@@ -63,7 +63,7 @@ impl State {
     }
 }
 
-use super::{Replica, input::Gesture};
+use super::{input::Gesture, presentation::Model};
 use otrios_interfaces::scene::{Action, PointerPhase};
 use std::collections::{BTreeMap, VecDeque};
 struct Drag {
@@ -99,7 +99,7 @@ impl Interactions {
     pub fn active(&self, control: u8) -> bool {
         self.drags.values().any(|d| d.control == control)
     }
-    pub fn flush(&mut self, replica: &mut Replica, now: u64) -> Result<bool> {
+    pub fn flush(&mut self, replica: &mut impl Model, now: u64) -> Result<bool> {
         let mut changed = false;
         for drag in self.drags.values_mut() {
             if drag.dirty && now.saturating_sub(drag.last) >= 50 {
@@ -112,7 +112,7 @@ impl Interactions {
     }
     pub fn gesture(
         &mut self,
-        replica: &mut Replica,
+        replica: &mut impl Model,
         pointer: u32,
         gesture: &Gesture,
         now: u64,
@@ -206,6 +206,7 @@ impl Interactions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dashboard::Replica;
     fn event(control: u8, phase: PointerPhase, p: [f32; 2]) -> Gesture {
         Gesture {
             action: Action::Control(control),

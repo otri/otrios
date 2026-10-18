@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Per-device navigation, focused input and immutable system scene composition.
 use super::{
-    Replica, Result,
+    Result,
     input::InputRouter,
     keyboard::{Keyboard, TextBuffer},
     layout::Layout,
+    presentation::Model,
     scene::Scene,
 };
 use otrios_interfaces::{ContentId, keyboard::Edit, layout::Value, scene::*};
@@ -29,13 +30,8 @@ fn assets() -> Result<&'static [Layout; 6]> {
         .as_ref()
         .map_err(Clone::clone)
 }
-fn view_enabled(replica: &Replica) -> bool {
-    replica.snapshot().view().nodes.iter().any(|n| {
-        matches!(
-            n.content,
-            otrios_interfaces::ViewContent::Switch { enabled: true, .. }
-        )
-    })
+fn view_enabled(replica: &impl Model) -> bool {
+    replica.enabled()
 }
 fn remap(mut node: SceneNode, offset: u32) -> Result<SceneNode> {
     node.id = node
@@ -233,8 +229,8 @@ impl Shell {
             false
         }
     }
-    fn apply(&mut self, replica: &mut Replica, action: Option<Action>) -> Result<bool> {
-        Ok(match action {
+    fn apply(&mut self, replica: &mut impl Model, action: Option<Action>) -> Result<bool> {
+        let changed = match action {
             Some(Action::Control(control)) if self.screen == Screen::Controls => {
                 let mut value = replica.controls()?.value(control)?;
                 value[0] = if value[0] >= 1000 {
@@ -313,15 +309,19 @@ impl Shell {
                 replica.apply_action(action)?
             }
             _ => false,
-        })
+        };
+        if changed {
+            self.changed();
+        }
+        Ok(changed)
     }
-    pub fn activate(&mut self, replica: &mut Replica, id: u32) -> Result<bool> {
+    pub fn activate(&mut self, replica: &mut impl Model, id: u32) -> Result<bool> {
         let scene = self.scene(replica)?;
         self.apply(replica, InputRouter::activate(&scene, id).action)
     }
     pub fn pointer(
         &mut self,
-        replica: &mut Replica,
+        replica: &mut impl Model,
         event: PointerEvent,
         now: u64,
     ) -> Result<bool> {
@@ -391,7 +391,7 @@ impl Shell {
         }
         Ok(changed)
     }
-    pub fn flush_controls(&mut self, replica: &mut Replica, now: u64) -> Result<bool> {
+    pub fn flush_controls(&mut self, replica: &mut impl Model, now: u64) -> Result<bool> {
         let changed = self.controls.flush(replica, now)?;
         if changed {
             self.changed();
@@ -400,7 +400,7 @@ impl Shell {
     }
     pub fn adjust_control(
         &mut self,
-        replica: &mut Replica,
+        replica: &mut impl Model,
         id: u32,
         dx: i16,
         dy: i16,
@@ -423,7 +423,7 @@ impl Shell {
         }
         replica.set_control(control, value)
     }
-    pub fn control_value(&mut self, replica: &Replica, id: u32) -> Result<Option<f64>> {
+    pub fn control_value(&mut self, replica: &impl Model, id: u32) -> Result<Option<f64>> {
         let scene = self.scene(replica)?;
         let Some(path) = scene.path(id) else {
             return Ok(None);
@@ -435,7 +435,7 @@ impl Shell {
             _ => None,
         })
     }
-    pub fn scene(&mut self, replica: &Replica) -> Result<Arc<Scene>> {
+    pub fn scene(&mut self, replica: &impl Model) -> Result<Arc<Scene>> {
         let id = replica.snapshot().id();
         if let Some((old, revision, scene)) = &self.cached
             && *old == id
@@ -718,6 +718,7 @@ impl Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dashboard::Replica;
     fn tap(s: &mut Shell, r: &mut Replica, p: [f32; 2]) {
         for phase in [PointerPhase::Down, PointerPhase::Up] {
             s.pointer(

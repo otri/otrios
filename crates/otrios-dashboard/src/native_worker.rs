@@ -4,6 +4,7 @@ use otrios_core::dashboard::{
     Replica, SyncSession,
     display::{Calibration, Surface, cached_regions},
     motion::{Intent, Stress},
+    presentation::{Command, Model, Presentation},
     render_scene,
     shell::Shell,
 };
@@ -75,7 +76,7 @@ pub(super) enum Input {
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Options {
     pub(super) url: Option<String>,
     pub(super) state: Option<String>,
@@ -96,6 +97,8 @@ pub(super) struct Options {
     pub(super) touch_matrix: Option<Calibration>,
     pub(super) completion_probe: bool,
     pub(super) texture_cache: bool,
+    #[cfg(test)]
+    pub(super) state_gate: Option<Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>>,
 }
 pub(super) fn options() -> Result<Options, String> {
     let mut o = Options::default();
@@ -157,6 +160,138 @@ pub(super) fn options() -> Result<Options, String> {
     }
     Ok(o)
 }
+struct Work {
+    commands: Vec<Command>,
+    stress: u8,
+    stall_ms: u64,
+    stop: bool,
+}
+struct Published {
+    replica: Arc<Replica>,
+    acknowledged: u64,
+    online: bool,
+    updates: u64,
+    received_updates: u64,
+}
+fn application_worker(
+    o: Options,
+    mut replica: Replica,
+    work: mpsc::Receiver<Work>,
+    publish: mpsc::SyncSender<Published>,
+) -> Result<(), String> {
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
+    let (reply_tx, reply_rx) = mpsc::sync_channel::<HostUpdate>(1);
+    let stream_ready = Arc::new(AtomicBool::new(false));
+    let worker_ready = stream_ready.clone();
+    let network_thread = o.url.clone().map(|url| {
+        let release_file = o.release_file.clone();
+        thread::spawn(move || network(url, rx, reply_tx, release_file, worker_ready))
+    });
+    let started = Instant::now();
+    let mut acknowledged = 0;
+    let mut last_sync = Instant::now() - Duration::from_secs(1);
+    let mut sent_id = None;
+    let mut saved_id = None;
+    let mut saved_presentation: Option<Vec<u8>> = None;
+    let mut published_key = None;
+    let mut pending = None;
+    let mut stress = Stress::new()?;
+    let mut hz = 0;
+    let mut stall_ms = 0;
+    let mut stalled = Instant::now();
+    let mut received_updates = 0;
+    loop {
+        if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
+            return Err("Network worker stopped unexpectedly".into());
+        }
+        let mut stop = false;
+        match work.try_recv() {
+            Ok(next) => {
+                #[cfg(test)]
+                if let Some(gate) = &o.state_gate {
+                    let (lock, wake) = &**gate;
+                    let mut paused = lock.lock().map_err(|_| "State gate poisoned")?;
+                    while *paused {
+                        paused = wake.wait(paused).map_err(|_| "State gate poisoned")?;
+                    }
+                }
+                for command in next.commands {
+                    if command.sequence > acknowledged {
+                        command.apply(&mut replica)?;
+                        acknowledged = command.sequence;
+                    }
+                }
+                hz = next.stress;
+                stall_ms = next.stall_ms;
+                stop = next.stop;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => stop = true,
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+        while let Ok(next) = reply_rx.try_recv() {
+            received_updates += u64::from(replica.merge(&next.document)?);
+            replica.set_presentation(next.presentation.as_deref())?;
+        }
+        stress.tick(started.elapsed().as_secs_f64() * 1000., hz)?;
+        if stall_ms > 0 && stalled.elapsed() >= Duration::from_secs(1) {
+            thread::sleep(Duration::from_millis(stall_ms));
+            stalled = Instant::now();
+        }
+        if network_thread.is_some() && last_sync.elapsed() >= Duration::from_millis(100) {
+            if sent_id != Some(replica.snapshot().id()) && tx.try_send(replica.save()).is_ok() {
+                sent_id = Some(replica.snapshot().id());
+            }
+            last_sync = Instant::now();
+        }
+        if saved_id != Some(replica.snapshot().id()) {
+            if let Some(path) = &o.state {
+                save_state(path, &mut replica)?;
+                let bytes = replica
+                    .presentation()
+                    .map(|p| p.bytes())
+                    .unwrap_or_default();
+                if saved_presentation.as_deref() != Some(bytes) {
+                    let path = format!("{path}.presentation.flex");
+                    let tmp = format!("{path}.tmp");
+                    fs::write(&tmp, bytes)
+                        .and_then(|_| fs::rename(tmp, path))
+                        .map_err(|e| e.to_string())?;
+                    saved_presentation = Some(bytes.to_vec());
+                }
+            }
+            saved_id = Some(replica.snapshot().id());
+        }
+        if stop {
+            return Ok(());
+        }
+        let online = stream_ready.load(Ordering::Acquire);
+        let key = (
+            replica.snapshot().id(),
+            acknowledged,
+            online,
+            stress.updates,
+            received_updates,
+        );
+        if published_key != Some(key) {
+            pending = Some(Published {
+                replica: Arc::new(replica.clone()),
+                acknowledged,
+                online,
+                updates: stress.updates,
+                received_updates,
+            });
+            published_key = Some(key);
+        }
+        if let Some(next) = pending.take() {
+            match publish.try_send(next) {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(next)) => pending = Some(next),
+                Err(_) => return Ok(()),
+            }
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
 pub(super) fn state_worker(
     o: Options,
     input: mpsc::Receiver<Input>,
@@ -180,13 +315,13 @@ pub(super) fn state_worker(
             ..replica.motion()?
         })?;
     }
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
-    let (reply_tx, reply_rx) = mpsc::sync_channel::<HostUpdate>(1);
-    let stream_ready = Arc::new(AtomicBool::new(false));
-    let worker_ready = stream_ready.clone();
-    let network_thread = o
-        .url
-        .map(|url| thread::spawn(move || network(url, rx, reply_tx, o.release_file, worker_ready)));
+    let mut replica = Presentation::new(Arc::new(replica.clone()));
+    let (work_tx, work_rx) = mpsc::sync_channel(1);
+    let (published_tx, published_rx) = mpsc::sync_channel(1);
+    let app_options = o.clone();
+    let initial = replica.published().as_ref().clone();
+    let app_worker =
+        thread::spawn(move || application_worker(app_options, initial, work_rx, published_tx));
     let mut shell = Shell::default();
     if let Some(path) = &o.state
         && let Ok(route) = fs::read_to_string(format!("{path}.screen"))
@@ -198,11 +333,9 @@ pub(super) fn state_worker(
     }
     shell.set_stress(o.load);
     let started = Instant::now();
-    let mut last_sync = Instant::now() - Duration::from_secs(1);
-    let mut sent_id = None;
-    let mut saved_id = None;
+    let mut sent_work = None;
     let mut saved_screen = String::new();
-    let mut observed_stream = false;
+    let mut online = false;
     let mut dirty = true;
     let mut pending = None;
     let mut serial = 0;
@@ -210,20 +343,29 @@ pub(super) fn state_worker(
     let mut scene_cache = None;
     let mut mesh_cache = Arc::new(Vec::new());
     let mut copy_cache = Arc::new(Vec::new());
-    let mut stress = Stress::new()?;
-    let mut stall = Instant::now();
+    let mut updates = 0;
     loop {
-        if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
-            return Err("Live state worker stopped unexpectedly".into());
+        if app_worker.is_finished() {
+            return app_worker
+                .join()
+                .map_err(|_| "Application worker panicked")?
+                .and(Err("Application worker stopped unexpectedly".into()));
         }
         let now = started.elapsed().as_millis() as u64;
         for event in input.try_iter() {
             match event {
                 Input::Stop => {
-                    if let Some(path) = &o.state {
-                        save_state(path, &mut replica)?;
-                    }
-                    return Ok(());
+                    work_tx
+                        .send(Work {
+                            commands: replica.pending().to_vec(),
+                            stress: 0,
+                            stall_ms: 0,
+                            stop: true,
+                        })
+                        .map_err(|_| "Application worker disconnected")?;
+                    return app_worker
+                        .join()
+                        .map_err(|_| "Application worker panicked")?;
                 }
                 Input::Pointer(e) => dirty |= shell.pointer(&mut replica, e, now)?,
                 Input::Back => dirty |= shell.back(),
@@ -248,31 +390,34 @@ pub(super) fn state_worker(
                 }
             }
         }
-        let online = stream_ready.load(Ordering::Acquire);
-        if online != observed_stream {
-            observed_stream = online;
-            dirty = true;
-        }
-        while let Ok(next) = reply_rx.try_recv() {
-            let changed = replica.merge(&next.document)?;
-            received_updates += u64::from(changed);
-            dirty |= changed;
-            dirty |= replica.set_presentation(next.presentation.as_deref())?;
+        while let Ok(next) = published_rx.try_recv() {
+            let next: Published = next;
+            dirty |= replica.snapshot().id() != next.replica.snapshot().id()
+                || online != next.online
+                || updates != next.updates;
+            replica.acknowledge(next.replica, next.acknowledged)?;
+            online = next.online;
+            updates = next.updates;
+            received_updates = next.received_updates;
         }
         dirty |= shell.tick(now);
         dirty |= shell.flush_controls(&mut replica, now)?;
-        let stressed = stress.tick(now as f64, shell.stress_hz())?;
-        dirty |= stressed;
-        let stall_ms = o.stall_ms.max(shell.stress_stall_ms());
-        if stall_ms > 0 && stall.elapsed() >= Duration::from_secs(1) {
-            thread::sleep(Duration::from_millis(stall_ms));
-            stall = Instant::now();
-        }
-        if network_thread.is_some() && last_sync.elapsed() >= Duration::from_millis(100) {
-            if sent_id != Some(replica.snapshot().id()) && tx.try_send(replica.save()).is_ok() {
-                sent_id = Some(replica.snapshot().id());
-            }
-            last_sync = Instant::now();
+        let wanted = (
+            replica.sequence(),
+            shell.stress_hz(),
+            o.stall_ms.max(shell.stress_stall_ms()),
+        );
+        if sent_work != Some(wanted)
+            && work_tx
+                .try_send(Work {
+                    commands: replica.pending().to_vec(),
+                    stress: wanted.1,
+                    stall_ms: wanted.2,
+                    stop: false,
+                })
+                .is_ok()
+        {
+            sent_work = Some(wanted);
         }
         if dirty {
             let scene = shell.scene(&replica)?;
@@ -305,7 +450,7 @@ pub(super) fn state_worker(
                 online,
                 intent: replica.motion()?,
                 controls: replica.controls()?,
-                updates: stress.updates,
+                updates,
                 received_updates,
                 serial,
             });
@@ -316,33 +461,26 @@ pub(super) fn state_worker(
                 }
                 saved_screen = shell.screen_name().into();
             }
-            if saved_id != Some(replica.snapshot().id()) {
-                if let Some(p) = &o.state {
-                    save_state(p, &mut replica)?;
-                    let path = format!("{p}.presentation.flex");
-                    let tmp = format!("{path}.tmp");
-                    fs::write(
-                        &tmp,
-                        replica
-                            .presentation()
-                            .map(|p| p.bytes())
-                            .unwrap_or_default(),
-                    )
-                    .and_then(|_| fs::rename(tmp, path))
-                    .map_err(|e| e.to_string())?;
-                }
-                saved_id = Some(replica.snapshot().id());
-            }
             dirty = false;
         }
         if let Some(frame) = pending.take() {
             match frames.try_send(frame) {
                 Ok(()) => {}
                 Err(mpsc::TrySendError::Full(frame)) => pending = Some(frame),
-                Err(_) => return Ok(()),
+                Err(_) => {
+                    let _ = work_tx.send(Work {
+                        commands: replica.pending().to_vec(),
+                        stress: 0,
+                        stall_ms: 0,
+                        stop: true,
+                    });
+                    return app_worker
+                        .join()
+                        .map_err(|_| "Application worker panicked")?;
+                }
             }
         }
-        thread::sleep(Duration::from_millis(4));
+        thread::sleep(Duration::from_millis(2));
     }
 }
 fn save_state(path: &str, replica: &mut Replica) -> Result<(), String> {
@@ -505,6 +643,93 @@ fn network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn blocked_application_and_disk_worker_cannot_block_drag_or_exact_release() {
+        use otrios_interfaces::scene::{Action, PointerPhase, TouchResponder};
+        let root = std::env::temp_dir().join(format!(
+            "otrios-local-feedback-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("state.automerge");
+        let mut original = Replica::new().unwrap();
+        let saved = original.save();
+        fs::write(&path, &saved).unwrap();
+        let mut shell = Shell::default();
+        shell.open_name("controls");
+        let scene = shell.scene(&original).unwrap();
+        let slider = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.responder == Some(TouchResponder::Drag(Action::Control(0))))
+            .unwrap();
+        let at = |x| {
+            [
+                slider.origin[0] + x * slider.scale,
+                slider.origin[1] + 40. * slider.scale,
+            ]
+        };
+        let gate = Arc::new((std::sync::Mutex::new(true), std::sync::Condvar::new()));
+        let options = Options {
+            state: Some(path.to_string_lossy().into()),
+            screen: Some("controls".into()),
+            state_gate: Some(gate.clone()),
+            ..Options::default()
+        };
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        for (phase, position) in [
+            (PointerPhase::Down, at(20.)),
+            (PointerPhase::Move, at(160.)),
+            (PointerPhase::Up, at(999.)),
+        ] {
+            tx.send(Input::Pointer(PointerEvent {
+                id: 9,
+                phase,
+                position,
+            }))
+            .unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut presented = false;
+        while Instant::now() < deadline {
+            if fr
+                .recv_timeout(Duration::from_millis(100))
+                .is_ok_and(|f| f.controls.level == 1000)
+            {
+                presented = true;
+                break;
+            }
+        }
+        let before_ack = fs::read(&path).unwrap();
+        *gate.0.lock().unwrap() = false;
+        gate.1.notify_all();
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+        assert!(
+            presented,
+            "Local release feedback waited for the application worker"
+        );
+        assert_eq!(
+            before_ack, saved,
+            "The application worker was not actually held"
+        );
+        assert_eq!(
+            Replica::load(&fs::read(&path).unwrap())
+                .unwrap()
+                .controls()
+                .unwrap()
+                .level,
+            1000
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn slow_presentation_consumer_does_not_block_state_or_unbound_the_mailbox() {
         let path = std::env::temp_dir().join(format!(

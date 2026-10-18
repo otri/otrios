@@ -52,3 +52,21 @@ native bounded-mailbox/persistence test; coverage tests for glyphs and fractiona
 clipping, pinned snapshot reuse/invalidation, and rejection of grafted history.
 Physical touch tracking was accepted before this optimization; perceived update
 speed after deployment still needs confirmation on the panel.
+
+## Follow-up: independent local feedback
+
+The user found that release improved dragging but remained slow. Native touch,
+scene preparation, document merges and fsync were still serialized on one worker.
+The native host now gives touch/scene preparation a presentation model with
+bounded pending intent. A separate application worker owns reconciliation,
+network handoff and durable saves. Absolute control values coalesce independently;
+discrete commands retain order. Acknowledgements cannot erase newer pending
+values, and release feedback stays visible until the corresponding published
+replica is acknowledged. Stop flushes the final commands and waits for persistence.
+
+The native regression test holds the application worker behind a deterministic
+gate and verifies that drag/release feedback completes while the state file is
+unchanged, then releases the gate and verifies the exact value survives on disk.
+`dashboard-profile --deferred STATE_FILE PRESENTATION_FILE` measures just the
+presentation path with publication held back. It is still a CPU probe, not a
+touch-to-panel or refresh-lock measurement.

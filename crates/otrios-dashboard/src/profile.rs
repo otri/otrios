@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Headless, read-only timing probe. No display, network or state-file writes.
+use otrios_core::dashboard::presentation::{Model, Presentation};
 use otrios_core::dashboard::{Replica, display::cached_regions, render_scene, shell::Shell};
 use otrios_interfaces::scene::{Action, PointerEvent, PointerPhase, Rect, TouchResponder};
-use std::{hint::black_box, time::Instant};
+use std::{hint::black_box, sync::Arc, time::Instant};
 fn main() -> Result<(), String> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut args: Vec<_> = std::env::args().skip(1).collect();
+    let deferred = args.first().is_some_and(|a| a == "--deferred");
+    if deferred {
+        args.remove(0);
+    }
     if args.len() > 2 {
-        return Err("Usage: dashboard-profile [STATE_FILE [PRESENTATION_FILE]]".into());
+        return Err(
+            "Usage: dashboard-profile [--deferred] [STATE_FILE [PRESENTATION_FILE]]".into(),
+        );
     }
     let mut replica = if let Some(path) = args.first() {
         Replica::load(&std::fs::read(path).map_err(|e| e.to_string())?)?
@@ -16,9 +23,30 @@ fn main() -> Result<(), String> {
     if let Some(path) = args.get(1) {
         replica.set_presentation(Some(&std::fs::read(path).map_err(|e| e.to_string())?))?;
     }
+    if deferred {
+        measure(
+            &mut Presentation::new(Arc::new(replica)),
+            |_| {},
+            "publication queued (no IO)",
+        )
+    } else {
+        measure(
+            &mut replica,
+            |r| {
+                black_box(r.save());
+            },
+            "serialize",
+        )
+    }
+}
+fn measure<M: Model>(
+    replica: &mut M,
+    mut save: impl FnMut(&mut M),
+    storage_label: &str,
+) -> Result<(), String> {
     let mut shell = Shell::default();
     shell.open_name("controls");
-    let scene = shell.scene(&replica)?;
+    let scene = shell.scene(replica)?;
     let control = scene
         .controls()
         .into_iter()
@@ -30,7 +58,7 @@ fn main() -> Result<(), String> {
         let now = i * 60;
         let start = Instant::now();
         shell.pointer(
-            &mut replica,
+            replica,
             PointerEvent {
                 id: 1,
                 phase: if i == 0 {
@@ -47,10 +75,10 @@ fn main() -> Result<(), String> {
             },
             now,
         )?;
-        shell.flush_controls(&mut replica, now)?;
+        shell.flush_controls(replica, now)?;
         totals[0] += start.elapsed().as_secs_f64();
         let start = Instant::now();
-        let scene = shell.scene(&replica)?;
+        let scene = shell.scene(replica)?;
         totals[1] += start.elapsed().as_secs_f64();
         let start = Instant::now();
         let mesh = render_scene(&scene);
@@ -64,16 +92,22 @@ fn main() -> Result<(), String> {
         ));
         totals[3] += start.elapsed().as_secs_f64();
         let start = Instant::now();
-        black_box(replica.save());
+        save(replica);
         totals[4] += start.elapsed().as_secs_f64();
     }
     if replica.controls()?.level != 926 {
         return Err("Replay did not update the slider to the expected endpoint".into());
     }
     println!("30 disposable slider updates; {vertices} vertices; mean milliseconds:");
-    for (name, seconds) in ["input/project", "scene", "mesh", "SDL regions", "serialize"]
-        .into_iter()
-        .zip(totals)
+    for (name, seconds) in [
+        "input/project",
+        "scene",
+        "mesh",
+        "SDL regions",
+        storage_label,
+    ]
+    .into_iter()
+    .zip(totals)
     {
         println!("{name}: {:.3}", seconds * 1000. / 30.);
     }
