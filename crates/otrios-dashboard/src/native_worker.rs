@@ -254,6 +254,7 @@ pub(super) fn state_worker(
         Some(font) => font.clone(),
         None => crate::font_resource::load()?,
     };
+    client.set_font(font.clone());
     let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
     let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(2);
     let stream_ready = Arc::new(AtomicBool::new(false));

@@ -115,11 +115,15 @@ pub struct Client {
     navigation: Option<(String, String)>,
     catalog: Option<Catalog>,
     catalog_hash: Vec<u8>,
+    font: Option<Arc<crate::dashboard::font::Font>>,
     auth_required: bool,
     session_controls: bool,
     sign_out_requested: bool,
 }
 impl Client {
+    pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
+        self.font = Some(font);
+    }
     /// Controls presentation only; the host still verifies and revokes its cookie session.
     pub fn set_session_controls(&mut self, enabled: bool) -> bool {
         self.session_controls = enabled;
@@ -765,7 +769,55 @@ impl Client {
             }
             return Ok(true);
         }
-        let delivery = m.input.dispatch(scene, event);
+        let delivery = m.input.dispatch(scene.clone(), event);
+        // Activate responders retain release-inside/cancellation semantics. Resolve
+        // the caret against the displayed field before focus adds its local marker.
+        let caret = if self.requested.is_none()
+            && let Some(Action::AppEvent(control)) = delivery.action
+            && let Some(handler) =
+                m.ui.handlers
+                    .iter()
+                    .find(|h| h.control == control && h.operation == Operation::Focus)
+            && let Some(field) = handler.fields.first()
+            && let Some(editor) = m.editors.get(field)
+            && let Some(responder) = delivery.responder
+            && let Some(path) = scene.path(responder)
+        {
+            fn bound_text(n: &SceneNode, value: &str) -> Option<u32> {
+                if matches!(&n.primitive, otrios_interfaces::scene::Primitive::Text { value: v, .. } if v == value)
+                {
+                    return Some(n.id);
+                }
+                n.children.iter().find_map(|n| bound_text(n, value))
+            }
+            let focused = m.focus == Some(*field);
+            let text = editor.display(focused);
+            let located = path
+                .last()
+                .and_then(|owner| bound_text(owner.node, &text))
+                .and_then(|id| scene.path(id));
+            if let Some(text) = located.as_ref().and_then(|p| p.last())
+                && let otrios_interfaces::scene::Primitive::Text { scale, .. } = text.node.primitive
+            {
+                let font = self
+                    .font
+                    .as_ref()
+                    .ok_or("Font resource required for caret placement")?;
+                Some((
+                    *field,
+                    editor.hit_test(
+                        (event.position[0] - text.origin[0]) / text.scale,
+                        font,
+                        scale as f32,
+                        focused,
+                    ),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
         if pad && self.requested.is_some() {
             return Ok(false);
@@ -808,6 +860,15 @@ impl Client {
             m.pad_preview.clear();
         }
         let changed = self.deliver(delivery)? || pad;
+        if changed
+            && let Some((field, cursor)) = caret
+            && let Some(m) = &mut self.active
+            && m.focus == Some(field)
+            && let Some(editor) = m.editors.get_mut(&field)
+        {
+            editor.place_cursor(cursor);
+            m.invalidate();
+        }
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {

@@ -1440,3 +1440,120 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
     );
     assert!(control(&c.scene().unwrap(), "Sign out").is_none());
 }
+
+#[test]
+fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus_memory() {
+    use otrios_core::dashboard::font::Font;
+    use otrios_interfaces::{
+        keyboard::Edit,
+        layout::Value,
+        scene::{PointerEvent, PointerPhase, Primitive},
+    };
+    use std::sync::Arc;
+    let font = Arc::new(
+        Font::from_zstd(
+            include_bytes!("../../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let ui = input_lab::ui();
+    let mut authority = Document::new(ui.state_schema.clone(), "tapped-input").unwrap();
+    authority
+        .set_typed(&[
+            (1, Value::Text("WiWWW".into())),
+            (2, Value::Text("alphabet".into())),
+        ])
+        .unwrap();
+    let mut c = Client::default();
+    c.set_font(font.clone());
+    activate_snapshot(&mut c, ui, "tapped-input", vec![], false, authority.save());
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    fn tap(c: &mut Client, label: &str, x: f32) {
+        let scene = c.scene().unwrap();
+        let controls = scene.controls();
+        let field = controls
+            .iter()
+            .find(|n| n.node.semantics.as_ref().is_some_and(|s| s.label == label))
+            .unwrap();
+        let text = field
+            .node
+            .children
+            .iter()
+            .find(|n| matches!(n.primitive, Primitive::Text { .. }))
+            .unwrap();
+        let position = [field.origin[0] + text.frame.x + x, field.origin[1] + 35.];
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
+            c.pointer(
+                c.epoch(),
+                PointerEvent {
+                    id: 23,
+                    phase,
+                    position,
+                },
+            )
+            .unwrap();
+        }
+    }
+    tap(&mut c, "First text field", font.text_width("Wi", 2.));
+    assert!(
+        c.outgoing().unwrap().is_none(),
+        "caret placement emits no shared update"
+    );
+    c.hardware_edit(&Edit::Commit("!".into())).unwrap();
+    assert_eq!(c.typed_value(1).unwrap(), Value::Text("Wi!WWW".into()));
+    tap(&mut c, "Second text field", font.text_width("alph", 2.));
+    c.hardware_edit(&Edit::Commit("?".into())).unwrap();
+    assert_eq!(c.typed_value(2).unwrap(), Value::Text("alph?abet".into()));
+    tap(&mut c, "First text field", font.text_width("W", 2.));
+    c.hardware_edit(&Edit::Commit("#".into())).unwrap();
+    assert_eq!(c.typed_value(1).unwrap(), Value::Text("W#i!WWW".into()));
+    // Repeated taps account for the visible local caret marker's glyph width.
+    tap(&mut c, "First text field", font.text_width("W#|i!", 2.));
+    c.hardware_edit(&Edit::Commit("$".into())).unwrap();
+    assert_eq!(c.typed_value(1).unwrap(), Value::Text("W#i!$WWW".into()));
+    tap(&mut c, "First text field", -12.);
+    c.hardware_edit(&Edit::Commit("<".into())).unwrap();
+    tap(&mut c, "First text field", 1080.);
+    c.hardware_edit(&Edit::Commit(">".into())).unwrap();
+    assert_eq!(c.typed_value(1).unwrap(), Value::Text("<W#i!$WWW>".into()));
+    pump(&mut c, &mut authority, &mut session);
+    assert_eq!(
+        authority.typed_value(1).unwrap(),
+        Value::Text("<W#i!$WWW>".into())
+    );
+    assert!(!c.input_busy());
+}
+
+#[test]
+fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
+    use otrios_core::dashboard::{font::Font, keyboard::TextBuffer};
+    use otrios_interfaces::keyboard::Edit;
+    let font = Font::from_zstd(
+        include_bytes!("../../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+    )
+    .unwrap();
+    let mut text = TextBuffer::default();
+    text.replace("a\u{301}👩‍👩‍👧‍👦Wi");
+    let boundary = "a\u{301}".len();
+    let x = font.text_width("a\u{301}", 2.);
+    text.place_cursor(text.hit_test(x, &font, 2., false));
+    text.edit(&Edit::Commit("!".into()));
+    assert_eq!(&text.text()[..boundary + 1], "a\u{301}!");
+    let family = "a\u{301}!👩‍👩‍👧‍👦";
+    text.place_cursor(text.hit_test(font.text_width(family, 2.), &font, 2., false));
+    text.edit(&Edit::Commit("?".into()));
+    assert_eq!(text.text(), "a\u{301}!👩‍👩‍👧‍👦?Wi");
+    let long = "W".repeat(60);
+    text.replace(&long);
+    text.place_cursor(long.len());
+    assert_eq!(text.display(false).len(), 36);
+    text.place_cursor(text.hit_test(0., &font, 2., false));
+    text.edit(&Edit::Commit("!".into()));
+    assert_eq!(
+        text.text(),
+        format!("{}!{}", "W".repeat(24), "W".repeat(36))
+    );
+}

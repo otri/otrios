@@ -212,6 +212,7 @@ impl CanvasApp {
     }
     pub fn set_font(&mut self, bytes: &[u8], hash: &str) -> Result<(), String> {
         let font = Arc::new(Font::from_zstd(bytes, hash)?);
+        self.inner.set_font(font.clone());
         self.font = Some(font);
         self.rendered = None;
         Ok(())

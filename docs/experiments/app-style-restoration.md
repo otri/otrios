@@ -82,3 +82,20 @@ logout input check reliably; cookie revocation and immediate private clearing
 passed the deployed HTTP/policy and worker tests instead. The frame accepted the
 same release, acknowledged Home with zero pending commands, and retained exactly
 one direct renderer.
+
+## Tap-to-place text caret
+
+Input Lab's Focus operation previously selected a field without using pointer
+coordinates, leaving a new editor at byte zero and revisited fields at their saved
+local caret. Pointer releases now locate the displayed text under that field's
+responder and map the local X coordinate through the loaded proportional font to
+the nearest Unicode grapheme boundary. The hit map includes the visible window's
+source offset and the local caret marker's width. Keyboard/assistive focus without
+a pointer retains its existing behavior. Both hosts share the same loaded font with
+the Canvas input client; font decoding is not repeated for taps.
+
+The new integration cases tap repeatedly within one field, switch fields, tap before
+and after the text, then type and synchronize the resulting insertions. Separate
+checks cover combining characters, joined emoji and a scrolled display window.
+Caret-only movement emits no shared state update. Physical finger behavior still
+requires device acceptance.

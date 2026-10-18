@@ -275,24 +275,63 @@ impl TextBuffer {
     pub fn text(&self) -> &str {
         &self.text
     }
-    pub fn display(&self, focused: bool) -> String {
-        let before = &self.text[..self.cursor];
-        let n = before.graphemes(true).count();
+    /// Each rendered run maps back to source byte boundaries. The local caret
+    /// marker occupies glyph width, but maps both sides to the same text boundary.
+    fn display_runs(&self, focused: bool) -> Vec<(usize, usize, &str)> {
+        let n = self.text[..self.cursor].graphemes(true).count();
         let start = n.saturating_sub(36);
-        let mut result = String::new();
-        for (i, g) in self.text.graphemes(true).enumerate().skip(start).take(38) {
-            if focused && i == n {
-                result.push('|');
+        let mut runs = Vec::new();
+        let mut bytes = 0;
+        for (index, g) in self.text.grapheme_indices(true).skip(start).take(38) {
+            if focused && index == self.cursor {
+                runs.push((index, index, "|"));
+                bytes += 1;
             }
-            if result.len() + g.len() > 88 {
+            if bytes + g.len() > 88 {
                 break;
             }
-            result.push_str(g);
+            runs.push((index, index + g.len(), g));
+            bytes += g.len();
         }
         if focused && self.cursor == self.text.len() {
-            result.push('|');
+            runs.push((self.cursor, self.cursor, "|"));
         }
-        result
+        runs
+    }
+    pub fn display(&self, focused: bool) -> String {
+        self.display_runs(focused)
+            .into_iter()
+            .map(|(_, _, text)| text)
+            .collect()
+    }
+    /// Nearest grapheme boundary in the currently displayed run, using the same
+    /// proportional font advances as the renderer, not a character-count estimate.
+    pub fn hit_test(&self, x: f32, font: &super::font::Font, scale: f32, focused: bool) -> usize {
+        let runs = self.display_runs(focused);
+        let mut cursor = runs.first().map_or(0, |r| r.0);
+        let mut distance = x.abs();
+        let mut pen = 0.;
+        for (_, end, text) in runs {
+            pen += font.text_width(text, scale);
+            let next = (x - pen).abs();
+            if next < distance {
+                distance = next;
+                cursor = end;
+            }
+        }
+        cursor
+    }
+    pub fn place_cursor(&mut self, byte: usize) -> bool {
+        let cursor = self
+            .boundaries()
+            .into_iter()
+            .take_while(|i| *i <= byte)
+            .last()
+            .unwrap_or(0);
+        let changed = self.cursor != cursor || self.anchor != cursor;
+        self.cursor = cursor;
+        self.anchor = cursor;
+        changed
     }
     fn boundaries(&self) -> Vec<usize> {
         self.text
