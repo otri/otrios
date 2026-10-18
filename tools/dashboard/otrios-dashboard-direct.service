@@ -38,7 +38,7 @@ ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-# SDL evdev uses the udev netlink monitor for device discovery/hotplug.
+# Input/display discovery uses the udev netlink monitor.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 [Install]
