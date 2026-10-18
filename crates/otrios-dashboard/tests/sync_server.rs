@@ -97,13 +97,25 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
     );
     let mut peer = Peer::connect(&server, Replica::new().unwrap());
     peer.replica.set_enabled(false).unwrap();
-    for _ in 0..8 {
+    // Release notices and presentation frames can precede sync acknowledgements.
+    // Wait for the durable boundary rather than counting transport messages.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !peer.replica.is_confirmed(&peer.session) {
         peer.pump();
+        assert!(
+            Instant::now() < deadline,
+            "Initial edit was not acknowledged"
+        );
     }
-    let before = Replica::load(&std::fs::read(&state).unwrap())
-        .unwrap()
-        .snapshot()
-        .id();
+    let before = peer.replica.snapshot().id();
+    assert_eq!(
+        Replica::load(&std::fs::read(&state).unwrap())
+            .unwrap()
+            .snapshot()
+            .id(),
+        before,
+        "Acknowledged state was not persisted"
+    );
     drop(peer);
     let mut peer = Peer::connect(
         &server,
