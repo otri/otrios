@@ -3,6 +3,7 @@
 //! This is a bounded, trusted-peer demo; it does not implement Linux shared memory.
 
 pub mod components;
+pub mod controls;
 pub mod display;
 pub mod input;
 pub mod keyboard;
@@ -82,6 +83,46 @@ impl Replica {
             snapshot,
             presentation: None,
         })
+    }
+    pub fn controls(&self) -> Result<controls::State> {
+        controls::State::read(&self.doc)
+    }
+    /// Each scalar has its own merge register. The pad pair is one atomic value.
+    pub fn set_control(&mut self, control: u8, value: [u16; 2]) -> Result<bool> {
+        if value.iter().any(|v| *v > 1000) || (control < 2 && value[1] != 0) {
+            return Err("Invalid control value".into());
+        }
+        if self.controls()?.value(control)? == value {
+            return Ok(false);
+        }
+        let mut candidate = self.doc.clone();
+        match control {
+            0 | 1 => {
+                candidate
+                    .put(
+                        ROOT,
+                        if control == 0 {
+                            "control_level_v1"
+                        } else {
+                            "control_dial_v1"
+                        },
+                        u64::from(value[0]),
+                    )
+                    .map_err(err)?;
+            }
+            2 => {
+                let bytes = value
+                    .into_iter()
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<_>>();
+                candidate
+                    .put(ROOT, "control_pad_v1", ScalarValue::Bytes(bytes))
+                    .map_err(err)?;
+            }
+            _ => return Err("Unknown control".into()),
+        }
+        candidate.commit();
+        self.publish(candidate)
     }
     pub fn motion(&self) -> Result<motion::Intent> {
         match self.doc.get(ROOT, "motion").map_err(err)? {
@@ -211,6 +252,22 @@ impl Replica {
                         OpType::Put(ScalarValue::Bytes(bytes)),
                         false,
                     ) if key == "motion" => motion::Intent::decode(bytes).is_ok(),
+                    (ObjectId::Root, Key::Map(key), OpType::Put(ScalarValue::Uint(v)), false)
+                        if matches!(key.as_str(), "control_level_v1" | "control_dial_v1") =>
+                    {
+                        *v <= 1000
+                    }
+                    (
+                        ObjectId::Root,
+                        Key::Map(key),
+                        OpType::Put(ScalarValue::Bytes(bytes)),
+                        false,
+                    ) if key == "control_pad_v1" => {
+                        bytes.len() == 4
+                            && bytes
+                                .chunks_exact(2)
+                                .all(|v| u16::from_le_bytes([v[0], v[1]]) <= 1000)
+                    }
                     (obj, Key::Seq(_), OpType::Put(ScalarValue::Int(24 | 78)), true)
                         if *obj == samples =>
                     {
@@ -344,6 +401,7 @@ fn project_cached(
     cached: Option<&layout::Layout>,
     presentation: Option<&layout::Layout>,
 ) -> Result<ViewSnapshot> {
+    controls::State::read(doc)?;
     if let Some((v, _)) = doc.get(ROOT, "motion").map_err(err)? {
         motion::Intent::decode(v.as_bytes().ok_or("Motion must be binary")?)?;
     }
@@ -539,6 +597,33 @@ mod tests {
             assert!(drain_public(&mut browser, &mut a, &mut authority, &mut b).is_err());
             assert_eq!(authority.save(), before);
         }
+    }
+    #[test]
+    fn independent_component_registers_merge_and_pad_coordinates_stay_atomic() {
+        let mut a = Replica::new().unwrap();
+        let mut b = Replica::new().unwrap();
+        a.set_control(0, [920, 0]).unwrap();
+        b.set_control(1, [180, 0]).unwrap();
+        let (mut sa, mut sb) = (SyncSession::default(), SyncSession::default());
+        drain_public(&mut a, &mut sa, &mut b, &mut sb).unwrap();
+        assert_eq!(
+            a.controls().unwrap(),
+            controls::State {
+                level: 920,
+                dial: 180,
+                pad: [500, 500]
+            }
+        );
+        a.set_control(2, [120, 800]).unwrap();
+        b.set_control(2, [700, 300]).unwrap();
+        drain_public(&mut a, &mut sa, &mut b, &mut sb).unwrap();
+        assert_eq!(a.controls().unwrap(), b.controls().unwrap());
+        assert!([[120, 800], [700, 300]].contains(&a.controls().unwrap().pad));
+        let before = a.snapshot().id();
+        assert!(a.set_control(0, [1001, 0]).is_err());
+        assert!(a.set_control(2, [0, 1001]).is_err());
+        assert!(a.set_control(3, [0, 0]).is_err());
+        assert_eq!(a.snapshot().id(), before);
     }
     #[test]
     fn incremental_sync_pushes_edits_and_recovers_offline_concurrency() {

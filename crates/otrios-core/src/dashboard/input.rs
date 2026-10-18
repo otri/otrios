@@ -9,12 +9,20 @@ pub struct Visit {
     pub local: [f32; 2],
     pub phase: PointerPhase,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gesture {
+    pub action: Action,
+    pub local: [f32; 2],
+    pub extent: [f32; 2],
+    pub phase: PointerPhase,
+}
 #[derive(Default, Debug)]
 pub struct Delivery {
     pub target: Option<NodeId>,
     pub responder: Option<NodeId>,
     pub visits: Vec<Visit>,
     pub action: Option<Action>,
+    pub gesture: Option<Gesture>,
 }
 struct Capture {
     scene: Arc<Scene>,
@@ -44,6 +52,14 @@ fn bubble(path: &[Located<'_>], event: PointerEvent) -> (Delivery, Option<TouchR
             && responder != TouchResponder::Bubble
         {
             result.responder = Some(entry.node.id);
+            if let TouchResponder::Drag(action) = responder {
+                result.gesture = Some(Gesture {
+                    action,
+                    local: result.visits.last().unwrap().local,
+                    extent: [entry.node.frame.width, entry.node.frame.height],
+                    phase: event.phase,
+                });
+            }
             return (result, Some(responder));
         }
     }
@@ -118,7 +134,7 @@ impl InputRouter {
                 position: [0., 0.],
             },
         );
-        if let Some(TouchResponder::Activate(action)) = responder {
+        if let Some(TouchResponder::Activate(action) | TouchResponder::Drag(action)) = responder {
             result.action = Some(action);
         }
         result
@@ -154,6 +170,36 @@ mod tests {
             phase,
             position,
         }
+    }
+    #[test]
+    fn dragging_bubbles_captures_outside_and_cancels_if_the_owner_changes() {
+        let mut root = scene().root().clone();
+        root.children[0].responder = Some(TouchResponder::Drag(Action::Control(0)));
+        let scene = Arc::new(Scene::new(root).unwrap());
+        let mut input = InputRouter::default();
+        let down = input.dispatch(scene.clone(), event(3, PointerPhase::Down, [170., 280.]));
+        assert_eq!(down.responder, Some(10));
+        assert_eq!(down.gesture.unwrap().local, [70., 80.]);
+        let moved = input.dispatch(scene.clone(), event(3, PointerPhase::Move, [900., 900.]));
+        let moved = moved.gesture.unwrap();
+        assert_eq!(moved.local, [800., 700.]);
+        assert_eq!(moved.phase, PointerPhase::Move);
+        let empty =
+            Arc::new(Scene::new(canvas(0, Rect::new(0., 0., 1280., 800.), vec![])).unwrap());
+        assert_eq!(
+            input
+                .dispatch(empty, event(3, PointerPhase::Up, [900., 900.]))
+                .gesture
+                .unwrap()
+                .phase,
+            PointerPhase::Cancel
+        );
+        assert!(
+            input
+                .dispatch(scene, event(3, PointerPhase::Up, [170., 280.]))
+                .gesture
+                .is_none()
+        );
     }
     #[test]
     fn deepest_child_bubbles_to_parent_in_local_coordinates_and_activates_once() {

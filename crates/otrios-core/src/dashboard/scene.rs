@@ -92,9 +92,13 @@ impl Scene {
                 _ => {}
             }
             if let Some(s) = &n.semantics
-                && (s.label.len() > 96 || !matches!(n.responder, Some(TouchResponder::Activate(_))))
+                && (s.label.len() > 96
+                    || !matches!(
+                        n.responder,
+                        Some(TouchResponder::Activate(_) | TouchResponder::Drag(_))
+                    ))
             {
-                return Err("Switch semantics need an activating responder".into());
+                return Err("Control semantics need an activating or dragging responder".into());
             }
             for child in &n.children {
                 validate(child, depth + 1, ids)?;

@@ -596,6 +596,12 @@ fn expand(
         }
         let responder = if let Some(r) = n.responder {
             Some(match r {
+                Responder::DragControl(id) => {
+                    if id > 2 {
+                        return Err("Unknown drag control".into());
+                    }
+                    TouchResponder::Drag(Action::Control(id))
+                }
                 Responder::Bubble => TouchResponder::Bubble,
                 Responder::Consume => TouchResponder::Consume,
                 Responder::Motion(id) => TouchResponder::Activate(Action::Motion(id)),

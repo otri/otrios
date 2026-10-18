@@ -60,6 +60,7 @@ pub enum Primitive {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     ToggleFocus,
+    Control(u8),
     Motion(u8),
     Stress,
     Open(Screen),
@@ -84,6 +85,8 @@ pub enum TouchResponder {
     Consume,
     /// Capture on press; emit only on release inside this responder's subtree.
     Activate(Action),
+    /// Capture and deliver local positions throughout the gesture, including cancel.
+    Drag(Action),
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SwitchSemantics {

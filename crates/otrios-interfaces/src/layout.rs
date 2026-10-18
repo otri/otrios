@@ -84,6 +84,7 @@ pub enum Shape {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Responder {
+    DragControl(u8),
     Bubble,
     Consume,
     ToggleFocus,
