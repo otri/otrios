@@ -56,3 +56,7 @@ Rejected publication leaves the saved document and displayed root intact. The se
 Tests exercise typed-vector binary encoding, exact bootstrap round trip, data-only geometry/text changes, primitive template changes, nested slots, retained snapshots, persistence, both-state qualification, malformed input, concurrent CRDT layouts and ordinary state edits. A real child-process test runs the CLI, publishes over HTTP, observes WebSocket push, races two publishers against one base revision (one succeeds), rejects bad/stale/cross-origin/oversized updates and recovers the layout after server restart. See [validation checkpoint](experiments/dashboard-validation.md) for actual hardware/browser evidence.
 
 A separate replaceable [monitoring presentation](MONITORING.md) can display complete binary primitive views without accumulating metric windows in the collaborative layout register. Clearing it reveals the retained editable layout.
+
+## Proposed typed selectors and module roots
+
+[RFC 0003](rfcs/0003-module-roots-and-state-selectors.md) proposes a versioned successor to enum/local bindings: typed state selectors shared by UI properties, identity-based collection targets, and separate UI/State subscriptions per module. It defines navigation through opaque UI/State references and distinguishes CRDT metadata replication from value-level repaint. The current v1 interpreter and whole-room replication do not implement that contract.

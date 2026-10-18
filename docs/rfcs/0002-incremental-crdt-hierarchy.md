@@ -3,6 +3,12 @@
 Status: proposed research design. The dashboard still uses Automerge; this RFC
 and the hash-cost experiment do not implement a Merkle CRDT runtime/store.
 
+[RFC 0003](0003-module-roots-and-state-selectors.md) develops the module boundary,
+typed state selectors, stable collection identity and subscription semantics
+needed to make UI and state independently addressable data. Its scope includes
+separate UI/State roots per module and value-level presentation invalidation
+while causal metadata continues to synchronize.
+
 ## Goal and measured problem
 
 A small leaf edit should cost work proportional to that leaf, its merge metadata
