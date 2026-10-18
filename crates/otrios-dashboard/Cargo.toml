@@ -43,6 +43,10 @@ name = "dashboard-native"
 path = "src/native.rs"
 required-features = ["native"]
 
+[[bin]]
+name = "dashboard-layout"
+path = "src/layout_tool.rs"
+
 [dev-dependencies]
 tungstenite = "=0.30.0"
 

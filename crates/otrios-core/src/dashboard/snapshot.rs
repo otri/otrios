@@ -6,21 +6,38 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-const MAX_SNAPSHOT: usize = 32 * 1024;
+const MAX_SNAPSHOT: usize = super::layout::MAX_LAYOUT_BYTES + 32 * 1024;
 /// Complete, validated, immutable binary view. Clone pins the previous revision.
 #[derive(Clone)]
 pub struct ViewSnapshot {
     bytes: Arc<[u8]>,
     view: Arc<DashboardView>,
     scene: Arc<super::scene::Scene>,
+    layout: super::layout::Layout,
     id: ContentId,
 }
 impl ViewSnapshot {
     pub fn build(view: DashboardView) -> Result<Self> {
+        Self::build_with_layout(view, None)
+    }
+    pub fn build_with_layout(view: DashboardView, layout: Option<&[u8]>) -> Result<Self> {
+        Self::build_cached(view, layout, None)
+    }
+    pub(crate) fn build_cached(
+        view: DashboardView,
+        layout: Option<&[u8]>,
+        cached: Option<&super::layout::Layout>,
+    ) -> Result<Self> {
         let mut b = Builder::new(BuilderOptions::default());
         {
             let mut root = b.start_map();
             root.push("schema", "otrios-view-v1");
+            if let Some(bytes) = layout {
+                if bytes.len() > super::layout::MAX_LAYOUT_BYTES {
+                    return Err("Layout too large".into());
+                }
+                root.push("layout", flexbuffers::Blob(bytes));
+            }
             {
                 let mut heads = root.start_vector("heads");
                 for h in &view.heads {
@@ -60,10 +77,13 @@ impl ViewSnapshot {
                 }
             }
         }
-        Self::from_bytes(b.view())
+        Self::from_bytes_cached(b.view(), cached)
     }
     /// Check lengths before allocation and validate every consumed field before activation.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        Self::from_bytes_cached(bytes, None)
+    }
+    fn from_bytes_cached(bytes: &[u8], cached: Option<&super::layout::Layout>) -> Result<Self> {
         let parse = || -> std::result::Result<DashboardView, Box<dyn std::error::Error>> {
             if bytes.len() > MAX_SNAPSHOT {
                 return Err("Snapshot too large".into());
@@ -168,13 +188,39 @@ impl ViewSnapshot {
             Ok(DashboardView { heads, nodes })
         };
         let view = parse().map_err(|e| e.to_string())?;
+        let root = Reader::get_root(bytes)
+            .map_err(|e| e.to_string())?
+            .get_map()
+            .map_err(|e| e.to_string())?;
+        let source = if root.iter_keys().any(|key| key == "layout") {
+            let value = root.index("layout").map_err(|e| e.to_string())?;
+            if value.length() > super::layout::MAX_LAYOUT_BYTES {
+                return Err("Layout blob too large".into());
+            }
+            value.get_blob().map_err(|e| e.to_string())?.0
+        } else {
+            super::layout::DEFAULT_LAYOUT
+        };
+        let reused = cached.filter(|layout| layout.bytes() == source);
+        let layout = if let Some(layout) = reused {
+            layout.clone()
+        } else if source == super::layout::DEFAULT_LAYOUT {
+            super::layout::Layout::bootstrap()?
+        } else {
+            super::layout::Layout::from_bytes(source)?
+        };
+        if reused.is_none() {
+            layout.qualify(&view)?;
+        }
+        let scene = layout.resolve(&view)?;
         // Versioned domain separates view bytes from other content object types.
         let mut hash = Sha256::new();
         hash.update(b"OTriOS\0view\0v1\0");
         hash.update(bytes);
         Ok(Self {
             bytes: bytes.into(),
-            scene: Arc::new(super::components::dashboard(&view)?),
+            scene: Arc::new(scene),
+            layout,
             view: Arc::new(view),
             id: ContentId(hash.finalize().into()),
         })
@@ -187,6 +233,9 @@ impl ViewSnapshot {
     }
     pub fn scene(&self) -> &Arc<super::scene::Scene> {
         &self.scene
+    }
+    pub fn layout(&self) -> &super::layout::Layout {
+        &self.layout
     }
     pub fn id(&self) -> ContentId {
         self.id

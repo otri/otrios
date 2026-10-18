@@ -294,3 +294,141 @@ fn websocket_push_reconnect_and_concurrent_offline_changes() {
     drop(server);
     std::fs::remove_file(state).unwrap();
 }
+
+#[test]
+fn binary_layout_cli_publish_push_cas_and_restart_preserve_app_state() {
+    use otrios_core::dashboard::layout::{DEFAULT_LAYOUT, Layout, MAX_LAYOUT_BYTES};
+    use otrios_interfaces::layout::{Expr, Property, Value};
+    let root = std::env::temp_dir().join(format!("otrios-layout-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let state = root.join("state");
+    let file = root.join("draft.flex");
+    let server = start(&state);
+    let url = format!("http://{}/layout", server.address);
+    let cli = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_dashboard-layout"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let mut peer = Peer::connect(&server, Replica::new().unwrap());
+    peer.replica.set_enabled(false).unwrap();
+    for _ in 0..8 {
+        peer.pump();
+    }
+    cli(&["fetch", &url, file.to_str().unwrap()]);
+    assert_eq!(std::fs::read(&file).unwrap(), DEFAULT_LAYOUT);
+    cli(&[
+        "frame",
+        file.to_str().unwrap(),
+        "2",
+        "72",
+        "160",
+        "440",
+        "240",
+    ]);
+    cli(&["text", file.to_str().unwrap(), "2", "1", "Quiet mode"]);
+    cli(&["publish", file.to_str().unwrap(), &url]);
+    let layout = Layout::from_bytes(&std::fs::read(&file).unwrap()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while peer.replica.snapshot().layout().hex_id() != layout.hex_id() {
+        peer.pump();
+        assert!(Instant::now() < deadline, "Layout was not pushed");
+    }
+    assert_eq!(
+        peer.replica.snapshot().scene().controls()[0].origin,
+        [72., 160.]
+    );
+    assert!(
+        !peer.replica.snapshot().scene().controls()[0]
+            .node
+            .semantics
+            .as_ref()
+            .unwrap()
+            .checked
+    );
+    assert!(
+        peer.replica
+            .snapshot()
+            .view()
+            .nodes
+            .iter()
+            .any(|n| n.content == otrios_interfaces::ViewContent::Label("1 touches".into()))
+    );
+    fn post_layout(address: &str, body: &[u8], expected: &str, origin: &str) -> u16 {
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(stream,"POST /layout HTTP/1.0\r\nHost: {address}\r\nOrigin: {origin}\r\nContent-Type: application/octet-stream\r\nIf-Match: \"{expected}\"\r\nContent-Length: {}\r\n\r\n",body.len()).unwrap();
+        let _ = stream.write_all(body);
+        let mut reply = Vec::new();
+        stream.read_to_end(&mut reply).unwrap();
+        std::str::from_utf8(&reply)
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+    let expected = layout.hex_id();
+    let origin = format!("http://{}", server.address);
+    assert_eq!(
+        post_layout(&server.address, b"bad", &expected, &origin),
+        400
+    );
+    assert_eq!(
+        post_layout(
+            &server.address,
+            layout.bytes(),
+            &expected,
+            "https://unrelated.example"
+        ),
+        403
+    );
+    assert_eq!(
+        post_layout(
+            &server.address,
+            &vec![0; MAX_LAYOUT_BYTES + 1],
+            &expected,
+            &origin
+        ),
+        413
+    );
+    let make = |label: &str| {
+        let mut b = layout.blueprint().clone();
+        let i = b.root.children.iter_mut().find(|i| i.id == 2).unwrap();
+        i.properties.retain(|p| p.key != 1);
+        i.properties.push(Property {
+            key: 1,
+            value: Expr::Literal(Value::Text(label.into())),
+        });
+        Layout::encode(&b).unwrap()
+    };
+    let a = make("Draft A");
+    let b = make("Draft B");
+    let mut statuses = std::thread::scope(|scope| {
+        let x = scope.spawn(|| post_layout(&server.address, &a, &expected, &origin));
+        let y = scope.spawn(|| post_layout(&server.address, &b, &expected, &origin));
+        vec![x.join().unwrap(), y.join().unwrap()]
+    });
+    statuses.sort();
+    assert_eq!(statuses, [200, 412]);
+    let persisted = Replica::load(&std::fs::read(&state).unwrap()).unwrap();
+    let winner = persisted.snapshot().layout().bytes().to_vec();
+    assert!(winner == a || winner == b);
+    drop(peer);
+    drop(server);
+    let restarted = start(&state);
+    let url = format!("http://{}/layout", restarted.address);
+    cli(&["fetch", &url, file.to_str().unwrap()]);
+    assert_eq!(std::fs::read(&file).unwrap(), winner);
+    drop(restarted);
+    std::fs::remove_dir_all(root).unwrap();
+}

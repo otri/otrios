@@ -14,7 +14,7 @@ The dashboard now expands its immutable application view into a validated, immut
 
 Superellipse exponent 2 gives circular corners; the components use exponent 4. This is a rounded rectangle with superelliptic corners, not a claim that its entire outline follows one full-width Lamé oval. Painting tessellates curves into GPU triangles; hit testing evaluates their analytic boundaries, so subpixel tessellation differences remain possible at an edge.
 
-`components::panel` returns a Canvas with a Superellipse background followed by supplied children. `components::switch` composes a panel, Text, a nested control Canvas, a Superellipse track and Circle knob, with a touch responder and switch accessibility semantics on its outer Canvas. The graph is a Panel containing Text, grid rectangles, a Path and a Circle. None is a compositor primitive or a special case in the hit tester.
+Panel and Switch are now FlexBuffers component templates interpreted at runtime. Panel expands into a Canvas, Superellipse background and child slot. Switch expands into a panel, Text, a nested control Canvas, a Superellipse track and Circle knob, with a touch responder and switch accessibility semantics on its outer Canvas. The graph is a Panel containing Text, grid rectangles, a Path and a Circle. None is a compositor primitive or a special case in the hit tester.
 
 ```text
 Canvas (screen)
@@ -31,7 +31,7 @@ Canvas (screen)
 └─ Canvas (other labels/panels)
 ```
 
-Factories are Rust modules today. Dynamically loaded component modules, an external scene IDL and editing this scene structure through CRDT operations remain later steps. The current v1 CRDT/view snapshot stays compatible: primitive trees derive from validated v1 application nodes at snapshot publication and are retained beside the snapshot. The snapshot hash identifies those input bytes, while the code release identifies the component/projector implementation; a view ID alone does not identify rendered geometry across code releases.
+Component templates and instances now live in versioned FlexBuffers data. [BINARY_LAYOUT.md](BINARY_LAYOUT.md) describes the contract and live authoring tool. The existing v1 application snapshot remains readable; a configured layout is embedded as a bounded binary blob in the complete view snapshot. Primitive trees derive from the typed component data and application bindings at publication. The view hash binds those exact input bytes; its code release still identifies the interpreter and primitive implementation.
 
 ## Pointer delivery
 

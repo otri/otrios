@@ -136,6 +136,65 @@ async fn sync_http(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes
     }
     binary("application/octet-stream", bytes, false)
 }
+async fn get_layout(State(app): State<Arc<App>>) -> Response {
+    let replica = app.replica.lock().await;
+    let layout = replica.snapshot().layout();
+    (
+        [
+            (header::ETAG, format!("\"{}\"", layout.hex_id())),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=dashboard.flex".to_string(),
+            ),
+        ],
+        binary("application/octet-stream", layout.bytes().to_vec(), false),
+    )
+        .into_response()
+}
+async fn put_layout(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes) -> Response {
+    if !origin_ok(&app, &headers) {
+        return failure(StatusCode::FORBIDDEN, "Origin rejected");
+    }
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        != Some("application/octet-stream")
+    {
+        return failure(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Expected binary FlexBuffers",
+        );
+    }
+    let Some(expected) = headers.get(header::IF_MATCH).and_then(|h| h.to_str().ok()) else {
+        return failure(
+            StatusCode::PRECONDITION_REQUIRED,
+            "If-Match layout revision is required",
+        );
+    };
+    let mut replica = app.replica.lock().await;
+    if expected.trim_matches('"') != replica.snapshot().layout().hex_id() {
+        return failure(
+            StatusCode::PRECONDITION_FAILED,
+            "Layout changed; fetch and reapply edits",
+        );
+    }
+    let mut candidate = replica.clone();
+    let changed = match candidate.set_layout(&bytes) {
+        Ok(value) => value,
+        Err(e) => return failure(StatusCode::BAD_REQUEST, &format!("Invalid layout: {e}")),
+    };
+    if let Err(e) = commit(&app, &mut candidate).await {
+        eprintln!("Persistence: {e}");
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
+    }
+    let id = candidate.snapshot().layout().hex_id();
+    *replica = candidate;
+    drop(replica);
+    if changed {
+        announce(&app).await;
+    }
+    binary("text/plain; charset=utf-8", id.into_bytes(), false)
+}
 async fn stream(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -241,10 +300,13 @@ async fn current_release(State(app): State<Arc<App>>) -> Response {
     )
 }
 async fn health(State(app): State<Arc<App>>) -> Response {
-    let id = app.replica.lock().await.snapshot().hex_id();
+    let (id, layout) = {
+        let r = app.replica.lock().await;
+        (r.snapshot().hex_id(), r.snapshot().layout().hex_id())
+    };
     binary(
         "application/json",
-        json!({"status":"ok","snapshot":id,"release":app.release.read().await["id"]})
+        json!({"status":"ok","snapshot":id,"layout":layout,"release":app.release.read().await["id"]})
             .to_string()
             .into_bytes(),
         false,
@@ -351,6 +413,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/health", get(health))
         .route("/release", get(current_release))
         .route("/sync", post(sync_http))
+        .route(
+            "/layout",
+            get(get_layout)
+                .post(put_layout)
+                .layer(DefaultBodyLimit::max(
+                    otrios_core::dashboard::layout::MAX_LAYOUT_BYTES,
+                )),
+        )
         .route("/stream", get(stream))
         .route("/releases/{id}/{*path}", get(release_asset))
         .route("/{*path}", get(source_asset))

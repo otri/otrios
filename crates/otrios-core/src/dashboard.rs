@@ -4,6 +4,7 @@
 
 pub mod components;
 pub mod input;
+pub mod layout;
 mod render;
 pub mod scene;
 mod snapshot;
@@ -74,6 +75,19 @@ impl Replica {
     }
     pub fn snapshot(&self) -> &ViewSnapshot {
         &self.snapshot
+    }
+    pub fn set_layout(&mut self, bytes: &[u8]) -> Result<bool> {
+        let layout = layout::Layout::from_bytes(bytes)?;
+        layout.qualify(self.snapshot.view())?;
+        if layout.bytes() == self.snapshot.layout().bytes() {
+            return Ok(false);
+        }
+        let mut candidate = self.doc.clone();
+        candidate
+            .put(ROOT, "layout", ScalarValue::Bytes(bytes.to_vec()))
+            .map_err(err)?;
+        candidate.commit();
+        self.publish(candidate)
     }
     pub fn generate_sync(&mut self, session: &mut SyncSession) -> Result<Option<Vec<u8>>> {
         let data = self
@@ -172,7 +186,7 @@ impl Replica {
         if candidate.save().len() > MAX_DOCUMENT_BYTES {
             return Err("Demo document limit reached".into());
         }
-        let snapshot = project(&mut candidate)?;
+        let snapshot = project_cached(&mut candidate, Some(self.snapshot.layout()))?;
         let changed = snapshot.id() != self.snapshot.id();
         self.doc = candidate;
         self.snapshot = snapshot;
@@ -207,6 +221,9 @@ fn validate_lineage(doc: &mut AutoCommit) -> Result<()> {
     Ok(())
 }
 fn project(doc: &mut AutoCommit) -> Result<ViewSnapshot> {
+    project_cached(doc, None)
+}
+fn project_cached(doc: &mut AutoCommit, cached: Option<&layout::Layout>) -> Result<ViewSnapshot> {
     let (_, title) = doc
         .get(ROOT, "title")
         .map_err(err)?
@@ -250,42 +267,56 @@ fn project(doc: &mut AutoCommit) -> Result<ViewSnapshot> {
     }
     let mut heads: Vec<_> = doc.get_heads().iter().map(ToString::to_string).collect();
     heads.sort();
-    ViewSnapshot::build(DashboardView {
-        heads,
-        nodes: vec![
-            ViewNode {
-                id: 1,
-                bounds: [64, 64, 1152, 96],
-                content: ViewContent::Label(title),
-            },
-            ViewNode {
-                id: 2,
-                bounds: [64, 208, 440, 240],
-                content: ViewContent::Switch {
-                    label: "Focus mode".into(),
-                    enabled,
+    let layout = doc
+        .get(ROOT, "layout")
+        .map_err(err)?
+        .map(|(value, _)| {
+            value
+                .as_bytes()
+                .map(|v| v.to_vec())
+                .ok_or("Layout must be a binary scalar")
+        })
+        .transpose()?;
+    ViewSnapshot::build_cached(
+        DashboardView {
+            heads,
+            nodes: vec![
+                ViewNode {
+                    id: 1,
+                    bounds: [64, 64, 1152, 96],
+                    content: ViewContent::Label(title),
                 },
-            },
-            ViewNode {
-                id: 3,
-                bounds: [536, 208, 680, 400],
-                content: ViewContent::Graph {
-                    label: "Sample signal".into(),
-                    samples,
+                ViewNode {
+                    id: 2,
+                    bounds: [64, 208, 440, 240],
+                    content: ViewContent::Switch {
+                        label: "Focus mode".into(),
+                        enabled,
+                    },
                 },
-            },
-            ViewNode {
-                id: 4,
-                bounds: [64, 500, 440, 108],
-                content: ViewContent::Label(format!("{touches} touches")),
-            },
-            ViewNode {
-                id: 5,
-                bounds: [64, 676, 1152, 60],
-                content: ViewContent::Label("Touch a tile. Your other screen follows.".into()),
-            },
-        ],
-    })
+                ViewNode {
+                    id: 3,
+                    bounds: [536, 208, 680, 400],
+                    content: ViewContent::Graph {
+                        label: "Sample signal".into(),
+                        samples,
+                    },
+                },
+                ViewNode {
+                    id: 4,
+                    bounds: [64, 500, 440, 108],
+                    content: ViewContent::Label(format!("{touches} touches")),
+                },
+                ViewNode {
+                    id: 5,
+                    bounds: [64, 676, 1152, 60],
+                    content: ViewContent::Label("Touch a tile. Your other screen follows.".into()),
+                },
+            ],
+        },
+        layout.as_deref(),
+        cached,
+    )
 }
 
 #[cfg(test)]

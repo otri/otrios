@@ -12,7 +12,7 @@ otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
 default = []
-dashboard = ["dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:font8x8"]
+dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:font8x8"]
 
 [dependencies.automerge]
 version = "=0.12.0"

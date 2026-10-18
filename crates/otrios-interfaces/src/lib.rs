@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Experimental contract types. No stable wire format or ABI is promised.
 
+#[cfg(feature = "layout")]
+pub mod layout;
 pub mod scene;
 
 /// SHA-256 digest of a canonical object envelope, once hashing is implemented.

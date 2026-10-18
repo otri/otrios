@@ -54,6 +54,12 @@ impl Dashboard {
     pub fn snapshot(&self) -> Vec<u8> {
         self.replica.snapshot().bytes().to_vec()
     }
+    pub fn layout(&self) -> Vec<u8> {
+        self.replica.snapshot().layout().bytes().to_vec()
+    }
+    pub fn layout_id(&self) -> String {
+        self.replica.snapshot().layout().hex_id()
+    }
     pub fn snapshot_id(&self) -> String {
         self.replica.snapshot().hex_id()
     }

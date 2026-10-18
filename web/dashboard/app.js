@@ -18,6 +18,7 @@ try {
   } catch(e) {throw new Error(`Saved dashboard could not be loaded; it has been kept intact. ${e}`);}
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});
   if(!gl)throw new Error('This dashboard requires WebGL.');
+  gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
   function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
   const vs=shader(gl.VERTEX_SHADER,'attribute vec2 pos; attribute vec4 color; varying lowp vec4 tint; void main(){gl_Position=vec4(pos.x/640.0-1.0,1.0-pos.y/400.0,0.0,1.0);tint=color;}');
   const fs=shader(gl.FRAGMENT_SHADER,'varying lowp vec4 tint; void main(){gl_FragColor=tint;}');
@@ -33,7 +34,7 @@ try {
     catch(e){connection.textContent='Changes live in this tab; storage unavailable';console.warn(e);return false;}
   }
   function draw(){
-    const vertices=dashboard.vertices();gl.viewport(0,0,1280,800);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);
+    const vertices=dashboard.vertices();gl.viewport(0,0,1280,800);gl.clearColor(16/255,28/255,41/255,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);
     if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');
     const ids=new Set(dashboard.control_ids());
     for(const [id,button] of controls)if(!ids.has(id)){button.remove();controls.delete(id);}
@@ -50,6 +51,7 @@ try {
     }
     revision.textContent=`VIEW ${dashboard.snapshot_id().slice(0,12)}`;
     revision.dataset.snapshot=dashboard.snapshot_id();
+    revision.dataset.layout=dashboard.layout_id();
     persist();
   }
   let socket=null,retry=250,stopped=false;

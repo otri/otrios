@@ -7,5 +7,11 @@ rust-version.workspace = true
 publish.workspace = true
 license = "Apache-2.0"
 
+[features]
+layout = ["dep:serde"]
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"], optional = true }
+
 [lints]
 workspace = true

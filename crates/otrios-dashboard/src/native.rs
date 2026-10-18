@@ -89,6 +89,7 @@ fn main() -> Result<(), String> {
     canvas
         .set_logical_size(1280, 800)
         .map_err(|e| e.to_string())?;
+    canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
     let mut events = sdl.event_pump()?;
     let mut dirty = true;
     let mut input = InputRouter::default();
@@ -245,7 +246,7 @@ fn main() -> Result<(), String> {
             }
             canvas.present();
             if let Some(path) = &ready_file {
-                let info = serde_json::json!({"pid":std::process::id(),"snapshot":replica.snapshot().hex_id(),"renderer":canvas.info().name,"stream_ready":observed_stream,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                let info = serde_json::json!({"pid":std::process::id(),"snapshot":replica.snapshot().hex_id(),"renderer":canvas.info().name,"stream_ready":observed_stream,"layout":replica.snapshot().layout().hex_id(),"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                 let tmp = format!("{path}.tmp");
                 fs::write(&tmp, info.to_string())
                     .and_then(|_| fs::rename(tmp, path))
