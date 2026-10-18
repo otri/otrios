@@ -87,6 +87,8 @@ pub enum Responder {
     Bubble,
     Consume,
     ToggleFocus,
+    Motion(u8),
+    Stress,
     Open(crate::scene::Screen),
     Back,
     Home,

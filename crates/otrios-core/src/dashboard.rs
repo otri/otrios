@@ -6,6 +6,7 @@ pub mod components;
 pub mod input;
 pub mod keyboard;
 pub mod layout;
+pub mod motion;
 mod render;
 pub mod scene;
 pub mod shell;
@@ -80,6 +81,26 @@ impl Replica {
             snapshot,
             presentation: None,
         })
+    }
+    pub fn motion(&self) -> Result<motion::Intent> {
+        match self.doc.get(ROOT, "motion").map_err(err)? {
+            Some((value, _)) => {
+                motion::Intent::decode(value.as_bytes().ok_or("Motion must be binary")?)
+            }
+            None => Ok(motion::Intent::default()),
+        }
+    }
+    pub fn set_motion(&mut self, intent: motion::Intent) -> Result<bool> {
+        intent.validate()?;
+        if intent == self.motion()? {
+            return Ok(false);
+        }
+        let mut candidate = self.doc.clone();
+        candidate
+            .put(ROOT, "motion", ScalarValue::Bytes(intent.encode()))
+            .map_err(err)?;
+        candidate.commit();
+        self.publish(candidate)
     }
     pub fn save(&mut self) -> Vec<u8> {
         self.doc.save()
@@ -265,6 +286,9 @@ fn project_cached(
     cached: Option<&layout::Layout>,
     presentation: Option<&layout::Layout>,
 ) -> Result<ViewSnapshot> {
+    if let Some((v, _)) = doc.get(ROOT, "motion").map_err(err)? {
+        motion::Intent::decode(v.as_bytes().ok_or("Motion must be binary")?)?;
+    }
     let (_, title) = doc
         .get(ROOT, "title")
         .map_err(err)?

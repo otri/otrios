@@ -407,9 +407,12 @@ async fn health(State(app): State<Arc<App>>) -> Response {
 fn asset_type(path: &str) -> Option<&'static str> {
     match path {
         "index.html" | "web/index.html" => Some("text/html; charset=utf-8"),
-        "app.js" | "web/app.js" | "pkg/otrios_dashboard.js" | "web/pkg/otrios_dashboard.js" => {
-            Some("text/javascript")
-        }
+        "app.js"
+        | "web/app.js"
+        | "state-worker.js"
+        | "web/state-worker.js"
+        | "pkg/otrios_dashboard.js"
+        | "web/pkg/otrios_dashboard.js" => Some("text/javascript"),
         "style.css" | "web/style.css" => Some("text/css"),
         "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
             Some("application/wasm")

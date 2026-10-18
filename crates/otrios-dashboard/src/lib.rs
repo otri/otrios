@@ -10,6 +10,7 @@ pub struct Dashboard {
     replica: Replica,
     session: SyncSession,
     shell: Shell,
+    stress: otrios_core::dashboard::motion::Stress,
 }
 #[wasm_bindgen]
 impl Dashboard {
@@ -19,6 +20,7 @@ impl Dashboard {
             replica: Replica::new()?,
             session: SyncSession::default(),
             shell: Shell::default(),
+            stress: otrios_core::dashboard::motion::Stress::new()?,
         })
     }
     pub fn load(bytes: &[u8]) -> Result<Dashboard, String> {
@@ -26,6 +28,7 @@ impl Dashboard {
             replica: Replica::load(bytes)?,
             session: SyncSession::default(),
             shell: Shell::default(),
+            stress: otrios_core::dashboard::motion::Stress::new()?,
         })
     }
     pub fn document(&mut self) -> Vec<u8> {
@@ -55,6 +58,23 @@ impl Dashboard {
     }
     pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
         Ok(render_scene(self.shell.scene(&self.replica)?.as_ref()).vertices)
+    }
+    pub fn motion_intent(&self) -> Result<Vec<f32>, String> {
+        let i = self.replica.motion()?;
+        Ok(vec![
+            if i.playing { 1. } else { 0. },
+            i.speed,
+            f32::from(i.count),
+        ])
+    }
+    pub fn stress_tick(&mut self, now: f64) -> Result<bool, String> {
+        self.stress.tick(now, self.shell.stress_hz())
+    }
+    pub fn stress_stall_ms(&self) -> f64 {
+        self.shell.stress_stall_ms() as f64
+    }
+    pub fn stress_updates(&self) -> f64 {
+        self.stress.updates as f64
     }
     pub fn keyboard_visible(&self) -> bool {
         self.shell.keyboard_visible()
@@ -258,5 +278,51 @@ impl Dashboard {
             .find(|c| c.node.id == id)
             .and_then(|c| c.node.semantics.as_ref())
             .is_some_and(|s| s.checked))
+    }
+}
+
+/// Has no CRDT, networking, storage, navigation or app-owned text.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct MotionPresenter {
+    inner: otrios_core::dashboard::motion::Presenter,
+}
+#[wasm_bindgen]
+impl MotionPresenter {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn vertices(
+        &mut self,
+        three_d: bool,
+        playing: bool,
+        speed: f32,
+        count: u16,
+        now: f64,
+        updates: f64,
+    ) -> Result<Vec<f32>, String> {
+        let i = otrios_core::dashboard::motion::Intent {
+            playing,
+            speed,
+            count,
+        };
+        i.validate()?;
+        Ok(self
+            .inner
+            .mesh(three_d, i, now, updates.max(0.) as u64)
+            .vertices)
+    }
+    pub fn suspend(&mut self) {
+        self.inner.suspend();
+    }
+    pub fn hud_revision(&self) -> f64 {
+        self.inner.hud_revision() as f64
+    }
+    pub fn hud(&self) -> Vec<f32> {
+        self.inner.hud().to_vec()
+    }
+    pub fn stats(&self) -> String {
+        self.inner.stats()
     }
 }

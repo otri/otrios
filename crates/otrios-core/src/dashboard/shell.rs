@@ -13,8 +13,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 const SYSTEM: u32 = 4_100_000_000;
-fn assets() -> Result<&'static [Layout; 4]> {
-    static ASSETS: OnceLock<Result<[Layout; 4]>> = OnceLock::new();
+fn assets() -> Result<&'static [Layout; 5]> {
+    static ASSETS: OnceLock<Result<[Layout; 5]>> = OnceLock::new();
     ASSETS
         .get_or_init(|| {
             Ok([
@@ -22,6 +22,7 @@ fn assets() -> Result<&'static [Layout; 4]> {
                 Layout::from_bytes(include_bytes!("shell-assets/navigation.flex"))?,
                 Layout::from_bytes(include_bytes!("shell-assets/editor.flex"))?,
                 Layout::from_bytes(include_bytes!("shell-assets/keyboard.flex"))?,
+                Layout::from_bytes(include_bytes!("shell-assets/motion.flex"))?,
             ])
         })
         .as_ref()
@@ -46,6 +47,7 @@ pub struct Shell {
     focused: Option<u8>,
     input: InputRouter,
     revision: u64,
+    stress_hz: u8,
     cached: Option<(ContentId, u64, Arc<Scene>)>,
 }
 impl Default for Shell {
@@ -57,6 +59,7 @@ impl Default for Shell {
             focused: None,
             input: InputRouter::default(),
             revision: 0,
+            stress_hz: 0,
             cached: None,
         }
     }
@@ -71,7 +74,31 @@ impl Shell {
             Screen::Monitoring => "monitoring",
             Screen::Controls => "controls",
             Screen::Keyboard => "keyboard",
+            Screen::Animation => "animation",
+            Screen::ThreeD => "3d",
         }
+    }
+    pub fn stress_hz(&self) -> u8 {
+        if matches!(self.screen, Screen::Animation | Screen::ThreeD) {
+            if self.stress_hz == 31 {
+                30
+            } else {
+                self.stress_hz
+            }
+        } else {
+            0
+        }
+    }
+    pub fn stress_stall_ms(&self) -> u64 {
+        if self.stress_hz == 31 && self.stress_hz() != 0 {
+            250
+        } else {
+            0
+        }
+    }
+    pub fn set_stress(&mut self, hz: u8) {
+        self.stress_hz = hz;
+        self.changed();
     }
     pub fn keyboard_visible(&self) -> bool {
         self.screen == Screen::Keyboard && self.keyboard.visible
@@ -89,6 +116,8 @@ impl Shell {
             "monitoring" => Screen::Monitoring,
             "controls" => Screen::Controls,
             "keyboard" => Screen::Keyboard,
+            "animation" => Screen::Animation,
+            "3d" => Screen::ThreeD,
             _ => Screen::Home,
         })
     }
@@ -165,6 +194,40 @@ impl Shell {
     }
     fn apply(&mut self, replica: &mut Replica, action: Option<Action>) -> Result<bool> {
         Ok(match action {
+            Some(Action::Motion(id))
+                if matches!(self.screen, Screen::Animation | Screen::ThreeD) =>
+            {
+                let mut intent = replica.motion()?;
+                match id {
+                    0 => intent.playing = !intent.playing,
+                    1 => {
+                        intent.speed = if intent.speed >= 4. {
+                            0.25
+                        } else {
+                            intent.speed * 2.
+                        }
+                    }
+                    2 => {
+                        intent.count = if intent.count >= 64 {
+                            12
+                        } else {
+                            (intent.count * 2).min(64)
+                        }
+                    }
+                    _ => return Ok(false),
+                }
+                replica.set_motion(intent)?
+            }
+            Some(Action::Stress) if matches!(self.screen, Screen::Animation | Screen::ThreeD) => {
+                self.stress_hz = match self.stress_hz {
+                    0 => 10,
+                    10 => 30,
+                    30 => 31,
+                    _ => 0,
+                };
+                self.changed();
+                true
+            }
             Some(Action::Open(s)) => self.open(s),
             Some(Action::Home) => self.open(Screen::Home),
             Some(Action::Back) => self.back(),
@@ -267,6 +330,8 @@ impl Shell {
             Screen::Monitoring => "MONITORING",
             Screen::Controls => "LIVE CONTROLS",
             Screen::Keyboard => "INPUT LAB",
+            Screen::Animation => "MOTION LAB",
+            Screen::ThreeD => "3D LAB",
         };
         local.insert(0, Value::Text(title.into()));
         local.insert(
@@ -330,6 +395,32 @@ impl Shell {
                 }),
             );
         }
+        let intent = replica.motion()?;
+        local.insert(
+            500,
+            Value::Text(if intent.playing { "PAUSE" } else { "PLAY" }.into()),
+        );
+        local.insert(501, Value::Text(format!("SPEED {}x", intent.speed)));
+        local.insert(502, Value::Text(format!("OBJECTS {}", intent.count)));
+        local.insert(
+            503,
+            Value::Text(if self.stress_hz == 31 {
+                "STALL 250ms".into()
+            } else {
+                format!("CRDT LOAD {}Hz", self.stress_hz)
+            }),
+        );
+        local.insert(
+            504,
+            Value::Text(
+                if self.screen == Screen::ThreeD {
+                    "Perspective cubes / CPU projection + GPU triangles"
+                } else {
+                    "Orbiting circles / local clock + smooth speed changes"
+                }
+                .into(),
+            ),
+        );
         let assets = assets()?;
         let view = replica.snapshot().view();
         let page = match self.screen {
@@ -340,6 +431,10 @@ impl Shell {
             Screen::Keyboard => remap(
                 assets[2].resolve_local(view, &local)?.root().clone(),
                 SYSTEM + 2_000_000,
+            )?,
+            Screen::Animation | Screen::ThreeD => remap(
+                assets[4].resolve_local(view, &local)?.root().clone(),
+                SYSTEM + 6_000_000,
             )?,
             Screen::Monitoring | Screen::Controls => {
                 let content = if self.screen == Screen::Monitoring {
@@ -511,6 +606,27 @@ mod tests {
         assert_eq!(s.screen(), Screen::Monitoring);
     }
     #[test]
+    fn demo_responders_separate_shared_intent_from_local_stress_and_navigation() {
+        let mut r = Replica::new().unwrap();
+        let mut s = Shell::default();
+        s.open(Screen::Animation);
+        let before = r.save();
+        for expected in [(10, 0), (30, 0), (30, 250), (0, 0)] {
+            tap(&mut s, &mut r, [1080., 220.]);
+            assert_eq!((s.stress_hz(), s.stress_stall_ms()), expected);
+        }
+        assert_eq!(r.save(), before);
+        tap(&mut s, &mut r, [120., 220.]);
+        assert!(!r.motion().unwrap().playing);
+        let mut remote = Replica::new().unwrap();
+        remote.merge(&r.save()).unwrap();
+        assert_eq!(remote.motion().unwrap(), r.motion().unwrap());
+        let saved = r.save();
+        s.open(Screen::ThreeD);
+        s.back();
+        assert_eq!(r.save(), saved);
+    }
+    #[test]
     fn all_embedded_binary_screens_resolve_and_fit_scene_limits() {
         let r = Replica::new().unwrap();
         let mut s = Shell::default();
@@ -519,6 +635,8 @@ mod tests {
             Screen::Monitoring,
             Screen::Controls,
             Screen::Keyboard,
+            Screen::Animation,
+            Screen::ThreeD,
         ] {
             s.open(screen);
             s.scene(&r).unwrap();

@@ -45,6 +45,11 @@ pub enum Primitive {
     Circle {
         color: Color,
     },
+    /// Projected triangle geometry; bounded and clipped like other primitives.
+    Triangles {
+        points: Vec<[f32; 2]>,
+        color: Color,
+    },
     Path {
         points: Vec<[f32; 2]>,
         width: f32,
@@ -55,6 +60,8 @@ pub enum Primitive {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     ToggleFocus,
+    Motion(u8),
+    Stress,
     Open(Screen),
     Back,
     Home,
@@ -68,6 +75,8 @@ pub enum Screen {
     Monitoring,
     Controls,
     Keyboard,
+    Animation,
+    ThreeD,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TouchResponder {

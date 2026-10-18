@@ -115,9 +115,9 @@ const MUTED: [u8; 4] = [150, 171, 185, 255];
 const GREEN: [u8; 4] = [185, 238, 143, 255];
 fn home() -> Blueprint {
     let mut a = Author::new(false);
-    a.label([48., 140., 1184., 64.], s("OTriOS"), 8., WHITE);
+    a.label([48., 116., 1184., 64.], s("OTriOS"), 6., WHITE);
     a.label(
-        [48., 232., 1184., 24.],
+        [48., 192., 1184., 24.],
         s("A shared runtime. A place to explore."),
         3.,
         MUTED,
@@ -141,18 +141,31 @@ fn home() -> Blueprint {
             "Reusable keyboard",
             "Literal typing, focus and editing",
         ),
+        (
+            Screen::Animation,
+            "MOTION LAB",
+            "Local animation clock",
+            "Stress CRDT without stopping frames",
+        ),
+        (
+            Screen::ThreeD,
+            "3D LAB",
+            "Perspective + rotation",
+            "Shared intent, independent playback",
+        ),
     ]
     .iter()
     .enumerate()
     {
         let t = 10 + i as u16;
         a.button_template(t, Responder::Open(*screen));
-        let x = 48. + i as f32 * 400.;
-        a.add(t, [x, 328., 384., 264.], vec![prop(1, s(title))]);
+        let x = 48. + (i % 3) as f32 * 400.;
+        let y = 272. + (i / 3) as f32 * 208.;
+        a.add(t, [x, y, 384., 192.], vec![prop(1, s(title))]);
         let button = a.b.root.children.len() - 1;
-        a.label([16., 92., 352., 24.], s(line1), 2., WHITE);
-        a.label([16., 132., 352., 32.], s(line2), 1., MUTED);
-        a.label([16., 212., 320., 16.], s("OPEN  ->"), 2., GREEN);
+        a.label([16., 76., 352., 24.], s(line1), 2., WHITE);
+        a.label([16., 112., 352., 32.], s(line2), 1., MUTED);
+        a.label([16., 156., 320., 16.], s("OPEN  ->"), 2., GREEN);
         let children = a.b.root.children.drain(button + 1..).collect();
         a.b.root.children[button].children = children;
     }
@@ -209,6 +222,33 @@ fn editor() -> Blueprint {
         );
     }
     a.label([48., 444., 1184., 16.], local(102), 2., MUTED);
+    a.b
+}
+fn motion() -> Blueprint {
+    let mut a = Author::new(false);
+    a.label([48., 112., 1184., 32.], local(504), 2., WHITE);
+    a.label(
+        [48., 160., 1184., 16.],
+        s("Shared: play, speed, count. Local: phase, frames, load test. Tap CRDT LOAD to cycle."),
+        1.,
+        MUTED,
+    );
+    for (i, r) in [
+        Responder::Motion(0),
+        Responder::Motion(1),
+        Responder::Motion(2),
+        Responder::Stress,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        a.button_template(10 + i as u16, r);
+        a.add(
+            10 + i as u16,
+            [48. + i as f32 * 300., 196., 284., 56.],
+            vec![prop(1, local(500 + i as u16))],
+        );
+    }
     a.b
 }
 fn keyboard() -> Blueprint {
@@ -292,6 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("navigation", navigation()),
         ("editor", editor()),
         ("keyboard", keyboard()),
+        ("motion", motion()),
     ] {
         std::fs::write(
             root.join(format!("{name}.flex")),
@@ -307,6 +348,11 @@ mod tests {
     #[test]
     fn binary_system_assets_match_their_authoring_fixtures() {
         for (b, bytes) in [
+            (
+                motion(),
+                include_bytes!("../../otrios-core/src/dashboard/shell-assets/motion.flex")
+                    .as_slice(),
+            ),
             (
                 home(),
                 include_bytes!("../../otrios-core/src/dashboard/shell-assets/home.flex").as_slice(),

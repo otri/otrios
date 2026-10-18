@@ -1,153 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
-import init, { Dashboard } from './pkg/otrios_dashboard.js';
-const canvas=document.querySelector('#dashboard');
-const controlsLayer=document.querySelector('#controls');
-const controls=new Map();
-const connection=document.querySelector('#connection');
-const dot=document.querySelector('#connection-dot');
-const revision=document.querySelector('#revision');
-const error=document.querySelector('#error');
+// Presentation owner: monotonic clock, cached GPU geometry, input forwarding.
+import init,{MotionPresenter} from './pkg/otrios_dashboard.js';
+const canvas=document.querySelector('#dashboard'),controlsLayer=document.querySelector('#controls');
+const connection=document.querySelector('#connection'),dot=document.querySelector('#connection-dot'),revision=document.querySelector('#revision'),error=document.querySelector('#error');
 function fatal(e){error.hidden=false;error.textContent=String(e);connection.textContent='Unable to open this space';}
-try {
-  await init();
-  let dashboard;
-  const storageKey='otrios-dashboard-v1';
-  const presentationKey='otrios-dashboard-presentation-v1';
-  try {
-    const saved=sessionStorage.getItem(storageKey);
-    dashboard=saved?Dashboard.load(Uint8Array.from(atob(saved),c=>c.charCodeAt(0))):new Dashboard();
-  } catch(e) {throw new Error(`Saved dashboard could not be loaded; it has been kept intact. ${e}`);}
-  const cachedPresentation=sessionStorage.getItem(presentationKey);
-  if(cachedPresentation)dashboard.present(Uint8Array.from(atob(cachedPresentation),c=>c.charCodeAt(0)));
-  let historyApplying=false,lastRoute='';
-  function route(){return `/${dashboard.screen()}${dashboard.keyboard_visible()?'/input':''}`;}
-  function applyRoute(){
-    historyApplying=true;
-    const parts=location.hash.replace(/^#\/?/,'').split('/');dashboard.navigate(parts[0]);
-    if(parts[0]==='keyboard'&&parts[1]==='input'&&!dashboard.keyboard_visible())dashboard.show_keyboard();
-    else if(dashboard.keyboard_visible()&&parts[1]!=='input')dashboard.back();
-    lastRoute=route();
-  }
-  applyRoute();history.replaceState({otrios:true,input:dashboard.keyboard_visible(),previous:null},'',`#${route()}`);historyApplying=false;
-  function syncRoute(){
-    const next=route();
-    if(!historyApplying&&next!==lastRoute){
-      if(next===history.state?.previous){lastRoute=next;history.back();}
-      else {const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,input:dashboard.keyboard_visible(),previous},'',`#${next}`);}
-    }
-  }
-  window.addEventListener('popstate',()=>{applyRoute();draw();historyApplying=false;});
-  const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});
-  if(!gl)throw new Error('This dashboard requires WebGL.');
+try{
+  await init();const presenter=new MotionPresenter();
+  const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
+  let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false;
+  function command(m){if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
+  function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}}
+  function route(){return `/${model.screen}${model.keyboard?'/input':''}`;}
+  window.addEventListener('popstate',()=>{applyingRoute=true;routeTarget=location.hash.replace(/^#/, '')||'/home';command({type:'route',route:location.hash});});
+  const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
   gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
   function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
   const vs=shader(gl.VERTEX_SHADER,'attribute vec2 pos; attribute vec4 color; varying lowp vec4 tint; void main(){gl_Position=vec4(pos.x/640.0-1.0,1.0-pos.y/400.0,0.0,1.0);tint=color;}');
-  const fs=shader(gl.FRAGMENT_SHADER,'varying lowp vec4 tint; void main(){gl_FragColor=tint;}');
-  const program=gl.createProgram();gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);
-  if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));
-  gl.useProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);
-  const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
-  const pos=gl.getAttribLocation(program,'pos'),color=gl.getAttribLocation(program,'color');
-  gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,24,0);
-  gl.enableVertexAttribArray(color);gl.vertexAttribPointer(color,4,gl.FLOAT,false,24,8);
-  function persist(){
-    try {const bytes=dashboard.document();let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));sessionStorage.setItem(storageKey,btoa(binary));return true;}
-    catch(e){connection.textContent='Changes live in this tab; storage unavailable';console.warn(e);return false;}
-  }
-  function draw(){
-    const vertices=dashboard.vertices();gl.viewport(0,0,1280,800);gl.clearColor(16/255,28/255,41/255,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);
-    if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');
-    const ids=new Set(dashboard.control_ids());
-    for(const [id,button] of controls)if(!ids.has(id)){button.remove();controls.delete(id);}
-    for(const id of ids){
-      let button=controls.get(id);
-      if(!button){
-        button=document.createElement('button');button.type='button';button.dataset.sceneNode=String(id);
-        button.addEventListener('click',()=>{try{if(dashboard.activate(id)){draw();sendChanges();}}catch(e){fatal(e);}});
-        controlsLayer.append(button);controls.set(id,button);
-      }
-      button.setAttribute('aria-label',dashboard.control_label(id));button.disabled=dashboard.control_disabled(id);const role=dashboard.control_role(id);button.setAttribute('role',role);if(role==='switch')button.setAttribute('aria-checked',String(dashboard.control_checked(id)));else button.removeAttribute('aria-checked');
-      const [x,y,w,h]=dashboard.control_bounds(id);
-      Object.assign(button.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});
+  const fs=shader(gl.FRAGMENT_SHADER,'varying lowp vec4 tint; void main(){gl_FragColor=tint;}');const program=gl.createProgram();gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));gl.useProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);
+  const buffers=[gl.createBuffer(),gl.createBuffer(),gl.createBuffer()];const pos=gl.getAttribLocation(program,'pos'),color=gl.getAttribLocation(program,'color');gl.enableVertexAttribArray(pos);gl.enableVertexAttribArray(color);
+  function bind(buffer){gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,24,0);gl.vertexAttribPointer(color,4,gl.FLOAT,false,24,8);}
+  let staticCount=0,hudCount=0,hudRevision=-1,dirty=true;const controls=new Map();
+  function accept(f){
+    if(model?.screen!==f.screen)presenter.suspend();
+    model={...model,...f};
+    if(f.vertices){bind(buffers[0]);gl.bufferData(gl.ARRAY_BUFFER,f.vertices,gl.STATIC_DRAW);staticCount=f.vertices.length/6;
+      const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
+      for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',id:c.id}));controlsLayer.append(b);controls.set(c.id,b);}
+        b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');const [x,y,w,h]=c.bounds;Object.assign(b.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});}
+      canvas.setAttribute('aria-label',f.text);revision.textContent=`VIEW ${f.snapshot.slice(0,12)}`;revision.dataset.snapshot=f.snapshot;revision.dataset.layout=f.layout;
     }
-    canvas.setAttribute('aria-label',dashboard.scene_text());
-    revision.textContent=`VIEW ${dashboard.snapshot_id().slice(0,12)}`;
-    revision.dataset.snapshot=dashboard.snapshot_id();
-    revision.dataset.layout=dashboard.layout_id();
-    revision.dataset.screen=dashboard.screen();
-    syncRoute();
-    persist();
+    revision.dataset.screen=f.screen;dirty=true;
+    const next=route();if(applyingRoute&&(!routeTarget||next===routeTarget)){lastRoute=next;routeTarget=null;history.replaceState({otrios:true,previous:history.state?.previous},'',`#${next}`);applyingRoute=false;}
+    else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
+    pump();worker.postMessage({type:'frame-ack'});
   }
-  let socket=null,retry=250,stopped=false;
-  let activeRelease=location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null;
-  function sendChanges(){
-    if(socket?.readyState!==WebSocket.OPEN)return;
-    const bytes=dashboard.sync_message();if(bytes)socket.send(bytes);
-  }
-  function connect(){
-    dashboard.reset_sync();
-    const url=new URL('/stream',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';
-    socket=new WebSocket(url);socket.binaryType='arraybuffer';
-    socket.onopen=()=>{retry=250;sendChanges();};
-    socket.onmessage=event=>{
-      try {
-        if(typeof event.data==='string'){
-          const message=JSON.parse(event.data);
-          if(message.type==='release'){
-            const release=message.release;
-            if(activeRelease&&release.id!==activeRelease&&release.web_entry){
-              if(!persist()){error.hidden=false;error.textContent='A code update is ready. Automatic reload is paused because this tab cannot save its state.';return;}
-              stopped=true;socket.close();location.replace(release.web_entry+location.hash);return;
-            }
-            activeRelease=release.id;
-            revision.dataset.release=release.id;
-          }
-        }else{
-          const bytes=new Uint8Array(event.data);
-          if(bytes.length>=5&&String.fromCharCode(...bytes.subarray(0,5))==='OTML1'){
-            const view=bytes.subarray(5);
-            if(dashboard.present(view))draw();
-            try{let encoded='';for(let i=0;i<view.length;i+=8192)encoded+=String.fromCharCode(...view.subarray(i,i+8192));if(view.length)sessionStorage.setItem(presentationKey,btoa(encoded));else sessionStorage.removeItem(presentationKey);}catch(e){console.warn('Monitoring view cache unavailable',e);}
-          }else if(dashboard.receive_sync(bytes))draw();
-          sendChanges();
-          dot.classList.add('online');connection.textContent='Live shared space';
-        }
-      }catch(e){console.error(e);socket.close();}
-    };
-    socket.onclose=()=>{
-      dot.classList.remove('online');connection.textContent='Offline · changes saved in this tab';
-      if(!stopped){setTimeout(connect,retry);retry=Math.min(retry*2,5000);}
-    };
-    socket.onerror=()=>socket.close();
-  }
-  const pointers=new Set();
-  function pointer(event,phase){
+  worker.onmessage=event=>{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · changes saved on this device';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}};
+  worker.onerror=e=>fatal(e.message);
+  function legacy(key){try{const s=sessionStorage.getItem(key);return s?Uint8Array.from(atob(s),c=>c.charCodeAt(0)):null;}catch{return null;}}
+  worker.postMessage({type:'start',saved:legacy('otrios-dashboard-v1'),presentation:legacy('otrios-dashboard-presentation-v1'),release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
+  const pointers=new Set(),moves=new Map();
+  function pointer(e,phase){const r=canvas.getBoundingClientRect();return {type:'pointer',args:[phase,e.pointerId,(e.clientX-r.left)*1280/r.width,(e.clientY-r.top)*800/r.height,performance.now()]};}
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
+  canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.set(e.pointerId,pointer(e,1));});
+  function finish(e,phase){if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.get(e.pointerId));moves.delete(e.pointerId);}command(pointer(e,phase));pointers.delete(e.pointerId);}
+  canvas.addEventListener('pointerup',e=>finish(e,2));canvas.addEventListener('pointercancel',e=>finish(e,3));canvas.addEventListener('lostpointercapture',e=>finish(e,3));
+  window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();command({type:'cancel'});});
+  window.addEventListener('keydown',e=>{if(e.isComposing)return;if(e.key==='Escape'){e.preventDefault();command({type:'back'});return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
+  window.addEventListener('paste',e=>{if(model?.editing){e.preventDefault();command({type:'text',text:e.clipboardData.getData('text/plain')});}});
+  let lastMetric=0;
+  function frame(now){
     try{
-      const r=canvas.getBoundingClientRect();
-      const changed=dashboard.pointer(phase,event.pointerId,(event.clientX-r.left)*1280/r.width,(event.clientY-r.top)*800/r.height,performance.now());
-      if(changed){draw();sendChanges();}
-    }catch(e){fatal(e);}
+      if(!busy)for(const [id,m]of moves){command(m);moves.delete(id);break;}
+      const animated=model&&(model.screen==='animation'||model.screen==='3d');
+      if(model&&(dirty||animated)){
+        gl.viewport(0,0,1280,800);gl.clearColor(16/255,28/255,41/255,1);gl.clear(gl.COLOR_BUFFER_BIT);bind(buffers[0]);gl.drawArrays(gl.TRIANGLES,0,staticCount);
+        if(animated){const [playing,speed,count]=model.intent;const v=presenter.vertices(model.screen==='3d',playing!==0,speed,count,now,model.updates);bind(buffers[1]);gl.bufferData(gl.ARRAY_BUFFER,v,gl.DYNAMIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,v.length/6);if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();const h=presenter.hud();bind(buffers[2]);gl.bufferData(gl.ARRAY_BUFFER,h,gl.STATIC_DRAW);hudCount=h.length/6;}bind(buffers[2]);gl.drawArrays(gl.TRIANGLES,0,hudCount);}
+        if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');dirty=false;
+        if(animated&&now-lastMetric>=1000){lastMetric=now;revision.dataset.frameStats=presenter.stats();}
+      }
+    }catch(e){fatal(e);return;}
+    requestAnimationFrame(frame);
   }
-  let ticking=false;
-  function tick(now){try{if(dashboard.tick(now))draw();}catch(e){fatal(e);}if(pointers.size)requestAnimationFrame(tick);else ticking=false;}
-  canvas.addEventListener('pointerdown',event=>{event.preventDefault();canvas.focus({preventScroll:true});pointer(event,0);pointers.add(event.pointerId);canvas.setPointerCapture(event.pointerId);if(!ticking){ticking=true;requestAnimationFrame(tick);}});
-  canvas.addEventListener('pointermove',event=>{if(pointers.has(event.pointerId))pointer(event,1);});
-  canvas.addEventListener('pointerup',event=>{pointer(event,2);pointers.delete(event.pointerId);});
-  canvas.addEventListener('pointercancel',event=>{pointer(event,3);pointers.delete(event.pointerId);});
-  canvas.addEventListener('lostpointercapture',event=>{pointer(event,3);pointers.delete(event.pointerId);});
-  window.addEventListener('blur',()=>{for(const id of pointers){dashboard.pointer(3,id,0,0,performance.now());if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();dashboard.cancel_input();draw();});
-  window.addEventListener('keydown',event=>{
-    if(event.isComposing)return;
-    try{
-      if(event.key==='Escape'){event.preventDefault();if(dashboard.back())draw();return;}
-      if(!dashboard.editing()||event.target.closest?.('#controls button'))return;
-      const shortcut=event.ctrlKey||event.metaKey;
-      const key=shortcut&&event.key.toLowerCase()==='a'?'SelectAll':event.key;
-      if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){event.preventDefault();if(dashboard.key(key,event.shiftKey))draw();}
-      else if(!shortcut&&!event.altKey&&event.key.length===1){event.preventDefault();if(dashboard.type_text(event.key))draw();}
-    }catch(e){fatal(e);}
-  });
-  window.addEventListener('paste',event=>{if(dashboard.editing()){event.preventDefault();if(dashboard.type_text(event.clipboardData.getData('text/plain')))draw();}});
-  canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to resume your saved dashboard.');});
-  draw();connect();
+  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to resume your saved dashboard.');});requestAnimationFrame(frame);
 }catch(e){fatal(e);}

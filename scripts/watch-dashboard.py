@@ -32,7 +32,8 @@ def rebuild(config,wanted):
     env=dict(os.environ,**config['build_env'],CARGO_TARGET_DIR=str(build/'mac-target'))
     run(['cargo','test','-p','otrios-core','--features','dashboard','--locked'],cwd=source,env=env)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
-    if config.get('node'):run([config['node'],'--check','web/dashboard/app.js'],cwd=source)
+    if config.get('node'):
+        for script in ['app.js','state-worker.js']:run([config['node'],'--check','web/dashboard/'+script],cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:

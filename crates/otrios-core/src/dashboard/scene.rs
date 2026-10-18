@@ -68,6 +68,16 @@ impl Scene {
                 Primitive::Circle { .. } if r.width != r.height => {
                     return Err("Circle needs a square frame".into());
                 }
+                Primitive::Triangles { points, .. }
+                    if points.len() > 4096
+                        || points.len() % 3 != 0
+                        || points
+                            .iter()
+                            .flatten()
+                            .any(|v| !v.is_finite() || v.abs() > 8192.) =>
+                {
+                    return Err("Invalid triangles".into());
+                }
                 Primitive::Path { points, width, .. }
                     if points.len() > 256
                         || !width.is_finite()

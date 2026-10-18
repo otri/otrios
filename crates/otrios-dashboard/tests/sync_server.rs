@@ -73,6 +73,7 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
         let dir = root.join(id).join("web");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("index.html"), html).unwrap();
+        std::fs::write(dir.join("state-worker.js"), "// worker asset").unwrap();
         let pointer =
             serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html")});
         let temp = root.join("pending.json");
@@ -139,6 +140,7 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
     assert!(get("/").contains(&format!("/releases/{second}/web/index.html")));
     let old = get(&format!("/releases/{first}/web/index.html"));
     assert!(old.ends_with("first code"));
+    assert!(get(&format!("/releases/{second}/web/state-worker.js")).ends_with("// worker asset"));
     assert!(old.contains("max-age=31536000, immutable"));
     assert!(get("/releases/invalid/web/index.html").starts_with("HTTP/1.0 404"));
     assert_eq!(
@@ -193,6 +195,12 @@ fn real_process_sync_rejects_invalid_updates_and_recovers_persisted_history() {
     let mut a = Replica::new().unwrap();
     let mut b = Replica::new().unwrap();
     a.set_enabled(false).unwrap();
+    a.set_motion(otrios_core::dashboard::motion::Intent {
+        playing: false,
+        speed: 2.,
+        count: 64,
+    })
+    .unwrap();
     b.set_enabled(true).unwrap();
     let (status, bytes) = post(&server, &a.save(), &origin);
     assert_eq!(status, 200);
@@ -216,6 +224,7 @@ fn real_process_sync_rejects_invalid_updates_and_recovers_persisted_history() {
     let (_, bytes) = post(&restarted, &Replica::new().unwrap().save(), &origin);
     let recovered = Replica::load(&bytes).unwrap();
     assert_eq!(recovered.snapshot().id(), a.snapshot().id());
+    assert_eq!(recovered.motion().unwrap(), a.motion().unwrap());
     drop(restarted);
     std::fs::remove_file(state).unwrap();
 }

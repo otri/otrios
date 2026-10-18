@@ -238,6 +238,17 @@ impl Mesh {
                 color,
             } => self.superellipse(r, *radius * factor, *exponent, *color, clip),
             Primitive::Circle { color } => self.circle(r, *color, clip),
+            Primitive::Triangles { points, color } => {
+                for tri in points.chunks_exact(3) {
+                    self.triangle(
+                        std::array::from_fn(|i| {
+                            [r.x + tri[i][0] * factor, r.y + tri[i][1] * factor]
+                        }),
+                        *color,
+                        clip,
+                    );
+                }
+            }
             Primitive::Path {
                 points,
                 width,

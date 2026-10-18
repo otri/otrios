@@ -61,3 +61,8 @@ required-features = ["server"]
 [[bin]]
 name = "dashboard-shell-assets"
 path = "src/shell_seed.rs"
+
+[[bin]]
+name = "dashboard-load"
+path = "src/load.rs"
+required-features = ["native"]
