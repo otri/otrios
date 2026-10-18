@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "otrios-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+
+[dependencies]
+otrios-interfaces = { path = "../otrios-interfaces" }
+
+[lints]
+workspace = true

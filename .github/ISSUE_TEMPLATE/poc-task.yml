@@ -1,0 +1,22 @@
+name: PoC task
+description: A bounded implementation task with observable acceptance criteria
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What behavior should be possible after this change?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Include failure cases and the command that demonstrates completion.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and dependencies
+      description: State exclusions, prerequisites, interface changes, and license boundaries.
