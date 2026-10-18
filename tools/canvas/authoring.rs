@@ -21,10 +21,95 @@ pub struct StateField {
     id: u16,
     name: &'static str,
     default: u16,
+    kind: FieldKind,
+    writable: bool,
+}
+#[derive(Clone, Copy)]
+enum FieldKind {
+    Number,
+    Text,
+    Series,
+    TimedSeries,
 }
 impl StateField {
     pub const fn normalized(id: u16, name: &'static str, default: u16) -> Self {
-        Self { id, name, default }
+        Self {
+            id,
+            name,
+            default,
+            kind: FieldKind::Number,
+            writable: true,
+        }
+    }
+    pub const fn text(id: u16, name: &'static str) -> Self {
+        Self {
+            id,
+            name,
+            default: 0,
+            kind: FieldKind::Text,
+            writable: true,
+        }
+    }
+    pub const fn series(id: u16, name: &'static str) -> Self {
+        Self {
+            id,
+            name,
+            default: 0,
+            kind: FieldKind::Series,
+            writable: false,
+        }
+    }
+    pub const fn timed_series(id: u16, name: &'static str) -> Self {
+        Self {
+            id,
+            name,
+            default: 0,
+            kind: FieldKind::TimedSeries,
+            writable: false,
+        }
+    }
+    pub const fn id(self) -> u16 {
+        self.id
+    }
+    pub fn value(self) -> ValueExpr {
+        ValueExpr::State(self, Projection::Identity)
+    }
+    pub fn format_number(self, prefix: &str, suffix: &str, scale: f32, offset: f32) -> ValueExpr {
+        self.formatted(prefix, suffix, scale, offset, 2)
+    }
+    pub fn format_integer(self, prefix: &str, suffix: &str, scale: f32, offset: f32) -> ValueExpr {
+        self.formatted(prefix, suffix, scale, offset, 0)
+    }
+    fn formatted(
+        self,
+        prefix: &str,
+        suffix: &str,
+        scale: f32,
+        offset: f32,
+        precision: u8,
+    ) -> ValueExpr {
+        ValueExpr::State(
+            self,
+            Projection::NumberText {
+                prefix: prefix.into(),
+                suffix: suffix.into(),
+                scale,
+                offset,
+                precision,
+            },
+        )
+    }
+    pub fn choose_text(self, zero: &str, nonzero: &str) -> ValueExpr {
+        ValueExpr::State(
+            self,
+            Projection::ChooseText {
+                zero: zero.into(),
+                nonzero: nonzero.into(),
+            },
+        )
+    }
+    pub fn window_signal(self, seconds: u32) -> ValueExpr {
+        ValueExpr::State(self, Projection::WindowSignal { seconds })
     }
     pub fn mapped(self, min: f32, max: f32) -> ValueExpr {
         ValueExpr::State(
@@ -50,7 +135,13 @@ pub fn schema(id: &str, fields: &[StateField]) -> StateSchema {
             .map(|f| Field {
                 id: f.id,
                 name: f.name.into(),
-                default: f.default,
+                default: match f.kind {
+                    FieldKind::Number => Value::Number(f32::from(f.default)),
+                    FieldKind::Text => Value::Text(String::new()),
+                    FieldKind::Series => Value::Series(vec![]),
+                    FieldKind::TimedSeries => Value::TimedSeries(vec![]),
+                },
+                writable: f.writable,
             })
             .collect(),
     }
@@ -100,6 +191,7 @@ pub struct Event {
     kind: GestureKind,
     fields: Vec<StateField>,
     behavior: Option<BehaviorEvent>,
+    operation: Operation,
 }
 impl Event {
     pub fn slider(field: StateField) -> Self {
@@ -107,6 +199,7 @@ impl Event {
             kind: GestureKind::Slider,
             fields: vec![field],
             behavior: None,
+            operation: Operation::Set,
         }
     }
     pub fn dial(field: StateField) -> Self {
@@ -114,6 +207,7 @@ impl Event {
             kind: GestureKind::Dial,
             fields: vec![field],
             behavior: None,
+            operation: Operation::Set,
         }
     }
     pub fn pad(x: StateField, y: StateField) -> Self {
@@ -121,6 +215,7 @@ impl Event {
             kind: GestureKind::Pad,
             fields: vec![x, y],
             behavior: None,
+            operation: Operation::Set,
         }
     }
     pub fn press(field: StateField) -> Self {
@@ -128,6 +223,46 @@ impl Event {
             kind: GestureKind::Activate,
             fields: vec![field],
             behavior: None,
+            operation: Operation::Set,
+        }
+    }
+    pub fn toggle(field: StateField) -> Self {
+        let mut e = Self::press(field);
+        e.operation = Operation::Toggle;
+        e
+    }
+    pub fn cycle(field: StateField, values: &[u16]) -> Self {
+        let mut e = Self::press(field);
+        e.operation = Operation::Cycle(values.to_vec());
+        e
+    }
+    pub fn focus(field: StateField) -> Self {
+        let mut e = Self::press(field);
+        e.operation = Operation::Focus;
+        e
+    }
+    pub fn key(key: u16) -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::Key(key),
+        }
+    }
+    pub fn back() -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::Back,
+        }
+    }
+    pub fn stress() -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::Stress,
         }
     }
     pub fn reduced_by(mut self, event: BehaviorEvent) -> Self {
@@ -143,9 +278,20 @@ enum Interaction {
 #[derive(Clone)]
 enum Paint {
     Canvas,
-    Text { value: ValueExpr, font_scale: f32 },
-    Round { radius: ValueExpr, color: [u8; 4] },
+    Text {
+        value: ValueExpr,
+        font_scale: f32,
+    },
+    Round {
+        radius: ValueExpr,
+        color: [u8; 4],
+    },
     Circle([u8; 4]),
+    Series {
+        value: ValueExpr,
+        timed: bool,
+        color: [u8; 4],
+    },
 }
 #[derive(Clone)]
 pub struct Element {
@@ -157,6 +303,7 @@ pub struct Element {
     resize: Option<[AxisResize; 2]>,
     frame_size: [f32; 2],
     design_size: Option<[f32; 2]>,
+    visible: ValueExpr,
 }
 impl Element {
     fn new(paint: Paint, frame: [f32; 4]) -> Self {
@@ -169,7 +316,16 @@ impl Element {
             resize: None,
             frame_size: [frame[2], frame[3]],
             design_size: None,
+            visible: ValueExpr::Literal(yes()),
         }
+    }
+    pub fn visible(mut self, value: ValueExpr) -> Self {
+        self.visible = value;
+        self
+    }
+    pub fn semantic_label(mut self, label: &str) -> Self {
+        self.label = Some(label.into());
+        self
     }
     pub fn frame(mut self, frame: [f32; 4]) -> Self {
         self.frame = frame.map(ValueExpr::from);
@@ -338,6 +494,38 @@ pub fn rounded_rect(color: [u8; 4]) -> Element {
 pub fn circle(color: [u8; 4]) -> Element {
     Element::new(Paint::Circle(color), [0., 0., 100., 100.])
 }
+pub fn series(value: ValueExpr, color: [u8; 4]) -> Element {
+    Element::new(
+        Paint::Series {
+            value,
+            timed: false,
+            color,
+        },
+        [0., 0., 100., 100.],
+    )
+}
+pub fn timed_series(value: ValueExpr, color: [u8; 4]) -> Element {
+    Element::new(
+        Paint::Series {
+            value,
+            timed: true,
+            color,
+        },
+        [0., 0., 100., 100.],
+    )
+}
+pub fn keyboard_visible() -> ValueExpr {
+    ValueExpr::State(
+        StateField::normalized(0, "keyboard", 0),
+        Projection::KeyboardVisible,
+    )
+}
+pub fn keyboard_label(key: u16) -> Element {
+    text(ValueExpr::State(
+        StateField::normalized(0, "keyboard", 0),
+        Projection::KeyboardLabel { key },
+    ))
+}
 pub fn canvas(children: Vec<Element>) -> Element {
     let mut n = Element::new(Paint::Canvas, SCREEN);
     n.children = children;
@@ -367,6 +555,7 @@ pub struct AppUi {
     title: String,
     schema: StateSchema,
     behavior: Option<BehaviorRef>,
+    presentation: Option<Presentation>,
 }
 impl AppUi {
     pub fn new(id: &str, title: &str, schema: StateSchema) -> Self {
@@ -375,7 +564,12 @@ impl AppUi {
             title: title.into(),
             schema,
             behavior: None,
+            presentation: None,
         }
+    }
+    pub fn with_presentation(mut self, presentation: Presentation) -> Self {
+        self.presentation = Some(presentation);
+        self
     }
     pub fn with_behavior(mut self, code: &[u8], writes: &[StateField]) -> Self {
         self.behavior = Some(BehaviorRef {
@@ -417,7 +611,7 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: "otrios-canvas-v1".into(),
+            format: "otrios-canvas-v2".into(),
             ui_ref: format!("app:{}/ui", self.id),
             title: self.title,
             state_schema: self.schema,
@@ -426,6 +620,7 @@ impl AppUi {
             handlers: compiler.handlers,
             navigation: compiler.navigation,
             behavior: self.behavior,
+            presentation: self.presentation,
         }
     }
 }
@@ -478,6 +673,24 @@ impl Compiler {
                 color: tint(color),
             },
             Paint::Circle(color) => Shape::Circle { color: tint(color) },
+            Paint::Series {
+                value,
+                timed: false,
+                color,
+            } => Shape::SeriesPath {
+                series: self.value(value),
+                width: 2.,
+                color: tint(color),
+            },
+            Paint::Series {
+                value,
+                timed: true,
+                color,
+            } => Shape::TimedSeriesPath {
+                series: self.value(value),
+                width: 2.,
+                color: tint(color),
+            },
         };
         let responder = n.interaction.map(|i| match i {
             Interaction::Navigate(d) => {
@@ -510,6 +723,7 @@ impl Compiler {
                     control,
                     event: e.behavior.map(|e| e.0).unwrap_or(0),
                     kind: e.kind,
+                    operation: e.operation,
                     fields: e.fields.iter().map(|f| f.id).collect(),
                 });
                 Responder::AppEvent { control, drag }
@@ -533,7 +747,7 @@ impl Compiler {
                 vertical: r[1],
             }),
             frame,
-            visible: yes(),
+            visible: self.value(n.visible),
             shape,
             responder,
             semantics,

@@ -75,12 +75,14 @@ impl Server {
     }
     fn peer(&self, ui: &str, state: &str) -> Peer {
         let (mut ws, _) =
-            tungstenite::connect(format!("ws://127.0.0.1:{}/stream", self.port)).unwrap();
+            tungstenite::connect(format!("ws://127.0.0.1:{}/apps/stream", self.port)).unwrap();
         if let MaybeTlsStream::Plain(tcp) = ws.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_millis(30)))
                 .unwrap();
         }
         let mut c = Client::default();
+        c.admit_catalog(&std::fs::read(self.root.join("apps/catalog.flex")).unwrap())
+            .unwrap();
         c.open(ui, state);
         let mut p = Peer { ws, c };
         p.settle();
@@ -107,7 +109,7 @@ fn spawn(root: &std::path::Path, port: u16) -> Child {
     Command::new(env!("CARGO_BIN_EXE_canvas-server"))
         .args(["--bind", &format!("127.0.0.1:{port}"), "--apps"])
         .arg(root.join("apps"))
-        .arg("--state")
+        .arg("--app-state")
         .arg(root.join("state"))
         .stdout(Stdio::null())
         .spawn()
@@ -130,10 +132,24 @@ struct Peer {
 }
 impl Peer {
     fn tick(&mut self) -> bool {
+        self.c
+            .tick(
+                1000 + std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+                0,
+            )
+            .unwrap();
         while let Some(b) = self.c.outgoing().unwrap() {
             self.ws.send(Message::Binary(b.into())).unwrap();
         }
         match self.ws.read() {
+            Ok(Message::Text(_)) => true,
+            Ok(Message::Ping(b)) => {
+                self.ws.send(Message::Pong(b)).unwrap();
+                true
+            }
             Ok(Message::Binary(b)) => {
                 self.c.receive(&b).unwrap();
                 true
@@ -206,6 +222,8 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
             .unwrap()
             .success()
     );
+    a.c.admit_catalog(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap())
+        .unwrap();
     a.c.open(
         "app:component-playground/ui",
         "app:component-playground/state",
@@ -225,7 +243,8 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     assert_eq!(c.c.value(1).unwrap(), 123);
     drop(c);
     let probe = Command::new(env!("CARGO_BIN_EXE_canvas-native"))
-        .arg(format!("ws://127.0.0.1:{}/stream", server.port))
+        .arg(format!("ws://127.0.0.1:{}/apps/stream", server.port))
+        .arg(server.root.join("apps/catalog.flex"))
         .output()
         .unwrap();
     assert!(
@@ -236,20 +255,25 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     assert!(String::from_utf8_lossy(&probe.stdout).contains("acknowledged=true"));
     // Unknown pair is denied by server policy before any UI/State data.
     let (mut bad, _) =
-        tungstenite::connect(format!("ws://127.0.0.1:{}/stream", server.port)).unwrap();
+        tungstenite::connect(format!("ws://127.0.0.1:{}/apps/stream", server.port)).unwrap();
     bad.send(Message::Binary(
         encode_client(&ClientMessage::Mount {
             epoch: 1,
             ui_ref: "app:layout-lab/ui".into(),
             state_ref: "app:component-playground/state".into(),
             known_code: vec![],
+            catalog_hash: hash(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap()),
         })
         .unwrap()
         .into(),
     ))
     .unwrap();
-    let Message::Binary(bytes) = bad.read().unwrap() else {
-        panic!("missing error")
+    let bytes = loop {
+        match bad.read().unwrap() {
+            Message::Binary(b) => break b,
+            Message::Text(_) => {}
+            other => panic!("Unexpected {other:?}"),
+        }
     };
     assert!(matches!(
         decode_server(&bytes).unwrap(),
@@ -257,7 +281,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     ));
     // Reject browser origins outside the exact loopback viewer.
     use tungstenite::client::IntoClientRequest;
-    let mut request = format!("ws://127.0.0.1:{}/stream", server.port)
+    let mut request = format!("ws://127.0.0.1:{}/apps/stream", server.port)
         .into_client_request()
         .unwrap();
     request

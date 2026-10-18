@@ -39,7 +39,11 @@ pub fn description(state_schema: StateSchema) -> Ui {
             )
             .frame([680., 490., 460., 220.])
             .width(PANEL_WIDTH.mapped(280., 420.)),
-            text("One component / two sizes / shared state").position([80., 750.]),
+            text("Toggle signal / Data from Last 5min").position([80., 580.]),
+            button("Toggle")
+                .frame([80., 640., 200., 80.])
+                .on_press(Event::toggle(TOGGLE)),
+            timed_series(TOGGLE.window_signal(300), ACCENT).frame([320., 620., 280., 110.]),
         ],
     )
 }

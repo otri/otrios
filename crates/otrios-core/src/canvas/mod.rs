@@ -73,17 +73,58 @@ codec!(encode_client, decode_client, ClientMessage);
 codec!(encode_server, decode_server, ServerMessage);
 codec!(encode_ui, decode_ui, Ui);
 codec!(encode_app, decode_app, App);
+codec!(encode_catalog, decode_catalog, Catalog);
 codec!(encode_schema, decode_schema, StateSchema);
+
+pub const MAX_FIELDS: usize = 64;
+pub const MAX_TEXT_BYTES: usize = 4096;
+pub const MAX_SERIES_POINTS: usize = 2016;
 
 pub fn validate_schema(s: &StateSchema) -> Result<()> {
     let mut ids = std::collections::BTreeSet::new();
-    if s.id.is_empty() || s.id.len() > 96 || s.fields.len() > 5 {
+    let mut names = std::collections::BTreeSet::new();
+    if s.id.is_empty() || s.id.len() > 96 || s.fields.len() > MAX_FIELDS {
         return Err("Invalid Canvas schema".into());
     }
     for f in &s.fields {
-        if !(1..=5).contains(&f.id) || f.default > 1000 || f.name.len() > 64 || !ids.insert(f.id) {
+        if !(1..=MAX_FIELDS as u16).contains(&f.id)
+            || f.name.is_empty()
+            || f.name.len() > 64
+            || !ids.insert(f.id)
+            || !names.insert(&f.name)
+        {
             return Err("Invalid Canvas field".into());
         }
+        validate_value(f, &f.default)?;
+    }
+    Ok(())
+}
+/// A field's default fixes its variant. Numbers are normalized integer registers;
+/// layout projections and series retain their independent floating-point domains.
+pub fn validate_value(field: &Field, value: &otrios_interfaces::layout::Value) -> Result<()> {
+    use otrios_interfaces::layout::Value;
+    if std::mem::discriminant(&field.default) != std::mem::discriminant(value) {
+        return Err("Canvas field type mismatch".into());
+    }
+    let valid = match value {
+        Value::Number(n) => n.is_finite() && n.fract() == 0. && (0. ..=1000.).contains(n),
+        Value::Text(s) => s.len() <= MAX_TEXT_BYTES,
+        Value::Boolean(_) | Value::Color(_) => true,
+        Value::Series(values) => {
+            values.len() <= MAX_SERIES_POINTS && values.iter().all(|n| n.is_finite())
+        }
+        Value::TimedSeries(points) => {
+            points.len() <= MAX_SERIES_POINTS
+                && points.iter().all(|p| {
+                    p[0].is_finite()
+                        && p[1].is_finite()
+                        && (0. ..=1.).contains(&p[0])
+                        && (0. ..=100.).contains(&p[1])
+                })
+        }
+    };
+    if !valid {
+        return Err("Canvas field value exceeds its typed bounds".into());
     }
     Ok(())
 }

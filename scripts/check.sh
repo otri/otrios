@@ -3,8 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features otrios-dashboard/server --locked --offline -- -D warnings
-cargo test --workspace --features otrios-dashboard/server --locked --offline
+cargo clippy --workspace --all-targets --features otrios-dashboard/server,otrios-dashboard/canvas --locked --offline -- -D warnings
+cargo test --workspace --features otrios-dashboard/server,otrios-dashboard/canvas --locked --offline
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$PWD/target/python-cache}"
 python3 scripts/test_dashboard_release.py
 python3 scripts/test_dashboard_direct.py

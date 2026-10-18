@@ -42,7 +42,14 @@ impl Ink {
         }
     }
     pub fn gesture(&mut self, pointer: u32, g: &Gesture, now: u64) {
-        if g.action != Action::Control(2) {
+        self.gesture_with_mapping(pointer, g, now, false);
+    }
+    /// App coordinates are top-left normalized; no legacy control ID or inset.
+    pub fn gesture_normalized(&mut self, pointer: u32, g: &Gesture, now: u64) {
+        self.gesture_with_mapping(pointer, g, now, true);
+    }
+    fn gesture_with_mapping(&mut self, pointer: u32, g: &Gesture, now: u64, normalized: bool) {
+        if !normalized && g.action != Action::Control(2) {
             return;
         }
         self.now = now;
@@ -84,10 +91,18 @@ impl Ink {
                 PointerPhase::Cancel => 3,
             },
             stroke,
-            position: [
-                (((x - 14.) / (w - 28.).max(1.)).clamp(0., 1.) * 1000.).round() as u16,
-                ((1. - (y - 14.) / (h - 28.).max(1.)).clamp(0., 1.) * 1000.).round() as u16,
-            ],
+            position: if normalized {
+                [
+                    (x / w.max(1.)).clamp(0., 1.) * 1000.,
+                    (y / h.max(1.)).clamp(0., 1.) * 1000.,
+                ]
+                .map(|n| n.round() as u16)
+            } else {
+                [
+                    (((x - 14.) / (w - 28.).max(1.)).clamp(0., 1.) * 1000.).round() as u16,
+                    ((1. - (y - 14.) / (h - 28.).max(1.)).clamp(0., 1.) * 1000.).round() as u16,
+                ]
+            },
         };
         self.add(0, point, now as i64);
         // Coalesce only unsent moves. Down/up boundaries remain in order.
@@ -181,6 +196,12 @@ impl Ink {
         changed
     }
     pub fn nodes(&self, extent: [f32; 2], base: u32) -> Vec<SceneNode> {
+        self.nodes_with_mapping(extent, base, false)
+    }
+    pub fn nodes_normalized(&self, extent: [f32; 2], base: u32) -> Vec<SceneNode> {
+        self.nodes_with_mapping(extent, base, true)
+    }
+    fn nodes_with_mapping(&self, extent: [f32; 2], base: u32, normalized: bool) -> Vec<SceneNode> {
         let palette = [
             [94, 218, 231],
             [255, 161, 94],
@@ -193,6 +214,12 @@ impl Ink {
         ];
         let mut out = vec![];
         let position = |p: [u16; 2]| {
+            if normalized {
+                return [
+                    f32::from(p[0]) / 1000. * extent[0],
+                    f32::from(p[1]) / 1000. * extent[1],
+                ];
+            }
             [
                 14. + f32::from(p[0]) / 1000. * (extent[0] - 28.),
                 14. + (1. - f32::from(p[1]) / 1000.) * (extent[1] - 28.),

@@ -7,30 +7,20 @@ rust-version.workspace = true
 publish.workspace = true
 license = "Apache-2.0"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [features]
 canvas = ["otrios-core/canvas", "dep:wat"]
 default = []
-native = ["dep:sdl2", "host-sync"]
 host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls"]
-direct = ["host-sync", "dep:otrios-linux-display"]
-server = ["dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util", "dep:argon2", "dep:getrandom", "dep:sha2"]
+direct = ["host-sync", "otrios-core/canvas", "dep:otrios-linux-display"]
+server = ["otrios-core/canvas", "dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util", "dep:argon2", "dep:getrandom", "dep:sha2"]
 
 [dependencies]
 otrios-core = { path = "../otrios-core", features = ["dashboard"] }
 otrios-interfaces = { path = "../otrios-interfaces" }
 
-wasm-bindgen = "=0.2.129"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.4", features = ["wasm_js"] }
-
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
 wat = { version = "=1.239.0", optional = true }
-sdl2 = { version = "=0.38.0", optional = true }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 tungstenite = { version = "=0.30.0", features = ["rustls-tls-webpki-roots"], optional = true }
 axum = { version = "=0.8.9", features = ["ws"], optional = true }
@@ -47,11 +37,6 @@ path = "src/server.rs"
 required-features = ["server"]
 
 [[bin]]
-name = "dashboard-native"
-path = "src/native.rs"
-required-features = ["native"]
-
-[[bin]]
 name = "dashboard-layout"
 path = "src/layout_tool.rs"
 
@@ -65,19 +50,6 @@ workspace = true
 name = "dashboard-monitoring"
 path = "src/monitoring.rs"
 required-features = ["server"]
-
-[[bin]]
-name = "dashboard-shell-assets"
-path = "src/shell_seed.rs"
-
-[[bin]]
-name = "dashboard-profile"
-path = "src/profile.rs"
-
-[[bin]]
-name = "dashboard-load"
-path = "src/load.rs"
-required-features = ["native"]
 
 [[bin]]
 name = "dashboard-direct"

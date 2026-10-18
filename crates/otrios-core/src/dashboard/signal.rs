@@ -156,34 +156,6 @@ mod tests {
         assert!(fresh.toggle_signal().unwrap().project(2340).is_empty());
     }
     #[test]
-    fn layout_clock_repaints_a_single_event_and_expires_it_without_mutation() {
-        use crate::dashboard::shell::Shell;
-        use otrios_interfaces::scene::{Primitive, SceneNode};
-        fn signal_path(node: &SceneNode) -> Option<&Vec<[f32; 2]>> {
-            if let Primitive::Path { points, .. } = &node.primitive {
-                return Some(points);
-            }
-            node.children.iter().find_map(signal_path)
-        }
-        let mut replica = Replica::new().unwrap();
-        replica.set_enabled_at(false, 1000).unwrap();
-        let before = replica.save();
-        let mut shell = Shell::default();
-        shell.open_name("layout");
-        assert!(shell.set_wall_time(1000));
-        let first = shell.scene(&replica).unwrap();
-        let points = signal_path(first.root()).unwrap();
-        assert_eq!(points.len(), 2); // A visible marker, not a fabricated event.
-        assert!(points[1][0] > points[0][0]);
-        assert!(!shell.set_wall_time(1000));
-        assert!(Arc::ptr_eq(&first, &shell.scene(&replica).unwrap()));
-        assert!(shell.set_wall_time(1300));
-        let expired = shell.scene(&replica).unwrap();
-        assert!(signal_path(expired.root()).unwrap().is_empty());
-        assert_eq!(replica.save(), before);
-        assert_eq!(signal_path(first.root()).unwrap().len(), 2); // pinned view
-    }
-    #[test]
     fn dense_history_has_a_bounded_time_projection() {
         let signal = ToggleSignal((1..=1000).map(|t| (t, 24.)).collect::<Vec<_>>().into());
         let points = signal.project(1000);

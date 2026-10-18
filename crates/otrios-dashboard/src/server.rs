@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Durable development room. Bind loopback and put Tailscale Serve in front of it.
+// App authority. Bind loopback and put the admitted module host in front of it.
 use axum::{
     Router,
     body::Bytes,
@@ -9,10 +9,10 @@ use axum::{
     },
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
-use otrios_core::dashboard::{MAX_DOCUMENT_BYTES, Replica, SyncSession};
+
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -23,6 +23,8 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 
+#[path = "server_apps.rs"]
+mod apps;
 #[path = "server_auth.rs"]
 mod auth;
 #[path = "server_ink.rs"]
@@ -31,8 +33,7 @@ mod ink;
 struct App {
     ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
-    replica: Mutex<Replica>,
-    state_file: Option<PathBuf>,
+    apps: Mutex<apps::Hub>,
     presentation_file: Option<PathBuf>,
     web: PathBuf,
     releases: Option<PathBuf>,
@@ -121,110 +122,13 @@ fn binary(kind: &str, bytes: Vec<u8>, immutable: bool) -> Response {
 async fn announce(app: &App) {
     app.changed.send_modify(|v| *v = v.wrapping_add(1));
 }
-async fn commit(app: &App, candidate: &mut Replica) -> Result<(), String> {
-    if let Some(path) = &app.state_file {
-        persist(path, &candidate.save()).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+async fn retired() -> Response {
+    failure(StatusCode::GONE, "Use the app-scoped /apps/stream protocol")
 }
-async fn sync_http(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes) -> Response {
-    if !origin_ok(&app, &headers) {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    let mut replica = app.replica.lock().await;
-    let mut candidate = replica.clone();
-    let changed = match candidate.merge(&bytes) {
-        Ok(v) => v,
-        Err(_) => return failure(StatusCode::BAD_REQUEST, "Invalid dashboard document"),
-    };
-    if let Err(e) = commit(&app, &mut candidate).await {
-        eprintln!("Persistence: {e}");
-        return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
-    }
-    let bytes = candidate.save();
-    *replica = candidate;
-    drop(replica);
-    if changed {
-        announce(&app).await;
-    }
-    binary("application/octet-stream", bytes, false)
-}
-async fn get_layout(State(app): State<Arc<App>>) -> Response {
-    let replica = app.replica.lock().await;
-    let layout = replica.base_layout().expect("validated base layout");
-    (
-        [
-            (header::ETAG, format!("\"{}\"", layout.hex_id())),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=dashboard.flex".to_string(),
-            ),
-        ],
-        binary("application/octet-stream", layout.bytes().to_vec(), false),
-    )
-        .into_response()
-}
-async fn put_layout(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes) -> Response {
-    if !origin_ok(&app, &headers) {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    if headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok())
-        != Some("application/octet-stream")
-    {
-        return failure(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "Expected binary FlexBuffers",
-        );
-    }
-    let Some(expected) = headers.get(header::IF_MATCH).and_then(|h| h.to_str().ok()) else {
-        return failure(
-            StatusCode::PRECONDITION_REQUIRED,
-            "If-Match layout revision is required",
-        );
-    };
-    let mut replica = app.replica.lock().await;
-    if expected.trim_matches('"')
-        != replica
-            .base_layout()
-            .expect("validated base layout")
-            .hex_id()
-    {
-        return failure(
-            StatusCode::PRECONDITION_FAILED,
-            "Layout changed; fetch and reapply edits",
-        );
-    }
-    let mut candidate = replica.clone();
-    let changed = match candidate.set_layout(&bytes) {
-        Ok(value) => value,
-        Err(e) => return failure(StatusCode::BAD_REQUEST, &format!("Invalid layout: {e}")),
-    };
-    if let Err(e) = commit(&app, &mut candidate).await {
-        eprintln!("Persistence: {e}");
-        return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
-    }
-    let id = candidate
-        .base_layout()
-        .expect("validated base layout")
-        .hex_id();
-    *replica = candidate;
-    drop(replica);
-    if changed {
-        announce(&app).await;
-    }
-    binary("text/plain; charset=utf-8", id.into_bytes(), false)
-}
-// Trusted tailnet editors use the same origin policy as /layout. No query URLs or secrets accepted.
 async fn get_presentation(State(app): State<Arc<App>>) -> Response {
-    let replica = app.replica.lock().await;
     binary(
         "application/octet-stream",
-        replica
-            .presentation()
-            .map(|p| p.bytes().to_vec())
-            .unwrap_or_default(),
+        app.apps.lock().await.view().to_vec(),
         false,
     )
 }
@@ -246,171 +150,36 @@ async fn put_presentation(
             "Expected binary FlexBuffers",
         );
     }
-    let mut replica = app.replica.lock().await;
-    let mut candidate = replica.clone();
-    let changed =
-        match candidate.set_presentation(if bytes.is_empty() { None } else { Some(&bytes) }) {
-            Ok(value) => value,
-            Err(e) => {
-                return failure(
-                    StatusCode::BAD_REQUEST,
-                    &format!("Invalid presentation: {e}"),
-                );
-            }
-        };
+    let mut hub = app.apps.lock().await;
+    // Validate before persisting, then publish this replaceable aggregate atomically.
+    if !bytes.is_empty() {
+        let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes).and_then(|l| {
+            l.resolve_slots(&std::collections::BTreeMap::new())
+                .map(|_| ())
+        });
+        if let Err(e) = checked {
+            return failure(
+                StatusCode::BAD_REQUEST,
+                &format!("Invalid presentation: {e}"),
+            );
+        }
+    }
     if let Some(path) = &app.presentation_file
         && let Err(e) = persist(path, &bytes)
     {
         eprintln!("Presentation persistence: {e}");
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
     }
-    let id = candidate.snapshot().layout().hex_id();
-    *replica = candidate;
-    drop(replica);
+    let changed = hub.set_view(bytes.to_vec()).expect("validated view");
+    drop(hub);
     if changed {
         announce(&app).await;
     }
-    binary("text/plain; charset=utf-8", id.into_bytes(), false)
-}
-async fn stream(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    if !origin_ok(&app, &headers) {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    let permit = match app.peers.clone().try_acquire_owned() {
-        Ok(v) => v,
-        Err(_) => {
-            return failure(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Too many connected screens",
-            );
-        }
-    };
-    upgrade
-        .max_message_size(MAX_DOCUMENT_BYTES)
-        .max_frame_size(MAX_DOCUMENT_BYTES)
-        .on_upgrade(move |socket| async move {
-            let _permit = permit;
-            peer(app, socket, false).await
-        })
-        .into_response()
-}
-async fn peer(app: Arc<App>, socket: WebSocket, public: bool) {
-    let (mut output, mut input) = socket.split();
-    let mut session = SyncSession::default();
-    let mut updates = app.changed.subscribe();
-    let mut release_id = String::new();
-    let mut presentation_id: Option<String> = None;
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
-    let mut rate_window = std::time::Instant::now();
-    let mut received = 0u32;
-    loop {
-        let release = app.release.read().await.clone();
-        let id = release["id"].as_str().unwrap_or("development");
-        if id != release_id {
-            if output
-                .send(Message::Text(
-                    json!({"type":"release","release":release})
-                        .to_string()
-                        .into(),
-                ))
-                .await
-                .is_err()
-            {
-                break;
-            }
-            release_id = id.to_string();
-        }
-        let presentation = if public {
-            None
-        } else {
-            let replica = app.replica.lock().await;
-            let id = replica
-                .presentation()
-                .map(|p| p.hex_id())
-                .unwrap_or_default();
-            if presentation_id.as_ref() != Some(&id) {
-                let mut bytes = b"OTML1".to_vec();
-                if let Some(p) = replica.presentation() {
-                    bytes.extend_from_slice(p.bytes());
-                }
-                presentation_id = Some(id);
-                Some(bytes)
-            } else {
-                None
-            }
-        };
-        if let Some(bytes) = presentation
-            && output.send(Message::Binary(bytes.into())).await.is_err()
-        {
-            break;
-        }
-        let outgoing = app.replica.lock().await.generate_sync(&mut session);
-        match outgoing {
-            Ok(Some(bytes)) => {
-                if output.send(Message::Binary(bytes.into())).await.is_err() {
-                    break;
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                eprintln!("Sync generate: {e}");
-                break;
-            }
-        }
-        tokio::select! {
-            incoming=input.next()=>match incoming{
-                Some(Ok(Message::Binary(bytes)))=>{
-                    if public {
-                        if rate_window.elapsed() >= Duration::from_secs(1) { rate_window = std::time::Instant::now(); received = 0; }
-                        received += 1;
-                        if received > 64 { break; }
-                    }
-                    let mut replica=app.replica.lock().await;let mut candidate=replica.clone();let mut next=session.clone();
-                    let result=if public { candidate.receive_demo_sync(&mut next,&bytes) } else { candidate.receive_sync(&mut next,&bytes) };
-                    let changed=match result{Ok(v)=>v,Err(e)=>{eprintln!("Rejected sync: {e}");break;}};
-                    if changed && let Err(e)=commit(&app,&mut candidate).await{eprintln!("Persistence: {e}");break;}
-                    *replica=candidate;session=next;drop(replica);if changed{announce(&app).await;}
-                },
-                Some(Ok(Message::Ping(data)))=>{if output.send(Message::Pong(data)).await.is_err(){break;}},
-                Some(Ok(Message::Pong(_)))=>{},Some(Ok(Message::Close(_)))|None=>break,
-                Some(Ok(Message::Text(_)))=>break,Some(Err(_))=>break,
-            },
-            result=updates.changed()=>{if result.is_err(){break;}},
-            _=heartbeat.tick()=>{if output.send(Message::Ping(Bytes::new())).await.is_err(){break;}},
-        }
-    }
-    let _ = output.close().await;
-}
-// This listener exposes one shared demo document, never the private feed or
-// administrative routes. Native/trusted clients retain the original listener.
-async fn public_stream(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    if headers
-        .get(header::ORIGIN)
-        .and_then(|h| h.to_str().ok())
-        .is_none_or(|origin| !app.origins.iter().any(|allowed| allowed == origin))
-    {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    let permit = match app.public_peers.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "Too many screens"),
-    };
-    upgrade
-        .max_message_size(MAX_DOCUMENT_BYTES)
-        .max_frame_size(MAX_DOCUMENT_BYTES)
-        .on_upgrade(move |socket| async move {
-            let _permit = permit;
-            peer(app, socket, true).await;
-        })
-        .into_response()
+    binary(
+        "text/plain; charset=utf-8",
+        otrios_core::canvas::hex(&otrios_core::canvas::hash(&bytes)).into_bytes(),
+        false,
+    )
 }
 async fn public_health(State(app): State<Arc<App>>) -> Response {
     binary(
@@ -446,21 +215,11 @@ async fn current_release(State(app): State<Arc<App>>) -> Response {
     )
 }
 async fn health(State(app): State<Arc<App>>) -> Response {
-    let (id, layout, presentation) = {
-        let r = app.replica.lock().await;
-        (
-            r.snapshot().hex_id(),
-            r.snapshot().layout().hex_id(),
-            r.presentation().is_some(),
-        )
-    };
-    binary(
-        "application/json",
-        json!({"status":"ok","snapshot":id,"layout":layout,"presentation":presentation,"release":app.release.read().await["id"]})
-            .to_string()
-            .into_bytes(),
-        false,
-    )
+    let hub = app.apps.lock().await;
+    let (catalogs, roots) = hub.counts();
+    let presentation = !hub.view().is_empty();
+    drop(hub);
+    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
     match path {
@@ -486,15 +245,21 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "font-reference.mjs"
         | "web/font-reference.mjs"
         | "pkg/otrios_dashboard.js"
-        | "web/pkg/otrios_dashboard.js" => Some("text/javascript"),
+        | "web/pkg/otrios_dashboard.js"
+        | "pkg/host.js"
+        | "web/pkg/host.js"
+        | "app-catalog.mjs"
+        | "web/app-catalog.mjs" => Some("text/javascript"),
         "style.css" | "web/style.css" => Some("text/css"),
         "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
         "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
             Some("application/octet-stream")
         }
-        "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
-            Some("application/wasm")
-        }
+        "pkg/otrios_dashboard_bg.wasm"
+        | "web/pkg/otrios_dashboard_bg.wasm"
+        | "pkg/host_bg.wasm"
+        | "web/pkg/host_bg.wasm" => Some("application/wasm"),
+        "apps/catalog.flex" => Some("application/octet-stream"),
         "manifest.json" => Some("application/json"),
         "manifest.sig" | "native/armv7/dashboard-native" | "native/armv7/dashboard-sdl" => {
             Some("application/octet-stream")
@@ -509,13 +274,24 @@ async fn serve_file(path: PathBuf, kind: &str, immutable: bool) -> Response {
     }
 }
 async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<String>) -> Response {
+    if path == "apps/catalog.flex" {
+        return match app.apps.lock().await.catalog_bytes() {
+            Ok(bytes) => binary("application/octet-stream", bytes, false),
+            Err(_) => failure(StatusCode::NOT_FOUND, "Not found"),
+        };
+    }
     match asset_type(&path) {
         Some(kind) if !path.starts_with("native/") => {
             let mut file = app.web.join(&path);
             if !file.exists()
                 && matches!(
                     path.as_str(),
-                    "Slug-LICENSE.txt"
+                    "artifact-cache-worker.js"
+                        | "artifact-cache.mjs"
+                        | "release-gate.mjs"
+                        | "monitoring-session.mjs"
+                        | "app-catalog.mjs"
+                        | "Slug-LICENSE.txt"
                         | "gpu-scene.mjs"
                         | "slug-shaders.mjs"
                         | "font-resource.mjs"
@@ -523,6 +299,9 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                 )
             {
                 file = app.web.join("../shared").join(&path);
+            }
+            if !file.exists() && path == "fonts/Roboto-Regular.otq.zst" {
+                file = app.web.join("../dashboard").join(&path);
             }
             serve_file(file, kind, false).await
         }
@@ -543,62 +322,64 @@ async fn release_asset(
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut bind = "127.0.0.1:8876".to_string();
+    let prototype = env!("CARGO_BIN_NAME") == "canvas-server";
+    let mut bind = if prototype {
+        "127.0.0.1:8894"
+    } else {
+        "127.0.0.1:8876"
+    }
+    .to_string();
     let mut public_bind = None;
     let mut auth_file = None;
     let mut session_seconds = 8 * 60 * 60;
-    let mut state_file = None;
+    let mut state_file: Option<PathBuf> = None;
+    let mut app_state = None;
     let mut releases = None;
-    let mut origins = Vec::new();
-    let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/dashboard");
+    let mut origins = vec![];
+    let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/canvas");
+    let mut source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        match arg.as_str(){
-        "--bind"=>bind=args.next().ok_or("Missing bind")?,"--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
+        match arg.as_str() {
+        "--bind"=>bind=args.next().ok_or("Missing bind")?,
+        "--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
+        "--app-state"=>app_state=Some(PathBuf::from(args.next().ok_or("Missing app state directory")?)),
+        "--apps"=>source=PathBuf::from(args.next().ok_or("Missing app source directory")?),
         "--auth-file"=>auth_file=Some(PathBuf::from(args.next().ok_or("Missing auth file")?)),
         "--session-seconds"=>session_seconds=args.next().ok_or("Missing session duration")?.parse::<u64>()?,
         "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
-        "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release folder")?)),
-        "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web folder")?),"--origin"=>origins.push(args.next().ok_or("Missing origin")?),
-        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--state FILE] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
+        "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release directory")?)),
+        "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
+        "--origin"=>origins.push(args.next().ok_or("Missing origin")?),
+        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
     }
     }
-    let mut replica = if let Some(path) = &state_file {
-        if path.exists() {
-            Replica::load(&fs::read(path)?)?
-        } else {
-            Replica::new()?
-        }
-    } else {
-        Replica::new()?
-    };
-    if let Some(path) = &state_file {
-        persist(path, &replica.save())?;
+    if prototype && !bind.parse::<std::net::SocketAddr>()?.ip().is_loopback() {
+        return Err("Development authority must bind loopback".into());
     }
+    let app_state = app_state.or_else(|| state_file.as_ref().map(|p| p.with_extension("apps")));
     let presentation_file = state_file
         .as_ref()
         .map(|p| p.with_extension("presentation.flex"));
+    let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
+    let mut hub = apps::Hub::new(source, app_state)?;
+    hub.refresh(&releases, &release)?;
     if let Some(path) = &presentation_file
         && path.exists()
     {
-        let bytes = fs::read(path)?;
-        if !bytes.is_empty() {
-            replica.set_presentation(Some(&bytes))?;
-        }
+        hub.set_view(fs::read(path)?)?;
     }
-    let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
-    let (changed, _) = watch::channel(0);
     if !(1..=86400).contains(&session_seconds) {
         return Err("Session duration must be between 1 and 86400 seconds".into());
     }
     let auth = auth_file
-        .map(|path| auth::Sessions::load(&path, Duration::from_secs(session_seconds)).map(Arc::new))
+        .map(|p| auth::Sessions::load(&p, Duration::from_secs(session_seconds)).map(Arc::new))
         .transpose()?;
+    let (changed, _) = watch::channel(0);
     let app = Arc::new(App {
         ink: ink::Room::new()?,
         auth,
-        replica: Mutex::new(replica),
-        state_file,
+        apps: Mutex::new(hub),
         presentation_file,
         web,
         releases,
@@ -614,12 +395,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         loop {
             tick.tick().await;
             observer.ink.expire().await;
-            if let Some(next) = read_release(&observer.releases) {
-                let mut current = observer.release.write().await;
-                if *current != next {
-                    *current = next;
-                    drop(current);
-                    announce(&observer).await;
+            if let Some(next) = read_release(&observer.releases)
+                && *observer.release.read().await != next
+            {
+                let admitted = observer
+                    .apps
+                    .lock()
+                    .await
+                    .refresh(&observer.releases, &next);
+                match admitted {
+                    Ok(()) => {
+                        *observer.release.write().await = next;
+                        announce(&observer).await;
+                    }
+                    Err(e) => eprintln!("Rejected release: {e}"),
                 }
             }
         }
@@ -630,10 +419,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             return Err("Public adapter must bind loopback behind the module host".into());
         }
         let listener = tokio::net::TcpListener::bind(address).await?;
-        let public_routes = Router::new()
+        let routes = Router::new()
             .route("/demo/ink", get(ink::public))
-            .route("/stream", get(public_stream))
-            .route("/demo/stream", get(public_stream))
+            .route("/apps/stream", get(apps::public))
+            .route("/stream", get(retired))
+            .route("/demo/stream", get(retired))
+            .route("/monitoring/stream", get(retired))
             .route(
                 "/auth/session",
                 get(auth::session)
@@ -642,13 +433,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     .layer(DefaultBodyLimit::max(2048)),
             )
             .route("/monitoring/presentation", get(auth::presentation))
-            .route("/monitoring/stream", get(auth::stream))
             .route("/health", get(public_health))
             .fallback(|| async { failure(StatusCode::NOT_FOUND, "Not found") })
             .with_state(app.clone());
         tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, public_routes).await {
-                eprintln!("Public adapter stopped: {error}");
+            if let Err(e) = axum::serve(listener, routes).await {
+                eprintln!("Public adapter stopped: {e}");
                 std::process::exit(1);
             }
         });
@@ -658,15 +448,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/", get(root))
         .route("/health", get(health))
         .route("/release", get(current_release))
-        .route("/sync", post(sync_http))
-        .route(
-            "/layout",
-            get(get_layout)
-                .post(put_layout)
-                .layer(DefaultBodyLimit::max(
-                    otrios_core::dashboard::layout::MAX_LAYOUT_BYTES,
-                )),
-        )
+        .route("/apps/stream", get(apps::trusted))
+        .route("/sync", get(retired).post(retired))
+        .route("/layout", get(retired).post(retired))
+        .route("/stream", get(retired))
+        .route("/demo/stream", get(retired))
+        .route("/monitoring/stream", get(retired))
         .route(
             "/presentation",
             get(get_presentation)
@@ -675,8 +462,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     otrios_core::dashboard::layout::MAX_LAYOUT_BYTES,
                 )),
         )
-        .route("/stream", get(stream))
-        .route("/demo/stream", get(public_stream))
         .route(
             "/auth/session",
             get(auth::session)
@@ -685,13 +470,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .layer(DefaultBodyLimit::max(2048)),
         )
         .route("/monitoring/presentation", get(auth::presentation))
-        .route("/monitoring/stream", get(auth::stream))
         .route("/releases/{id}/{*path}", get(release_asset))
         .route("/{*path}", get(source_asset))
-        .layer(DefaultBodyLimit::max(MAX_DOCUMENT_BYTES))
+        .layer(DefaultBodyLimit::max(otrios_core::canvas::MAX_BYTES))
         .with_state(app);
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    println!("OTriOS durable room: http://{bind}/");
+    println!("OTriOS app authority: http://{bind}/");
     axum::serve(listener, routes).await?;
     Ok(())
 }

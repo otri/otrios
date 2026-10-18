@@ -684,7 +684,7 @@ fn expand(
         let responder = if let Some(r) = n.responder {
             Some(match r {
                 Responder::AppEvent { control, drag } => {
-                    if control > 31 {
+                    if control >= 128 {
                         return Err("Canvas event index exceeds limit".into());
                     }
                     if drag {

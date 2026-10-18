@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Safe state/network owner shared by the SDL and direct Linux presentation hosts.
-use otrios_core::dashboard::{
-    Replica, SyncSession,
-    display::{Calibration, Surface, cached_regions},
-    motion::{Intent, Stress},
-    presentation::{Command, Model, Presentation},
-    render_scene_with_font,
-    shell::Shell,
+//! Safe app/state/network owner for the direct Linux presentation host.
+use otrios_core::{
+    canvas::Client,
+    dashboard::{
+        display::{Calibration, Surface},
+        motion::Intent,
+        render_scene_with_font,
+    },
 };
-use otrios_interfaces::{keyboard::Edit, scene::PointerEvent};
+use otrios_interfaces::scene::PointerEvent;
 use std::{
     fs,
     sync::{
@@ -30,40 +30,51 @@ struct NetworkSend {
 #[derive(Clone)]
 pub(super) struct Frame {
     pub(super) vertices: Arc<Vec<f32>>,
-    #[allow(
-        dead_code,
-        reason = "Experimental glyph stream is consumed by the direct host; SDL recovery has no Slug pass"
-    )]
     pub(super) glyph_vertices: Arc<Vec<f32>>,
-    #[allow(
-        dead_code,
-        reason = "Ordered glyph stream is consumed by the direct host"
-    )]
     pub(super) draws: Arc<Vec<u32>>,
-    #[allow(
-        dead_code,
-        reason = "SDL texture cache; direct host uses retained VBOs"
-    )]
-    pub(super) copy_regions: Arc<Vec<otrios_interfaces::scene::Rect>>,
     pub(super) snapshot: String,
     pub(super) layout: String,
     pub(super) screen: String,
     pub(super) keyboard: bool,
-    #[allow(
-        dead_code,
-        reason = "SDL desktop text input; frame uses the shared virtual keyboard"
-    )]
-    pub(super) editing: bool,
     pub(super) online: bool,
     pub(super) state_confirmed: bool,
     pub(super) pending_commands: usize,
     pub(super) input_busy: bool,
     pub(super) intent: Intent,
-    pub(super) controls: otrios_core::dashboard::controls::State,
     pub(super) updates: u64,
     pub(super) received_updates: u64,
     pub(super) remote_sample: Option<(u64, Instant)>,
     pub(super) serial: u64,
+    pub(super) epoch: u32,
+    pub(super) motion_kind: Option<bool>,
+    pub(super) state_ref: String,
+    pub(super) ui_ref: String,
+}
+impl Frame {
+    fn blank(serial: u64, online: bool) -> Self {
+        Self {
+            vertices: Arc::new(vec![]),
+            glyph_vertices: Arc::new(vec![]),
+            draws: Arc::new(vec![]),
+            snapshot: String::new(),
+            layout: String::new(),
+            screen: "locked".into(),
+            keyboard: false,
+            online,
+            state_confirmed: false,
+            pending_commands: 1,
+            input_busy: false,
+            intent: Intent::default(),
+            updates: 0,
+            received_updates: 0,
+            remote_sample: None,
+            serial,
+            epoch: 0,
+            motion_kind: None,
+            state_ref: String::new(),
+            ui_ref: String::new(),
+        }
+    }
 }
 #[derive(Clone, Copy)]
 pub(super) struct DisplayInfo {
@@ -77,14 +88,9 @@ pub(super) struct DisplayInfo {
     pub(super) stride: u32,
 }
 pub(super) enum Input {
-    Pointer(PointerEvent),
-    #[allow(dead_code, reason = "SDL desktop keyboard input")]
+    CanvasPointer(u32, PointerEvent),
+    CanvasCancel(u32),
     Back,
-    #[allow(dead_code, reason = "SDL desktop keyboard input")]
-    Edit(Edit),
-    #[allow(dead_code, reason = "SDL desktop keyboard input")]
-    First,
-    Cancel,
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
 }
@@ -93,8 +99,8 @@ pub(super) struct Options {
     pub(super) font: Option<Arc<otrios_core::dashboard::font::Font>>,
     pub(super) url: Option<String>,
     pub(super) state: Option<String>,
+    pub(super) apps: Option<String>,
     pub(super) frames: Option<usize>,
-    pub(super) fullscreen: bool,
     pub(super) capture: Option<String>,
     pub(super) capture_after: usize,
     pub(super) seconds: Option<u64>,
@@ -108,8 +114,6 @@ pub(super) struct Options {
     pub(super) stall_ms: u64,
     pub(super) rotation: u16,
     pub(super) touch_matrix: Option<Calibration>,
-    pub(super) completion_probe: bool,
-    pub(super) texture_cache: bool,
     #[cfg(test)]
     pub(super) state_gate: Option<Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>>,
 }
@@ -117,18 +121,11 @@ pub(super) fn options() -> Result<Options, String> {
     let mut o = Options::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--fullscreen" {
-            o.fullscreen = true;
-            continue;
-        }
-        if arg == "--completion-probe" {
-            o.completion_probe = true;
-            continue;
-        }
         let value = args.next().ok_or("Missing argument value")?;
         match arg.as_str() {
             "--sync" => o.url = Some(value),
             "--state" => o.state = Some(value),
+            "--apps" => o.apps = Some(value),
             "--frames" => o.frames = Some(value.parse::<usize>().map_err(|e| e.to_string())?),
             "--rotation" => {
                 o.rotation = value.parse::<u16>().map_err(|e| e.to_string())?;
@@ -160,6 +157,9 @@ pub(super) fn options() -> Result<Options, String> {
             _ => return Err(format!("Unknown option {arg}")),
         }
     }
+    if o.state.is_some() {
+        return Err("Clients keep state in RAM; remove the obsolete --state option".into());
+    }
     if o.objects > 64 || (o.objects > 0 && (o.url.is_some() || o.state.is_some())) {
         return Err(
             "--objects is an isolated benchmark override (1..64, no --sync or --state)".into(),
@@ -168,305 +168,154 @@ pub(super) fn options() -> Result<Options, String> {
     if o.load > 60 || o.stall_ms > 1000 {
         return Err("Load must be <=60 Hz; stall <=1000 ms".into());
     }
-    if o.completion_probe && (o.url.is_some() || o.state.is_some()) {
-        return Err("GPU completion probing requires an isolated benchmark".into());
-    }
     Ok(o)
 }
-struct Work {
-    commands: Vec<Command>,
-    stress: u8,
-    stall_ms: u64,
-    stop: bool,
-}
-struct Published {
-    replica: Arc<Replica>,
-    acknowledged: u64,
-    online: bool,
-    confirmed: bool,
-    updates: u64,
-    received_updates: u64,
-    remote_sample: Option<(u64, Instant)>,
-}
-fn application_worker(
-    o: Options,
-    mut replica: Replica,
-    work: mpsc::Receiver<Work>,
-    publish: mpsc::SyncSender<Published>,
-) -> Result<(), String> {
-    let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
-    let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(2);
-    let stream_ready = Arc::new(AtomicBool::new(false));
-    let worker_ready = stream_ready.clone();
-    let connection = Arc::new(AtomicU64::new(0));
-    let abort = Arc::new(AtomicU64::new(0));
-    let transport_connection = connection.clone();
-    let transport_abort = abort.clone();
-    let network_thread = o.url.clone().map(|url| {
-        let release_file = o.release_file.clone();
-        thread::spawn(move || {
-            network(
-                url,
-                rx,
-                reply_tx,
-                release_file,
-                worker_ready,
-                transport_connection,
-                transport_abort,
-            )
-        })
-    });
-    let started = Instant::now();
-    let mut acknowledged = 0;
-    let mut last_sync = Instant::now() - Duration::from_secs(1);
-    let mut epoch = None;
-    let mut session = SyncSession::default();
-    let mut outgoing = None;
-    let mut stopping = None;
-    let mut published_key = None;
-    let mut pending = None;
-    let mut stress = Stress::new()?;
-    let mut hz = 0;
-    let mut stall_ms = 0;
-    let mut stalled = Instant::now();
-    let mut received_updates = 0;
-    let mut remote_sample = None;
-    loop {
-        if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
-            return Err("Network worker stopped unexpectedly".into());
-        }
-        let mut stop = stopping.is_some();
-        match work.try_recv() {
-            Ok(next) => {
-                #[cfg(test)]
-                if let Some(gate) = &o.state_gate {
-                    let (lock, wake) = &**gate;
-                    let mut paused = lock.lock().map_err(|_| "State gate poisoned")?;
-                    while *paused {
-                        paused = wake.wait(paused).map_err(|_| "State gate poisoned")?;
-                    }
-                }
-                for command in next.commands {
-                    if command.sequence > acknowledged {
-                        command.apply(&mut replica)?;
-                        acknowledged = command.sequence;
-                    }
-                }
-                hz = next.stress;
-                stall_ms = next.stall_ms;
-                stop = next.stop;
-            }
-            Err(mpsc::TryRecvError::Disconnected) => stop = true,
-            Err(mpsc::TryRecvError::Empty) => {}
-        }
-        let mut received = false;
-        // Protocol frames retain order; only published views may coalesce.
-        for _ in 0..2 {
-            let Ok(event) = reply_rx.try_recv() else {
-                break;
-            };
-            match event {
-                NetworkEvent::Connected(id) => {
-                    epoch = Some(id);
-                    session = SyncSession::default();
-                    outgoing = None;
-                    received = true;
-                }
-                NetworkEvent::Packet(id, received_at, bytes)
-                    if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
-                {
-                    let result = if bytes.starts_with(b"OTML1") {
-                        replica.set_presentation(if bytes.len() == 5 {
-                            None
-                        } else {
-                            Some(&bytes[5..])
-                        })
-                    } else {
-                        let result = replica.receive_sync(&mut session, &bytes);
-                        if result.is_ok() {
-                            stream_ready.store(true, Ordering::Release);
-                        }
-                        result
-                    };
-                    match result {
-                        Ok(changed) => {
-                            received_updates += u64::from(changed);
-                            if changed && !bytes.starts_with(b"OTML1") {
-                                remote_sample = Some((received_updates, received_at));
-                            }
-                            received = true;
-                        }
-                        Err(e) => {
-                            eprintln!("Rejected stream: {e}");
-                            abort.store(id, Ordering::Release);
-                            epoch = None;
-                            outgoing = None;
-                            stream_ready.store(false, Ordering::Release);
-                        }
-                    }
-                }
-                NetworkEvent::Packet(..) => {}
-            }
-        }
-        stress.tick(started.elapsed().as_secs_f64() * 1000., hz)?;
-        if stall_ms > 0 && stalled.elapsed() >= Duration::from_secs(1) {
-            thread::sleep(Duration::from_millis(stall_ms));
-            stalled = Instant::now();
-        }
-        if stop && stopping.is_none() {
-            stopping = Some(Instant::now());
-        }
-        let connected = epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id);
-        if !connected {
-            outgoing = None;
-        }
-        if connected {
-            if outgoing.is_none()
-                && (stop || received || last_sync.elapsed() >= Duration::from_millis(100))
-            {
-                if let Some(bytes) = replica.generate_sync(&mut session)? {
-                    outgoing = Some(NetworkSend {
-                        epoch: epoch.expect("connected epoch"),
-                        bytes,
-                    });
-                }
-                last_sync = Instant::now();
-            }
-            if let Some(packet) = outgoing.take() {
-                match tx.try_send(packet) {
-                    Ok(()) => {}
-                    Err(mpsc::TrySendError::Full(packet)) => outgoing = Some(packet),
-                    Err(_) => return Err("Network transport disconnected".into()),
-                }
-            }
-        }
-        let online = connected && stream_ready.load(Ordering::Acquire);
-        let confirmed = network_thread.is_none() || (online && replica.is_confirmed(&session));
-        if stop && (confirmed || stopping.is_some_and(|t| t.elapsed() >= Duration::from_secs(3))) {
-            return Ok(());
-        }
-        let key = (
-            replica.snapshot().id(),
-            acknowledged,
-            online,
-            confirmed,
-            stress.updates,
-            received_updates,
-        );
-        if published_key != Some(key) {
-            pending = Some(Published {
-                replica: Arc::new(replica.clone()),
-                acknowledged,
-                online,
-                confirmed,
-                updates: stress.updates,
-                received_updates,
-                remote_sample,
-            });
-            published_key = Some(key);
-        }
-        if let Some(next) = pending.take() {
-            match publish.try_send(next) {
-                Ok(()) => {}
-                Err(mpsc::TrySendError::Full(next)) => pending = Some(next),
-                Err(_) => return Ok(()),
-            }
-        }
-        thread::sleep(Duration::from_millis(2));
+/// Legacy command-line route aliases are an entry-point convenience only.
+/// Rendering and input dispatch use the admitted app graph, never these strings.
+fn entry_app(name: &str) -> Result<&str, String> {
+    let id = match name {
+        "controls" => "component-playground",
+        "keyboard" => "input-lab",
+        "animation" => "animation-lab",
+        "3d" => "three-d-lab",
+        "layout" => "layout-lab",
+        value => value,
+    };
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+        return Err("Invalid app entry point".into());
     }
+    Ok(id)
+}
+fn app_stream(url: &str) -> String {
+    let url = url
+        .replacen("https://", "wss://", 1)
+        .replacen("http://", "ws://", 1);
+    if url.ends_with("/apps/stream") {
+        return url;
+    }
+    let root = ["/demo/stream", "/stream", "/sync"]
+        .iter()
+        .find_map(|suffix| url.strip_suffix(suffix))
+        .unwrap_or(url.trim_end_matches('/'));
+    format!("{root}/apps/stream")
+}
+fn app_resources(o: &Options) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+    let adjacent = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("No host folder")?
+        .join("app-catalog.flex");
+    let root = o
+        .apps
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("apps"));
+    let catalog = if o.apps.is_none() && adjacent.is_file() {
+        adjacent
+    } else {
+        root.join("catalog.flex")
+    };
+    let bytes =
+        fs::read(&catalog).map_err(|e| format!("App catalog {}: {e}", catalog.display()))?;
+    Ok((root, bytes))
+}
+fn mount_local(client: &mut Client, root: &std::path::Path, app: &str) -> Result<(), String> {
+    let folder = root.join(app).join("package");
+    let ui = fs::read(folder.join("ui.flex")).map_err(|e| e.to_string())?;
+    let description = otrios_core::canvas::decode_ui(&ui)?;
+    let code = if description.behavior.is_some() {
+        fs::read(folder.join("behavior.wasm")).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+    client
+        .mount_local(&ui, &format!("app:{app}/state"), &code, &[])
+        .map(|_| ())
 }
 pub(super) fn state_worker(
     o: Options,
     input: mpsc::Receiver<Input>,
     frames: mpsc::SyncSender<Frame>,
 ) -> Result<(), String> {
-    // --state is accepted for old supervisors, but clients never read or write it.
-    let mut replica = Replica::new()?;
-    if o.objects > 0 {
-        replica.set_motion(Intent {
-            count: o.objects,
-            ..replica.motion()?
-        })?;
+    if o.state.is_some() {
+        return Err("Clients keep state in RAM; remove the obsolete --state option".into());
     }
-    let mut replica = Presentation::new(Arc::new(replica.clone()));
-    let (work_tx, work_rx) = mpsc::sync_channel(1);
-    let (published_tx, published_rx) = mpsc::sync_channel(1);
-    let app_options = o.clone();
-    let initial = replica.published().as_ref().clone();
-    let app_worker =
-        thread::spawn(move || application_worker(app_options, initial, work_rx, published_tx));
-    let mut shell = Shell::default();
-    if let Some(screen) = &o.screen {
-        shell.open_name(screen);
+    let (resources, catalog) = app_resources(&o)?;
+    let mut client = Client::default();
+    client.admit_catalog(&catalog)?;
+    let app = entry_app(o.screen.as_deref().unwrap_or("home"))?;
+    if o.url.is_some() {
+        client.open(&format!("app:{app}/ui"), &format!("app:{app}/state"));
+    } else {
+        mount_local(&mut client, &resources, app)?;
     }
-    shell.set_stress(o.load);
+    let font = match &o.font {
+        Some(font) => font.clone(),
+        None => crate::font_resource::load()?,
+    };
+    let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
+    let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(2);
+    let stream_ready = Arc::new(AtomicBool::new(false));
+    let connection = Arc::new(AtomicU64::new(0));
+    let abort = Arc::new(AtomicU64::new(0));
+    let network_thread = o.url.as_ref().map(|url| {
+        let url = app_stream(url);
+        let ready = stream_ready.clone();
+        let connected = connection.clone();
+        let aborted = abort.clone();
+        let release = o.release_file.clone();
+        thread::spawn(move || network(url, rx, reply_tx, release, ready, connected, aborted))
+    });
+    let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
+    let (ink_publish, ink_rx) = mpsc::sync_channel(64);
+    let ink_active = Arc::new(AtomicBool::new(false));
+    if let Some(url) = o.url.clone() {
+        let active = ink_active.clone();
+        thread::spawn(move || ink_network(url, ink_out, ink_publish, active));
+    }
     let started = Instant::now();
-    let mut sent_work = None;
-    let mut confirmed = false;
-    let mut online = false;
-    let mut dirty = true;
+    let mut epoch = None;
+    let mut outgoing = None;
+    let mut ink_pending = None;
     let mut pending = None;
+    let mut dirty = true;
     let mut serial = 0;
     let mut received_updates = 0;
     let mut remote_sample = None;
     let mut measured_sample = 0;
     let mut sync_to_present_ms = None;
+    let mut last_status = None;
     let mut scene_cache = None;
-    let font = match &o.font {
-        Some(font) => font.clone(),
-        None => crate::font_resource::load()?,
-    };
-    shell.set_font(font.clone());
     let mut mesh_cache = Arc::new(Vec::new());
     let mut glyph_cache = Arc::new(Vec::new());
     let mut draws_cache = Arc::new(Vec::new());
-    let mut copy_cache = Arc::new(Vec::new());
-    let mut updates = 0;
-    let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
-    let (ink_publish, ink_rx) = mpsc::sync_channel(64);
-    let ink_connected = o.url.is_some();
-    if let Some(url) = o.url.clone() {
-        thread::spawn(move || ink_network(url, ink_out, ink_publish));
-    }
-    let mut ink_pending = None;
+    let mut stopping: Option<Instant> = None;
+    let mut next_stall = Instant::now() + Duration::from_secs(1);
+    let mut stress_epoch = None;
     loop {
-        if app_worker.is_finished() {
-            return app_worker
-                .join()
-                .map_err(|_| "Application worker panicked")?
-                .and(Err("Application worker stopped unexpectedly".into()));
+        if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
+            return Err("Network worker stopped unexpectedly".into());
         }
         let now = started.elapsed().as_millis() as u64;
-        let wall_seconds = otrios_core::dashboard::signal::wall_time_seconds();
-        replica.set_wall_time(wall_seconds);
-        dirty |= shell.set_wall_time(wall_seconds);
+        let stall_ms = o.stall_ms.max(client.stress_stall_ms());
+        if stall_ms > 0 && Instant::now() >= next_stall {
+            // Deliberately stall only this app/state owner for the diagnostic;
+            // the direct display's clock and retained buffers remain independent.
+            thread::sleep(Duration::from_millis(stall_ms));
+            next_stall = Instant::now() + Duration::from_secs(1);
+        }
         for event in input.try_iter() {
             match event {
                 Input::Stop => {
-                    work_tx
-                        .send(Work {
-                            commands: replica.pending().to_vec(),
-                            stress: 0,
-                            stall_ms: 0,
-                            stop: true,
-                        })
-                        .map_err(|_| "Application worker disconnected")?;
-                    return app_worker
-                        .join()
-                        .map_err(|_| "Application worker panicked")?;
+                    stopping.get_or_insert_with(Instant::now);
                 }
-                Input::Pointer(e) => dirty |= shell.pointer(&mut replica, e, now)?,
-                Input::Back => dirty |= shell.back(),
-                Input::Edit(e) => dirty |= shell.hardware_edit(&e),
-                Input::Cancel => {
-                    shell.cancel();
-                    dirty = true;
-                }
-                Input::First => {
-                    if let Some(id) = shell.scene(&replica)?.controls().first().map(|c| c.node.id) {
-                        dirty |= shell.activate(&mut replica, id)?;
+                Input::CanvasPointer(generation, e) => dirty |= client.pointer(generation, e)?,
+                Input::CanvasCancel(generation) => {
+                    if generation == client.epoch() {
+                        dirty |= client.cancel()?;
                     }
                 }
+                Input::Back => dirty |= client.back()?,
                 Input::Presented(frame, renderer, display) => {
                     if let Some((id, at)) = frame.remote_sample
                         && id > measured_sample
@@ -475,7 +324,7 @@ pub(super) fn state_worker(
                         sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
                     }
                     if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"controls":{"level":frame.controls.level,"dial":frame.controls.dial,"pad":frame.controls.pad},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                         let tmp = format!("{path}.tmp");
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
@@ -484,36 +333,70 @@ pub(super) fn state_worker(
                 }
             }
         }
-        while let Ok(next) = published_rx.try_recv() {
-            let next: Published = next;
-            dirty |= replica.snapshot().id() != next.replica.snapshot().id()
-                || online != next.online
-                || confirmed != next.confirmed
-                || replica
-                    .pending()
-                    .iter()
-                    .any(|c| c.sequence <= next.acknowledged)
-                || updates != next.updates;
-            replica.acknowledge(next.replica, next.acknowledged)?;
-            online = next.online;
-            confirmed = next.confirmed;
-            updates = next.updates;
-            received_updates = next.received_updates;
-            remote_sample = next.remote_sample;
-        }
-        dirty |= shell.tick(now);
-        for _ in 0..64 {
-            let Ok(bytes) = ink_rx.try_recv() else {
-                break;
-            };
-            match shell.receive_ink(&bytes, now) {
-                Ok(changed) => dirty |= changed,
-                Err(e) => eprintln!("Rejected ink: {e}"),
+        let blocked = false;
+        #[cfg(test)]
+        let blocked = blocked
+            || o.state_gate
+                .as_ref()
+                .map(|gate| {
+                    gate.0
+                        .lock()
+                        .map(|held| *held)
+                        .map_err(|_| "State gate poisoned")
+                })
+                .transpose()?
+                .unwrap_or(false);
+        if !blocked {
+            // Wire messages retain order. Only immutable presentation views coalesce.
+            for _ in 0..2 {
+                let Ok(event) = reply_rx.try_recv() else {
+                    break;
+                };
+                match event {
+                    NetworkEvent::Connected(id) => {
+                        epoch = Some(id);
+                        client.reset_connection();
+                        outgoing = None;
+                    }
+                    NetworkEvent::Packet(id, received_at, bytes)
+                        if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
+                    {
+                        match client.receive(&bytes) {
+                            Ok(changed) => {
+                                stream_ready.store(true, Ordering::Release);
+                                if changed {
+                                    received_updates += 1;
+                                    remote_sample = Some((received_updates, received_at));
+                                    dirty = true;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Rejected app stream: {e}");
+                                abort.store(id, Ordering::Release);
+                                epoch = None;
+                                outgoing = None;
+                                stream_ready.store(false, Ordering::Release);
+                            }
+                        }
+                    }
+                    NetworkEvent::Packet(..) => {}
+                }
             }
         }
-        if ink_connected {
+        ink_active.store(
+            matches!(
+                client.presentation(),
+                Some(otrios_interfaces::canvas::Presentation::TouchPad { .. })
+            ),
+            Ordering::Release,
+        );
+        dirty |= client.tick(now, otrios_core::dashboard::signal::wall_time_seconds())?;
+        for bytes in ink_rx.try_iter().take(64) {
+            dirty |= client.receive_ink(&bytes, now)?;
+        }
+        if o.url.is_some() {
             if ink_pending.is_none() {
-                let bytes = shell.ink_outgoing(now);
+                let bytes = client.ink_outgoing(now);
                 if !bytes.is_empty() {
                     ink_pending = Some((Instant::now(), bytes));
                 }
@@ -524,66 +407,108 @@ pub(super) fn state_worker(
                 ink_pending = Some(bytes);
             }
         }
-        dirty |= shell.flush_controls(&mut replica, now)?;
-        let wanted = (
-            replica.sequence(),
-            shell.stress_hz(),
-            o.stall_ms.max(shell.stress_stall_ms()),
-        );
-        if sent_work != Some(wanted)
-            && work_tx
-                .try_send(Work {
-                    commands: replica.pending().to_vec(),
-                    stress: wanted.1,
-                    stall_ms: wanted.2,
-                    stop: false,
-                })
-                .is_ok()
-        {
-            sent_work = Some(wanted);
+        let connected = epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id);
+        if !connected {
+            outgoing = None;
         }
-        if dirty {
-            let scene = shell.scene(&replica)?;
+        if connected {
+            if outgoing.is_none() {
+                outgoing = client.outgoing()?.map(|bytes| NetworkSend {
+                    epoch: epoch.expect("connected epoch"),
+                    bytes,
+                });
+            }
+            if let Some(packet) = outgoing.take() {
+                match tx.try_send(packet) {
+                    Ok(()) => {}
+                    Err(mpsc::TrySendError::Full(packet)) => outgoing = Some(packet),
+                    Err(_) => return Err("Network transport disconnected".into()),
+                }
+            }
+        } else if o.url.is_none() {
+            // Local benchmark navigation loads admitted package bytes, with no
+            // client persistence and no implicit state-service replacement.
+            if let Some(bytes) = client.outgoing()?
+                && let otrios_interfaces::canvas::ClientMessage::Mount { ui_ref, .. } =
+                    otrios_core::canvas::decode_client(&bytes)?
+            {
+                let id = ui_ref
+                    .strip_prefix("app:")
+                    .and_then(|v| v.strip_suffix("/ui"))
+                    .ok_or("Invalid local app reference")?;
+                mount_local(&mut client, &resources, entry_app(id)?)?;
+                dirty = true;
+            }
+        }
+        let online = o.url.is_none() || (connected && stream_ready.load(Ordering::Acquire));
+        let confirmed = o.url.is_none() || (online && client.confirmed());
+        if !client.ui_ref().is_empty() && stress_epoch != Some(client.epoch()) {
+            if o.load > 0 {
+                dirty |= client.set_stress(o.load)?;
+            }
+            stress_epoch = Some(client.epoch());
+        }
+        dirty |= client.stress_tick(now as f64)?;
+        let updates = client.stress_updates();
+        let status = (online, confirmed, updates, client.input_busy());
+        dirty |= last_status != Some(status);
+        last_status = Some(status);
+        if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
+            return Ok(());
+        }
+        if dirty && client.ui_ref().is_empty() && scene_cache.is_some() {
+            serial += 1;
+            pending = Some(Frame::blank(serial, online));
+            scene_cache = None;
+            dirty = false;
+        }
+        if dirty && !client.ui_ref().is_empty() {
+            let scene = client.scene()?;
             if scene_cache
                 .as_ref()
                 .is_none_or(|old| !Arc::ptr_eq(old, &scene))
             {
                 let mesh = render_scene_with_font(&scene, &font);
-                copy_cache = Arc::new(if o.texture_cache {
-                    cached_regions(
-                        &mesh.vertices,
-                        otrios_interfaces::scene::Rect::new(0., 0., 1280., 800.),
-                        [16, 28, 41, 255],
-                    )
-                } else {
-                    Vec::new()
-                });
                 mesh_cache = Arc::new(mesh.vertices);
                 glyph_cache = Arc::new(mesh.glyph_vertices);
                 draws_cache = Arc::new(mesh.draws);
                 scene_cache = Some(scene);
             }
+            let motion = client.motion_intent()?;
+            let mut intent = motion.map(|v| v.1).unwrap_or_default();
+            if o.objects > 0 {
+                intent.count = o.objects;
+            }
+            let ui_ref = client.ui_ref();
+            let state_ref = client.state_ref();
             serial += 1;
             pending = Some(Frame {
                 vertices: mesh_cache.clone(),
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),
-                copy_regions: copy_cache.clone(),
-                snapshot: replica.snapshot().hex_id(),
-                layout: replica.snapshot().layout().hex_id(),
-                screen: shell.screen_name().into(),
-                keyboard: shell.keyboard_visible(),
-                editing: shell.editing(),
+                // These telemetry fields now identify logical app roots, not old
+                // dashboard snapshot/layout hashes.
+                snapshot: state_ref.clone(),
+                layout: ui_ref.clone(),
+                screen: ui_ref
+                    .strip_prefix("app:")
+                    .and_then(|v| v.strip_suffix("/ui"))
+                    .unwrap_or("app")
+                    .into(),
+                keyboard: client.keyboard_visible(),
                 online,
-                state_confirmed: confirmed && replica.pending().is_empty(),
-                pending_commands: replica.pending().len(),
-                input_busy: shell.input_busy(),
-                intent: replica.motion()?,
-                controls: replica.controls()?,
+                state_confirmed: confirmed,
+                pending_commands: client.pending_count(),
+                input_busy: client.input_busy(),
+                intent,
                 updates,
                 received_updates,
                 remote_sample,
                 serial,
+                epoch: client.epoch(),
+                motion_kind: motion.map(|v| v.0),
+                state_ref,
+                ui_ref,
             });
             dirty = false;
         }
@@ -591,17 +516,7 @@ pub(super) fn state_worker(
             match frames.try_send(frame) {
                 Ok(()) => {}
                 Err(mpsc::TrySendError::Full(frame)) => pending = Some(frame),
-                Err(_) => {
-                    let _ = work_tx.send(Work {
-                        commands: replica.pending().to_vec(),
-                        stress: 0,
-                        stall_ms: 0,
-                        stop: true,
-                    });
-                    return app_worker
-                        .join()
-                        .map_err(|_| "Application worker panicked")?;
-                }
+                Err(_) => return Ok(()),
             }
         }
         thread::sleep(Duration::from_millis(2));
@@ -611,13 +526,14 @@ fn ink_network(
     url: String,
     outgoing: mpsc::Receiver<(Instant, Vec<u8>)>,
     incoming: mpsc::SyncSender<Vec<u8>>,
+    active: Arc<AtomicBool>,
 ) {
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
     let _ = rustls::crypto::ring::default_provider().install_default();
     let mut url = url
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
-    for suffix in ["/stream", "/sync"] {
+    for suffix in ["/apps/stream", "/demo/stream", "/stream", "/sync"] {
         if let Some(root) = url.strip_suffix(suffix) {
             url = format!("{root}/demo/ink");
             break;
@@ -629,7 +545,19 @@ fn ink_network(
             Err(mpsc::TryRecvError::Disconnected) => return,
             Err(_) => None,
         };
-        let mut socket = match tungstenite::connect(url.as_str()) {
+        if !active.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        let mut socket = match tungstenite::client::connect_with_config(
+            url.as_str(),
+            Some(
+                tungstenite::protocol::WebSocketConfig::default()
+                    .max_message_size(Some(otrios_core::canvas::MAX_BYTES))
+                    .max_frame_size(Some(otrios_core::canvas::MAX_BYTES)),
+            ),
+            0,
+        ) {
             Ok((s, _)) => s,
             Err(_) => {
                 thread::sleep(Duration::from_millis(500));
@@ -647,6 +575,9 @@ fn ink_network(
         }
         let mut pending = initial;
         loop {
+            if !active.load(Ordering::Acquire) {
+                break;
+            }
             let packet = pending.take().or_else(|| outgoing.try_recv().ok());
             if let Some((at, bytes)) = packet
                 && at.elapsed() < Duration::from_secs(1)
@@ -705,7 +636,15 @@ fn network(
     loop {
         stream_ready.store(false, Ordering::Release);
         connection.store(0, Ordering::Release);
-        let mut socket = match tungstenite::connect(url.as_str()) {
+        let mut socket = match tungstenite::client::connect_with_config(
+            url.as_str(),
+            Some(
+                tungstenite::protocol::WebSocketConfig::default()
+                    .max_message_size(Some(otrios_core::canvas::MAX_BYTES))
+                    .max_frame_size(Some(otrios_core::canvas::MAX_BYTES)),
+            ),
+            0,
+        ) {
             Ok((s, _)) => s,
             Err(e) => {
                 eprintln!("Sync disconnected: {e}");
@@ -750,7 +689,7 @@ fn network(
             }
             match socket.read() {
                 Ok(Message::Binary(bytes)) => {
-                    if bytes.len() > otrios_core::dashboard::MAX_DOCUMENT_BYTES + 5 {
+                    if bytes.len() > otrios_core::canvas::MAX_BYTES {
                         break;
                     }
                     if reply
@@ -802,52 +741,323 @@ fn network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct Fixture {
+        root: std::path::PathBuf,
+        ui: Vec<u8>,
+        schema: otrios_interfaces::canvas::StateSchema,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+    fn fixture() -> Fixture {
+        use otrios_interfaces::{canvas::*, layout::*};
+        let root = std::env::temp_dir().join(format!(
+            "otrios-canvas-worker-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let schema = StateSchema {
+            id: "worker-motion-v1".into(),
+            fields: [
+                (1, "playing", 1000.),
+                (2, "speed", 200.),
+                (3, "count", 175.),
+                (4, "load", 0.),
+            ]
+            .into_iter()
+            .map(|(id, name, n)| Field {
+                id,
+                name: name.into(),
+                default: Value::Number(n),
+                writable: true,
+            })
+            .collect(),
+        };
+        let number = |n| Expr::Literal(Value::Number(n));
+        let mut entries = Vec::new();
+        let mut motion_ui = Vec::new();
+        for (id, motion) in [("home", false), ("three-d-lab", true)] {
+            let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
+                schema: "otrios-layout-v2".into(),
+                templates: vec![Template {
+                    id: 1,
+                    name: "Root".into(),
+                    parameters: vec![],
+                    root: TemplateNode {
+                        id: 0,
+                        resize: None,
+                        frame: [number(0.), number(0.), Expr::Width, Expr::Height],
+                        visible: Expr::Literal(Value::Boolean(true)),
+                        shape: Shape::Canvas { clip: true },
+                        responder: motion.then_some(Responder::AppEvent {
+                            control: 0,
+                            drag: true,
+                        }),
+                        semantics: None,
+                        children: vec![TemplateNode {
+                            id: 1,
+                            resize: None,
+                            frame: [number(0.), number(0.), Expr::Width, Expr::Height],
+                            visible: Expr::Literal(Value::Boolean(true)),
+                            shape: Shape::Superellipse {
+                                radius: number(0.),
+                                exponent: 4.,
+                                color: Expr::Literal(Value::Color([16, 28, 41, 255])),
+                            },
+                            responder: None,
+                            semantics: None,
+                            children: vec![],
+                        }],
+                    },
+                }],
+                root: Instance {
+                    id: 0,
+                    template: 1,
+                    frame: [0., 0., 1280., 800.],
+                    properties: vec![],
+                    children: vec![],
+                },
+            })
+            .unwrap();
+            let ui = otrios_core::canvas::encode_ui(&Ui {
+                format: "otrios-canvas-v2".into(),
+                ui_ref: format!("app:{id}/ui"),
+                title: id.into(),
+                state_schema: if motion {
+                    schema.clone()
+                } else {
+                    StateSchema {
+                        id: "worker-home-v1".into(),
+                        fields: vec![],
+                    }
+                },
+                layout,
+                selectors: if motion {
+                    vec![Selector {
+                        local: 1,
+                        field: 3,
+                        projection: Projection::Identity,
+                    }]
+                } else {
+                    vec![]
+                },
+                handlers: if motion {
+                    vec![Handler {
+                        control: 0,
+                        event: 0,
+                        kind: GestureKind::Slider,
+                        operation: Operation::Set,
+                        fields: vec![3],
+                    }]
+                } else {
+                    vec![]
+                },
+                navigation: vec![],
+                behavior: None,
+                presentation: motion.then_some(Presentation::Motion {
+                    three_d: true,
+                    playing: 1,
+                    speed: 2,
+                    count: 3,
+                    load: 4,
+                }),
+            })
+            .unwrap();
+            let folder = root.join(id).join("package");
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("ui.flex"), &ui).unwrap();
+            entries.push(CatalogEntry {
+                app: App {
+                    id: id.into(),
+                    title: id.into(),
+                    ui_ref: format!("app:{id}/ui"),
+                    state_ref: format!("app:{id}/state"),
+                    status: "canvas-prototype".into(),
+                    dependencies: vec![],
+                },
+                ui_hash: otrios_core::canvas::hash(&ui),
+                private: false,
+            });
+            if motion {
+                motion_ui = ui;
+            }
+        }
+        fs::write(
+            root.join("catalog.flex"),
+            otrios_core::canvas::encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: entries,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        Fixture {
+            root,
+            ui: motion_ui,
+            schema,
+        }
+    }
     #[test]
-    fn single_owner_receives_remote_edits_and_resyncs_after_transport_reconnect() {
-        use std::net::TcpListener;
+    fn captured_release_stays_local_and_slow_frame_consumer_cannot_block_navigation() {
+        use otrios_interfaces::scene::PointerPhase;
+        let fixture = fixture();
+        let gate = Arc::new((std::sync::Mutex::new(true), std::sync::Condvar::new()));
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("3d".into()),
+            state_gate: Some(gate),
+            ..Options::default()
+        };
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(first.motion_kind, Some(true));
+        assert_eq!(first.intent.count, 12);
+        for (phase, x) in [
+            (PointerPhase::Down, 128.),
+            (PointerPhase::Move, 640.),
+            (PointerPhase::Up, 2000.),
+        ] {
+            tx.send(Input::CanvasPointer(
+                first.epoch,
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position: [x, 400.],
+                },
+            ))
+            .unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let next = fr.recv_timeout(Duration::from_secs(2)).unwrap();
+            if next.intent.count == 64 && !next.input_busy {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Captured release waited for a blocked transport"
+            );
+        }
+        // Leave the single-slot frame mailbox unread while navigation proceeds.
+        tx.send(Input::Back).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let next = fr.recv_timeout(Duration::from_secs(2)).unwrap();
+            if next.ui_ref == "app:home/ui" {
+                assert!(next.serial > first.serial);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "A full frame mailbox blocked navigation"
+            );
+        }
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+        assert!(!fixture.root.join("three-d-lab.automerge").exists());
+    }
+    #[test]
+    fn app_transport_receives_remote_edits_and_resynchronizes_after_reconnect() {
+        use otrios_core::canvas::{Document, Session, decode_client, encode_server};
+        use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
         use tungstenite::Message;
         enum ServerAction {
-            Level(u16),
+            Count(u16),
             Disconnect,
-            Stop,
         }
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fixture = fixture();
+        let schema = fixture.schema.clone();
+        let ui = fixture.ui.clone();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = stop.clone();
         let (actions, commands) = mpsc::channel();
         let server = thread::spawn(move || {
-            let mut authority = Replica::new().unwrap();
-            authority.set_control(0, [705, 0]).unwrap();
+            let mut authority = Document::new(schema, "app:three-d-lab/state").unwrap();
+            authority.set(&[(3, 500)]).unwrap();
             'accept: loop {
-                let (tcp, _) = listener.accept().unwrap();
+                if server_stop.load(Ordering::Acquire) {
+                    return;
+                }
+                let (tcp, _) = match listener.accept() {
+                    Ok(pair) => pair,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(e) => panic!("Server accept: {e}"),
+                };
+                tcp.set_nonblocking(false).unwrap();
                 tcp.set_read_timeout(Some(Duration::from_millis(5)))
                     .unwrap();
-                let mut wire = tungstenite::accept(tcp).unwrap();
-                let mut session = SyncSession::default();
+                let mut socket = tungstenite::accept(tcp).unwrap();
+                let mut sync = Session::default();
+                let mut epoch = None;
                 loop {
-                    for command in commands.try_iter() {
-                        match command {
-                            ServerAction::Level(n) => {
-                                authority.set_control(0, [n, 0]).unwrap();
+                    if server_stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    for action in commands.try_iter() {
+                        match action {
+                            ServerAction::Count(n) => {
+                                authority.set(&[(3, n)]).unwrap();
                             }
                             ServerAction::Disconnect => {
-                                let _ = wire.close(None);
+                                let _ = socket.close(None);
                                 continue 'accept;
                             }
-                            ServerAction::Stop => return,
                         }
                     }
-                    if let Some(bytes) = authority.generate_sync(&mut session).unwrap()
-                        && wire.send(Message::Binary(bytes.into())).is_err()
+                    if let Some(epoch) = epoch
+                        && let Some(bytes) = authority.generate(&mut sync).unwrap()
+                        && socket
+                            .send(Message::Binary(
+                                encode_server(&ServerMessage::Sync { epoch, bytes })
+                                    .unwrap()
+                                    .into(),
+                            ))
+                            .is_err()
                     {
                         continue 'accept;
                     }
-                    match wire.read() {
-                        Ok(Message::Binary(bytes)) => {
-                            authority.receive_sync(&mut session, &bytes).unwrap();
-                        }
+                    match socket.read() {
+                        Ok(Message::Binary(bytes)) => match decode_client(&bytes).unwrap() {
+                            ClientMessage::Mount { epoch: id, .. } => {
+                                epoch = Some(id);
+                                sync = Session::default();
+                                let state = authority.save();
+                                socket
+                                    .send(Message::Binary(
+                                        encode_server(&ServerMessage::Mounted {
+                                            epoch: id,
+                                            ui: ui.clone(),
+                                            ui_hash: otrios_core::canvas::hash(&ui),
+                                            code: vec![],
+                                            state,
+                                        })
+                                        .unwrap()
+                                        .into(),
+                                    ))
+                                    .unwrap();
+                            }
+                            ClientMessage::Sync { bytes, .. } => {
+                                authority.receive(&mut sync, &bytes).unwrap();
+                            }
+                            _ => {}
+                        },
                         Ok(Message::Close(_)) => continue 'accept,
                         Ok(_) => {
-                            let _ = wire.flush();
+                            let _ = socket.flush();
                         }
                         Err(tungstenite::Error::Io(e))
                             if matches!(
@@ -859,188 +1069,69 @@ mod tests {
                 }
             }
         });
-        let (work, receive) = mpsc::sync_channel(1);
-        let (publish, views) = mpsc::sync_channel(1);
-        let worker = thread::spawn(move || {
-            application_worker(
-                Options {
-                    url: Some(format!("ws://{address}/stream")),
-                    ..Options::default()
-                },
-                Replica::new().unwrap(),
-                receive,
-                publish,
-            )
-        });
-        let wait = |level, dial, ack| {
-            let deadline = Instant::now() + Duration::from_secs(5);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("3d".into()),
+            url: Some(format!("ws://{address}/stream")),
+            ..Options::default()
+        };
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let wait = |count| {
+            let deadline = Instant::now() + Duration::from_secs(6);
             loop {
-                let next = views.recv_timeout(Duration::from_secs(2)).unwrap();
-                let c = next.replica.controls().unwrap();
-                if next.online
-                    && next.confirmed
-                    && c.level == level
-                    && c.dial == dial
-                    && next.acknowledged >= ack
-                {
-                    break;
+                let next = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+                if next.state_confirmed && next.online && next.intent.count == count {
+                    return next;
                 }
                 assert!(
                     Instant::now() < deadline,
-                    "Latest confirmed view did not arrive"
+                    "Confirmed remote app view did not arrive"
                 );
             }
         };
-        wait(705, 350, 0);
-        actions.send(ServerAction::Level(804)).unwrap();
-        work.send(Work {
-            commands: vec![Command {
-                sequence: 1,
-                edit: otrios_core::dashboard::presentation::Edit::Control(1, [620, 0]),
-            }],
-            stress: 0,
-            stall_ms: 0,
-            stop: false,
-        })
-        .unwrap();
-        wait(804, 620, 1);
+        wait(33);
+        actions.send(ServerAction::Count(1000)).unwrap();
+        wait(64);
         actions.send(ServerAction::Disconnect).unwrap();
-        actions.send(ServerAction::Level(905)).unwrap();
-        wait(905, 620, 1);
-        actions.send(ServerAction::Stop).unwrap();
+        actions.send(ServerAction::Count(0)).unwrap();
+        wait(1);
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+        stop.store(true, Ordering::Release);
         server.join().unwrap();
-        work.send(Work {
-            commands: vec![],
-            stress: 0,
-            stall_ms: 0,
-            stop: true,
-        })
-        .unwrap();
-        worker.join().unwrap().unwrap();
     }
     #[test]
-    fn client_ignores_disk_and_blocked_application_cannot_block_exact_release() {
-        use otrios_interfaces::scene::{Action, PointerPhase, TouchResponder};
-        let root = std::env::temp_dir().join(format!(
-            "otrios-local-feedback-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir(&root).unwrap();
-        let path = root.join("state.automerge");
-        let original = Replica::new().unwrap();
-        let saved = b"invalid legacy document that must never be loaded";
-        fs::write(&path, saved).unwrap();
-        let mut shell = Shell::default();
-        shell.open_name("controls");
-        let scene = shell.scene(&original).unwrap();
-        let slider = scene
-            .controls()
-            .into_iter()
-            .find(|c| c.node.responder == Some(TouchResponder::Drag(Action::Control(0))))
-            .unwrap();
-        let at = |x| {
-            [
-                slider.origin[0] + x * slider.scale,
-                slider.origin[1] + 40. * slider.scale,
-            ]
-        };
-        let gate = Arc::new((std::sync::Mutex::new(true), std::sync::Condvar::new()));
-        let options = Options {
-            state: Some(path.to_string_lossy().into()),
-            screen: Some("controls".into()),
-            state_gate: Some(gate.clone()),
-            ..Options::default()
-        };
-        let (tx, rx) = mpsc::sync_channel(128);
-        let (ft, fr) = mpsc::sync_channel(1);
-        let worker = thread::spawn(move || state_worker(options, rx, ft));
-        fr.recv_timeout(Duration::from_secs(3)).unwrap();
-        for (phase, position) in [
-            (PointerPhase::Down, at(20.)),
-            (PointerPhase::Move, at(160.)),
-            (PointerPhase::Up, at(999.)),
+    fn legacy_entry_aliases_do_not_drive_rendering_and_urls_keep_app_scope() {
+        assert_eq!(entry_app("3d").unwrap(), "three-d-lab");
+        assert_eq!(entry_app("controls").unwrap(), "component-playground");
+        assert_eq!(entry_app("input-lab").unwrap(), "input-lab");
+        assert!(entry_app("../monitoring").is_err());
+        for input in [
+            "https://host/stream",
+            "https://host/sync",
+            "https://host/demo/stream",
+            "https://host/apps/stream",
+            "https://host/",
         ] {
-            tx.send(Input::Pointer(PointerEvent {
-                id: 9,
-                phase,
-                position,
-            }))
-            .unwrap();
+            assert_eq!(app_stream(input), "wss://host/apps/stream");
         }
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let mut presented = false;
-        while Instant::now() < deadline {
-            if fr
-                .recv_timeout(Duration::from_millis(100))
-                .is_ok_and(|f| f.controls.level == 1000)
-            {
-                presented = true;
-                break;
-            }
-        }
-        let before_ack = fs::read(&path).unwrap();
-        *gate.0.lock().unwrap() = false;
-        gate.1.notify_all();
-        tx.send(Input::Stop).unwrap();
-        worker.join().unwrap().unwrap();
-        assert!(
-            presented,
-            "Local release feedback waited for the application worker"
-        );
-        assert_eq!(
-            before_ack, saved,
-            "The application worker was not actually held"
-        );
-        assert_eq!(
-            fs::read(&path).unwrap(),
-            saved,
-            "Client wrote state to disk"
-        );
-        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
-        fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn slow_presentation_consumer_does_not_block_state_or_unbound_the_mailbox() {
-        let path = std::env::temp_dir().join(format!(
-            "otrios-state-owner-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let options = Options {
-            state: Some(path.to_string_lossy().into()),
-            screen: Some("3d".into()),
-            ..Options::default()
-        };
-        let (tx, rx) = mpsc::sync_channel(128);
-        let (ft, fr) = mpsc::sync_channel(1);
-        let worker = thread::spawn(move || state_worker(options, rx, ft));
-        // The single frame slot stays full while navigation progresses.
-        thread::sleep(Duration::from_millis(100));
-        tx.send(Input::Back).unwrap();
-        thread::sleep(Duration::from_millis(100));
-        let first = fr.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(first.screen, "3d");
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let latest = fr.recv_timeout(Duration::from_secs(1)).unwrap();
-            if latest.screen == "home" {
-                assert!(latest.serial > first.serial);
-                break;
-            }
-            assert!(Instant::now() < deadline);
-        }
-        assert!(!path.exists());
-        tx.send(Input::Stop).unwrap();
-        worker.join().unwrap().unwrap();
-        for suffix in ["", ".screen", ".presentation.flex"] {
-            let _ = fs::remove_file(format!("{}{suffix}", path.display()));
-        }
+    fn obsolete_client_state_path_is_rejected_before_any_read_or_write() {
+        let (tx, rx) = mpsc::channel();
+        let (frames, _) = mpsc::sync_channel(1);
+        let error = state_worker(
+            Options {
+                state: Some("/unreadable/legacy-state".into()),
+                ..Options::default()
+            },
+            rx,
+            frames,
+        )
+        .unwrap_err();
+        assert!(error.contains("RAM"));
+        drop(tx);
     }
 }

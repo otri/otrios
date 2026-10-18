@@ -2,9 +2,16 @@
 //! Linux platform host; the shared state worker remains safe Rust.
 #[cfg(target_os = "linux")]
 mod direct_host;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 mod font_resource;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        dead_code,
+        reason = "macOS runs safe worker tests without a DRM presentation host"
+    )
+)]
 mod native_worker;
 fn main() -> Result<(), String> {
     #[cfg(target_os = "linux")]

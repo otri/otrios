@@ -106,7 +106,9 @@ pub(super) fn run() -> Result<(), String> {
             }
             for e in display.input()? {
                 if e.phase == 3 {
-                    send(Input::Cancel)?;
+                    send(Input::CanvasCancel(
+                        model.as_ref().map(|f| f.epoch).unwrap_or(0),
+                    ))?;
                     continue;
                 }
                 let phase = match e.phase {
@@ -116,17 +118,25 @@ pub(super) fn run() -> Result<(), String> {
                     _ => return Err("Invalid input phase".into()),
                 };
                 if let Some(position) = surface.touch(calibration, [e.x, e.y]) {
-                    send(Input::Pointer(PointerEvent {
-                        id: 1,
-                        phase,
-                        position,
-                    }))?;
+                    send(Input::CanvasPointer(
+                        model.as_ref().map(|f| f.epoch).unwrap_or(0),
+                        PointerEvent {
+                            id: 1,
+                            phase,
+                            position,
+                        },
+                    ))?;
                 } else {
-                    send(Input::Cancel)?;
+                    send(Input::CanvasCancel(
+                        model.as_ref().map(|f| f.epoch).unwrap_or(0),
+                    ))?;
                 }
             }
             while let Ok(next) = frame_rx.try_recv() {
-                if model.as_ref().is_some_and(|old| old.screen != next.screen) {
+                if model
+                    .as_ref()
+                    .is_some_and(|old| old.ui_ref != next.ui_ref || old.state_ref != next.state_ref)
+                {
                     presenter = Presenter::default();
                     hud = u64::MAX;
                 }
@@ -134,7 +144,7 @@ pub(super) fn run() -> Result<(), String> {
                 dirty = true;
             }
             if let Some(f) = &model {
-                let animated = matches!(f.screen.as_str(), "animation" | "3d");
+                let animated = f.motion_kind.is_some();
                 if dirty || animated {
                     let before = Instant::now();
                     if retained
@@ -146,7 +156,8 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     if animated {
                         let now = started.elapsed().as_secs_f64() * 1000.;
-                        let mesh = presenter.geometry(f.screen == "3d", f.intent, now);
+                        let mesh =
+                            presenter.geometry(f.motion_kind.unwrap_or(false), f.intent, now);
                         display.upload(1, &mesh.vertices)?;
                         let bucket = (now / 1000.) as u64;
                         if hud != bucket

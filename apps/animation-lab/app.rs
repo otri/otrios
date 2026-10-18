@@ -1,13 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-// Migration inventory only; not an independent Canvas app yet.
+#[path = "state/schema.rs"]
+mod state;
+mod ui;
+
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "animation-lab",
         "Animation Lab",
-        "legacy-adapter",
+        "canvas-app",
         &[
-            "crates/otrios-core/src/dashboard/motion.rs",
-            "crates/otrios-core/src/dashboard/shell.rs",
+            "ui.rs",
+            "state/schema.rs",
+            "sdk:canvas-authoring-v2",
+            "presentation:motion-v1",
         ],
     )
+}
+
+pub fn ui() -> otrios_interfaces::canvas::Ui {
+    ui::description(state::schema())
 }

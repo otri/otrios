@@ -15,7 +15,6 @@ pub mod motion;
 pub mod presentation;
 mod render;
 pub mod scene;
-pub mod shell;
 pub mod signal;
 mod snapshot;
 pub use render::{Mesh, render, render_scene, render_scene_with_font, render_with_font};

@@ -32,6 +32,7 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     .frame([80., 460., 520., 230.])
     .on_drag("Touch pad", Event::pad(PAD_X, PAD_Y).reduced_by(SET_PAD));
     AppUi::new("component-playground", "Component Playground", state_schema)
+        .with_presentation(otrios_interfaces::canvas::Presentation::TouchPad { control: 2 })
         .with_behavior(code, &state::FIELDS)
         .build(
             "Component Playground",

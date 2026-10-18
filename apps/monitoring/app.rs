@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-// Migration inventory only; not an independent Canvas app yet.
+mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "monitoring",
         "Monitoring",
-        "legacy-adapter",
+        "canvas-app",
         &[
-            "crates/otrios-core/src/dashboard/monitoring.rs",
-            "crates/otrios-core/src/dashboard/shell.rs",
+            "ui.rs",
+            "adapter.rs",
             "capability:monitoring.read",
+            "sdk:canvas-authoring-v2",
         ],
     )
+}
+pub fn ui() -> otrios_interfaces::canvas::Ui {
+    ui::description()
 }

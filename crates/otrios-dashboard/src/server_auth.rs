@@ -58,13 +58,13 @@ impl Sessions {
             verifier: Arc::new(Semaphore::new(1)),
         })
     }
-    async fn valid(&self, key: &str) -> bool {
+    pub(super) async fn valid(&self, key: &str) -> bool {
         let mut sessions = self.sessions.lock().await;
         let now = Instant::now();
         sessions.retain(|_, expires| *expires > now);
         sessions.contains_key(key)
     }
-    async fn key(&self, headers: &HeaderMap) -> Option<String> {
+    pub(super) async fn key(&self, headers: &HeaderMap) -> Option<String> {
         let token = cookie(headers)?;
         let key = digest(&token);
         self.valid(&key).await.then_some(key)
@@ -259,71 +259,4 @@ pub async fn presentation(State(app): State<Arc<App>>, headers: HeaderMap) -> Re
         .headers_mut()
         .insert(header::VARY, header::HeaderValue::from_static("Cookie"));
     result
-}
-pub async fn stream(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    if !origin(&app, &headers) {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    let Some(auth) = &app.auth else {
-        return denied();
-    };
-    let Some(key) = auth.key(&headers).await else {
-        return denied();
-    };
-    let Ok(permit) = app.public_peers.clone().try_acquire_owned() else {
-        return failure(StatusCode::SERVICE_UNAVAILABLE, "Too many screens");
-    };
-    upgrade
-        .max_message_size(1024)
-        .max_frame_size(1024)
-        .on_upgrade(move |socket| async move {
-            let _permit = permit;
-            monitor(app, key, socket).await;
-        })
-        .into_response()
-}
-async fn monitor(app: Arc<App>, key: String, socket: WebSocket) {
-    let (mut output, mut input) = socket.split();
-    let mut changed = app.changed.subscribe();
-    let mut expiry = tokio::time::interval(Duration::from_secs(1));
-    let mut previous = None;
-    loop {
-        if !app.auth.as_ref().unwrap().valid(&key).await {
-            break;
-        }
-        let next = {
-            let replica = app.replica.lock().await;
-            replica
-                .presentation()
-                .map(|p| (p.hex_id(), p.bytes().to_vec()))
-        };
-        let id = next.as_ref().map(|(id, _)| id.clone()).unwrap_or_default();
-        if previous.as_ref() != Some(&id) {
-            let mut bytes = b"OTML1".to_vec();
-            if let Some((_, data)) = next {
-                bytes.extend(data);
-            }
-            if !matches!(
-                tokio::time::timeout(
-                    Duration::from_secs(1),
-                    output.send(Message::Binary(bytes.into()))
-                )
-                .await,
-                Ok(Ok(()))
-            ) {
-                break;
-            }
-            previous = Some(id);
-        }
-        tokio::select! {
-            event=input.next()=>match event{Some(Ok(Message::Ping(bytes)))=>{if output.send(Message::Pong(bytes)).await.is_err(){break;}},Some(Ok(Message::Pong(_)))=>{},_=>break},
-            result=changed.changed()=>{if result.is_err(){break;}},
-            _=expiry.tick()=>{},
-        }
-    }
-    let _ = tokio::time::timeout(Duration::from_secs(1), output.send(Message::Close(None))).await;
 }

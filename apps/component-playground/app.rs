@@ -9,13 +9,13 @@ pub fn manifest() -> App {
     crate::authoring::app(
         "component-playground",
         "Component Playground",
-        "canvas-prototype",
+        "canvas-app",
         &[
             "ui.rs",
             "state/schema.rs",
             "behavior/main.wat",
             "behavior/events.rs",
-            "sdk:canvas-authoring-v1",
+            "sdk:canvas-authoring-v2",
         ],
     )
 }

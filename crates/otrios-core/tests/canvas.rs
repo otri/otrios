@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 #![cfg(feature = "canvas")]
+#[path = "../../../apps/animation-lab/app.rs"]
+mod animation_lab;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
+#[path = "../../../tools/canvas/components.rs"]
+pub mod components;
 #[path = "../../../apps/home/app.rs"]
 mod home;
+#[path = "../../../apps/input-lab/app.rs"]
+mod input_lab;
 #[path = "../../../apps/layout-lab/app.rs"]
 mod layout;
+#[path = "../../../apps/monitoring/app.rs"]
+mod monitoring_app;
 #[path = "../../../apps/component-playground/app.rs"]
 mod playground;
+#[path = "../../../apps/three-d-lab/app.rs"]
+mod three_d_lab;
 use otrios_core::canvas::*;
 use otrios_interfaces::canvas::*;
 fn edit(c: &mut Client, label: &str, a: u16, b: u16) {
@@ -28,25 +38,66 @@ fn code() -> Vec<u8> {
     .unwrap()
 }
 fn activate(c: &mut Client, ui: Ui, state: &str, code: Vec<u8>) {
-    c.open(&ui.ui_ref, state);
-    assert!(matches!(
-        decode_client(&c.outgoing().unwrap().unwrap()).unwrap(),
-        ClientMessage::Mount { .. }
-    ));
+    activate_access(c, ui, state, code, false);
+}
+fn activate_access(c: &mut Client, ui: Ui, state: &str, code: Vec<u8>, private: bool) {
+    activate_snapshot(c, ui, state, code, private, vec![]);
+}
+fn activate_snapshot(
+    c: &mut Client,
+    ui: Ui,
+    state: &str,
+    code: Vec<u8>,
+    private: bool,
+    state_bytes: Vec<u8>,
+) {
     let bytes = encode_ui(&ui).unwrap();
+    let id = ui
+        .ui_ref
+        .strip_prefix("app:")
+        .unwrap()
+        .strip_suffix("/ui")
+        .unwrap();
+    c.admit_catalog(
+        &encode_catalog(&Catalog {
+            format: "otrios-app-catalog-v1".into(),
+            apps: vec![CatalogEntry {
+                app: App {
+                    id: id.into(),
+                    title: ui.title.clone(),
+                    ui_ref: ui.ui_ref.clone(),
+                    state_ref: state.into(),
+                    status: "canvas-app".into(),
+                    dependencies: vec![],
+                },
+                ui_hash: hash(&bytes),
+                private,
+            }],
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    c.open(&ui.ui_ref, state);
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("missingmount")
+    };
     c.receive(
         &encode_server(&ServerMessage::Mounted {
-            epoch: c.epoch(),
+            epoch,
             ui_hash: hash(&bytes),
             ui: bytes,
             code,
+            state: state_bytes,
         })
         .unwrap(),
     )
     .unwrap();
 }
 fn pump(c: &mut Client, authority: &mut Document, session: &mut Session) {
-    for _ in 0..20 {
+    for step in 0..20 {
+        c.tick(1000 + step * 33, 0).unwrap();
         let mut progress = false;
         while let Some(b) = c.outgoing().unwrap() {
             if let ClientMessage::Sync { bytes, .. } = decode_client(&b).unwrap() {
@@ -196,12 +247,17 @@ fn corrupt_candidate_retains_previous_view_without_applying_code() {
     let mut d = Document::new(home::ui().state_schema, "home").unwrap();
     pump(&mut c, &mut d, &mut Session::default());
     c.open("app:layout-lab/ui", "layout");
-    c.outgoing().unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("missing mount")
+    };
     let b = encode_ui(&layout::ui()).unwrap();
     assert!(
         c.receive(
             &encode_server(&ServerMessage::Mounted {
-                epoch: c.epoch(),
+                epoch,
+                state: vec![],
                 ui: b,
                 ui_hash: vec![0; 32],
                 code: vec![]
@@ -556,12 +612,36 @@ fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
         bad.layout = Layout::encode(&b).unwrap();
         let data = encode_ui(&bad).unwrap();
         let mut c = Client::default();
+        c.admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![CatalogEntry {
+                    app: App {
+                        id: "home".into(),
+                        title: "Home".into(),
+                        ui_ref: bad.ui_ref.clone(),
+                        state_ref: "scope".into(),
+                        status: "canvas-app".into(),
+                        dependencies: vec![],
+                    },
+                    ui_hash: hash(&data),
+                    private: false,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
         c.open(&bad.ui_ref, "scope");
-        c.outgoing().unwrap();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("missing mount")
+        };
         assert!(
             c.receive(
                 &encode_server(&ServerMessage::Mounted {
-                    epoch: c.epoch(),
+                    epoch,
+                    state: vec![],
                     ui_hash: hash(&data),
                     ui: data,
                     code: vec![]
@@ -570,5 +650,424 @@ fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
             )
             .is_err()
         );
+    }
+}
+
+fn node(c: &Client, label: &str) -> u32 {
+    c.scene()
+        .unwrap()
+        .controls()
+        .iter()
+        .find(|n| n.node.semantics.as_ref().is_some_and(|s| s.label == label))
+        .unwrap()
+        .node
+        .id
+}
+fn text_contains(n: &otrios_interfaces::scene::SceneNode, value: &str) -> bool {
+    matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value:t,..} if t.contains(value))
+        || n.children.iter().any(|n| text_contains(n, value))
+}
+#[test]
+fn animation_and_three_d_own_independent_intent_and_bounded_private_stress_history() {
+    use std::sync::Arc;
+    let mut animation = Client::default();
+    let mut three_d = Client::default();
+    let aui = animation_lab::ui();
+    let tui = three_d_lab::ui();
+    activate(&mut animation, aui.clone(), "animation:state", vec![]);
+    activate(&mut three_d, tui.clone(), "three-d:state", vec![]);
+    let mut authority = Document::new(aui.state_schema, "animation:state").unwrap();
+    let mut session = Session::default();
+    pump(&mut animation, &mut authority, &mut session);
+    animation
+        .activate(animation.epoch(), node(&animation, "Play / Pause"))
+        .unwrap();
+    edit(&mut animation, "Animation speed", 800, 0);
+    pump(&mut animation, &mut authority, &mut session);
+    assert!(!animation.motion_intent().unwrap().unwrap().1.playing);
+    assert!(three_d.motion_intent().unwrap().unwrap().1.playing);
+    assert_eq!(three_d.value(2).unwrap(), 200);
+    let before = animation.scene().unwrap();
+    let authority_before = authority.save();
+    animation.set_stress(30).unwrap();
+    for step in 0..600 {
+        animation.stress_tick(f64::from(step) * 40.).unwrap();
+    }
+    assert_eq!(animation.stress_updates(), 600);
+    assert_eq!(
+        animation.value(4).unwrap(),
+        0,
+        "Diagnostic writes must never enter the app document"
+    );
+    assert!(animation.confirmed());
+    assert!(Arc::ptr_eq(&before, &animation.scene().unwrap()));
+    assert_eq!(authority_before, authority.save());
+    assert_ne!(
+        animation_lab::manifest().state_ref,
+        three_d_lab::manifest().state_ref
+    );
+}
+#[test]
+fn input_shared_text_keeps_focus_and_caret_local_and_keyboard_repeats_cancel() {
+    use otrios_interfaces::{
+        keyboard::Edit,
+        layout::Value,
+        scene::{PointerEvent, PointerPhase},
+    };
+    let ui = input_lab::ui();
+    let mut a = Client::default();
+    let mut b = Client::default();
+    activate(&mut a, ui.clone(), "input:shared", vec![]);
+    activate(&mut b, ui.clone(), "input:shared", vec![]);
+    let mut authority = Document::new(ui.state_schema, "input:shared").unwrap();
+    let mut sa = Session::default();
+    let mut sb = Session::default();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    a.activate(a.epoch(), node(&a, "First text field")).unwrap();
+    a.hardware_edit(&Edit::Commit("abcdef".into())).unwrap();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    assert_eq!(b.typed_value(1).unwrap(), Value::Text("abcdef".into()));
+    assert!(!b.editing());
+    assert!(!b.keyboard_visible());
+    // Holding Backspace edits on down and repeat, never again on release.
+    a.tick(0, 0).unwrap();
+    let keyboard_scene = a.scene().unwrap();
+    let backspace = keyboard_scene
+        .controls()
+        .into_iter()
+        .find(|n| n.node.semantics.as_ref().is_some_and(|s| s.label == "BKSP"))
+        .unwrap();
+    let position = [backspace.origin[0] + 20., backspace.origin[1] + 20.];
+    a.pointer(
+        a.epoch(),
+        PointerEvent {
+            id: 7,
+            phase: PointerPhase::Down,
+            position,
+        },
+    )
+    .unwrap();
+    assert_eq!(a.typed_value(1).unwrap(), Value::Text("abcde".into()));
+    assert!(a.input_busy());
+    a.tick(450, 0).unwrap();
+    assert_eq!(a.typed_value(1).unwrap(), Value::Text("abcd".into()));
+    // A focus change cancels the held key and its repeat timer.
+    a.activate(a.epoch(), node(&a, "Second text field"))
+        .unwrap();
+    a.tick(1000, 0).unwrap();
+    assert!(!a.input_busy());
+    assert_eq!(a.typed_value(1).unwrap(), Value::Text("abcd".into()));
+    a.hardware_edit(&Edit::Commit("xyz".into())).unwrap();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    assert_eq!(b.typed_value(2).unwrap(), Value::Text("xyz".into()));
+    // Remote replacement cannot leave the local caret inside a grapheme cluster.
+    a.activate(a.epoch(), node(&a, "First text field")).unwrap();
+    for _ in 0..4 {
+        a.hardware_edit(&Edit::Left { select: false }).unwrap();
+    }
+    a.hardware_edit(&Edit::Right { select: false }).unwrap();
+    authority
+        .set_typed(&[(1, Value::Text("a\u{301}z".into()))])
+        .unwrap();
+    pump(&mut a, &mut authority, &mut sa);
+    assert!(text_contains(a.scene().unwrap().root(), "|a\u{301}z"));
+    a.back().unwrap();
+    assert!(!a.keyboard_visible());
+    a.tick(3000, 0).unwrap();
+    assert_eq!(a.typed_value(2).unwrap(), Value::Text("xyz".into()));
+    assert_eq!(input_lab::manifest().id, "input-lab");
+}
+#[test]
+fn access_revocation_drops_private_view_and_back_cancels_rejected_sign_in() {
+    let ui = home::ui();
+    let mut c = Client::default();
+    activate_access(&mut c, ui, "private", vec![], true);
+    let old = c.epoch();
+    assert!(c.private());
+    assert!(
+        c.receive(&encode_server(&ServerMessage::AccessRequired { epoch: old }).unwrap())
+            .unwrap()
+    );
+    assert!(c.ui_ref().is_empty());
+    assert!(c.scene().is_err());
+    assert!(c.auth_required());
+    assert!(!c.confirmed());
+    assert_eq!(c.pending_state_ref(), "private");
+    c.back().unwrap();
+    assert!(!c.auth_required());
+    let ClientMessage::Mount {
+        ui_ref, state_ref, ..
+    } = decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Home mount")
+    };
+    assert_eq!(
+        (ui_ref.as_str(), state_ref.as_str()),
+        ("app:home/ui", "app:home/state")
+    );
+}
+
+#[test]
+fn all_seven_app_packages_qualify_default_and_scalar_extremes() {
+    use otrios_interfaces::layout::Value;
+    let code = code();
+    for (ui, code, private) in [
+        (home::ui(), vec![], false),
+        (playground::ui(&code), code, false),
+        (layout::ui(), vec![], false),
+        (input_lab::ui(), vec![], false),
+        (animation_lab::ui(), vec![], false),
+        (three_d_lab::ui(), vec![], false),
+        (monitoring_app::ui(), vec![], true),
+    ] {
+        for high in [false, true] {
+            let mut authority = Document::new(ui.state_schema.clone(), "qualify:state").unwrap();
+            let commands = ui
+                .state_schema
+                .fields
+                .iter()
+                .filter(|f| f.writable)
+                .filter_map(|f| match f.default {
+                    Value::Number(_) => Some((f.id, Value::Number(if high { 1000. } else { 0. }))),
+                    Value::Text(_) => Some((
+                        f.id,
+                        Value::Text(if high {
+                            "é\u{301} 👩‍🚀".into()
+                        } else {
+                            String::new()
+                        }),
+                    )),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            authority.set_typed(&commands).unwrap();
+            let mut client = Client::default();
+            activate_snapshot(
+                &mut client,
+                ui.clone(),
+                "qualify:state",
+                code.clone(),
+                private,
+                authority.save(),
+            );
+            client.scene().unwrap();
+            if let Some((_, intent)) = client.motion_intent().unwrap() {
+                intent.validate().unwrap();
+            }
+            assert_eq!(client.private(), private);
+        }
+    }
+    assert!(
+        monitoring_app::manifest()
+            .dependencies
+            .iter()
+            .any(|d| d == "capability:monitoring.read")
+    );
+}
+
+#[test]
+fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coordinates() {
+    use otrios_interfaces::{
+        ink,
+        scene::{PointerEvent, PointerPhase, Primitive},
+    };
+    let code = code();
+    let ui = playground::ui(&code);
+    let mut client = Client::default();
+    activate(&mut client, ui.clone(), "pad:state", code);
+    let mut authority = Document::new(ui.state_schema, "pad:state").unwrap();
+    let mut session = Session::default();
+    pump(&mut client, &mut authority, &mut session);
+    client.tick(0, 0).unwrap();
+    for (phase, x, y) in [
+        (PointerPhase::Down, 0.2, 0.25),
+        (PointerPhase::Move, 0.8, 0.75),
+    ] {
+        client
+            .pointer(
+                client.epoch(),
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position: [80. + x * 520., 460. + y * 230.],
+                },
+            )
+            .unwrap();
+    }
+    client.tick(1000, 0).unwrap();
+    assert_eq!(
+        (client.value(3).unwrap(), client.value(4).unwrap()),
+        (800, 750)
+    );
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        (authority.value(3).unwrap(), authority.value(4).unwrap()),
+        (500, 500)
+    );
+    let points = client.ink_outgoing(2000);
+    let last = ink::Point::decode(&points[points.len() - ink::CLIENT_BYTES..]).unwrap();
+    assert_eq!(last.position, [800, 750]);
+    let scene = client.scene().unwrap();
+    fn contains_point(n: &otrios_interfaces::scene::SceneNode) -> bool {
+        matches!(&n.primitive,Primitive::Path{points,..} if points.last().is_some_and(|p|(p[0]-416.).abs()<0.1&&(p[1]-172.5).abs()<0.1))
+            || n.children.iter().any(contains_point)
+    }
+    assert!(contains_point(scene.root()));
+    client
+        .pointer(
+            client.epoch(),
+            PointerEvent {
+                id: 9,
+                phase: PointerPhase::Up,
+                position: [80. + 0.9 * 520., 460. + 0.6 * 230.],
+            },
+        )
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        (authority.value(3).unwrap(), authority.value(4).unwrap()),
+        (900, 600)
+    );
+}
+
+#[test]
+fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation() {
+    let code = code();
+    let ui = playground::ui(&code);
+    let mut client = Client::default();
+    activate(&mut client, ui.clone(), "reconnect", code.clone());
+    let mut authority = Document::new(ui.state_schema, "reconnect").unwrap();
+    let mut session = Session::default();
+    pump(&mut client, &mut authority, &mut session);
+    edit(&mut client, "Linear slider", 870, 0);
+    assert_eq!(client.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 420);
+    client.reset_connection();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Mount")
+    };
+    assert!(!client.confirmed());
+    let bytes = encode_ui(&playground::ui(&code)).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code,
+                state: authority.save(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        client.value(1).unwrap(),
+        870,
+        "Unsent preview vanished during reconnect activation"
+    );
+    pump(&mut client, &mut authority, &mut Session::default());
+    assert_eq!(authority.value(1).unwrap(), 870);
+}
+
+#[test]
+fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
+    use otrios_interfaces::{keyboard::Edit, layout::Value};
+    let ui = input_lab::ui();
+    let mut client = Client::default();
+    activate(&mut client, ui.clone(), "editor:reload", vec![]);
+    let mut authority = Document::new(ui.state_schema.clone(), "editor:reload").unwrap();
+    let mut session = Session::default();
+    pump(&mut client, &mut authority, &mut session);
+    client
+        .activate(client.epoch(), node(&client, "First text field"))
+        .unwrap();
+    client
+        .hardware_edit(&Edit::Commit("before".into()))
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    let scene = client.scene().unwrap();
+    let active_epoch = client.epoch();
+    client.open(&ui.ui_ref, "editor:reload");
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Mount")
+    };
+    assert!(!client.hardware_edit(&Edit::Commit("lost".into())).unwrap());
+    assert_eq!(client.typed_value(1).unwrap(), Value::Text("before".into()));
+    assert!(
+        client
+            .receive(
+                &encode_server(&ServerMessage::Mounted {
+                    epoch,
+                    ui: encode_ui(&ui).unwrap(),
+                    ui_hash: vec![0; 32],
+                    code: vec![],
+                    state: authority.save()
+                })
+                .unwrap()
+            )
+            .is_err()
+    );
+    assert_eq!(client.epoch(), active_epoch);
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    assert!(client.keyboard_visible());
+    assert!(
+        client
+            .hardware_edit(&Edit::Commit(" after".into()))
+            .unwrap()
+    );
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        authority.typed_value(1).unwrap(),
+        Value::Text("before after".into())
+    );
+}
+#[test]
+fn admission_rejects_gesture_arity_and_numeric_operations_on_text() {
+    for case in 0..3 {
+        let mut ui = input_lab::ui();
+        let h = &mut ui.handlers[0];
+        match case {
+            0 => {
+                h.kind = GestureKind::Slider;
+                h.operation = Operation::Back;
+                h.fields.clear();
+            }
+            1 => {
+                h.kind = GestureKind::Activate;
+                h.operation = Operation::Set;
+            }
+            _ => {
+                h.kind = GestureKind::Pad;
+                h.operation = Operation::Set;
+            }
+        }
+        let bytes = encode_ui(&ui).unwrap();
+        let mut client = Client::default();
+        client
+            .admit_catalog(
+                &encode_catalog(&Catalog {
+                    format: "otrios-app-catalog-v1".into(),
+                    apps: vec![CatalogEntry {
+                        app: input_lab::manifest(),
+                        ui_hash: hash(&bytes),
+                        private: false,
+                    }],
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            client
+                .mount_local(&bytes, "app:input-lab/state", &[], &[])
+                .is_err()
+        );
+        assert!(client.scene().is_err());
     }
 }

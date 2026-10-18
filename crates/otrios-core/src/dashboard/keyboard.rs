@@ -258,6 +258,20 @@ pub struct TextBuffer {
     anchor: usize,
 }
 impl TextBuffer {
+    /// Replace a remote/shared value while preserving a valid local caret.
+    pub fn replace(&mut self, text: &str) {
+        self.text = text.into();
+        let limit = self.cursor.min(self.text.len());
+        self.cursor = self
+            .text
+            .grapheme_indices(true)
+            .map(|(index, _)| index)
+            .chain(std::iter::once(self.text.len()))
+            .take_while(|index| *index <= limit)
+            .last()
+            .unwrap_or(0);
+        self.anchor = self.cursor;
+    }
     pub fn text(&self) -> &str {
         &self.text
     }

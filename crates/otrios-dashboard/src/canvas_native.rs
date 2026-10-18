@@ -12,7 +12,7 @@ fn main() -> Result<()> {
     let endpoint = args
         .get(1)
         .map(String::as_str)
-        .unwrap_or("ws://127.0.0.1:8894/stream");
+        .unwrap_or("ws://127.0.0.1:8894/apps/stream");
     if !endpoint.starts_with("ws://127.0.0.1:") {
         return Err("Prototype native probe requires a loopback endpoint (SSH forward for remote authority)".into());
     }
@@ -22,6 +22,11 @@ fn main() -> Result<()> {
             .map_err(|e| e.to_string())?;
     }
     let mut client = Client::default();
+    let catalog = args
+        .get(2)
+        .map(String::as_str)
+        .unwrap_or("apps/catalog.flex");
+    client.admit_catalog(&std::fs::read(catalog).map_err(|e| e.to_string())?)?;
     client.open(
         "app:component-playground/ui",
         "app:component-playground/state",
@@ -29,6 +34,7 @@ fn main() -> Result<()> {
     let start = Instant::now();
     let mut edited = false;
     loop {
+        client.tick(start.elapsed().as_millis() as u64, 0)?;
         while let Some(b) = client.outgoing()? {
             ws.send(tungstenite::Message::Binary(b.into()))
                 .map_err(|e| e.to_string())?;

@@ -7,12 +7,12 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "layout-lab",
         "Layout Lab",
-        "canvas-prototype",
+        "canvas-app",
         &[
             "ui.rs",
             "components.rs",
             "state/schema.rs",
-            "sdk:canvas-authoring-v1",
+            "sdk:canvas-authoring-v2",
         ],
     )
 }

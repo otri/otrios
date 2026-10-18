@@ -1,110 +1,93 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Apps
 
-Each Home Screen entry is becoming an app package. An app owns its UI description,
-state schema, behavior and local assets. The launcher opens references; it does
-not import each app's state, UI implementation or executable instance.
+Each Home entry is an independent app package. It owns its primitive UI,
+state schema, behavior and local dependencies. Home passes UI/State references;
+it does not import another app's document or executable instance.
 
 ```text
 apps/
-  home/                         # Launcher: UI and navigation references
-    app.rs                      # Typed build-time manifest
-    ui.rs
-  component-playground/
-    app.rs                      # Identity, entry refs, dependencies, migration status
-    ui.rs                       # Canvas / Text / Superellipse / Circle + selectors
-    state/schema.rs             # Stable field IDs and defaults
-    behavior/main.wat           # Pure event reducer; packaged as behavior.wasm
-    package/                    # Generated, ignored; never hand edit
-      app.flex
-      ui.flex
-      behavior.wasm
-  layout-lab/
-    app.rs
-    ui.rs
-    state/schema.rs             # Its own document, unrelated to Playground history
-    package/                    # No behavior binary needed for standard setters
-  input-lab/                    # Migration inventory; existing demo still works
-  animation-lab/
-  three-d-lab/
-  monitoring/                   # Private authority capability remains mandatory
+  home/                         # Admitted app launcher
+  component-playground/         # Controls, bounded Wasm reducer, ephemeral trails
+  layout-lab/                   # Reusable components and five-minute signal
+  input-lab/                    # Shared text registers; local editing/keyboard
+  animation-lab/                 # Shared intent, local animation clock
+  three-d-lab/                   # Shared intent, local tetrahedron presentation
+  monitoring/                   # Protected UI and replaceable read-only chart view
+  catalog.flex                  # Generated public catalog, ignored
 ```
 
-Add `assets/` for app-owned fonts/images/blobs and `tests/` for local fixtures as
-needed; empty placeholder directories are unnecessary. Large assets should become
-immutable content-addressed dependencies, rather than CRDT scalar values. Keep
-app-specific code here. A reusable component or capability contract moves into
-the SDK only when it is shared; apps must not reach into sibling app internals.
+An app generally contains `app.rs`, `ui.rs`, `state/schema.rs` and optional
+`behavior/`, `assets/` or tests. Its generated, ignored `package/` contains
+`app.flex`, `ui.flex` and optional `behavior.wasm`. Do not hand-edit generated
+artifacts or add empty dependency directories. The packer has an explicit build
+registry; register a new app and add a launcher destination.
 
-`app.rs` is source authoring, **not the runtime manifest format**. `canvas-pack`
-compiles it and each UI description into FlexBuffers. The source-level dependency
-list names local files plus the shared authoring SDK contract. Wasm imports are
-recorded separately in the UI graph, with content digest, ABI and permitted field
-IDs. This avoids another manifest parser during the prototype. A future external
-app packager should consume the same binary contract without knowing Rust.
+Shared authored controls, including the keyboard, live in
+`tools/canvas/components.rs`.
 
-`tools/canvas/authoring.rs` is shared build tooling. `otrios-interfaces::canvas`
-defines permissive contracts. `otrios-core::canvas` owns the shared LGPL runtime:
-selector evaluation, responder routing, guest execution, CRDT validation and
-mount lifecycle. The web/native hosts know neither Playground nor Layout Lab
-behavior. The packer has an explicit build registry; adding an app currently
-requires registering its source there and adding a launcher navigation reference.
+`app.rs` and shared `tools/canvas/authoring.rs` are build-time authoring. Runtime
+contracts live in Apache-licensed `otrios-interfaces::canvas`; interpretation,
+CRDT validation, mount lifecycle and guest execution remain in LGPL
+`otrios-core::canvas`. A reused runtime implementation should not be cloned into
+an app or permissive SDK.
 
-`otrios-web-host` is the Canvas-only browser adapter. Its generated
-`web/canvas/pkg/host.js`/`host_bg.wasm` bundle excludes the old Dashboard and
-MotionPresenter exports. New work follows the [modern app pattern](../docs/MODERN_APP_PATTERN.md)
-and its retirement gates rather than extending the old shell.
+## Delivery and policy
 
-## Run the isolated prototype
+`canvas-pack` emits all seven packages and `apps/catalog.flex`. Catalog entries
+bind app identities and UI/State references to UI hashes; the UI binds optional
+behavior bytes and permitted field writes. Status/dependency strings do not grant
+capabilities. UI v2 supports typed, bounded fields and declared operations;
+custom reducers still use the small, separately versioned Wasm ABI v1.
 
-With the repository's Rust 1.90 / wasm32 and wasm-bindgen toolchain available:
+The signed release publishes the generic browser/native hosts, catalog and public
+font resources. App UI/code bytes are retained in its signed `authority/apps/`
+tree and delivered by admitted mounts, not copied into the public module store.
+Monitoring authorization precedes its UI/code/state payloads. The public Home
+catalog may name Monitoring without exposing its private package.
+
+Browser and native use one app-scoped transport, `/apps/stream`, with browser
+permissions derived from the existing session and trusted native access derived
+from its private listener. Public devices and the frame share the same intended
+public roots. Clients keep app documents in RAM; only the authority persists them.
+Code/blob caches retain their bounded budgets; touch trails remain ephemeral.
+
+Input Lab stores text in shared atomic typed registers, not a per-character text
+CRDT. Carets, selections, focus, repeat and keyboard presentation stay local.
+Animation/3D keep phase and rendering local while syncing intent. Their stress
+control is an isolated RAM CRDT workload. Monitoring replaces a protected binary
+Layout aggregate without adding telemetry history to app documents.
+
+## Build and validation
 
 ```sh
-bash scripts/build-canvas-prototype.sh
-target/debug/canvas-server --state target/canvas-state
-# Open http://127.0.0.1:8894
-# A second process uses the same protocol and behavior binary:
-target/debug/canvas-native ws://127.0.0.1:8894/stream
+bash scripts/build-dashboard-web.sh
+# With the authority dependencies enabled:
+cargo run -p otrios-dashboard --bin dashboard-server --features canvas,server -- \
+  --apps apps --web-dir web/canvas --bind 127.0.0.1:8876
 ```
 
-The server accepts only loopback binds. Its exact Origin defaults to the bind URL;
-use that URL rather than `localhost`. Client documents and guest memory stay in
-RAM. The authority persists app documents under `--state`; use a different folder
-for independent test authorities. This is separate from the deployed dashboard.
-The probe changes Playground's level and checks authority acknowledgement; it
-runs headless and does not take over the frame's display.
+The browser bundle keeps the operational filename
+`pkg/otrios_dashboard.js`/`otrios_dashboard_bg.wasm`, but is built from
+`otrios-web-host` and exports CanvasApp plus a generic CanvasPresentation.
+It does not export the former Dashboard or bundled MotionPresenter adapters.
+The live native host uses the same core Canvas runtime with direct GLES.
+`canvas-native` remains a headless process probe, not proof of physical display
+or touch acceptance.
 
-After changing UI or WAT sources, rerun `canvas-pack` and select **Reload app
-package** (or leave/reopen the app). The server reads the new UI/code on mount;
-the host executable is unchanged and the stable State reference is preserved.
-Schema changes are rejected pending an explicit migration. Active app instances
-are not force-replaced mid-gesture. Automatic registry notifications, rollback of
-rejected remote mounts and production signed app admission remain follow-up work.
-The prototype retains at most eight 64 KiB behavior byte entries in RAM; it does
-not install another persistent browser cache or change the live bounded caches.
+The production cutover starts fresh app roots, as authorized. It does not mirror
+or silently convert the former global room. Logical state references remain
+stable within the new schema; incompatible schema changes need an explicit
+migration or new reference. Documents and transport are bounded; history
+compaction and general collection/Merkle subscriptions remain future work.
 
-## Migration order
-
-| App | Current boundary | Next migration |
-| --- | --- | --- |
-| Home | Independent Canvas UI + empty State root | Catalog of admitted app references |
-| Component Playground | Independent UI/State + loadable Wasm reducer | Reuse existing ephemeral trail service as an explicit capability |
-| Layout Lab | Independent UI/State; declarative setters | Nested components and reusable templates |
-| Input Lab | Legacy adapter manifest | App-owned document fields; shared keyboard/input capability |
-| Animation Lab | Legacy adapter manifest | App-owned intent; separate local presentation state/clock |
-| 3D Lab | Legacy adapter manifest | App-owned scene/intent; renderer capability and mesh assets |
-| Monitoring | Legacy adapter manifest | Separate protected UI/data imports; server-issued read capability |
-
-The legacy apps still use the working dashboard shell. Their manifests inventory
-that dependency rather than pretending they have isolated state. Monitoring must
-never become public by changing a manifest: authority-side admission and data
-policy remain required. App packages cannot grant themselves capabilities.
-
-For each migration, prove independent subscription/persistence, retained native
-and web behavior, input capture cleanup, and no state or executable-instance leaks
-across navigation. See RFC 0004 and `scripts/check-canvas-prototype.sh`.
-
-Validation evidence and prototype resource limits are recorded in [canvas-apps-validation.md](../docs/experiments/canvas-apps-validation.md).
+Run `scripts/check.sh`, the Canvas checks, publisher/resource tests and browser
+checks. Verify independent subscriptions, persistence-before-acknowledgement,
+private admission/revocation, stale generation rejection, reconnect with RAM
+edits, and the real native renderer separately. Read the
+[modern app pattern](../docs/MODERN_APP_PATTERN.md) and
+[RFC 0004](../docs/rfcs/0004-canvas-behavior-and-app-packages.md) for current limits.
+Implementation and deployment acceptance are distinct.
 
 ## Declarative UI authoring
 
