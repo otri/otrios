@@ -50,6 +50,11 @@ mount lifecycle. The web/native hosts know neither Playground nor Layout Lab
 behavior. The packer has an explicit build registry; adding an app currently
 requires registering its source there and adding a launcher navigation reference.
 
+`otrios-web-host` is the Canvas-only browser adapter. Its generated
+`web/canvas/pkg/host.js`/`host_bg.wasm` bundle excludes the old Dashboard and
+MotionPresenter exports. New work follows the [modern app pattern](../docs/MODERN_APP_PATTERN.md)
+and its retirement gates rather than extending the old shell.
+
 ## Run the isolated prototype
 
 With the repository's Rust 1.90 / wasm32 and wasm-bindgen toolchain available:
