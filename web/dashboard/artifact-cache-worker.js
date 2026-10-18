@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {ArtifactCache,CACHE,eligible,boundedBody} from './artifact-cache.mjs';
+import {ArtifactCache,CACHE,eligible,boundedBody,budget} from './artifact-cache.mjs';
 function metadata(){return new Promise((resolve,reject)=>{
   const open=indexedDB.open(CACHE,1);open.onupgradeneeded=()=>open.result.createObjectStore('entries',{keyPath:'url'});
   open.onerror=()=>reject(open.error);open.onsuccess=()=>{
@@ -18,6 +18,15 @@ function cache(){return storage??=lock(async()=>{
 });}
 self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));
+self.addEventListener('message',event=>{
+  if(event.data?.type!=='artifact-cache-status')return;
+  event.waitUntil((async()=>{try{
+    const store=await cache();const stats=await store.serial(async()=>{
+      await store.trim();const entries=await store.index.all(),bytes=entries.reduce((n,e)=>n+e.bytes,0);
+      return {bytes,limit:budget(await store.estimate(),bytes),count:entries.length};
+    });event.source?.postMessage({type:'artifact-cache-status',enabled:true,...stats});
+  }catch{event.source?.postMessage({type:'artifact-cache-status',enabled:false});}})());
+});
 self.addEventListener('fetch',event=>{
   if(!eligible(event.request,self.location.origin))return;
   event.respondWith((async()=>{

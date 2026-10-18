@@ -28,6 +28,7 @@ def main():
         assert len(data)==item['bytes']and hashlib.sha256(data).hexdigest()==item['sha256'],name
         assert 'public' in headers.get('Cache-Control',''),name
         if name.endswith('.wasm'):assert headers.get('Content-Type')=='application/wasm'
+        if name.endswith('artifact-cache-worker.js'):assert headers.get('Service-Worker-Allowed')=='/'
         count+=1
     for path in ['/layout','/presentation','/sync','/private/stream']:
         for method in ['GET','POST']:
