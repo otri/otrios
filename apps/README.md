@@ -98,3 +98,5 @@ policy remain required. App packages cannot grant themselves capabilities.
 For each migration, prove independent subscription/persistence, retained native
 and web behavior, input capture cleanup, and no state or executable-instance leaks
 across navigation. See RFC 0004 and `scripts/check-canvas-prototype.sh`.
+
+Validation evidence and prototype resource limits are recorded in [canvas-apps-validation.md](../docs/experiments/canvas-apps-validation.md).

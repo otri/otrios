@@ -29,6 +29,11 @@ jobs:
         run: rustup toolchain install 1.90.0 --profile minimal --component clippy --target wasm32-unknown-unknown
       - name: Check all host adapters
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Check Canvas app runtime and real process boundary
+        run: |
+          cargo test -p otrios-core --features canvas --locked
+          cargo test -p otrios-dashboard --features canvas,server,host-sync --test canvas_process --locked
+          cargo build -p otrios-dashboard --lib --features canvas --release --locked --target wasm32-unknown-unknown
       - name: Check distributed module handoff
         run: node --test scripts/test-dashboard-release-gate.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs
       - name: Compile browser module
