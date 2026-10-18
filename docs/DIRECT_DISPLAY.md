@@ -29,6 +29,10 @@ The direct unit is installed but **not enabled at boot**; the existing boot reco
 
 ## Measuring the renderer
 
+For the component playground's input/CRDT/scene CPU path, the read-only
+`dashboard-profile` probe and paired frame results are documented in
+[component playground validation](experiments/component-playground-validation.md).
+
 On the frame, as root:
 
 ```sh

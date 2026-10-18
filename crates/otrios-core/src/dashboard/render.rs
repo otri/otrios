@@ -169,13 +169,20 @@ impl Mesh {
                 .or_else(|| BASIC_FONTS.get('?'))
                 .unwrap_or([0; 8]);
             for (row, bits) in glyph.iter().enumerate() {
-                for col in 0..8 {
-                    if bits & (1 << col) != 0 {
+                let mut col = 0;
+                while col < 8 {
+                    if bits & (1 << col) == 0 {
+                        col += 1;
+                    } else {
+                        let begin = col;
+                        while col < 8 && bits & (1 << col) != 0 {
+                            col += 1;
+                        }
                         self.rect(
                             Rect::new(
-                                r.x + (i as f32 * 9. + col as f32) * scale,
+                                r.x + (i as f32 * 9. + begin as f32) * scale,
                                 r.y + row as f32 * scale,
-                                scale,
+                                (col - begin) as f32 * scale,
                                 scale,
                             ),
                             c,
@@ -270,6 +277,41 @@ impl Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn glyph_runs_preserve_pixel_coverage_and_fractional_clipping() {
+        let value = "ABCxyz09?";
+        let mut mesh = Mesh { vertices: vec![] };
+        let clip = Clip {
+            left: 3.25,
+            top: 1.25,
+            right: 73.75,
+            bottom: 7.75,
+        };
+        mesh.text(Rect::new(0., 0., 1280., 800.), value, 1., [255; 4], clip);
+        for (i, ch) in value.chars().enumerate() {
+            let glyph = BASIC_FONTS.get(ch).unwrap();
+            for (row, bits) in glyph.iter().enumerate() {
+                for col in 0..9 {
+                    let p = [i as f32 * 9. + col as f32 + 0.5, row as f32 + 0.5];
+                    let covered = mesh.vertices.chunks_exact(18).any(|t| {
+                        let cross = |a: usize, b: usize| {
+                            (t[b] - t[a]) * (p[1] - t[a + 1])
+                                - (t[b + 1] - t[a + 1]) * (p[0] - t[a])
+                        };
+                        let signs = [cross(0, 6), cross(6, 12), cross(12, 0)];
+                        signs.iter().all(|s| *s >= 0.) || signs.iter().all(|s| *s <= 0.)
+                    });
+                    let expected = col < 8
+                        && bits & (1 << col) != 0
+                        && p[0] >= clip.left
+                        && p[0] <= clip.right
+                        && p[1] >= clip.top
+                        && p[1] <= clip.bottom;
+                    assert_eq!(covered, expected, "{ch} {col} {row}");
+                }
+            }
+        }
+    }
     #[test]
     fn same_snapshot_produces_same_mesh_and_touch_changes_it() {
         let mut r = crate::dashboard::Replica::new().unwrap();

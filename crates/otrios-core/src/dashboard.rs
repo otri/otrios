@@ -62,25 +62,33 @@ fn err(e: impl std::fmt::Display) -> String {
 pub struct Replica {
     doc: AutoCommit,
     snapshot: ViewSnapshot,
+    base_snapshot: ViewSnapshot,
+    saved: std::sync::Arc<[u8]>,
     presentation: Option<layout::Layout>,
 }
 impl Replica {
     pub fn new() -> Result<Self> {
         let mut doc = seed()?.fork();
-        let snapshot = project(&mut doc)?;
+        let (base_snapshot, snapshot) = project_cached(&mut doc, None, None, None)?;
+        let saved = doc.save().into();
         Ok(Self {
             doc,
             snapshot,
+            base_snapshot,
+            saved,
             presentation: None,
         })
     }
     /// A fresh actor on every load prevents two tabs/processes sharing an actor.
     pub fn load(bytes: &[u8]) -> Result<Self> {
         let mut doc = load_document(bytes)?.fork();
-        let snapshot = project(&mut doc)?;
+        let (base_snapshot, snapshot) = project_cached(&mut doc, None, None, None)?;
+        let saved = doc.save().into();
         Ok(Self {
             doc,
             snapshot,
+            base_snapshot,
+            saved,
             presentation: None,
         })
     }
@@ -145,7 +153,7 @@ impl Replica {
         self.publish(candidate)
     }
     pub fn save(&mut self) -> Vec<u8> {
-        self.doc.save()
+        self.saved.to_vec()
     }
     pub fn snapshot(&self) -> &ViewSnapshot {
         &self.snapshot
@@ -163,12 +171,18 @@ impl Replica {
         }
     }
     pub fn set_presentation(&mut self, bytes: Option<&[u8]>) -> Result<bool> {
-        let next = bytes.map(layout::Layout::from_bytes).transpose()?;
-        if self.presentation.as_ref().map(|p| p.bytes()) == next.as_ref().map(|p| p.bytes()) {
+        if self.presentation.as_ref().map(|p| p.bytes()) == bytes {
             return Ok(false);
         }
-        let snapshot = project_cached(&mut self.doc, Some(self.snapshot.layout()), next.as_ref())?;
+        let next = bytes.map(layout::Layout::from_bytes).transpose()?;
+        let (base, snapshot) = project_cached(
+            &mut self.doc,
+            Some(&self.base_snapshot),
+            next.as_ref(),
+            Some(&self.snapshot),
+        )?;
         self.presentation = next;
+        self.base_snapshot = base;
         self.snapshot = snapshot;
         Ok(true)
     }
@@ -286,7 +300,8 @@ impl Replica {
     }
     /// Prepare, validate, then replace the root. Errors retain both old doc and view.
     pub fn merge(&mut self, bytes: &[u8]) -> Result<bool> {
-        let mut incoming = load_document(bytes)?;
+        // Publication checks newly added roots against our validated history.
+        let mut incoming = decode_document(bytes)?;
         let mut candidate = self.doc.clone();
         candidate.merge(&mut incoming).map_err(err)?;
         self.publish(candidate)
@@ -351,22 +366,38 @@ impl Replica {
         }
     }
     fn publish(&mut self, mut candidate: AutoCommit) -> Result<bool> {
-        validate_lineage(&mut candidate)?;
-        if candidate.save().len() > MAX_DOCUMENT_BYTES {
+        let known = self.doc.get_heads();
+        if candidate
+            .get_changes_meta(&known)
+            .iter()
+            .any(|change| change.deps.is_empty())
+        {
+            return Err("Unrelated document history".into());
+        }
+        let saved = candidate.save();
+        if saved.len() > MAX_DOCUMENT_BYTES {
             return Err("Demo document limit reached".into());
         }
-        let snapshot = project_cached(
+        let (base, snapshot) = project_cached(
             &mut candidate,
-            Some(self.snapshot.layout()),
+            Some(&self.base_snapshot),
             self.presentation.as_ref(),
+            Some(&self.snapshot),
         )?;
         let changed = snapshot.id() != self.snapshot.id();
         self.doc = candidate;
+        self.saved = saved.into();
+        self.base_snapshot = base;
         self.snapshot = snapshot;
         Ok(changed)
     }
 }
 fn load_document(bytes: &[u8]) -> Result<AutoCommit> {
+    let mut doc = decode_document(bytes)?;
+    validate_lineage(&mut doc)?;
+    Ok(doc)
+}
+fn decode_document(bytes: &[u8]) -> Result<AutoCommit> {
     if bytes.is_empty() || bytes.len() > MAX_DOCUMENT_BYTES {
         return Err("Invalid document size".into());
     }
@@ -376,31 +407,30 @@ fn load_document(bytes: &[u8]) -> Result<AutoCommit> {
     )
     .map_err(err)?;
     let seed_head = seed()?.get_heads()[0];
-    if doc.get_change_by_hash(&seed_head).is_none() {
+    if doc.get_change_meta_by_hash(&seed_head).is_none() {
         return Err("Wrong dashboard seed/history".into());
     }
-    validate_lineage(&mut doc)?;
     Ok(doc)
 }
 fn validate_lineage(doc: &mut AutoCommit) -> Result<()> {
     let seed_head = seed()?.get_heads()[0];
     if doc
-        .get_changes(&[])
+        // Metadata carries exactly the roots/dependencies needed here. Asking
+        // for full Changes re-encodes every historical operation on each edit.
+        .get_changes_meta(&[])
         .iter()
-        .any(|change| change.deps().is_empty() && change.hash() != seed_head)
+        .any(|change| change.deps.is_empty() && change.hash != seed_head)
     {
         return Err("Unrelated document history".into());
     }
     Ok(())
 }
-fn project(doc: &mut AutoCommit) -> Result<ViewSnapshot> {
-    project_cached(doc, None, None)
-}
 fn project_cached(
     doc: &mut AutoCommit,
-    cached: Option<&layout::Layout>,
+    cached: Option<&ViewSnapshot>,
     presentation: Option<&layout::Layout>,
-) -> Result<ViewSnapshot> {
+    visible: Option<&ViewSnapshot>,
+) -> Result<(ViewSnapshot, ViewSnapshot)> {
     controls::State::read(doc)?;
     if let Some((v, _)) = doc.get(ROOT, "motion").map_err(err)? {
         motion::Intent::decode(v.as_bytes().ok_or("Motion must be binary")?)?;
@@ -496,11 +526,12 @@ fn project_cached(
     };
     // A read-only feed cannot conceal an invalid collaborative layout that would fail on clear.
     let base = ViewSnapshot::build_cached(view.clone(), layout.as_deref(), cached)?;
-    if let Some(presentation) = presentation {
-        ViewSnapshot::build_cached(view, Some(presentation.bytes()), cached)
+    let snapshot = if let Some(presentation) = presentation {
+        ViewSnapshot::build_cached(view, Some(presentation.bytes()), visible)?
     } else {
-        Ok(base)
-    }
+        base.clone()
+    };
+    Ok((base, snapshot))
 }
 
 #[cfg(test)]
@@ -626,6 +657,46 @@ mod tests {
         assert_eq!(a.snapshot().id(), before);
     }
     #[test]
+    fn unchanged_bindings_reuse_scenes_but_changed_views_and_layouts_are_revalidated() {
+        use std::sync::Arc;
+        let mut r = Replica::new().unwrap();
+        let mut b = layout::Layout::bootstrap().unwrap().blueprint().clone();
+        b.root.properties.push(otrios_interfaces::layout::Property {
+            key: 2,
+            value: otrios_interfaces::layout::Expr::Literal(
+                otrios_interfaces::layout::Value::Color([7, 8, 9, 255]),
+            ),
+        });
+        let private = layout::Layout::encode(&b).unwrap();
+        r.set_presentation(Some(&private)).unwrap();
+        let pinned = r.snapshot().clone();
+        let base = r.base_snapshot.clone();
+        r.set_control(0, [731, 0]).unwrap();
+        assert_ne!(r.snapshot().id(), pinned.id());
+        assert!(Arc::ptr_eq(r.snapshot().scene(), pinned.scene()));
+        assert!(Arc::ptr_eq(r.base_snapshot.scene(), base.scene()));
+        let copy = ViewSnapshot::from_bytes(r.snapshot().bytes()).unwrap();
+        assert_eq!(
+            render_scene(copy.scene()).vertices,
+            render_scene(r.snapshot().scene()).vertices
+        );
+        r.set_enabled(false).unwrap();
+        assert!(!Arc::ptr_eq(r.snapshot().scene(), pinned.scene()));
+        assert!(!Arc::ptr_eq(r.base_snapshot.scene(), base.scene()));
+        // A hidden collaborative layout is still validated before publication.
+        let before = r.snapshot().id();
+        let mut invalid = r.doc.clone();
+        invalid
+            .put(ROOT, "layout", ScalarValue::Bytes(vec![0]))
+            .unwrap();
+        invalid.commit();
+        assert!(r.publish(invalid).is_err());
+        assert_eq!(r.snapshot().id(), before);
+        r.set_presentation(None).unwrap();
+        assert!(Arc::ptr_eq(r.snapshot().scene(), r.base_snapshot.scene()));
+        assert!(!Arc::ptr_eq(r.snapshot().scene(), pinned.scene()));
+    }
+    #[test]
     fn incremental_sync_pushes_edits_and_recovers_offline_concurrency() {
         let mut a = Replica::new().unwrap();
         let mut b = Replica::new().unwrap();
@@ -724,7 +795,17 @@ mod tests {
         assert!(a.merge(b"bad").is_err());
         assert!(a.merge(&vec![0; MAX_DOCUMENT_BYTES + 1]).is_err());
         assert!(a.merge(&AutoCommit::new().save()).is_err());
+        // Even a valid seed cannot disguise a second unrelated history root.
+        let mut graft = seed().unwrap();
+        let mut foreign = AutoCommit::new();
+        foreign.put(ROOT, "extra", true).unwrap();
+        foreign.commit();
+        graft.merge(&mut foreign).unwrap();
+        let graft = graft.save();
+        assert!(Replica::load(&graft).is_err());
+        assert!(a.merge(&graft).is_err());
         assert_eq!(old, a.snapshot.id());
+        assert!(Replica::load(&a.save()).is_ok());
     }
     #[test]
     fn hit_test_uses_published_bounds() {

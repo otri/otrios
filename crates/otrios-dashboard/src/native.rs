@@ -43,6 +43,7 @@ fn display_rect(surface: Surface, region: otrios_interfaces::scene::Rect) -> sdl
 }
 fn main() -> Result<(), String> {
     let mut o = options()?;
+    o.texture_cache = true;
     let seconds = o.seconds;
     let frames = o.frames;
     let exit_file = o.exit_file.clone();

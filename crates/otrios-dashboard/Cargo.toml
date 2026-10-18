@@ -69,6 +69,10 @@ name = "dashboard-shell-assets"
 path = "src/shell_seed.rs"
 
 [[bin]]
+name = "dashboard-profile"
+path = "src/profile.rs"
+
+[[bin]]
 name = "dashboard-load"
 path = "src/load.rs"
 required-features = ["native"]

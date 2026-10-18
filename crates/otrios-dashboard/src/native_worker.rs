@@ -95,6 +95,7 @@ pub(super) struct Options {
     pub(super) rotation: u16,
     pub(super) touch_matrix: Option<Calibration>,
     pub(super) completion_probe: bool,
+    pub(super) texture_cache: bool,
 }
 pub(super) fn options() -> Result<Options, String> {
     let mut o = Options::default();
@@ -280,11 +281,15 @@ pub(super) fn state_worker(
                 .is_none_or(|old| !Arc::ptr_eq(old, &scene))
             {
                 let mesh = render_scene(&scene);
-                copy_cache = Arc::new(cached_regions(
-                    &mesh.vertices,
-                    otrios_interfaces::scene::Rect::new(0., 0., 1280., 800.),
-                    [16, 28, 41, 255],
-                ));
+                copy_cache = Arc::new(if o.texture_cache {
+                    cached_regions(
+                        &mesh.vertices,
+                        otrios_interfaces::scene::Rect::new(0., 0., 1280., 800.),
+                        [16, 28, 41, 255],
+                    )
+                } else {
+                    Vec::new()
+                });
                 mesh_cache = Arc::new(mesh.vertices);
                 scene_cache = Some(scene);
             }

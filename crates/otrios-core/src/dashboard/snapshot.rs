@@ -26,7 +26,7 @@ impl ViewSnapshot {
     pub(crate) fn build_cached(
         view: DashboardView,
         layout: Option<&[u8]>,
-        cached: Option<&super::layout::Layout>,
+        cached: Option<&Self>,
     ) -> Result<Self> {
         let mut b = Builder::new(BuilderOptions::default());
         {
@@ -83,7 +83,7 @@ impl ViewSnapshot {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         Self::from_bytes_cached(bytes, None)
     }
-    fn from_bytes_cached(bytes: &[u8], cached: Option<&super::layout::Layout>) -> Result<Self> {
+    fn from_bytes_cached(bytes: &[u8], cached: Option<&Self>) -> Result<Self> {
         let parse = || -> std::result::Result<DashboardView, Box<dyn std::error::Error>> {
             if bytes.len() > MAX_SNAPSHOT {
                 return Err("Snapshot too large".into());
@@ -201,9 +201,9 @@ impl ViewSnapshot {
         } else {
             super::layout::DEFAULT_LAYOUT
         };
-        let reused = cached.filter(|layout| layout.bytes() == source);
+        let reused = cached.filter(|snapshot| snapshot.layout.bytes() == source);
         let layout = if let Some(layout) = reused {
-            layout.clone()
+            layout.layout.clone()
         } else if source == super::layout::DEFAULT_LAYOUT {
             super::layout::Layout::bootstrap()?
         } else {
@@ -212,14 +212,20 @@ impl ViewSnapshot {
         if reused.is_none() {
             layout.qualify(&view)?;
         }
-        let scene = layout.resolve(&view)?;
+        // Heads version the binary snapshot but are not layout bindings. Reuse
+        // already validated geometry only when every consumed input is equal.
+        let scene = if let Some(previous) = reused.filter(|s| s.view.nodes == view.nodes) {
+            previous.scene.clone()
+        } else {
+            Arc::new(layout.resolve(&view)?)
+        };
         // Versioned domain separates view bytes from other content object types.
         let mut hash = Sha256::new();
         hash.update(b"OTriOS\0view\0v1\0");
         hash.update(bytes);
         Ok(Self {
             bytes: bytes.into(),
-            scene: Arc::new(scene),
+            scene,
             layout,
             view: Arc::new(view),
             id: ContentId(hash.finalize().into()),
