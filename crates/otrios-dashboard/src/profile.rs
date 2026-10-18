@@ -6,13 +6,22 @@ use otrios_interfaces::scene::{Action, PointerEvent, PointerPhase, Rect, TouchRe
 use std::{hint::black_box, sync::Arc, time::Instant};
 fn main() -> Result<(), String> {
     let mut args: Vec<_> = std::env::args().skip(1).collect();
+    let wire_only = args.first().is_some_and(|a| a == "--wire");
+    if wire_only {
+        args.remove(0);
+    }
+    let handoff = args.first().is_some_and(|a| a == "--handoff");
+    if handoff {
+        args.remove(0);
+    }
     let deferred = args.first().is_some_and(|a| a == "--deferred");
     if deferred {
         args.remove(0);
     }
     if args.len() > 2 {
         return Err(
-            "Usage: dashboard-profile [--deferred] [STATE_FILE [PRESENTATION_FILE]]".into(),
+            "Usage: dashboard-profile [--deferred|--handoff|--wire] [STATE_FILE [PRESENTATION_FILE]]"
+                .into(),
         );
     }
     let mut replica = if let Some(path) = args.first() {
@@ -22,6 +31,9 @@ fn main() -> Result<(), String> {
     };
     if let Some(path) = args.get(1) {
         replica.set_presentation(Some(&std::fs::read(path).map_err(|e| e.to_string())?))?;
+    }
+    if handoff || wire_only {
+        return measure_handoff(replica, wire_only);
     }
     if deferred {
         measure(
@@ -110,6 +122,73 @@ fn measure<M: Model>(
     .zip(totals)
     {
         println!("{name}: {:.3}", seconds * 1000. / 30.);
+    }
+    Ok(())
+}
+
+fn measure_handoff(mut app: Replica, wire_only: bool) -> Result<(), String> {
+    use otrios_core::dashboard::SyncSession;
+    let mut network = app.clone();
+    let mut server = app.clone();
+    let mut ns = SyncSession::default();
+    let mut ss = SyncSession::default();
+    fn exchange(
+        a: &mut Replica,
+        sa: &mut SyncSession,
+        b: &mut Replica,
+        sb: &mut SyncSession,
+    ) -> Result<(), String> {
+        for _ in 0..32 {
+            let x = a.generate_sync(sa)?;
+            let y = b.generate_sync(sb)?;
+            if x.is_none() && y.is_none() {
+                return Ok(());
+            }
+            if let Some(x) = x {
+                b.receive_sync(sb, &x)?;
+            }
+            if let Some(y) = y {
+                a.receive_sync(sa, &y)?;
+            }
+        }
+        Err("Sync did not settle".into())
+    }
+    exchange(&mut network, &mut ns, &mut server, &mut ss)?;
+    println!(
+        "Disposable replicas; {} serialized bytes; 10 remote updates",
+        app.save().len()
+    );
+    let mut times = [0.; 4];
+    for i in 0..10 {
+        server.set_control(0, [100 + i * 37, 0])?;
+        let begin = Instant::now();
+        exchange(&mut network, &mut ns, &mut server, &mut ss)?;
+        times[0] += begin.elapsed().as_secs_f64();
+        let begin = Instant::now();
+        let bytes = network.save();
+        times[1] += begin.elapsed().as_secs_f64();
+        let begin = Instant::now();
+        if !wire_only {
+            app.merge(&bytes)?;
+        }
+        times[2] += begin.elapsed().as_secs_f64();
+        let begin = Instant::now();
+        black_box(app.clone());
+        times[3] += begin.elapsed().as_secs_f64();
+    }
+    if wire_only {
+        println!("Single owner: full-document handoff removed");
+    }
+    for (name, seconds) in [
+        "wire receive/ack",
+        "handoff serialize copy",
+        "handoff full-document decode/merge",
+        "published replica clone",
+    ]
+    .into_iter()
+    .zip(times)
+    {
+        println!("{name}: {:.3} ms", seconds * 1000. / 10.);
     }
     Ok(())
 }

@@ -13,23 +13,19 @@ use std::{
     fs,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
     time::{Duration, Instant},
 };
-struct HostUpdate {
-    document: Vec<u8>,
-    presentation: Option<Vec<u8>>,
-    confirmed_heads: Vec<String>,
+enum NetworkEvent {
+    Connected(u64),
+    Packet(u64, Instant, Vec<u8>),
 }
-fn update(replica: &mut Replica, session: &SyncSession) -> HostUpdate {
-    HostUpdate {
-        confirmed_heads: Replica::confirmed_heads(session),
-        document: replica.save(),
-        presentation: replica.presentation().map(|p| p.bytes().to_vec()),
-    }
+struct NetworkSend {
+    epoch: u64,
+    bytes: Vec<u8>,
 }
 #[derive(Clone)]
 pub(super) struct Frame {
@@ -56,6 +52,7 @@ pub(super) struct Frame {
     pub(super) controls: otrios_core::dashboard::controls::State,
     pub(super) updates: u64,
     pub(super) received_updates: u64,
+    pub(super) remote_sample: Option<(u64, Instant)>,
     pub(super) serial: u64,
 }
 #[derive(Clone, Copy)]
@@ -178,6 +175,7 @@ struct Published {
     confirmed: bool,
     updates: u64,
     received_updates: u64,
+    remote_sample: Option<(u64, Instant)>,
 }
 fn application_worker(
     o: Options,
@@ -185,19 +183,34 @@ fn application_worker(
     work: mpsc::Receiver<Work>,
     publish: mpsc::SyncSender<Published>,
 ) -> Result<(), String> {
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
-    let (reply_tx, reply_rx) = mpsc::sync_channel::<HostUpdate>(1);
+    let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
+    let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(2);
     let stream_ready = Arc::new(AtomicBool::new(false));
     let worker_ready = stream_ready.clone();
+    let connection = Arc::new(AtomicU64::new(0));
+    let abort = Arc::new(AtomicU64::new(0));
+    let transport_connection = connection.clone();
+    let transport_abort = abort.clone();
     let network_thread = o.url.clone().map(|url| {
         let release_file = o.release_file.clone();
-        thread::spawn(move || network(url, rx, reply_tx, release_file, worker_ready))
+        thread::spawn(move || {
+            network(
+                url,
+                rx,
+                reply_tx,
+                release_file,
+                worker_ready,
+                transport_connection,
+                transport_abort,
+            )
+        })
     });
     let started = Instant::now();
     let mut acknowledged = 0;
     let mut last_sync = Instant::now() - Duration::from_secs(1);
-    let mut sent_id = None;
-    let mut confirmed_heads = Vec::new();
+    let mut epoch = None;
+    let mut session = SyncSession::default();
+    let mut outgoing = None;
     let mut stopping = None;
     let mut published_key = None;
     let mut pending = None;
@@ -206,6 +219,7 @@ fn application_worker(
     let mut stall_ms = 0;
     let mut stalled = Instant::now();
     let mut received_updates = 0;
+    let mut remote_sample = None;
     loop {
         if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
             return Err("Network worker stopped unexpectedly".into());
@@ -234,10 +248,54 @@ fn application_worker(
             Err(mpsc::TryRecvError::Disconnected) => stop = true,
             Err(mpsc::TryRecvError::Empty) => {}
         }
-        while let Ok(next) = reply_rx.try_recv() {
-            received_updates += u64::from(replica.merge(&next.document)?);
-            replica.set_presentation(next.presentation.as_deref())?;
-            confirmed_heads = next.confirmed_heads;
+        let mut received = false;
+        // Protocol frames retain order; only published views may coalesce.
+        for _ in 0..2 {
+            let Ok(event) = reply_rx.try_recv() else {
+                break;
+            };
+            match event {
+                NetworkEvent::Connected(id) => {
+                    epoch = Some(id);
+                    session = SyncSession::default();
+                    outgoing = None;
+                    received = true;
+                }
+                NetworkEvent::Packet(id, received_at, bytes)
+                    if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
+                {
+                    let result = if bytes.starts_with(b"OTML1") {
+                        replica.set_presentation(if bytes.len() == 5 {
+                            None
+                        } else {
+                            Some(&bytes[5..])
+                        })
+                    } else {
+                        let result = replica.receive_sync(&mut session, &bytes);
+                        if result.is_ok() {
+                            stream_ready.store(true, Ordering::Release);
+                        }
+                        result
+                    };
+                    match result {
+                        Ok(changed) => {
+                            received_updates += u64::from(changed);
+                            if changed && !bytes.starts_with(b"OTML1") {
+                                remote_sample = Some((received_updates, received_at));
+                            }
+                            received = true;
+                        }
+                        Err(e) => {
+                            eprintln!("Rejected stream: {e}");
+                            abort.store(id, Ordering::Release);
+                            epoch = None;
+                            outgoing = None;
+                            stream_ready.store(false, Ordering::Release);
+                        }
+                    }
+                }
+                NetworkEvent::Packet(..) => {}
+            }
         }
         stress.tick(started.elapsed().as_secs_f64() * 1000., hz)?;
         if stall_ms > 0 && stalled.elapsed() >= Duration::from_secs(1) {
@@ -247,21 +305,32 @@ fn application_worker(
         if stop && stopping.is_none() {
             stopping = Some(Instant::now());
         }
-        if network_thread.is_some() && (stop || last_sync.elapsed() >= Duration::from_millis(100)) {
-            if sent_id != Some(replica.snapshot().id()) && tx.try_send(replica.save()).is_ok() {
-                sent_id = Some(replica.snapshot().id());
-            }
-            last_sync = Instant::now();
+        let connected = epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id);
+        if !connected {
+            outgoing = None;
         }
-        let online = stream_ready.load(Ordering::Acquire);
-        let confirmed = network_thread.is_none()
-            || (online
-                && replica
-                    .snapshot()
-                    .view()
-                    .heads
-                    .iter()
-                    .all(|h| confirmed_heads.contains(h)));
+        if connected {
+            if outgoing.is_none()
+                && (stop || received || last_sync.elapsed() >= Duration::from_millis(100))
+            {
+                if let Some(bytes) = replica.generate_sync(&mut session)? {
+                    outgoing = Some(NetworkSend {
+                        epoch: epoch.expect("connected epoch"),
+                        bytes,
+                    });
+                }
+                last_sync = Instant::now();
+            }
+            if let Some(packet) = outgoing.take() {
+                match tx.try_send(packet) {
+                    Ok(()) => {}
+                    Err(mpsc::TrySendError::Full(packet)) => outgoing = Some(packet),
+                    Err(_) => return Err("Network transport disconnected".into()),
+                }
+            }
+        }
+        let online = connected && stream_ready.load(Ordering::Acquire);
+        let confirmed = network_thread.is_none() || (online && replica.is_confirmed(&session));
         if stop && (confirmed || stopping.is_some_and(|t| t.elapsed() >= Duration::from_secs(3))) {
             return Ok(());
         }
@@ -281,6 +350,7 @@ fn application_worker(
                 confirmed,
                 updates: stress.updates,
                 received_updates,
+                remote_sample,
             });
             published_key = Some(key);
         }
@@ -327,6 +397,9 @@ pub(super) fn state_worker(
     let mut pending = None;
     let mut serial = 0;
     let mut received_updates = 0;
+    let mut remote_sample = None;
+    let mut measured_sample = 0;
+    let mut sync_to_present_ms = None;
     let mut scene_cache = None;
     let mut mesh_cache = Arc::new(Vec::new());
     let mut copy_cache = Arc::new(Vec::new());
@@ -374,8 +447,14 @@ pub(super) fn state_worker(
                     }
                 }
                 Input::Presented(frame, renderer, display) => {
+                    if let Some((id, at)) = frame.remote_sample
+                        && id > measured_sample
+                    {
+                        measured_sample = id;
+                        sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
+                    }
                     if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"controls":{"level":frame.controls.level,"dial":frame.controls.dial,"pad":frame.controls.pad},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"controls":{"level":frame.controls.level,"dial":frame.controls.dial,"pad":frame.controls.pad},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                         let tmp = format!("{path}.tmp");
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
@@ -399,6 +478,7 @@ pub(super) fn state_worker(
             confirmed = next.confirmed;
             updates = next.updates;
             received_updates = next.received_updates;
+            remote_sample = next.remote_sample;
         }
         dirty |= shell.tick(now);
         for _ in 0..64 {
@@ -477,6 +557,7 @@ pub(super) fn state_worker(
                 controls: replica.controls()?,
                 updates,
                 received_updates,
+                remote_sample,
                 serial,
             });
             dirty = false;
@@ -578,13 +659,14 @@ fn ink_network(
 }
 fn network(
     url: String,
-    rx: mpsc::Receiver<Vec<u8>>,
-    reply: mpsc::SyncSender<HostUpdate>,
+    rx: mpsc::Receiver<NetworkSend>,
+    reply: mpsc::SyncSender<NetworkEvent>,
     release_file: Option<String>,
     stream_ready: Arc<AtomicBool>,
+    connection: Arc<AtomicU64>,
+    abort: Arc<AtomicU64>,
 ) {
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
-    let _ = rustls::crypto::ring::default_provider().install_default();
     let url = url
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
@@ -593,22 +675,11 @@ fn network(
     } else {
         url
     };
-    let mut replica = match Replica::new() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Sync startup: {e}");
-            return;
-        }
-    };
-    let mut pending = None;
     let mut announced_release = String::new();
+    let mut epoch = 0_u64;
     loop {
         stream_ready.store(false, Ordering::Release);
-        while let Ok(doc) = rx.try_recv() {
-            if let Err(e) = replica.merge(&doc) {
-                eprintln!("Rejected local sync: {e}");
-            }
-        }
+        connection.store(0, Ordering::Release);
         let mut socket = match tungstenite::connect(url.as_str()) {
             Ok((s, _)) => s,
             Err(e) => {
@@ -623,75 +694,51 @@ fn network(
             _ => None,
         };
         if let Some(tcp) = tcp {
-            let _ = tcp.set_read_timeout(Some(Duration::from_millis(50)));
-            let _ = tcp.set_write_timeout(Some(Duration::from_secs(5)));
+            let _ = tcp.set_read_timeout(Some(Duration::from_millis(5)));
+            let _ = tcp.set_write_timeout(Some(Duration::from_secs(2)));
         }
-        let mut session = SyncSession::default();
-        eprintln!("Live state stream connected");
+        epoch = epoch.checked_add(1).expect("Connection epoch exhausted");
+        connection.store(epoch, Ordering::Release);
+        if reply.send(NetworkEvent::Connected(epoch)).is_err() {
+            return;
+        }
+        eprintln!("Live state byte transport connected");
         loop {
+            if abort.load(Ordering::Acquire) == epoch {
+                break;
+            }
             loop {
                 match rx.try_recv() {
-                    Ok(doc) => {
-                        if let Err(e) = replica.merge(&doc) {
-                            eprintln!("Local sync: {e}");
+                    Ok(packet) if packet.epoch == epoch => {
+                        if socket.send(Message::Binary(packet.bytes.into())).is_err() {
+                            connection.store(0, Ordering::Release);
+                            break;
                         }
                     }
+                    Ok(_) => {}
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => return,
                 }
             }
-            if let Some(bytes) = pending.take() {
-                match reply.try_send(bytes) {
-                    Ok(()) => {}
-                    Err(mpsc::TrySendError::Full(bytes)) => pending = Some(bytes),
-                    Err(_) => return,
-                }
-            }
-            match replica.generate_sync(&mut session) {
-                Ok(Some(bytes)) => {
-                    if socket.send(Message::Binary(bytes.into())).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    eprintln!("Sync generate: {e}");
-                    break;
-                }
+            if connection.load(Ordering::Acquire) == 0 {
+                break;
             }
             match socket.read() {
-                Ok(Message::Binary(bytes)) if bytes.starts_with(b"OTML1") => {
-                    match replica.set_presentation(if bytes.len() == 5 {
-                        None
-                    } else {
-                        Some(&bytes[5..])
-                    }) {
-                        Ok(_) => pending = Some(update(&mut replica, &session)),
-                        Err(e) => {
-                            eprintln!("Rejected monitoring view: {e}");
-                            break;
-                        }
-                    }
-                }
-                Ok(Message::Binary(bytes)) => match replica.receive_sync(&mut session, &bytes) {
-                    Ok(true) => {
-                        pending = Some(update(&mut replica, &session));
-                        stream_ready.store(true, Ordering::Release);
-                    }
-                    Ok(false) => {
-                        pending = Some(update(&mut replica, &session));
-                        stream_ready.store(true, Ordering::Release);
-                    }
-                    Err(e) => {
-                        eprintln!("Rejected stream: {e}");
+                Ok(Message::Binary(bytes)) => {
+                    if bytes.len() > otrios_core::dashboard::MAX_DOCUMENT_BYTES + 5 {
                         break;
                     }
-                },
+                    if reply
+                        .send(NetworkEvent::Packet(epoch, Instant::now(), bytes.to_vec()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
                 Ok(Message::Text(text)) => {
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
                         && value["type"] == "release"
                     {
-                        eprintln!("Published code release={}", value["release"]["id"]);
                         let id = value["release"]["id"].as_str().unwrap_or_default();
                         if announced_release != id {
                             if let Some(path) = &release_file {
@@ -721,13 +768,131 @@ fn network(
                 }
             }
         }
-        thread::sleep(Duration::from_millis(500));
+        connection.store(0, Ordering::Release);
+        stream_ready.store(false, Ordering::Release);
+        thread::sleep(Duration::from_millis(250));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn single_owner_receives_remote_edits_and_resyncs_after_transport_reconnect() {
+        use std::net::TcpListener;
+        use tungstenite::Message;
+        enum ServerAction {
+            Level(u16),
+            Disconnect,
+            Stop,
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (actions, commands) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let mut authority = Replica::new().unwrap();
+            authority.set_control(0, [705, 0]).unwrap();
+            'accept: loop {
+                let (tcp, _) = listener.accept().unwrap();
+                tcp.set_read_timeout(Some(Duration::from_millis(5)))
+                    .unwrap();
+                let mut wire = tungstenite::accept(tcp).unwrap();
+                let mut session = SyncSession::default();
+                loop {
+                    for command in commands.try_iter() {
+                        match command {
+                            ServerAction::Level(n) => {
+                                authority.set_control(0, [n, 0]).unwrap();
+                            }
+                            ServerAction::Disconnect => {
+                                let _ = wire.close(None);
+                                continue 'accept;
+                            }
+                            ServerAction::Stop => return,
+                        }
+                    }
+                    if let Some(bytes) = authority.generate_sync(&mut session).unwrap()
+                        && wire.send(Message::Binary(bytes.into())).is_err()
+                    {
+                        continue 'accept;
+                    }
+                    match wire.read() {
+                        Ok(Message::Binary(bytes)) => {
+                            authority.receive_sync(&mut session, &bytes).unwrap();
+                        }
+                        Ok(Message::Close(_)) => continue 'accept,
+                        Ok(_) => {
+                            let _ = wire.flush();
+                        }
+                        Err(tungstenite::Error::Io(e))
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                            ) => {}
+                        Err(_) => continue 'accept,
+                    }
+                }
+            }
+        });
+        let (work, receive) = mpsc::sync_channel(1);
+        let (publish, views) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            application_worker(
+                Options {
+                    url: Some(format!("ws://{address}/stream")),
+                    ..Options::default()
+                },
+                Replica::new().unwrap(),
+                receive,
+                publish,
+            )
+        });
+        let wait = |level, dial, ack| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let next = views.recv_timeout(Duration::from_secs(2)).unwrap();
+                let c = next.replica.controls().unwrap();
+                if next.online
+                    && next.confirmed
+                    && c.level == level
+                    && c.dial == dial
+                    && next.acknowledged >= ack
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Latest confirmed view did not arrive"
+                );
+            }
+        };
+        wait(705, 350, 0);
+        actions.send(ServerAction::Level(804)).unwrap();
+        work.send(Work {
+            commands: vec![Command {
+                sequence: 1,
+                edit: otrios_core::dashboard::presentation::Edit::Control(1, [620, 0]),
+            }],
+            stress: 0,
+            stall_ms: 0,
+            stop: false,
+        })
+        .unwrap();
+        wait(804, 620, 1);
+        actions.send(ServerAction::Disconnect).unwrap();
+        actions.send(ServerAction::Level(905)).unwrap();
+        wait(905, 620, 1);
+        actions.send(ServerAction::Stop).unwrap();
+        server.join().unwrap();
+        work.send(Work {
+            commands: vec![],
+            stress: 0,
+            stall_ms: 0,
+            stop: true,
+        })
+        .unwrap();
+        worker.join().unwrap().unwrap();
+    }
     #[test]
     fn client_ignores_disk_and_blocked_application_cannot_block_exact_release() {
         use otrios_interfaces::scene::{Action, PointerPhase, TouchResponder};

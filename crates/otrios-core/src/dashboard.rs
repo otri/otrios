@@ -234,12 +234,20 @@ impl Replica {
             return Err("Sync message too large".into());
         }
         let message = automerge::sync::Message::decode(bytes).map_err(err)?;
+        let acknowledgement_only = message.changes.is_empty();
         let mut doc = self.doc.clone();
         let mut next_session = session.clone();
         doc.sync()
             .receive_sync_message(&mut next_session.0, message)
             .map_err(err)?;
-        let changed = self.publish(doc)?;
+        // A pure protocol acknowledgement cannot introduce document changes.
+        // Preserve protocol bookkeeping without recompressing history/projecting.
+        let changed = if acknowledgement_only {
+            self.doc = doc;
+            false
+        } else {
+            self.publish(doc)?
+        };
         *session = next_session;
         Ok(changed)
     }

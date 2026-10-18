@@ -70,3 +70,26 @@ unchanged, then releases the gate and verifies the exact value survives on disk.
 `dashboard-profile --deferred STATE_FILE PRESENTATION_FILE` measures just the
 presentation path with publication held back. It is still a CPU probe, not a
 touch-to-panel or refresh-lock measurement.
+
+
+## Single CRDT owner and transient ink
+
+The frame user confirmed ephemeral trails now track quickly, but reported 2–3 s
+when following durable edits from another device. A frozen 14,626-byte authority
+snapshot was copied into temporary frame RAM for ten disposable update probes.
+No display owner, clocks, calibration or live state was changed by those probes.
+
+| Mean CPU stage | Before | Single owner + fast acknowledgement |
+| --- | ---: | ---: |
+| Wire receive/ack experiment | 90.813 ms | 62.415 ms |
+| Full-document decode/merge between workers | 335.046 ms | removed |
+| Replica clone for publication | 2.317 ms | 2.105 ms |
+
+The transport now moves ordered protocol bytes only; application reconciliation
+owns one mutable replica, while presentation and ink retain their independent
+threads. Pure protocol acknowledgements retain sync bookkeeping without
+recompressing history/rebuilding an unchanged view. New real-WebSocket tests
+cover concurrent local/remote edits and reconnection with a fresh sync session.
+The ready file records actual remote receive-to-present CPU/queue/display timing;
+this excludes the sending device, authority and network transit before receipt.
+The probe figures above are not end-to-end latency or FPS measurements.
