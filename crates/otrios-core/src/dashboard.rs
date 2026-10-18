@@ -4,11 +4,13 @@
 
 pub mod components;
 pub mod input;
+pub mod keyboard;
 pub mod layout;
 mod render;
 pub mod scene;
+pub mod shell;
 mod snapshot;
-pub use render::{Mesh, render};
+pub use render::{Mesh, render, render_scene};
 pub use snapshot::ViewSnapshot;
 
 use automerge::sync::SyncDoc;
@@ -209,7 +211,7 @@ impl Replica {
                     .ok_or("Missing focus switch")?;
                 self.set_enabled(!enabled)
             }
-            None => Ok(false),
+            _ => Ok(false),
         }
     }
     fn publish(&mut self, mut candidate: AutoCommit) -> Result<bool> {

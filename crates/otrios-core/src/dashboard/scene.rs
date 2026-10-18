@@ -14,6 +14,7 @@ pub struct Scene {
 pub struct Located<'a> {
     pub node: &'a SceneNode,
     pub origin: [f32; 2],
+    pub scale: f32,
 }
 
 impl Scene {
@@ -36,10 +37,19 @@ impl Scene {
             {
                 return Err("Invalid scene frame".into());
             }
-            if !matches!(n.primitive, Primitive::Canvas { .. }) && !n.children.is_empty() {
+            if !matches!(
+                n.primitive,
+                Primitive::Canvas { .. } | Primitive::Viewport { .. }
+            ) && !n.children.is_empty()
+            {
                 return Err("Only a canvas may contain children".into());
             }
             match &n.primitive {
+                Primitive::Viewport { scale }
+                    if !scale.is_finite() || !(0.1..=4.).contains(scale) =>
+                {
+                    return Err("Invalid viewport scale".into());
+                }
                 Primitive::Text { value, scale, .. }
                     if value.len() > 96 || !(1..=8).contains(scale) =>
                 {
@@ -93,16 +103,21 @@ impl Scene {
         fn walk<'a>(
             n: &'a SceneNode,
             origin: [f32; 2],
+            scale: f32,
             id: NodeId,
             path: &mut Vec<Located<'a>>,
         ) -> bool {
-            let origin = [origin[0] + n.frame.x, origin[1] + n.frame.y];
-            path.push(Located { node: n, origin });
+            let origin = [origin[0] + n.frame.x * scale, origin[1] + n.frame.y * scale];
+            path.push(Located {
+                node: n,
+                origin,
+                scale,
+            });
             if n.id == id {
                 return true;
             }
             for child in &n.children {
-                if walk(child, origin, id, path) {
+                if walk(child, origin, child_scale(n, scale), id, path) {
                     return true;
                 }
             }
@@ -110,7 +125,7 @@ impl Scene {
             false
         }
         let mut path = Vec::new();
-        if walk(self.root(), [0., 0.], id, &mut path) {
+        if walk(self.root(), [0., 0.], 1., id, &mut path) {
             Some(path)
         } else {
             None
@@ -120,23 +135,34 @@ impl Scene {
         fn walk<'a>(
             n: &'a SceneNode,
             origin: [f32; 2],
+            scale: f32,
             p: [f32; 2],
             path: &mut Vec<Located<'a>>,
         ) -> bool {
-            let origin = [origin[0] + n.frame.x, origin[1] + n.frame.y];
-            let local = [p[0] - origin[0], p[1] - origin[1]];
-            if matches!(n.primitive, Primitive::Canvas { clip: true })
-                && !rect_contains(n.frame, local)
+            let origin = [origin[0] + n.frame.x * scale, origin[1] + n.frame.y * scale];
+            let local = [(p[0] - origin[0]) / scale, (p[1] - origin[1]) / scale];
+            if matches!(
+                n.primitive,
+                Primitive::Canvas { clip: true } | Primitive::Viewport { .. }
+            ) && !rect_contains(n.frame, local)
             {
                 return false;
             }
-            path.push(Located { node: n, origin });
+            path.push(Located {
+                node: n,
+                origin,
+                scale,
+            });
             for child in n.children.iter().rev() {
-                if walk(child, origin, p, path) {
+                if walk(child, origin, child_scale(n, scale), p, path) {
                     return true;
                 }
             }
-            if !matches!(n.primitive, Primitive::Canvas { .. }) && contains(n, local) {
+            if !matches!(
+                n.primitive,
+                Primitive::Canvas { .. } | Primitive::Viewport { .. }
+            ) && contains(n, local)
+            {
                 return true;
             }
             path.pop();
@@ -146,22 +172,33 @@ impl Scene {
             return vec![];
         }
         let mut path = Vec::new();
-        walk(self.root(), [0., 0.], point, &mut path);
+        walk(self.root(), [0., 0.], 1., point, &mut path);
         path
     }
     pub fn controls(&self) -> Vec<Located<'_>> {
-        fn walk<'a>(n: &'a SceneNode, origin: [f32; 2], v: &mut Vec<Located<'a>>) {
-            let origin = [origin[0] + n.frame.x, origin[1] + n.frame.y];
+        fn walk<'a>(n: &'a SceneNode, origin: [f32; 2], scale: f32, v: &mut Vec<Located<'a>>) {
+            let origin = [origin[0] + n.frame.x * scale, origin[1] + n.frame.y * scale];
             if n.semantics.is_some() {
-                v.push(Located { node: n, origin });
+                v.push(Located {
+                    node: n,
+                    origin,
+                    scale,
+                });
             }
             for c in &n.children {
-                walk(c, origin, v);
+                walk(c, origin, child_scale(n, scale), v);
             }
         }
         let mut v = Vec::new();
-        walk(self.root(), [0., 0.], &mut v);
+        walk(self.root(), [0., 0.], 1., &mut v);
         v
+    }
+}
+fn child_scale(n: &SceneNode, scale: f32) -> f32 {
+    if let Primitive::Viewport { scale: child } = n.primitive {
+        scale * child
+    } else {
+        scale
     }
 }
 fn rect_contains(r: Rect, p: [f32; 2]) -> bool {

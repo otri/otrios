@@ -19,6 +19,24 @@ try {
   } catch(e) {throw new Error(`Saved dashboard could not be loaded; it has been kept intact. ${e}`);}
   const cachedPresentation=sessionStorage.getItem(presentationKey);
   if(cachedPresentation)dashboard.present(Uint8Array.from(atob(cachedPresentation),c=>c.charCodeAt(0)));
+  let historyApplying=false,lastRoute='';
+  function route(){return `/${dashboard.screen()}${dashboard.keyboard_visible()?'/input':''}`;}
+  function applyRoute(){
+    historyApplying=true;
+    const parts=location.hash.replace(/^#\/?/,'').split('/');dashboard.navigate(parts[0]);
+    if(parts[0]==='keyboard'&&parts[1]==='input'&&!dashboard.keyboard_visible())dashboard.show_keyboard();
+    else if(dashboard.keyboard_visible()&&parts[1]!=='input')dashboard.back();
+    lastRoute=route();
+  }
+  applyRoute();history.replaceState({otrios:true,input:dashboard.keyboard_visible(),previous:null},'',`#${route()}`);historyApplying=false;
+  function syncRoute(){
+    const next=route();
+    if(!historyApplying&&next!==lastRoute){
+      if(next===history.state?.previous){lastRoute=next;history.back();}
+      else {const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,input:dashboard.keyboard_visible(),previous},'',`#${next}`);}
+    }
+  }
+  window.addEventListener('popstate',()=>{applyRoute();draw();historyApplying=false;});
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});
   if(!gl)throw new Error('This dashboard requires WebGL.');
   gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
@@ -44,11 +62,11 @@ try {
     for(const id of ids){
       let button=controls.get(id);
       if(!button){
-        button=document.createElement('button');button.type='button';button.setAttribute('role','switch');button.dataset.sceneNode=String(id);
+        button=document.createElement('button');button.type='button';button.dataset.sceneNode=String(id);
         button.addEventListener('click',()=>{try{if(dashboard.activate(id)){draw();sendChanges();}}catch(e){fatal(e);}});
         controlsLayer.append(button);controls.set(id,button);
       }
-      button.setAttribute('aria-label',dashboard.control_label(id));button.setAttribute('aria-checked',String(dashboard.control_checked(id)));
+      button.setAttribute('aria-label',dashboard.control_label(id));button.disabled=dashboard.control_disabled(id);const role=dashboard.control_role(id);button.setAttribute('role',role);if(role==='switch')button.setAttribute('aria-checked',String(dashboard.control_checked(id)));else button.removeAttribute('aria-checked');
       const [x,y,w,h]=dashboard.control_bounds(id);
       Object.assign(button.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});
     }
@@ -56,6 +74,8 @@ try {
     revision.textContent=`VIEW ${dashboard.snapshot_id().slice(0,12)}`;
     revision.dataset.snapshot=dashboard.snapshot_id();
     revision.dataset.layout=dashboard.layout_id();
+    revision.dataset.screen=dashboard.screen();
+    syncRoute();
     persist();
   }
   let socket=null,retry=250,stopped=false;
@@ -77,7 +97,7 @@ try {
             const release=message.release;
             if(activeRelease&&release.id!==activeRelease&&release.web_entry){
               if(!persist()){error.hidden=false;error.textContent='A code update is ready. Automatic reload is paused because this tab cannot save its state.';return;}
-              stopped=true;socket.close();location.replace(release.web_entry);return;
+              stopped=true;socket.close();location.replace(release.web_entry+location.hash);return;
             }
             activeRelease=release.id;
             revision.dataset.release=release.id;
@@ -104,16 +124,30 @@ try {
   function pointer(event,phase){
     try{
       const r=canvas.getBoundingClientRect();
-      const changed=dashboard.pointer(phase,event.pointerId,(event.clientX-r.left)*1280/r.width,(event.clientY-r.top)*800/r.height);
+      const changed=dashboard.pointer(phase,event.pointerId,(event.clientX-r.left)*1280/r.width,(event.clientY-r.top)*800/r.height,performance.now());
       if(changed){draw();sendChanges();}
     }catch(e){fatal(e);}
   }
-  canvas.addEventListener('pointerdown',event=>{event.preventDefault();pointer(event,0);pointers.add(event.pointerId);canvas.setPointerCapture(event.pointerId);});
+  let ticking=false;
+  function tick(now){try{if(dashboard.tick(now))draw();}catch(e){fatal(e);}if(pointers.size)requestAnimationFrame(tick);else ticking=false;}
+  canvas.addEventListener('pointerdown',event=>{event.preventDefault();canvas.focus({preventScroll:true});pointer(event,0);pointers.add(event.pointerId);canvas.setPointerCapture(event.pointerId);if(!ticking){ticking=true;requestAnimationFrame(tick);}});
   canvas.addEventListener('pointermove',event=>{if(pointers.has(event.pointerId))pointer(event,1);});
   canvas.addEventListener('pointerup',event=>{pointer(event,2);pointers.delete(event.pointerId);});
   canvas.addEventListener('pointercancel',event=>{pointer(event,3);pointers.delete(event.pointerId);});
   canvas.addEventListener('lostpointercapture',event=>{pointer(event,3);pointers.delete(event.pointerId);});
-  window.addEventListener('blur',()=>{for(const id of pointers){dashboard.pointer(3,id,0,0);if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();});
+  window.addEventListener('blur',()=>{for(const id of pointers){dashboard.pointer(3,id,0,0,performance.now());if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();dashboard.cancel_input();draw();});
+  window.addEventListener('keydown',event=>{
+    if(event.isComposing)return;
+    try{
+      if(event.key==='Escape'){event.preventDefault();if(dashboard.back())draw();return;}
+      if(!dashboard.editing()||event.target.closest?.('#controls button'))return;
+      const shortcut=event.ctrlKey||event.metaKey;
+      const key=shortcut&&event.key.toLowerCase()==='a'?'SelectAll':event.key;
+      if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){event.preventDefault();if(dashboard.key(key,event.shiftKey))draw();}
+      else if(!shortcut&&!event.altKey&&event.key.length===1){event.preventDefault();if(dashboard.type_text(event.key))draw();}
+    }catch(e){fatal(e);}
+  });
+  window.addEventListener('paste',event=>{if(dashboard.editing()){event.preventDefault();if(dashboard.type_text(event.clipboardData.getData('text/plain')))draw();}});
   canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to resume your saved dashboard.');});
   draw();connect();
 }catch(e){fatal(e);}

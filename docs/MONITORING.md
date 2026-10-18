@@ -1,5 +1,7 @@
 # Prometheus monitoring view
 
+Open **Monitoring** from the [Home Screen](HOME_AND_INPUT.md), or use the browser `#/monitoring` route. Back/Home navigate locally while the collector continues refreshing.
+
 This read-only dashboard recreates a subset of Grafana's **SPD & M3D — Overall Service Status** in the shared primitive compositor. Both the native GLES2 photo frame and Wasm/WebGL browser host receive the same complete FlexBuffers presentation. The frame does not run Grafana or a browser.
 
 ## Panels and query semantics

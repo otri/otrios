@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Native GPU host: SDL owns the window/input, GLES2 draws the shared triangle list.
-use otrios_core::dashboard::{Replica, SyncSession, input::InputRouter, render};
+use otrios_core::dashboard::{Replica, SyncSession, render_scene, shell::Shell};
+use otrios_interfaces::keyboard::Edit;
 use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use sdl2::{
     event::Event, keyboard::Keycode, mouse::MouseButton, pixels::Color, rect::FPoint,
@@ -106,9 +107,17 @@ fn main() -> Result<(), String> {
         .set_logical_size(1280, 800)
         .map_err(|e| e.to_string())?;
     canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+    // The core OSK owns this surface; do not activate a second compositor input panel.
+    video.text_input().stop();
     let mut events = sdl.event_pump()?;
     let mut dirty = true;
-    let mut input = InputRouter::default();
+    let mut shell = Shell::default();
+    if let Some(path) = &state
+        && let Ok(route) = fs::read_to_string(format!("{path}.screen"))
+    {
+        shell.open_name(route.trim());
+    }
+    let mut saved_screen = String::new();
     let mut drawn = 0;
     let mut last_sync = Instant::now() - Duration::from_secs(1);
     let started = Instant::now();
@@ -137,38 +146,81 @@ fn main() -> Result<(), String> {
         }
         for event in events.poll_iter() {
             match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
+                Event::Quit { .. } => break 'running,
+                Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => break 'running,
+                } => dirty |= shell.back(),
+                Event::TextInput { text, .. } if shell.editing() => {
+                    dirty |= shell.hardware_edit(&Edit::Commit(text))
+                }
+                Event::KeyDown {
+                    keycode: Some(key),
+                    keymod,
+                    ..
+                } if shell.editing() => {
+                    let shift = keymod.intersects(
+                        sdl2::keyboard::Mod::LSHIFTMOD | sdl2::keyboard::Mod::RSHIFTMOD,
+                    );
+                    let shortcut = keymod.intersects(
+                        sdl2::keyboard::Mod::LCTRLMOD
+                            | sdl2::keyboard::Mod::RCTRLMOD
+                            | sdl2::keyboard::Mod::LGUIMOD
+                            | sdl2::keyboard::Mod::RGUIMOD,
+                    );
+                    let edit = match key {
+                        Keycode::Backspace => Some(Edit::Backspace),
+                        Keycode::Left => Some(Edit::Left { select: shift }),
+                        Keycode::Right => Some(Edit::Right { select: shift }),
+                        Keycode::Tab => Some(Edit::Tab { backward: shift }),
+                        Keycode::Return => Some(Edit::Enter),
+                        Keycode::A if shortcut => Some(Edit::SelectAll),
+                        _ => None,
+                    };
+                    if let Some(edit) = edit {
+                        dirty |= shell.hardware_edit(&edit);
+                    } else if video.current_video_driver() == "wayland" && !shortcut {
+                        let name = if key == Keycode::Space {
+                            " ".into()
+                        } else {
+                            key.name()
+                        };
+                        if let Some(text) = otrios_core::dashboard::keyboard::ascii_key(
+                            &name,
+                            shift,
+                            keymod.contains(sdl2::keyboard::Mod::CAPSMOD),
+                        ) {
+                            dirty |= shell.hardware_edit(&Edit::Commit(text));
+                        }
+                    }
+                }
                 Event::MouseButtonDown {
                     mouse_btn: MouseButton::Left,
                     x,
                     y,
                     ..
                 } => {
-                    let result = input.dispatch(
-                        replica.snapshot().scene().clone(),
+                    dirty |= shell.pointer(
+                        &mut replica,
                         PointerEvent {
                             id: 0,
                             phase: PointerPhase::Down,
                             position: [x as f32, y as f32],
                         },
-                    );
-                    sdl.mouse().capture(result.responder.is_some());
-                    dirty |= replica.apply_action(result.action)?;
+                        started.elapsed().as_millis() as u64,
+                    )?;
+                    sdl.mouse().capture(true);
                 }
                 Event::MouseMotion { x, y, .. } => {
-                    let result = input.dispatch(
-                        replica.snapshot().scene().clone(),
+                    dirty |= shell.pointer(
+                        &mut replica,
                         PointerEvent {
                             id: 0,
                             phase: PointerPhase::Move,
                             position: [x as f32, y as f32],
                         },
-                    );
-                    dirty |= replica.apply_action(result.action)?;
+                        started.elapsed().as_millis() as u64,
+                    )?;
                 }
                 Event::MouseButtonUp {
                     mouse_btn: MouseButton::Left,
@@ -176,16 +228,16 @@ fn main() -> Result<(), String> {
                     y,
                     ..
                 } => {
-                    let result = input.dispatch(
-                        replica.snapshot().scene().clone(),
+                    dirty |= shell.pointer(
+                        &mut replica,
                         PointerEvent {
                             id: 0,
                             phase: PointerPhase::Up,
                             position: [x as f32, y as f32],
                         },
-                    );
+                        started.elapsed().as_millis() as u64,
+                    )?;
                     sdl.mouse().capture(false);
-                    dirty |= replica.apply_action(result.action)?;
                     last_sync = Instant::now() - Duration::from_secs(1);
                 }
                 Event::KeyDown {
@@ -193,15 +245,8 @@ fn main() -> Result<(), String> {
                     repeat: false,
                     ..
                 } => {
-                    if let Some(id) = replica
-                        .snapshot()
-                        .scene()
-                        .controls()
-                        .first()
-                        .map(|c| c.node.id)
-                    {
-                        let result = InputRouter::activate(replica.snapshot().scene(), id);
-                        dirty |= replica.apply_action(result.action)?;
+                    if let Some(id) = shell.scene(&replica)?.controls().first().map(|c| c.node.id) {
+                        dirty |= shell.activate(&mut replica, id)?;
                         last_sync = Instant::now() - Duration::from_secs(1);
                     }
                 }
@@ -210,14 +255,8 @@ fn main() -> Result<(), String> {
                     ..
                 } => {
                     sdl.mouse().capture(false);
-                    input.dispatch(
-                        replica.snapshot().scene().clone(),
-                        PointerEvent {
-                            id: 0,
-                            phase: PointerPhase::Cancel,
-                            position: [0., 0.],
-                        },
-                    );
+                    shell.cancel();
+                    dirty = true;
                 }
                 Event::Window { .. } => dirty = true,
                 _ => {}
@@ -237,9 +276,29 @@ fn main() -> Result<(), String> {
             let _ = tx.try_send(replica.save());
             last_sync = Instant::now();
         }
+        dirty |= shell.tick(started.elapsed().as_millis() as u64);
+        if video.current_video_driver() != "wayland" {
+            if shell.editing() {
+                if !video.text_input().is_active() {
+                    video.text_input().start();
+                }
+            } else if video.text_input().is_active() {
+                video.text_input().stop();
+            }
+        }
+        if shell.screen_name() != saved_screen {
+            if let Some(path) = &state {
+                let path = format!("{path}.screen");
+                let tmp = format!("{path}.tmp");
+                fs::write(&tmp, shell.screen_name())
+                    .and_then(|_| fs::rename(tmp, path))
+                    .map_err(|e| e.to_string())?;
+            }
+            saved_screen = shell.screen_name().into();
+        }
         if dirty {
             let start = Instant::now();
-            let mesh = render(replica.snapshot());
+            let mesh = render_scene(shell.scene(&replica)?.as_ref());
             let vertices: Vec<_> = mesh
                 .vertices
                 .chunks_exact(6)
@@ -266,7 +325,7 @@ fn main() -> Result<(), String> {
             }
             canvas.present();
             if let Some(path) = &ready_file {
-                let info = serde_json::json!({"pid":std::process::id(),"snapshot":replica.snapshot().hex_id(),"renderer":canvas.info().name,"stream_ready":observed_stream,"layout":replica.snapshot().layout().hex_id(),"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                let info = serde_json::json!({"pid":std::process::id(),"snapshot":replica.snapshot().hex_id(),"renderer":canvas.info().name,"stream_ready":observed_stream,"screen":shell.screen_name(),"keyboard_visible":shell.keyboard_visible(),"layout":replica.snapshot().layout().hex_id(),"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                 let tmp = format!("{path}.tmp");
                 fs::write(&tmp, info.to_string())
                     .and_then(|_| fs::rename(tmp, path))

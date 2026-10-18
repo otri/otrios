@@ -12,7 +12,7 @@ otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
 default = []
-dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:font8x8"]
+dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:font8x8", "dep:unicode-segmentation"]
 
 [dependencies.automerge]
 version = "=0.12.0"
@@ -32,3 +32,7 @@ optional = true
 
 [lints]
 workspace = true
+
+[dependencies.unicode-segmentation]
+version = "=1.13.3"
+optional = true

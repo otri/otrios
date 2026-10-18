@@ -25,6 +25,7 @@ pub enum Binding {
     Samples,
     HasSamples,
     LastSample,
+    Local(u16),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
@@ -86,6 +87,12 @@ pub enum Responder {
     Bubble,
     Consume,
     ToggleFocus,
+    Open(crate::scene::Screen),
+    Back,
+    Home,
+    FocusField(u8),
+    KeyboardKey(u16),
+    KeyParameter(u16),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

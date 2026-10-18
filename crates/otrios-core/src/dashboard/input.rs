@@ -35,8 +35,8 @@ fn bubble(path: &[Located<'_>], event: PointerEvent) -> (Delivery, Option<TouchR
         result.visits.push(Visit {
             node: entry.node.id,
             local: [
-                event.position[0] - entry.origin[0],
-                event.position[1] - entry.origin[1],
+                (event.position[0] - entry.origin[0]) / entry.scale,
+                (event.position[1] - entry.origin[1]) / entry.scale,
             ],
             phase: event.phase,
         });
@@ -50,6 +50,9 @@ fn bubble(path: &[Located<'_>], event: PointerEvent) -> (Delivery, Option<TouchR
     (result, None)
 }
 impl InputRouter {
+    pub fn cancel_all(&mut self) {
+        self.captures.clear();
+    }
     pub fn dispatch(&mut self, scene: Arc<Scene>, mut event: PointerEvent) -> Delivery {
         if event.position.iter().any(|v| !v.is_finite()) {
             event.phase = PointerPhase::Cancel;

@@ -34,6 +34,7 @@ pub fn render_scene(scene: &Scene) -> Mesh {
     mesh.paint(
         scene.root(),
         [0., 0.],
+        1.,
         Clip {
             left: 0.,
             top: 0.,
@@ -160,8 +161,7 @@ impl Mesh {
         }
         self.fan([r.x + r.width / 2., r.y + r.height / 2.], &outline, c, clip);
     }
-    fn text(&mut self, r: Rect, value: &str, scale: u32, c: Color, clip: Clip) {
-        let scale = scale as f32;
+    fn text(&mut self, r: Rect, value: &str, scale: f32, c: Color, clip: Clip) {
         let clip = clip.intersect(r);
         for (i, ch) in value.chars().enumerate() {
             let glyph = BASIC_FONTS
@@ -202,15 +202,28 @@ impl Mesh {
         self.triangle([p[0], p[1], p[2]], c, clip);
         self.triangle([p[2], p[1], p[3]], c, clip);
     }
-    fn paint(&mut self, node: &SceneNode, parent: [f32; 2], clip: Clip) {
+    fn paint(&mut self, node: &SceneNode, parent: [f32; 2], factor: f32, clip: Clip) {
         let f = node.frame;
-        let r = Rect::new(parent[0] + f.x, parent[1] + f.y, f.width, f.height);
+        let r = Rect::new(
+            parent[0] + f.x * factor,
+            parent[1] + f.y * factor,
+            f.width * factor,
+            f.height * factor,
+        );
         match &node.primitive {
             Primitive::Canvas { clip: enabled } => {
                 let clip = if *enabled { clip.intersect(r) } else { clip };
                 if !clip.empty() {
                     for child in &node.children {
-                        self.paint(child, [r.x, r.y], clip);
+                        self.paint(child, [r.x, r.y], factor, clip);
+                    }
+                }
+            }
+            Primitive::Viewport { scale } => {
+                let clip = clip.intersect(r);
+                if !clip.empty() {
+                    for child in &node.children {
+                        self.paint(child, [r.x, r.y], factor * scale, clip);
                     }
                 }
             }
@@ -218,12 +231,12 @@ impl Mesh {
                 value,
                 scale,
                 color,
-            } => self.text(r, value, *scale, *color, clip),
+            } => self.text(r, value, *scale as f32 * factor, *color, clip),
             Primitive::Superellipse {
                 radius,
                 exponent,
                 color,
-            } => self.superellipse(r, *radius, *exponent, *color, clip),
+            } => self.superellipse(r, *radius * factor, *exponent, *color, clip),
             Primitive::Circle { color } => self.circle(r, *color, clip),
             Primitive::Path {
                 points,
@@ -232,9 +245,9 @@ impl Mesh {
             } => {
                 for p in points.windows(2) {
                     self.line(
-                        [r.x + p[0][0], r.y + p[0][1]],
-                        [r.x + p[1][0], r.y + p[1][1]],
-                        *width,
+                        [r.x + p[0][0] * factor, r.y + p[0][1] * factor],
+                        [r.x + p[1][0] * factor, r.y + p[1][1] * factor],
+                        *width * factor,
                         *color,
                         clip,
                     );

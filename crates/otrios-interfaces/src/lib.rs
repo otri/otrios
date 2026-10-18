@@ -57,3 +57,5 @@ pub enum ViewContent {
     Switch { label: String, enabled: bool },
     Graph { label: String, samples: Vec<u32> },
 }
+
+pub mod keyboard;

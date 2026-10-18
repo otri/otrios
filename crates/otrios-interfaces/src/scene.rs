@@ -27,6 +27,10 @@ pub enum Primitive {
     Canvas {
         clip: bool,
     },
+    /// Uniformly scale child logical coordinates inside a clipped frame.
+    Viewport {
+        scale: f32,
+    },
     Text {
         value: String,
         scale: u32,
@@ -51,6 +55,19 @@ pub enum Primitive {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     ToggleFocus,
+    Open(Screen),
+    Back,
+    Home,
+    FocusField(u8),
+    KeyboardKey(u16),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
+pub enum Screen {
+    Home,
+    Monitoring,
+    Controls,
+    Keyboard,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TouchResponder {

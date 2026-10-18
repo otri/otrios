@@ -57,3 +57,7 @@ workspace = true
 name = "dashboard-monitoring"
 path = "src/monitoring.rs"
 required-features = ["server"]
+
+[[bin]]
+name = "dashboard-shell-assets"
+path = "src/shell_seed.rs"

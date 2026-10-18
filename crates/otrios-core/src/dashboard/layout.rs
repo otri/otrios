@@ -121,6 +121,25 @@ impl Layout {
     pub fn resolve(&self, view: &DashboardView) -> Result<Scene> {
         self.resolve_enabled(view, None)
     }
+    /// Typed local UI state belongs to a host session, outside the collaborative document.
+    pub fn resolve_local(
+        &self,
+        view: &DashboardView,
+        local: &BTreeMap<u16, Value>,
+    ) -> Result<Scene> {
+        let bindings = Bindings {
+            view,
+            enabled: None,
+            local: Some(local),
+        };
+        Scene::new(expand(
+            &self.blueprint,
+            &self.blueprint.root,
+            &bindings,
+            0,
+            &mut 0,
+        )?)
+    }
     /// Validate both switch states so a layout cannot disable the next normal toggle.
     pub fn qualify(&self, view: &DashboardView) -> Result<()> {
         for enabled in [false, true] {
@@ -142,7 +161,11 @@ impl Layout {
         Ok(())
     }
     fn resolve_enabled(&self, view: &DashboardView, enabled: Option<bool>) -> Result<Scene> {
-        let bindings = Bindings { view, enabled };
+        let bindings = Bindings {
+            view,
+            enabled,
+            local: None,
+        };
         let mut count = 0;
         Scene::new(expand(
             &self.blueprint,
@@ -316,10 +339,16 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
 struct Bindings<'a> {
     view: &'a DashboardView,
     enabled: Option<bool>,
+    local: Option<&'a BTreeMap<u16, Value>>,
 }
 impl Bindings<'_> {
     fn value(&self, b: Binding) -> Result<Value> {
         match b {
+            Binding::Local(id) => self
+                .local
+                .and_then(|v| v.get(&id))
+                .cloned()
+                .ok_or("Missing local binding".into()),
             Binding::Enabled => Ok(Value::Boolean(self.enabled.unwrap_or_else(|| {
                 self.view
                     .nodes
@@ -565,11 +594,27 @@ fn expand(
                 }
             }
         }
-        let responder = n.responder.map(|r| match r {
-            Responder::Bubble => TouchResponder::Bubble,
-            Responder::Consume => TouchResponder::Consume,
-            Responder::ToggleFocus => TouchResponder::Activate(Action::ToggleFocus),
-        });
+        let responder = if let Some(r) = n.responder {
+            Some(match r {
+                Responder::Bubble => TouchResponder::Bubble,
+                Responder::Consume => TouchResponder::Consume,
+                Responder::ToggleFocus => TouchResponder::Activate(Action::ToggleFocus),
+                Responder::Open(screen) => TouchResponder::Activate(Action::Open(screen)),
+                Responder::Back => TouchResponder::Activate(Action::Back),
+                Responder::Home => TouchResponder::Activate(Action::Home),
+                Responder::FocusField(id) => TouchResponder::Activate(Action::FocusField(id)),
+                Responder::KeyboardKey(id) => TouchResponder::Activate(Action::KeyboardKey(id)),
+                Responder::KeyParameter(key) => {
+                    let id = number(c.params.get(&key).cloned().ok_or("Missing key parameter")?)?;
+                    if id.fract() != 0. || !(0. ..=65535.).contains(&id) {
+                        return Err("Invalid key parameter".into());
+                    }
+                    TouchResponder::Activate(Action::KeyboardKey(id as u16))
+                }
+            })
+        } else {
+            None
+        };
         let semantics = if let Some(s) = &n.semantics {
             Some(SwitchSemantics {
                 label: text(run(&s.label)?)?,

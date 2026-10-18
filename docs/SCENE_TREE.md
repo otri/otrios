@@ -7,6 +7,7 @@ The dashboard now expands its immutable application view into a validated, immut
 | Primitive | Responsibility |
 | --- | --- |
 | Canvas | Parent-local child frames, ordered children, optional rectangular clipping |
+| Viewport | Uniformly scaled child coordinates with rectangular clipping; painting, hit testing and semantic bounds share the transform |
 | Text | Bounded text, bitmap font scale and colour |
 | Superellipse | Filled rectangle with superelliptic corners, radius and exponent; radius zero gives a rectangle |
 | Circle | Filled circle within a square frame |
@@ -47,6 +48,8 @@ The router bounds active pointers to 16 and validates finite input. Pointer capt
 
 ## Validation and limits
 
-Scene construction rejects duplicate identities, nonfinite/oversized geometry, invalid circle/superellipse/path fields, children on non-Canvas primitives, more than 512 nodes and depth beyond 16. Only a clipped root at the fixed logical extent is accepted. Component IDs reserve stable descendant ranges across checked/unchecked states and graph sample changes. Clipping trims actual triangles, including text and curves, rather than just skipping wholly outside shapes.
+Scene construction rejects duplicate identities, nonfinite/oversized geometry, invalid circle/superellipse/path fields, children on primitives other than Canvas/Viewport, more than 512 nodes and depth beyond 16. Only a clipped root at the fixed logical extent is accepted. Component IDs reserve stable descendant ranges across checked/unchecked states and graph sample changes. Clipping trims actual triangles, including text and curves, rather than just skipping wholly outside shapes.
 
-Runtime tests cover nested local-coordinate bubbling, consume/stop behavior and overlapping siblings, independent pointer captures, duplicate release, cancellation and responder removal, drag-out release, concurrent state changes during a gesture, geometric hit tests, clipped triangles and malformed trees. Native/browser host builds remain part of CI. The tiny demo font, absolute frames, translation-only transforms, rectangular Canvas clipping and one application action are intentional first-slice limits. General layout, affine transforms, vector fonts, accessibility-tree generalization and gesture recognition are not implemented here.
+Runtime tests cover nested local-coordinate bubbling, consume/stop behavior and overlapping siblings, independent pointer captures, duplicate release, cancellation and responder removal, drag-out release, concurrent state changes during a gesture, geometric hit tests, clipped triangles and malformed trees. Native/browser host builds remain part of CI. The tiny demo font, absolute frames, translation plus uniform Viewport scaling, rectangular Canvas clipping and explicit bounded application/navigation/input actions are intentional first-slice limits. General layout, arbitrary affine transforms, vector fonts, accessibility-tree generalization and gesture recognition are not implemented here.
+
+The [local shell and core keyboard](HOME_AND_INPUT.md) reuse this chain. Navigation cancels captures. Keyboard contacts use the same painted key ancestry, with an explicit keyboard model for slide-to-neighbour and bounded editing-key repeat instead of ordinary button activation on the originally pressed key.
