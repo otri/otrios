@@ -170,6 +170,63 @@ impl Replica {
         *session = next_session;
         Ok(changed)
     }
+    /// Public demo peers may mutate only the existing switch/count/sample and
+    /// motion fields. Check every new operation, including losing conflicts, so
+    /// a protected layout/schema write cannot hide behind an unchanged view.
+    pub fn receive_demo_sync(&mut self, session: &mut SyncSession, bytes: &[u8]) -> Result<bool> {
+        use automerge::legacy::{Key, ObjectId, OpId, OpType};
+        let mut candidate = self.clone();
+        let mut next = session.clone();
+        let changed = candidate.receive_sync(&mut next, bytes)?;
+        let samples = match self
+            .doc
+            .get(ROOT, "samples")
+            .map_err(err)?
+            .ok_or("Missing samples")?
+            .1
+        {
+            automerge::ObjId::Id(counter, actor, _) => ObjectId::Id(OpId::new(counter, &actor)),
+            _ => return Err("Invalid demo sample object".into()),
+        };
+        for change in self.doc.get_changes_added(&mut candidate.doc) {
+            if change.len() > 16 {
+                return Err("Demo change exceeds operation limit".into());
+            }
+            for op in change.decode().operations {
+                let allowed = match (&op.obj, &op.key, &op.action, op.insert) {
+                    (
+                        ObjectId::Root,
+                        Key::Map(key),
+                        OpType::Put(ScalarValue::Boolean(_)),
+                        false,
+                    ) if key == "enabled" => true,
+                    (ObjectId::Root, Key::Map(key), OpType::Increment(1), false)
+                        if key == "touches" =>
+                    {
+                        true
+                    }
+                    (
+                        ObjectId::Root,
+                        Key::Map(key),
+                        OpType::Put(ScalarValue::Bytes(bytes)),
+                        false,
+                    ) if key == "motion" => motion::Intent::decode(bytes).is_ok(),
+                    (obj, Key::Seq(_), OpType::Put(ScalarValue::Int(24 | 78)), true)
+                        if *obj == samples =>
+                    {
+                        true
+                    }
+                    _ => false,
+                };
+                if !allowed {
+                    return Err("Public peer attempted a protected change".into());
+                }
+            }
+        }
+        *self = candidate;
+        *session = next;
+        Ok(changed)
+    }
     /// Prepare, validate, then replace the root. Errors retain both old doc and view.
     pub fn merge(&mut self, bytes: &[u8]) -> Result<bool> {
         let mut incoming = load_document(bytes)?;
@@ -414,6 +471,74 @@ mod tests {
             }
         }
         panic!("Sync did not quiesce");
+    }
+    fn drain_public(
+        a: &mut Replica,
+        sa: &mut SyncSession,
+        b: &mut Replica,
+        sb: &mut SyncSession,
+    ) -> Result<()> {
+        for _ in 0..100 {
+            let one = a.generate_sync(sa)?;
+            let two = b.generate_sync(sb)?;
+            if one.is_none() && two.is_none() {
+                return Ok(());
+            }
+            if let Some(bytes) = one {
+                b.receive_demo_sync(sb, &bytes)?;
+            }
+            if let Some(bytes) = two {
+                a.receive_sync(sa, &bytes)?;
+            }
+        }
+        Err("Public sync did not quiesce".into())
+    }
+    #[test]
+    fn public_demo_sync_accepts_controls_and_motion_without_replacing_presentation() {
+        let mut browser = Replica::new().unwrap();
+        let mut frame = Replica::new().unwrap();
+        frame
+            .set_presentation(Some(layout::DEFAULT_LAYOUT))
+            .unwrap();
+        let presentation = frame.presentation().unwrap().hex_id();
+        let (mut a, mut b) = (SyncSession::default(), SyncSession::default());
+        drain_public(&mut browser, &mut a, &mut frame, &mut b).unwrap();
+        browser.set_enabled(false).unwrap();
+        browser
+            .set_motion(motion::Intent {
+                count: 48,
+                speed: 2.,
+                ..Default::default()
+            })
+            .unwrap();
+        drain_public(&mut browser, &mut a, &mut frame, &mut b).unwrap();
+        assert_eq!(frame.motion().unwrap(), browser.motion().unwrap());
+        assert_eq!(frame.presentation().unwrap().hex_id(), presentation);
+        let mut public_copy = Replica::load(&frame.save()).unwrap();
+        assert!(public_copy.presentation().is_none());
+        assert_eq!(public_copy.save(), frame.save());
+    }
+    #[test]
+    fn public_sync_rejects_protected_operations_even_when_the_visible_layout_is_unchanged() {
+        for field in ["layout", "schema", "admin"] {
+            let mut browser = Replica::new().unwrap();
+            let mut authority = Replica::new().unwrap();
+            let (mut a, mut b) = (SyncSession::default(), SyncSession::default());
+            drain_public(&mut browser, &mut a, &mut authority, &mut b).unwrap();
+            let before = authority.save();
+            if field == "layout" {
+                let bytes = browser.base_layout().unwrap().bytes().to_vec();
+                browser
+                    .doc
+                    .put(ROOT, field, ScalarValue::Bytes(bytes))
+                    .unwrap();
+            } else {
+                browser.doc.put(ROOT, field, "unauthorized").unwrap();
+            }
+            browser.doc.commit();
+            assert!(drain_public(&mut browser, &mut a, &mut authority, &mut b).is_err());
+            assert_eq!(authority.save(), before);
+        }
     }
     #[test]
     fn incremental_sync_pushes_edits_and_recovers_offline_concurrency() {

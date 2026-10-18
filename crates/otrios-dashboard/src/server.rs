@@ -282,17 +282,19 @@ async fn stream(
         .max_frame_size(MAX_DOCUMENT_BYTES)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            peer(app, socket).await
+            peer(app, socket, false).await
         })
         .into_response()
 }
-async fn peer(app: Arc<App>, socket: WebSocket) {
+async fn peer(app: Arc<App>, socket: WebSocket, public: bool) {
     let (mut output, mut input) = socket.split();
     let mut session = SyncSession::default();
     let mut updates = app.changed.subscribe();
     let mut release_id = String::new();
     let mut presentation_id: Option<String> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
+    let mut rate_window = std::time::Instant::now();
+    let mut received = 0u32;
     loop {
         let release = app.release.read().await.clone();
         let id = release["id"].as_str().unwrap_or("development");
@@ -310,7 +312,9 @@ async fn peer(app: Arc<App>, socket: WebSocket) {
             }
             release_id = id.to_string();
         }
-        let presentation = {
+        let presentation = if public {
+            None
+        } else {
             let replica = app.replica.lock().await;
             let id = replica
                 .presentation()
@@ -348,8 +352,14 @@ async fn peer(app: Arc<App>, socket: WebSocket) {
         tokio::select! {
             incoming=input.next()=>match incoming{
                 Some(Ok(Message::Binary(bytes)))=>{
+                    if public {
+                        if rate_window.elapsed() >= Duration::from_secs(1) { rate_window = std::time::Instant::now(); received = 0; }
+                        received += 1;
+                        if received > 64 { break; }
+                    }
                     let mut replica=app.replica.lock().await;let mut candidate=replica.clone();let mut next=session.clone();
-                    let changed=match candidate.receive_sync(&mut next,&bytes){Ok(v)=>v,Err(e)=>{eprintln!("Rejected sync: {e}");break;}};
+                    let result=if public { candidate.receive_demo_sync(&mut next,&bytes) } else { candidate.receive_sync(&mut next,&bytes) };
+                    let changed=match result{Ok(v)=>v,Err(e)=>{eprintln!("Rejected sync: {e}");break;}};
                     if changed && let Err(e)=commit(&app,&mut candidate).await{eprintln!("Persistence: {e}");break;}
                     *replica=candidate;session=next;drop(replica);if changed{announce(&app).await;}
                 },
@@ -362,6 +372,42 @@ async fn peer(app: Arc<App>, socket: WebSocket) {
         }
     }
     let _ = output.close().await;
+}
+// This listener exposes one shared demo document, never the private feed or
+// administrative routes. Native/trusted clients retain the original listener.
+async fn public_stream(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    if headers
+        .get(header::ORIGIN)
+        .and_then(|h| h.to_str().ok())
+        .is_none_or(|origin| !app.origins.iter().any(|allowed| allowed == origin))
+    {
+        return failure(StatusCode::FORBIDDEN, "Origin rejected");
+    }
+    let permit = match app.peers.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "Too many screens"),
+    };
+    upgrade
+        .max_message_size(MAX_DOCUMENT_BYTES)
+        .max_frame_size(MAX_DOCUMENT_BYTES)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            peer(app, socket, true).await;
+        })
+        .into_response()
+}
+async fn public_health(State(app): State<Arc<App>>) -> Response {
+    binary(
+        "application/json",
+        json!({"status":"ok","release":app.release.read().await["id"]})
+            .to_string()
+            .into_bytes(),
+        false,
+    )
 }
 async fn root(State(app): State<Arc<App>>) -> Response {
     let release = app.release.read().await;
@@ -455,6 +501,7 @@ async fn release_asset(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut bind = "127.0.0.1:8876".to_string();
+    let mut public_bind = None;
     let mut state_file = None;
     let mut releases = None;
     let mut origins = Vec::new();
@@ -463,6 +510,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     while let Some(arg) = args.next() {
         match arg.as_str(){
         "--bind"=>bind=args.next().ok_or("Missing bind")?,"--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
+        "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
         "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release folder")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web folder")?),"--origin"=>origins.push(args.next().ok_or("Missing origin")?),
         _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--state FILE] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
@@ -519,6 +567,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     });
+    if let Some(public_bind) = public_bind {
+        let address: std::net::SocketAddr = public_bind.parse()?;
+        if !address.ip().is_loopback() {
+            return Err("Public adapter must bind loopback behind the module host".into());
+        }
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        let public_routes = Router::new()
+            .route("/stream", get(public_stream))
+            .route("/health", get(public_health))
+            .fallback(|| async { failure(StatusCode::NOT_FOUND, "Not found") })
+            .with_state(app.clone());
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, public_routes).await {
+                eprintln!("Public adapter stopped: {error}");
+                std::process::exit(1);
+            }
+        });
+    }
     let routes = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
