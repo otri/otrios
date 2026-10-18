@@ -7,3 +7,4 @@ cargo clippy --workspace --all-targets --features otrios-dashboard/server --lock
 cargo test --workspace --features otrios-dashboard/server --locked --offline
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$PWD/target/python-cache}"
 python3 scripts/test_dashboard_release.py
+python3 scripts/test_dashboard_direct.py

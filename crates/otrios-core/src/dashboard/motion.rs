@@ -139,7 +139,9 @@ impl Presenter {
             self.late
         )
     }
-    pub fn mesh(&mut self, three_d: bool, intent: Intent, now: f64, updates: u64) -> Mesh {
+    /// Generate animation geometry without rebuilding telemetry text. A host may
+    /// rasterize telemetry on a separate bounded presentation worker.
+    pub fn geometry(&mut self, three_d: bool, intent: Intent, now: f64) -> Mesh {
         self.advance(now, intent);
         let mut children = Vec::new();
         let t = self.phase as f32;
@@ -202,6 +204,10 @@ impl Presenter {
                             center[1] + p[1] * size * perspective,
                         ]
                     };
+                    let [a, b, c] = [project(idx[0]), project(idx[1]), project(idx[2])];
+                    if (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) <= 0. {
+                        continue;
+                    }
                     let points = [idx[0], idx[1], idx[2], idx[0], idx[2], idx[3]]
                         .into_iter()
                         .map(project)
@@ -245,29 +251,28 @@ impl Presenter {
         }
         let scene = Scene::new(canvas(0, Rect::new(0., 0., 1280., 800.), children))
             .expect("bounded motion geometry");
-        let mesh = render_scene(&scene);
+        render_scene(&scene)
+    }
+    pub fn mesh(&mut self, three_d: bool, intent: Intent, now: f64, updates: u64) -> Mesh {
+        let mesh = self.geometry(three_d, intent, now);
         let bucket = (now.max(0.) / 1000.) as u64;
         if self.hud.as_ref().is_none_or(|(old, _)| *old != bucket) {
-            let mean = if self.intervals.is_empty() {
-                0.
-            } else {
-                self.intervals.iter().sum::<f64>() / self.intervals.len() as f64
-            };
-            let label = format!(
-                "{:05.1} FPS / {} FRAMES >25ms / {} CRDT LOAD UPDATES",
-                if mean > 0. { 1000. / mean } else { 0. },
-                self.late,
-                updates
-            );
-            let s = Scene::new(canvas(
-                0,
-                Rect::new(0., 0., 1280., 800.),
-                vec![text(1, Rect::new(48., 748., 1184., 24.), &label, 2, WHITE)],
-            ))
-            .unwrap();
-            self.hud = Some((bucket, render_scene(&s)));
+            self.hud = Some((bucket, render_hud(&self.hud_label(updates))));
         }
         mesh
+    }
+    pub fn hud_label(&self, updates: u64) -> String {
+        let mean = if self.intervals.is_empty() {
+            0.
+        } else {
+            self.intervals.iter().sum::<f64>() / self.intervals.len() as f64
+        };
+        format!(
+            "{:05.1} FPS / {} FRAMES >25ms / {} CRDT LOAD UPDATES",
+            if mean > 0. { 1000. / mean } else { 0. },
+            self.late,
+            updates
+        )
     }
     pub fn hud_revision(&self) -> u64 {
         self.hud.as_ref().map(|h| h.0).unwrap_or(u64::MAX)
@@ -278,6 +283,17 @@ impl Presenter {
             .map(|h| h.1.vertices.as_slice())
             .unwrap_or_default()
     }
+}
+/// Telemetry remains a Text primitive. Hosts may render this immutable label
+/// independently from the animation clock and the CRDT/state worker.
+pub fn render_hud(label: &str) -> Mesh {
+    let scene = Scene::new(canvas(
+        0,
+        Rect::new(0., 0., 1280., 800.),
+        vec![text(1, Rect::new(48., 748., 1184., 24.), label, 2, WHITE)],
+    ))
+    .unwrap();
+    render_scene(&scene)
 }
 /// Isolated CRDT load: exercises real mutation, incremental encoding, merge,
 /// validation and projection. It never touches the user's room or disk history.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Unprivileged native update supervisor. Only a pinned publisher may supply code."""
-import argparse, fcntl, hashlib, json, os, pathlib, signal, subprocess, tempfile, time, urllib.request, urllib.parse, uuid
+import argparse, fcntl, hashlib, json, math, os, pathlib, re, signal, subprocess, tempfile, time, urllib.request, urllib.parse, uuid
 MAX_BINARY=32*1024*1024
 running=True
 
@@ -38,33 +38,61 @@ def verify_binary(data,item):
 def valid_release(release):
     if len(release)!=64 or any(c not in '0123456789abcdef' for c in release):raise ValueError('Invalid release ID')
 
-def cached(cache,release,key,openssl):
+def cached(cache,release,key,openssl,sdl=False):
     valid_release(release);dest=cache/release
     raw=(dest/'manifest.json').read_bytes();sig=(dest/'manifest.sig').read_bytes()
     manifest=verify_manifest(raw,sig,release,cache,key,openssl)
-    exe=dest/'dashboard-native';verify_binary(exe.read_bytes(),manifest['assets']['native/armv7/dashboard-native'])
-    return release,exe
+    name='dashboard-sdl' if sdl and 'native/armv7/dashboard-sdl' in manifest['assets'] else 'dashboard-native'
+    for artifact in ['dashboard-native','dashboard-sdl']:
+        if 'native/armv7/'+artifact in manifest['assets']:verify_binary((dest/artifact).read_bytes(),manifest['assets']['native/armv7/'+artifact])
+    return release,dest/name
 
-def qualify(base,cache,key,openssl,release=None):
+def qualify(base,cache,key,openssl,release=None,sdl=False):
     if release is None:release=json.loads(fetch(base,'/release',8192))['id']
     valid_release(release)
-    try:return cached(cache,release,key,openssl)
+    try:return cached(cache,release,key,openssl,sdl)
     except (OSError,ValueError,KeyError):pass
     root='/releases/'+release+'/'
     raw=fetch(base,root+'manifest.json',65536);sig=fetch(base,root+'manifest.sig',64)
     manifest=verify_manifest(raw,sig,release,cache,key,openssl)
-    item=manifest['assets']['native/armv7/dashboard-native']
-    if not 0<item['bytes']<=MAX_BINARY:raise ValueError('Invalid binary size')
-    data=fetch(base,root+'native/armv7/dashboard-native',MAX_BINARY);verify_binary(data,item)
     dest=cache/release;dest.mkdir(exist_ok=True)
-    atomic(dest/'manifest.json',raw);atomic(dest/'manifest.sig',sig);atomic(dest/'dashboard-native',data,0o700)
-    return release,dest/'dashboard-native'
+    for name in ['dashboard-native','dashboard-sdl']:
+        path='native/armv7/'+name
+        if path not in manifest['assets']:continue
+        item=manifest['assets'][path]
+        if not 0<item['bytes']<=MAX_BINARY:raise ValueError('Invalid binary size')
+        data=fetch(base,root+path,MAX_BINARY);verify_binary(data,item)
+        atomic(dest/name,data,0o700)
+    atomic(dest/'manifest.json',raw);atomic(dest/'manifest.sig',sig)
+    return cached(cache,release,key,openssl,sdl)
+
+def touch_calibration(path):
+    # Read the accepted live rule; never rewrite udev/libinput calibration.
+    match=re.search(r'LIBINPUT_CALIBRATION_MATRIX[^=]*=\s*"([^"]+)"',path.read_text())
+    if not match:raise ValueError('Accepted libinput calibration matrix not found')
+    values=[float(v) for v in match.group(1).split()]
+    if len(values)!=6 or any(not math.isfinite(v) or abs(v)>8 for v in values) or abs(values[0]*values[4]-values[1]*values[3])<.00001:raise ValueError('Invalid accepted calibration')
+    return ','.join(format(v,'.13g') for v in values)
+
+def ready_contract(info,driver,rotation):
+    direct=info.get('renderer')=='gles2-direct' and info.get('video')=='DRM'
+    if not direct and info.get('renderer')!='opengles2':raise RuntimeError('Candidate did not use GLES2')
+    if direct and driver!='KMSDRM':raise RuntimeError('Direct executable requires the direct display service')
+    if driver=='KMSDRM':
+        size=[800,1280] if rotation in (90,270) else [1280,800]
+        if info.get('video')!=('DRM' if direct else 'KMSDRM') or info.get('rotation')!=rotation or info.get('output')!=size or not info.get('touch_calibrated') or info.get('touch_devices',0)<1:raise RuntimeError('Candidate did not satisfy the direct display/input contract')
+        if direct:
+            formats={'RGB565':([5,6,5,0],2),'XRGB8888':([8,8,8,0],4)}
+            bits,bpp=formats.get(info.get('scanout_format'),([],0))
+            if info.get('color_bits')!=bits or info.get('stride',0)<size[0]*bpp or not bpp:raise RuntimeError('Direct framebuffer colour/stride mismatch')
 
 class Host:
     def __init__(self,a,release,exe):
         self.a=a;self.release=release;self.stop=a.cache/('stop-'+uuid.uuid4().hex);self.ready=a.cache/('ready-'+uuid.uuid4().hex+'.json')
-        env=dict(os.environ,OTRIOS_RELEASE_ID=release,SDL_RENDER_DRIVER='opengles2',SDL_VIDEODRIVER='wayland')
+        env=dict(os.environ,OTRIOS_RELEASE_ID=release,SDL_RENDER_DRIVER='opengles2',SDL_VIDEODRIVER=a.video_driver)
+        if a.video_driver=='KMSDRM':env.update(SDL_KMSDRM_DEVICE_INDEX='0',SDL_KMSDRM_REQUIRE_DRM_MASTER='1')
         command=[str(exe),'--fullscreen','--sync',a.url.rstrip('/')+'/stream','--state',str(a.cache/'state.automerge'),'--exit-file',str(self.stop),'--ready-file',str(self.ready),'--release-file',str(a.cache/'release-notice.json')]
+        if a.video_driver=='KMSDRM':command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]
         if a.capture_first_frame:command+=['--capture',str(a.cache/'first-frame.ppm')]
         self.process=subprocess.Popen(command,env=env)
     def wait_ready(self,require_stream=True):
@@ -73,7 +101,7 @@ class Host:
             if self.process.poll() is not None:raise RuntimeError('Native candidate exited before drawing')
             if self.ready.exists():
                 info=json.loads(self.ready.read_text())
-                if info.get('renderer')!='opengles2':raise RuntimeError('Candidate did not use GLES2')
+                ready_contract(info,self.a.video_driver,self.a.rotation)
                 if not require_stream or info.get('stream_ready'):return
             time.sleep(.1)
         raise RuntimeError('Native candidate did not become ready')
@@ -94,7 +122,7 @@ def main(a):
     good_file=a.cache/'last-good.json'
     if good_file.exists():
         try:
-            value=json.loads(good_file.read_text());last_good=cached(a.cache,value['id'],a.key,a.openssl)
+            value=json.loads(good_file.read_text());last_good=cached(a.cache,value['id'],a.key,a.openssl,sdl=a.video_driver=='wayland')
             host=Host(a,*last_good);host.wait_ready(require_stream=False);current=last_good[0]
             print('RESUMED signed_release='+current,flush=True)
         except Exception as e:
@@ -111,7 +139,7 @@ def main(a):
                     time.sleep(.1);continue
                 if time.monotonic()-last_probe>=30 or release is None:
                     release=json.loads(fetch(a.url,'/release',8192))['id'];last_probe=time.monotonic()
-                release,exe=qualify(a.url,a.cache,a.key,a.openssl,release)
+                release,exe=qualify(a.url,a.cache,a.key,a.openssl,release,sdl=a.video_driver=='wayland')
                 if (host is None or host.process.poll() is not None or release!=current) and release!=bad:
                     old=host;host=None
                     if old:old.close()
@@ -121,7 +149,7 @@ def main(a):
                         candidate.close();bad=release
                         if last_good and last_good[0]!=release:
                             # Previous accepted release was signature-qualified this session.
-                            last_good=cached(a.cache,last_good[0],a.key,a.openssl);host=Host(a,*last_good);host.wait_ready(require_stream=False)
+                            last_good=cached(a.cache,last_good[0],a.key,a.openssl,sdl=a.video_driver=='wayland');host=Host(a,*last_good);host.wait_ready(require_stream=False)
                         raise
                     host=candidate;current=release;last_good=(release,exe);bad=None
                     atomic(good_file,json.dumps({'id':release}).encode())
@@ -136,7 +164,10 @@ def main(a):
         if host:host.close()
     lock.close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');p.add_argument('--video-driver',choices=['wayland','KMSDRM'],default='wayland');p.add_argument('--rotation',type=int,choices=[0,90,180,270],default=90);p.add_argument('--touch-calibration',type=pathlib.Path);a=p.parse_args()
+    if a.video_driver=='KMSDRM':
+        if a.touch_calibration is None:p.error('Direct mode requires the accepted touch calibration rule')
+        a.touch_matrix=touch_calibration(a.touch_calibration)
     if not a.url.startswith('https://'):p.error('HTTPS is required')
     def stop(*_):
         global running

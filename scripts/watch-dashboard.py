@@ -10,7 +10,7 @@ def inputs(repo):
     files=[repo/x for x in exact]
     for tree in ['crates','scripts','web','tools/dashboard']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()
@@ -46,10 +46,17 @@ def rebuild(config,wanted):
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features','native','--bin','dashboard-native','--target','armv7-unknown-linux-gnueabihf'])
-    native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/dashboard-native',native])
+    host=config.get('native_host','sdl')
+    if host not in ('sdl','direct'):raise ValueError('native_host must be sdl or direct')
+    feature,binary=('direct','dashboard-direct') if host=='direct' else ('native','dashboard-native')
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--target','armv7-unknown-linux-gnueabihf'])
+    native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
+    fallback=None
+    if host=='direct':
+        run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features','native','--bin','dashboard-native','--target','armv7-unknown-linux-gnueabihf'])
+        fallback=build/'dashboard-sdl';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/dashboard-native',fallback])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/dashboard',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'])
+    release=publisher.publish(source/'web/dashboard',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback)
     publisher.atomic(build/'source-id',wanted.encode());print('PUBLISHED '+release['id'],flush=True)
     return release
 

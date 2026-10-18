@@ -11,9 +11,9 @@ docker start "$build_container" >/dev/null
 COPYFILE_DISABLE=1 tar -cf "$build_stage/source.tar" Cargo.toml Cargo.lock rust-toolchain.toml crates
 docker cp "$build_stage/source.tar" "$build_container:/tmp/source.tar"
 docker exec "$build_container" tar -xf /tmp/source.tar -C /src
-docker exec "$build_container" cargo build --release --locked -p otrios-dashboard --features native,server --target armv7-unknown-linux-gnueabihf
+docker exec "$build_container" cargo build --release --locked -p otrios-dashboard --features native,direct,server --target armv7-unknown-linux-gnueabihf
 mkdir -p target/dashboard-armv7/lib
-for program in dashboard-native dashboard-server; do
+for program in dashboard-direct dashboard-native dashboard-server; do
   docker cp "$build_container:/src/target/armv7-unknown-linux-gnueabihf/release/$program" "target/dashboard-armv7/$program"
 done
 # Optional private runtime for an internal trial; retains Debian's own licenses.

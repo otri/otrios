@@ -74,6 +74,9 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("index.html"), html).unwrap();
         std::fs::write(dir.join("state-worker.js"), "// worker asset").unwrap();
+        let recovery = root.join(id).join("native/armv7");
+        std::fs::create_dir_all(&recovery).unwrap();
+        std::fs::write(recovery.join("dashboard-sdl"), b"signed-recovery-fixture").unwrap();
         let pointer =
             serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html")});
         let temp = root.join("pending.json");
@@ -142,6 +145,10 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
     assert!(old.ends_with("first code"));
     assert!(get(&format!("/releases/{second}/web/state-worker.js")).ends_with("// worker asset"));
     assert!(old.contains("max-age=31536000, immutable"));
+    assert!(
+        get(&format!("/releases/{second}/native/armv7/dashboard-sdl"))
+            .ends_with("signed-recovery-fixture")
+    );
     assert!(get("/releases/invalid/web/index.html").starts_with("HTTP/1.0 404"));
     assert_eq!(
         Replica::load(&std::fs::read(&state).unwrap())

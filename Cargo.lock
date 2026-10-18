@@ -639,6 +639,7 @@ dependencies = [
  "getrandom 0.4.3",
  "otrios-core",
  "otrios-interfaces",
+ "otrios-linux-display",
  "rustls",
  "sdl2",
  "serde_json",
@@ -653,6 +654,10 @@ version = "0.1.0"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "otrios-linux-display"
+version = "0.1.0"
 
 [[package]]
 name = "otrios-sdk"

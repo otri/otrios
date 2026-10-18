@@ -418,7 +418,9 @@ fn asset_type(path: &str) -> Option<&'static str> {
             Some("application/wasm")
         }
         "manifest.json" => Some("application/json"),
-        "manifest.sig" | "native/armv7/dashboard-native" => Some("application/octet-stream"),
+        "manifest.sig" | "native/armv7/dashboard-native" | "native/armv7/dashboard-sdl" => {
+            Some("application/octet-stream")
+        }
         _ => None,
     }
 }

@@ -1,6 +1,6 @@
 # Live dashboard development
 
-The development service runs on a Mac and serves the Rust/Wasm browser dashboard plus a persistent Automerge room. The Rockchip frame runs a native ARMv7 GLES2 executable on its existing Weston session. Both use the same Rust state projector and compositor. The frame runs no dashboard browser.
+The development service runs on a Mac and serves the Rust/Wasm browser dashboard plus a persistent Automerge room. The Rockchip frame runs a native ARMv7 GLES2 executable. Its current [direct KMS profile](DIRECT_DISPLAY.md) bypasses Weston; the existing Weston service remains recovery. Both use the same Rust state projector and compositor. The frame runs no dashboard browser.
 
 ## Network and authority
 
@@ -78,3 +78,5 @@ For the Mac, stop the two LaunchAgents to stop serving/building. `tailscale serv
 Run `bash scripts/check.sh`, then all-feature Clippy where SDL2 is installed. The checks exercise incremental offline merge/reconnect, real HTTP/WS processes, durable restart, origin rejection, release notification and old-asset retention, and actual Ed25519 verification/tamper rejection. Linux CI builds both hosts and presents a GLES2 frame under Mesa/Xvfb.
 
 A matching `/health` snapshot, browser `data-snapshot`, and native ready JSON demonstrates convergence. A changed release ID on both hosts with the same snapshot demonstrates state-preserving code reload. Framebuffer readback establishes GPU output, not physical panel colour or touch alignment. Someone at the frame still needs to accept those physical properties. iPad access must be checked on the actual iPad; desktop browser validation alone does not establish it.
+
+For the SDL-free frame profile, private builder config `native_host: "direct"` builds both `dashboard-direct` and signed `dashboard-sdl` recovery assets. The supervisor checks both hashes, chooses the recovery executable for Wayland, and checks direct framebuffer colour/stride metadata before accepting a new direct release. Platform `.c` and `.h` files participate in source fingerprints. See [direct display](DIRECT_DISPLAY.md).

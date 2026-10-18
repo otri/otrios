@@ -12,7 +12,9 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-native = ["dep:sdl2", "dep:tungstenite", "dep:serde_json", "dep:rustls"]
+native = ["dep:sdl2", "host-sync"]
+host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls"]
+direct = ["host-sync", "dep:otrios-linux-display"]
 server = ["dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util"]
 
 [dependencies]
@@ -25,6 +27,7 @@ wasm-bindgen = "=0.2.129"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
 sdl2 = { version = "=0.38.0", optional = true }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 tungstenite = { version = "=0.30.0", features = ["rustls-tls-webpki-roots"], optional = true }
@@ -66,3 +69,8 @@ path = "src/shell_seed.rs"
 name = "dashboard-load"
 path = "src/load.rs"
 required-features = ["native"]
+
+[[bin]]
+name = "dashboard-direct"
+path = "src/direct.rs"
+required-features = ["direct"]

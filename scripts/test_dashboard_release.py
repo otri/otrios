@@ -25,7 +25,9 @@ class SignedReleases(unittest.TestCase):
     def copy_cache(self,id):
         dest=self.cache/id;dest.mkdir()
         for file in ['manifest.json','manifest.sig']:shutil.copyfile(self.out/id/file,dest/file)
-        shutil.copyfile(self.out/id/'native/armv7/dashboard-native',dest/'dashboard-native')
+        for name in ['dashboard-native','dashboard-sdl']:
+            source=self.out/id/'native/armv7'/name
+            if source.exists():shutil.copyfile(source,dest/name)
     def test_signed_native_artifact_is_accepted(self):
         id,path=agent.cached(self.cache,self.id,self.public,OPENSSL);self.assertEqual(id,self.id);self.assertEqual(path.read_bytes(),self.native.read_bytes())
     def test_modified_native_bytes_are_rejected(self):
@@ -44,4 +46,33 @@ class SignedReleases(unittest.TestCase):
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
         self.native.write_bytes(b'not an ARM executable')
         with self.assertRaises(ValueError):self.publish()
+    def test_direct_and_recovery_executables_are_both_signed_and_selected(self):
+        fallback=self.root/'sdl';fallback.write_bytes(self.native.read_bytes()+b'recovery')
+        pointer=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,fallback);release=pointer['id'];self.copy_cache(release)
+        _,primary=agent.cached(self.cache,release,self.public,OPENSSL)
+        _,recovery=agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
+        self.assertEqual(primary.name,'dashboard-native');self.assertEqual(recovery.name,'dashboard-sdl')
+        self.assertEqual(recovery.read_bytes(),fallback.read_bytes())
+        recovery.write_bytes(recovery.read_bytes()+b'tampered')
+        with self.assertRaises(ValueError):agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
+class DirectHostContract(unittest.TestCase):
+    def test_direct_candidate_cannot_claim_wayland_or_uncalibrated_readiness(self):
+        good={'renderer':'opengles2','video':'KMSDRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1}
+        agent.ready_contract(good,'KMSDRM',90)
+        for update in [{'video':'wayland'},{'touch_calibrated':False},{'touch_devices':0},{'rotation':0},{'output':[1280,800]}]:
+            with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,**update),'KMSDRM',90)
+        agent.ready_contract({'renderer':'opengles2'},'wayland',0)
+    def test_owned_gles_backend_requires_verified_scanout_and_direct_service(self):
+        good={'renderer':'gles2-direct','video':'DRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1,'scanout_format':'RGB565','color_bits':[5,6,5,0],'stride':1600}
+        agent.ready_contract(good,'KMSDRM',90)
+        for update in [{'color_bits':[8,8,8,0]},{'stride':800},{'scanout_format':'unknown'},{'touch_devices':0}]:
+            with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,**update),'KMSDRM',90)
+        with self.assertRaises(RuntimeError):agent.ready_contract(good,'wayland',90)
+    def test_live_rule_is_read_without_rewriting_and_bad_matrices_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rule=pathlib.Path(tmp)/'accepted.rules';data='ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"'
+            rule.write_text(data);self.assertEqual(agent.touch_calibration(rule),'0,1,0,-1,0,1');self.assertEqual(rule.read_text(),data)
+            for bad in ['0 0 0 0 0 0','nan 1 0 -1 0 1','1 0 0 0 1']:
+                rule.write_text('ENV{LIBINPUT_CALIBRATION_MATRIX}="'+bad+'"')
+                with self.assertRaises(ValueError):agent.touch_calibration(rule)
 if __name__=='__main__':unittest.main()
