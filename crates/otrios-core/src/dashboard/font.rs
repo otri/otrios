@@ -60,7 +60,12 @@ pub struct Glyph {
 }
 impl Glyph {
     pub fn band_data(&self) -> [f32; 4] {
-        [f32::from(self.band_offset), 7., 7., 0.]
+        [
+            f32::from(self.band_offset % TEXTURE_WIDTH as u16),
+            f32::from(self.band_offset / TEXTURE_WIDTH as u16),
+            7.,
+            7.,
+        ]
     }
 }
 
@@ -73,8 +78,8 @@ pub struct Atlas {
     pub curves: Vec<f32>,
     pub band_width: u32,
     pub band_height: u32,
-    /// RGBA8 texels, each two little-endian u16 values. Metadata=(count,listOffset),
-    /// list entries=(global curve texel offset,0). Indices are linear texel offsets.
+    /// RGBA8 texels: metadata=(count,listX,listY,0), lists=(curveX,curveY,0,0).
+    /// Byte coordinates avoid reconstructing large indices in FP16 fragment ALUs.
     pub bands: Vec<u8>,
     pub max_band_curves: u16,
 }
@@ -354,7 +359,7 @@ fn build_atlas(metrics: Metrics, glyphs: &mut [Glyph], curves: &[Curve]) -> Resu
         curve_texels[i * 8..i * 8 + 8]
             .copy_from_slice(&[p[0][0], p[0][1], p[1][0], p[1][1], p[2][0], p[2][1], 0., 0.]);
     }
-    let mut bands = vec![[0_u16; 2]; glyphs.len() * BANDS * 2];
+    let mut bands = vec![[0_u8; 4]; glyphs.len() * BANDS * 2];
     let mut max_band = 0;
     for (glyph_index, glyph) in glyphs.iter_mut().enumerate() {
         let base = glyph_index * BANDS * 2;
@@ -413,11 +418,19 @@ fn build_atlas(metrics: Metrics, glyphs: &mut [Glyph], curves: &[Curve]) -> Resu
                 });
                 let offset =
                     u16::try_from(bands.len()).map_err(|_| "Font band texture offset overflow")?;
-                bands[base + direction * BANDS + band] = [indices.len() as u16, offset];
+                bands[base + direction * BANDS + band] = [
+                    indices.len() as u8,
+                    (usize::from(offset) % TEXTURE_WIDTH) as u8,
+                    (usize::from(offset) / TEXTURE_WIDTH) as u8,
+                    0,
+                ];
                 for i in indices {
+                    let curve = u16::try_from((glyph.curve_start as usize + i) * 2)
+                        .map_err(|_| "Font curve texture offset overflow")?;
                     bands.push([
-                        u16::try_from((glyph.curve_start as usize + i) * 2)
-                            .map_err(|_| "Font curve texture offset overflow")?,
+                        (usize::from(curve) % TEXTURE_WIDTH) as u8,
+                        (usize::from(curve) / TEXTURE_WIDTH) as u8,
+                        0,
                         0,
                     ]);
                 }
@@ -428,11 +441,8 @@ fn build_atlas(metrics: Metrics, glyphs: &mut [Glyph], curves: &[Curve]) -> Resu
         }
     }
     let band_height = bands.len().max(1).div_ceil(TEXTURE_WIDTH);
-    bands.resize(TEXTURE_WIDTH * band_height, [0; 2]);
-    let bands = bands
-        .into_iter()
-        .flat_map(|pair| pair.into_iter().flat_map(u16::to_le_bytes))
-        .collect();
+    bands.resize(TEXTURE_WIDTH * band_height, [0; 4]);
+    let bands = bands.into_iter().flatten().collect();
     Ok(Atlas {
         curve_width: TEXTURE_WIDTH as u32,
         curve_height: curve_height as u32,
@@ -581,12 +591,16 @@ mod tests {
         for glyph in f.glyphs() {
             for band in 0..16 {
                 let b = (usize::from(glyph.band_offset) + band) * 4;
-                let count = u16::from_le_bytes([a.bands[b], a.bands[b + 1]]) as usize;
-                let offset = u16::from_le_bytes([a.bands[b + 2], a.bands[b + 3]]) as usize;
+                let count = usize::from(a.bands[b]);
+                let offset =
+                    usize::from(a.bands[b + 1]) + TEXTURE_WIDTH * usize::from(a.bands[b + 2]);
+                assert_eq!(a.bands[b + 3], 0);
                 assert!(count <= 128);
                 assert!((offset + count) * 4 <= a.bands.len());
                 for i in offset..offset + count {
-                    let curve = u16::from_le_bytes([a.bands[i * 4], a.bands[i * 4 + 1]]) as usize;
+                    let curve = usize::from(a.bands[i * 4])
+                        + TEXTURE_WIDTH * usize::from(a.bands[i * 4 + 1]);
+                    assert_eq!(&a.bands[i * 4 + 2..i * 4 + 4], &[0, 0]);
                     assert_eq!(curve % 2, 0);
                     assert!(curve / 2 >= glyph.curve_start as usize);
                     assert!(curve / 2 < (glyph.curve_start + glyph.curve_count) as usize);
@@ -597,6 +611,26 @@ mod tests {
             "font atlas: {}x{} curves,{}x{} bands,max {} curves/band",
             a.curve_width, a.curve_height, a.band_width, a.band_height, a.max_band_curves
         );
+    }
+    #[test]
+    fn shader_addresses_remain_byte_coordinates_without_large_float_indices() {
+        let font = test_font();
+        for glyph in font.glyphs() {
+            let [x, y, mx, my] = glyph.band_data();
+            assert!((0. ..=255.).contains(&x) && (0. ..=255.).contains(&y));
+            assert_eq!(x.fract(), 0.);
+            assert_eq!(y.fract(), 0.);
+            assert_eq!(
+                x as usize + TEXTURE_WIDTH * y as usize,
+                usize::from(glyph.band_offset)
+            );
+            assert_eq!([mx, my], [7., 7.]);
+            // Sixteen metadata records share one row; two curve texels do too.
+            assert!(x as usize + 15 < TEXTURE_WIDTH);
+        }
+        for texel in font.atlas().bands.chunks_exact(4) {
+            assert_eq!(texel[3], 0);
+        }
     }
     #[test]
     fn adjacent_bands_overlap_to_cover_half_float_rounding() {
@@ -623,7 +657,7 @@ mod tests {
             points: [[512., 129.], [512., 200.], [512., 400.]],
         }];
         let atlas = build_atlas(metrics, &mut glyphs, &curves).unwrap();
-        let count = u16::from_le_bytes([atlas.bands[0], atlas.bands[1]]);
+        let count = atlas.bands[0];
         assert_eq!(count, 1);
     }
     #[test]

@@ -279,6 +279,164 @@ mod tests {
         assert!(Display::headless([0, 64], false).is_err());
     }
     #[test]
+    #[ignore = "Requires Mesa EGL; includes real font only in the test binary"]
+    fn mesa_real_roboto_coverage_survives_fp16_addresses_lines_and_rotation() {
+        use otrios_core::dashboard::{
+            display::Surface, font::Font, font_reference::RESOURCE_SHA256,
+        };
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../web/dashboard/fonts/Roboto-Regular.otq.zst"
+        ));
+        let font = Font::from_zstd(bytes, RESOURCE_SHA256).unwrap();
+        let atlas = font.atlas();
+        assert!(atlas.curve_height > 32 && atlas.band_height > 32);
+        let factor = font.metrics().scale(6.);
+        let baseline = 80. + font.metrics().baseline_from_top(6.);
+        let mut vertices = Vec::new();
+        let mut references = Vec::new();
+        for (index, ch) in ['H', 'O', 'g', 'R', '7', 'y'].into_iter().enumerate() {
+            let glyph = font.glyph(ch);
+            let pen = 80. + index as f32 * 180.;
+            let b = glyph.ink_bounds;
+            let left = pen + b[0] * factor - 1.;
+            let right = pen + b[2] * factor + 1.;
+            let top = baseline - b[3] * factor - 1.;
+            let bottom = baseline - b[1] * factor + 1.;
+            for [x, y] in [[left, top], [right, top], [left, bottom], [right, bottom]] {
+                vertices.extend([
+                    x,
+                    y,
+                    (x - pen) / (factor * f32::from(font.metrics().units_per_em)),
+                    (baseline - y) / (factor * f32::from(font.metrics().units_per_em)),
+                    1.,
+                    1.,
+                    1.,
+                    1.,
+                ]);
+                vertices.extend(glyph.band_transform);
+                vertices.extend(glyph.band_data());
+            }
+            // A test-only independent winding reference. Conservative samples
+            // exclude pixels near flattened edges; no reference rasterizer ships.
+            let mut segments = Vec::new();
+            for curve in &font.curves()
+                [glyph.curve_start as usize..(glyph.curve_start + glyph.curve_count) as usize]
+            {
+                let at = |t: f32| {
+                    let u = 1. - t;
+                    let point = std::array::from_fn::<_, 2, _>(|axis| {
+                        u * u * curve.points[0][axis]
+                            + 2. * u * t * curve.points[1][axis]
+                            + t * t * curve.points[2][axis]
+                    });
+                    [pen + point[0] * factor, baseline - point[1] * factor]
+                };
+                for step in 0..16 {
+                    segments.push((at(step as f32 / 16.), at((step + 1) as f32 / 16.)));
+                }
+            }
+            references.push((ch, [left, top, right, bottom], segments));
+        }
+        assert!(
+            vertices.chunks_exact(16).any(|v| v[13] > 0.),
+            "Exercise metadata beyond the first texture row"
+        );
+        for angle in [0, 90] {
+            let surface = Surface::new(angle).unwrap();
+            let [w, h] = surface.extent();
+            let mut display = Display::headless([w, h], false).unwrap();
+            display
+                .set_font(
+                    atlas.curve_width,
+                    atlas.curve_height,
+                    &atlas.curves,
+                    atlas.band_width,
+                    atlas.band_height,
+                    &atlas.bands,
+                )
+                .unwrap();
+            display
+                .upload_scene(0, &[], &vertices, &[1, 0, (vertices.len() / 16) as u32])
+                .unwrap();
+            display.draw(surface.projection(), false).unwrap();
+            let pixels = display.pixels().unwrap();
+            let mut inside = 0usize;
+            let mut inside_good = 0usize;
+            let mut outside = 0usize;
+            let mut outside_good = 0usize;
+            for (ch, bounds, segments) in &references {
+                let previous_inside = inside;
+                let previous_good = inside_good;
+                for y in ((bounds[1].floor() as i32)..=(bounds[3].ceil() as i32)).step_by(3) {
+                    for x in ((bounds[0].floor() as i32)..=(bounds[2].ceil() as i32)).step_by(3) {
+                        let p = [x as f32 + 0.5, y as f32 + 0.5];
+                        let mut winding = 0i32;
+                        let mut distance2 = f32::INFINITY;
+                        for &(a, b) in segments {
+                            let dx = b[0] - a[0];
+                            let dy = b[1] - a[1];
+                            let length2 = dx * dx + dy * dy;
+                            let t = if length2 == 0. {
+                                0.
+                            } else {
+                                ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2
+                            }
+                            .clamp(0., 1.);
+                            distance2 = distance2.min(
+                                (p[0] - a[0] - t * dx).powi(2) + (p[1] - a[1] - t * dy).powi(2),
+                            );
+                            let cross = dx * (p[1] - a[1]) - dy * (p[0] - a[0]);
+                            if a[1] <= p[1] && b[1] > p[1] && cross > 0. {
+                                winding += 1;
+                            }
+                            if a[1] > p[1] && b[1] <= p[1] && cross < 0. {
+                                winding -= 1;
+                            }
+                        }
+                        if distance2 < 2.25 {
+                            continue;
+                        }
+                        let at = surface.project(p);
+                        let px = at[0].floor() as usize;
+                        let py = at[1].floor() as usize;
+                        let red = pixels[((h as usize - 1 - py) * w as usize + px) * 4];
+                        if winding != 0 {
+                            inside += 1;
+                            inside_good += usize::from(red > 220);
+                        } else {
+                            outside += 1;
+                            outside_good += usize::from(red < 45);
+                        }
+                    }
+                }
+                let glyph_inside = inside - previous_inside;
+                let glyph_good = inside_good - previous_good;
+                assert!(
+                    glyph_inside > 0 && glyph_good * 100 >= glyph_inside * 98,
+                    "Glyph {ch} interior shredded at {angle}deg: {glyph_good}/{glyph_inside}"
+                );
+            }
+            eprintln!(
+                "Real Roboto {angle}deg: interior {inside_good}/{inside}; exterior {outside_good}/{outside}"
+            );
+            assert!(inside > 100 && outside > 100);
+            assert!(
+                inside_good * 100 >= inside * 98,
+                "Real glyph interiors were shredded at {angle}deg"
+            );
+            assert!(
+                outside_good * 100 >= outside * 98,
+                "Real glyph holes/background were filled at {angle}deg"
+            );
+            let before = display.glyph_cache_stats();
+            display.draw(surface.projection(), false).unwrap();
+            assert_eq!(display.pixels().unwrap(), pixels);
+            assert_eq!(display.glyph_cache_stats()[1], before[1]);
+        }
+    }
+
+    #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_slug_quadratic_holes_cache_and_selected_color_pipeline() {
         let mut d = Display::headless([128, 128], false).unwrap();
@@ -296,8 +454,8 @@ mod tests {
             bands[index * 4 + 2..index * 4 + 4].copy_from_slice(&b.to_le_bytes());
         };
         for i in 0..8 {
-            band(i, 8, 16);
-            band(8 + i, 8, 24);
+            band(i, 8 | (16 << 8), 0);
+            band(8 + i, 8 | (24 << 8), 0);
             band(16 + i, [0, 1, 6, 7, 2, 3, 4, 5][i] * 2, 0);
             band(24 + i, [1, 2, 5, 6, 0, 3, 4, 7][i] * 2, 0);
         }
@@ -323,9 +481,9 @@ mod tests {
                 0.,
                 0.,
                 0.,
-                7.,
-                7.,
                 0.,
+                7.,
+                7.,
             ]);
         }
         let projection = [1., 0., 0., 0., 1., 0., 0., 0., 1.];

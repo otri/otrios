@@ -260,7 +260,7 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
         const float *v=vertices+i*16;
         for(int j=0;j<16;j++)if(!isfinite(v[j]) || fabsf(v[j])>100000.f)return fail(d,"Invalid text vertex component");
         for(int j=4;j<8;j++)if(v[j]<0.f || v[j]>1.f)return fail(d,"Invalid glyph color");
-        if(v[12]<0 || v[12]>65535 || v[13]!=7 || v[14]!=7 || v[15]!=0)return fail(d,"Invalid glyph band reference");
+        if(v[12]<0 || v[12]>255 || v[13]<0 || v[13]>255 || v[14]!=7 || v[15]!=7)return fail(d,"Invalid glyph band reference");
     }
     for(size_t i=0;i<words;i+=3) {
         uint32_t kind=draws[i],first=draws[i+1],length=draws[i+2];

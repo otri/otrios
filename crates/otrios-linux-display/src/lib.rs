@@ -44,10 +44,11 @@ pub fn validate_text_mesh(
         if vertex.iter().any(|v| !v.is_finite() || v.abs() > 100000.)
             || vertex[4..8].iter().any(|v| !(0. ..=1.).contains(v))
             || vertex[12] < 0.
-            || vertex[12] > 65535.
-            || vertex[13] != 7.
+            || vertex[12] > 255.
+            || vertex[13] < 0.
+            || vertex[13] > 255.
             || vertex[14] != 7.
-            || vertex[15] != 0.
+            || vertex[15] != 7.
         {
             return Err("Invalid glyph vertex".into());
         }
@@ -79,8 +80,9 @@ mod tests {
         let mut glyphs = vec![0.; 64];
         for vertex in glyphs.chunks_exact_mut(16) {
             vertex[7] = 1.;
-            vertex[13] = 7.;
+            vertex[13] = 0.;
             vertex[14] = 7.;
+            vertex[15] = 7.;
         }
         assert!(validate_text_mesh(&glyphs, &[0, 0, 3, 1, 0, 4], 3).is_ok());
         assert!(validate_text_mesh(&glyphs[..63], &[1, 0, 4], 0).is_err());

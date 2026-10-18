@@ -718,6 +718,9 @@ dependencies = [
 [[package]]
 name = "otrios-linux-display"
 version = "0.1.0"
+dependencies = [
+ "otrios-core",
+]
 
 [[package]]
 name = "otrios-sdk"

@@ -2,7 +2,7 @@
 
 Roboto Regular is a separate, content-addressed, Zstandard-compressed quadratic outline resource. Font bytes are not built into executable code. Both the native GLES and browser WebGL hosts load the same packet, verify its admitted SHA-256, decode and prepare it once, then retain its immutable font metrics and GPU atlas. The existing bounded artifact cache holds the compressed resource alongside code and blobs.
 
-The renderer emits an indexed quad for each glyph. Shared Slug shaders evaluate its quadratic curves at presentation time using derivative-based antialiasing and horizontal/vertical band acceleration. No CPU triangle tessellation, font parsing, decompression, or atlas regeneration occurs on a presentation frame. The native GLES host can upload the shared atlas as half-float curves when full-float texture support is unavailable.
+The renderer emits an indexed quad for each glyph. Shared Slug shaders evaluate its quadratic curves at presentation time using derivative-based antialiasing and horizontal/vertical band acceleration. Font decoding and curve/band preparation occur once per admission. A GPU cache miss rasterizes a glyph into the coverage atlas; later frames reuse it. There is no CPU glyph triangulation. The native GLES host can upload the shared atlas as half-float curves when full-float texture support is unavailable.
 
 Source files were retrieved on 2026-10-19 from the Google Fonts repository:
 
@@ -40,7 +40,7 @@ Normal Rust builds require none of the generation dependencies or the original T
 
 `Font::from_zstd` requires a known admitted SHA-256 and verifies it before decompression. It rejects compressed resources over 1 MiB, decoded content/windows over 2 MiB, unknown decoded lengths, dictionaries, extra frames, invalid checksums, invalid metrics, malformed ranges, glyph bounds that exclude curve extrema, and oversized shader bands. The packet admits at most 1,024 glyph records and 16,384 curves, with at most 128 curves per band and a 16-bit texture address space. Current Roboto uses 213 glyph records, 5,440 curves and at most 31 curves in a band.
 
-`Font::atlas()` holds two RGBA curve texels per quadratic, normalized by units per em: `(p0.xy,p1.xy)` then `(p2.xy,0,0)`. The RGBA8 band texture holds two little-endian `u16` values per texel: `(count,listOffset)` metadata and `(curveTexelOffset,0)` list entries. Each glyph has eight horizontal bands followed by eight vertical bands. Horizontal lists are sorted by descending maximum x; vertical lists by descending maximum y. Parallel straight segments are omitted from the corresponding ray direction. Adjacent bands overlap by 1/1024 em to cover boundary rounding on half-float hosts. Both textures are 256 texels wide; current heights are 43 and 94 respectively.
+`Font::atlas()` holds two RGBA curve texels per quadratic, normalized by units per em: `(p0.xy,p1.xy)` then `(p2.xy,0,0)`. The RGBA8 band texture holds byte-sized coordinates: `(count,listX,listY,0)` metadata and `(curveX,curveY,0,0)` list entries. Shaders never reconstruct a large linear index. Glyph references contain `(metadataX,metadataY,7,7)`. Each glyph has eight horizontal bands followed by eight vertical bands. Horizontal lists are sorted by descending maximum x; vertical lists by descending maximum y. Parallel straight segments are omitted from the corresponding ray direction. Adjacent bands overlap by 1/1024 em to cover boundary rounding on half-float hosts. Both textures are 256 texels wide; current heights are 43 and 94 respectively.
 
 ## Metrics and scope
 

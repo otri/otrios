@@ -16,14 +16,14 @@ browser module and its license notice; `--check` verifies parity.
 - Curve texture: two RGBA texels per quadratic, containing `(p0.x,p0.y,p1.x,p1.y)`
   then `(p2.x,p2.y,0,0)`, in em units. The host packet is float32; the native
   Mali400 upload converts once to RGBA16F (`GL_OES_texture_half_float`).
-- Band texture: RGBA8, each texel containing two little-endian uint16 values.
-  A glyph has eight horizontal then eight vertical metadata texels, each
-  `(curveCount,globalListOffset)`. Each list item is `(globalCurveTexelOffset,0)`.
+- Band texture: RGBA8 with byte-sized coordinates. A glyph has eight horizontal
+  then eight vertical metadata texels `(curveCount,listX,listY,0)`. Each list
+  item is `(curveX,curveY,0,0)`, avoiding large linear indices in fragment math.
   Horizontal lists sort by descending maximum x; vertical lists by maximum y.
   Parallel straight curves are excluded from the corresponding ray direction.
 - Four vertices per glyph, ordered top-left, top-right, bottom-left, bottom-right.
   Each vertex has 16 floats: position2, emCoordinate2, tintRGBA4,
-  bandTransform4 and glyph4. `glyph=(metadataOffset,7,7,0)`;
+  bandTransform4 and glyph4. `glyph=(metadataX,metadataY,7,7)`;
   bandTransform scales/offsets em coordinates into the eight bands.
 - Indexed triangles use `(0,1,2,2,1,3)`. The draw plan is triples
   `(kind,firstVertex,countVertices)`, with kind0 colored triangles and kind1 text.
@@ -73,3 +73,16 @@ and rejected because they did not improve this GPU's throughput. The opt-in
 diagnostic retains the exact transfer table. Default scanout avoids that pass,
 while both modes keep the same unmodified coverage alpha. Premultiplication
 does not make default sRGB compositing linear-light correct.
+
+The Mali400/Lima driver reports more fragment precision than the hardware uses.
+Its [documented limitation](https://docs.mesa3d.org/drivers/lima.html) is FP16
+fragment arithmetic, even for `highp`; dependent texture address math also uses
+FP16. Atlas references therefore keep x/y bytes separate and never reconstruct
+large 16-bit linear offsets. Shader guards use the normal FP16 value 2^-14;
+2^-16 can flush to zero and turn line/coverage guards into divisions by zero.
+Real Roboto probes supplement synthetic curves, which did not expose these limits.
+The ray solver scales local differences by an exact power of two before forming
+quadratic products and uses cancellation-resistant roots. Negative/zero
+discriminants retain the reference's equal-root cancellation. These changes keep
+near-linear diagonal strokes stable in FP16; simply increasing a shader precision
+qualifier or storing half-float curves was insufficient.

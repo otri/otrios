@@ -25,7 +25,7 @@ function device(){
 function packet(){return {curveWidth:1,curveHeight:1,curves:new Float32Array(4),bandWidth:1,bandHeight:1,bands:new Uint8Array(4)};}
 function frame(phase=0,color=[1,1,1,1]){
   const glyphVertices=new Float32Array(64);
-  for(const [i,x,y] of [[0,10+phase,10],[1,20+phase,10],[2,10+phase,20],[3,20+phase,20]])glyphVertices.set([x,y,i%2,Math.floor(i/2),...color,8,8,0,0,0,7,7,0],i*16);
+  for(const [i,x,y] of [[0,10+phase,10],[1,20+phase,10],[2,10+phase,20],[3,20+phase,20]])glyphVertices.set([x,y,i%2,Math.floor(i/2),...color,8,8,0,0,0,0,7,7],i*16);
   return {vertices:new Float32Array(36),glyphVertices,draws:new Uint32Array([0,0,3,1,0,4,0,3,3])};
 }
 test('cache misses use analytic coverage once; warm glyph tint preserves draw ordering',()=>{
