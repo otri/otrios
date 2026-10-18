@@ -42,6 +42,7 @@ fn remap(mut node: SceneNode, offset: u32) -> Result<SceneNode> {
 }
 pub struct Shell {
     screen: Screen,
+    monitoring_allowed: bool,
     keyboard: Keyboard,
     fields: [TextBuffer; 2],
     focused: Option<u8>,
@@ -54,6 +55,7 @@ impl Default for Shell {
     fn default() -> Self {
         Self {
             screen: Screen::Home,
+            monitoring_allowed: true,
             keyboard: Keyboard::default(),
             fields: Default::default(),
             focused: None,
@@ -65,6 +67,16 @@ impl Default for Shell {
     }
 }
 impl Shell {
+    /// Local presentation guard only. The host must authorize private data at
+    /// its source; this flag is never a server capability or shared CRDT field.
+    pub fn set_monitoring_access(&mut self, allowed: bool) -> bool {
+        if self.monitoring_allowed == allowed {
+            return false;
+        }
+        self.monitoring_allowed = allowed;
+        self.changed();
+        true
+    }
     pub fn screen(&self) -> Screen {
         self.screen
     }
@@ -421,6 +433,17 @@ impl Shell {
                 .into(),
             ),
         );
+        local.insert(
+            506,
+            Value::Text(
+                if self.monitoring_allowed {
+                    "Private / available"
+                } else {
+                    "Private / sign in"
+                }
+                .into(),
+            ),
+        );
         let assets = assets()?;
         let view = replica.snapshot().view();
         let page = match self.screen {
@@ -438,7 +461,7 @@ impl Shell {
             )?,
             Screen::Monitoring | Screen::Controls => {
                 let content = if self.screen == Screen::Monitoring {
-                    if replica.presentation().is_some() {
+                    if self.monitoring_allowed && replica.presentation().is_some() {
                         replica.snapshot().scene().as_ref().clone()
                     } else {
                         use super::components::*;
@@ -448,7 +471,11 @@ impl Shell {
                             vec![text(
                                 1,
                                 Rect::new(48., 100., 1184., 32.),
-                                "Waiting for the monitoring stream",
+                                if self.monitoring_allowed {
+                                    "Waiting for the monitoring stream"
+                                } else {
+                                    "Sign in to open Monitoring"
+                                },
                                 3,
                                 WHITE,
                             )],
@@ -550,6 +577,43 @@ mod tests {
             assert!((215. ..=255.).contains(&vertex[1]));
         }
         assert!(scene.hit_path([410., 225.]).is_empty());
+    }
+    #[test]
+    fn a_locked_monitoring_scene_never_renders_a_retained_private_view() {
+        use otrios_interfaces::layout::{Expr, Property, Value};
+        let mut blueprint = Layout::bootstrap().unwrap().blueprint().clone();
+        let label = blueprint
+            .root
+            .children
+            .iter_mut()
+            .find(|i| i.id == 2)
+            .unwrap();
+        label.properties.retain(|p| p.key != 1);
+        label.properties.push(Property {
+            key: 1,
+            value: Expr::Literal(Value::Text("PRIVATE VIEW CANARY".into())),
+        });
+        let mut replica = Replica::new().unwrap();
+        replica
+            .set_presentation(Some(&Layout::encode(&blueprint).unwrap()))
+            .unwrap();
+        let mut shell = Shell::default();
+        shell.open(Screen::Monitoring);
+        fn labels(node: &SceneNode) -> String {
+            let mut text = match &node.primitive {
+                Primitive::Text { value, .. } => value.clone(),
+                _ => String::new(),
+            };
+            for child in &node.children {
+                text.push_str(&labels(child));
+            }
+            text
+        }
+        assert!(labels(shell.scene(&replica).unwrap().root()).contains("PRIVATE VIEW CANARY"));
+        shell.set_monitoring_access(false);
+        let locked = labels(shell.scene(&replica).unwrap().root());
+        assert!(!locked.contains("PRIVATE VIEW CANARY"));
+        assert!(locked.contains("Sign in to open Monitoring"));
     }
     #[test]
     fn local_launcher_and_back_do_not_change_or_follow_shared_state() {

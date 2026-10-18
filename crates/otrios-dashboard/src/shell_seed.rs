@@ -163,7 +163,16 @@ fn home() -> Blueprint {
         let y = 272. + (i / 3) as f32 * 208.;
         a.add(t, [x, y, 384., 192.], vec![prop(1, s(title))]);
         let button = a.b.root.children.len() - 1;
-        a.label([16., 76., 352., 24.], s(line1), 2., WHITE);
+        a.label(
+            [16., 76., 352., 24.],
+            if *screen == Screen::Monitoring {
+                local(506)
+            } else {
+                s(line1)
+            },
+            2.,
+            WHITE,
+        );
         a.label([16., 112., 352., 32.], s(line2), 1., MUTED);
         a.label([16., 156., 320., 16.], s("OPEN  ->"), 2., GREEN);
         let children = a.b.root.children.drain(button + 1..).collect();

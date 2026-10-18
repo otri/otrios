@@ -5,6 +5,11 @@ use otrios_interfaces::keyboard::Edit;
 use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use wasm_bindgen::prelude::*;
 
+fn browser_shell() -> Shell {
+    let mut shell = Shell::default();
+    shell.set_monitoring_access(false);
+    shell
+}
 #[wasm_bindgen]
 pub struct Dashboard {
     replica: Replica,
@@ -19,7 +24,7 @@ impl Dashboard {
         Ok(Self {
             replica: Replica::new()?,
             session: SyncSession::default(),
-            shell: Shell::default(),
+            shell: browser_shell(),
             stress: otrios_core::dashboard::motion::Stress::new()?,
         })
     }
@@ -27,7 +32,7 @@ impl Dashboard {
         Ok(Self {
             replica: Replica::load(bytes)?,
             session: SyncSession::default(),
-            shell: Shell::default(),
+            shell: browser_shell(),
             stress: otrios_core::dashboard::motion::Stress::new()?,
         })
     }
@@ -81,6 +86,13 @@ impl Dashboard {
     }
     pub fn show_keyboard(&mut self) {
         self.shell.show_keyboard();
+    }
+    pub fn set_monitoring_access(&mut self, allowed: bool) -> Result<bool, String> {
+        let mut changed = self.shell.set_monitoring_access(allowed);
+        if !allowed {
+            changed |= self.replica.set_presentation(None)?;
+        }
+        Ok(changed)
     }
     pub fn screen(&self) -> String {
         self.shell.screen_name().into()

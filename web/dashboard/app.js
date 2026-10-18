@@ -2,6 +2,9 @@
 // Presentation owner: monotonic clock, cached GPU geometry, input forwarding.
 import init,{MotionPresenter} from './pkg/otrios_dashboard.js';
 const canvas=document.querySelector('#dashboard'),controlsLayer=document.querySelector('#controls');
+const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),signout=document.querySelector('#monitoring-signout'),loginError=document.querySelector('#login-error');
+let monitoringAuth={authenticated:false},currentScreen='home';
+function showAuth(){const needed=currentScreen==='monitoring'&&!monitoringAuth.authenticated;signout.hidden=currentScreen!=='monitoring'||!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
 const connection=document.querySelector('#connection'),dot=document.querySelector('#connection-dot'),revision=document.querySelector('#revision'),error=document.querySelector('#error');
 function fatal(e){error.hidden=false;error.textContent=String(e);connection.textContent='Unable to open this space';}
 try{
@@ -22,7 +25,7 @@ try{
   let staticCount=0,hudCount=0,hudRevision=-1,dirty=true;const controls=new Map();
   function accept(f){
     if(model?.screen!==f.screen)presenter.suspend();
-    model={...model,...f};
+    model={...model,...f};currentScreen=f.screen;showAuth();
     if(f.vertices){bind(buffers[0]);gl.bufferData(gl.ARRAY_BUFFER,f.vertices,gl.STATIC_DRAW);staticCount=f.vertices.length/6;
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',id:c.id}));controlsLayer.append(b);controls.set(c.id,b);}
@@ -34,10 +37,14 @@ try{
     else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
     pump();worker.postMessage({type:'frame-ack'});
   }
-  worker.onmessage=event=>{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · changes saved on this device';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}};
+  worker.onmessage=event=>{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · changes saved on this device';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}};
   worker.onerror=e=>fatal(e.message);
+  form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
+  function leaveLogin(){command({type:'route',route:'#/home'});}
+  document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});signout.addEventListener('click',()=>command({type:'logout'}));
   function legacy(key){try{const s=sessionStorage.getItem(key);return s?Uint8Array.from(atob(s),c=>c.charCodeAt(0)):null;}catch{return null;}}
-  worker.postMessage({type:'start',saved:legacy('otrios-dashboard-v1'),presentation:legacy('otrios-dashboard-presentation-v1'),release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
+  const oldDocument=legacy('otrios-dashboard-v1');try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
+  worker.postMessage({type:'start',saved:oldDocument,release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const r=canvas.getBoundingClientRect();return {type:'pointer',args:[phase,e.pointerId,(e.clientX-r.left)*1280/r.width,(e.clientY-r.top)*800/r.height,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});

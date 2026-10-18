@@ -462,6 +462,8 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/app.js"
         | "state-worker.js"
         | "web/state-worker.js"
+        | "monitoring-session.mjs"
+        | "web/monitoring-session.mjs"
         | "release-gate.mjs"
         | "web/release-gate.mjs"
         | "pkg/otrios_dashboard.js"

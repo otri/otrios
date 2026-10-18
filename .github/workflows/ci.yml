@@ -30,7 +30,7 @@ jobs:
       - name: Check all host adapters
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Check distributed module handoff
-        run: node --test scripts/test-dashboard-release-gate.mjs
+        run: node --test scripts/test-dashboard-release-gate.mjs scripts/test-dashboard-monitoring-session.mjs
       - name: Compile browser module
         run: cargo build -p otrios-dashboard --lib --release --locked --target wasm32-unknown-unknown
       - name: Compile native module
