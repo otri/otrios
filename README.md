@@ -32,6 +32,8 @@ Rust 1.90.0 is pinned for reproducibility. Linux CI is configured for Ubuntu 24.
 
 Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), [Tess handoff](docs/TESS_HANDOFF.md), and [Cloud setup](docs/CODEX_CLOUD.md). See [contribution instructions](CONTRIBUTING.md).
 
+The [transport comparison experiment](docs/experiments/transport-comparison.md) measures Wasm and native-target LLVM bitcode using Embedded Swift and Rust no_std. Its Mac measurements are exploratory and do not change the Linux PoC scope.
+
 ## Licensing
 
 The runtime uses LGPLv3 only; interfaces, SDK, documentation, and tooling use Apache 2.0. These are path-specific licenses, not a choice of either license for all files. Separate proprietary hardware, firmware, and accelerator implementations are an intended integration model, subject to the applicable licenses. See [the license boundary](LICENSE.md).

@@ -1,0 +1,2040 @@
+{
+  "host": {
+    "system": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "cpu": "Apple M2 Max",
+    "logical_cpus": 12,
+    "ram_bytes": 68719476736,
+    "hardware_source": "sysctl on benchmark host"
+  },
+  "versions": {
+    "swift": "Apple Swift version 6.4.1 (swift-6.4.1-RELEASE)\nTarget: arm64-apple-macosx27.0.0",
+    "rust": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: aarch64-apple-darwin\nrelease: 1.90.0\nLLVM version: 20.1.8",
+    "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+  },
+  "producers_ms": {
+    "swift_bitcode": [
+      256.3101659999999,
+      254.86374999999995,
+      257.04583299999996,
+      256.81600000000014,
+      260.70187499999986,
+      254.74504199999993,
+      250.03579200000004
+    ],
+    "swift_wasm": [
+      271.56641799999994,
+      311.09145799999993,
+      274.77899999999966,
+      268.1594580000004,
+      272.90304200000026,
+      275.14349999999956,
+      270.06329200000056
+    ],
+    "rust_bitcode": [
+      48.49358299999995,
+      48.95683300000009,
+      48.95150000000026,
+      49.148250000000004,
+      49.83662500000019,
+      50.02654099999937,
+      48.69370799999917
+    ],
+    "rust_wasm": [
+      71.18008299999978,
+      68.00862500000005,
+      69.23895899999977,
+      68.73158400000001,
+      67.879209,
+      67.61758399999974,
+      67.32624999999982
+    ]
+  },
+  "receiver_compile_ms": {
+    "swift_bitcode": [
+      71.39841600000008,
+      66.82633299999985,
+      65.12287500000014,
+      67.3214169999996,
+      66.47908400000003,
+      64.88587499999987,
+      67.25733300000059
+    ],
+    "rust_bitcode": [
+      39.65354199999993,
+      39.238208999999635,
+      42.179708000000815,
+      41.86249999999969,
+      40.45683399999955,
+      39.45699999999963,
+      39.24579099999992
+    ],
+    "swift_wasm": [
+      {
+        "wall_ms": 87.26870799999986,
+        "engine_ms": 0.185,
+        "compile_ms": 1.982,
+        "serialize_write_ms": 0.236,
+        "cache_bytes": 67824
+      },
+      {
+        "wall_ms": 8.554625000000371,
+        "engine_ms": 0.146,
+        "compile_ms": 1.752,
+        "serialize_write_ms": 0.238,
+        "cache_bytes": 67824
+      },
+      {
+        "wall_ms": 7.866540999999394,
+        "engine_ms": 0.14,
+        "compile_ms": 1.683,
+        "serialize_write_ms": 0.221,
+        "cache_bytes": 67824
+      },
+      {
+        "wall_ms": 7.561834000000545,
+        "engine_ms": 0.145,
+        "compile_ms": 1.861,
+        "serialize_write_ms": 0.16,
+        "cache_bytes": 67824
+      },
+      {
+        "wall_ms": 7.432125000000234,
+        "engine_ms": 0.149,
+        "compile_ms": 1.724,
+        "serialize_write_ms": 0.135,
+        "cache_bytes": 67824
+      },
+      {
+        "wall_ms": 7.213166999999743,
+        "engine_ms": 0.141,
+        "compile_ms": 1.637,
+        "serialize_write_ms": 0.137,
+        "cache_bytes": 67824
+      },
+      {
+        "wall_ms": 6.59112499999992,
+        "engine_ms": 0.141,
+        "compile_ms": 1.619,
+        "serialize_write_ms": 0.15,
+        "cache_bytes": 67824
+      }
+    ],
+    "rust_wasm": [
+      {
+        "wall_ms": 6.283874999999384,
+        "engine_ms": 0.12,
+        "compile_ms": 1.301,
+        "serialize_write_ms": 0.167,
+        "cache_bytes": 50976
+      },
+      {
+        "wall_ms": 5.642208000001148,
+        "engine_ms": 0.115,
+        "compile_ms": 1.024,
+        "serialize_write_ms": 0.125,
+        "cache_bytes": 50976
+      },
+      {
+        "wall_ms": 5.709958999998932,
+        "engine_ms": 0.116,
+        "compile_ms": 1.027,
+        "serialize_write_ms": 0.114,
+        "cache_bytes": 50976
+      },
+      {
+        "wall_ms": 5.995458000001008,
+        "engine_ms": 0.126,
+        "compile_ms": 1.132,
+        "serialize_write_ms": 0.137,
+        "cache_bytes": 50976
+      },
+      {
+        "wall_ms": 5.9644169999995,
+        "engine_ms": 0.112,
+        "compile_ms": 1.068,
+        "serialize_write_ms": 0.122,
+        "cache_bytes": 50976
+      },
+      {
+        "wall_ms": 5.927541000000147,
+        "engine_ms": 0.113,
+        "compile_ms": 1.123,
+        "serialize_write_ms": 0.14,
+        "cache_bytes": 50976
+      },
+      {
+        "wall_ms": 5.686834000000474,
+        "engine_ms": 0.113,
+        "compile_ms": 1.112,
+        "serialize_write_ms": 0.14,
+        "cache_bytes": 50976
+      }
+    ]
+  },
+  "artifacts": {
+    "swift.bc": {
+      "bytes": 20992,
+      "gzip9_bytes": 11240,
+      "sha256": "2b099e017cfb02dccc2393f3ed0c786f881708fdf434aec2e49219bab4fe188c"
+    },
+    "swift.wasm": {
+      "bytes": 570,
+      "gzip9_bytes": 378,
+      "sha256": "7ac1d30ccf9d51bb56f915147047cc8cbfa11fd8897088e83f71d2a331fd3b68"
+    },
+    "swift.dylib": {
+      "bytes": 16952,
+      "gzip9_bytes": 908,
+      "sha256": "23d5aa715df7c82783e5225b5906bb68932c6fef097b8cfdb1dba028ee6a4a6d"
+    },
+    "swift.cwasm": {
+      "bytes": 67824,
+      "gzip9_bytes": 2925,
+      "sha256": "64f5beed026664e044a2e0ce36723677a824a2aea06af40c4fa1c155f813fc16"
+    },
+    "rust.bc": {
+      "bytes": 3776,
+      "gzip9_bytes": 3040,
+      "sha256": "467550428cb9e9c06ee225b417cac1da6089aa23b2180a15c451791ca34a6c41"
+    },
+    "rust.wasm": {
+      "bytes": 577,
+      "gzip9_bytes": 339,
+      "sha256": "d59c91b1d24c16ef473f36e660889c22270139faec5deee4efefa5178f660912"
+    },
+    "rust.dylib": {
+      "bytes": 16840,
+      "gzip9_bytes": 812,
+      "sha256": "774cc92c510afeb33d3a12b230bcf302ba56c7b6549af77637084a2f84f23b16"
+    },
+    "rust.cwasm": {
+      "bytes": 50976,
+      "gzip9_bytes": 2427,
+      "sha256": "93812432eead21f21a9c7bb74c17a50e2421832f21054aad89cc04cd6dfbf469"
+    },
+    "swift-ownership.dylib": {
+      "bytes": 34088,
+      "dynamic_dependencies": "<checkout>/bench-results/transport/swift-ownership.dylib:\n\t<checkout>/bench-results/transport/swift-ownership.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)"
+    },
+    "rust-ownership.dylib": {
+      "bytes": 35672,
+      "dynamic_dependencies": "<checkout>/bench-results/transport/rust-ownership.dylib:\n\t<checkout>/bench-results/transport/rust-ownership.dylib (compatibility version 0.0.0, current version 0.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)"
+    }
+  },
+  "runs": {
+    "swift_native": [
+      {
+        "wall_ms": 212.9044579999997,
+        "load_ms": 39.409,
+        "kernel_ms": [
+          13.15,
+          12.539,
+          12.482,
+          12.139,
+          12.121,
+          11.893,
+          11.722
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.497,
+          1.497,
+          1.497,
+          1.618,
+          1.529,
+          1.551,
+          1.497
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.994,
+          0.866,
+          0.858,
+          0.886,
+          0.89,
+          0.86,
+          0.878
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 130.59116700000038,
+        "load_ms": 0.183,
+        "kernel_ms": [
+          11.734,
+          11.628,
+          11.569,
+          11.588,
+          11.627,
+          11.478,
+          11.765
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.497,
+          1.498,
+          1.498,
+          1.51,
+          1.596,
+          1.519,
+          1.498
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.917,
+          0.921,
+          0.857,
+          0.858,
+          0.881,
+          0.857,
+          0.857
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 131.15212499999984,
+        "load_ms": 0.169,
+        "kernel_ms": [
+          11.661,
+          11.505,
+          11.888,
+          11.709,
+          11.825,
+          11.578,
+          11.649
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.497,
+          1.497,
+          1.499,
+          1.497,
+          1.513,
+          1.609,
+          1.577
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.902,
+          0.933,
+          0.905,
+          0.857,
+          0.858,
+          0.883,
+          0.893
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 132.80758400000002,
+        "load_ms": 0.163,
+        "kernel_ms": [
+          11.724,
+          11.932,
+          11.744,
+          11.907,
+          11.789,
+          11.72,
+          11.921
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.538,
+          1.617,
+          1.544,
+          1.546,
+          1.498,
+          1.498,
+          1.576
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.889,
+          0.864,
+          0.858,
+          0.865,
+          0.858,
+          0.862,
+          0.966
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 132.63116600000126,
+        "load_ms": 0.162,
+        "kernel_ms": [
+          11.564,
+          11.933,
+          11.741,
+          11.841,
+          11.801,
+          11.674,
+          11.869
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.501,
+          1.63,
+          1.597,
+          1.757,
+          1.834,
+          1.63,
+          1.636
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.916,
+          0.894,
+          0.894,
+          0.895,
+          0.894,
+          0.924,
+          0.979
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 132.4179999999995,
+        "load_ms": 0.182,
+        "kernel_ms": [
+          11.855,
+          11.664,
+          11.89,
+          11.672,
+          11.791,
+          11.778,
+          12.198
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.603,
+          1.511,
+          1.606,
+          1.567,
+          1.567,
+          1.509,
+          1.512
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.928,
+          0.931,
+          0.916,
+          0.921,
+          0.913,
+          0.889,
+          0.859
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 132.2233749999988,
+        "load_ms": 0.193,
+        "kernel_ms": [
+          11.785,
+          11.761,
+          11.601,
+          11.65,
+          11.931,
+          11.892,
+          11.788
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.499,
+          1.505,
+          1.532,
+          1.567,
+          1.641,
+          1.538,
+          1.498
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.936,
+          0.91,
+          0.913,
+          0.91,
+          0.873,
+          0.858,
+          0.857
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      }
+    ],
+    "swift_wasm": [
+      {
+        "wall_ms": 843.2992500000003,
+        "engine_ms": 0.129,
+        "module_ms": 0.105,
+        "instantiate_ms": 0.049,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          12.028,
+          11.981,
+          11.622,
+          11.837,
+          11.679,
+          11.668,
+          11.853
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.506,
+          1.59,
+          1.561,
+          1.512,
+          1.528,
+          1.542,
+          1.57
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          79.12,
+          78.968,
+          78.999,
+          79.142,
+          79.509,
+          80.514,
+          79.073
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      },
+      {
+        "wall_ms": 847.7032080000005,
+        "engine_ms": 0.123,
+        "module_ms": 0.1,
+        "instantiate_ms": 0.057,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          11.759,
+          11.532,
+          11.563,
+          11.571,
+          11.471,
+          11.839,
+          11.72
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.509,
+          1.59,
+          1.499,
+          1.532,
+          1.498,
+          1.498,
+          1.655
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.67,
+          79.021,
+          80.021,
+          81.741,
+          79.976,
+          81.026,
+          79.379
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      },
+      {
+        "wall_ms": 850.2524170000002,
+        "engine_ms": 0.131,
+        "module_ms": 0.097,
+        "instantiate_ms": 0.05,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          11.533,
+          11.714,
+          12.021,
+          11.754,
+          12.032,
+          11.892,
+          11.882
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.573,
+          1.526,
+          1.568,
+          1.723,
+          1.568,
+          1.499,
+          1.501
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.681,
+          80.891,
+          80.105,
+          79.649,
+          79.629,
+          80.228,
+          80.415
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      },
+      {
+        "wall_ms": 851.9222079999995,
+        "engine_ms": 0.12,
+        "module_ms": 0.09,
+        "instantiate_ms": 0.05,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          11.698,
+          11.751,
+          11.747,
+          11.657,
+          11.87,
+          11.742,
+          11.804
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.499,
+          1.498,
+          1.597,
+          1.604,
+          1.516,
+          1.502,
+          1.5
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.272,
+          80.459,
+          80.367,
+          80.524,
+          80.902,
+          81.046,
+          80.505
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      },
+      {
+        "wall_ms": 855.1578749999998,
+        "engine_ms": 0.133,
+        "module_ms": 0.1,
+        "instantiate_ms": 0.048,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          12.079,
+          11.816,
+          11.971,
+          11.918,
+          11.811,
+          11.936,
+          11.794
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.575,
+          1.517,
+          1.498,
+          1.524,
+          1.59,
+          1.606,
+          1.524
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.625,
+          80.725,
+          80.405,
+          81.204,
+          81.417,
+          80.723,
+          81.166
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      },
+      {
+        "wall_ms": 855.6393749999991,
+        "engine_ms": 0.126,
+        "module_ms": 0.098,
+        "instantiate_ms": 0.055,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          11.682,
+          12.012,
+          12.039,
+          11.81,
+          12.367,
+          11.723,
+          11.976
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.548,
+          1.564,
+          1.565,
+          1.592,
+          1.594,
+          1.565,
+          1.532
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.78,
+          82.866,
+          80.58,
+          80.974,
+          80.763,
+          80.533,
+          80.047
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      },
+      {
+        "wall_ms": 852.2179160000007,
+        "engine_ms": 0.146,
+        "module_ms": 0.122,
+        "instantiate_ms": 0.057,
+        "linear_memory_bytes": 196608,
+        "kernel_ms": [
+          11.912,
+          11.706,
+          11.644,
+          11.608,
+          11.981,
+          11.769,
+          11.793
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.512,
+          1.572,
+          1.611,
+          1.587,
+          1.499,
+          1.498,
+          1.499
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.601,
+          80.938,
+          80.324,
+          81.39,
+          81.325,
+          79.775,
+          80.419
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4669440
+      }
+    ],
+    "rust_native": [
+      {
+        "wall_ms": 208.0752499999985,
+        "load_ms": 71.492,
+        "kernel_ms": [
+          12.707,
+          12.248,
+          11.708,
+          11.739,
+          11.521,
+          11.726,
+          11.798
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.605,
+          1.62,
+          1.542,
+          1.503,
+          1.497,
+          1.523,
+          1.644
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.864,
+          0.857,
+          0.857,
+          0.857,
+          0.857,
+          0.911,
+          0.922
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 130.50841699999972,
+        "load_ms": 0.167,
+        "kernel_ms": [
+          11.559,
+          11.683,
+          11.544,
+          11.649,
+          11.662,
+          11.711,
+          11.897
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.498,
+          1.651,
+          1.636,
+          1.515,
+          1.507,
+          1.499,
+          1.515
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.86,
+          0.859,
+          0.858,
+          0.858,
+          0.86,
+          0.86,
+          0.86
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 131.48829200000023,
+        "load_ms": 0.182,
+        "kernel_ms": [
+          11.639,
+          11.608,
+          11.591,
+          11.567,
+          11.785,
+          11.678,
+          11.917
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.504,
+          1.499,
+          1.745,
+          1.533,
+          1.511,
+          1.498,
+          1.528
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.865,
+          0.87,
+          0.864,
+          0.857,
+          0.857,
+          0.857,
+          0.857
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 130.7559170000019,
+        "load_ms": 0.187,
+        "kernel_ms": [
+          11.839,
+          11.468,
+          11.74,
+          11.483,
+          11.629,
+          11.594,
+          11.625
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.527,
+          1.507,
+          1.518,
+          1.512,
+          1.527,
+          1.6,
+          1.557
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.859,
+          0.857,
+          0.858,
+          0.89,
+          1.037,
+          0.868,
+          0.867
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 130.3074159999973,
+        "load_ms": 0.161,
+        "kernel_ms": [
+          11.727,
+          11.533,
+          11.527,
+          11.578,
+          11.602,
+          11.68,
+          11.542
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.521,
+          1.599,
+          1.508,
+          1.523,
+          1.498,
+          1.498,
+          1.791
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.871,
+          0.857,
+          0.857,
+          0.865,
+          0.858,
+          0.892,
+          1.036
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 132.47762499999993,
+        "load_ms": 0.178,
+        "kernel_ms": [
+          11.659,
+          12.016,
+          11.747,
+          11.843,
+          11.742,
+          11.72,
+          11.858
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.53,
+          1.615,
+          1.55,
+          1.503,
+          1.497,
+          1.504,
+          1.606
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.906,
+          0.858,
+          0.864,
+          0.858,
+          0.872,
+          0.857,
+          0.942
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      },
+      {
+        "wall_ms": 132.14712499999948,
+        "load_ms": 0.17,
+        "kernel_ms": [
+          11.808,
+          11.974,
+          11.593,
+          11.501,
+          11.717,
+          11.787,
+          11.654
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.56,
+          1.63,
+          1.539,
+          1.525,
+          1.607,
+          1.705,
+          1.498
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          0.885,
+          0.857,
+          0.856,
+          0.857,
+          0.857,
+          0.978,
+          0.857
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 1802240
+      }
+    ],
+    "rust_wasm": [
+      {
+        "wall_ms": 850.1720410000005,
+        "engine_ms": 0.131,
+        "module_ms": 0.118,
+        "instantiate_ms": 0.02,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.883,
+          11.781,
+          11.772,
+          11.877,
+          11.646,
+          11.885,
+          11.704
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.564,
+          1.529,
+          1.499,
+          1.497,
+          1.55,
+          1.61,
+          1.565
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          81.247,
+          80.613,
+          79.559,
+          79.963,
+          80.514,
+          80.132,
+          81.092
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      },
+      {
+        "wall_ms": 846.6778329999993,
+        "engine_ms": 0.131,
+        "module_ms": 0.098,
+        "instantiate_ms": 0.018,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.556,
+          11.54,
+          11.589,
+          11.506,
+          11.768,
+          11.676,
+          11.508
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.53,
+          1.497,
+          1.497,
+          1.498,
+          1.576,
+          1.498,
+          1.498
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          79.483,
+          80.112,
+          79.605,
+          80.608,
+          80.699,
+          80.26,
+          79.958
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      },
+      {
+        "wall_ms": 846.9092089999997,
+        "engine_ms": 0.127,
+        "module_ms": 0.1,
+        "instantiate_ms": 0.019,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.912,
+          11.729,
+          11.716,
+          11.859,
+          11.675,
+          11.857,
+          11.757
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.666,
+          1.53,
+          1.51,
+          1.497,
+          1.497,
+          1.522,
+          1.653
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.06,
+          79.893,
+          79.651,
+          80.052,
+          80.014,
+          79.49,
+          81.336
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      },
+      {
+        "wall_ms": 855.188708,
+        "engine_ms": 0.139,
+        "module_ms": 0.099,
+        "instantiate_ms": 0.019,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.586,
+          11.538,
+          11.721,
+          11.83,
+          11.906,
+          11.91,
+          11.727
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.601,
+          1.616,
+          1.533,
+          1.506,
+          1.514,
+          1.6,
+          1.52
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          81.571,
+          81.37,
+          81.88,
+          81.017,
+          79.431,
+          80.806,
+          79.963
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      },
+      {
+        "wall_ms": 840.0630839999969,
+        "engine_ms": 0.127,
+        "module_ms": 0.095,
+        "instantiate_ms": 0.018,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.863,
+          11.528,
+          11.611,
+          11.571,
+          11.523,
+          11.581,
+          11.639
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.599,
+          1.598,
+          1.509,
+          1.498,
+          1.498,
+          1.498,
+          1.683
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          79.373,
+          79.202,
+          79.738,
+          79.552,
+          80.612,
+          79.201,
+          79.332
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      },
+      {
+        "wall_ms": 848.1278749999994,
+        "engine_ms": 0.133,
+        "module_ms": 0.117,
+        "instantiate_ms": 0.026,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.939,
+          11.727,
+          11.728,
+          11.901,
+          11.63,
+          11.872,
+          11.743
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.602,
+          1.556,
+          1.531,
+          1.498,
+          1.534,
+          1.498,
+          1.512
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.523,
+          80.468,
+          80.529,
+          80.237,
+          80.111,
+          80.818,
+          80.186
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      },
+      {
+        "wall_ms": 850.5969580000005,
+        "engine_ms": 0.133,
+        "module_ms": 0.1,
+        "instantiate_ms": 0.018,
+        "linear_memory_bytes": 131072,
+        "kernel_ms": [
+          11.657,
+          11.891,
+          11.477,
+          11.83,
+          11.542,
+          11.645,
+          11.473
+        ],
+        "kernel_result": 3471936222,
+        "scan_ms": [
+          1.55,
+          1.627,
+          1.501,
+          1.499,
+          1.499,
+          1.543,
+          1.61
+        ],
+        "scan_result": 3044613573,
+        "boundary_ns": [
+          80.63,
+          80.662,
+          80.237,
+          79.804,
+          80.96,
+          81.372,
+          81.334
+        ],
+        "boundary_result": 999999,
+        "maxrss_raw": 4571136
+      }
+    ]
+  },
+  "startup": {
+    "swift": {
+      "native_cached": [
+        {
+          "wall_ms": 4.006709000000441,
+          "load_ms": 0.172,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.2160409999999473,
+          "load_ms": 0.156,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.05970900000041,
+          "load_ms": 0.145,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.1424590000010966,
+          "load_ms": 0.153,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 2.830417000000196,
+          "load_ms": 0.135,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.2200840000005115,
+          "load_ms": 0.185,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.0688330000003816,
+          "load_ms": 0.15,
+          "result": 3994876604
+        }
+      ],
+      "wasm_cold": [
+        {
+          "wall_ms": 6.004209000000316,
+          "engine_ms": 0.13,
+          "module_ms": 1.528,
+          "instantiate_ms": 0.052,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.86208300000024,
+          "engine_ms": 0.119,
+          "module_ms": 1.311,
+          "instantiate_ms": 0.048,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.913500000000127,
+          "engine_ms": 0.109,
+          "module_ms": 1.383,
+          "instantiate_ms": 0.041,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.732291999999362,
+          "engine_ms": 0.112,
+          "module_ms": 1.285,
+          "instantiate_ms": 0.04,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.7776250000003415,
+          "engine_ms": 0.109,
+          "module_ms": 1.257,
+          "instantiate_ms": 0.04,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 6.020874999999037,
+          "engine_ms": 0.114,
+          "module_ms": 1.288,
+          "instantiate_ms": 0.043,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.649165999999539,
+          "engine_ms": 0.115,
+          "module_ms": 1.332,
+          "instantiate_ms": 0.048,
+          "result": 3994876604
+        }
+      ],
+      "wasm_cached": [
+        {
+          "wall_ms": 4.469708000000239,
+          "engine_ms": 0.111,
+          "module_ms": 0.086,
+          "instantiate_ms": 0.044,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.540667000000553,
+          "engine_ms": 0.106,
+          "module_ms": 0.081,
+          "instantiate_ms": 0.041,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.332624999999979,
+          "engine_ms": 0.113,
+          "module_ms": 0.078,
+          "instantiate_ms": 0.045,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.403874999999502,
+          "engine_ms": 0.106,
+          "module_ms": 0.079,
+          "instantiate_ms": 0.042,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.262957999999983,
+          "engine_ms": 0.106,
+          "module_ms": 0.079,
+          "instantiate_ms": 0.04,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.442416999999921,
+          "engine_ms": 0.116,
+          "module_ms": 0.083,
+          "instantiate_ms": 0.043,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.33237500000061,
+          "engine_ms": 0.106,
+          "module_ms": 0.077,
+          "instantiate_ms": 0.045,
+          "result": 3994876604
+        }
+      ]
+    },
+    "rust": {
+      "native_cached": [
+        {
+          "wall_ms": 3.7389169999997307,
+          "load_ms": 0.223,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.130915999999928,
+          "load_ms": 0.154,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.1253749999997638,
+          "load_ms": 0.168,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.514374999998182,
+          "load_ms": 0.169,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.4322499999994704,
+          "load_ms": 0.162,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.285082999997968,
+          "load_ms": 0.151,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 3.1403750000009722,
+          "load_ms": 0.147,
+          "result": 3994876604
+        }
+      ],
+      "wasm_cold": [
+        {
+          "wall_ms": 6.212916999999152,
+          "engine_ms": 0.127,
+          "module_ms": 1.19,
+          "instantiate_ms": 0.019,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.699040999999738,
+          "engine_ms": 0.118,
+          "module_ms": 1.078,
+          "instantiate_ms": 0.016,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.380292000001674,
+          "engine_ms": 0.111,
+          "module_ms": 1.06,
+          "instantiate_ms": 0.015,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.866499999999775,
+          "engine_ms": 0.124,
+          "module_ms": 1.176,
+          "instantiate_ms": 0.015,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 6.224042000003038,
+          "engine_ms": 0.121,
+          "module_ms": 1.096,
+          "instantiate_ms": 0.017,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 6.08295800000036,
+          "engine_ms": 0.183,
+          "module_ms": 1.239,
+          "instantiate_ms": 0.017,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 6.180042000000441,
+          "engine_ms": 0.116,
+          "module_ms": 1.21,
+          "instantiate_ms": 0.015,
+          "result": 3994876604
+        }
+      ],
+      "wasm_cached": [
+        {
+          "wall_ms": 4.582750000000857,
+          "engine_ms": 0.108,
+          "module_ms": 0.077,
+          "instantiate_ms": 0.013,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.750250000000733,
+          "engine_ms": 0.115,
+          "module_ms": 0.082,
+          "instantiate_ms": 0.015,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.2214169999977855,
+          "engine_ms": 0.122,
+          "module_ms": 0.083,
+          "instantiate_ms": 0.017,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.035874999997247,
+          "engine_ms": 0.128,
+          "module_ms": 0.087,
+          "instantiate_ms": 0.021,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.899082999997972,
+          "engine_ms": 0.115,
+          "module_ms": 0.077,
+          "instantiate_ms": 0.017,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 4.9616249999999695,
+          "engine_ms": 0.124,
+          "module_ms": 0.086,
+          "instantiate_ms": 0.017,
+          "result": 3994876604
+        },
+        {
+          "wall_ms": 5.913416000002059,
+          "engine_ms": 0.116,
+          "module_ms": 0.085,
+          "instantiate_ms": 0.015,
+          "result": 3994876604
+        }
+      ]
+    }
+  },
+  "ownership": {
+    "swift_handle": [
+      {
+        "wall_ms": 163.57166599999928,
+        "load_ms": 27.45,
+        "retain_release_ns": [
+          5.9875,
+          5.9825,
+          5.9645,
+          5.7775,
+          5.89,
+          5.8055,
+          5.968
+        ],
+        "alloc_release_ns": [
+          27.5,
+          28.13,
+          27.46,
+          27.55,
+          28.280001,
+          27.629999,
+          30.080001
+        ]
+      },
+      {
+        "wall_ms": 136.3306669999993,
+        "load_ms": 0.203,
+        "retain_release_ns": [
+          5.9305,
+          5.8945,
+          5.896,
+          6.0865,
+          5.903,
+          6.028,
+          5.959
+        ],
+        "alloc_release_ns": [
+          27.750002,
+          28.12,
+          29.279999,
+          27.699999,
+          28.42,
+          29.430001,
+          27.729999
+        ]
+      },
+      {
+        "wall_ms": 135.4113340000005,
+        "load_ms": 0.209,
+        "retain_release_ns": [
+          5.712,
+          5.9,
+          5.7965,
+          5.7635,
+          5.8615,
+          6.0305,
+          5.9245
+        ],
+        "alloc_release_ns": [
+          28.68,
+          29.440001,
+          27.56,
+          28.479998,
+          28.41,
+          27.400001,
+          28.42
+        ]
+      },
+      {
+        "wall_ms": 138.27379199999967,
+        "load_ms": 0.188,
+        "retain_release_ns": [
+          5.9165,
+          5.973,
+          5.8655,
+          6.013,
+          5.963,
+          6.7,
+          5.7335
+        ],
+        "alloc_release_ns": [
+          29.01,
+          28.17,
+          28.5,
+          27.669999,
+          28.840001,
+          27.649999,
+          27.310001
+        ]
+      },
+      {
+        "wall_ms": 136.2326660000015,
+        "load_ms": 0.195,
+        "retain_release_ns": [
+          6.1085,
+          5.946,
+          6.0355,
+          5.8385,
+          5.7425,
+          5.8145,
+          5.895
+        ],
+        "alloc_release_ns": [
+          27.19,
+          27.22,
+          29.29,
+          27.55,
+          27.16,
+          28.19,
+          28.42
+        ]
+      },
+      {
+        "wall_ms": 136.18408299999984,
+        "load_ms": 0.224,
+        "retain_release_ns": [
+          5.7895,
+          5.8045,
+          5.9835,
+          5.84,
+          6.016,
+          5.8225,
+          6.1035
+        ],
+        "alloc_release_ns": [
+          28.539998,
+          27.58,
+          27.400001,
+          27.609998,
+          27.87,
+          27.409999,
+          27.51
+        ]
+      },
+      {
+        "wall_ms": 135.79708299999993,
+        "load_ms": 0.199,
+        "retain_release_ns": [
+          5.8785,
+          5.971,
+          5.8645,
+          5.897,
+          5.831,
+          5.895,
+          6.0515
+        ],
+        "alloc_release_ns": [
+          27.669999,
+          27.46,
+          29.05,
+          27.810002,
+          27.47,
+          29.899999,
+          27.729999
+        ]
+      }
+    ],
+    "rust_rc": [
+      {
+        "wall_ms": 316.12216600000306,
+        "load_ms": 198.857,
+        "retain_release_ns": [
+          5.4095,
+          5.044,
+          4.719,
+          4.4505,
+          4.2525,
+          4.0885,
+          3.99
+        ],
+        "alloc_release_ns": [
+          25.849999,
+          25.160001,
+          24.349999,
+          26.180001,
+          24.77,
+          24.530001,
+          25.69
+        ]
+      },
+      {
+        "wall_ms": 96.24550000000198,
+        "load_ms": 0.208,
+        "retain_release_ns": [
+          3.8755,
+          3.868,
+          3.8385,
+          3.8495,
+          3.856,
+          3.8655,
+          3.8575
+        ],
+        "alloc_release_ns": [
+          26.449999,
+          24.42,
+          24.48,
+          24.320001,
+          25.309999,
+          24.359999,
+          24.49
+        ]
+      },
+      {
+        "wall_ms": 95.65466599999795,
+        "load_ms": 0.189,
+        "retain_release_ns": [
+          3.8325,
+          3.833,
+          3.7885,
+          3.8485,
+          3.803,
+          3.82,
+          3.8335
+        ],
+        "alloc_release_ns": [
+          24.550001,
+          25.259999,
+          26.400001,
+          24.4,
+          24.379999,
+          27.030001,
+          24.51
+        ]
+      },
+      {
+        "wall_ms": 96.48024999999905,
+        "load_ms": 0.206,
+        "retain_release_ns": [
+          3.896,
+          3.844,
+          3.8885,
+          3.8725,
+          3.8235,
+          3.8085,
+          3.802
+        ],
+        "alloc_release_ns": [
+          24.8,
+          24.4,
+          25.820001,
+          24.529998,
+          24.47,
+          24.75,
+          26.150001
+        ]
+      },
+      {
+        "wall_ms": 95.64045900000195,
+        "load_ms": 0.184,
+        "retain_release_ns": [
+          3.8185,
+          3.8755,
+          3.8715,
+          3.8875,
+          3.85,
+          3.8035,
+          3.8695
+        ],
+        "alloc_release_ns": [
+          26.02,
+          24.649999,
+          24.339999,
+          26.230002,
+          24.899999,
+          24.41,
+          24.320001
+        ]
+      },
+      {
+        "wall_ms": 96.40720800000224,
+        "load_ms": 0.183,
+        "retain_release_ns": [
+          3.905,
+          3.8985,
+          3.9385,
+          3.917,
+          3.8595,
+          3.854,
+          3.8255
+        ],
+        "alloc_release_ns": [
+          24.5,
+          27.000001,
+          24.52,
+          24.289999,
+          26.57,
+          24.680002,
+          24.389999
+        ]
+      },
+      {
+        "wall_ms": 96.35866600000043,
+        "load_ms": 0.189,
+        "retain_release_ns": [
+          3.8755,
+          3.881,
+          3.8525,
+          3.818,
+          3.851,
+          3.8485,
+          3.84
+        ],
+        "alloc_release_ns": [
+          24.359999,
+          24.989999,
+          26.159999,
+          25.000002,
+          24.299999,
+          25.889999,
+          24.360002
+        ]
+      }
+    ],
+    "rust_arc": [
+      {
+        "wall_ms": 99.24912500000005,
+        "load_ms": 0.208,
+        "retain_release_ns": [
+          4.1305,
+          4.009,
+          4.1365,
+          4.0965,
+          4.037,
+          4.0235,
+          4.046
+        ],
+        "alloc_release_ns": [
+          23.82,
+          24.299999,
+          24.370002,
+          23.810002,
+          23.81,
+          25.159998,
+          24.15
+        ]
+      },
+      {
+        "wall_ms": 100.57137500000124,
+        "load_ms": 0.203,
+        "retain_release_ns": [
+          4.199,
+          4.1695,
+          4.1865,
+          4.1745,
+          4.129,
+          4.147,
+          4.1265
+        ],
+        "alloc_release_ns": [
+          25.12,
+          24.389999,
+          23.790002,
+          23.749999,
+          25.97,
+          23.970001,
+          23.719999
+        ]
+      },
+      {
+        "wall_ms": 100.61604199999863,
+        "load_ms": 0.19,
+        "retain_release_ns": [
+          4.1175,
+          4.1155,
+          4.1405,
+          4.106,
+          4.1205,
+          4.111,
+          4.0955
+        ],
+        "alloc_release_ns": [
+          23.83,
+          23.980001,
+          23.79,
+          25.37,
+          23.940001,
+          23.769999,
+          25.09
+        ]
+      },
+      {
+        "wall_ms": 99.21041599999825,
+        "load_ms": 0.191,
+        "retain_release_ns": [
+          4.0635,
+          4.0295,
+          4.04,
+          4.1065,
+          4.0905,
+          4.0215,
+          4.069
+        ],
+        "alloc_release_ns": [
+          24.089999,
+          23.930001,
+          23.990001,
+          25.770001,
+          23.79,
+          23.779999,
+          25.899999
+        ]
+      },
+      {
+        "wall_ms": 100.07895900000108,
+        "load_ms": 0.18,
+        "retain_release_ns": [
+          4.114,
+          4.113,
+          4.1375,
+          4.12,
+          4.124,
+          4.094,
+          4.126
+        ],
+        "alloc_release_ns": [
+          24.1,
+          24.18,
+          25.869999,
+          24.000001,
+          23.719999,
+          25.540001,
+          24.15
+        ]
+      },
+      {
+        "wall_ms": 100.75295800000106,
+        "load_ms": 0.26,
+        "retain_release_ns": [
+          4.1115,
+          4.1415,
+          4.149,
+          4.138,
+          4.1645,
+          4.1205,
+          4.1615
+        ],
+        "alloc_release_ns": [
+          23.79,
+          26.230002,
+          23.909998,
+          23.720001,
+          26.060001,
+          24.679999,
+          23.979999
+        ]
+      },
+      {
+        "wall_ms": 100.71754199999816,
+        "load_ms": 0.2,
+        "retain_release_ns": [
+          4.1785,
+          4.2185,
+          4.0805,
+          4.058,
+          4.067,
+          4.017,
+          4.0385
+        ],
+        "alloc_release_ns": [
+          25.73,
+          23.85,
+          24.669999,
+          26.080001,
+          24.849998,
+          25.000002,
+          24.849998
+        ]
+      }
+    ]
+  },
+  "method": {
+    "process_trials": 7,
+    "inner_warmups": 2,
+    "inner_samples": 7,
+    "compute_iterations": 8000000,
+    "scan_bytes": 65536,
+    "scan_rounds": 64,
+    "receiver_optimizer": "clang -O3 or Wasmtime Cranelift speed",
+    "native_target": "arm64-apple-macosx14.0",
+    "wasm_stack_bytes": 65536,
+    "compile_cache_policy": "OS caches warm; fresh compiler/runtime process; no persistent compiler cache",
+    "wasm_version": "49.0.3 (official C API archive)",
+    "ownership_scope": "native only, one thread, platform allocator; no cross-process or Wasm ownership claim"
+  },
+  "correctness": {
+    "kernel": 3471936222,
+    "scan": 3044613573,
+    "all_results_match": true
+  },
+  "git_commit": "e53c4e76adf128bcdb4ee94cbe37209267b40e7f",
+  "source_sha256": {
+    "wasm_runner.c": "c0c1846bfa9c98a025190b645e240262fa5e413c4e5478c7a1dd128c178d247f",
+    "run.py": "0fc6286f2373122dd7d7361f15ab8b06e87c0dba23afca6eb8422878834b9c27",
+    "native_runner.c": "84315ba39791b42e93be52905f0a99919df1923b12afdf1958af06c639e626ed",
+    "kernel.swift": "d677aa939d965d5c3921ce7682a4c324bb3d12926c88d3e621454b4d48b89f3a",
+    "kernel.rs": "883f2d97941fac5670dc49624b4780401e55359b1119c25e8d5b45ba9466248f",
+    "ownership.rs": "6bc9861d3fb138f173995d969cdbcb16dad3ddcec745c3e2fe27a272cff78e1f",
+    "ownership.swift": "9fc71b2d7e441a6fccf0c9b4e9f84ca8eb129533c6a324b810ea148a79cf34f1"
+  }
+}
