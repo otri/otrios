@@ -150,12 +150,24 @@ async fn asset(
 async fn file(s: &Server, path: &str) -> Response {
     let mime = match path {
         "index.html" => "text/html; charset=utf-8",
-        "app.js" | "state-worker.js" | "pkg/host.js" => "text/javascript; charset=utf-8",
+        "app.js" | "state-worker.js" | "pkg/host.js" | "gpu-scene.mjs" | "slug-shaders.mjs"
+        | "font-resource.mjs" | "font-reference.mjs" => "text/javascript; charset=utf-8",
         "style.css" => "text/css; charset=utf-8",
         "pkg/host_bg.wasm" => "application/wasm",
+        "fonts/Roboto-Regular.otq.zst" => "application/octet-stream",
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
-    match tokio::fs::read(s.web.join(path)).await {
+    let source = if matches!(
+        path,
+        "gpu-scene.mjs" | "slug-shaders.mjs" | "font-resource.mjs" | "font-reference.mjs"
+    ) {
+        s.web.join("../shared").join(path)
+    } else if path == "fonts/Roboto-Regular.otq.zst" {
+        s.web.join("../dashboard").join(path)
+    } else {
+        s.web.join(path)
+    };
+    match tokio::fs::read(source).await {
         Ok(b) => (
             [
                 (header::CONTENT_TYPE, mime),

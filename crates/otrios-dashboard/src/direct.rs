@@ -3,6 +3,8 @@
 #[cfg(target_os = "linux")]
 mod direct_host;
 #[cfg(target_os = "linux")]
+mod font_resource;
+#[cfg(target_os = "linux")]
 mod native_worker;
 fn main() -> Result<(), String> {
     #[cfg(target_os = "linux")]

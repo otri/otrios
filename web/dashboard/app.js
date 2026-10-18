@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Presentation owner: monotonic clock, cached GPU geometry, input forwarding.
 import init,{MotionPresenter} from './pkg/otrios_dashboard.js';
+import {SceneRenderer} from './gpu-scene.mjs';
+import {loadFontResource} from './font-resource.mjs';
 const canvas=document.querySelector('#dashboard'),controlsLayer=document.querySelector('#controls');
 const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),signout=document.querySelector('#monitoring-signout'),loginError=document.querySelector('#login-error');
 let monitoringAuth={authenticated:false},currentScreen='home';
@@ -14,7 +16,7 @@ try{
     navigator.serviceWorker.addEventListener('message',({data})=>{if(data?.type==='artifact-cache-status'){revision.dataset.cacheState=data.enabled?'ready':'unavailable';if(data.enabled){revision.dataset.cacheBytes=String(data.bytes);revision.dataset.cacheLimit=String(data.limit);revision.dataset.cacheEntries=String(data.count);}}});
     navigator.serviceWorker.register(new URL('./artifact-cache-worker.js',import.meta.url),{type:'module',scope:'/'}).then(()=>navigator.serviceWorker.ready).then(reg=>reg.active?.postMessage({type:'artifact-cache-status'})).catch(e=>{revision.dataset.cacheState='unavailable';console.warn('Artifact cache unavailable',e);});
   }else revision.dataset.cacheState='unsupported';
-  await init();const presenter=new MotionPresenter();
+  await init();const presenter=new MotionPresenter();const fontResource=await loadFontResource(import.meta.url);presenter.set_font(fontResource.bytes,fontResource.hash);
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false;
   function command(m){if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
@@ -22,17 +24,16 @@ try{
   function route(){return `/${model.screen}${model.keyboard?'/input':''}`;}
   window.addEventListener('popstate',()=>{applyingRoute=true;routeTarget=location.hash.replace(/^#/, '')||'/home';command({type:'route',route:location.hash});});
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
-  gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-  function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
-  const vs=shader(gl.VERTEX_SHADER,'attribute vec2 pos; attribute vec4 color; varying lowp vec4 tint; void main(){gl_Position=vec4(pos.x/640.0-1.0,1.0-pos.y/400.0,0.0,1.0);tint=color;}');
-  const fs=shader(gl.FRAGMENT_SHADER,'varying lowp vec4 tint; void main(){gl_FragColor=tint;}');const program=gl.createProgram();gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));gl.useProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);
-  const buffers=[gl.createBuffer(),gl.createBuffer(),gl.createBuffer()];const pos=gl.getAttribLocation(program,'pos'),color=gl.getAttribLocation(program,'color');gl.enableVertexAttribArray(pos);gl.enableVertexAttribArray(color);
-  function bind(buffer){gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,24,0);gl.vertexAttribPointer(color,4,gl.FLOAT,false,24,8);}
-  let staticCount=0,hudCount=0,hudRevision=-1,dirty=true;const controls=new Map();
+  const renderer=new SceneRenderer(gl),staticLayer=renderer.createLayer(),motionLayer=renderer.createLayer(),hudLayer=renderer.createLayer();
+  const [curveWidth,curveHeight,bandWidth,bandHeight]=presenter.font_dimensions();
+  renderer.setFont({curveWidth,curveHeight,curves:presenter.font_curves(),bandWidth,bandHeight,bands:presenter.font_bands()});revision.dataset.fontRenderer='analytic-quadratic-cached';revision.dataset.gamma='linear-light-srgb';
+  let hudRevision=-1,dirty=true,lastFontCache='';const controls=new Map();
+  function resize(){try{dirty=renderer.fitCanvas(canvas)||dirty;}catch(error){fatal(error);}}
+  resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',resize);
   function accept(f){
     if(model?.screen!==f.screen)presenter.suspend();
     model={...model,...f};currentScreen=f.screen;showAuth();
-    if(f.vertices){bind(buffers[0]);gl.bufferData(gl.ARRAY_BUFFER,f.vertices,gl.STATIC_DRAW);staticCount=f.vertices.length/6;
+    if(f.vertices){staticLayer.setFrame(f);
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',id:c.id}));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
         b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');const [x,y,w,h]=c.bounds;Object.assign(b.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});}
@@ -43,13 +44,13 @@ try{
     else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
     pump();worker.postMessage({type:'frame-ack'});
   }
-  worker.onmessage=event=>{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':releaseCandidate=null;reloading=false;break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}};
+  worker.onmessage=event=>{try{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':releaseCandidate=null;reloading=false;break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
   worker.onerror=e=>fatal(e.message);
   form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
   function leaveLogin(){command({type:'route',route:'#/home'});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});signout.addEventListener('click',()=>command({type:'logout'}));
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
+  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const r=canvas.getBoundingClientRect();return {type:'pointer',args:[phase,e.pointerId,(e.clientX-r.left)*1280/r.width,(e.clientY-r.top)*800/r.height,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
@@ -66,13 +67,16 @@ try{
       if(releaseCandidate)pump();
       const animated=model&&(model.screen==='animation'||model.screen==='3d');
       if(model&&(dirty||animated)){
-        gl.viewport(0,0,1280,800);gl.clearColor(16/255,28/255,41/255,1);gl.clear(gl.COLOR_BUFFER_BIT);bind(buffers[0]);gl.drawArrays(gl.TRIANGLES,0,staticCount);
-        if(animated){const [playing,speed,count]=model.intent;const v=presenter.vertices(model.screen==='3d',playing!==0,speed,count,now,model.updates);bind(buffers[1]);gl.bufferData(gl.ARRAY_BUFFER,v,gl.DYNAMIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,v.length/6);if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();const h=presenter.hud();bind(buffers[2]);gl.bufferData(gl.ARRAY_BUFFER,h,gl.STATIC_DRAW);hudCount=h.length/6;}bind(buffers[2]);gl.drawArrays(gl.TRIANGLES,0,hudCount);}
+        if(animated){const [playing,speed,count]=model.intent;motionLayer.setFrame({vertices:presenter.vertices(model.screen==='3d',playing!==0,speed,count,now,model.updates)});if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();hudLayer.setFrame({vertices:presenter.hud(),glyphVertices:presenter.hud_glyph_vertices(),draws:presenter.hud_draws()});}}
+        renderer.prepare(animated?[staticLayer,hudLayer]:[staticLayer]);
+        renderer.beginFrame();staticLayer.draw();
+        if(animated){motionLayer.draw();hudLayer.draw();}renderer.endFrame();
+        const fontCache=JSON.stringify(renderer.cacheStats);if(fontCache!==lastFontCache){revision.dataset.fontCache=fontCache;lastFontCache=fontCache;}
         if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');dirty=false;
         if(animated&&now-lastMetric>=1000){lastMetric=now;revision.dataset.frameStats=presenter.stats();}
       }
     }catch(e){fatal(e);return;}
     requestAnimationFrame(frame);
   }
-  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to reconnect to the shared dashboard.');});requestAnimationFrame(frame);
+  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();renderer.contextLost();fatal('Graphics context lost. Reload to reconnect to the shared dashboard.');});requestAnimationFrame(frame);
 }catch(e){fatal(e);}

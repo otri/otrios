@@ -2,7 +2,7 @@
 use crate::native_worker::{DisplayInfo, Frame, Input, options, state_worker};
 use otrios_core::dashboard::{
     display::Surface,
-    motion::{Presenter, render_hud},
+    motion::{Presenter, render_hud_with_font},
 };
 use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use otrios_linux_display::Display;
@@ -19,6 +19,8 @@ fn percentile(v: &[u64], q: f64) -> u64 {
 }
 pub(super) fn run() -> Result<(), String> {
     let mut o = options()?;
+    let font = crate::font_resource::load()?;
+    o.font = Some(font.clone());
     let seconds = o.seconds;
     let frames = o.frames;
     let exit_file = o.exit_file.clone();
@@ -43,6 +45,15 @@ pub(super) fn run() -> Result<(), String> {
         .unwrap_or_else(|_| "/dev/input/by-path/platform-2005a000.i2c-event".into());
     let card = std::env::var("OTRIOS_DRM_DEVICE").unwrap_or_else(|_| "/dev/dri/card0".into());
     let mut display = Display::open(&card, &touch, surface.extent(), rgb565)?;
+    let atlas = font.atlas();
+    display.set_font(
+        atlas.curve_width,
+        atlas.curve_height,
+        &atlas.curves,
+        atlas.band_width,
+        atlas.band_height,
+        &atlas.bands,
+    )?;
     let initial = display.info();
     println!(
         "Direct DRM/GBM/EGL/GLES2 {}x{} format={} bits={}/{}/{}/{}",
@@ -64,9 +75,10 @@ pub(super) fn run() -> Result<(), String> {
     };
     let (hud_tx, hud_requests) = mpsc::sync_channel::<(u64, String)>(1);
     let (hud_results, hud_rx) = mpsc::sync_channel(1);
+    let hud_font = font.clone();
     let hud_worker = thread::spawn(move || {
         while let Ok((bucket, label)) = hud_requests.recv() {
-            let _ = hud_results.try_send((bucket, render_hud(&label).vertices));
+            let _ = hud_results.try_send((bucket, render_hud_with_font(&label, &hud_font)));
         }
     });
     let started = Instant::now();
@@ -129,7 +141,7 @@ pub(super) fn run() -> Result<(), String> {
                         .as_ref()
                         .is_none_or(|old| !Arc::ptr_eq(old, &f.vertices))
                     {
-                        display.upload(0, &f.vertices)?;
+                        display.upload_scene(0, &f.vertices, &f.glyph_vertices, &f.draws)?;
                         retained = Some(f.vertices.clone());
                     }
                     if animated {
@@ -144,8 +156,13 @@ pub(super) fn run() -> Result<(), String> {
                         {
                             hud = bucket;
                         }
-                        while let Ok((_bucket, vertices)) = hud_rx.try_recv() {
-                            display.upload(2, &vertices)?;
+                        while let Ok((_bucket, mesh)) = hud_rx.try_recv() {
+                            display.upload_scene(
+                                2,
+                                &mesh.vertices,
+                                &mesh.glyph_vertices,
+                                &mesh.draws,
+                            )?;
                         }
                     }
                     display.draw(surface.projection(), animated)?;
@@ -244,7 +261,7 @@ pub(super) fn run() -> Result<(), String> {
         let info = display.info();
         let cadence: serde_json::Value =
             serde_json::from_str(&presenter.stats()).map_err(|e| e.to_string())?;
-        let report = serde_json::json!({"renderer":"gles2-direct","video":"DRM","drawn":drawn,"seconds":started.elapsed().as_secs_f64(),"scanout_format":if rgb565{"RGB565"}else{"XRGB8888"},"stride":info.stride,"color_bits":[info.red,info.green,info.blue,info.alpha],"output":[info.width,info.height],"rotation":surface.degrees(),"cadence":cadence,"compose_submit_p50_us":percentile(&compose,0.5),"compose_submit_p95_us":percentile(&compose,0.95),"compose_submit_p99_us":percentile(&compose,0.99),"compose_submit_max_us":compose.last(),"present_p50_us":percentile(&present,0.5),"present_p95_us":percentile(&present,0.95),"load_requested_hz":load,"worker_stall_ms":stall,"load_updates":model.as_ref().map(|f|f.updates),"received_app_updates":model.as_ref().map(|f|f.received_updates),"screen":model.as_ref().map(|f|&f.screen),"objects":model.as_ref().map(|f|f.intent.count),"kernel_flips":{"events":sample.len(),"seconds":duration,"fps":actual_fps,"missed_vblanks":missed,"p50_us":percentile(&intervals,0.5),"p95_us":percentile(&intervals,0.95),"p99_us":percentile(&intervals,0.99),"max_us":intervals.last(),"crtc":sample.first().map(|f|f.crtc)},"measurement":"kernel page-flip completions after two-second warmup; no tracing"});
+        let report = serde_json::json!({"renderer":"gles2-direct","font_renderer":"slug-coverage-cache","font_resource":otrios_core::dashboard::font_reference::RESOURCE_SHA256,"font_cache":display.glyph_cache_stats(),"gamma":"linear-light-srgb","video":"DRM","drawn":drawn,"seconds":started.elapsed().as_secs_f64(),"scanout_format":if rgb565{"RGB565"}else{"XRGB8888"},"stride":info.stride,"color_bits":[info.red,info.green,info.blue,info.alpha],"output":[info.width,info.height],"rotation":surface.degrees(),"cadence":cadence,"compose_submit_p50_us":percentile(&compose,0.5),"compose_submit_p95_us":percentile(&compose,0.95),"compose_submit_p99_us":percentile(&compose,0.99),"compose_submit_max_us":compose.last(),"present_p50_us":percentile(&present,0.5),"present_p95_us":percentile(&present,0.95),"load_requested_hz":load,"worker_stall_ms":stall,"load_updates":model.as_ref().map(|f|f.updates),"received_app_updates":model.as_ref().map(|f|f.received_updates),"screen":model.as_ref().map(|f|&f.screen),"objects":model.as_ref().map(|f|f.intent.count),"kernel_flips":{"events":sample.len(),"seconds":duration,"fps":actual_fps,"missed_vblanks":missed,"p50_us":percentile(&intervals,0.5),"p95_us":percentile(&intervals,0.95),"p99_us":percentile(&intervals,0.99),"max_us":intervals.last(),"crtc":sample.first().map(|f|f.crtc)},"measurement":"kernel page-flip completions after two-second warmup; no tracing"});
         fs::write(path, report.to_string()).map_err(|e| e.to_string())?;
         println!("{report}");
     }

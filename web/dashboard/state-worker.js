@@ -10,12 +10,12 @@ let inFlight=false,pendingFrame=null,lastStall=0;
 function sendFrame(){
   if(inFlight||!pendingFrame)return;
   const f=pendingFrame;pendingFrame=null;inFlight=true;
-  postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer]:[]);
+  postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer]:[]);
 }
 function publish(geometry=true){
   const frame={screen:dashboard.screen(),keyboard:dashboard.keyboard_visible(),editing:dashboard.editing(),intent:Array.from(dashboard.motion_intent()),updates:dashboard.stress_updates()};
   if(geometry){
-    frame.vertices=dashboard.vertices();frame.text=dashboard.scene_text();frame.snapshot=dashboard.snapshot_id();frame.layout=dashboard.layout_id();
+    frame.vertices=dashboard.vertices();frame.glyphVertices=dashboard.glyph_vertices();frame.draws=dashboard.draws();frame.text=dashboard.scene_text();frame.snapshot=dashboard.snapshot_id();frame.layout=dashboard.layout_id();
     frame.controls=Array.from(dashboard.control_ids(),id=>({id,label:dashboard.control_label(id),disabled:dashboard.control_disabled(id),role:dashboard.control_role(id),checked:dashboard.control_checked(id),bounds:Array.from(dashboard.control_bounds(id)),value:dashboard.control_value(id),draggable:dashboard.control_draggable(id)}));
   }
   // Preserve unsent geometry when replacing only the counters/intent.
@@ -78,7 +78,7 @@ onmessage=async event=>{
   const m=event.data;
   try{
     if(m.type==='start'){
-      await init();retireDocumentCaches();dashboard=new Dashboard();dashboard.set_wall_time(Date.now()/1000);
+      await init();retireDocumentCaches();dashboard=new Dashboard();dashboard.set_font(m.fontBytes,m.fontHash);dashboard.set_wall_time(Date.now()/1000);
       monitoring=new MonitoringSession({onStatus:state=>{
         dashboard.set_monitoring_access(state.authenticated);publish();postMessage({type:'monitoring-auth',...state});
       },onView:bytes=>{if(dashboard.present(bytes))publish();}});

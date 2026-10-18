@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! SDL presentation host; shared state and network work live in native_worker.
+mod font_resource;
 mod native_worker;
 use native_worker::{DisplayInfo, Frame, Input, options, state_worker};
 use otrios_core::dashboard::{

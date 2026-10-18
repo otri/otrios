@@ -5,7 +5,7 @@ use otrios_core::dashboard::{
     display::{Calibration, Surface, cached_regions},
     motion::{Intent, Stress},
     presentation::{Command, Model, Presentation},
-    render_scene,
+    render_scene_with_font,
     shell::Shell,
 };
 use otrios_interfaces::{keyboard::Edit, scene::PointerEvent};
@@ -30,6 +30,16 @@ struct NetworkSend {
 #[derive(Clone)]
 pub(super) struct Frame {
     pub(super) vertices: Arc<Vec<f32>>,
+    #[allow(
+        dead_code,
+        reason = "Experimental glyph stream is consumed by the direct host; SDL recovery has no Slug pass"
+    )]
+    pub(super) glyph_vertices: Arc<Vec<f32>>,
+    #[allow(
+        dead_code,
+        reason = "Ordered glyph stream is consumed by the direct host"
+    )]
+    pub(super) draws: Arc<Vec<u32>>,
     #[allow(
         dead_code,
         reason = "SDL texture cache; direct host uses retained VBOs"
@@ -80,6 +90,7 @@ pub(super) enum Input {
 }
 #[derive(Clone, Default)]
 pub(super) struct Options {
+    pub(super) font: Option<Arc<otrios_core::dashboard::font::Font>>,
     pub(super) url: Option<String>,
     pub(super) state: Option<String>,
     pub(super) frames: Option<usize>,
@@ -401,7 +412,14 @@ pub(super) fn state_worker(
     let mut measured_sample = 0;
     let mut sync_to_present_ms = None;
     let mut scene_cache = None;
+    let font = match &o.font {
+        Some(font) => font.clone(),
+        None => crate::font_resource::load()?,
+    };
+    shell.set_font(font.clone());
     let mut mesh_cache = Arc::new(Vec::new());
+    let mut glyph_cache = Arc::new(Vec::new());
+    let mut draws_cache = Arc::new(Vec::new());
     let mut copy_cache = Arc::new(Vec::new());
     let mut updates = 0;
     let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
@@ -530,7 +548,7 @@ pub(super) fn state_worker(
                 .as_ref()
                 .is_none_or(|old| !Arc::ptr_eq(old, &scene))
             {
-                let mesh = render_scene(&scene);
+                let mesh = render_scene_with_font(&scene, &font);
                 copy_cache = Arc::new(if o.texture_cache {
                     cached_regions(
                         &mesh.vertices,
@@ -541,11 +559,15 @@ pub(super) fn state_worker(
                     Vec::new()
                 });
                 mesh_cache = Arc::new(mesh.vertices);
+                glyph_cache = Arc::new(mesh.glyph_vertices);
+                draws_cache = Arc::new(mesh.draws);
                 scene_cache = Some(scene);
             }
             serial += 1;
             pending = Some(Frame {
                 vertices: mesh_cache.clone(),
+                glyph_vertices: glyph_cache.clone(),
+                draws: draws_cache.clone(),
                 copy_regions: copy_cache.clone(),
                 snapshot: replica.snapshot().hex_id(),
                 layout: replica.snapshot().layout().hex_id(),

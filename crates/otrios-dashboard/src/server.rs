@@ -477,9 +477,20 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/monitoring-session.mjs"
         | "release-gate.mjs"
         | "web/release-gate.mjs"
+        | "gpu-scene.mjs"
+        | "web/gpu-scene.mjs"
+        | "slug-shaders.mjs"
+        | "web/slug-shaders.mjs"
+        | "font-resource.mjs"
+        | "web/font-resource.mjs"
+        | "font-reference.mjs"
+        | "web/font-reference.mjs"
         | "pkg/otrios_dashboard.js"
         | "web/pkg/otrios_dashboard.js" => Some("text/javascript"),
         "style.css" | "web/style.css" => Some("text/css"),
+        "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
+            Some("application/octet-stream")
+        }
         "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
             Some("application/wasm")
         }
@@ -499,7 +510,19 @@ async fn serve_file(path: PathBuf, kind: &str, immutable: bool) -> Response {
 async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<String>) -> Response {
     match asset_type(&path) {
         Some(kind) if !path.starts_with("native/") => {
-            serve_file(app.web.join(path), kind, false).await
+            let mut file = app.web.join(&path);
+            if !file.exists()
+                && matches!(
+                    path.as_str(),
+                    "gpu-scene.mjs"
+                        | "slug-shaders.mjs"
+                        | "font-resource.mjs"
+                        | "font-reference.mjs"
+                )
+            {
+                file = app.web.join("../shared").join(&path);
+            }
+            serve_file(file, kind, false).await
         }
         _ => failure(StatusCode::NOT_FOUND, "Not found"),
     }

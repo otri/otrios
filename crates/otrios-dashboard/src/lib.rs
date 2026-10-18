@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Thin host adapter. The LGPL runtime owns state, snapshots, input and rendering.
-use otrios_core::dashboard::{Replica, SyncSession, render_scene, shell::Shell};
+use otrios_core::dashboard::{Mesh, font::Font, render_scene_with_font, scene::Scene};
+use otrios_core::dashboard::{Replica, SyncSession, shell::Shell};
 use otrios_interfaces::keyboard::Edit;
 use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 fn browser_shell() -> Shell {
@@ -12,6 +14,8 @@ fn browser_shell() -> Shell {
 }
 #[wasm_bindgen]
 pub struct Dashboard {
+    font: Option<Arc<Font>>,
+    rendered: Option<(Arc<Scene>, Mesh)>,
     replica: Replica,
     session: SyncSession,
     shell: Shell,
@@ -23,6 +27,8 @@ impl Dashboard {
     pub fn new() -> Result<Dashboard, String> {
         Ok(Self {
             replica: Replica::new()?,
+            font: None,
+            rendered: None,
             session: SyncSession::default(),
             shell: browser_shell(),
             stress: otrios_core::dashboard::motion::Stress::new()?,
@@ -31,6 +37,8 @@ impl Dashboard {
     pub fn load(bytes: &[u8]) -> Result<Dashboard, String> {
         Ok(Self {
             replica: Replica::load(bytes)?,
+            font: None,
+            rendered: None,
             session: SyncSession::default(),
             shell: browser_shell(),
             stress: otrios_core::dashboard::motion::Stress::new()?,
@@ -68,8 +76,53 @@ impl Dashboard {
         self.replica.set_enabled(value)
     }
     pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
-        Ok(render_scene(self.shell.scene(&self.replica)?.as_ref()).vertices)
+        Ok(self.compose()?.vertices.clone())
     }
+    pub fn glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
+        Ok(self.compose()?.glyph_vertices.clone())
+    }
+    pub fn draws(&mut self) -> Result<Vec<u32>, String> {
+        Ok(self.compose()?.draws.clone())
+    }
+    pub fn set_font(&mut self, bytes: &[u8], hash: &str) -> Result<(), String> {
+        let font = Arc::new(Font::from_zstd(bytes, hash)?);
+        self.shell.set_font(font.clone());
+        self.font = Some(font);
+        self.rendered = None;
+        Ok(())
+    }
+    pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
+        let a = self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas();
+        Ok(vec![
+            a.curve_width,
+            a.curve_height,
+            a.band_width,
+            a.band_height,
+        ])
+    }
+    pub fn font_curves(&self) -> Result<Vec<f32>, String> {
+        Ok(self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas()
+            .curves
+            .clone())
+    }
+    pub fn font_bands(&self) -> Result<Vec<u8>, String> {
+        Ok(self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas()
+            .bands
+            .clone())
+    }
+
     pub fn motion_intent(&self) -> Result<Vec<f32>, String> {
         let i = self.replica.motion()?;
         Ok(vec![
@@ -341,6 +394,9 @@ impl Dashboard {
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct MotionPresenter {
+    font: Option<Arc<Font>>,
+    rendered_hud: Option<(u64, Mesh)>,
+    updates: u64,
     inner: otrios_core::dashboard::motion::Presenter,
 }
 #[wasm_bindgen]
@@ -364,6 +420,7 @@ impl MotionPresenter {
             count,
         };
         i.validate()?;
+        self.updates = updates.max(0.) as u64;
         Ok(self
             .inner
             .mesh(three_d, i, now, updates.max(0.) as u64)
@@ -375,10 +432,88 @@ impl MotionPresenter {
     pub fn hud_revision(&self) -> f64 {
         self.inner.hud_revision() as f64
     }
-    pub fn hud(&self) -> Vec<f32> {
-        self.inner.hud().to_vec()
+    pub fn hud(&mut self) -> Result<Vec<f32>, String> {
+        Ok(self.compose_hud()?.vertices.clone())
     }
+    pub fn hud_glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
+        Ok(self.compose_hud()?.glyph_vertices.clone())
+    }
+    pub fn hud_draws(&mut self) -> Result<Vec<u32>, String> {
+        Ok(self.compose_hud()?.draws.clone())
+    }
+    pub fn set_font(&mut self, bytes: &[u8], hash: &str) -> Result<(), String> {
+        self.font = Some(Arc::new(Font::from_zstd(bytes, hash)?));
+        self.rendered_hud = None;
+        Ok(())
+    }
+    pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
+        let a = self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas();
+        Ok(vec![
+            a.curve_width,
+            a.curve_height,
+            a.band_width,
+            a.band_height,
+        ])
+    }
+    pub fn font_curves(&self) -> Result<Vec<f32>, String> {
+        Ok(self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas()
+            .curves
+            .clone())
+    }
+    pub fn font_bands(&self) -> Result<Vec<u8>, String> {
+        Ok(self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas()
+            .bands
+            .clone())
+    }
+
     pub fn stats(&self) -> String {
         self.inner.stats()
+    }
+}
+
+impl Dashboard {
+    fn compose(&mut self) -> Result<&Mesh, String> {
+        let scene = self.shell.scene(&self.replica)?;
+        if self
+            .rendered
+            .as_ref()
+            .is_none_or(|(old, _)| !Arc::ptr_eq(old, &scene))
+        {
+            let font = self.font.as_ref().ok_or("Font resource not loaded")?;
+            let mesh = render_scene_with_font(&scene, font);
+            self.rendered = Some((scene, mesh));
+        }
+        Ok(&self.rendered.as_ref().ok_or("No rendered scene")?.1)
+    }
+}
+
+impl MotionPresenter {
+    fn compose_hud(&mut self) -> Result<&Mesh, String> {
+        let revision = self.inner.hud_revision();
+        if self
+            .rendered_hud
+            .as_ref()
+            .is_none_or(|(old, _)| *old != revision)
+        {
+            let font = self.font.as_ref().ok_or("Font resource not loaded")?;
+            let mesh = otrios_core::dashboard::motion::render_hud_with_font(
+                &self.inner.hud_label(self.updates),
+                font,
+            );
+            self.rendered_hud = Some((revision, mesh));
+        }
+        Ok(&self.rendered_hud.as_ref().ok_or("No HUD")?.1)
     }
 }

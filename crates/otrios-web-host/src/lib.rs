@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Browser adapter; Canvas state/guest memory live only in the worker's RAM.
-use otrios_core::{canvas::Client, dashboard::render_scene};
+use otrios_core::canvas::Client;
+use otrios_core::dashboard::{Mesh, font::Font, render_scene_with_font, scene::Scene};
 use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct CanvasApp {
+    font: Option<Arc<Font>>,
+    rendered: Option<(Arc<Scene>, Mesh)>,
     inner: Client,
 }
 #[wasm_bindgen]
@@ -38,9 +42,53 @@ impl CanvasApp {
     pub fn confirmed(&mut self) -> bool {
         self.inner.confirmed()
     }
-    pub fn vertices(&self) -> Result<Vec<f32>, String> {
-        Ok(render_scene(self.inner.scene()?.as_ref()).vertices)
+    pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
+        Ok(self.compose()?.vertices.clone())
     }
+    pub fn glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
+        Ok(self.compose()?.glyph_vertices.clone())
+    }
+    pub fn draws(&mut self) -> Result<Vec<u32>, String> {
+        Ok(self.compose()?.draws.clone())
+    }
+    pub fn set_font(&mut self, bytes: &[u8], hash: &str) -> Result<(), String> {
+        let font = Arc::new(Font::from_zstd(bytes, hash)?);
+        self.font = Some(font);
+        self.rendered = None;
+        Ok(())
+    }
+    pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
+        let a = self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas();
+        Ok(vec![
+            a.curve_width,
+            a.curve_height,
+            a.band_width,
+            a.band_height,
+        ])
+    }
+    pub fn font_curves(&self) -> Result<Vec<f32>, String> {
+        Ok(self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas()
+            .curves
+            .clone())
+    }
+    pub fn font_bands(&self) -> Result<Vec<u8>, String> {
+        Ok(self
+            .font
+            .as_ref()
+            .ok_or("Font resource not loaded")?
+            .atlas()
+            .bands
+            .clone())
+    }
+
     pub fn text(&self) -> Result<String, String> {
         fn visit(n: &otrios_interfaces::scene::SceneNode, out: &mut Vec<String>) {
             if let Primitive::Text { value, .. } = &n.primitive {
@@ -117,5 +165,21 @@ impl CanvasApp {
                 position: [x, y],
             },
         )
+    }
+}
+
+impl CanvasApp {
+    fn compose(&mut self) -> Result<&Mesh, String> {
+        let scene = self.inner.scene()?;
+        if self
+            .rendered
+            .as_ref()
+            .is_none_or(|(old, _)| !Arc::ptr_eq(old, &scene))
+        {
+            let font = self.font.as_ref().ok_or("Font resource not loaded")?;
+            let mesh = render_scene_with_font(&scene, font);
+            self.rendered = Some((scene, mesh));
+        }
+        Ok(&self.rendered.as_ref().ok_or("No rendered scene")?.1)
     }
 }
