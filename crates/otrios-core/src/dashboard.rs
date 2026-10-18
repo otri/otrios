@@ -15,7 +15,7 @@ mod render;
 pub mod scene;
 pub mod shell;
 mod snapshot;
-pub use render::{Mesh, render, render_scene};
+pub use render::{Mesh, font_notice, render, render_scene, text_width};
 pub use snapshot::ViewSnapshot;
 
 use automerge::sync::SyncDoc;

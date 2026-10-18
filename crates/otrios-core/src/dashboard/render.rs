@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::{ViewSnapshot, scene::Scene};
-use font8x8::{BASIC_FONTS, UnicodeFonts};
+#[path = "font.rs"]
+mod font;
 use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
+/// Roboto copyright and license notice, embedded with the glyph data in every host.
+pub fn font_notice() -> &'static str {
+    font::notice()
+}
+
+/// Proportional text advance in logical units, using the same metrics as rendering.
+pub fn text_width(value: &str, scale: f32) -> f32 {
+    value
+        .chars()
+        .map(|ch| font::glyph(ch).advance * scale)
+        .sum()
+}
+
 /// Triangle list: logical x/y and RGBA. Both GPU hosts consume this geometry.
 pub struct Mesh {
     pub vertices: Vec<f32>,
@@ -163,36 +177,24 @@ impl Mesh {
     }
     fn text(&mut self, r: Rect, value: &str, scale: f32, c: Color, clip: Clip) {
         let clip = clip.intersect(r);
-        for (i, ch) in value.chars().enumerate() {
-            let glyph = BASIC_FONTS
-                .get(ch)
-                .or_else(|| BASIC_FONTS.get('?'))
-                .unwrap_or([0; 8]);
-            for (row, bits) in glyph.iter().enumerate() {
-                let mut col = 0;
-                while col < 8 {
-                    if bits & (1 << col) == 0 {
-                        col += 1;
-                    } else {
-                        let begin = col;
-                        while col < 8 && bits & (1 << col) != 0 {
-                            col += 1;
-                        }
-                        self.rect(
-                            Rect::new(
-                                r.x + (i as f32 * 9. + begin as f32) * scale,
-                                r.y + row as f32 * scale,
-                                (col - begin) as f32 * scale,
-                                scale,
-                            ),
-                            c,
-                            clip,
-                        );
-                    }
-                }
+        let mut x = r.x;
+        for ch in value.chars() {
+            let glyph = font::glyph(ch);
+            let mut points = glyph.points();
+            while let (Some(a), Some(b), Some(d)) = (points.next(), points.next(), points.next()) {
+                self.triangle(
+                    [a, b, d].map(|p| [x + p[0] * scale, r.y + p[1] * scale]),
+                    c,
+                    clip,
+                );
+            }
+            x += glyph.advance * scale;
+            if x >= clip.right {
+                break;
             }
         }
     }
+
     fn line(&mut self, a: [f32; 2], b: [f32; 2], width: f32, c: Color, clip: Clip) {
         let d = [b[0] - a[0], b[1] - a[1]];
         let len = d[0].hypot(d[1]);
@@ -278,38 +280,50 @@ impl Mesh {
 mod tests {
     use super::*;
     #[test]
-    fn glyph_runs_preserve_pixel_coverage_and_fractional_clipping() {
-        let value = "ABCxyz09?";
+    fn vector_text_preserves_holes_and_fractional_clipping() {
         let mut mesh = Mesh { vertices: vec![] };
+        let clip = Clip {
+            left: 0.,
+            top: 0.,
+            right: 100.,
+            bottom: 100.,
+        };
+        mesh.text(Rect::new(0., 0., 100., 100.), "O", 4., [255; 4], clip);
+        let covered = |p: [f32; 2]| {
+            mesh.vertices.chunks_exact(18).any(|t| {
+                let cross = |a: usize, b: usize| {
+                    (t[b] - t[a]) * (p[1] - t[a + 1]) - (t[b + 1] - t[a + 1]) * (p[0] - t[a])
+                };
+                let signs = [cross(0, 6), cross(6, 12), cross(12, 0)];
+                signs.iter().all(|s| *s >= 0.) || signs.iter().all(|s| *s <= 0.)
+            })
+        };
+        assert!(!mesh.vertices.is_empty());
+        assert!(
+            !covered([font::glyph('O').advance * 2., 16.]),
+            "O counter must be empty"
+        );
+        assert!(covered([3., 16.]), "O stem must be filled");
         let clip = Clip {
             left: 3.25,
             top: 1.25,
             right: 73.75,
             bottom: 7.75,
         };
-        mesh.text(Rect::new(0., 0., 1280., 800.), value, 1., [255; 4], clip);
-        for (i, ch) in value.chars().enumerate() {
-            let glyph = BASIC_FONTS.get(ch).unwrap();
-            for (row, bits) in glyph.iter().enumerate() {
-                for col in 0..9 {
-                    let p = [i as f32 * 9. + col as f32 + 0.5, row as f32 + 0.5];
-                    let covered = mesh.vertices.chunks_exact(18).any(|t| {
-                        let cross = |a: usize, b: usize| {
-                            (t[b] - t[a]) * (p[1] - t[a + 1])
-                                - (t[b + 1] - t[a + 1]) * (p[0] - t[a])
-                        };
-                        let signs = [cross(0, 6), cross(6, 12), cross(12, 0)];
-                        signs.iter().all(|s| *s >= 0.) || signs.iter().all(|s| *s <= 0.)
-                    });
-                    let expected = col < 8
-                        && bits & (1 << col) != 0
-                        && p[0] >= clip.left
-                        && p[0] <= clip.right
-                        && p[1] >= clip.top
-                        && p[1] <= clip.bottom;
-                    assert_eq!(covered, expected, "{ch} {col} {row}");
-                }
-            }
+        mesh.vertices.clear();
+        mesh.text(
+            Rect::new(0., 0., 1280., 800.),
+            "ABCxyz09?",
+            1.,
+            [255; 4],
+            clip,
+        );
+        assert!(!mesh.vertices.is_empty());
+        assert_eq!(mesh.vertices.len() % 18, 0);
+        for p in mesh.vertices.chunks_exact(6) {
+            assert!(p.iter().all(|v| v.is_finite()));
+            assert!((clip.left..=clip.right).contains(&p[0]));
+            assert!((clip.top..=clip.bottom).contains(&p[1]));
         }
     }
     #[test]
