@@ -99,3 +99,13 @@ and after the text, then type and synchronize the resulting insertions. Separate
 checks cover combining characters, joined emoji and a scrolled display window.
 Caret-only movement emits no shared state update. Physical finger behavior still
 requires device acceptance.
+
+Deployed source `b46a1db`, signed release
+`9d10b4f91c6d263e50af0e02eb9e15742ac1153271f366065455083b145750f4`.
+Required workspace checks, 26 Canvas integration tests, 4 native worker tests and
+32 Node tests passed. Tap-only checks on the actual HTTPS browser produced `hello|`
+when tapping after the first field's text and `y|ea` when tapping within the second
+field. The shared values were not edited. Revisiting a field at a new position is
+covered by the integration test; the additional browser automation attempt timed
+out before input dispatch. The frame accepted the same release with acknowledged
+Home state and zero pending commands; physical finger acceptance remains pending.
