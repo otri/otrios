@@ -36,6 +36,16 @@ def verify_binary(data,item):
     if not 0<item['bytes']<=MAX_BINARY or len(data)!=item['bytes'] or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Native artifact digest rejected')
     if len(data)<52 or data[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(data[18:20],'little')!=40:raise ValueError('Wrong executable target')
 
+def verify_font(data,item):
+    if not 0<item['bytes']<=1024*1024 or len(data)!=item['bytes'] or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Font resource digest rejected')
+
+def resource_items(manifest):
+    for remote,local in [('web/fonts/Roboto-Regular.otq.zst','fonts/Roboto-Regular.otq.zst'),('web/Slug-LICENSE.txt','Slug-LICENSE.txt')]:
+        item=manifest['assets'].get(remote)
+        if item:
+            if not 0<item['bytes']<=1024*1024:raise ValueError('Resource exceeds item budget')
+            yield remote,local,item
+
 def valid_release(release):
     if len(release)!=64 or any(c not in '0123456789abcdef' for c in release):raise ValueError('Invalid release ID')
 
@@ -47,6 +57,7 @@ def cached(cache,release,key,openssl,sdl=False):
     name='dashboard-sdl' if sdl and 'native/armv7/dashboard-sdl' in manifest['assets'] else 'dashboard-native'
     for artifact in ['dashboard-native','dashboard-sdl']:
         if 'native/armv7/'+artifact in manifest['assets']:verify_binary((dest/artifact).read_bytes(),manifest['assets']['native/armv7/'+artifact])
+    for _,local,item in resource_items(manifest):verify_font((dest/local).read_bytes(),item)
     return release,dest/name
 
 def cache_size(path):
@@ -98,6 +109,7 @@ def qualify(base,cache,key,openssl,release=None,sdl=False,limit=CACHE_BYTES,pins
         if item:
             if not 0<item['bytes']<=MAX_BINARY:raise ValueError('Invalid binary size')
             expected+=item['bytes']
+    expected+=sum(item['bytes']for _,_,item in resource_items(manifest))
     trim_cache(cache,limit,reserve=expected,pins=pins)
     # Stage outside digest namespace, accounted by reservation; publish at once.
     with tempfile.TemporaryDirectory(prefix='.download-',dir=cache) as staging:
@@ -108,6 +120,9 @@ def qualify(base,cache,key,openssl,release=None,sdl=False,limit=CACHE_BYTES,pins
             item=manifest['assets'][path]
             data=fetch(base,root+path,MAX_BINARY);verify_binary(data,item)
             atomic(stage/name,data,0o700)
+        for remote,local,item in resource_items(manifest):
+            data=fetch(base,root+remote,1024*1024);verify_font(data,item)
+            (stage/local).parent.mkdir(parents=True,exist_ok=True);atomic(stage/local,data)
         atomic(stage/'manifest.json',raw);atomic(stage/'manifest.sig',sig)
         stage.rename(dest)
     trim_cache(cache,limit,pins=(*pins,release));os.utime(dest,None)

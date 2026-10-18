@@ -19,6 +19,8 @@ class SignedReleases(unittest.TestCase):
         (self.web/'pkg/otrios_dashboard_bg.wasm').write_bytes(b'\0asm\x01\0\0\0')
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
+        (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
+        for name in ['Slug-LICENSE.txt','gpu-scene.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
     def tearDown(self):self.temp.cleanup()
@@ -26,9 +28,18 @@ class SignedReleases(unittest.TestCase):
     def copy_cache(self,id):
         dest=self.cache/id;dest.mkdir()
         for file in ['manifest.json','manifest.sig']:shutil.copyfile(self.out/id/file,dest/file)
+        for name in ['fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']:
+            if (self.out/id/'web'/name).exists():
+                (dest/name).parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/id/'web'/name,dest/name)
         for name in ['dashboard-native','dashboard-sdl']:
             source=self.out/id/'native/armv7'/name
             if source.exists():shutil.copyfile(source,dest/name)
+    def test_font_resource_is_verified_with_cached_native_release(self):
+        path=self.cache/self.id/'fonts/Roboto-Regular.otq.zst'
+        path.write_bytes(b'corrupt')
+        with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
+    def test_resource_budget_rejects_oversized_font_before_download(self):
+        with self.assertRaises(ValueError):list(agent.resource_items({'assets':{'web/fonts/Roboto-Regular.otq.zst':{'bytes':1024*1024+1}}}))
     def test_signed_native_artifact_is_accepted(self):
         id,path=agent.cached(self.cache,self.id,self.public,OPENSSL);self.assertEqual(id,self.id);self.assertEqual(path.read_bytes(),self.native.read_bytes())
     def test_download_reserves_budget_and_never_evicts_active_release(self):
@@ -36,7 +47,7 @@ class SignedReleases(unittest.TestCase):
         (self.web/'app.js').write_text('candidate')
         candidate=self.publish()['id']
         new=self.out/candidate
-        required=(new/'manifest.json').stat().st_size+64+self.native.stat().st_size
+        required=(new/'manifest.json').stat().st_size+64+self.native.stat().st_size+(new/'web/fonts/Roboto-Regular.otq.zst').stat().st_size+(new/'web/Slug-LICENSE.txt').stat().st_size
         used=agent.cache_size(self.cache)
         def fetch(base,path,limit):return (self.out/path.removeprefix('/releases/')).read_bytes()
         with patch.object(agent,'fetch',side_effect=fetch):

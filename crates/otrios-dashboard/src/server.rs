@@ -488,6 +488,7 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "pkg/otrios_dashboard.js"
         | "web/pkg/otrios_dashboard.js" => Some("text/javascript"),
         "style.css" | "web/style.css" => Some("text/css"),
+        "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
         "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
             Some("application/octet-stream")
         }
@@ -514,7 +515,8 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
             if !file.exists()
                 && matches!(
                     path.as_str(),
-                    "gpu-scene.mjs"
+                    "Slug-LICENSE.txt"
+                        | "gpu-scene.mjs"
                         | "slug-shaders.mjs"
                         | "font-resource.mjs"
                         | "font-reference.mjs"

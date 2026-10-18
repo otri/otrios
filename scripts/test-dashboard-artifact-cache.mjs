@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {ArtifactCache,eligible,budget,victims,boundedBody,MAX_BYTES,MAX_ITEM} from '../web/dashboard/artifact-cache.mjs';
 const origin='https://otrios.example',release=`${origin}/releases/${'a'.repeat(64)}/web/`;
 test('only immutable public code/blob paths can enter the cache',()=>{
-  for(const p of ['app.js','artifact-cache.mjs','pkg/otrios_dashboard_bg.wasm'])assert(eligible(new Request(release+p),origin));
+  for(const p of ['app.js','artifact-cache.mjs','pkg/otrios_dashboard_bg.wasm','fonts/Roboto-Regular.otq.zst'])assert(eligible(new Request(release+p),origin));
   assert(eligible(new Request(`${origin}/objects/${'b'.repeat(64)}`),origin));
   for(const p of ['/sync','/demo/stream','/demo/ink','/monitoring/presentation','/auth/session','/release','/presentation'])assert(!eligible(new Request(origin+p),origin));
   assert(!eligible(new Request(release+'app.js',{headers:{Authorization:'private'}}),origin));
