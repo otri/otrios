@@ -5,8 +5,5 @@ cd "$(dirname "$0")/.."
 cargo run -p otrios-dashboard --bin canvas-pack --features canvas --locked --offline
 cargo build -p otrios-web-host --lib --target wasm32-unknown-unknown --release --locked --offline
 canvas_target="${CARGO_TARGET_DIR:-target}"
-wasm-bindgen --target web --out-name host --out-dir web/canvas/pkg "$canvas_target/wasm32-unknown-unknown/release/otrios_web_host.wasm"
-# Retire the old generated combined host after the replacement has built.
-rm -f web/canvas/pkg/otrios_dashboard.js web/canvas/pkg/otrios_dashboard.d.ts \
-  web/canvas/pkg/otrios_dashboard_bg.wasm web/canvas/pkg/otrios_dashboard_bg.wasm.d.ts
+wasm-bindgen --target web --out-name otrios_dashboard --out-dir web/canvas/pkg "$canvas_target/wasm32-unknown-unknown/release/otrios_web_host.wasm"
 cargo build -p otrios-dashboard --features canvas,server,host-sync --bin canvas-server --bin canvas-native --locked --offline

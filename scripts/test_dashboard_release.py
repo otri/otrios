@@ -20,20 +20,38 @@ class SignedReleases(unittest.TestCase):
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
         (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
-        for name in ['Slug-LICENSE.txt','gpu-scene.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        (self.root/'apps').mkdir();(self.root/'apps/catalog.flex').write_bytes(b'test-catalog')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
     def tearDown(self):self.temp.cleanup()
-    def publish(self):return publisher.publish(self.web,self.native,self.out,self.key,OPENSSL)
+    def publish(self):return publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,catalog=self.root/'apps/catalog.flex')
     def copy_cache(self,id):
         dest=self.cache/id;dest.mkdir()
         for file in ['manifest.json','manifest.sig']:shutil.copyfile(self.out/id/file,dest/file)
+        if (self.out/id/'apps/catalog.flex').exists():shutil.copyfile(self.out/id/'apps/catalog.flex',dest/'app-catalog.flex')
         for name in ['fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']:
             if (self.out/id/'web'/name).exists():
                 (dest/name).parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/id/'web'/name,dest/name)
         for name in ['dashboard-native','dashboard-sdl']:
             source=self.out/id/'native/armv7'/name
             if source.exists():shutil.copyfile(source,dest/name)
+    def test_authority_app_payloads_are_signed_but_never_replicated_publicly(self):
+        package=self.root/'apps/monitoring/package';package.mkdir(parents=True)
+        (package/'app.flex').write_bytes(b'private-app-manifest')
+        (package/'ui.flex').write_bytes(b'private-ui-canary')
+        (package/'behavior.wasm').write_bytes(b'private-code-canary')
+        pointer=self.publish();folder=self.out/pointer['id'];manifest=json.loads((folder/'manifest.json').read_bytes())
+        self.assertIn('apps/catalog.flex',manifest['assets'])
+        self.assertIn('authority/apps/monitoring/ui.flex',manifest['authority'])
+        self.assertFalse(any(name.startswith('authority/') for name in manifest['assets']))
+        self.assertEqual((folder/'authority/apps/monitoring/ui.flex').read_bytes(),b'private-ui-canary')
+        _,_,payload=module_publisher.bundle(self.out,self.public,OPENSSL)
+        self.assertFalse(any(name.startswith('authority/') for name in payload))
+        self.assertTrue(all(b'private-ui-canary' not in value and b'private-code-canary' not in value for value in payload.values()))
+    def test_cached_app_catalog_tampering_is_rejected(self):
+        (self.cache/self.id/'app-catalog.flex').write_bytes(b'tampered')
+        with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
     def test_font_resource_is_verified_with_cached_native_release(self):
         path=self.cache/self.id/'fonts/Roboto-Regular.otq.zst'
         path.write_bytes(b'corrupt')
@@ -47,7 +65,7 @@ class SignedReleases(unittest.TestCase):
         (self.web/'app.js').write_text('candidate')
         candidate=self.publish()['id']
         new=self.out/candidate
-        required=(new/'manifest.json').stat().st_size+64+self.native.stat().st_size+(new/'web/fonts/Roboto-Regular.otq.zst').stat().st_size+(new/'web/Slug-LICENSE.txt').stat().st_size
+        required=(new/'manifest.json').stat().st_size+64+self.native.stat().st_size+(new/'web/fonts/Roboto-Regular.otq.zst').stat().st_size+(new/'web/Slug-LICENSE.txt').stat().st_size+(new/'apps/catalog.flex').stat().st_size
         used=agent.cache_size(self.cache)
         def fetch(base,path,limit):return (self.out/path.removeprefix('/releases/')).read_bytes()
         with patch.object(agent,'fetch',side_effect=fetch):
@@ -74,7 +92,7 @@ class SignedReleases(unittest.TestCase):
         with self.assertRaises(ValueError):self.publish()
     def test_direct_and_recovery_executables_are_both_signed_and_selected(self):
         fallback=self.root/'sdl';fallback.write_bytes(self.native.read_bytes()+b'recovery')
-        pointer=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,fallback);release=pointer['id'];self.copy_cache(release)
+        pointer=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,fallback,catalog=self.root/'apps/catalog.flex');release=pointer['id'];self.copy_cache(release)
         _,primary=agent.cached(self.cache,release,self.public,OPENSSL)
         _,recovery=agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
         self.assertEqual(primary.name,'dashboard-native');self.assertEqual(recovery.name,'dashboard-sdl')
@@ -89,7 +107,7 @@ class SignedReleases(unittest.TestCase):
         with self.assertRaises(ValueError):module_publisher.bundle(self.out,self.public,OPENSSL)
     def test_staged_module_does_not_announce_until_replica_is_ready(self):
         (self.web/'app.js').write_text('staged code')
-        staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False)
+        staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False,catalog=self.root/'apps/catalog.flex')
         self.assertNotEqual(staged['id'],self.id)
         self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id)
         release,_,_=module_publisher.bundle(self.out,self.public,OPENSSL,json.dumps(staged).encode())

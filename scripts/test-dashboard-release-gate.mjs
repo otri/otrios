@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {awaitRelease,validRelease} from '../web/dashboard/release-gate.mjs';
+import {awaitRelease,validRelease} from '../web/shared/release-gate.mjs';
 const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`});
 test('lagging code host does not switch a running runtime/state session',async()=>{
   let reads=0,liveEdits=0,switched=false;

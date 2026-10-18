@@ -5,6 +5,7 @@ export function eligible(request,origin){
   const u=new URL(request.url);
   return request.method==='GET'&&u.origin===origin&&!u.search&&!request.headers.has('range')&&!request.headers.has('authorization')&&(
     /^\/releases\/[a-f0-9]{64}\/web\/(?:[a-z0-9-]+\.(?:html|css|js|mjs)|pkg\/otrios_dashboard(?:_bg\.wasm|\.js)|fonts\/Roboto-Regular\.otq\.zst)$/.test(u.pathname)||
+    /^\/releases\/[a-f0-9]{64}\/apps\/catalog\.flex$/.test(u.pathname)||
     /^\/objects\/[a-f0-9]{64}$/.test(u.pathname));
 }
 export function budget(estimate={},owned=0){

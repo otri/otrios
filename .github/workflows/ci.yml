@@ -24,7 +24,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install native display dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev xvfb libgl1-mesa-dri libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dri libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
       - name: Prepare pinned Rust
         run: rustup toolchain install 1.90.0 --profile minimal --component clippy --target wasm32-unknown-unknown
       - name: Check all host adapters
@@ -36,17 +36,9 @@ jobs:
           cargo build -p otrios-web-host --lib --release --locked --target wasm32-unknown-unknown
           node --test scripts/test-canvas-host-exports.mjs scripts/test_gpu_scene.mjs
       - name: Check distributed module handoff
-        run: node --test scripts/test-dashboard-release-gate.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs
-      - name: Compile browser module
-        run: cargo build -p otrios-dashboard --lib --release --locked --target wasm32-unknown-unknown
-      - name: Compile native module
-        run: cargo build -p otrios-dashboard --features native --bin dashboard-native --release --locked
-      - name: Test the native state-worker boundary
-        run: cargo test -p otrios-dashboard --features native --bin dashboard-native --locked
-      - name: Exercise native GLES2 under Mesa
-        run: |
-          xvfb-run -a env SDL_RENDER_DRIVER=opengles2 LIBGL_ALWAYS_SOFTWARE=1 target/release/dashboard-native --frames 1
-          xvfb-run -a env SDL_RENDER_DRIVER=opengles2 LIBGL_ALWAYS_SOFTWARE=1 target/release/dashboard-native --screen 3d --objects 64 --load-hz 30 --frames 12 --report /tmp/otrios-3d.json
+        run: node --test scripts/test-dashboard-release-gate.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs
+      - name: Test the native Canvas worker boundary
+        run: cargo test -p otrios-dashboard --features direct --bin dashboard-direct --locked
       - name: Compile the owned Linux display host
         run: cargo build -p otrios-dashboard --features direct --bin dashboard-direct --release --locked
       - name: Check retained GPU geometry and pixel output

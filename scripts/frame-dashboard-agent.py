@@ -29,7 +29,7 @@ def verify_manifest(raw,sig,release,cache,key,openssl):
         result=subprocess.run([openssl,'pkeyutl','-verify','-pubin','-inkey',str(key),'-rawin','-in',str(tmp/'manifest'),'-sigfile',str(tmp/'sig')],capture_output=True)
         if result.returncode:raise ValueError('Publisher signature rejected')
     manifest=json.loads(raw)
-    if manifest.get('format')!='otrios-release-v1' or manifest.get('state_schema')!='otrios-dashboard-v1' or manifest.get('sync_protocol')!='automerge-sync-v1' or manifest.get('native_target')!='armv7-unknown-linux-gnueabihf':raise ValueError('Incompatible release')
+    if manifest.get('format')!='otrios-release-v1' or manifest.get('state_schema')!='otrios-canvas-apps-v1' or manifest.get('sync_protocol')!='otrios-canvas-sync-v1' or manifest.get('native_target')!='armv7-unknown-linux-gnueabihf':raise ValueError('Incompatible release')
     return manifest
 
 def verify_binary(data,item):
@@ -40,7 +40,7 @@ def verify_font(data,item):
     if not 0<item['bytes']<=1024*1024 or len(data)!=item['bytes'] or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Font resource digest rejected')
 
 def resource_items(manifest):
-    for remote,local in [('web/fonts/Roboto-Regular.otq.zst','fonts/Roboto-Regular.otq.zst'),('web/Slug-LICENSE.txt','Slug-LICENSE.txt')]:
+    for remote,local in [('apps/catalog.flex','app-catalog.flex'),('web/fonts/Roboto-Regular.otq.zst','fonts/Roboto-Regular.otq.zst'),('web/Slug-LICENSE.txt','Slug-LICENSE.txt')]:
         item=manifest['assets'].get(remote)
         if item:
             if not 0<item['bytes']<=1024*1024:raise ValueError('Resource exceeds item budget')
@@ -172,7 +172,7 @@ class Host:
         self.a=a;self.release=release;self.stop=a.runtime_dir/('stop-'+uuid.uuid4().hex);self.ready=a.runtime_dir/('ready-'+uuid.uuid4().hex+'.json')
         env=dict(os.environ,OTRIOS_RELEASE_ID=release,SDL_RENDER_DRIVER='opengles2',SDL_VIDEODRIVER=a.video_driver)
         if a.video_driver=='KMSDRM':env.update(SDL_KMSDRM_DEVICE_INDEX='0',SDL_KMSDRM_REQUIRE_DRM_MASTER='1')
-        command=[str(exe),'--fullscreen','--sync',a.url.rstrip('/')+'/stream','--exit-file',str(self.stop),'--ready-file',str(self.ready),'--release-file',str(a.runtime_dir/'release-notice.json')]
+        command=[str(exe),'--sync',a.url.rstrip('/')+'/apps/stream','--exit-file',str(self.stop),'--ready-file',str(self.ready),'--release-file',str(a.runtime_dir/'release-notice.json')]
         if screen:command+=['--screen',screen]
         if a.video_driver=='KMSDRM':command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]
         if a.capture_first_frame:command+=['--capture',str(a.runtime_dir/'first-frame.ppm')]

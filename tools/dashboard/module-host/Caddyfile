@@ -28,7 +28,7 @@
             header Service-Worker-Allowed "/"
             file_server
         }
-        @state path /stream /demo/stream /demo/ink /auth/session /monitoring/presentation /monitoring/stream /health
+        @state path /apps/stream /demo/ink /auth/session /monitoring/presentation /health
         handle @state {
             reverse_proxy {$OTRIOS_PUBLIC_UPSTREAM:host.docker.internal:8878} {
                 # Ignore cached Basic credentials; Monitoring uses a host-only

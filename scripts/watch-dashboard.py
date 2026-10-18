@@ -10,7 +10,7 @@ def inputs(repo):
     files=[repo/x for x in exact]
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()
@@ -30,12 +30,12 @@ def rebuild(config,wanted):
         os.replace(temp,source);temp.mkdir()
         if old.exists():shutil.rmtree(old)
     env=dict(os.environ,**config['build_env'],CARGO_TARGET_DIR=str(build/'mac-target'))
-    run(['cargo','test','-p','otrios-core','--features','dashboard','--locked'],cwd=source,env=env)
+    run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs'],cwd=source)
-        for script in ['app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs','artifact-cache-worker.js','artifact-cache.mjs']:run([config['node'],'--check','web/dashboard/'+script],cwd=source)
+        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs'],cwd=source)
+        for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/release-gate.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:
@@ -44,7 +44,7 @@ def rebuild(config,wanted):
     elif probe.stdout.strip()!='true':run(['docker','start',name])
     archive=build/'source.tar'
     with tarfile.open(archive,'w') as t:
-        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates']:t.add(source/item,arcname=item)
+        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools']:t.add(source/item,arcname=item)
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
@@ -57,7 +57,7 @@ def rebuild(config,wanted):
     # New releases use the direct Slug renderer. The supervisor retains the
     # previous signed release for rollback; no incomplete SDL UI is published.
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/dashboard',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=not bool(config.get('module_volume')))
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=not bool(config.get('module_volume')),catalog=source/'apps/catalog.flex')
     if config.get('module_volume'):
         pointer=build/'module-pointer.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
         run([sys.executable,source/'scripts/publish-dashboard-module.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--volume',config['module_volume'],'--marker',runtime/'module-host/published-release','--pointer',pointer,'--activate-origin'])

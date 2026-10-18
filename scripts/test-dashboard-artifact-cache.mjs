@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ArtifactCache,eligible,budget,victims,boundedBody,MAX_BYTES,MAX_ITEM} from '../web/dashboard/artifact-cache.mjs';
+import {ArtifactCache,eligible,budget,victims,boundedBody,MAX_BYTES,MAX_ITEM} from '../web/shared/artifact-cache.mjs';
 const origin='https://otrios.example',release=`${origin}/releases/${'a'.repeat(64)}/web/`;
 test('only immutable public code/blob paths can enter the cache',()=>{
   for(const p of ['app.js','artifact-cache.mjs','pkg/otrios_dashboard_bg.wasm','fonts/Roboto-Regular.otq.zst'])assert(eligible(new Request(release+p),origin));
@@ -40,4 +40,10 @@ test('oversized streaming objects are cancelled without unbounded buffering',asy
 });
 test('protected entries cannot be evicted to falsely admit an oversized item',()=>{
   assert.deepEqual(victims([{url:'a',bytes:9,used:1}],10,2,'a'),{remove:[],fits:false});
+});
+
+test('public app catalog is cached while authority package bytes remain outside the cache',()=>{
+  const root='https://demo.example',id='a'.repeat(64);
+  assert.equal(eligible(new Request(`${root}/releases/${id}/apps/catalog.flex`),root),true);
+  for(const path of [`/releases/${id}/authority/apps/monitoring/ui.flex`,`/monitoring/apps/ui.flex`,`/apps/stream`])assert.equal(eligible(new Request(root+path),root),false);
 });
