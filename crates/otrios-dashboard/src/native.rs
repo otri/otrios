@@ -16,6 +16,16 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+struct HostUpdate {
+    document: Vec<u8>,
+    presentation: Option<Vec<u8>>,
+}
+fn update(replica: &mut Replica) -> HostUpdate {
+    HostUpdate {
+        document: replica.save(),
+        presentation: replica.presentation().map(|p| p.bytes().to_vec()),
+    }
+}
 fn main() -> Result<(), String> {
     let mut url = None;
     let mut state = None;
@@ -47,8 +57,14 @@ fn main() -> Result<(), String> {
         }
         _ => Replica::new()?,
     };
+    if let Some(path) = &state
+        && let Ok(bytes) = fs::read(format!("{path}.presentation.flex"))
+        && !bytes.is_empty()
+    {
+        replica.set_presentation(Some(&bytes))?;
+    }
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
-    let (reply_tx, reply_rx) = mpsc::sync_channel::<Vec<u8>>(1);
+    let (reply_tx, reply_rx) = mpsc::sync_channel::<HostUpdate>(1);
     let stream_ready = Arc::new(AtomicBool::new(false));
     let worker_ready = stream_ready.clone();
     let network_thread = url
@@ -207,8 +223,12 @@ fn main() -> Result<(), String> {
                 _ => {}
             }
         }
-        while let Ok(bytes) = reply_rx.try_recv() {
-            match replica.merge(&bytes) {
+        while let Ok(next) = reply_rx.try_recv() {
+            match replica.merge(&next.document).and_then(|changed| {
+                replica
+                    .set_presentation(next.presentation.as_deref())
+                    .map(|view| changed || view)
+            }) {
                 Ok(changed) => dirty |= changed,
                 Err(e) => eprintln!("Rejected sync: {e}"),
             }
@@ -262,6 +282,17 @@ fn main() -> Result<(), String> {
             if saved_id != Some(replica.snapshot().id()) {
                 if let Some(p) = &state {
                     save_state(p, &mut replica)?;
+                    let path = format!("{p}.presentation.flex");
+                    let tmp = format!("{path}.tmp");
+                    fs::write(
+                        &tmp,
+                        replica
+                            .presentation()
+                            .map(|p| p.bytes())
+                            .unwrap_or_default(),
+                    )
+                    .and_then(|_| fs::rename(&tmp, &path))
+                    .map_err(|e| e.to_string())?;
                 }
                 saved_id = Some(replica.snapshot().id());
             }
@@ -288,7 +319,7 @@ fn save_state(path: &str, replica: &mut Replica) -> Result<(), String> {
 fn network(
     url: String,
     rx: mpsc::Receiver<Vec<u8>>,
-    reply: mpsc::SyncSender<Vec<u8>>,
+    reply: mpsc::SyncSender<HostUpdate>,
     release_file: Option<String>,
     stream_ready: Arc<AtomicBool>,
 ) {
@@ -369,9 +400,22 @@ fn network(
                 }
             }
             match socket.read() {
+                Ok(Message::Binary(bytes)) if bytes.starts_with(b"OTML1") => {
+                    match replica.set_presentation(if bytes.len() == 5 {
+                        None
+                    } else {
+                        Some(&bytes[5..])
+                    }) {
+                        Ok(_) => pending = Some(update(&mut replica)),
+                        Err(e) => {
+                            eprintln!("Rejected monitoring view: {e}");
+                            break;
+                        }
+                    }
+                }
                 Ok(Message::Binary(bytes)) => match replica.receive_sync(&mut session, &bytes) {
                     Ok(true) => {
-                        pending = Some(replica.save());
+                        pending = Some(update(&mut replica));
                         stream_ready.store(true, Ordering::Release);
                     }
                     Ok(false) => {

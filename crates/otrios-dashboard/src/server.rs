@@ -26,6 +26,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 struct App {
     replica: Mutex<Replica>,
     state_file: Option<PathBuf>,
+    presentation_file: Option<PathBuf>,
     web: PathBuf,
     releases: Option<PathBuf>,
     release: RwLock<Value>,
@@ -138,7 +139,7 @@ async fn sync_http(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes
 }
 async fn get_layout(State(app): State<Arc<App>>) -> Response {
     let replica = app.replica.lock().await;
-    let layout = replica.snapshot().layout();
+    let layout = replica.base_layout().expect("validated base layout");
     (
         [
             (header::ETAG, format!("\"{}\"", layout.hex_id())),
@@ -172,7 +173,12 @@ async fn put_layout(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Byte
         );
     };
     let mut replica = app.replica.lock().await;
-    if expected.trim_matches('"') != replica.snapshot().layout().hex_id() {
+    if expected.trim_matches('"')
+        != replica
+            .base_layout()
+            .expect("validated base layout")
+            .hex_id()
+    {
         return failure(
             StatusCode::PRECONDITION_FAILED,
             "Layout changed; fetch and reapply edits",
@@ -185,6 +191,65 @@ async fn put_layout(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Byte
     };
     if let Err(e) = commit(&app, &mut candidate).await {
         eprintln!("Persistence: {e}");
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
+    }
+    let id = candidate
+        .base_layout()
+        .expect("validated base layout")
+        .hex_id();
+    *replica = candidate;
+    drop(replica);
+    if changed {
+        announce(&app).await;
+    }
+    binary("text/plain; charset=utf-8", id.into_bytes(), false)
+}
+// Trusted tailnet editors use the same origin policy as /layout. No query URLs or secrets accepted.
+async fn get_presentation(State(app): State<Arc<App>>) -> Response {
+    let replica = app.replica.lock().await;
+    binary(
+        "application/octet-stream",
+        replica
+            .presentation()
+            .map(|p| p.bytes().to_vec())
+            .unwrap_or_default(),
+        false,
+    )
+}
+async fn put_presentation(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Response {
+    if !origin_ok(&app, &headers) {
+        return failure(StatusCode::FORBIDDEN, "Origin rejected");
+    }
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        != Some("application/octet-stream")
+    {
+        return failure(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Expected binary FlexBuffers",
+        );
+    }
+    let mut replica = app.replica.lock().await;
+    let mut candidate = replica.clone();
+    let changed =
+        match candidate.set_presentation(if bytes.is_empty() { None } else { Some(&bytes) }) {
+            Ok(value) => value,
+            Err(e) => {
+                return failure(
+                    StatusCode::BAD_REQUEST,
+                    &format!("Invalid presentation: {e}"),
+                );
+            }
+        };
+    if let Some(path) = &app.presentation_file
+        && let Err(e) = persist(path, &bytes)
+    {
+        eprintln!("Presentation persistence: {e}");
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
     }
     let id = candidate.snapshot().layout().hex_id();
@@ -226,6 +291,7 @@ async fn peer(app: Arc<App>, socket: WebSocket) {
     let mut session = SyncSession::default();
     let mut updates = app.changed.subscribe();
     let mut release_id = String::new();
+    let mut presentation_id: Option<String> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     loop {
         let release = app.release.read().await.clone();
@@ -243,6 +309,28 @@ async fn peer(app: Arc<App>, socket: WebSocket) {
                 break;
             }
             release_id = id.to_string();
+        }
+        let presentation = {
+            let replica = app.replica.lock().await;
+            let id = replica
+                .presentation()
+                .map(|p| p.hex_id())
+                .unwrap_or_default();
+            if presentation_id.as_ref() != Some(&id) {
+                let mut bytes = b"OTML1".to_vec();
+                if let Some(p) = replica.presentation() {
+                    bytes.extend_from_slice(p.bytes());
+                }
+                presentation_id = Some(id);
+                Some(bytes)
+            } else {
+                None
+            }
+        };
+        if let Some(bytes) = presentation
+            && output.send(Message::Binary(bytes.into())).await.is_err()
+        {
+            break;
         }
         let outgoing = app.replica.lock().await.generate_sync(&mut session);
         match outgoing {
@@ -300,13 +388,17 @@ async fn current_release(State(app): State<Arc<App>>) -> Response {
     )
 }
 async fn health(State(app): State<Arc<App>>) -> Response {
-    let (id, layout) = {
+    let (id, layout, presentation) = {
         let r = app.replica.lock().await;
-        (r.snapshot().hex_id(), r.snapshot().layout().hex_id())
+        (
+            r.snapshot().hex_id(),
+            r.snapshot().layout().hex_id(),
+            r.presentation().is_some(),
+        )
     };
     binary(
         "application/json",
-        json!({"status":"ok","snapshot":id,"layout":layout,"release":app.release.read().await["id"]})
+        json!({"status":"ok","snapshot":id,"layout":layout,"presentation":presentation,"release":app.release.read().await["id"]})
             .to_string()
             .into_bytes(),
         false,
@@ -381,11 +473,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(path) = &state_file {
         persist(path, &replica.save())?;
     }
+    let presentation_file = state_file
+        .as_ref()
+        .map(|p| p.with_extension("presentation.flex"));
+    if let Some(path) = &presentation_file
+        && path.exists()
+    {
+        let bytes = fs::read(path)?;
+        if !bytes.is_empty() {
+            replica.set_presentation(Some(&bytes))?;
+        }
+    }
     let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
     let (changed, _) = watch::channel(0);
     let app = Arc::new(App {
         replica: Mutex::new(replica),
         state_file,
+        presentation_file,
         web,
         releases,
         release: RwLock::new(release),
@@ -417,6 +521,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "/layout",
             get(get_layout)
                 .post(put_layout)
+                .layer(DefaultBodyLimit::max(
+                    otrios_core::dashboard::layout::MAX_LAYOUT_BYTES,
+                )),
+        )
+        .route(
+            "/presentation",
+            get(get_presentation)
+                .post(put_presentation)
                 .layer(DefaultBodyLimit::max(
                     otrios_core::dashboard::layout::MAX_LAYOUT_BYTES,
                 )),

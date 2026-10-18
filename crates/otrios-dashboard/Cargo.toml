@@ -52,3 +52,8 @@ tungstenite = "=0.30.0"
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "dashboard-monitoring"
+path = "src/monitoring.rs"
+required-features = ["server"]

@@ -164,7 +164,7 @@ fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
             }
             Value::Text(s) if s.len() > 96 => return Err("Text literal too long".into()),
             Value::Series(v)
-                if v.len() > 32
+                if v.len() > 256
                     || v.iter()
                         .any(|n| !n.is_finite() || !(0. ..=100.).contains(n)) =>
             {
@@ -620,6 +620,49 @@ mod tests {
             value: Expr::Literal(Value::Text("Quiet mode".into())),
         });
         Layout::encode(&b).unwrap()
+    }
+    #[test]
+    fn replaceable_feed_views_pin_old_roots_without_growing_crdt_history() {
+        let mut replica = Replica::new().unwrap();
+        let before = replica.save();
+        let old = replica.snapshot().clone();
+        let mut b = blueprint();
+        for index in 0..100 {
+            b.root.children[0].frame[0] = 64. + index as f32;
+            let bytes = Layout::encode(&b).unwrap();
+            replica.set_presentation(Some(&bytes)).unwrap();
+        }
+        assert_eq!(replica.save(), before);
+        assert_eq!(old.layout().bytes(), DEFAULT_LAYOUT);
+        let latest = replica.snapshot().id();
+        assert!(replica.set_presentation(Some(b"broken")).is_err());
+        assert_eq!(replica.snapshot().id(), latest);
+        // A feed cannot hide an invalid base layout received through ordinary sync.
+        use automerge::transaction::Transactable;
+        let mut invalid = automerge::AutoCommit::load(&replica.save()).unwrap();
+        invalid
+            .put(
+                automerge::ROOT,
+                "layout",
+                automerge::ScalarValue::Bytes(b"bad".to_vec()),
+            )
+            .unwrap();
+        assert!(replica.merge(&invalid.save()).is_err());
+        assert_eq!(replica.snapshot().id(), latest);
+        let mut peer = Replica::new().unwrap();
+        peer.set_enabled(false).unwrap();
+        replica.merge(&peer.save()).unwrap();
+        assert!(replica.presentation().is_some());
+        replica.set_presentation(None).unwrap();
+        assert_eq!(replica.snapshot().layout().bytes(), DEFAULT_LAYOUT);
+        assert!(
+            replica
+                .snapshot()
+                .view()
+                .nodes
+                .iter()
+                .any(|n| matches!(n.content, ViewContent::Switch { enabled: false, .. }))
+        );
     }
     #[test]
     fn actual_binary_uses_typed_vectors_and_round_trips_without_json() {

@@ -57,18 +57,27 @@ fn err(e: impl std::fmt::Display) -> String {
 pub struct Replica {
     doc: AutoCommit,
     snapshot: ViewSnapshot,
+    presentation: Option<layout::Layout>,
 }
 impl Replica {
     pub fn new() -> Result<Self> {
         let mut doc = seed()?.fork();
         let snapshot = project(&mut doc)?;
-        Ok(Self { doc, snapshot })
+        Ok(Self {
+            doc,
+            snapshot,
+            presentation: None,
+        })
     }
     /// A fresh actor on every load prevents two tabs/processes sharing an actor.
     pub fn load(bytes: &[u8]) -> Result<Self> {
         let mut doc = load_document(bytes)?.fork();
         let snapshot = project(&mut doc)?;
-        Ok(Self { doc, snapshot })
+        Ok(Self {
+            doc,
+            snapshot,
+            presentation: None,
+        })
     }
     pub fn save(&mut self) -> Vec<u8> {
         self.doc.save()
@@ -76,10 +85,32 @@ impl Replica {
     pub fn snapshot(&self) -> &ViewSnapshot {
         &self.snapshot
     }
+    /// Latest complete read-only feed view; never inserted into the CRDT history.
+    pub fn presentation(&self) -> Option<&layout::Layout> {
+        self.presentation.as_ref()
+    }
+    pub fn base_layout(&self) -> Result<layout::Layout> {
+        match self.doc.get(ROOT, "layout").map_err(err)? {
+            Some((value, _)) => {
+                layout::Layout::from_bytes(value.as_bytes().ok_or("Invalid layout")?)
+            }
+            None => layout::Layout::bootstrap(),
+        }
+    }
+    pub fn set_presentation(&mut self, bytes: Option<&[u8]>) -> Result<bool> {
+        let next = bytes.map(layout::Layout::from_bytes).transpose()?;
+        if self.presentation.as_ref().map(|p| p.bytes()) == next.as_ref().map(|p| p.bytes()) {
+            return Ok(false);
+        }
+        let snapshot = project_cached(&mut self.doc, Some(self.snapshot.layout()), next.as_ref())?;
+        self.presentation = next;
+        self.snapshot = snapshot;
+        Ok(true)
+    }
     pub fn set_layout(&mut self, bytes: &[u8]) -> Result<bool> {
         let layout = layout::Layout::from_bytes(bytes)?;
         layout.qualify(self.snapshot.view())?;
-        if layout.bytes() == self.snapshot.layout().bytes() {
+        if layout.bytes() == self.base_layout()?.bytes() {
             return Ok(false);
         }
         let mut candidate = self.doc.clone();
@@ -186,7 +217,11 @@ impl Replica {
         if candidate.save().len() > MAX_DOCUMENT_BYTES {
             return Err("Demo document limit reached".into());
         }
-        let snapshot = project_cached(&mut candidate, Some(self.snapshot.layout()))?;
+        let snapshot = project_cached(
+            &mut candidate,
+            Some(self.snapshot.layout()),
+            self.presentation.as_ref(),
+        )?;
         let changed = snapshot.id() != self.snapshot.id();
         self.doc = candidate;
         self.snapshot = snapshot;
@@ -221,9 +256,13 @@ fn validate_lineage(doc: &mut AutoCommit) -> Result<()> {
     Ok(())
 }
 fn project(doc: &mut AutoCommit) -> Result<ViewSnapshot> {
-    project_cached(doc, None)
+    project_cached(doc, None, None)
 }
-fn project_cached(doc: &mut AutoCommit, cached: Option<&layout::Layout>) -> Result<ViewSnapshot> {
+fn project_cached(
+    doc: &mut AutoCommit,
+    cached: Option<&layout::Layout>,
+    presentation: Option<&layout::Layout>,
+) -> Result<ViewSnapshot> {
     let (_, title) = doc
         .get(ROOT, "title")
         .map_err(err)?
@@ -277,46 +316,49 @@ fn project_cached(doc: &mut AutoCommit, cached: Option<&layout::Layout>) -> Resu
                 .ok_or("Layout must be a binary scalar")
         })
         .transpose()?;
-    ViewSnapshot::build_cached(
-        DashboardView {
-            heads,
-            nodes: vec![
-                ViewNode {
-                    id: 1,
-                    bounds: [64, 64, 1152, 96],
-                    content: ViewContent::Label(title),
+    let view = DashboardView {
+        heads,
+        nodes: vec![
+            ViewNode {
+                id: 1,
+                bounds: [64, 64, 1152, 96],
+                content: ViewContent::Label(title),
+            },
+            ViewNode {
+                id: 2,
+                bounds: [64, 208, 440, 240],
+                content: ViewContent::Switch {
+                    label: "Focus mode".into(),
+                    enabled,
                 },
-                ViewNode {
-                    id: 2,
-                    bounds: [64, 208, 440, 240],
-                    content: ViewContent::Switch {
-                        label: "Focus mode".into(),
-                        enabled,
-                    },
+            },
+            ViewNode {
+                id: 3,
+                bounds: [536, 208, 680, 400],
+                content: ViewContent::Graph {
+                    label: "Sample signal".into(),
+                    samples,
                 },
-                ViewNode {
-                    id: 3,
-                    bounds: [536, 208, 680, 400],
-                    content: ViewContent::Graph {
-                        label: "Sample signal".into(),
-                        samples,
-                    },
-                },
-                ViewNode {
-                    id: 4,
-                    bounds: [64, 500, 440, 108],
-                    content: ViewContent::Label(format!("{touches} touches")),
-                },
-                ViewNode {
-                    id: 5,
-                    bounds: [64, 676, 1152, 60],
-                    content: ViewContent::Label("Touch a tile. Your other screen follows.".into()),
-                },
-            ],
-        },
-        layout.as_deref(),
-        cached,
-    )
+            },
+            ViewNode {
+                id: 4,
+                bounds: [64, 500, 440, 108],
+                content: ViewContent::Label(format!("{touches} touches")),
+            },
+            ViewNode {
+                id: 5,
+                bounds: [64, 676, 1152, 60],
+                content: ViewContent::Label("Touch a tile. Your other screen follows.".into()),
+            },
+        ],
+    };
+    // A read-only feed cannot conceal an invalid collaborative layout that would fail on clear.
+    let base = ViewSnapshot::build_cached(view.clone(), layout.as_deref(), cached)?;
+    if let Some(presentation) = presentation {
+        ViewSnapshot::build_cached(view, Some(presentation.bytes()), cached)
+    } else {
+        Ok(base)
+    }
 }
 
 #[cfg(test)]

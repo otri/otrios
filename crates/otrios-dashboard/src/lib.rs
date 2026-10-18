@@ -42,6 +42,10 @@ impl Dashboard {
     pub fn receive_sync(&mut self, bytes: &[u8]) -> Result<bool, String> {
         self.replica.receive_sync(&mut self.session, bytes)
     }
+    pub fn present(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        self.replica
+            .set_presentation(if bytes.is_empty() { None } else { Some(bytes) })
+    }
     pub fn touch(&mut self, x: u32, y: u32) -> Result<bool, String> {
         self.replica.touch(x, y)
     }
@@ -50,6 +54,20 @@ impl Dashboard {
     }
     pub fn vertices(&self) -> Vec<f32> {
         render(self.replica.snapshot()).vertices
+    }
+    /// Assistive description derives from the same primitive scene as the pixels.
+    pub fn scene_text(&self) -> String {
+        fn gather(node: &otrios_interfaces::scene::SceneNode, values: &mut Vec<String>) {
+            if let otrios_interfaces::scene::Primitive::Text { value, .. } = &node.primitive {
+                values.push(value.clone());
+            }
+            for child in &node.children {
+                gather(child, values);
+            }
+        }
+        let mut values = Vec::new();
+        gather(self.replica.snapshot().scene().root(), &mut values);
+        values.join(". ")
     }
     pub fn snapshot(&self) -> Vec<u8> {
         self.replica.snapshot().bytes().to_vec()

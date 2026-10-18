@@ -227,6 +227,15 @@ impl Peer {
                 .unwrap();
         }
         match self.socket.read() {
+            Ok(tungstenite::Message::Binary(bytes)) if bytes.starts_with(b"OTML1") => {
+                self.replica
+                    .set_presentation(if bytes.len() == 5 {
+                        None
+                    } else {
+                        Some(&bytes[5..])
+                    })
+                    .unwrap();
+            }
             Ok(tungstenite::Message::Binary(bytes)) => {
                 self.replica
                     .receive_sync(&mut self.session, &bytes)
@@ -430,5 +439,77 @@ fn binary_layout_cli_publish_push_cas_and_restart_preserve_app_state() {
     cli(&["fetch", &url, file.to_str().unwrap()]);
     assert_eq!(std::fs::read(&file).unwrap(), winner);
     drop(restarted);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn monitoring_presentation_push_restart_and_clear_preserve_the_collaborative_document() {
+    use otrios_core::dashboard::layout::{DEFAULT_LAYOUT, Layout};
+    let root = std::env::temp_dir().join(format!("otrios-monitoring-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let state = root.join("state.automerge");
+    let server = start(&state);
+    let before = std::fs::read(&state).unwrap();
+    let mut peer = Peer::connect(&server, Replica::new().unwrap());
+    for _ in 0..8 {
+        peer.pump();
+    }
+    let mut blueprint = Layout::bootstrap().unwrap().blueprint().clone();
+    blueprint.root.children[0].frame[0] = 90.;
+    let bytes = Layout::encode(&blueprint).unwrap();
+    let post = |server: &Server, bytes: &[u8], origin: &str| {
+        let mut stream = TcpStream::connect(&server.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(stream,"POST /presentation HTTP/1.0\r\nHost: {}\r\nOrigin: {origin}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",server.address,bytes.len()).unwrap();
+        let _ = stream.write_all(bytes);
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).unwrap();
+        reply
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse::<u16>()
+            .unwrap()
+    };
+    let origin = format!("http://{}", server.address);
+    assert_eq!(post(&server, &bytes, "https://unrelated.example"), 403);
+    assert_eq!(post(&server, &bytes, &origin), 200);
+    assert_eq!(post(&server, b"broken", &origin), 400);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while peer.replica.presentation().is_none() {
+        peer.pump();
+        assert!(Instant::now() < deadline);
+    }
+    assert_eq!(peer.replica.presentation().unwrap().bytes(), bytes);
+    assert_eq!(std::fs::read(&state).unwrap(), before);
+    assert_eq!(
+        std::fs::read(state.with_extension("presentation.flex")).unwrap(),
+        bytes
+    );
+    drop(peer);
+    drop(server);
+    let server = start(&state);
+    let mut peer = Peer::connect(&server, Replica::new().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while peer.replica.presentation().is_none() {
+        peer.pump();
+        assert!(Instant::now() < deadline);
+    }
+    assert_eq!(peer.replica.presentation().unwrap().bytes(), bytes);
+    assert_eq!(
+        post(&server, b"", &format!("http://{}", server.address)),
+        200
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while peer.replica.presentation().is_some() {
+        peer.pump();
+        assert!(Instant::now() < deadline);
+    }
+    assert_eq!(peer.replica.snapshot().layout().bytes(), DEFAULT_LAYOUT);
+    assert_eq!(std::fs::read(&state).unwrap(), before);
+    drop(peer);
+    drop(server);
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -12,10 +12,13 @@ try {
   await init();
   let dashboard;
   const storageKey='otrios-dashboard-v1';
+  const presentationKey='otrios-dashboard-presentation-v1';
   try {
     const saved=sessionStorage.getItem(storageKey);
     dashboard=saved?Dashboard.load(Uint8Array.from(atob(saved),c=>c.charCodeAt(0))):new Dashboard();
   } catch(e) {throw new Error(`Saved dashboard could not be loaded; it has been kept intact. ${e}`);}
+  const cachedPresentation=sessionStorage.getItem(presentationKey);
+  if(cachedPresentation)dashboard.present(Uint8Array.from(atob(cachedPresentation),c=>c.charCodeAt(0)));
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});
   if(!gl)throw new Error('This dashboard requires WebGL.');
   gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
@@ -49,6 +52,7 @@ try {
       const [x,y,w,h]=dashboard.control_bounds(id);
       Object.assign(button.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});
     }
+    canvas.setAttribute('aria-label',dashboard.scene_text());
     revision.textContent=`VIEW ${dashboard.snapshot_id().slice(0,12)}`;
     revision.dataset.snapshot=dashboard.snapshot_id();
     revision.dataset.layout=dashboard.layout_id();
@@ -79,7 +83,12 @@ try {
             revision.dataset.release=release.id;
           }
         }else{
-          if(dashboard.receive_sync(new Uint8Array(event.data)))draw();
+          const bytes=new Uint8Array(event.data);
+          if(bytes.length>=5&&String.fromCharCode(...bytes.subarray(0,5))==='OTML1'){
+            const view=bytes.subarray(5);
+            if(dashboard.present(view))draw();
+            try{let encoded='';for(let i=0;i<view.length;i+=8192)encoded+=String.fromCharCode(...view.subarray(i,i+8192));if(view.length)sessionStorage.setItem(presentationKey,btoa(encoded));else sessionStorage.removeItem(presentationKey);}catch(e){console.warn('Monitoring view cache unavailable',e);}
+          }else if(dashboard.receive_sync(bytes))draw();
           sendChanges();
           dot.classList.add('online');connection.textContent='Live shared space';
         }
