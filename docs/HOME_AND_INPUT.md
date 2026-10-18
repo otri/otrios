@@ -1,10 +1,10 @@
 # Home Screen and shared input
 
-The per-device shell launches three current demos: **Monitoring**, **Live Controls** and **Input Lab**. A persistent top bar provides Back and Home. All visible UI, including launcher cards, navigation, text fields and keyboard keys, uses the shared primitive compositor on both native GLES2 and browser WebGL.
+The per-device shell launches five current demos: **Monitoring**, **Live Controls**, **Input Lab**, **Motion Lab** and **3D Lab**. A persistent top bar provides Back and Home. All visible UI, including launcher cards, navigation, text fields and keyboard keys, uses the shared primitive compositor on both native GLES2 and browser WebGL.
 
 ## Navigation and composition
 
-Navigation lives in `otrios-core::dashboard::shell::Shell`, separately from `Replica`. A shared state or metrics update never changes another device's selected screen. Monitoring displays the latest replaceable presentation; Live Controls displays the saved editable layout and shared CRDT state. Both remain available together.
+Navigation lives in `otrios-core::dashboard::shell::Shell`, separately from `Replica`. A shared state or metrics update never changes another device's selected screen. Monitoring displays the latest replaceable presentation; Live Controls displays the [component playground](COMPONENT_PLAYGROUND.md), with the saved editable layout available in its Layout Lab subview. Both remain available together.
 
 Back first hides an open keyboard without blurring its field. Back again returns to Home; on other demos it returns directly to Home. Home goes straight to the launcher. Native Escape follows Back rather than terminating the kiosk. Home's redundant navigation buttons are disabled in browser semantics. Browser hash routes support direct entry and ordinary Back/Forward, including the keyboard's visible layer; an app Back to the preceding route pops history instead of creating another entry. Each browser tab owns its route.
 
@@ -19,7 +19,7 @@ cargo run --locked -p otrios-dashboard --bin dashboard-shell-assets -- \
   crates/otrios-core/src/dashboard/shell-assets
 ```
 
-The system assets ship with the signed code release. Editing the existing `/layout` register changes Live Controls, not the shell catalog. A live shell-catalog editor and arbitrary downloaded demo modules are future work. System node IDs occupy a reserved range above the current app-layout ID limit, so app actions and navigation controls cannot share a node identity. The existing scene count/depth bounds still apply to the composed scene.
+The system assets ship with the signed code release. Editing the existing `/layout` register changes Live Controls' Layout Lab subview, not the playground asset or shell catalog. A live shell-catalog editor and arbitrary downloaded demo modules are future work. System node IDs occupy a reserved range above the current app-layout ID limit, so app actions and navigation controls cannot share a node identity. The existing scene count/depth bounds still apply to the composed scene.
 
 ## Core keyboard component
 

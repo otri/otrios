@@ -13,8 +13,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 const SYSTEM: u32 = 4_100_000_000;
-fn assets() -> Result<&'static [Layout; 5]> {
-    static ASSETS: OnceLock<Result<[Layout; 5]>> = OnceLock::new();
+fn assets() -> Result<&'static [Layout; 6]> {
+    static ASSETS: OnceLock<Result<[Layout; 6]>> = OnceLock::new();
     ASSETS
         .get_or_init(|| {
             Ok([
@@ -23,10 +23,19 @@ fn assets() -> Result<&'static [Layout; 5]> {
                 Layout::from_bytes(include_bytes!("shell-assets/editor.flex"))?,
                 Layout::from_bytes(include_bytes!("shell-assets/keyboard.flex"))?,
                 Layout::from_bytes(include_bytes!("shell-assets/motion.flex"))?,
+                Layout::from_bytes(include_bytes!("shell-assets/playground.flex"))?,
             ])
         })
         .as_ref()
         .map_err(Clone::clone)
+}
+fn view_enabled(replica: &Replica) -> bool {
+    replica.snapshot().view().nodes.iter().any(|n| {
+        matches!(
+            n.content,
+            otrios_interfaces::ViewContent::Switch { enabled: true, .. }
+        )
+    })
 }
 fn remap(mut node: SceneNode, offset: u32) -> Result<SceneNode> {
     node.id = node
@@ -42,7 +51,9 @@ fn remap(mut node: SceneNode, offset: u32) -> Result<SceneNode> {
 }
 pub struct Shell {
     screen: Screen,
+    controls: super::controls::Interactions,
     monitoring_allowed: bool,
+    controls_layout: bool,
     keyboard: Keyboard,
     fields: [TextBuffer; 2],
     focused: Option<u8>,
@@ -55,7 +66,9 @@ impl Default for Shell {
     fn default() -> Self {
         Self {
             screen: Screen::Home,
+            controls: Default::default(),
             monitoring_allowed: true,
+            controls_layout: false,
             keyboard: Keyboard::default(),
             fields: Default::default(),
             focused: None,
@@ -140,11 +153,26 @@ impl Shell {
         self.cancel();
         self.keyboard.hide();
         self.focused = None;
+        self.controls_layout = false;
         self.screen = screen;
         self.changed();
         true
     }
+    pub fn controls_layout(&self) -> bool {
+        self.screen == Screen::Controls && self.controls_layout
+    }
+    pub fn show_controls_layout(&mut self, value: bool) {
+        if self.controls_layout != value {
+            self.cancel();
+            self.controls_layout = value;
+            self.changed();
+        }
+    }
     pub fn back(&mut self) -> bool {
+        if self.controls_layout() {
+            self.show_controls_layout(false);
+            return true;
+        }
         if self.keyboard_visible() {
             self.keyboard.hide();
             self.input.cancel_all();
@@ -156,6 +184,7 @@ impl Shell {
     }
     pub fn cancel(&mut self) {
         self.input.cancel_all();
+        self.controls.cancel();
         self.keyboard.cancel();
         self.changed();
     }
@@ -206,6 +235,31 @@ impl Shell {
     }
     fn apply(&mut self, replica: &mut Replica, action: Option<Action>) -> Result<bool> {
         Ok(match action {
+            Some(Action::Control(control)) if self.screen == Screen::Controls => {
+                let mut value = replica.controls()?.value(control)?;
+                value[0] = if value[0] >= 1000 {
+                    0
+                } else {
+                    (value[0] + 100).min(1000)
+                };
+                replica.set_control(control, value)?
+            }
+            Some(Action::LayoutLab) if self.screen == Screen::Controls => {
+                self.show_controls_layout(true);
+                true
+            }
+            Some(Action::ResetControls) if self.screen == Screen::Controls => {
+                self.cancel();
+                self.controls.trail.clear();
+                self.controls.feedback = "RESET / SHARED DEFAULTS".into();
+                let state = super::controls::State::default();
+                let mut changed = false;
+                for i in 0..3 {
+                    changed |= replica.set_control(i, state.value(i)?)?;
+                }
+                changed
+            }
+
             Some(Action::Motion(id))
                 if matches!(self.screen, Screen::Animation | Screen::ThreeD) =>
             {
@@ -322,11 +376,64 @@ impl Shell {
             changed = true;
         }
         let delivery = self.input.dispatch(scene, event);
+        if self.screen == Screen::Controls
+            && let Some(gesture) = &delivery.gesture
+        {
+            let changed = self.controls.gesture(replica, event.id, gesture, now)?;
+            if changed {
+                self.changed();
+            }
+            return Ok(changed);
+        }
         // Keyboard contacts use the same hit/responder ancestry but own slide/repeat semantics.
         if !matches!(delivery.action, Some(Action::KeyboardKey(_))) {
             changed |= self.apply(replica, delivery.action)?;
         }
         Ok(changed)
+    }
+    pub fn flush_controls(&mut self, replica: &mut Replica, now: u64) -> Result<bool> {
+        let changed = self.controls.flush(replica, now)?;
+        if changed {
+            self.changed();
+        }
+        Ok(changed)
+    }
+    pub fn adjust_control(
+        &mut self,
+        replica: &mut Replica,
+        id: u32,
+        dx: i16,
+        dy: i16,
+    ) -> Result<bool> {
+        let scene = self.scene(replica)?;
+        let Some(path) = scene.path(id) else {
+            return Ok(false);
+        };
+        let Some(TouchResponder::Drag(Action::Control(control))) =
+            path.last().and_then(|n| n.node.responder)
+        else {
+            return Ok(false);
+        };
+        let mut value = replica.controls()?.value(control)?;
+        value[0] =
+            (i32::from(value[0]) + i32::from(dx) + if control < 2 { i32::from(dy) } else { 0 })
+                .clamp(0, 1000) as u16;
+        if control == 2 {
+            value[1] = (i32::from(value[1]) + i32::from(dy)).clamp(0, 1000) as u16;
+        }
+        replica.set_control(control, value)
+    }
+    pub fn control_value(&mut self, replica: &Replica, id: u32) -> Result<Option<f64>> {
+        let scene = self.scene(replica)?;
+        let Some(path) = scene.path(id) else {
+            return Ok(None);
+        };
+        Ok(match path.last().and_then(|n| n.node.responder) {
+            Some(TouchResponder::Drag(Action::Control(control))) if control < 2 => {
+                Some(f64::from(self.controls.preview(replica.controls()?).value(control)?[0]) / 10.)
+            }
+            _ => None,
+        })
     }
     pub fn scene(&mut self, replica: &Replica) -> Result<Arc<Scene>> {
         let id = replica.snapshot().id();
@@ -340,7 +447,13 @@ impl Shell {
         let title = match self.screen {
             Screen::Home => "HOME",
             Screen::Monitoring => "MONITORING",
-            Screen::Controls => "LIVE CONTROLS",
+            Screen::Controls => {
+                if self.controls_layout {
+                    "LAYOUT LAB"
+                } else {
+                    "LIVE CONTROLS"
+                }
+            }
             Screen::Keyboard => "INPUT LAB",
             Screen::Animation => "MOTION LAB",
             Screen::ThreeD => "3D LAB",
@@ -444,6 +557,78 @@ impl Shell {
                 .into(),
             ),
         );
+        let controls = self.controls.preview(replica.controls()?);
+        for (id, value) in [
+            (600, controls.level),
+            (601, controls.dial),
+            (602, controls.pad[0]),
+            (603, controls.pad[1]),
+        ] {
+            local.insert(id, Value::Number(f32::from(value) / 1000.));
+        }
+        local.insert(712, Value::Boolean(controls.level > 0));
+        for i in 0..3 {
+            local.insert(720 + u16::from(i), Value::Boolean(self.controls.active(i)));
+        }
+        let angle = (f32::from(controls.dial) / 1000. - 0.5) * std::f32::consts::PI * 1.5;
+        local.insert(604, Value::Number(0.5 + angle.sin() * 0.32));
+        local.insert(605, Value::Number(0.5 - angle.cos() * 0.32));
+        local.insert(610, Value::Text(format!("{}%", controls.level / 10)));
+        local.insert(611, Value::Text(format!("{}%", controls.dial / 10)));
+        local.insert(
+            612,
+            Value::Text(format!(
+                "X {} / Y {}",
+                controls.pad[0] / 10,
+                controls.pad[1] / 10
+            )),
+        );
+        local.insert(
+            613,
+            Value::Text(if self.controls.feedback.is_empty() {
+                "DRAG A CONTROL / VALUES FOLLOW ACROSS DEVICES".into()
+            } else {
+                self.controls.feedback.clone()
+            }),
+        );
+        local.insert(
+            616,
+            Value::Text(
+                if view_enabled(replica) {
+                    "OUTPUT ON"
+                } else {
+                    "OUTPUT OFF"
+                }
+                .into(),
+            ),
+        );
+        local.insert(
+            617,
+            Value::Text(format!(
+                "Touch pad / X {} / Y {} / arrow keys move the point",
+                controls.pad[0] / 10,
+                controls.pad[1] / 10
+            )),
+        );
+        for i in 0..12 {
+            let point = self.controls.trail.get(i).copied().unwrap_or([500, 500]);
+            local.insert(
+                640 + i as u16 * 2,
+                Value::Number(f32::from(point[0]) / 1000.),
+            );
+            local.insert(
+                641 + i as u16 * 2,
+                Value::Number(f32::from(point[1]) / 1000.),
+            );
+            local.insert(
+                680 + i as u16,
+                Value::Boolean(i < self.controls.trail.len()),
+            );
+            local.insert(
+                700 + i as u16,
+                Value::Boolean(f32::from(controls.dial) / 1000. >= i as f32 / 11.),
+            );
+        }
         let assets = assets()?;
         let view = replica.snapshot().view();
         let page = match self.screen {
@@ -459,7 +644,24 @@ impl Shell {
                 assets[4].resolve_local(view, &local)?.root().clone(),
                 SYSTEM + 6_000_000,
             )?,
-            Screen::Monitoring | Screen::Controls => {
+            Screen::Controls => {
+                if self.controls_layout {
+                    let mut node = super::components::node(
+                        SYSTEM + 4_000_000,
+                        Rect::new(64., 80., 1152., 720.),
+                        Primitive::Viewport { scale: 0.9 },
+                    );
+                    node.children
+                        .push(replica.base_layout()?.resolve(view)?.root().clone());
+                    node
+                } else {
+                    remap(
+                        assets[5].resolve_local(view, &local)?.root().clone(),
+                        SYSTEM + 7_000_000,
+                    )?
+                }
+            }
+            Screen::Monitoring => {
                 let content = if self.screen == Screen::Monitoring {
                     if self.monitoring_allowed && replica.presentation().is_some() {
                         replica.snapshot().scene().as_ref().clone()
@@ -637,7 +839,10 @@ mod tests {
                 )
             })
             .unwrap();
-        let p = [c.origin[0] + 100. * c.scale, c.origin[1] + 100. * c.scale];
+        let p = [
+            c.origin[0] + c.node.frame.width * 0.5 * c.scale,
+            c.origin[1] + c.node.frame.height * 0.5 * c.scale,
+        ];
         tap(&mut s, &mut r, p);
         assert_ne!(r.save(), before);
         assert_eq!(Shell::default().screen(), Screen::Home);
@@ -689,6 +894,72 @@ mod tests {
         s.open(Screen::ThreeD);
         s.back();
         assert_eq!(r.save(), saved);
+    }
+    #[test]
+    fn playground_drag_uses_responder_coordinates_and_layout_back_is_local() {
+        let mut r = Replica::new().unwrap();
+        let mut s = Shell::default();
+        s.open(Screen::Controls);
+        let scene = s.scene(&r).unwrap();
+        let slider = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.responder == Some(TouchResponder::Drag(Action::Control(0))))
+            .unwrap();
+        let at = |x, y| {
+            [
+                slider.origin[0] + x * slider.scale,
+                slider.origin[1] + y * slider.scale,
+            ]
+        };
+        for (phase, position, now) in [
+            (PointerPhase::Down, at(20., 40.), 0),
+            (PointerPhase::Move, at(160., 40.), 10),
+            (PointerPhase::Up, at(1000., 40.), 11),
+        ] {
+            s.pointer(
+                &mut r,
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position,
+                },
+                now,
+            )
+            .unwrap();
+        }
+        assert_eq!(r.controls().unwrap().level, 1000);
+        let before = r.save();
+        s.show_controls_layout(true);
+        assert!(s.controls_layout());
+        s.scene(&r).unwrap();
+        assert!(s.back());
+        assert!(!s.controls_layout());
+        assert_eq!(s.screen(), Screen::Controls);
+        assert_eq!(r.save(), before);
+        assert!(s.back());
+        assert_eq!(s.screen(), Screen::Home);
+    }
+    #[test]
+    fn playground_extremes_and_small_nonzero_fills_remain_valid_scenes() {
+        let mut r = Replica::new().unwrap();
+        let mut s = Shell::default();
+        s.open(Screen::Controls);
+        for value in [0, 1, 1000] {
+            for control in 0..3 {
+                r.set_control(
+                    control,
+                    if control == 2 {
+                        [value, 1000 - value]
+                    } else {
+                        [value, 0]
+                    },
+                )
+                .unwrap();
+            }
+            let scene = s.scene(&r).unwrap();
+            assert!(!super::super::render_scene(&scene).vertices.is_empty());
+        }
     }
     #[test]
     fn all_embedded_binary_screens_resolve_and_fit_scene_limits() {

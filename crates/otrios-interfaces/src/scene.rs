@@ -60,6 +60,8 @@ pub enum Primitive {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     ToggleFocus,
+    ResetControls,
+    LayoutLab,
     Control(u8),
     Motion(u8),
     Stress,

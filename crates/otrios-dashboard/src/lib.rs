@@ -97,6 +97,12 @@ impl Dashboard {
     pub fn screen(&self) -> String {
         self.shell.screen_name().into()
     }
+    pub fn controls_layout(&self) -> bool {
+        self.shell.controls_layout()
+    }
+    pub fn show_controls_layout(&mut self, value: bool) {
+        self.shell.show_controls_layout(value);
+    }
     pub fn navigate(&mut self, name: &str) -> bool {
         self.shell.open_name(name)
     }
@@ -106,8 +112,27 @@ impl Dashboard {
     pub fn editing(&self) -> bool {
         self.shell.editing()
     }
-    pub fn tick(&mut self, now: f64) -> bool {
-        self.shell.tick(now.max(0.) as u64)
+    pub fn tick(&mut self, now: f64) -> Result<bool, String> {
+        let now = now.max(0.) as u64;
+        Ok(self.shell.tick(now) | self.shell.flush_controls(&mut self.replica, now)?)
+    }
+    pub fn adjust_control(&mut self, id: u32, dx: i16, dy: i16) -> Result<bool, String> {
+        self.shell.adjust_control(&mut self.replica, id, dx, dy)
+    }
+    pub fn control_draggable(&mut self, id: u32) -> Result<bool, String> {
+        Ok(self.shell.scene(&self.replica)?.controls().iter().any(|c| {
+            c.node.id == id
+                && matches!(
+                    c.node.responder,
+                    Some(otrios_interfaces::scene::TouchResponder::Drag(_))
+                )
+        }))
+    }
+    pub fn control_value(&mut self, id: u32) -> Result<f64, String> {
+        Ok(self
+            .shell
+            .control_value(&self.replica, id)?
+            .unwrap_or(f64::NAN))
     }
     pub fn cancel_input(&mut self) {
         self.shell.cancel();
@@ -260,6 +285,9 @@ impl Dashboard {
         )
     }
     pub fn control_role(&mut self, id: u32) -> Result<String, String> {
+        if self.shell.control_value(&self.replica, id)?.is_some() {
+            return Ok("slider".into());
+        }
         Ok(if self
             .shell
             .scene(&self.replica)?

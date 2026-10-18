@@ -47,6 +47,7 @@ pub(super) struct Frame {
     pub(super) editing: bool,
     pub(super) online: bool,
     pub(super) intent: Intent,
+    pub(super) controls: otrios_core::dashboard::controls::State,
     pub(super) updates: u64,
     pub(super) received_updates: u64,
     pub(super) serial: u64,
@@ -71,7 +72,7 @@ pub(super) enum Input {
     #[allow(dead_code, reason = "SDL desktop keyboard input")]
     First,
     Cancel,
-    Presented(Frame, String, DisplayInfo),
+    Presented(Box<Frame>, String, DisplayInfo),
     Stop,
 }
 #[derive(Default)]
@@ -237,7 +238,7 @@ pub(super) fn state_worker(
                 }
                 Input::Presented(frame, renderer, display) => {
                     if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"controls":{"level":frame.controls.level,"dial":frame.controls.dial,"pad":frame.controls.pad},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                         let tmp = format!("{path}.tmp");
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
@@ -258,6 +259,7 @@ pub(super) fn state_worker(
             dirty |= replica.set_presentation(next.presentation.as_deref())?;
         }
         dirty |= shell.tick(now);
+        dirty |= shell.flush_controls(&mut replica, now)?;
         let stressed = stress.tick(now as f64, shell.stress_hz())?;
         dirty |= stressed;
         let stall_ms = o.stall_ms.max(shell.stress_stall_ms());
@@ -297,6 +299,7 @@ pub(super) fn state_worker(
                 editing: shell.editing(),
                 online,
                 intent: replica.motion()?,
+                controls: replica.controls()?,
                 updates: stress.updates,
                 received_updates,
                 serial,

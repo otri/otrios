@@ -88,6 +88,8 @@ pub enum Responder {
     Bubble,
     Consume,
     ToggleFocus,
+    ResetControls,
+    LayoutLab,
     Motion(u8),
     Stress,
     Open(crate::scene::Screen),

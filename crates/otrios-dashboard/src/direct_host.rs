@@ -177,7 +177,7 @@ pub(super) fn run() -> Result<(), String> {
                     if acked != f.serial {
                         let info = display.info();
                         send(Input::Presented(
-                            f.clone(),
+                            Box::new(f.clone()),
                             "gles2-direct".into(),
                             DisplayInfo {
                                 video: "DRM",

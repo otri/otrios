@@ -15,10 +15,10 @@ function sendFrame(){
   postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer]:[]);
 }
 function publish(geometry=true){
-  const frame={screen:dashboard.screen(),keyboard:dashboard.keyboard_visible(),editing:dashboard.editing(),intent:Array.from(dashboard.motion_intent()),updates:dashboard.stress_updates()};
+  const frame={screen:dashboard.screen(),controlsLayout:dashboard.controls_layout(),keyboard:dashboard.keyboard_visible(),editing:dashboard.editing(),intent:Array.from(dashboard.motion_intent()),updates:dashboard.stress_updates()};
   if(geometry){
     frame.vertices=dashboard.vertices();frame.text=dashboard.scene_text();frame.snapshot=dashboard.snapshot_id();frame.layout=dashboard.layout_id();
-    frame.controls=Array.from(dashboard.control_ids(),id=>({id,label:dashboard.control_label(id),disabled:dashboard.control_disabled(id),role:dashboard.control_role(id),checked:dashboard.control_checked(id),bounds:Array.from(dashboard.control_bounds(id))}));
+    frame.controls=Array.from(dashboard.control_ids(),id=>({id,label:dashboard.control_label(id),disabled:dashboard.control_disabled(id),role:dashboard.control_role(id),checked:dashboard.control_checked(id),bounds:Array.from(dashboard.control_bounds(id)),value:dashboard.control_value(id),draggable:dashboard.control_draggable(id)}));
   }
   // Preserve unsent geometry when replacing only the counters/intent.
   pendingFrame={...pendingFrame,...frame};sendFrame();
@@ -94,7 +94,7 @@ onmessage=async event=>{
         const now=performance.now();const changed=dashboard.tick(now);const stressed=dashboard.stress_tick(now);
         const stall=dashboard.stress_stall_ms();
         if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the state worker. */}}
-        if(changed)publish();else if(stressed)publish(false);
+        if(changed){publish();sendChanges();persist().catch(storageError);}else if(stressed)publish(false);
       }catch(e){fatal(e);}},8);
       return;
     }
@@ -105,6 +105,7 @@ onmessage=async event=>{
       case 'login':monitoring.login(m.username,m.password);break;
       case 'logout':monitoring.logout();break;
       case 'pointer':changed=dashboard.pointer(...m.args.slice(0,4),performance.now());break;
+      case 'adjust':changed=dashboard.adjust_control(m.id,m.dx,m.dy);break;
       case 'activate':changed=dashboard.activate(m.id);break;
       case 'route':applyRoute(m.route);changed=true;break;
       case 'back':changed=dashboard.back();break;
@@ -117,4 +118,4 @@ onmessage=async event=>{
     postMessage({type:'command-ack'});
   }catch(e){fatal(e);postMessage({type:'command-ack'});}
 };
-function applyRoute(route){const p=route.replace(/^#\/?/,'').split('/');dashboard.navigate(p[0]);if(p[0]==='keyboard'&&p[1]==='input'&&!dashboard.keyboard_visible())dashboard.show_keyboard();else if(dashboard.keyboard_visible()&&p[1]!=='input')dashboard.back();monitoring?.setActive(dashboard.screen()==='monitoring');}
+function applyRoute(route){const p=route.replace(/^#\/?/,'').split('/');dashboard.navigate(p[0]);dashboard.show_controls_layout(p[0]==='controls'&&p[1]==='layout');if(p[0]==='keyboard'&&p[1]==='input'&&!dashboard.keyboard_visible())dashboard.show_keyboard();else if(dashboard.keyboard_visible()&&p[1]!=='input')dashboard.back();monitoring?.setActive(dashboard.screen()==='monitoring');}

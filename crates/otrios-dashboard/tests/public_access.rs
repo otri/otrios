@@ -211,6 +211,9 @@ fn anonymous_demo_stream_shares_frame_state_but_never_sends_monitoring_or_admin_
         ..Default::default()
     })
     .unwrap();
+    demo.set_control(0, [830, 0]).unwrap();
+    demo.set_control(1, [210, 0]).unwrap();
+    demo.set_control(2, [120, 940]).unwrap();
     let mut session = SyncSession::default();
     let deadline = Instant::now() + Duration::from_secs(4);
     let mut synced = false;
@@ -235,7 +238,11 @@ fn anonymous_demo_stream_shares_frame_state_but_never_sends_monitoring_or_admin_
         }
         let saved =
             Replica::load(&std::fs::read(room.root.join("state.automerge")).unwrap()).unwrap();
-        if saved.motion().unwrap().count == 48 {
+        if saved.motion().unwrap().count == 48
+            && saved.controls().unwrap().level == 830
+            && saved.controls().unwrap().dial == 210
+            && saved.controls().unwrap().pad == [120, 940]
+        {
             synced = true;
             break;
         }

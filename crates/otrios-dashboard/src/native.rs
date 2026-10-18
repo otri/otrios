@@ -483,7 +483,7 @@ fn main() -> Result<(), String> {
                     }
                     if f.serial != acked {
                         send(Input::Presented(
-                            f.clone(),
+                            Box::new(f.clone()),
                             canvas.info().name.into(),
                             display_info,
                         ))?;

@@ -605,6 +605,8 @@ fn expand(
                 Responder::Bubble => TouchResponder::Bubble,
                 Responder::Consume => TouchResponder::Consume,
                 Responder::Motion(id) => TouchResponder::Activate(Action::Motion(id)),
+                Responder::LayoutLab => TouchResponder::Activate(Action::LayoutLab),
+                Responder::ResetControls => TouchResponder::Activate(Action::ResetControls),
                 Responder::Stress => TouchResponder::Activate(Action::Stress),
                 Responder::ToggleFocus => TouchResponder::Activate(Action::ToggleFocus),
                 Responder::Open(screen) => TouchResponder::Activate(Action::Open(screen)),

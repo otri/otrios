@@ -13,7 +13,7 @@ try{
   let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false;
   function command(m){if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
   function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}}
-  function route(){return `/${model.screen}${model.keyboard?'/input':''}`;}
+  function route(){return `/${model.screen}${model.keyboard?'/input':model.controlsLayout?'/layout':''}`;}
   window.addEventListener('popstate',()=>{applyingRoute=true;routeTarget=location.hash.replace(/^#/, '')||'/home';command({type:'route',route:location.hash});});
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
   gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
@@ -28,8 +28,8 @@ try{
     model={...model,...f};currentScreen=f.screen;showAuth();
     if(f.vertices){bind(buffers[0]);gl.bufferData(gl.ARRAY_BUFFER,f.vertices,gl.STATIC_DRAW);staticCount=f.vertices.length/6;
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
-      for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',id:c.id}));controlsLayer.append(b);controls.set(c.id,b);}
-        b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');const [x,y,w,h]=c.bounds;Object.assign(b.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});}
+      for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',id:c.id}));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
+        b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');const [x,y,w,h]=c.bounds;Object.assign(b.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});}
       canvas.setAttribute('aria-label',f.text);revision.textContent=`VIEW ${f.snapshot.slice(0,12)}`;revision.dataset.snapshot=f.snapshot;revision.dataset.layout=f.layout;
     }
     revision.dataset.screen=f.screen;dirty=true;

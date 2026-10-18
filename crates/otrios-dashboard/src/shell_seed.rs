@@ -329,6 +329,339 @@ fn keyboard() -> Blueprint {
     }
     a.b
 }
+fn playground() -> Blueprint {
+    fn add(a: Expr, b: Expr) -> Expr {
+        Expr::Add(Box::new(a), Box::new(b))
+    }
+    fn sub(a: Expr, b: Expr) -> Expr {
+        Expr::Subtract(Box::new(a), Box::new(b))
+    }
+    fn mul(a: Expr, b: Expr) -> Expr {
+        Expr::Multiply(Box::new(a), Box::new(b))
+    }
+    fn choose(condition: Expr, yes: Expr, no: Expr) -> Expr {
+        Expr::Select {
+            condition: Box::new(condition),
+            yes: Box::new(yes),
+            no: Box::new(no),
+        }
+    }
+    fn node(id: u16, frame: [Expr; 4], shape: Shape) -> TemplateNode {
+        TemplateNode {
+            id,
+            frame,
+            shape,
+            visible: Expr::Literal(Value::Boolean(true)),
+            responder: None,
+            semantics: None,
+            children: vec![],
+        }
+    }
+    fn paint(id: u16, frame: [Expr; 4], color: Expr, radius: f32) -> TemplateNode {
+        node(
+            id,
+            frame,
+            Shape::Superellipse {
+                radius: n(radius),
+                exponent: 4.,
+                color,
+            },
+        )
+    }
+    fn circle(id: u16, frame: [Expr; 4], color: Expr) -> TemplateNode {
+        node(id, frame, Shape::Circle { color })
+    }
+    let mut a = Author::new(false);
+    a.label(
+        [48., 112., 1184., 48.],
+        s("COMPONENT PLAYGROUND"),
+        4.,
+        WHITE,
+    );
+    a.label(
+        [48., 174., 1184., 24.],
+        s("Drag, rotate, explore. The values follow across devices."),
+        2.,
+        MUTED,
+    );
+    for (x, w, title, subtitle) in [
+        (48., 370., "01 / LINEAR", "Drag the thumb"),
+        (440., 370., "02 / ROTARY", "Turn the ring"),
+        (832., 400., "03 / TOUCH PAD", "Drag in two axes"),
+    ] {
+        a.add(3, [x, 230., w, 382.], vec![]);
+        let parent = a.b.root.children.len() - 1;
+        a.label([24., 24., w - 48., 26.], s(title), 2., GREEN);
+        a.label([24., 62., w - 48., 22.], s(subtitle), 2., MUTED);
+        let children = a.b.root.children.drain(parent + 1..).collect();
+        a.b.root.children[parent].children = children;
+    }
+    let mut slider = node(
+        0,
+        [n(0.), n(0.), Expr::Width, Expr::Height],
+        Shape::Canvas { clip: true },
+    );
+    slider.responder = Some(Responder::DragControl(0));
+    slider.semantics = Some(Semantics {
+        label: s("Intensity slider"),
+        checked: Expr::Literal(Value::Boolean(false)),
+    });
+    let active = choose(Expr::State(Binding::Enabled), c(GREEN), c(MUTED));
+    slider.children = vec![
+        paint(
+            1,
+            [n(20.), n(34.), sub(Expr::Width, n(40.)), n(12.)],
+            c([45, 65, 78, 255]),
+            6.,
+        ),
+        paint(
+            2,
+            [
+                n(20.),
+                n(34.),
+                mul(sub(Expr::Width, n(40.)), local(600)),
+                n(12.),
+            ],
+            active.clone(),
+            0.,
+        ),
+        circle(
+            3,
+            [
+                mul(sub(Expr::Width, n(40.)), local(600)),
+                n(20.),
+                n(40.),
+                n(40.),
+            ],
+            active.clone(),
+        ),
+    ];
+    slider.children[1].visible = local(712);
+    let mut glow = circle(
+        4,
+        [
+            sub(mul(sub(Expr::Width, n(40.)), local(600)), n(3.)),
+            n(17.),
+            n(46.),
+            n(46.),
+        ],
+        c([185, 238, 143, 80]),
+    );
+    glow.visible = local(720);
+    slider.children.insert(2, glow);
+    a.b.templates.push(Template {
+        id: 40,
+        name: "Slider".into(),
+        parameters: vec![],
+        root: slider,
+    });
+    a.add(40, [72., 388., 322., 80.], vec![]);
+    a.label([72., 500., 322., 56.], local(610), 5., WHITE);
+    a.label([72., 570., 322., 20.], s("DRAG OUTSIDE TO TEST"), 2., MUTED);
+    let mut dial = node(
+        0,
+        [n(0.), n(0.), Expr::Width, Expr::Height],
+        Shape::Canvas { clip: true },
+    );
+    dial.responder = Some(Responder::DragControl(1));
+    dial.semantics = Some(Semantics {
+        label: s("Rotary dial"),
+        checked: Expr::Literal(Value::Boolean(false)),
+    });
+    dial.children.push(circle(
+        1,
+        [
+            n(16.),
+            n(16.),
+            sub(Expr::Width, n(32.)),
+            sub(Expr::Height, n(32.)),
+        ],
+        c([16, 28, 41, 255]),
+    ));
+    for i in 0..12 {
+        let angle = (i as f32 / 11. - 0.5) * std::f32::consts::PI * 1.5;
+        dial.children.push(circle(
+            10 + i,
+            [
+                sub(mul(Expr::Width, n(0.5 + angle.sin() * 0.44)), n(3.)),
+                sub(mul(Expr::Height, n(0.5 - angle.cos() * 0.44)), n(3.)),
+                n(6.),
+                n(6.),
+            ],
+            choose(local(700 + i), active.clone(), c([58, 80, 94, 255])),
+        ));
+    }
+    dial.children.push(circle(
+        30,
+        [
+            sub(mul(Expr::Width, local(604)), n(8.)),
+            sub(mul(Expr::Height, local(605)), n(8.)),
+            n(16.),
+            n(16.),
+        ],
+        active,
+    ));
+    dial.children.push(circle(
+        31,
+        [
+            sub(mul(Expr::Width, n(0.5)), n(18.)),
+            sub(mul(Expr::Height, n(0.5)), n(18.)),
+            n(36.),
+            n(36.),
+        ],
+        c([34, 54, 67, 255]),
+    ));
+    let mut glow = circle(
+        2,
+        [
+            n(10.),
+            n(10.),
+            sub(Expr::Width, n(20.)),
+            sub(Expr::Height, n(20.)),
+        ],
+        c([185, 238, 143, 70]),
+    );
+    glow.visible = local(721);
+    dial.children.insert(0, glow);
+    a.b.templates.push(Template {
+        id: 41,
+        name: "Dial".into(),
+        parameters: vec![],
+        root: dial,
+    });
+    a.add(41, [520., 336., 210., 210.], vec![]);
+    a.label([464., 556., 322., 40.], local(611), 3., WHITE);
+    let mut pad = node(
+        0,
+        [n(0.), n(0.), Expr::Width, Expr::Height],
+        Shape::Canvas { clip: true },
+    );
+    pad.responder = Some(Responder::DragControl(2));
+    pad.semantics = Some(Semantics {
+        label: local(617),
+        checked: Expr::Literal(Value::Boolean(false)),
+    });
+    pad.children.push(paint(
+        1,
+        [n(0.), n(0.), Expr::Width, Expr::Height],
+        choose(local(722), c([22, 44, 58, 255]), c([16, 28, 41, 255])),
+        12.,
+    ));
+    for i in 1..4 {
+        let f = i as f32 / 4.;
+        pad.children.push(paint(
+            10 + i,
+            [mul(Expr::Width, n(f)), n(0.), n(1.), Expr::Height],
+            c([40, 61, 76, 255]),
+            0.,
+        ));
+        pad.children.push(paint(
+            20 + i,
+            [n(0.), mul(Expr::Height, n(f)), Expr::Width, n(1.)],
+            c([40, 61, 76, 255]),
+            0.,
+        ));
+    }
+    for i in 0..12 {
+        let mut dot = circle(
+            40 + i,
+            [
+                sub(
+                    add(n(14.), mul(sub(Expr::Width, n(28.)), local(640 + i * 2))),
+                    n(3.),
+                ),
+                sub(
+                    add(
+                        n(14.),
+                        mul(sub(Expr::Height, n(28.)), sub(n(1.), local(641 + i * 2))),
+                    ),
+                    n(3.),
+                ),
+                n(6.),
+                n(6.),
+            ],
+            c([94, 169, 181, 120]),
+        );
+        dot.visible = local(680 + i);
+        pad.children.push(dot);
+    }
+    let px = add(n(14.), mul(sub(Expr::Width, n(28.)), local(602)));
+    let py = add(
+        n(14.),
+        mul(sub(Expr::Height, n(28.)), sub(n(1.), local(603))),
+    );
+    pad.children.push(paint(
+        60,
+        [px.clone(), n(0.), n(1.), Expr::Height],
+        c([94, 169, 181, 110]),
+        0.,
+    ));
+    pad.children.push(paint(
+        61,
+        [n(0.), py.clone(), Expr::Width, n(1.)],
+        c([94, 169, 181, 110]),
+        0.,
+    ));
+    pad.children.push(circle(
+        62,
+        [
+            sub(px.clone(), n(12.)),
+            sub(py.clone(), n(12.)),
+            n(24.),
+            n(24.),
+        ],
+        c([84, 174, 183, 255]),
+    ));
+    pad.children.push(circle(
+        63,
+        [sub(px, n(4.)), sub(py, n(4.)), n(8.), n(8.)],
+        c(WHITE),
+    ));
+    a.b.templates.push(Template {
+        id: 42,
+        name: "TouchPad".into(),
+        parameters: vec![],
+        root: pad,
+    });
+    a.add(42, [856., 336., 352., 210.], vec![]);
+    a.label([856., 566., 352., 24.], local(612), 2., WHITE);
+    for (id, responder, frame, label) in [
+        (
+            50,
+            Responder::ResetControls,
+            [48., 636., 176., 64.],
+            s("RESET"),
+        ),
+        (
+            51,
+            Responder::ToggleFocus,
+            [240., 636., 224., 64.],
+            local(616),
+        ),
+        (
+            52,
+            Responder::LayoutLab,
+            [480., 636., 232., 64.],
+            s("LAYOUT LAB"),
+        ),
+    ] {
+        a.button_template(id, responder);
+        if id == 51 {
+            a.b.templates
+                .last_mut()
+                .unwrap()
+                .root
+                .semantics
+                .as_mut()
+                .unwrap()
+                .checked = Expr::State(Binding::Enabled);
+        }
+        a.add(id, frame, vec![prop(1, label)]);
+    }
+    a.label([48., 726., 1184., 22.], local(613), 2., MUTED);
+    a.b
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::path::PathBuf::from(
         std::env::args()
@@ -342,6 +675,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("editor", editor()),
         ("keyboard", keyboard()),
         ("motion", motion()),
+        ("playground", playground()),
     ] {
         std::fs::write(
             root.join(format!("{name}.flex")),
@@ -357,6 +691,11 @@ mod tests {
     #[test]
     fn binary_system_assets_match_their_authoring_fixtures() {
         for (b, bytes) in [
+            (
+                playground(),
+                include_bytes!("../../otrios-core/src/dashboard/shell-assets/playground.flex")
+                    .as_slice(),
+            ),
             (
                 motion(),
                 include_bytes!("../../otrios-core/src/dashboard/shell-assets/motion.flex")
