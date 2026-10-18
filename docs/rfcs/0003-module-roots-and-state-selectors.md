@@ -4,7 +4,10 @@
 Status: proposed design, extending [RFC 0002](0002-incremental-crdt-hierarchy.md).
 The live dashboard still has one shared Automerge room, enum-based bindings,
 bundled screen layouts and named navigation actions. This RFC defines the next
-contract; no module-scoped replication or selector interpreter is implemented.
+contract. An isolated [RFC 0004 prototype](0004-canvas-behavior-and-app-packages.md)
+now mounts Home, Playground and Layout Lab with independent Automerge documents,
+flat typed field selectors and optional Wasm reducers. General collection
+selectors and incremental Merkle replication below remain proposed.
 
 ## Decision proposed
 
@@ -23,8 +26,8 @@ query language. Readable examples below are authoring/debug notation only.
 An activated module instance receives exactly two logical subscription roots:
 
 ```text
-ComponentPlayground(UI: playgroundUiRef, State: playgroundStateRef)
-LayoutLab          (UI: layoutUiRef,     State: layoutStateRef)
+Canvas(uiRef = playgroundUiRef, stateRef = playgroundStateRef)
+Canvas(uiRef = layoutUiRef,     stateRef = layoutStateRef)
 ```
 
 Each root is a logical ObjectRef whose current revision is a Merkle ContentId.

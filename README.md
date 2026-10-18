@@ -45,3 +45,5 @@ Live Controls now includes a [primitive component playground](docs/COMPONENT_PLA
 Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](docs/ANIMATION.md). The [direct KMS display path](docs/DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](docs/experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](docs/rfcs/0001-direct-linux-gles2.md).
 
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica from OrbStack. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
+
+The opt-in [Canvas app prototype](apps/README.md) packages Home, Component Playground and Layout Lab independently, with app-local UI/state/behavior sources and a migration inventory for the other demos. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
