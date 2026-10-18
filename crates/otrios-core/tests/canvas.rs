@@ -1225,3 +1225,58 @@ fn old_private_lease_revocation_preserves_newer_public_mount() {
         matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:e} if e==epoch)
     );
 }
+
+#[test]
+fn aggregate_content_cannot_cover_app_navigation_or_header() {
+    use otrios_interfaces::scene::Action;
+    let mut c = Client::default();
+    activate_access(
+        &mut c,
+        monitoring_app::ui(),
+        "app:monitoring/state",
+        vec![],
+        true,
+    );
+    let feed = authoring::AppUi::new("feed", "Feed", authoring::schema("empty", &[]))
+        .build("Private aggregate", vec![]);
+    c.receive(
+        &encode_server(&ServerMessage::View {
+            epoch: c.epoch(),
+            bytes: feed.layout,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let scene = c.scene().unwrap();
+    let home = scene
+        .hit_path([1195., 85.])
+        .iter()
+        .find_map(|n| {
+            n.node
+                .semantics
+                .as_ref()
+                .filter(|s| s.label == "Home")
+                .map(|_| n.node.id)
+        })
+        .expect("Home remains tappable where the aggregate overlaps its lower edge");
+    assert!(matches!(
+        otrios_core::dashboard::input::InputRouter::activate(&scene, home).action,
+        Some(Action::AppNavigate(_))
+    ));
+    let header=scene.root().children.iter().position(|n|matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value,..} if value=="Monitoring")).unwrap();
+    let content = scene
+        .root()
+        .children
+        .iter()
+        .position(|n| {
+            matches!(
+                n.primitive,
+                otrios_interfaces::scene::Primitive::Viewport { .. }
+            )
+        })
+        .unwrap();
+    assert!(
+        content < header,
+        "content paints below the app-owned header"
+    );
+}

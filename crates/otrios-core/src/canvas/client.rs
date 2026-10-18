@@ -1358,7 +1358,9 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
             },
         );
         viewport.children.push(content);
-        root.children.push(viewport);
+        // An aggregate is content beneath the app header and navigation.
+        // AppUi reserves the first root child for its backdrop.
+        root.children.insert(root.children.len().min(1), viewport);
     }
     Scene::new(root)
 }
