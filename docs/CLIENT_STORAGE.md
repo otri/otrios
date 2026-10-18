@@ -16,10 +16,14 @@ Ready, stop, code-notice, route and diagnostic capture files live under `/run/ot
 
 ## High-frequency input
 
-Local preview follows presentation timing. Replaceable control values publish at most every 50 ms plus exact endpoints; native pending absolute values supersede older unsent values independently per control, with network handoff every 100 ms. Ordered discrete actions retain order. Once committed, Automerge changes remain history; transport batching is not compaction.
+Local preview follows presentation timing. Replaceable control values publish at most every 50 ms plus exact endpoints; native pending absolute values supersede older unsent values independently per control, with local sync generation batched at 100 ms and immediate protocol responses for received updates. Ordered discrete actions retain order. Once committed, Automerge changes remain history; transport batching is not compaction.
 
 Touch Pad motion instead uses the bounded ephemeral `/demo/ink` channel. Peer/stroke IDs preserve separate drawings, late joins preserve age, and marks fade five seconds after the stroke’s latest point. Only the final pad position is committed to durable app state. Trails are never stored in either server history or client caches. See [the ink protocol](TOUCH_PAD_INK.md).
 
 ## Validation
 
+The native application worker is the sole mutable CRDT owner; its network thread moves ordered binary frames through bounded channels, never complete document replicas. Connection epochs reset sync state and discard stale transport frames after reconnect. Ready diagnostics report receive-to-present time for actual remote CRDT changes.
+
 Core acknowledgement tests cover new edits, fresh sessions and fresh subscribers. Real server-process tests confirm an acknowledged edit is on disk before acknowledgement and survives killing/restarting the authority, then appears in a new RAM-only subscriber. Native worker tests prove a legacy state file is ignored and unchanged, even when the application worker is blocked during a drag. Cache tests cover exact byte accounting, LRU/pinning, quota failures, corrupt blobs, symlinks and bounded streaming. Ink integration tests use public and native WebSockets, late joining, expiration and unchanged durable history/private view.
+
+The proposed [incremental CRDT hierarchy](rfcs/0002-incremental-crdt-hierarchy.md) defines the next runtime experiment; it is not implemented by the current Automerge host changes.
