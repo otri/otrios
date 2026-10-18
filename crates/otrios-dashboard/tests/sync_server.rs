@@ -104,9 +104,36 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
         .unwrap()
         .snapshot()
         .id();
+    drop(peer);
+    let mut peer = Peer::connect(
+        &server,
+        Replica::load(&std::fs::read(&state).unwrap()).unwrap(),
+    );
+    if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = peer.socket.get_mut() {
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    }
+    let tungstenite::Message::Text(initial) = peer.socket.read().unwrap() else {
+        panic!("missing initial release notice");
+    };
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&initial).unwrap()["release"]["id"],
+        first
+    );
+    if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = peer.socket.get_mut() {
+        tcp.set_read_timeout(Some(Duration::from_millis(30)))
+            .unwrap();
+    }
+    // Leave the initial binary state frames unread, forcing their delivery
+    // ahead of the next code notice rather than relying on scheduler timing.
     publish(&second, "second code");
+    let mut state_messages = 0;
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
+        if let Some(bytes) = peer.replica.generate_sync(&mut peer.session).unwrap() {
+            peer.socket
+                .send(tungstenite::Message::Binary(bytes.into()))
+                .unwrap();
+        }
         match peer.socket.read() {
             Ok(tungstenite::Message::Text(text)) => {
                 let notice: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -114,9 +141,28 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
                     break;
                 }
             }
+            // Code notices share the stream with state and acknowledgements;
+            // a fixed number of earlier pumps cannot establish their order.
+            Ok(tungstenite::Message::Binary(bytes)) if bytes.starts_with(b"OTML1") => {
+                state_messages += 1;
+                peer.replica
+                    .set_presentation(if bytes.len() == 5 {
+                        None
+                    } else {
+                        Some(&bytes[5..])
+                    })
+                    .unwrap();
+            }
+            Ok(tungstenite::Message::Binary(bytes)) => {
+                state_messages += 1;
+                peer.replica
+                    .receive_sync(&mut peer.session, &bytes)
+                    .unwrap();
+            }
             Ok(tungstenite::Message::Ping(_)) => {
                 peer.socket.flush().unwrap();
             }
+            Ok(tungstenite::Message::Pong(_)) => {}
             Err(tungstenite::Error::Io(e))
                 if matches!(
                     e.kind(),
@@ -126,6 +172,10 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
         }
         assert!(Instant::now() < deadline, "release was not pushed");
     }
+    assert!(
+        state_messages > 0,
+        "interleaved state frames were not exercised"
+    );
     let get = |path: &str| {
         let mut stream = TcpStream::connect(&server.address).unwrap();
         stream
