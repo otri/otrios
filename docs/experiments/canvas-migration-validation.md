@@ -111,8 +111,22 @@ Raw public timing results are in `canvas-app-frame-results.json`.
 
 Inspection caught a content-layer overlap at Monitoring's header. The follow-up
 places aggregate content below app chrome and reserves browser sign-out space;
-a regression checks both painter order and Home hit testing. Later signed rollout
-acceptance is recorded below when complete.
+a regression checks both painter order and Home hit testing.
+
+Final signed release:
+`8e3466df4e54dfbb390e426a479fbc25133b922e56f0c0b48b42a489e5c60d82`.
+The browser automatically adopted this release and rendered 3D Lab and the six-app
+Home launcher from the public host. All 73 deployed public-resource, cookie-session
+and private-payload policy checks passed again against this release. A five-second
+native Monitoring run confirmed the corrected header and Home button above the
+actual seven-day aggregate; its private capture remains outside Git.
+
+After that check, the normal frame service resumed this final release on Home.
+Readiness confirmed `app:home/ui`, `app:home/state`, acknowledged state, zero pending
+commands, calibrated touch and direct DRM/GLES2 RGB565 output. The process inventory
+showed exactly one native renderer and no Weston/browser. The normal signed release
+watcher is running again. Fresh app state was used as requested; no legacy state
+migration or preservation was required.
 
 All independent client audit findings have focused passing regressions: retained
 coalesced edits across reconnect, frozen late keyboard input during staged mounts,
