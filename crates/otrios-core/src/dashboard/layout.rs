@@ -596,6 +596,17 @@ fn expand(
         }
         let responder = if let Some(r) = n.responder {
             Some(match r {
+                Responder::AppEvent { control, drag } => {
+                    if control > 31 {
+                        return Err("Canvas event index exceeds limit".into());
+                    }
+                    if drag {
+                        TouchResponder::Drag(Action::AppEvent(control))
+                    } else {
+                        TouchResponder::Activate(Action::AppEvent(control))
+                    }
+                }
+                Responder::AppNavigate(id) => TouchResponder::Activate(Action::AppNavigate(id)),
                 Responder::DragControl(id) => {
                     if id > 2 {
                         return Err("Unknown drag control".into());

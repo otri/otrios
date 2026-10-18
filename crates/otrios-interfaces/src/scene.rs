@@ -59,6 +59,8 @@ pub enum Primitive {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
+    AppEvent(u8),
+    AppNavigate(u8),
     ToggleFocus,
     ResetControls,
     LayoutLab,

@@ -7,3 +7,6 @@
 /web/dashboard/pkg/
 /dashboard-state.automerge
 /*-dashboard.automerge
+
+/web/canvas/pkg/
+/apps/*/package/

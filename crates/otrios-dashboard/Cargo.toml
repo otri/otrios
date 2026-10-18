@@ -11,6 +11,7 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [features]
+canvas = ["otrios-core/canvas", "dep:wat"]
 default = []
 native = ["dep:sdl2", "host-sync"]
 host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls"]
@@ -28,6 +29,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
+wat = { version = "=1.239.0", optional = true }
 sdl2 = { version = "=0.38.0", optional = true }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 tungstenite = { version = "=0.30.0", features = ["rustls-tls-webpki-roots"], optional = true }
@@ -81,3 +83,18 @@ required-features = ["native"]
 name = "dashboard-direct"
 path = "src/direct.rs"
 required-features = ["direct"]
+
+[[bin]]
+name = "canvas-pack"
+path = "src/canvas_pack.rs"
+required-features = ["canvas"]
+
+[[bin]]
+name = "canvas-server"
+path = "src/canvas_server.rs"
+required-features = ["canvas", "server"]
+
+[[bin]]
+name = "canvas-native"
+path = "src/canvas_native.rs"
+required-features = ["canvas", "host-sync"]

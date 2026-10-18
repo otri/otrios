@@ -8,9 +8,9 @@ publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_na
 def inputs(repo):
     exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml']
     files=[repo/x for x in exact]
-    for tree in ['crates','scripts','web','tools/dashboard']:
+    for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()

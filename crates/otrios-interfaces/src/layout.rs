@@ -84,6 +84,12 @@ pub enum Shape {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Responder {
+    /// App-scoped event/navigation indices, resolved by the Canvas mount.
+    AppEvent {
+        control: u8,
+        drag: bool,
+    },
+    AppNavigate(u8),
     DragControl(u8),
     Bubble,
     Consume,

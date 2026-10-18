@@ -94,3 +94,6 @@ mod tests {
 
 #[cfg(feature = "dashboard")]
 pub mod dashboard;
+
+#[cfg(feature = "canvas")]
+pub mod canvas;
