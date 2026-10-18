@@ -124,12 +124,6 @@ fn home() -> Blueprint {
     );
     for (i, (screen, title, line1, line2)) in [
         (
-            Screen::Monitoring,
-            "MONITORING",
-            "Live service data",
-            "Seven days of service history",
-        ),
-        (
             Screen::Controls,
             "LIVE CONTROLS",
             "Touch + CRDT state",
@@ -153,6 +147,12 @@ fn home() -> Blueprint {
             "Tetrahedra + rotation",
             "Shared intent, independent playback",
         ),
+        (
+            Screen::Monitoring,
+            "MONITORING",
+            "Live service data",
+            "Seven days of service history",
+        ),
     ]
     .iter()
     .enumerate()
@@ -163,6 +163,18 @@ fn home() -> Blueprint {
         let y = 272. + (i / 3) as f32 * 208.;
         a.add(t, [x, y, 384., 192.], vec![prop(1, s(title))]);
         let button = a.b.root.children.len() - 1;
+        if *screen == Screen::Monitoring {
+            // A padlock built from the same primitives on native and web hosts.
+            // These children bubble to the card's existing Open responder.
+            for (frame, color, radius) in [
+                ([336., 16., 24., 28.], MUTED, 12.),
+                ([341., 21., 14., 23.], [27, 44, 61, 255], 7.),
+                ([331., 33., 34., 26.], MUTED, 5.),
+                ([346., 41., 4., 10.], [27, 44, 61, 255], 2.),
+            ] {
+                a.add(3, frame, vec![prop(2, c(color)), prop(3, n(radius))]);
+            }
+        }
         a.label(
             [16., 76., 352., 24.],
             if *screen == Screen::Monitoring {

@@ -823,6 +823,10 @@ mod tests {
         let before = r.save();
         let mut s = Shell::default();
         tap(&mut s, &mut r, [180., 450.]);
+        assert_eq!(s.screen(), Screen::Controls);
+        assert!(s.back());
+        // The last card's decorative lock still bubbles to its Open responder.
+        tap(&mut s, &mut r, [795., 525.]);
         assert_eq!(s.screen(), Screen::Monitoring);
         assert!(s.back());
         assert_eq!(s.screen(), Screen::Home);
