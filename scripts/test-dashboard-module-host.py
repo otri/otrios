@@ -15,7 +15,7 @@ def main():
     def request(path,method='GET',extra=None,body=None,upgrade=False):
         connection=(http.client.HTTPSConnection if url.scheme=='https' else http.client.HTTPConnection)(url.hostname,url.port,timeout=15)
         headers={'User-Agent':'Mozilla/5.0 (compatible; OTriOS-Module-Check/2.0)'};headers.update(extra or {})
-        connection.request(method,path,body=body,headers=headers);response=connection.getresponse();status=response.status;headers=dict(response.getheaders())
+        connection.request(method,path,body=body,headers=headers);response=connection.getresponse();status=response.status;headers=response.headers
         if upgrade and status==101:return connection,response
         data=response.read(40*1024*1024);connection.close();return status,headers,data
     status,_,raw=request('/release');assert status==200,('public release',status)

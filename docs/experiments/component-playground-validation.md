@@ -93,3 +93,23 @@ cover concurrent local/remote edits and reconnection with a fresh sync session.
 The ready file records actual remote receive-to-present CPU/queue/display timing;
 this excludes the sending device, authority and network transit before receipt.
 The probe figures above are not end-to-end latency or FPS measurements.
+
+
+## Deployed acceptance
+
+Signed release `9f508c3f98b014c120922484dcecb8506f130f62616eccca543a98766f1dc6f7`
+ran on the public Wasm host and the frame's single direct GLES2 renderer. Native
+ready metadata showed server-confirmed state, no pending commands, controls
+navigation preserved across hot reload, and a remote receive-to-present sample
+of 169.131 ms. This one sample is not a latency percentile and excludes sender,
+authority and transit before the frame receives the packet. The frame user
+reported “Massive improvement!” after the single-owner update, having already
+confirmed fast ephemeral traces before it.
+
+Browser diagnostics confirmed 9,221,154 artifact payload bytes across 24 entries
+with a 536,870,912-byte cap. The frame artifact cache was below its
+2,147,483,648-byte cap; legacy client document/view/route files were absent, and
+runtime notices were on tmpfs. The legacy checkpoint was merged and acknowledged
+by the authority before retirement. Weston/browser remained stopped. Existing
+Monitoring authentication and private-view isolation remain part of deployment
+conformance checks.
