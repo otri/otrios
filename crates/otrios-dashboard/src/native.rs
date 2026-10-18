@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Native GPU host: SDL owns the window/input, GLES2 draws the shared triangle list.
-use otrios_core::dashboard::{Replica, SyncSession, render};
+use otrios_core::dashboard::{Replica, SyncSession, input::InputRouter, render};
+use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use sdl2::{
     event::Event, keyboard::Keycode, mouse::MouseButton, pixels::Color, rect::FPoint,
     render::Vertex,
@@ -90,6 +91,7 @@ fn main() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let mut events = sdl.event_pump()?;
     let mut dirty = true;
+    let mut input = InputRouter::default();
     let mut drawn = 0;
     let mut last_sync = Instant::now() - Duration::from_secs(1);
     let started = Instant::now();
@@ -123,24 +125,82 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                Event::MouseButtonDown {
+                    mouse_btn: MouseButton::Left,
+                    x,
+                    y,
+                    ..
+                } => {
+                    let result = input.dispatch(
+                        replica.snapshot().scene().clone(),
+                        PointerEvent {
+                            id: 0,
+                            phase: PointerPhase::Down,
+                            position: [x as f32, y as f32],
+                        },
+                    );
+                    sdl.mouse().capture(result.responder.is_some());
+                    dirty |= replica.apply_action(result.action)?;
+                }
+                Event::MouseMotion { x, y, .. } => {
+                    let result = input.dispatch(
+                        replica.snapshot().scene().clone(),
+                        PointerEvent {
+                            id: 0,
+                            phase: PointerPhase::Move,
+                            position: [x as f32, y as f32],
+                        },
+                    );
+                    dirty |= replica.apply_action(result.action)?;
+                }
                 Event::MouseButtonUp {
                     mouse_btn: MouseButton::Left,
                     x,
                     y,
                     ..
                 } => {
-                    if x >= 0 && y >= 0 {
-                        dirty |= replica.touch(x as u32, y as u32)?;
-                        last_sync = Instant::now() - Duration::from_secs(1);
-                    }
+                    let result = input.dispatch(
+                        replica.snapshot().scene().clone(),
+                        PointerEvent {
+                            id: 0,
+                            phase: PointerPhase::Up,
+                            position: [x as f32, y as f32],
+                        },
+                    );
+                    sdl.mouse().capture(false);
+                    dirty |= replica.apply_action(result.action)?;
+                    last_sync = Instant::now() - Duration::from_secs(1);
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::Space),
                     repeat: false,
                     ..
                 } => {
-                    dirty |= replica.touch(200, 300)?;
-                    last_sync = Instant::now() - Duration::from_secs(1);
+                    if let Some(id) = replica
+                        .snapshot()
+                        .scene()
+                        .controls()
+                        .first()
+                        .map(|c| c.node.id)
+                    {
+                        let result = InputRouter::activate(replica.snapshot().scene(), id);
+                        dirty |= replica.apply_action(result.action)?;
+                        last_sync = Instant::now() - Duration::from_secs(1);
+                    }
+                }
+                Event::Window {
+                    win_event: sdl2::event::WindowEvent::FocusLost,
+                    ..
+                } => {
+                    sdl.mouse().capture(false);
+                    input.dispatch(
+                        replica.snapshot().scene().clone(),
+                        PointerEvent {
+                            id: 0,
+                            phase: PointerPhase::Cancel,
+                            position: [0., 0.],
+                        },
+                    );
                 }
                 Event::Window { .. } => dirty = true,
                 _ => {}

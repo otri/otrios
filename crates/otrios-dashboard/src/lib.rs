@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Thin host adapter. The LGPL runtime owns state, snapshots, input and rendering.
-use otrios_core::dashboard::{Replica, SyncSession, render};
+use otrios_core::dashboard::{Replica, SyncSession, input::InputRouter, render};
+use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Dashboard {
     replica: Replica,
     session: SyncSession,
+    input: InputRouter,
 }
 #[wasm_bindgen]
 impl Dashboard {
@@ -15,12 +17,14 @@ impl Dashboard {
         Ok(Self {
             replica: Replica::new()?,
             session: SyncSession::default(),
+            input: InputRouter::default(),
         })
     }
     pub fn load(bytes: &[u8]) -> Result<Dashboard, String> {
         Ok(Self {
             replica: Replica::load(bytes)?,
             session: SyncSession::default(),
+            input: InputRouter::default(),
         })
     }
     pub fn document(&mut self) -> Vec<u8> {
@@ -53,28 +57,73 @@ impl Dashboard {
     pub fn snapshot_id(&self) -> String {
         self.replica.snapshot().hex_id()
     }
-    pub fn switch_bounds(&self) -> Vec<u32> {
+    pub fn pointer(&mut self, phase: u8, id: u32, x: f32, y: f32) -> Result<bool, String> {
+        let phase = match phase {
+            0 => PointerPhase::Down,
+            1 => PointerPhase::Move,
+            2 => PointerPhase::Up,
+            3 => PointerPhase::Cancel,
+            _ => return Err("Invalid pointer phase".into()),
+        };
+        let result = self.input.dispatch(
+            self.replica.snapshot().scene().clone(),
+            PointerEvent {
+                id,
+                phase,
+                position: [x, y],
+            },
+        );
+        self.replica.apply_action(result.action)
+    }
+    pub fn activate(&mut self, id: u32) -> Result<bool, String> {
+        let result = InputRouter::activate(self.replica.snapshot().scene(), id);
+        self.replica.apply_action(result.action)
+    }
+    pub fn control_ids(&self) -> Vec<u32> {
         self.replica
             .snapshot()
-            .view()
-            .nodes
+            .scene()
+            .controls()
             .iter()
-            .find_map(|n| match n.content {
-                otrios_interfaces::ViewContent::Switch { .. } => Some(n.bounds.to_vec()),
-                _ => None,
+            .map(|c| c.node.id)
+            .collect()
+    }
+    pub fn control_bounds(&self, id: u32) -> Vec<f32> {
+        self.replica
+            .snapshot()
+            .scene()
+            .controls()
+            .iter()
+            .find(|c| c.node.id == id)
+            .map(|c| {
+                vec![
+                    c.origin[0],
+                    c.origin[1],
+                    c.node.frame.width,
+                    c.node.frame.height,
+                ]
             })
             .unwrap_or_default()
     }
-    pub fn enabled(&self) -> bool {
+    pub fn control_label(&self, id: u32) -> String {
         self.replica
             .snapshot()
-            .view()
-            .nodes
+            .scene()
+            .controls()
             .iter()
-            .find_map(|n| match n.content {
-                otrios_interfaces::ViewContent::Switch { enabled, .. } => Some(enabled),
-                _ => None,
-            })
-            .unwrap_or(false)
+            .find(|c| c.node.id == id)
+            .and_then(|c| c.node.semantics.as_ref())
+            .map(|s| s.label.clone())
+            .unwrap_or_default()
+    }
+    pub fn control_checked(&self, id: u32) -> bool {
+        self.replica
+            .snapshot()
+            .scene()
+            .controls()
+            .iter()
+            .find(|c| c.node.id == id)
+            .and_then(|c| c.node.semantics.as_ref())
+            .is_some_and(|s| s.checked)
     }
 }

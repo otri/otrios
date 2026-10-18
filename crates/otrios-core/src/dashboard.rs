@@ -2,7 +2,10 @@
 //! Dashboard experiment: CRDT edits -> complete immutable view -> shared compositor.
 //! This is a bounded, trusted-peer demo; it does not implement Linux shared memory.
 
+pub mod components;
+pub mod input;
 mod render;
+pub mod scene;
 mod snapshot;
 pub use render::{Mesh, render};
 pub use snapshot::ViewSnapshot;
@@ -124,20 +127,45 @@ impl Replica {
         candidate.commit(); // switch, count and sample are one CRDT change
         self.publish(candidate)
     }
-    /// Coordinates refer to the currently displayed snapshot, not a hidden DOM layout.
+    /// Compatibility tap adapter; real hosts deliver the complete pointer sequence.
     pub fn touch(&mut self, x: u32, y: u32) -> Result<bool> {
-        for node in &self.snapshot.view().nodes {
-            let [nx, ny, w, h] = node.bounds;
-            if x >= nx
-                && x < nx + w
-                && y >= ny
-                && y < ny + h
-                && let ViewContent::Switch { enabled, .. } = node.content
-            {
-                return self.set_enabled(!enabled);
+        use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+        let mut router = input::InputRouter::default();
+        let event = PointerEvent {
+            id: 0,
+            phase: PointerPhase::Down,
+            position: [x as f32, y as f32],
+        };
+        router.dispatch(self.snapshot.scene().clone(), event);
+        let result = router.dispatch(
+            self.snapshot.scene().clone(),
+            PointerEvent {
+                phase: PointerPhase::Up,
+                ..event
+            },
+        );
+        self.apply_action(result.action)
+    }
+    pub fn apply_action(
+        &mut self,
+        action: Option<otrios_interfaces::scene::Action>,
+    ) -> Result<bool> {
+        match action {
+            Some(otrios_interfaces::scene::Action::ToggleFocus) => {
+                let enabled = self
+                    .snapshot
+                    .view()
+                    .nodes
+                    .iter()
+                    .find_map(|n| match n.content {
+                        ViewContent::Switch { enabled, .. } => Some(enabled),
+                        _ => None,
+                    })
+                    .ok_or("Missing focus switch")?;
+                self.set_enabled(!enabled)
             }
+            None => Ok(false),
         }
-        Ok(false)
     }
     fn publish(&mut self, mut candidate: AutoCommit) -> Result<bool> {
         validate_lineage(&mut candidate)?;

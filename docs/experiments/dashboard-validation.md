@@ -27,3 +27,13 @@ Presented FPS, end-to-end touch latency, idle/active CPU/memory, direct KMS/GBM 
 The frame retains its old kiosk and recovery command; no kernel, bootloader, touch transform, browser profile, SSH forwarding policy or unrelated private source was changed. Automatic fallback is implemented and cryptographic rejection is tested; a deliberately crashing signed graphics release has not been deployed as a rollback test. The Mac must stay awake, online and logged in; this deployment has no cloud failover.
 
 Linux CI builds Wasm and presents a native GLES2 frame under Mesa/Xvfb. CI pass/failure is reported on the pull request. That API-path check does not measure physical Mali performance. Full setup and recovery: [DASHBOARD_LIVE.md](../DASHBOARD_LIVE.md).
+
+## Primitive UI follow-up
+
+The user has confirmed the deployed dashboard on iPad, iPhone and the physical photo frame, including frame touch updating both mobile screens. That confirms physical input and bidirectional state flow for the initial compositor. It does not separately settle panel colour quality.
+
+The primitive-tree refactor adds nine core tests (21 core tests plus three process tests and five signature tests, 29 total) and replaces specialized Switch/Graph painting with generic primitive traversal, clipping and responder dispatch. See [SCENE_TREE.md](../SCENE_TREE.md) for the bounded contracts and input semantics. Updated host rendering and live release validation are recorded with this change; physical touch acceptance of the new responder implementation remains a separate device check.
+
+Primitive release `7723abc9b2b5b25fca2c04acf69858f91946717ab33f2b540992a7f18a7801e8` was built and signed for both hosts. An actual browser pointer tap on the Circle knob toggled the app via its ancestor responder. Dragging from the control and releasing outside left snapshot `77fd3ef9095904385ea05a2ce5240cc4573845ab12137b8b022496afdb3486ac` unchanged. Keyboard Space then followed the same ancestry to activate the control, producing snapshot `8f1969b56aa22692ae09192a986e2a564950691c66209268023c54f555077009`, also reported by the central room.
+
+The actual frame accepted that signed release, reported `renderer=opengles2` and `stream_ready=true`, and presented both browser-produced snapshots above. Its native GPU readback was inspected with the new superellipse panels, composed switch and primitive graph. Updated physical frame touch has not been synthesized remotely or claimed from unit tests.

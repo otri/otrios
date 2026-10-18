@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import init, { Dashboard } from './pkg/otrios_dashboard.js';
 const canvas=document.querySelector('#dashboard');
-const toggle=document.querySelector('#toggle');
+const controlsLayer=document.querySelector('#controls');
+const controls=new Map();
 const connection=document.querySelector('#connection');
 const dot=document.querySelector('#connection-dot');
 const revision=document.querySelector('#revision');
@@ -34,9 +35,19 @@ try {
   function draw(){
     const vertices=dashboard.vertices();gl.viewport(0,0,1280,800);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);
     if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');
-    toggle.disabled=false;toggle.setAttribute('aria-checked',String(dashboard.enabled()));
-    const [x,y,w,h]=dashboard.switch_bounds();
-    Object.assign(toggle.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});
+    const ids=new Set(dashboard.control_ids());
+    for(const [id,button] of controls)if(!ids.has(id)){button.remove();controls.delete(id);}
+    for(const id of ids){
+      let button=controls.get(id);
+      if(!button){
+        button=document.createElement('button');button.type='button';button.setAttribute('role','switch');button.dataset.sceneNode=String(id);
+        button.addEventListener('click',()=>{try{if(dashboard.activate(id)){draw();sendChanges();}}catch(e){fatal(e);}});
+        controlsLayer.append(button);controls.set(id,button);
+      }
+      button.setAttribute('aria-label',dashboard.control_label(id));button.setAttribute('aria-checked',String(dashboard.control_checked(id)));
+      const [x,y,w,h]=dashboard.control_bounds(id);
+      Object.assign(button.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});
+    }
     revision.textContent=`VIEW ${dashboard.snapshot_id().slice(0,12)}`;
     revision.dataset.snapshot=dashboard.snapshot_id();
     persist();
@@ -78,7 +89,20 @@ try {
     };
     socket.onerror=()=>socket.close();
   }
-  toggle.addEventListener('click',()=>{try {dashboard.set_enabled(!dashboard.enabled());draw();sendChanges();}catch(e){fatal(e);}});
+  const pointers=new Set();
+  function pointer(event,phase){
+    try{
+      const r=canvas.getBoundingClientRect();
+      const changed=dashboard.pointer(phase,event.pointerId,(event.clientX-r.left)*1280/r.width,(event.clientY-r.top)*800/r.height);
+      if(changed){draw();sendChanges();}
+    }catch(e){fatal(e);}
+  }
+  canvas.addEventListener('pointerdown',event=>{event.preventDefault();pointer(event,0);pointers.add(event.pointerId);canvas.setPointerCapture(event.pointerId);});
+  canvas.addEventListener('pointermove',event=>{if(pointers.has(event.pointerId))pointer(event,1);});
+  canvas.addEventListener('pointerup',event=>{pointer(event,2);pointers.delete(event.pointerId);});
+  canvas.addEventListener('pointercancel',event=>{pointer(event,3);pointers.delete(event.pointerId);});
+  canvas.addEventListener('lostpointercapture',event=>{pointer(event,3);pointers.delete(event.pointerId);});
+  window.addEventListener('blur',()=>{for(const id of pointers){dashboard.pointer(3,id,0,0);if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();});
   canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to resume your saved dashboard.');});
   draw();connect();
 }catch(e){fatal(e);}

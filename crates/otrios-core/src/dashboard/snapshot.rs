@@ -12,6 +12,7 @@ const MAX_SNAPSHOT: usize = 32 * 1024;
 pub struct ViewSnapshot {
     bytes: Arc<[u8]>,
     view: Arc<DashboardView>,
+    scene: Arc<super::scene::Scene>,
     id: ContentId,
 }
 impl ViewSnapshot {
@@ -173,6 +174,7 @@ impl ViewSnapshot {
         hash.update(bytes);
         Ok(Self {
             bytes: bytes.into(),
+            scene: Arc::new(super::components::dashboard(&view)?),
             view: Arc::new(view),
             id: ContentId(hash.finalize().into()),
         })
@@ -182,6 +184,9 @@ impl ViewSnapshot {
     }
     pub fn view(&self) -> &DashboardView {
         &self.view
+    }
+    pub fn scene(&self) -> &Arc<super::scene::Scene> {
+        &self.scene
     }
     pub fn id(&self) -> ContentId {
         self.id

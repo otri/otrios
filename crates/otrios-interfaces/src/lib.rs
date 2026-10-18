@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Experimental contract types. No stable wire format or ABI is promised.
 
+pub mod scene;
+
 /// SHA-256 digest of a canonical object envelope, once hashing is implemented.
 /// Constructing this type does not authenticate or validate the referenced bytes.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
