@@ -51,3 +51,34 @@ The final readiness report confirmed this release, acknowledged `app:home/state`
 zero pending commands and calibrated touch. Exactly one native renderer remained,
 with no Weston/browser. Physical finger interaction remains a manual acceptance
 check; pointer/process tests do not prove physical-panel touch or color.
+
+## Monitoring session button
+
+The browser's separately positioned HTML Sign out overlay could overlap Home and
+used different CSS/font metrics. It is replaced by the same declared Canvas button
+as Home: 200 by 70 logical pixels, matching superellipse background and cached font,
+with a 20-pixel gap. Both scale and hit-test in the same scene coordinate system.
+
+A local session projection shows this control only for an authenticated browser's
+private mount. Trusted native clients leave it hidden. Its action requests cookie
+revocation in the browser worker, clears private presentation immediately and opens
+Home. It never writes CRDT fields or grants access; the authority still enforces
+Monitoring admission and session expiry. A compatible authority is installed before
+publishing the new selector/action description.
+
+The full workspace checks pass with 24 Canvas integration tests. The 32 Node tests
+include worker-side logout and immediate private clearing. The integration test
+checks matching button paint/font metrics, non-overlapping bounds, native hiding,
+one-shot local action delivery and no emitted CRDT mutation. The real-process policy
+probe now handles valid WebSocket Ping/Pong frames while awaiting its denied mount.
+
+Deployed source `4e46a33`, signed release
+`afc5243ea7962e7ad39758e0bc53abf132383f50b673ee73b70df74ce4ab5bcc`.
+All 73 live access checks passed. An actual browser sign-in succeeded and the
+Monitoring page exposed Sign out and Home as Canvas controls; a cropped header
+capture verified their matching appearance and spacing. The user also confirmed
+that the result looks good. Browser automation could not complete the additional
+logout input check reliably; cookie revocation and immediate private clearing
+passed the deployed HTTP/policy and worker tests instead. The frame accepted the
+same release, acknowledged Home with zero pending commands, and retained exactly
+one direct renderer.
