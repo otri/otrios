@@ -157,6 +157,22 @@ impl Replica {
     pub fn save(&mut self) -> Vec<u8> {
         self.saved.to_vec()
     }
+    pub fn confirmed_heads(session: &SyncSession) -> Vec<String> {
+        session
+            .0
+            .shared_heads
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+    pub fn is_confirmed(&self, session: &SyncSession) -> bool {
+        let common = Self::confirmed_heads(session);
+        self.snapshot
+            .view()
+            .heads
+            .iter()
+            .all(|h| common.contains(h))
+    }
     pub fn snapshot(&self) -> &ViewSnapshot {
         &self.snapshot
     }
@@ -562,6 +578,27 @@ mod tests {
             }
         }
         panic!("Sync did not quiesce");
+    }
+    #[test]
+    fn acknowledgement_covers_current_heads_and_resets_for_new_session() {
+        let mut client = Replica::new().unwrap();
+        let mut server = Replica::new().unwrap();
+        let mut c = SyncSession::default();
+        let mut s = SyncSession::default();
+        assert!(!client.is_confirmed(&c));
+        drain(&mut client, &mut c, &mut server, &mut s);
+        assert!(client.is_confirmed(&c));
+        client.set_control(0, [735, 0]).unwrap();
+        assert!(!client.is_confirmed(&c));
+        drain(&mut client, &mut c, &mut server, &mut s);
+        assert!(client.is_confirmed(&c));
+        assert!(!client.is_confirmed(&SyncSession::default()));
+        let mut fresh = Replica::new().unwrap();
+        let mut f = SyncSession::default();
+        let mut server_session = SyncSession::default();
+        drain(&mut fresh, &mut f, &mut server, &mut server_session);
+        assert!(fresh.is_confirmed(&f));
+        assert_eq!(fresh.controls().unwrap().level, 735);
     }
     fn drain_public(
         a: &mut Replica,

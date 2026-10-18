@@ -22,9 +22,11 @@ use std::{
 struct HostUpdate {
     document: Vec<u8>,
     presentation: Option<Vec<u8>>,
+    confirmed_heads: Vec<String>,
 }
-fn update(replica: &mut Replica) -> HostUpdate {
+fn update(replica: &mut Replica, session: &SyncSession) -> HostUpdate {
     HostUpdate {
+        confirmed_heads: Replica::confirmed_heads(session),
         document: replica.save(),
         presentation: replica.presentation().map(|p| p.bytes().to_vec()),
     }
@@ -47,6 +49,9 @@ pub(super) struct Frame {
     )]
     pub(super) editing: bool,
     pub(super) online: bool,
+    pub(super) state_confirmed: bool,
+    pub(super) pending_commands: usize,
+    pub(super) input_busy: bool,
     pub(super) intent: Intent,
     pub(super) controls: otrios_core::dashboard::controls::State,
     pub(super) updates: u64,
@@ -170,6 +175,7 @@ struct Published {
     replica: Arc<Replica>,
     acknowledged: u64,
     online: bool,
+    confirmed: bool,
     updates: u64,
     received_updates: u64,
 }
@@ -191,8 +197,8 @@ fn application_worker(
     let mut acknowledged = 0;
     let mut last_sync = Instant::now() - Duration::from_secs(1);
     let mut sent_id = None;
-    let mut saved_id = None;
-    let mut saved_presentation: Option<Vec<u8>> = None;
+    let mut confirmed_heads = Vec::new();
+    let mut stopping = None;
     let mut published_key = None;
     let mut pending = None;
     let mut stress = Stress::new()?;
@@ -204,7 +210,7 @@ fn application_worker(
         if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
             return Err("Network worker stopped unexpectedly".into());
         }
-        let mut stop = false;
+        let mut stop = stopping.is_some();
         match work.try_recv() {
             Ok(next) => {
                 #[cfg(test)]
@@ -231,44 +237,39 @@ fn application_worker(
         while let Ok(next) = reply_rx.try_recv() {
             received_updates += u64::from(replica.merge(&next.document)?);
             replica.set_presentation(next.presentation.as_deref())?;
+            confirmed_heads = next.confirmed_heads;
         }
         stress.tick(started.elapsed().as_secs_f64() * 1000., hz)?;
         if stall_ms > 0 && stalled.elapsed() >= Duration::from_secs(1) {
             thread::sleep(Duration::from_millis(stall_ms));
             stalled = Instant::now();
         }
-        if network_thread.is_some() && last_sync.elapsed() >= Duration::from_millis(100) {
+        if stop && stopping.is_none() {
+            stopping = Some(Instant::now());
+        }
+        if network_thread.is_some() && (stop || last_sync.elapsed() >= Duration::from_millis(100)) {
             if sent_id != Some(replica.snapshot().id()) && tx.try_send(replica.save()).is_ok() {
                 sent_id = Some(replica.snapshot().id());
             }
             last_sync = Instant::now();
         }
-        if saved_id != Some(replica.snapshot().id()) {
-            if let Some(path) = &o.state {
-                save_state(path, &mut replica)?;
-                let bytes = replica
-                    .presentation()
-                    .map(|p| p.bytes())
-                    .unwrap_or_default();
-                if saved_presentation.as_deref() != Some(bytes) {
-                    let path = format!("{path}.presentation.flex");
-                    let tmp = format!("{path}.tmp");
-                    fs::write(&tmp, bytes)
-                        .and_then(|_| fs::rename(tmp, path))
-                        .map_err(|e| e.to_string())?;
-                    saved_presentation = Some(bytes.to_vec());
-                }
-            }
-            saved_id = Some(replica.snapshot().id());
-        }
-        if stop {
+        let online = stream_ready.load(Ordering::Acquire);
+        let confirmed = network_thread.is_none()
+            || (online
+                && replica
+                    .snapshot()
+                    .view()
+                    .heads
+                    .iter()
+                    .all(|h| confirmed_heads.contains(h)));
+        if stop && (confirmed || stopping.is_some_and(|t| t.elapsed() >= Duration::from_secs(3))) {
             return Ok(());
         }
-        let online = stream_ready.load(Ordering::Acquire);
         let key = (
             replica.snapshot().id(),
             acknowledged,
             online,
+            confirmed,
             stress.updates,
             received_updates,
         );
@@ -277,6 +278,7 @@ fn application_worker(
                 replica: Arc::new(replica.clone()),
                 acknowledged,
                 online,
+                confirmed,
                 updates: stress.updates,
                 received_updates,
             });
@@ -297,18 +299,8 @@ pub(super) fn state_worker(
     input: mpsc::Receiver<Input>,
     frames: mpsc::SyncSender<Frame>,
 ) -> Result<(), String> {
-    let mut replica = match &o.state {
-        Some(p) if std::path::Path::new(p).exists() => {
-            Replica::load(&fs::read(p).map_err(|e| e.to_string())?)?
-        }
-        _ => Replica::new()?,
-    };
-    if let Some(path) = &o.state
-        && let Ok(bytes) = fs::read(format!("{path}.presentation.flex"))
-        && !bytes.is_empty()
-    {
-        replica.set_presentation(Some(&bytes))?;
-    }
+    // --state is accepted for old supervisors, but clients never read or write it.
+    let mut replica = Replica::new()?;
     if o.objects > 0 {
         replica.set_motion(Intent {
             count: o.objects,
@@ -323,18 +315,13 @@ pub(super) fn state_worker(
     let app_worker =
         thread::spawn(move || application_worker(app_options, initial, work_rx, published_tx));
     let mut shell = Shell::default();
-    if let Some(path) = &o.state
-        && let Ok(route) = fs::read_to_string(format!("{path}.screen"))
-    {
-        shell.open_name(route.trim());
-    }
     if let Some(screen) = &o.screen {
         shell.open_name(screen);
     }
     shell.set_stress(o.load);
     let started = Instant::now();
     let mut sent_work = None;
-    let mut saved_screen = String::new();
+    let mut confirmed = false;
     let mut online = false;
     let mut dirty = true;
     let mut pending = None;
@@ -388,7 +375,7 @@ pub(super) fn state_worker(
                 }
                 Input::Presented(frame, renderer, display) => {
                     if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"controls":{"level":frame.controls.level,"dial":frame.controls.dial,"pad":frame.controls.pad},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"controls":{"level":frame.controls.level,"dial":frame.controls.dial,"pad":frame.controls.pad},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                         let tmp = format!("{path}.tmp");
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
@@ -401,9 +388,15 @@ pub(super) fn state_worker(
             let next: Published = next;
             dirty |= replica.snapshot().id() != next.replica.snapshot().id()
                 || online != next.online
+                || confirmed != next.confirmed
+                || replica
+                    .pending()
+                    .iter()
+                    .any(|c| c.sequence <= next.acknowledged)
                 || updates != next.updates;
             replica.acknowledge(next.replica, next.acknowledged)?;
             online = next.online;
+            confirmed = next.confirmed;
             updates = next.updates;
             received_updates = next.received_updates;
         }
@@ -477,19 +470,15 @@ pub(super) fn state_worker(
                 keyboard: shell.keyboard_visible(),
                 editing: shell.editing(),
                 online,
+                state_confirmed: confirmed && replica.pending().is_empty(),
+                pending_commands: replica.pending().len(),
+                input_busy: shell.input_busy(),
                 intent: replica.motion()?,
                 controls: replica.controls()?,
                 updates,
                 received_updates,
                 serial,
             });
-            if shell.screen_name() != saved_screen {
-                if let Some(path) = &o.state {
-                    fs::write(format!("{path}.screen"), shell.screen_name())
-                        .map_err(|e| e.to_string())?;
-                }
-                saved_screen = shell.screen_name().into();
-            }
             dirty = false;
         }
         if let Some(frame) = pending.take() {
@@ -511,15 +500,6 @@ pub(super) fn state_worker(
         }
         thread::sleep(Duration::from_millis(2));
     }
-}
-fn save_state(path: &str, replica: &mut Replica) -> Result<(), String> {
-    use std::io::Write;
-    let temp = format!("{path}.tmp");
-    let mut f = fs::File::create(&temp).map_err(|e| e.to_string())?;
-    f.write_all(&replica.save())
-        .and_then(|_| f.sync_all())
-        .and_then(|_| fs::rename(temp, path))
-        .map_err(|e| e.to_string())
 }
 fn ink_network(
     url: String,
@@ -686,7 +666,7 @@ fn network(
                     } else {
                         Some(&bytes[5..])
                     }) {
-                        Ok(_) => pending = Some(update(&mut replica)),
+                        Ok(_) => pending = Some(update(&mut replica, &session)),
                         Err(e) => {
                             eprintln!("Rejected monitoring view: {e}");
                             break;
@@ -695,10 +675,11 @@ fn network(
                 }
                 Ok(Message::Binary(bytes)) => match replica.receive_sync(&mut session, &bytes) {
                     Ok(true) => {
-                        pending = Some(update(&mut replica));
+                        pending = Some(update(&mut replica, &session));
                         stream_ready.store(true, Ordering::Release);
                     }
                     Ok(false) => {
+                        pending = Some(update(&mut replica, &session));
                         stream_ready.store(true, Ordering::Release);
                     }
                     Err(e) => {
@@ -748,7 +729,7 @@ fn network(
 mod tests {
     use super::*;
     #[test]
-    fn blocked_application_and_disk_worker_cannot_block_drag_or_exact_release() {
+    fn client_ignores_disk_and_blocked_application_cannot_block_exact_release() {
         use otrios_interfaces::scene::{Action, PointerPhase, TouchResponder};
         let root = std::env::temp_dir().join(format!(
             "otrios-local-feedback-{}-{}",
@@ -760,9 +741,9 @@ mod tests {
         ));
         fs::create_dir(&root).unwrap();
         let path = root.join("state.automerge");
-        let mut original = Replica::new().unwrap();
-        let saved = original.save();
-        fs::write(&path, &saved).unwrap();
+        let original = Replica::new().unwrap();
+        let saved = b"invalid legacy document that must never be loaded";
+        fs::write(&path, saved).unwrap();
         let mut shell = Shell::default();
         shell.open_name("controls");
         let scene = shell.scene(&original).unwrap();
@@ -825,13 +806,11 @@ mod tests {
             "The application worker was not actually held"
         );
         assert_eq!(
-            Replica::load(&fs::read(&path).unwrap())
-                .unwrap()
-                .controls()
-                .unwrap()
-                .level,
-            1000
+            fs::read(&path).unwrap(),
+            saved,
+            "Client wrote state to disk"
         );
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -852,27 +831,22 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel(128);
         let (ft, fr) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || state_worker(options, rx, ft));
-        // Leave the first view occupying the single frame slot. Navigation and
-        // persistence must still complete without a presentation consumer.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let route = path.with_file_name(format!(
-            "{}.screen",
-            path.file_name().unwrap().to_string_lossy()
-        ));
-        while fs::read_to_string(&route).ok().as_deref() != Some("3d") {
-            assert!(Instant::now() < deadline);
-            thread::yield_now();
-        }
+        // The single frame slot stays full while navigation progresses.
+        thread::sleep(Duration::from_millis(100));
         tx.send(Input::Back).unwrap();
-        while fs::read_to_string(&route).ok().as_deref() != Some("home") {
-            assert!(Instant::now() < deadline);
-            thread::yield_now();
-        }
+        thread::sleep(Duration::from_millis(100));
         let first = fr.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(first.screen, "3d");
-        let latest = fr.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(latest.screen, "home");
-        assert!(latest.serial > first.serial);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let latest = fr.recv_timeout(Duration::from_secs(1)).unwrap();
+            if latest.screen == "home" {
+                assert!(latest.serial > first.serial);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+        }
+        assert!(!path.exists());
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
         for suffix in ["", ".screen", ".presentation.flex"] {

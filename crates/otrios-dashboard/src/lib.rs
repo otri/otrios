@@ -45,6 +45,12 @@ impl Dashboard {
     pub fn reset_sync(&mut self) {
         self.session = SyncSession::default();
     }
+    pub fn state_confirmed(&self) -> bool {
+        self.replica.is_confirmed(&self.session)
+    }
+    pub fn input_busy(&self) -> bool {
+        self.shell.input_busy()
+    }
     pub fn sync_message(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.replica.generate_sync(&mut self.session)
     }

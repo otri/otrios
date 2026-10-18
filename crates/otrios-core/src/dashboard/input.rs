@@ -66,6 +66,9 @@ fn bubble(path: &[Located<'_>], event: PointerEvent) -> (Delivery, Option<TouchR
     (result, None)
 }
 impl InputRouter {
+    pub fn active(&self) -> bool {
+        !self.captures.is_empty()
+    }
     pub fn cancel_all(&mut self) {
         self.captures.clear();
     }

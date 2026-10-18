@@ -341,6 +341,70 @@ fn anonymous_demo_stream_shares_frame_state_but_never_sends_monitoring_or_admin_
     );
 }
 
+#[test]
+fn acknowledged_edits_survive_authority_restart_and_fresh_ram_only_subscribers() {
+    fn sync_client(room: &Room, client: &mut Replica) {
+        let mut wire = socket(&room.public, "/demo/stream", ORIGIN);
+        let mut session = SyncSession::default();
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(bytes) = client.generate_sync(&mut session).unwrap() {
+                wire.send(Message::Binary(bytes.into())).unwrap();
+            }
+            match wire.read() {
+                Ok(Message::Binary(bytes)) => {
+                    assert!(!bytes.starts_with(b"OTML1"));
+                    client.receive_sync(&mut session, &bytes).unwrap();
+                }
+                Ok(Message::Ping(_)) => wire.flush().unwrap(),
+                Ok(Message::Text(_) | Message::Pong(_)) => {}
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) => {}
+                other => panic!("Unexpected sync {other:?}"),
+            }
+            if client.is_confirmed(&session) {
+                break;
+            }
+            assert!(Instant::now() < until, "Server acknowledgement timed out");
+        }
+    }
+    let mut room = room_with_auth(false, 28800);
+    let mut client = Replica::new().unwrap();
+    client.set_control(0, [735, 0]).unwrap();
+    client.set_control(2, [321, 654]).unwrap();
+    sync_client(&room, &mut client);
+    let saved = Replica::load(&std::fs::read(room.root.join("state.automerge")).unwrap()).unwrap();
+    assert_eq!(saved.controls().unwrap(), client.controls().unwrap());
+    drop(client);
+    room.child.kill().unwrap();
+    room.child.wait().unwrap();
+    room.child = Command::new(env!("CARGO_BIN_EXE_dashboard-server"))
+        .args([
+            "--bind",
+            &room.private,
+            "--public-bind",
+            &room.public,
+            "--origin",
+            ORIGIN,
+            "--state",
+            room.root.join("state.automerge").to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    while TcpStream::connect(&room.public).is_err() {
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mut fresh = Replica::new().unwrap();
+    sync_client(&room, &mut fresh);
+    assert_eq!(fresh.controls().unwrap(), saved.controls().unwrap());
+}
+
 fn login(room: &Room, origin: &str, password: &str, old: Option<&str>) -> (u16, String) {
     let bytes = serde_json::json!({"username":"test-user","password":password}).to_string();
     let mut tcp = TcpStream::connect(&room.public).unwrap();

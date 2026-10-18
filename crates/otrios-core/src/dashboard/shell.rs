@@ -78,6 +78,9 @@ impl Default for Shell {
     }
 }
 impl Shell {
+    pub fn input_busy(&self) -> bool {
+        self.input.active()
+    }
     /// Local presentation guard only. The host must authorize private data at
     /// its source; this flag is never a server capability or shared CRDT field.
     pub fn set_monitoring_access(&mut self, allowed: bool) -> bool {

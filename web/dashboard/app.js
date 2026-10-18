@@ -10,9 +10,9 @@ function fatal(e){error.hidden=false;error.textContent=String(e);connection.text
 try{
   await init();const presenter=new MotionPresenter();
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
-  let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false;
-  function command(m){if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
-  function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}}
+  let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false;
+  function command(m){if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
+  function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}else if(!busy&&model&&releaseCandidate&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
   function route(){return `/${model.screen}${model.keyboard?'/input':model.controlsLayout?'/layout':''}`;}
   window.addEventListener('popstate',()=>{applyingRoute=true;routeTarget=location.hash.replace(/^#/, '')||'/home';command({type:'route',route:location.hash});});
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
@@ -37,14 +37,13 @@ try{
     else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
     pump();worker.postMessage({type:'frame-ack'});
   }
-  worker.onmessage=event=>{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · changes saved on this device';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}};
+  worker.onmessage=event=>{const m=event.data;switch(m.type){case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':releaseCandidate=null;reloading=false;break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}};
   worker.onerror=e=>fatal(e.message);
   form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
   function leaveLogin(){command({type:'route',route:'#/home'});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});signout.addEventListener('click',()=>command({type:'logout'}));
-  function legacy(key){try{const s=sessionStorage.getItem(key);return s?Uint8Array.from(atob(s),c=>c.charCodeAt(0)):null;}catch{return null;}}
-  const oldDocument=legacy('otrios-dashboard-v1');try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',saved:oldDocument,release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
+  try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
+  worker.postMessage({type:'start',release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const r=canvas.getBoundingClientRect();return {type:'pointer',args:[phase,e.pointerId,(e.clientX-r.left)*1280/r.width,(e.clientY-r.top)*800/r.height,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
@@ -58,6 +57,7 @@ try{
   function frame(now){
     try{
       if(!busy)for(const [id,m]of moves){command(m);moves.delete(id);break;}
+      if(releaseCandidate)pump();
       const animated=model&&(model.screen==='animation'||model.screen==='3d');
       if(model&&(dirty||animated)){
         gl.viewport(0,0,1280,800);gl.clearColor(16/255,28/255,41/255,1);gl.clear(gl.COLOR_BUFFER_BIT);bind(buffers[0]);gl.drawArrays(gl.TRIANGLES,0,staticCount);
@@ -68,5 +68,5 @@ try{
     }catch(e){fatal(e);return;}
     requestAnimationFrame(frame);
   }
-  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to resume your saved dashboard.');});requestAnimationFrame(frame);
+  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to reconnect to the shared dashboard.');});requestAnimationFrame(frame);
 }catch(e){fatal(e);}

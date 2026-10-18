@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Sole owner of CRDT, Shell, network protocol, projection and durable storage.
+// Sole owner of CRDT, Shell, network protocol, projection and RAM-only working state.
 import init,{Dashboard} from './pkg/otrios_dashboard.js';
 import {awaitRelease,validRelease} from './release-gate.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
 let monitoring,inkSocket,inkRetry=250;
 let pendingRelease,releaseAbort;
-let dashboard,db,socket,retry=250,stopped=false,activeRelease,lastSnapshot;
-let durable=true;
-function storageError(e){durable=false;postMessage({type:'warning',message:`Changes live in this tab; durable cache unavailable: ${e}`});}
+let dashboard,socket,retry=250,stopped=false,activeRelease;
 let inFlight=false,pendingFrame=null,lastStall=0;
 function sendFrame(){
   if(inFlight||!pendingFrame)return;
@@ -23,24 +21,11 @@ function publish(geometry=true){
   // Preserve unsent geometry when replacing only the counters/intent.
   pendingFrame={...pendingFrame,...frame};sendFrame();
 }
-function transaction(mode,operation){return new Promise((resolve,reject)=>{const tx=db.transaction('cache',mode);operation(tx.objectStore('cache'));tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
-async function load(){
-  db=await new Promise((resolve,reject)=>{const r=indexedDB.open('otrios-demo-v3',1);r.onupgradeneeded=()=>r.result.createObjectStore('cache');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
-  const cached=await new Promise((resolve,reject)=>{const tx=db.transaction('cache');const r=tx.objectStore('cache').get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
-  // Previous builds mixed Monitoring into their cache. Migrate only the public
-  // document, close the handle, then remove that combined database.
-  let legacy;
-  try{const old=await new Promise((resolve,reject)=>{const r=indexedDB.open('otrios-dashboard-v2',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
-    if(old.objectStoreNames.contains('cache'))legacy=await new Promise(resolve=>{const r=old.transaction('cache').objectStore('cache').get('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>resolve(null);});
-    old.close();indexedDB.deleteDatabase('otrios-dashboard-v2');
-  }catch{/* The public authority can restore the shared document. */}
-  return cached||{document:legacy?.document};
-}
-async function persist(){
-  const id=dashboard.snapshot_id();if(id===lastSnapshot)return;
-  if(!db){storageError('storage unavailable');return;}
-  const document=dashboard.document();
-  await transaction('readwrite',store=>store.put({document},'state'));lastSnapshot=id;
+// Retire old document caches. Artifact caching has its own independent budget.
+function retireDocumentCaches(){
+  for(const name of ['otrios-demo-v3','otrios-dashboard-v2']){
+    try{indexedDB.deleteDatabase(name);}catch{/* Storage can be unavailable. */}
+  }
 }
 function sendChanges(){if(socket?.readyState===WebSocket.OPEN){const b=dashboard.sync_message();if(b)socket.send(b);}}
 function connect(){
@@ -55,14 +40,16 @@ function connect(){
           const r=message.release;
           if(!validRelease(r))return;
           if(activeRelease&&r.id!==activeRelease){
-            if(!db||!durable){postMessage({type:'warning',message:'A code update is ready; reload paused because durable storage is unavailable'});return;}
             if(pendingRelease?.id===r.id)return;
             releaseAbort?.abort();releaseAbort=new AbortController();pendingRelease=r;
-            const isCurrent=()=>pendingRelease===r&&!stopped&&durable;
+            const isCurrent=()=>pendingRelease===r&&!stopped;
             awaitRelease(r,{isCurrent,signal:releaseAbort.signal}).then(async ready=>{
-              if(!ready||!isCurrent())return;await persist();if(!isCurrent())return;
-              stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});
-            }).catch(storageError);return;
+              if(!ready||!isCurrent())return;
+              // The server has persisted every acknowledged head before it replies.
+              while(isCurrent()&&(!dashboard.state_confirmed()||dashboard.input_busy()))await new Promise(resolve=>setTimeout(resolve,100));
+              if(!isCurrent())return;
+              postMessage({type:'release-candidate',entry:r.web_entry});
+            }).catch(e=>postMessage({type:'warning',message:String(e)}));return;
           }
           pendingRelease=null;releaseAbort?.abort();activeRelease=r.id;postMessage({type:'release-id',id:r.id});
         }
@@ -71,7 +58,7 @@ function connect(){
         if(bytes.length>=5&&String.fromCharCode(...bytes.subarray(0,5))==='OTML1'){
           throw Error('Private data received on the public demo stream');
         }else changed=dashboard.receive_sync(bytes);
-        if(changed){publish();persist().catch(storageError);}sendChanges();postMessage({type:'online',online:true});
+        if(changed)publish();sendChanges();postMessage({type:'online',online:true});
       }
     }catch(e){console.error(e);socket.close();}
   };
@@ -91,13 +78,11 @@ onmessage=async event=>{
   const m=event.data;
   try{
     if(m.type==='start'){
-      await init();let cached;
-      try{cached=await load();}catch(e){postMessage({type:'warning',message:`Durable cache unavailable: ${e}`});}
-      const saved=cached?.document||m.saved;dashboard=saved?.length?Dashboard.load(saved):new Dashboard();
+      await init();retireDocumentCaches();dashboard=new Dashboard();
       monitoring=new MonitoringSession({onStatus:state=>{
         dashboard.set_monitoring_access(state.authenticated);publish();postMessage({type:'monitoring-auth',...state});
       },onView:bytes=>{if(dashboard.present(bytes))publish();}});
-      activeRelease=m.release;applyRoute(m.route);publish();await persist().catch(storageError);connect();connectInk();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
+      activeRelease=m.release;applyRoute(m.route);publish();connect();connectInk();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
       setInterval(()=>{try{
         const now=performance.now();
         const ink=dashboard.ink_outgoing(now);
@@ -105,9 +90,16 @@ onmessage=async event=>{
         const changed=dashboard.tick(now);const stressed=dashboard.stress_tick(now);
         const stall=dashboard.stress_stall_ms();
         if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the state worker. */}}
-        if(changed){publish();sendChanges();persist().catch(storageError);}else if(stressed)publish(false);
+        if(changed){publish();sendChanges();}else if(stressed)publish(false);
       }catch(e){fatal(e);}},8);
       return;
+    }
+    if(m.type==='release-commit'){
+      const r=pendingRelease;
+      if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry'});return;}
+      while(pendingRelease===r&&(!dashboard.state_confirmed()||dashboard.input_busy()))await new Promise(resolve=>setTimeout(resolve,100));
+      if(pendingRelease!==r){postMessage({type:'release-retry'});return;}
+      stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});return;
     }
     if(m.type==='frame-ack'){inFlight=false;sendFrame();return;}
     if(!dashboard)return;
@@ -125,7 +117,7 @@ onmessage=async event=>{
       case 'cancel':dashboard.cancel_input();changed=true;break;
     }
     monitoring.setActive(dashboard.screen()==='monitoring');
-    if(changed){publish();sendChanges();persist().catch(storageError);}
+    if(changed){publish();sendChanges();}
     postMessage({type:'command-ack'});
   }catch(e){fatal(e);postMessage({type:'command-ack'});}
 };
