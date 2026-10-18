@@ -333,6 +333,32 @@ fn monitoring_requires_a_cookie_and_logout_revokes_existing_streams_and_admin_ac
         403
     );
     assert_eq!(login(&room, ORIGIN, "wrong-password", None).0, 401);
+    assert_eq!(
+        request(
+            &room.public,
+            "POST",
+            "/auth/session",
+            &[("Origin", ORIGIN), ("Content-Type", "application/json")],
+            b"{}"
+        )
+        .0,
+        403
+    );
+    assert_eq!(
+        request(
+            &room.public,
+            "POST",
+            "/auth/session",
+            &[
+                ("Origin", ORIGIN),
+                ("X-OTriOS-Request", "session"),
+                ("Content-Type", "application/json")
+            ],
+            &vec![b'x'; 4096]
+        )
+        .0,
+        413
+    );
     let cookie = login_cookie(&room);
     assert_eq!(
         request(

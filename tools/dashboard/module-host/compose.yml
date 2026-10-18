@@ -8,7 +8,7 @@ services:
     ports:
       - "127.0.0.1:8877:8080"
     environment:
-      OTRIOS_STATE_UPSTREAM: host.docker.internal:8876
+      OTRIOS_PUBLIC_UPSTREAM: host.docker.internal:8878
       XDG_CONFIG_HOME: /tmp/config
       XDG_DATA_HOME: /tmp/data
     mem_limit: 512m
@@ -23,7 +23,6 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./index.html:/srv/bootstrap/index.html:ro
-      - ${OTRIOS_MODULE_AUTH_FILE:?Set the private auth snippet path}:/run/otrios/auth.caddy:ro
       - modules:/srv/modules:ro
 volumes:
   modules:

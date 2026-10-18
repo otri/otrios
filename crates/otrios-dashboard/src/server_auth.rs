@@ -325,5 +325,5 @@ async fn monitor(app: Arc<App>, key: String, socket: WebSocket) {
             _=expiry.tick()=>{},
         }
     }
-    let _ = output.send(Message::Close(None)).await;
+    let _ = tokio::time::timeout(Duration::from_secs(1), output.send(Message::Close(None))).await;
 }

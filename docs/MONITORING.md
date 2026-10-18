@@ -2,7 +2,7 @@
 
 Open **Monitoring** from the [Home Screen](HOME_AND_INPUT.md), or use the browser `#/monitoring` route. Back/Home navigate locally while the collector continues refreshing.
 
-This read-only dashboard recreates a subset of Grafana's **SPD & M3D — Overall Service Status** in the shared primitive compositor. Both the native GLES2 photo frame and Wasm/WebGL browser host receive the same complete FlexBuffers presentation. The frame does not run Grafana or a browser.
+This read-only dashboard recreates a subset of Grafana's **SPD & M3D — Overall Service Status** in the shared primitive compositor. The native GLES2 photo frame and authorized Wasm/WebGL browser sessions receive the same complete FlexBuffers presentation. Public demo visitors receive none of that view. The frame does not run Grafana or a browser.
 
 ## Panels and query semantics
 
@@ -24,9 +24,9 @@ This is deliberately a subset: no Grafana embedding, dashboard editor, arbitrary
 
 `dashboard-monitoring` consumes the window on stdin and authors typed component/instance data directly into FlexBuffers. It reuses Screen, Text and Panel templates and adds Path/Circle templates for plots. It formats units, normalizes plotted values against labelled axes and resolves data into a complete presentation; raw metric values are not a general client-queryable telemetry schema in this PoC. The same existing primitive interpreter expands and validates the result on both hosts. There is no JSON scene representation or JavaScript chart renderer.
 
-The collector posts the complete binary view to `/presentation`. This is a **replaceable presentation**, separate from the editable `/layout` register and Automerge history. The server persists only the latest presentation beside its state file, validates it before activation, and pushes it over the existing ordered WebSocket as `OTML1` followed by FlexBuffers bytes. A five-byte `OTML1` message clears the presentation. Peers must upgrade to this protocol before enabling a feed. The server coalesces announcements; native delivery coalesces a paired document/presentation so a newer CRDT message cannot drop a pending metrics view.
+The collector posts the complete binary view to `/presentation`. This is a **replaceable presentation**, separate from the editable `/layout` register and Automerge history. The server persists only the latest presentation beside its state file, validates it before activation, and pushes it to trusted native peers and separately authorized browser Monitoring subscriptions as `OTML1` followed by FlexBuffers bytes. A five-byte `OTML1` message clears the presentation. Peers must upgrade to this protocol before enabling a feed. The server coalesces announcements; native delivery coalesces a paired document/presentation so a newer CRDT message cannot drop a pending metrics view.
 
-`Replica::set_presentation` creates a complete immutable view while retaining old pinned snapshots. Normal CRDT edits/merges preserve the presentation; clearing it reveals the saved collaborative layout and state. Refreshing the feed does not append telemetry blobs or hashes to Automerge. The server also validates the underlying layout, so the overlay cannot conceal a malformed collaborative layout. The native host caches the latest binary presentation beside its state; the browser caches it in session storage. Neither cache makes the feed fresh while disconnected.
+`Replica::set_presentation` creates a complete immutable view while retaining old pinned snapshots. Normal CRDT edits/merges preserve the presentation; clearing it reveals the saved collaborative layout and state. Refreshing the feed does not append telemetry blobs or hashes to Automerge. The server also validates the underlying layout, so the overlay cannot conceal a malformed collaborative layout. The native host caches the latest binary presentation beside its state; authorized browsers retain it only in memory while the Monitoring subscription is open. Neither cache makes the feed fresh while disconnected.
 
 Each presentation remains limited to 128 KiB, 128 instances and 512 expanded nodes. Literal series allow at most 256 points (the demo state binding remains at its previous 32 samples). Extremely fragmented history that exceeds the scene limits is rejected and leaves the previous view intact. A general content-addressed raw telemetry store, independent data-binding schema and per-chart delta protocol are future work.
 
@@ -55,7 +55,7 @@ The current Mac installation uses `com.otri.otrios-dashboard-monitoring`, a logi
 
 ## Inspect and restore
 
-- `GET /presentation`: exact current binary presentation, or an empty body when disabled.
+- Trusted `GET /presentation`: exact current binary presentation, or an empty body when disabled. Public browsers use session-protected `GET /monitoring/presentation` or `/monitoring/stream`; anonymous `/demo/stream` never carries it.
 - `POST /presentation`, `Content-Type: application/octet-stream`: replace the view; an empty body clears it. The same origin checks and trusted-tailnet editing boundary as `/layout` apply. This is one collector with latest-writer replacement, not optimistic collaborative publication.
 - `GET /layout`: the underlying editable layout with its own ETag, even while a monitoring presentation is displayed. Its existing conditional publication API is unchanged.
 - `/health`: active displayed layout ID plus a `presentation` boolean.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Private views live only in this session's memory, never in the demo cache.
 export class MonitoringSession {
-  constructor({fetcher=globalThis.fetch.bind(globalThis),socket=url=>new WebSocket(url),origin=globalThis.location?.href,onStatus=()=>{},onView=()=>{},schedule=setTimeout,cancel=clearTimeout}={}){
+  constructor({fetcher=globalThis.fetch.bind(globalThis),socket=url=>new WebSocket(url),origin=globalThis.location?.href,onStatus=()=>{},onView=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancel=id=>clearTimeout(id)}={}){
     Object.assign(this,{fetcher,socketFactory:socket,origin,onStatus,onView,schedule,cancel});
     this.authenticated=false;this.active=false;this.epoch=0;this.mutations=Promise.resolve();
   }
