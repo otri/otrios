@@ -1,185 +1,165 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Modern app pattern and retirement map
 
-This is the implementation direction, with a removal plan for the experiments
-that preceded it. The live dashboard and the isolated Canvas prototype are still
-different hosts. A new app should follow this pattern rather than add another
-branch to the dashboard shell. Breaking prototype compatibility is acceptable;
-authority policy and ownership of durable data must remain explicit.
+This describes the implemented app cutover build. Deployment and physical frame
+acceptance are recorded separately; source changes alone do not prove that a
+running device has crossed the boundary.
 
-## The unit of composition
+## One app runtime
 
 ```text
 Canvas(uiRef, stateRef)
 ```
 
-An app owns its UI graph, state schema, behavior and immutable dependencies in
-`apps/<app>/`. The launcher passes references, not sibling app internals. The
-same UI can mount against different compatible State roots. Components define
-local coordinates, pins, springs and struts; instances supply frames, inputs and
-bindings. Named source declarations compile into typed binary contracts.
+Home, Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and
+Monitoring each own an app package under `apps/<id>/`. The launcher carries
+references rather than importing sibling state or behavior. UI descriptions
+contain primitives, component layout, typed field selectors, responders,
+navigation and optional bounded Wasm behavior. The same Canvas client mounts
+those descriptions on native GLES and browser WebGL.
 
-UI is data: Canvas, Text, Superellipse, Circle and geometry, with a responder
-tree and selectors. Repeated bindings share a selector; a slider and percentage
-label can read the same field. Stable schema IDs identify data. Generated node,
-control and navigation indices are transport identities scoped to an activation,
-not durable user data or paint priorities.
-
-Behavior is a bounded Wasm reducer loaded through the UI's dependency graph. It
-receives declared inputs and emits typed commands; it does not own a second
-document, bypass authority policy, acquire ambient capabilities or run the
-presentation loop. Declarative setters need no guest. WAT is a transparent test
-fixture, not a required future app authoring language.
+An app owns its schema and dependencies. Reusable controls use local component
+coordinates with pins, springs and struts. Named source declarations compile to
+FlexBuffers; generated control/node/selector indices are activation-scoped wire
+identities, not durable app data or priorities. Repeated bindings share a
+selector, so a slider and its percentage label read the same field.
 
 ```mermaid
 flowchart LR
-  UI[Immutable UI and code graph] --> Mount[Canvas mount]
+  Release[Signed release and public catalog] --> Mount[Admitted Canvas mount]
   Authority[Authority: policy and durable app roots] <--> Replica[RAM app replica]
-  Replica --> Select[Selected values]
+  Replica --> Select[Selected typed values]
   Mount --> Select
   Select --> Layout[Pins and struts]
   Layout --> Scene[Immutable scene]
   Scene --> GPU[WebGL or native GLES]
   Input[Touch and keyboard] --> Responders[Responder chain]
-  Responders --> Reducer[Declared setter or bounded reducer]
-  Reducer --> Replica
-  Clock[Local presentation clock and resources] --> GPU
+  Responders --> Commands[Declared operation or bounded Wasm reducer]
+  Commands --> Replica
+  Clock[Local presentation clock and GPU resources] --> GPU
+  Private[Authorized read-only Monitoring aggregate] --> Scene
 ```
 
-The authority validates scope, schema and permitted operations, merges conflicts,
-persists accepted state, then acknowledges it. Clients retain documents and
-pending interaction in RAM. Only immutable code and blobs enter bounded caches
-(the deployed defaults are about 512 MiB web and 2 GiB native). Touch trails and
-presence are ephemeral streams. Navigation, focus, capture, animation phase,
-frame timing and GPU buffers are local presentation state.
+The authority admits UI/State pairs from a catalog, validates operations against
+its own schema, persists changed app documents, then acknowledges them. A client
+holds its document, unacknowledged changes, editor focus, keyboard, captures and
+presentation resources in RAM. Disconnection preserves pending RAM edits; it
+does not create a client document checkpoint. Immutable code/blob caches retain
+the existing bounded budgets (about 512 MiB web and 2 GiB native). Touch trails
+use a separate ephemeral channel and fade without durable history.
 
-Signed graph admission and server-issued capabilities must protect private UI,
-code and state **before their bytes are sent**. The isolated Canvas server
-currently trusts a local package registry and checks hashes; it is not yet that
-production admission service. Hashes identify bytes; they do not grant access.
+## Admission and ownership
 
-## What exists today
+The publisher signs one immutable release containing the public runtime, font
+resources and `apps/catalog.flex`. The catalog binds app identities and entry
+references to UI hashes; an admitted UI binds its behavior hash and permitted
+writes. App manifest dependency strings describe requirements, not grants.
 
-Home, Component Playground and Layout Lab have independent prototype UI/State
-roots. Playground loads a Wasm reducer. Other app folders inventory their legacy
-adapters; they are not independent executable app packages yet.
+UI/code package bytes live under the release's signed `authority/apps/` tree.
+They are excluded from the public module replica and HTTP asset allowlists.
+The authority checks Monitoring permission before sending its UI, executable
+imports or state. An anonymous visitor may see its catalog entry and lock without
+receiving its package. Public visitors and the frame use the same intended public
+State roots. The trusted native listener retains unattended private access;
+browser grants come from the existing server session cookie. Authentication is
+never a CRDT field.
 
-The Canvas runtime projects declared fields and retains one immutable resolved
-scene until a selected value changes. Acknowledgements, history changes and
-unselected field edits do not rebuild that scene. This is presentation
-invalidation, **not Merkle subtree replication**: sync still transfers the
-app's document. The current state ABI is five normalized register fields, not a
-general collection or object schema.
+The public browser transport is `/apps/stream`; the authority sends a scoped
+Mounted/AcceptMount/Sync stream and release notices. Session revocation invalidates private
+mounts. The browser drops their scene, controls and private working state rather
+than retaining a hidden private view. Sign-in reconnects the transport so its
+upgrade carries the new HttpOnly cookie. The browser verifies the catalog against
+the immutable release manifest; publisher-signature verification remains in the
+existing module replica and native supervisor trust chain.
 
-[RFC 0002](rfcs/0002-incremental-crdt-hierarchy.md) and the
-[selector RFC](rfcs/0003-module-roots-and-state-selectors.md) describe
-the next hierarchy/collection work. They must become one shared state store,
-not separate CRDT implementations in each app. See the RFC directory for the
-current proposals; their existence does not imply runtime completion.
+The cutover starts fresh app documents, as authorized by the user. It does not
+merge the former global dashboard room into the new roots or run two writable
+owners. The former persisted state remains a recovery artifact, not an active
+mirror.
 
-The layout engine supports local component coordinates and parent resizing.
-Reusable source components compile into binary trees. External template loading,
-intrinsic text measurement, sibling constraints and persistent logical keys for
-collaborative UI-tree editing remain separate work. The default surface is still
-1280 × 800. A general constraint solver is unnecessary for the present controls.
+## Typed data and presentation
 
-## Fonts and presentation resources
+The UI/state contract is `otrios-canvas-v2`. It supports bounded numeric, text,
+boolean, color and series values with fixed field types and per-field write
+policy. The authority validates losing operations as well as selected values.
+Input Lab's text fields are shared atomic text registers. Concurrent edits
+converge by register semantics; this is not per-character collaborative editing.
+Caret, selection, focus, keyboard repeat and editing buffers stay local.
 
-Fonts follow the immutable resource path, alongside code and blobs. Entry code
-initializes generic resource and presentation services; a trusted root app graph
-should supply font references. The current bootstrap still uses small generated
-Roboto filename/hash references, while actual quadratic font bytes travel as a
-separate compressed resource through the bounded cache. That transition has not
-completed the signed Home graph or legacy Shell migration.
+Animation and 3D publish app-owned intent. Their phase, timing, interpolation,
+mesh generation, HUD and retained GPU resources remain on the presentation owner.
+The stress control runs a real isolated CRDT workload in RAM; it is not a stream
+of synthetic writes into durable app state. It can stall the state worker while
+the presentation clock continues independently.
 
-`Font::from_zstd` verifies admitted identity and bounded decoding once. An explicit
-retained font supplies line metrics, glyph advances/ink bounds and a prepared GPU
-curve/band atlas to both hosts. Baseline and line-box metrics are separate from
-glyph ink: accents, descenders and negative bearings must survive text frames;
-ancestor canvases own clipping. There is no embedded alphabet or ambient global
-font singleton.
+Monitoring uses a private, read-only, replaceable FlexBuffers Layout aggregate.
+Its app owns navigation/header composition; the authority supplies the current
+weekly chart projection with gaps preserved. Feed replacement does not append
+metric samples or binary layouts to Automerge history. This is the current
+aggregate-view contract, not a general query or analytics engine.
 
-The shared Slug shader path emits glyph quads. A disposable 4 MiB GPU coverage
-cache reuses exact glyph/size/phase/transform results across tints; it does not
-change app state or persist touch/animation data. Coverage stays linear in a premultiplied-white atlas; text tint remains reusable.
-The default atlas path renders directly to the ordinary
-framebuffer for speed; exact linear-light compositing is a separate opt-in
-reference path because its full-screen conversion was costly on the frame. Cache capacity is separate from the code/blob cache and framebuffer
-allocations. Full Unicode shaping and generic app bootstrap remain unfinished;
-measured graphics capabilities are not an FPS acceptance claim.
+A Canvas retains an immutable resolved scene until selected presentation inputs
+change. Unselected state changes and acknowledgements do not rebuild it. Sync is
+still per app document: this is not RFC 0002 Merkle subtree replication, and
+collection/item/cursor selectors from RFC 0003 remain unimplemented.
 
-[RFC 0006](rfcs/0006-font-resources-and-text-presentation.md) defines admission,
-metrics, coverage/cache/color contracts and the current limits. The
-[font resource guide](../assets/fonts/roboto/README.md) records source hashes,
-licensing, packet layout and deterministic regeneration.
+Current bounds include 64 schema fields, 4 KiB text values, 2,016 series points
+and 512 KiB Canvas messages/artifacts. Durable CRDT history has a slightly lower
+byte budget to leave transport headroom. Exhaustion fails explicitly; general
+history compaction, unlimited documents and schema migration are not supplied by
+this cutover. A schema change needs an explicit compatible migration or new
+State reference.
 
-## Simplifications made in this pass
+## Fonts and graphics
 
-- App layouts resolve against explicit local slots. They no longer construct a
-  fake empty dashboard view; global dashboard bindings and legacy responder
-  domains are rejected at app activation.
-- Scene resolution is cached per selected-value projection. Text/control getters
-  share that scene instead of repeatedly rebuilding it.
-- Navigation and behavior retain distinct action domains. The fallback from an
-  unknown navigation action into a behavior event, the unused outgoing queue and
-  cancellation of a freshly created router were removed.
-- `otrios-web-host` exports only Canvas. It does not export the old Dashboard or
-  MotionPresenter APIs. The legacy web host remains available for the live demos.
+Fonts are separate compressed immutable resources, loaded and verified once.
+An explicit retained font supplies metrics and GPU curve/band data; no embedded
+alphabet or ambient font singleton is required. Current bootstrap font references
+remain generated filename/hash metadata rather than a general OS resource graph.
+Baseline/line-box metrics are separate from glyph ink and ancestor clipping.
+Full Unicode shaping remains outside this implementation.
 
-These are boundary reductions, not new compatibility layers. The separate
-browser crate can shrink further once the generic UI runtime no longer compiles
-through the dashboard module tree.
+The shared Slug path generates glyph quads and a disposable 4 MiB GPU coverage
+atlas. Premultiplied white coverage can be reused across tints and exact physical
+sizes/subpixel phases. Browser backing buffers follow CSS size and device pixel
+ratio within texture bounds. Public mesh colors remain straight authored colors;
+rendering converts them to premultiplied values and uses premultiplied blending.
 
-## Retirement map
+The default path composites directly in the ordinary framebuffer. An opt-in
+linear-light reference path retains the fullscreen conversion for comparisons;
+premultiplication alone does not make ordinary sRGB blending gamma-correct.
+Code/blob caches, glyph coverage and framebuffer allocations are separate budgets.
+See [RFC 0006](rfcs/0006-font-resources-and-text-presentation.md).
 
-| Code or mechanism | Disposition | Concrete removal or replacement gate |
-| --- | --- | --- |
-| `core/dashboard/shell.rs`, screen branches, `shell_seed.rs`, generated shell assets | Retire the app-specific shell | Home mounts admitted apps on web/native; each app owns its inputs, state and navigation. Do not add new demo branches here. |
-| `Replica`, `DashboardView`, Label/Switch/Graph snapshots, shared demo room | Replace with app-root state | Explicit truth-state cutover and persisted migration; one writable owner. Preserve an offline recovery snapshot, not a permanent mirrored authority. |
-| Dashboard bindings and responders in layout contracts | Quarantine, then delete | App activation rejects them now. Remove variants when no admitted UI or recovery asset consumes them. |
-| `canvas/state.rs` alongside the old replica | Temporary competing models | Converge on one typed state store after the app-root migration; measure the RFC 0002 representation before expanding either model. |
-| Layout v1 decoder and fixture generator | Stop authoring new v1 UI | Repack admitted modules to v2, exercise reload/recovery, then delete v1 decoding. No indefinite format fallback. |
-| Legacy Dashboard/MotionPresenter Wasm exports | Removed from the modern bundle | Delete their old host when the deployed web apps use the Canvas host. |
-| Separate prototype server and production dashboard service | Keep the prototype as a test harness | Add app admission/subscriptions to the production authority; reuse its auth, durable storage and ephemeral streams. Avoid building a second full auth service. |
-| SDL/Wayland fallback and signed `dashboard-sdl` artifacts | Quarantined; the SDL renderer cannot draw Slug glyph quads | New Slug releases publish direct GLES and browser hosts only. Retain the prior validated signed release for rollback; remove old recovery paths after direct-display crash/rollback acceptance and coordinated publisher/agent/manifest updates. |
-| Five-register ABI, hand-listed pack registry, derived default refs | Prototype scaffolding | Versioned typed commands/schema plus an admitted app catalog; remove scaffolding in that cutover. |
-| Per-scalar host getters that traverse scene metadata | Consolidate | One coherent frame-view payload if profiling shows traversal matters; the expensive repeated scene construction is already removed. |
-| Failed mount leaves the old view read-only until reconnect | Replace lifecycle behavior | Stage and validate a candidate UI/state/guest together, then publish atomically; exercise rejected update and rollback without losing the current input session. |
+## Retirement and retained building blocks
 
-Keep and extract the generic implementations: scene validation, input routing,
-keyboard editing, pins/struts, mesh generation, direct display, code/blob cache,
-signing and recovery. Their current `dashboard/` location does not make them dead
-code. Move them when their ownership is clear; avoid cloned implementations or
-permanent forwarding modules merely to rename directories.
+| Mechanism | Cutover disposition |
+| --- | --- |
+| Fixed dashboard Shell/screen branches and compiled demo UI | Replaced in production by the admitted app catalog and Canvas mounts. New app UI belongs in `apps/`, not another host screen branch. |
+| Global demo room and ambient DashboardView bindings | Replaced by app-owned typed roots; app layouts resolve explicit slots. No durable legacy-room bridge is introduced. |
+| Dashboard/MotionPresenter browser adapters | Replaced by CanvasApp and generic CanvasPresentation. The modern Wasm host excludes the old Dashboard exports. |
+| Separate trusted prototype package loader | Removed; development and production are thin entries into the same authority. Production admits packages from signed releases. |
+| Per-frame scene reconstruction | Replaced by selected-value scene caching and retained GPU resources. |
+| SDL/Wayland app path | Removed from the app build and host dependencies; direct GLES is the supported frame path. Old signed recovery artifacts require their compatible service/protocol, not an implied universal rollback. |
+| Five-field UI schema | Replaced by typed v2 fields. The bounded Wasm reducer ABI remains separately versioned v1. |
 
-Shared authoring currently lives in `tools/canvas/authoring.rs`. Move stable
-builders into the SDK once their binary contract is settled. The SDK must not
-absorb copied LGPL runtime implementation.
+Keep one implementation of scene validation, responder routing, keyboard editing,
+pins/struts, rendering, direct display, artifact caching, signing and recovery.
+Their historical `dashboard/` directory does not make the generic code obsolete.
+Unrelated earlier OS snapshot/IPC experiments are separate milestones rather
+than compatibility requirements for app navigation.
 
-## Cutover sequence
-
-1. Establish the app-only host and explicit projection boundary (this pass).
-2. Implement signed app-graph admission, private capability checks and staged
-   mount/reload/rollback in the production authority and both hosts.
-3. Move Component Playground to that path, including its ephemeral trail
-   capability. Keep public visitors and the frame on the same intended State root.
-4. Migrate Input Lab, animation and 3D to app-owned intent. Keep animation phase,
-   mesh/GPU resources and clocks local; do not force a per-frame interpreted guest
-   loop. Migrate Monitoring behind its private admission gate. Delete the old
-   shell and global room rather than maintaining both app models.
-5. Remove v1 assets and the SDL recovery path once their installed consumers have
-   crossed their stated gates. Generalize state/selectors through the measured
-   Merkle/CRDT design, not through additional demo-specific stores.
+Shared authoring lives in `tools/canvas/authoring.rs`; stable builders can move to
+the SDK without copying LGPL runtime implementation into permissive packages.
+General OS loading, arbitrary capability imports, multi-object transactions,
+Merkle state replication and collection selectors are not completed by this work.
 
 ## Rounded corners
 
-Yes: `Primitive::Superellipse` uses four superelliptic quarter arcs joined by
+`Primitive::Superellipse` uses four local superelliptic quarter arcs joined by
 straight sides. The usual exponent is 4; exponent 2 gives circular corners.
-The local arc is sampled using
-`x = cx + r sign(cos θ) |cos θ|^(2/n)` and the matching sine expression for y.
-There are currently twelve segments per quarter, emitted as triangles. Hit
-testing uses the corresponding superellipse equation.
-
-This is a rounded rectangle with superellipse corners, not one global Lamé oval
-and not a claim of exact equivalence to Apple's continuous-corner geometry.
-Radius is bounded by half the shorter side; zero radius produces a rectangle.
+Each arc uses `x = cx + r sign(cos θ) |cos θ|^(2/n)` and the matching sine
+expression for y, currently sampled at twelve segments per quarter. Hit testing
+uses the corresponding equation. This is not one global Lamé oval or a claim of
+exact equivalence to Apple's continuous corners. Radius is bounded by half the
+shorter side; zero produces a rectangle.

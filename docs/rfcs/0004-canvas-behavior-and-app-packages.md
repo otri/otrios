@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0004: Canvas mounts, executable behavior and app packages
 
-Status: scoped prototype authorized by the user. Builds on RFCs 0002/0003.
+Status: app-scoped v2 cutover implemented; deployment/physical acceptance recorded separately. Builds on RFCs 0002/0003.
 
 `Canvas(uiRef, stateRef)` is a mounted UI description and its explicit state
 scope. A UI description includes primitive layout data, typed selectors,
@@ -17,20 +17,36 @@ permissive public contracts remain in `otrios-interfaces`. Apps declare local
 build/runtime dependencies explicitly. A launcher has opaque app/UI/state
 references, never an implicit import of every app's implementation or history.
 
-The first independently mounted apps are Home, Component Playground and Layout
-Lab. The other existing demos get package manifests recording their legacy
-adapter status and current dependency locations. They are not represented as
-migrated independent replicas until that migration is implemented and tested.
+Home, Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and
+Monitoring now have independent packages and State references. The production
+build uses the same Canvas runtime on web and direct GLES. The former global
+room and fixed app Shell are retired from that path; this cutover starts fresh
+app documents rather than running a legacy mirrored authority.
 
-## Prototype boundary
+## Admission and transport
 
-An opt-in Canvas server/viewer uses separate state documents and UI packages for
-each app; it does not replace the working dashboard or migrate its live history.
-The server binds loopback by default and accepts its exact browser Origin or a
-native client with no Origin. Its local package registry is trusted prototype
-configuration, not production publisher authentication. UI/behavior hashes are
-verified before activation. Production delivery must bind the graph to the
-existing pinned publisher/signature policy before exposing editable imports.
+A public signed `apps/catalog.flex` binds app identities, UI/State references,
+privacy requirements and UI hashes. Each admitted UI binds behavior imports.
+Signed UI/code payloads stay in the release's `authority/apps/` tree; the public
+module replica never receives those files. `/apps/stream` checks the admitted
+pair and server-side permission before sending Mounted UI/code/state. Browser
+Monitoring sessions are revocable; the trusted native listener retains its
+private transport policy. App-provided requirements are not grants.
+
+The authority persists accepted state before acknowledgement. Clients hold
+replicas and pending edits in RAM, preserving them through transport reconnect.
+Only immutable public code/blob resources enter bounded persistent caches.
+The browser verifies catalog bytes against its immutable release manifest;
+existing module-replica/native-supervisor code verifies publisher signatures.
+A loopback package loader remains useful for tests, not a separate production
+auth or storage service.
+
+UI format `otrios-canvas-v2` supports fixed typed fields, including bounded text,
+booleans, colors and series. Input Lab text uses whole-register conflict semantics,
+not per-character collaborative editing. Keyboard focus, selection and repeat are
+local. Monitoring's separate, read-only binary Layout aggregate is replaceable
+and never appended to CRDT history. Animation/3D sync intent while presentation
+phase, clock, GPU resources and the isolated RAM CRDT stress workload stay local.
 
 The selected interpreter is Wasmi 1.1.0 (Rust 1.86 minimum, compatible with pinned
 Rust 1.90), with binary parsing only. It runs the same behavior bytes in the
@@ -63,26 +79,29 @@ a general typed command-buffer ABI needs a later version.
 Each Canvas activation owns its guest instance, sync session, input capture and
 scope generation. Late commands/messages from a replaced or exited scope are
 ignored. Trap/fuel exhaustion leaves the document intact and fails that call.
-Candidate UI/code is qualified before replacing the active instance. If validation
-fails, the prior view/document remain retained but input is suspended until
-reconnect; transactional remote-mount rollback remains follow-up work. Immutable
-code bytes can be reused; mutable instance memory never leaks across State
+Candidate UI/code includes authoritative state and is qualified before replacing
+the active instance. Rejected updates retain the previous mount. Revocation drops
+a private mount immediately, while keeping only the references needed to request
+access again. Immutable code bytes can be reused; mutable instance memory never leaks across State
 inputs. Reopening an app resubscribes from the authority rather than a disk
 checkpoint. Durable state stays behind the stable State reference.
 
 UI/code updates require a compatible state schema and no active input/pending
-unacknowledged edits before activation. A rejected candidate leaves the old view
-retained read-only until reconnect. Navigation disposes the old subscription; independent apps do not
-receive each other's payloads. UI/code are hashed as canonical artifact bytes. State uses Automerge history
-and causal sync; the prototype does not implement RFC 0002 incremental Merkle
+unacknowledged edits before activation. Navigation disposes the old subscription;
+independent apps do not receive each other's payloads. UI/code are hashed as
+canonical artifact bytes. State uses Automerge history and causal sync; the app
+runtime does not implement RFC 0002 incremental Merkle
 state hashing or per-selector subtree subscriptions. It scopes subscriptions at
 app-document roots. Flat stable field-ID selectors are implemented; collection
 paths, item identities and cursor queries remain RFC 0003 design work.
 
-The package and migration guide is [apps/README.md](../../apps/README.md). The
-first implementation uses a build-time registry and explicit package reload on
-mount. Adding external packages, automatic update notifications and production
-signed app admission remain separate milestones.
+The package guide is [apps/README.md](../../apps/README.md). The build registry
+and signed release catalog are explicit. Code release notifications wait for
+confirmed state and idle input before replacement. General external package
+discovery and arbitrary capability imports are not implemented. Current bounds
+include 64 fields, 4 KiB text, 2,016 series points and 512 KiB messages/artifacts;
+history has a smaller byte ceiling for transport headroom. Exhaustion fails
+explicitly; general history compaction is not implemented.
 
 ## Acceptance
 
@@ -93,7 +112,10 @@ independent, inactive-app updates are absent, reconnect recovers acknowledged
 state, and stale events/wrong hashes/ABIs/imports/fuel exhaustion/bad commands
 are rejected without changing state. Render through the existing primitive
 compositor. Report headless native evidence separately from physical display
-acceptance. Keep the existing live dashboard intact during the opt-in prototype.
+acceptance. Report a staged build separately from a deployed cutover; old clients
+require a new entry visit when the protocol changes. Test private package denial and
+revocation, read-only aggregate replacement without CRDT growth, and pending
+RAM edits across reconnect as part of the app cutover.
 
 ## Declarative source authoring
 

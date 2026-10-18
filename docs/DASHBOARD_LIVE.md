@@ -1,84 +1,119 @@
-# Live dashboard development
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Live app deployment
 
-The development service runs on a Mac and serves the Rust/Wasm browser dashboard plus a persistent Automerge room. The Rockchip frame runs a native ARMv7 GLES2 executable. Its current [direct KMS profile](DIRECT_DISPLAY.md) bypasses Weston; the existing Weston service remains recovery. Both use the same Rust state projector and compositor. The frame runs no dashboard browser.
+The Mac runs one authority and a signed release publisher. A separate OrbStack
+module host serves immutable browser resources through `otrios.otri.ca`.
+Tailscale exposes the trusted authority to the frame. The frame runs one native
+DRM/GBM/EGL/GLES2 host with the accepted rotation and calibrated touch; no
+Wayland, SDL or dashboard browser is involved.
 
-## Network and authority
-
-Start the server with absolute paths outside the source checkout:
+## Authority and routes
 
 ```sh
-dashboard-server --bind 127.0.0.1:8876 --state /ABS/RUNTIME/state.automerge --releases /ABS/RUNTIME/releases --web-dir /ABS/RUNTIME/development-web --origin https://HOST.TAILNET.ts.net
+dashboard-server --bind 127.0.0.1:8876 --public-bind 127.0.0.1:8878 \
+  --app-state /ABS/RUNTIME/apps-state --releases /ABS/RUNTIME/releases \
+  --auth-file /ABS/RUNTIME/monitoring-auth.json \
+  --origin https://otrios.otri.ca --origin https://HOST.TAILNET.ts.net
 ```
 
-Expose only that listener with the official Tailscale CLI:
+The trusted listener permits private app admission for tailnet devices. The
+public adapter enforces an exact browser Origin, bounded peer/message counts,
+and Monitoring's existing HttpOnly session. Both use `/apps/stream` for binary
+Canvas mount/sync/view messages and JSON release notices. An anonymous mount
+cannot receive Monitoring UI, behavior or state. Private leases are checked on
+input, before delivery and at most one second after expiry/logout. `/demo/ink`
+is the separate ephemeral trail channel. `/auth/session` manages Monitoring
+sign-in. The public proxy has no administrative feed or state mutation routes.
+
+`/health` reports app-root counts and current release, rather than pretending
+unrelated apps have one global snapshot. Old `/stream`, `/demo/stream`, `/sync`
+and `/layout` global writers return 410. The authorized local monitoring job
+continues to upload a complete FlexBuffers Layout to `/presentation`; the
+server validates and replaces that read-only aggregate without CRDT history.
+
+One file per app holds accepted durable history. Writes replace and flush the
+file before acknowledgement. Clients keep only RAM state, so a live process
+can reconnect with pending edits; crashing or closing it can lose unacknowledged
+work. Code/fonts/blobs are disposable caches, not document checkpoints.
+`--state FILE` now supplies a legacy filename prefix only: app state lives in
+`FILE` with extension `.apps`, and the feed cache uses `.presentation.flex`.
+The old monolithic document is neither loaded nor written. This cutover starts
+fresh app state, as authorized by the user.
+
+## Signed publication
+
+`watch-dashboard.py` freezes source inputs, runs Canvas tests, compiles the
+modern browser host and ARMv7 direct host, checks JS/GPU/cache contracts, and
+signs a complete immutable release. Generated packages and catalogs are not
+source fingerprint inputs. `publish-dashboard-module.py` copies verified public
+assets into the independent read-only OrbStack volume before advancing the
+origin's current pointer. A stale or failed build leaves the previous release.
+
+The release manifest binds `otrios-canvas-apps-v1` state and
+`otrios-canvas-sync-v1` transport. Its public `apps/catalog.flex` lists admitted
+UI/State pairs and UI hashes; each UI binds its behavior's hash and permissions.
+App UI/code resides under `authority/apps/<id>/` in the signed release's
+`authority` digest table. These payloads are never copied to the public module
+volume or exposed by a static-download route. They travel through authorized
+mounts. The client checks the catalog's admitted UI hash before activation.
+
+The native supervisor verifies the pinned Ed25519 publisher signature, sizes,
+ARM executable, catalog and compressed font before execution. Browser resources
+use the trusted HTTPS origin and manifest hash closure; the browser does not
+independently verify the detached signature. A signature does not sandbox
+native code: the configured publisher remains trusted.
+
+The Mac runtime is `~/Library/Application Support/OTriOSDashboard`. Credentials,
+keys, logs, state, source inbox and build caches stay outside Git. Its login
+LaunchAgents include the state server, source watcher, monitoring collector and
+public tunnel/module adapter. The watcher follows the configured trusted Git
+branch or `queue-dashboard-source.py` feed; do not push incomplete code while
+its automatic deployment is active. Installed service scripts and server
+binaries must be updated explicitly for a protocol cutover.
 
 ```sh
-tailscale serve --bg --https=443 http://127.0.0.1:8876
-tailscale serve status
-```
-
-Open `https://HOST.TAILNET.ts.net/` on an iPad connected to the same tailnet. Serve is private tailnet HTTPS, not public Funnel. Existing tailnet grants determine who can reach it; this app has no separate users, per-object permissions or read-only role. The signing key is never served. The frame uses `/stream` over WSS with certificate verification, not an SSH reverse tunnel.
-
-`GET /health` identifies the current snapshot and code release. `/release` returns the current immutable entry. `/releases/ID/...` serves only the artifact whitelist. WebSocket `/stream` carries binary Automerge sync messages and JSON release notices. The optional `/sync` POST exchanges complete documents for baseline diagnostics. Browser cross-origin POST/upgrade requests are rejected. Connections/messages are bounded; slow state notifications coalesce rather than queue every revision.
-
-The central file contains accepted history and is flushed/replaced before acknowledging changes. Clients keep a working replica only in RAM, so edits made during a temporary disconnection converge if that process remains alive. Unacknowledged edits are lost on a crash or manual close; the server owns durable recovery. “Truth” here is the persisted merged history; screens need not switch at the exact same instant. There is one trusted development room, no consensus or multi-tenant security claim. Back up its state file when stopped (or an atomic captured copy), and retain the publisher key securely.
-
-## Code publication and state preservation
-
-`publish-dashboard.py` copies a complete web build and ARMv7 executable into an immutable directory named by the SHA-256 of its canonical manifest. An Ed25519 signature binds artifact hashes/sizes, state schema and sync protocol. The pointer changes only after all artifacts and signature exist. Old releases remain available.
-
-`watch-dashboard.py` freezes source inputs, runs core tests, compiles Wasm with wasm-bindgen 0.2.129, syntax-checks the browser host, and compiles ARMv7 in an isolated Docker cross-builder. A failed or stale build retains the active release. It uses source-copy Docker input, preserving unrelated containers and avoiding host mount permissions. Create the builder image with `scripts/build-dashboard-armv7.sh` first.
-
-A watcher JSON config supplies absolute `repo`, `runtime`, `openssl`, optional `node`, and `build_env` with `RUSTUP_HOME`, `CARGO_HOME`, and `PATH`. Example: `tools/dashboard/live-config.example.json`. Use OpenSSL 3 with Ed25519 support. Keep the private key at `RUNTIME/publisher/private.pem` with mode 0600 and a private runtime directory. Generate it once, export only its public key, and pin that key on the frame:
-
-```sh
-umask 077
-openssl genpkey -algorithm ED25519 -out /ABS/RUNTIME/publisher/private.pem
-openssl pkey -in /ABS/RUNTIME/publisher/private.pem -pubout -out /ABS/RUNTIME/publisher/public.pem
 python3 scripts/watch-dashboard.py --config /ABS/RUNTIME/config.json
 ```
 
-The Mac deployment uses two login LaunchAgents, `com.otri.otrios-dashboard-server` and `com.otri.otrios-dashboard-watch`. Runtime, logs, release store, build caches, source inbox and publisher key live under `~/Library/Application Support/OTriOSDashboard`. The compiler/tooling used by the background builder lives outside Documents so no additional macOS Documents privacy permission is required.
+The private watcher config supplies absolute repo/runtime/tool paths and the
+pinned Rust build environment. Keep the publisher private key mode 0600; serve
+only its public key. The Mac must remain awake, online and logged in. This is
+not an always-on cloud deployment.
 
-For immediate local edits, run this in an authorized checkout session:
+## Activation, readiness and recovery
 
-```sh
-python3 scripts/queue-dashboard-source.py --runtime "$HOME/Library/Application Support/OTriOSDashboard" --watch
-```
+A candidate mount qualifies its UI, schema, reducer, authoritative state and
+primitive scene before replacing the active scope. Navigation retires capture,
+keyboard repeat and the old subscription. Rejected candidates leave the current
+app usable. Automatic code replacement waits for acknowledgement and no active
+input; browser state does not enter session storage or IndexedDB. Normal
+navigation stays local; the public demos share the frame's data roots.
 
-This exports selected public build inputs to the builder inbox and holds a feed lock. It never exports `.git`, credentials, `.env` or arbitrary user files. If configured with `git_remote` and `git_branch`, the watcher refreshes that public branch every ten seconds when no local feed holds the lock. This gives pushed collaborative changes the same build path after the local chat closes. Only configure a trusted branch: the builder runs its tests/build scripts and signs successful output. A reboot/login restarts the installed services; Docker must be available for ARM builds. A failed refresh/build keeps the existing dashboard working.
+The frame supervisor keeps exactly one display owner and accepts a release only
+after rendered output and a live acknowledged app stream. Its cache limit is
+about 2 GiB; the browser immutable resource cache is about 512 MiB, subject to quota.
+The font/GPU coverage cache remains independent. New releases have only the
+native direct executable, not an SDL recovery binary. Failed compatible
+candidates can return to a previously verified cached release.
 
-Code reload means a browser page reload or a brief native process restart. Both clients start with a fresh seed and resubscribe to the server. Before automatic replacement they require acknowledgement of the current document heads and no active gesture; pending native commands must also be empty. Browser app state is never put in IndexedDB/session storage, and the native `--state` option is accepted only for supervisor compatibility and ignored. Navigation transfers via URL or a RAM runtime notice. Incompatible schema migrations remain deferred. See [client storage](CLIENT_STORAGE.md) for cache budgets and failure semantics.
+The initial Canvas protocol cutover cannot automatically run an older global-room
+binary against the new authority. Keep the previous server/agent/proxy scripts
+and signed release for coordinated operational rollback. Already-open legacy
+browser tabs need one visit to the root URL after this cutover; there is no
+permanent legacy protocol bridge.
 
-The native supervisor downloads into its private cache, verifies the pinned publisher signature and binary before execution, and requires a rendered GLES2 frame plus a live CRDT stream before accepting a new release. It retains the previous verified executable and returns to it if a candidate fails readiness. Cached accepted code may start offline. A signature is not a sandbox: the pinned publisher is trusted to supply executable native code. Browser code relies on the trusted HTTPS origin; it does not independently verify the detached signature. Revocation, rollback prevention, release garbage collection and signed arbitrary runtime modules remain future work.
+## Validation
 
-## Native frame service and recovery
+Run `bash scripts/check.sh`, all-feature Clippy, the modern Wasm export/GPU/cache
+Node tests, and native worker tests. Real-process tests cover per-app isolation,
+durable restart, new behavior admission, source reload, exact Origins, private
+UI denial, cookie logout/expiry and ephemeral ink. Signing tests include catalog
+tampering and a private-payload canary that must not reach the public volume.
 
-`tools/dashboard/otrios-dashboard.service` is a template for the existing SPD frame. It runs as `kiosk`, requires Weston, preserves its calibrated input/display configuration, stops `spd-browser` while active, and starts the old browser after dashboard failure. A successful service restart does not start a conflicting browser job; a deliberate manual stop uses the recovery commands below. Install:
-
-- `scripts/frame-dashboard-agent.py` as `/opt/otrios-dashboard/frame-dashboard-agent.py`.
-- The publisher public key as `/opt/otrios-dashboard/publisher.pem`, root-owned.
-- Qualified SDL2/libXss runtime libraries and their notices under `/opt/otrios-dashboard/lib` and `licenses`.
-- `/etc/otrios-dashboard.conf` containing `DASHBOARD_URL=https://HOST.TAILNET.ts.net`.
-- The service template under `/etc/systemd/system/otrios-dashboard.service`.
-
-After verifying dependency closure and the unit, reload systemd and start it. Enable at boot only for an intentional persistent native deployment. The state/release cache is `/var/lib/otrios-dashboard`, private to `kiosk`; no kernel, bootloader, touch calibration, SSH policy or old browser profile needs editing.
-
-For manual return to the old kiosk:
-
-```sh
-sudo systemctl disable --now otrios-dashboard.service
-sudo systemctl enable --now spd-browser.service
-```
-
-For the Mac, stop the two LaunchAgents to stop serving/building. `tailscale serve --https=443 off` removes this HTTPS proxy; check status first if other services have since been added. Keep state, key and releases for recovery. The Mac must remain awake, online and logged in for this deployment to be reachable. This is not an always-on cloud host.
-
-## Verification limits
-
-Run `bash scripts/check.sh`, then all-feature Clippy where SDL2 is installed. The checks exercise incremental offline merge/reconnect, real HTTP/WS processes, durable restart, origin rejection, release notification and old-asset retention, and actual Ed25519 verification/tamper rejection. Linux CI builds both hosts and presents a GLES2 frame under Mesa/Xvfb.
-
-A matching `/health` snapshot, browser `data-snapshot`, and native ready JSON demonstrates convergence. A changed release ID on both hosts with the same snapshot demonstrates state-preserving code reload. Framebuffer readback establishes GPU output, not physical panel colour or touch alignment. Someone at the frame still needs to accept those physical properties. iPad access must be checked on the actual iPad; desktop browser validation alone does not establish it.
-
-For the SDL-free frame profile, private builder config `native_host: "direct"` builds both `dashboard-direct` and signed `dashboard-sdl` recovery assets. The supervisor checks both hashes, chooses the recovery executable for Wayland, and checks direct framebuffer colour/stride metadata before accepting a new direct release. Platform `.c` and `.h` files participate in source fingerprints. See [direct display](DIRECT_DISPLAY.md).
-
-The [public module host](PUBLIC_ACCESS.md) serves demos without sign-in and authorizes Monitoring separately, using a verified read-only code store. Its browser adapter shares demo state with the frame but never broadcasts Monitoring on public sync. `module_volume` enables module delivery before state-server code announcements; browser release readiness also tolerates lagging replicas.
+Use `scripts/test-dashboard-module-host.py` against the deployed host for HTTP,
+resource, proxy and auth policy checks. It complements the Rust tests that
+actually encode app mounts. Verify the same signed release in browser and frame
+readiness, then inspect an actual native framebuffer and the local presentation
+statistics. Matching references prove scope identity, not pixel equivalence or
+physical panel color/touch acceptance. Record measured results in
+[the migration validation log](experiments/canvas-migration-validation.md).

@@ -1,0 +1,190 @@
+{
+  "release": "8210317c51e0ed85bcae5c57bbd04cb9bd3f67e59bd31fb6613d81b4ed70d961",
+  "source_commit": "11da2bb",
+  "measurement_note": "Bounded native app trials, one exclusive display owner, normal signed service restored. Captures included; Monitoring is static. No private metric payloads included.",
+  "scenarios": {
+    "three-d": {
+      "alpha": "premultiplied",
+      "cadence": {
+        "fps": 50.25,
+        "frames": 749,
+        "over_25ms": 16,
+        "p50_ms": 17.666,
+        "p95_ms": 17.814,
+        "p99_ms": 52.924,
+        "samples": 749
+      },
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "compose_submit_max_us": 305366,
+      "compose_submit_p50_us": 2720,
+      "compose_submit_p95_us": 4309,
+      "compose_submit_p99_us": 7028,
+      "drawn": 750,
+      "font_cache": [
+        72625,
+        205,
+        4194304
+      ],
+      "font_renderer": "slug-coverage-cache",
+      "font_resource": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+      "gamma": "srgb-framebuffer-blend",
+      "kernel_flips": {
+        "crtc": 37,
+        "events": 700,
+        "fps": 53.79875387000836,
+        "max_us": 282456,
+        "missed_vblanks": 37,
+        "p50_us": 17654,
+        "p95_us": 17667,
+        "p99_us": 35313,
+        "seconds": 12.992866
+      },
+      "load_requested_hz": 30,
+      "load_updates": 431,
+      "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+      "objects": 64,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 14880,
+      "present_p95_us": 15179,
+      "received_app_updates": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "scanout_format": "RGB565",
+      "screen": "three-d-lab",
+      "seconds": 15.019049249,
+      "stride": 1600,
+      "video": "DRM",
+      "worker_stall_ms": 0
+    },
+    "animation": {
+      "alpha": "premultiplied",
+      "cadence": {
+        "fps": 42.23,
+        "frames": 199,
+        "over_25ms": 9,
+        "p50_ms": 17.653,
+        "p95_ms": 18.616,
+        "p99_ms": 105.851,
+        "samples": 199
+      },
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "compose_submit_max_us": 266007,
+      "compose_submit_p50_us": 2874,
+      "compose_submit_p95_us": 5379,
+      "compose_submit_p99_us": 24810,
+      "drawn": 200,
+      "font_cache": [
+        19656,
+        106,
+        4194304
+      ],
+      "font_renderer": "slug-coverage-cache",
+      "font_resource": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+      "gamma": "srgb-framebuffer-blend",
+      "kernel_flips": {
+        "crtc": 37,
+        "events": 151,
+        "fps": 49.98218967974412,
+        "max_us": 282453,
+        "missed_vblanks": 20,
+        "p50_us": 17653,
+        "p95_us": 17664,
+        "p99_us": 35324,
+        "seconds": 3.001069
+      },
+      "load_requested_hz": 0,
+      "load_updates": 0,
+      "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+      "objects": 12,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 14767,
+      "present_p95_us": 15564,
+      "received_app_updates": 1,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "scanout_format": "RGB565",
+      "screen": "animation-lab",
+      "seconds": 5.017258254,
+      "stride": 1600,
+      "video": "DRM",
+      "worker_stall_ms": 0
+    },
+    "monitoring": {
+      "alpha": "premultiplied",
+      "cadence": {
+        "fps": 0.0,
+        "frames": 0,
+        "over_25ms": 0,
+        "p50_ms": 0.0,
+        "p95_ms": 0.0,
+        "p99_ms": 0.0,
+        "samples": 0
+      },
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "compose_submit_max_us": 1183429,
+      "compose_submit_p50_us": 67123,
+      "compose_submit_p95_us": 1183429,
+      "compose_submit_p99_us": 1183429,
+      "drawn": 3,
+      "font_cache": [
+        31,
+        603,
+        4194304
+      ],
+      "font_renderer": "slug-coverage-cache",
+      "font_resource": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+      "gamma": "srgb-framebuffer-blend",
+      "kernel_flips": {
+        "crtc": 37,
+        "events": 1,
+        "fps": 0.0,
+        "max_us": null,
+        "missed_vblanks": 0,
+        "p50_us": 0,
+        "p95_us": 0,
+        "p99_us": 0,
+        "seconds": 0.0
+      },
+      "load_requested_hz": 0,
+      "load_updates": 0,
+      "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+      "objects": 12,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 16885,
+      "present_p95_us": 609792,
+      "received_app_updates": 2,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "scanout_format": "RGB565",
+      "screen": "monitoring",
+      "seconds": 5.004021767,
+      "stride": 1600,
+      "video": "DRM",
+      "worker_stall_ms": 0
+    }
+  }
+}
