@@ -1,0 +1,13 @@
+{
+  "repo": "/ABS/RUNTIME/source-inbox",
+  "runtime": "/ABS/RUNTIME",
+  "openssl": "/ABS/OPENSSL3/bin/openssl",
+  "node": "/ABS/NODE/bin/node",
+  "git_remote": "https://github.com/OWNER/REPOSITORY.git",
+  "git_branch": "YOUR_TRUSTED_BRANCH",
+  "build_env": {
+    "RUSTUP_HOME": "/ABS/RUSTUP",
+    "CARGO_HOME": "/ABS/CARGO",
+    "PATH": "/ABS/CARGO/bin:/ABS/WASM_BINDGEN/bin:/usr/local/bin:/usr/bin:/bin"
+  }
+}

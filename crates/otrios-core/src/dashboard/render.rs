@@ -22,7 +22,7 @@ pub fn render(snapshot: &ViewSnapshot) -> Mesh {
         vertices: Vec::new(),
     };
     f.rect(0, 0, DASHBOARD_WIDTH, DASHBOARD_HEIGHT, BG);
-    f.text(64, 25, "OTRIOS  /  SHARED SPACES", 2, MUTED);
+    f.text(64, 25, "OTRIOS  /  LIVE SPACES", 2, MUTED);
     for node in &snapshot.view().nodes {
         let [x, y, w, h] = node.bounds;
         match &node.content {

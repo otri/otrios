@@ -14,7 +14,7 @@ try {
   try {
     const saved=sessionStorage.getItem(storageKey);
     dashboard=saved?Dashboard.load(Uint8Array.from(atob(saved),c=>c.charCodeAt(0))):new Dashboard();
-  } catch(e) {console.warn('Saved dashboard unavailable',e);dashboard=new Dashboard();}
+  } catch(e) {throw new Error(`Saved dashboard could not be loaded; it has been kept intact. ${e}`);}
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});
   if(!gl)throw new Error('This dashboard requires WebGL.');
   function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
@@ -28,8 +28,8 @@ try {
   gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,24,0);
   gl.enableVertexAttribArray(color);gl.vertexAttribPointer(color,4,gl.FLOAT,false,24,8);
   function persist(){
-    try {const bytes=dashboard.document();let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));sessionStorage.setItem(storageKey,btoa(binary));}
-    catch(e){connection.textContent='Changes live in this tab; storage unavailable';console.warn(e);}
+    try {const bytes=dashboard.document();let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));sessionStorage.setItem(storageKey,btoa(binary));return true;}
+    catch(e){connection.textContent='Changes live in this tab; storage unavailable';console.warn(e);return false;}
   }
   function draw(){
     const vertices=dashboard.vertices();gl.viewport(0,0,1280,800);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);
@@ -41,24 +41,44 @@ try {
     revision.dataset.snapshot=dashboard.snapshot_id();
     persist();
   }
-  let syncing=false,queued=false;
-  async function sync(){
-    if(syncing){queued=true;return;}
-    syncing=true;
-    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),5000);
-    try {
-      const response=await fetch('/sync',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:dashboard.document(),signal:controller.signal});
-      if(!response.ok)throw new Error(`Sync ${response.status}`);
-      const contentLength=Number(response.headers.get('Content-Length'));
-      if(contentLength>2097152)throw new Error('Oversized sync response');
-      const bytes=new Uint8Array(await response.arrayBuffer());
-      if(bytes.length>2097152)throw new Error('Oversized sync response');
-      if(dashboard.merge(bytes))draw();
-      dot.classList.add('online');connection.textContent='Shared space connected';
-    } catch(e) {dot.classList.remove('online');connection.textContent='Offline · changes saved in this tab';console.warn(e);}
-    finally {clearTimeout(timer);syncing=false;if(queued){queued=false;queueMicrotask(sync);}}
+  let socket=null,retry=250,stopped=false;
+  let activeRelease=location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null;
+  function sendChanges(){
+    if(socket?.readyState!==WebSocket.OPEN)return;
+    const bytes=dashboard.sync_message();if(bytes)socket.send(bytes);
   }
-  toggle.addEventListener('click',()=>{try {dashboard.set_enabled(!dashboard.enabled());draw();sync();}catch(e){fatal(e);}});
+  function connect(){
+    dashboard.reset_sync();
+    const url=new URL('/stream',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';
+    socket=new WebSocket(url);socket.binaryType='arraybuffer';
+    socket.onopen=()=>{retry=250;sendChanges();};
+    socket.onmessage=event=>{
+      try {
+        if(typeof event.data==='string'){
+          const message=JSON.parse(event.data);
+          if(message.type==='release'){
+            const release=message.release;
+            if(activeRelease&&release.id!==activeRelease&&release.web_entry){
+              if(!persist()){error.hidden=false;error.textContent='A code update is ready. Automatic reload is paused because this tab cannot save its state.';return;}
+              stopped=true;socket.close();location.replace(release.web_entry);return;
+            }
+            activeRelease=release.id;
+            revision.dataset.release=release.id;
+          }
+        }else{
+          if(dashboard.receive_sync(new Uint8Array(event.data)))draw();
+          sendChanges();
+          dot.classList.add('online');connection.textContent='Live shared space';
+        }
+      }catch(e){console.error(e);socket.close();}
+    };
+    socket.onclose=()=>{
+      dot.classList.remove('online');connection.textContent='Offline · changes saved in this tab';
+      if(!stopped){setTimeout(connect,retry);retry=Math.min(retry*2,5000);}
+    };
+    socket.onerror=()=>socket.close();
+  }
+  toggle.addEventListener('click',()=>{try {dashboard.set_enabled(!dashboard.enabled());draw();sendChanges();}catch(e){fatal(e);}});
   canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();fatal('Graphics context lost. Reload to resume your saved dashboard.');});
-  draw();sync();setInterval(sync,1000);
+  draw();connect();
 }catch(e){fatal(e);}

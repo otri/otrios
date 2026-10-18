@@ -18,14 +18,18 @@ impl Drop for Server {
     }
 }
 fn start(state: &std::path::Path) -> Server {
+    start_with_releases(state, None)
+}
+fn start_with_releases(state: &std::path::Path, releases: Option<&std::path::Path>) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap().to_string();
     drop(listener);
-    let child = Command::new(env!("CARGO_BIN_EXE_dashboard-server"))
-        .args(["--bind", &address, "--state", state.to_str().unwrap()])
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dashboard-server"));
+    command.args(["--bind", &address, "--state", state.to_str().unwrap()]);
+    if let Some(releases) = releases {
+        command.args(["--releases", releases.to_str().unwrap()]);
+    }
+    let child = command.stdout(Stdio::null()).spawn().unwrap();
     let mut server = Server { child, address };
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -36,6 +40,98 @@ fn start(state: &std::path::Path) -> Server {
         assert!(Instant::now() < deadline, "server startup timeout");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[test]
+fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() {
+    use tungstenite::client::IntoClientRequest;
+    let root = std::env::temp_dir().join(format!("otrios-release-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let state = root.join("state.automerge");
+    let first = "a".repeat(64);
+    let second = "b".repeat(64);
+    let publish = |id: &str, html: &str| {
+        let dir = root.join(id).join("web");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), html).unwrap();
+        let pointer =
+            serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html")});
+        let temp = root.join("pending.json");
+        std::fs::write(&temp, pointer.to_string()).unwrap();
+        std::fs::rename(temp, root.join("current.json")).unwrap();
+    };
+    publish(&first, "first code");
+    let server = start_with_releases(&state, Some(&root));
+    let mut request = format!("ws://{}/stream", server.address)
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("Origin", "https://unrelated.example".parse().unwrap());
+    assert!(
+        matches!(tungstenite::connect(request), Err(tungstenite::Error::Http(response)) if response.status().as_u16()==403)
+    );
+    let mut peer = Peer::connect(&server, Replica::new().unwrap());
+    peer.replica.set_enabled(false).unwrap();
+    for _ in 0..8 {
+        peer.pump();
+    }
+    let before = Replica::load(&std::fs::read(&state).unwrap())
+        .unwrap()
+        .snapshot()
+        .id();
+    publish(&second, "second code");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match peer.socket.read() {
+            Ok(tungstenite::Message::Text(text)) => {
+                let notice: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if notice["release"]["id"] == second {
+                    break;
+                }
+            }
+            Ok(tungstenite::Message::Ping(_)) => {
+                peer.socket.flush().unwrap();
+            }
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            other => panic!("Unexpected release stream message: {other:?}"),
+        }
+        assert!(Instant::now() < deadline, "release was not pushed");
+    }
+    let get = |path: &str| {
+        let mut stream = TcpStream::connect(&server.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            stream,
+            "GET {path} HTTP/1.0\r\nHost: {}\r\n\r\n",
+            server.address
+        )
+        .unwrap();
+        let mut bytes = String::new();
+        stream.read_to_string(&mut bytes).unwrap();
+        bytes
+    };
+    assert!(get("/").contains(&format!("/releases/{second}/web/index.html")));
+    let old = get(&format!("/releases/{first}/web/index.html"));
+    assert!(old.ends_with("first code"));
+    assert!(old.contains("max-age=31536000, immutable"));
+    assert!(get("/releases/invalid/web/index.html").starts_with("HTTP/1.0 404"));
+    assert_eq!(
+        Replica::load(&std::fs::read(&state).unwrap())
+            .unwrap()
+            .snapshot()
+            .id(),
+        before
+    );
+    drop(peer);
+    drop(server);
+    std::fs::remove_dir_all(root).unwrap();
 }
 fn post(server: &Server, body: &[u8], origin: &str) -> (u16, Vec<u8>) {
     let mut stream = TcpStream::connect(&server.address).unwrap();
@@ -50,7 +146,7 @@ fn post(server: &Server, body: &[u8], origin: &str) -> (u16, Vec<u8>) {
         body.len()
     )
     .unwrap();
-    stream.write_all(body).unwrap();
+    let _ = stream.write_all(body);
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes).unwrap();
     let split = bytes.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
@@ -92,7 +188,7 @@ fn real_process_sync_rejects_invalid_updates_and_recovers_persisted_history() {
     assert_eq!(post(&server, b"invalid", &origin).0, 400);
     assert_eq!(
         post(&server, &vec![0; MAX_DOCUMENT_BYTES + 1], &origin).0,
-        400
+        413
     );
     assert_eq!(post(&server, &a.save(), "https://unrelated.example").0, 403);
     drop(server);
@@ -102,5 +198,99 @@ fn real_process_sync_rejects_invalid_updates_and_recovers_persisted_history() {
     let recovered = Replica::load(&bytes).unwrap();
     assert_eq!(recovered.snapshot().id(), a.snapshot().id());
     drop(restarted);
+    std::fs::remove_file(state).unwrap();
+}
+
+struct Peer {
+    socket: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>,
+    replica: Replica,
+    session: otrios_core::dashboard::SyncSession,
+}
+impl Peer {
+    fn connect(server: &Server, replica: Replica) -> Self {
+        let (mut socket, _) =
+            tungstenite::connect(format!("ws://{}/stream", server.address).as_str()).unwrap();
+        if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = socket.get_mut() {
+            tcp.set_read_timeout(Some(Duration::from_millis(30)))
+                .unwrap();
+        }
+        Self {
+            socket,
+            replica,
+            session: Default::default(),
+        }
+    }
+    fn pump(&mut self) {
+        if let Some(bytes) = self.replica.generate_sync(&mut self.session).unwrap() {
+            self.socket
+                .send(tungstenite::Message::Binary(bytes.into()))
+                .unwrap();
+        }
+        match self.socket.read() {
+            Ok(tungstenite::Message::Binary(bytes)) => {
+                self.replica
+                    .receive_sync(&mut self.session, &bytes)
+                    .unwrap();
+            }
+            Ok(tungstenite::Message::Ping(_)) => {
+                self.socket.flush().unwrap();
+            }
+            Ok(tungstenite::Message::Text(_) | tungstenite::Message::Pong(_)) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            other => panic!("Unexpected stream result: {other:?}"),
+        }
+    }
+}
+#[test]
+fn websocket_push_reconnect_and_concurrent_offline_changes() {
+    let state =
+        std::env::temp_dir().join(format!("otrios-stream-{}.automerge", std::process::id()));
+    let server = start(&state);
+    let mut a = Peer::connect(&server, Replica::new().unwrap());
+    let mut b = Peer::connect(&server, Replica::new().unwrap());
+    for _ in 0..8 {
+        a.pump();
+        b.pump();
+    }
+    a.replica.set_enabled(false).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while b.replica.snapshot().id() != a.replica.snapshot().id() {
+        a.pump();
+        b.pump();
+        assert!(Instant::now() < deadline, "push timed out");
+    }
+    // The subscriber has never posted a full document or polled an HTTP state endpoint.
+    a.socket.close(None).unwrap();
+    let mut offline = a.replica.clone();
+    drop(a);
+    offline.set_enabled(true).unwrap();
+    b.replica.set_enabled(false).unwrap();
+    for _ in 0..5 {
+        b.pump();
+    }
+    let mut a = Peer::connect(&server, offline);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while a.replica.snapshot().id() != b.replica.snapshot().id() {
+        a.pump();
+        b.pump();
+        assert!(Instant::now() < deadline, "reconnect timed out");
+    }
+    assert!(
+        a.replica
+            .snapshot()
+            .view()
+            .nodes
+            .iter()
+            .any(|n| n.content == otrios_interfaces::ViewContent::Label("3 touches".into()))
+    );
+    let stored = Replica::load(&std::fs::read(&state).unwrap()).unwrap();
+    assert_eq!(stored.snapshot().id(), a.replica.snapshot().id());
+    drop(a);
+    drop(b);
+    drop(server);
     std::fs::remove_file(state).unwrap();
 }

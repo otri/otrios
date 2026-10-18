@@ -2,7 +2,7 @@
 
 OTriOS explores an operating environment built on Linux hardware support, immutable shared objects, reactive views, and streamable executable modules. This repository starts with a small Linux userspace proof of concept for the object model.
 
-The repository contains experimental Rust contract types, immutable aggregate manifest validation, and a [shared dashboard experiment](docs/DASHBOARD.md): Automerge state, immutable FlexBuffers view snapshots, and a Rust compositor shared by native OpenGL ES 2 and browser WebGL hosts. Touch updates synchronize through a local research-room service. The photo frame target uses native graphics, without a browser.
+The repository contains experimental Rust contract types, immutable aggregate manifest validation, and a [shared dashboard experiment](docs/DASHBOARD.md): Automerge state, immutable FlexBuffers view snapshots, and a Rust compositor shared by native OpenGL ES 2 and browser WebGL hosts. Touch updates stream through a persistent central research-room service. A private Tailscale HTTPS deployment supports signed, state-preserving code reloads on both hosts; see [live development](docs/DASHBOARD_LIVE.md). The photo frame target uses native graphics, without a browser.
 
 The general content store, Linux shared-memory IPC, subscriptions, module execution, and capability enforcement remain unimplemented. Dashboard view hashing and publication are a bounded in-process experiment, not completion of the planned Linux runtime.
 

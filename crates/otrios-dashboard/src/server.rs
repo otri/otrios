@@ -1,124 +1,363 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Local, unauthenticated research-room server. Not an internet-facing service.
-use otrios_core::dashboard::{MAX_DOCUMENT_BYTES, Replica};
+//! Durable development room. Bind loopback and put Tailscale Serve in front of it.
+use axum::{
+    Router,
+    body::Bytes,
+    extract::{
+        DefaultBodyLimit, Path as RoutePath, State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Redirect, Response},
+    routing::{get, post},
+};
+use futures_util::{SinkExt, StreamExt};
+use otrios_core::dashboard::{MAX_DOCUMENT_BYTES, Replica, SyncSession};
+use serde_json::{Value, json};
 use std::{
     fs,
-    io::Read,
+    io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tiny_http::{Header, Method, Response, Server};
+use tokio::sync::{Mutex, RwLock, Semaphore, watch};
+
+struct App {
+    replica: Mutex<Replica>,
+    state_file: Option<PathBuf>,
+    web: PathBuf,
+    releases: Option<PathBuf>,
+    release: RwLock<Value>,
+    changed: watch::Sender<u64>,
+    origins: Vec<String>,
+    peers: Arc<Semaphore>,
+}
 fn persist(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = path.with_extension(format!("{}.{nonce}.tmp", std::process::id()));
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&temp)?;
+        .open(&tmp)?;
     let result = (|| {
         f.write_all(bytes)?;
         f.sync_all()?;
-        fs::rename(&temp, path)
+        fs::rename(&tmp, path)?;
+        if let Some(parent) = path.parent()
+            && let Ok(dir) = fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
+        }
+        Ok(())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(temp);
+        let _ = fs::remove_file(tmp);
     }
     result
 }
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut bind = "127.0.0.1:8876".to_string();
-    let mut state = None;
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--bind" => bind = args.next().ok_or("Missing --bind address")?,
-            "--state" => state = Some(PathBuf::from(args.next().ok_or("Missing --state file")?)),
-            _ => {
-                return Err(
-                    "Usage: dashboard-server [--bind 127.0.0.1:8876] [--state FILE]".into(),
-                );
+fn valid_id(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+fn read_release(root: &Option<PathBuf>) -> Option<Value> {
+    let bytes = fs::read(root.as_ref()?.join("current.json")).ok()?;
+    if bytes.len() > 8192 {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    if !valid_id(value.get("id")?.as_str()?) {
+        return None;
+    }
+    Some(value)
+}
+fn origin_ok(app: &App, headers: &HeaderMap) -> bool {
+    headers.get(header::ORIGIN).is_none_or(|origin| {
+        let origin = origin.to_str().unwrap_or("");
+        app.origins.iter().any(|v| v == origin)
+            || headers
+                .get(header::HOST)
+                .is_some_and(|h| origin == format!("http://{}", h.to_str().unwrap_or("")))
+    })
+}
+fn failure(status: StatusCode, message: &str) -> Response {
+    (status, message.to_string()).into_response()
+}
+fn binary(kind: &str, bytes: Vec<u8>, immutable: bool) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, kind),
+            (
+                header::CACHE_CONTROL,
+                if immutable {
+                    "public, max-age=31536000, immutable"
+                } else {
+                    "no-store"
+                },
+            ),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+async fn announce(app: &App) {
+    app.changed.send_modify(|v| *v = v.wrapping_add(1));
+}
+async fn commit(app: &App, candidate: &mut Replica) -> Result<(), String> {
+    if let Some(path) = &app.state_file {
+        persist(path, &candidate.save()).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+async fn sync_http(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes) -> Response {
+    if !origin_ok(&app, &headers) {
+        return failure(StatusCode::FORBIDDEN, "Origin rejected");
+    }
+    let mut replica = app.replica.lock().await;
+    let mut candidate = replica.clone();
+    let changed = match candidate.merge(&bytes) {
+        Ok(v) => v,
+        Err(_) => return failure(StatusCode::BAD_REQUEST, "Invalid dashboard document"),
+    };
+    if let Err(e) = commit(&app, &mut candidate).await {
+        eprintln!("Persistence: {e}");
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
+    }
+    let bytes = candidate.save();
+    *replica = candidate;
+    drop(replica);
+    if changed {
+        announce(&app).await;
+    }
+    binary("application/octet-stream", bytes, false)
+}
+async fn stream(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    if !origin_ok(&app, &headers) {
+        return failure(StatusCode::FORBIDDEN, "Origin rejected");
+    }
+    let permit = match app.peers.clone().try_acquire_owned() {
+        Ok(v) => v,
+        Err(_) => {
+            return failure(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Too many connected screens",
+            );
+        }
+    };
+    upgrade
+        .max_message_size(MAX_DOCUMENT_BYTES)
+        .max_frame_size(MAX_DOCUMENT_BYTES)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            peer(app, socket).await
+        })
+        .into_response()
+}
+async fn peer(app: Arc<App>, socket: WebSocket) {
+    let (mut output, mut input) = socket.split();
+    let mut session = SyncSession::default();
+    let mut updates = app.changed.subscribe();
+    let mut release_id = String::new();
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
+    loop {
+        let release = app.release.read().await.clone();
+        let id = release["id"].as_str().unwrap_or("development");
+        if id != release_id {
+            if output
+                .send(Message::Text(
+                    json!({"type":"release","release":release})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            release_id = id.to_string();
+        }
+        let outgoing = app.replica.lock().await.generate_sync(&mut session);
+        match outgoing {
+            Ok(Some(bytes)) => {
+                if output.send(Message::Binary(bytes.into())).await.is_err() {
+                    break;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("Sync generate: {e}");
+                break;
             }
         }
+        tokio::select! {
+            incoming=input.next()=>match incoming{
+                Some(Ok(Message::Binary(bytes)))=>{
+                    let mut replica=app.replica.lock().await;let mut candidate=replica.clone();let mut next=session.clone();
+                    let changed=match candidate.receive_sync(&mut next,&bytes){Ok(v)=>v,Err(e)=>{eprintln!("Rejected sync: {e}");break;}};
+                    if changed && let Err(e)=commit(&app,&mut candidate).await{eprintln!("Persistence: {e}");break;}
+                    *replica=candidate;session=next;drop(replica);if changed{announce(&app).await;}
+                },
+                Some(Ok(Message::Ping(data)))=>{if output.send(Message::Pong(data)).await.is_err(){break;}},
+                Some(Ok(Message::Pong(_)))=>{},Some(Ok(Message::Close(_)))|None=>break,
+                Some(Ok(Message::Text(_)))=>break,Some(Err(_))=>break,
+            },
+            result=updates.changed()=>{if result.is_err(){break;}},
+            _=heartbeat.tick()=>{if output.send(Message::Ping(Bytes::new())).await.is_err(){break;}},
+        }
     }
-    let mut replica = if let Some(p) = &state {
-        if p.exists() {
-            Replica::load(&fs::read(p)?)?
+    let _ = output.close().await;
+}
+async fn root(State(app): State<Arc<App>>) -> Response {
+    let release = app.release.read().await;
+    if let Some(entry) = release["web_entry"].as_str() {
+        return (
+            [(header::CACHE_CONTROL, "no-store")],
+            Redirect::temporary(entry),
+        )
+            .into_response();
+    }
+    drop(release);
+    serve_file(
+        app.web.join("index.html"),
+        "text/html; charset=utf-8",
+        false,
+    )
+    .await
+}
+async fn current_release(State(app): State<Arc<App>>) -> Response {
+    binary(
+        "application/json",
+        app.release.read().await.to_string().into_bytes(),
+        false,
+    )
+}
+async fn health(State(app): State<Arc<App>>) -> Response {
+    let id = app.replica.lock().await.snapshot().hex_id();
+    binary(
+        "application/json",
+        json!({"status":"ok","snapshot":id,"release":app.release.read().await["id"]})
+            .to_string()
+            .into_bytes(),
+        false,
+    )
+}
+fn asset_type(path: &str) -> Option<&'static str> {
+    match path {
+        "index.html" | "web/index.html" => Some("text/html; charset=utf-8"),
+        "app.js" | "web/app.js" | "pkg/otrios_dashboard.js" | "web/pkg/otrios_dashboard.js" => {
+            Some("text/javascript")
+        }
+        "style.css" | "web/style.css" => Some("text/css"),
+        "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
+            Some("application/wasm")
+        }
+        "manifest.json" => Some("application/json"),
+        "manifest.sig" | "native/armv7/dashboard-native" => Some("application/octet-stream"),
+        _ => None,
+    }
+}
+async fn serve_file(path: PathBuf, kind: &str, immutable: bool) -> Response {
+    match tokio::fs::read(&path).await {
+        Ok(data) if data.len() <= 32 * 1024 * 1024 => binary(kind, data, immutable),
+        _ => failure(StatusCode::NOT_FOUND, "Not found"),
+    }
+}
+async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<String>) -> Response {
+    match asset_type(&path) {
+        Some(kind) if !path.starts_with("native/") => {
+            serve_file(app.web.join(path), kind, false).await
+        }
+        _ => failure(StatusCode::NOT_FOUND, "Not found"),
+    }
+}
+async fn release_asset(
+    State(app): State<Arc<App>>,
+    RoutePath((id, path)): RoutePath<(String, String)>,
+) -> Response {
+    if !valid_id(&id) {
+        return failure(StatusCode::NOT_FOUND, "Not found");
+    }
+    match (&app.releases, asset_type(&path)) {
+        (Some(root), Some(kind)) => serve_file(root.join(id).join(path), kind, true).await,
+        _ => failure(StatusCode::NOT_FOUND, "Not found"),
+    }
+}
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut bind = "127.0.0.1:8876".to_string();
+    let mut state_file = None;
+    let mut releases = None;
+    let mut origins = Vec::new();
+    let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/dashboard");
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str(){
+        "--bind"=>bind=args.next().ok_or("Missing bind")?,"--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
+        "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release folder")?)),
+        "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web folder")?),"--origin"=>origins.push(args.next().ok_or("Missing origin")?),
+        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--state FILE] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
+    }
+    }
+    let mut replica = if let Some(path) = &state_file {
+        if path.exists() {
+            Replica::load(&fs::read(path)?)?
         } else {
             Replica::new()?
         }
     } else {
         Replica::new()?
     };
-    let server = Server::http(&bind)?;
-    println!("OTriOS dashboard: http://{bind}/");
-    let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/dashboard");
-    for mut request in server.incoming_requests() {
-        let (status, kind, body) = if request.method() == &Method::Post && request.url() == "/sync"
-        {
-            // Reject cross-site browser writes; this service is same-origin only.
-            let origin = request.headers().iter().find(|h| h.field.equiv("Origin"));
-            let host = request.headers().iter().find(|h| h.field.equiv("Host"));
-            let origin_ok = origin.is_none_or(|o| {
-                host.is_some_and(|h| o.value.as_str() == format!("http://{}", h.value.as_str()))
-            });
-            if !origin_ok {
-                (403, "text/plain", b"Origin rejected".to_vec())
-            } else {
-                let mut body = Vec::new();
-                let read = request
-                    .as_reader()
-                    .take(MAX_DOCUMENT_BYTES as u64 + 1)
-                    .read_to_end(&mut body);
-                let mut candidate = replica.clone();
-                let result = read
-                    .map_err(|e| e.to_string())
-                    .and_then(|_| candidate.merge(&body));
-                match result {
-                    Ok(_) => {
-                        let bytes = candidate.save();
-                        match state.as_ref().map(|p| persist(p, &bytes)).transpose() {
-                            Ok(_) => {
-                                replica = candidate;
-                                (200, "application/octet-stream", bytes)
-                            }
-                            Err(_) => (
-                                500,
-                                "text/plain",
-                                b"Persistence failed; old state retained".to_vec(),
-                            ),
-                        }
-                    }
-                    Err(_) => (
-                        400,
-                        "text/plain",
-                        b"Invalid or oversized dashboard document".to_vec(),
-                    ),
-                }
-            }
-        } else if request.method() == &Method::Get {
-            let route = request.url().split('?').next().unwrap_or("");
-            let asset = match route {
-                "/" => Some(("index.html", "text/html; charset=utf-8")),
-                "/app.js" => Some(("app.js", "text/javascript")),
-                "/style.css" => Some(("style.css", "text/css")),
-                "/pkg/otrios_dashboard.js" => Some(("pkg/otrios_dashboard.js", "text/javascript")),
-                "/pkg/otrios_dashboard_bg.wasm" => {
-                    Some(("pkg/otrios_dashboard_bg.wasm", "application/wasm"))
-                }
-                _ => None,
-            };
-            match asset.and_then(|(path, kind)| fs::read(web.join(path)).ok().map(|b| (kind, b))) {
-                Some((kind, body)) => (200, kind, body),
-                None => (404, "text/plain", b"Not found".to_vec()),
-            }
-        } else {
-            (405, "text/plain", b"Method not allowed".to_vec())
-        };
-        let response = Response::from_data(body)
-            .with_status_code(status)
-            .with_header(Header::from_bytes("Content-Type", kind).unwrap())
-            .with_header(Header::from_bytes("Cache-Control", "no-store").unwrap())
-            .with_header(Header::from_bytes("X-Content-Type-Options", "nosniff").unwrap());
-        let _ = request.respond(response);
+    if let Some(path) = &state_file {
+        persist(path, &replica.save())?;
     }
+    let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
+    let (changed, _) = watch::channel(0);
+    let app = Arc::new(App {
+        replica: Mutex::new(replica),
+        state_file,
+        web,
+        releases,
+        release: RwLock::new(release),
+        changed,
+        origins,
+        peers: Arc::new(Semaphore::new(64)),
+    });
+    let observer = app.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            tick.tick().await;
+            if let Some(next) = read_release(&observer.releases) {
+                let mut current = observer.release.write().await;
+                if *current != next {
+                    *current = next;
+                    drop(current);
+                    announce(&observer).await;
+                }
+            }
+        }
+    });
+    let routes = Router::new()
+        .route("/", get(root))
+        .route("/health", get(health))
+        .route("/release", get(current_release))
+        .route("/sync", post(sync_http))
+        .route("/stream", get(stream))
+        .route("/releases/{id}/{*path}", get(release_asset))
+        .route("/{*path}", get(source_asset))
+        .layer(DefaultBodyLimit::max(MAX_DOCUMENT_BYTES))
+        .with_state(app);
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    println!("OTriOS durable room: http://{bind}/");
+    axum::serve(listener, routes).await?;
     Ok(())
 }

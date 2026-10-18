@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Thin host adapter. The LGPL runtime owns state, snapshots, input and rendering.
-use otrios_core::dashboard::{Replica, render};
+use otrios_core::dashboard::{Replica, SyncSession, render};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Dashboard {
     replica: Replica,
+    session: SyncSession,
 }
 #[wasm_bindgen]
 impl Dashboard {
@@ -13,11 +14,13 @@ impl Dashboard {
     pub fn new() -> Result<Dashboard, String> {
         Ok(Self {
             replica: Replica::new()?,
+            session: SyncSession::default(),
         })
     }
     pub fn load(bytes: &[u8]) -> Result<Dashboard, String> {
         Ok(Self {
             replica: Replica::load(bytes)?,
+            session: SyncSession::default(),
         })
     }
     pub fn document(&mut self) -> Vec<u8> {
@@ -25,6 +28,15 @@ impl Dashboard {
     }
     pub fn merge(&mut self, bytes: &[u8]) -> Result<bool, String> {
         self.replica.merge(bytes)
+    }
+    pub fn reset_sync(&mut self) {
+        self.session = SyncSession::default();
+    }
+    pub fn sync_message(&mut self) -> Result<Option<Vec<u8>>, String> {
+        self.replica.generate_sync(&mut self.session)
+    }
+    pub fn receive_sync(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        self.replica.receive_sync(&mut self.session, bytes)
     }
     pub fn touch(&mut self, x: u32, y: u32) -> Result<bool, String> {
         self.replica.touch(x, y)

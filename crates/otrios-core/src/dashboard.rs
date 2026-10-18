@@ -7,6 +7,7 @@ mod snapshot;
 pub use render::{Mesh, render};
 pub use snapshot::ViewSnapshot;
 
+use automerge::sync::SyncDoc;
 use automerge::transaction::Transactable;
 use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc, ScalarValue, TextEncoding};
 use otrios_interfaces::{DashboardView, ViewContent, ViewNode};
@@ -14,6 +15,10 @@ use otrios_interfaces::{DashboardView, ViewContent, ViewNode};
 pub const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_EDITS: usize = 4096;
 pub type Result<T> = std::result::Result<T, String>;
+
+/// Ephemeral protocol state for one reliable, ordered connection. Reset on reconnect.
+#[derive(Clone, Default)]
+pub struct SyncSession(automerge::sync::State);
 
 fn seed() -> Result<AutoCommit> {
     // Every peer must share the *same history*, not independently create equal maps.
@@ -67,6 +72,32 @@ impl Replica {
     pub fn snapshot(&self) -> &ViewSnapshot {
         &self.snapshot
     }
+    pub fn generate_sync(&mut self, session: &mut SyncSession) -> Result<Option<Vec<u8>>> {
+        let data = self
+            .doc
+            .sync()
+            .generate_sync_message(&mut session.0)
+            .map(|m| m.encode());
+        if data.as_ref().is_some_and(|b| b.len() > MAX_DOCUMENT_BYTES) {
+            return Err("Sync message exceeds demo limit".into());
+        }
+        Ok(data)
+    }
+    /// Invalid messages retain both the previous view and protocol state.
+    pub fn receive_sync(&mut self, session: &mut SyncSession, bytes: &[u8]) -> Result<bool> {
+        if bytes.len() > MAX_DOCUMENT_BYTES {
+            return Err("Sync message too large".into());
+        }
+        let message = automerge::sync::Message::decode(bytes).map_err(err)?;
+        let mut doc = self.doc.clone();
+        let mut next_session = session.clone();
+        doc.sync()
+            .receive_sync_message(&mut next_session.0, message)
+            .map_err(err)?;
+        let changed = self.publish(doc)?;
+        *session = next_session;
+        Ok(changed)
+    }
     /// Prepare, validate, then replace the root. Errors retain both old doc and view.
     pub fn merge(&mut self, bytes: &[u8]) -> Result<bool> {
         let mut incoming = load_document(bytes)?;
@@ -109,6 +140,7 @@ impl Replica {
         Ok(false)
     }
     fn publish(&mut self, mut candidate: AutoCommit) -> Result<bool> {
+        validate_lineage(&mut candidate)?;
         if candidate.save().len() > MAX_DOCUMENT_BYTES {
             return Err("Demo document limit reached".into());
         }
@@ -123,7 +155,7 @@ fn load_document(bytes: &[u8]) -> Result<AutoCommit> {
     if bytes.is_empty() || bytes.len() > MAX_DOCUMENT_BYTES {
         return Err("Invalid document size".into());
     }
-    let doc = AutoCommit::load_with_options(
+    let mut doc = AutoCommit::load_with_options(
         bytes,
         automerge::LoadOptions::new().text_encoding(TextEncoding::UnicodeCodePoint),
     )
@@ -132,7 +164,19 @@ fn load_document(bytes: &[u8]) -> Result<AutoCommit> {
     if doc.get_change_by_hash(&seed_head).is_none() {
         return Err("Wrong dashboard seed/history".into());
     }
+    validate_lineage(&mut doc)?;
     Ok(doc)
+}
+fn validate_lineage(doc: &mut AutoCommit) -> Result<()> {
+    let seed_head = seed()?.get_heads()[0];
+    if doc
+        .get_changes(&[])
+        .iter()
+        .any(|change| change.deps().is_empty() && change.hash() != seed_head)
+    {
+        return Err("Unrelated document history".into());
+    }
+    Ok(())
 }
 fn project(doc: &mut AutoCommit) -> Result<ViewSnapshot> {
     let (_, title) = doc
@@ -219,6 +263,68 @@ fn project(doc: &mut AutoCommit) -> Result<ViewSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn drain(
+        a: &mut Replica,
+        sa: &mut SyncSession,
+        b: &mut Replica,
+        sb: &mut SyncSession,
+    ) -> usize {
+        let mut sent = 0;
+        for _ in 0..100 {
+            let one = a.generate_sync(sa).unwrap();
+            let two = b.generate_sync(sb).unwrap();
+            if one.is_none() && two.is_none() {
+                return sent;
+            }
+            if let Some(bytes) = one {
+                sent += bytes.len();
+                b.receive_sync(sb, &bytes).unwrap();
+            }
+            if let Some(bytes) = two {
+                sent += bytes.len();
+                a.receive_sync(sa, &bytes).unwrap();
+            }
+        }
+        panic!("Sync did not quiesce");
+    }
+    #[test]
+    fn incremental_sync_pushes_edits_and_recovers_offline_concurrency() {
+        let mut a = Replica::new().unwrap();
+        let mut b = Replica::new().unwrap();
+        let mut sa = SyncSession::default();
+        let mut sb = SyncSession::default();
+        drain(&mut a, &mut sa, &mut b, &mut sb);
+        a.set_enabled(false).unwrap();
+        drain(&mut a, &mut sa, &mut b, &mut sb);
+        assert_eq!(a.snapshot.id(), b.snapshot.id());
+        a.set_enabled(true).unwrap();
+        b.set_enabled(false).unwrap();
+        sa = SyncSession::default();
+        sb = SyncSession::default();
+        drain(&mut a, &mut sa, &mut b, &mut sb);
+        assert_eq!(a.snapshot.id(), b.snapshot.id());
+        assert!(
+            a.snapshot
+                .view()
+                .nodes
+                .iter()
+                .any(|n| n.content == ViewContent::Label("3 touches".into()))
+        );
+        assert!(a.generate_sync(&mut sa).unwrap().is_none());
+    }
+    #[test]
+    fn malformed_sync_preserves_view_and_connection_can_continue() {
+        let mut a = Replica::new().unwrap();
+        let mut b = Replica::new().unwrap();
+        let mut sa = SyncSession::default();
+        let mut sb = SyncSession::default();
+        let old = a.snapshot.id();
+        assert!(a.receive_sync(&mut sa, b"invalid").is_err());
+        assert_eq!(a.snapshot.id(), old);
+        b.set_enabled(false).unwrap();
+        drain(&mut a, &mut sa, &mut b, &mut sb);
+        assert_eq!(a.snapshot.id(), b.snapshot.id());
+    }
     #[test]
     fn independently_started_peers_have_identical_seed_and_snapshot() {
         assert_eq!(
