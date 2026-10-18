@@ -1,0 +1,69 @@
+{
+  "source_commit": "08025a6",
+  "binary_sha256": "7f4ad6530cfe0d6f22850b8018c1f86bd33c228c61c736d240d90b5911e5e262",
+  "scenario": "direct-premultiplied-atlas-64-tetrahedra-30hz",
+  "warmup_seconds": 2,
+  "acceptance": "passed: real Roboto screenshot and actual ARM regression",
+  "report": {
+    "alpha": "premultiplied",
+    "cadence": {
+      "fps": 48.72,
+      "frames": 580,
+      "over_25ms": 17,
+      "p50_ms": 17.656,
+      "p95_ms": 17.907,
+      "p99_ms": 52.971,
+      "samples": 580
+    },
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ],
+    "compose_submit_max_us": 292867,
+    "compose_submit_p50_us": 3365,
+    "compose_submit_p95_us": 4968,
+    "compose_submit_p99_us": 10112,
+    "drawn": 581,
+    "font_cache": [
+      119519,
+      313,
+      4194304
+    ],
+    "font_renderer": "slug-coverage-cache",
+    "font_resource": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+    "gamma": "srgb-framebuffer-blend",
+    "kernel_flips": {
+      "crtc": 37,
+      "events": 547,
+      "fps": 54.645005626634095,
+      "max_us": 88267,
+      "missed_vblanks": 20,
+      "p50_us": 17654,
+      "p95_us": 17675,
+      "p99_us": 35312,
+      "seconds": 9.991764
+    },
+    "load_requested_hz": 30,
+    "load_updates": 344,
+    "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+    "objects": 64,
+    "output": [
+      800,
+      1280
+    ],
+    "present_p50_us": 14213,
+    "present_p95_us": 14856,
+    "received_app_updates": 0,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "scanout_format": "RGB565",
+    "screen": "3d",
+    "seconds": 12.008650687,
+    "stride": 1600,
+    "video": "DRM",
+    "worker_stall_ms": 0
+  },
+  "capture_after_frames": 5
+}

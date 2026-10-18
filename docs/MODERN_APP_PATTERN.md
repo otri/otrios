@@ -83,6 +83,36 @@ intrinsic text measurement, sibling constraints and persistent logical keys for
 collaborative UI-tree editing remain separate work. The default surface is still
 1280 × 800. A general constraint solver is unnecessary for the present controls.
 
+## Fonts and presentation resources
+
+Fonts follow the immutable resource path, alongside code and blobs. Entry code
+initializes generic resource and presentation services; a trusted root app graph
+should supply font references. The current bootstrap still uses small generated
+Roboto filename/hash references, while actual quadratic font bytes travel as a
+separate compressed resource through the bounded cache. That transition has not
+completed the signed Home graph or legacy Shell migration.
+
+`Font::from_zstd` verifies admitted identity and bounded decoding once. An explicit
+retained font supplies line metrics, glyph advances/ink bounds and a prepared GPU
+curve/band atlas to both hosts. Baseline and line-box metrics are separate from
+glyph ink: accents, descenders and negative bearings must survive text frames;
+ancestor canvases own clipping. There is no embedded alphabet or ambient global
+font singleton.
+
+The shared Slug shader path emits glyph quads. A disposable 4 MiB GPU coverage
+cache reuses exact glyph/size/phase/transform results across tints; it does not
+change app state or persist touch/animation data. Coverage stays linear in a premultiplied-white atlas; text tint remains reusable.
+The default atlas path renders directly to the ordinary
+framebuffer for speed; exact linear-light compositing is a separate opt-in
+reference path because its full-screen conversion was costly on the frame. Cache capacity is separate from the code/blob cache and framebuffer
+allocations. Full Unicode shaping and generic app bootstrap remain unfinished;
+measured graphics capabilities are not an FPS acceptance claim.
+
+[RFC 0006](rfcs/0006-font-resources-and-text-presentation.md) defines admission,
+metrics, coverage/cache/color contracts and the current limits. The
+[font resource guide](../assets/fonts/roboto/README.md) records source hashes,
+licensing, packet layout and deterministic regeneration.
+
 ## Simplifications made in this pass
 
 - App layouts resolve against explicit local slots. They no longer construct a
@@ -111,7 +141,7 @@ through the dashboard module tree.
 | Layout v1 decoder and fixture generator | Stop authoring new v1 UI | Repack admitted modules to v2, exercise reload/recovery, then delete v1 decoding. No indefinite format fallback. |
 | Legacy Dashboard/MotionPresenter Wasm exports | Removed from the modern bundle | Delete their old host when the deployed web apps use the Canvas host. |
 | Separate prototype server and production dashboard service | Keep the prototype as a test harness | Add app admission/subscriptions to the production authority; reuse its auth, durable storage and ephemeral streams. Avoid building a second full auth service. |
-| SDL/Wayland fallback and signed `dashboard-sdl` artifacts | Recovery dependency, not dead code | Direct-display crash and rollback acceptance; update publisher, agent, release manifests and allowlists together. Stop adding app features to the fallback. |
+| SDL/Wayland fallback and signed `dashboard-sdl` artifacts | Quarantined; the SDL renderer cannot draw Slug glyph quads | New Slug releases publish direct GLES and browser hosts only. Retain the prior validated signed release for rollback; remove old recovery paths after direct-display crash/rollback acceptance and coordinated publisher/agent/manifest updates. |
 | Five-register ABI, hand-listed pack registry, derived default refs | Prototype scaffolding | Versioned typed commands/schema plus an admitted app catalog; remove scaffolding in that cutover. |
 | Per-scalar host getters that traverse scene metadata | Consolidate | One coherent frame-view payload if profiling shows traversal matters; the expensive repeated scene construction is already removed. |
 | Failed mount leaves the old view read-only until reconnect | Replace lifecycle behavior | Stage and validate a candidate UI/state/guest together, then publish atomically; exercise rejected update and rollback without losing the current input session. |
