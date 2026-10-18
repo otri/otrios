@@ -24,9 +24,6 @@ pub fn description() -> Ui {
         })
         .collect::<Vec<_>>();
     let mut body = vec![
-        button("Back")
-            .on_press(Event::back())
-            .frame([800., 35., 180., 80.]),
         button("Home")
             .navigate_to(Destination::app("home"))
             .frame([1000., 35., 216., 80.]),

@@ -577,12 +577,24 @@ pub fn canvas(children: Vec<Element>) -> Element {
     n
 }
 pub fn button(label: &str) -> Element {
+    // These labels are literal authored UI. Measure the same hash-qualified font
+    // shipped with the release, then let the existing pins center its natural width
+    // in every component instance. No character-count estimate or host CSS offset.
+    static FONT: std::sync::OnceLock<otrios_core::dashboard::font::Font> =
+        std::sync::OnceLock::new();
+    let font = FONT.get_or_init(|| {
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .expect("valid release font for authored label measurement")
+    });
+    let label_width = font.text_width(label, 2.).max(1.);
     let mut b = canvas(vec![
         rounded_rect(CARD).pin_edges(0.),
         text(label)
-            .frame([24., 0., 152., 16.])
-            .pin_left(24.)
-            .pin_right(24.)
+            .frame([0., 0., label_width, 16.])
+            .center_x()
             .center_y(),
     ])
     .frame([0., 0., 200., 80.]);
