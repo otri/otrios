@@ -33,8 +33,27 @@ fn start_with_releases(state: &std::path::Path, releases: Option<&std::path::Pat
     let mut server = Server { child, address };
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if TcpStream::connect(&server.address).is_ok() {
-            return server;
+        // On Linux a bare connect to an unused ephemeral port can self-connect.
+        // Require our persisted state and a real HTTP response, not just an open socket.
+        if state.exists()
+            && let Ok(mut probe) = TcpStream::connect(&server.address)
+        {
+            probe
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+            probe
+                .set_write_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+            let request = format!("GET /health HTTP/1.0\r\nHost: {}\r\n\r\n", server.address);
+            if probe.write_all(request.as_bytes()).is_ok() {
+                let mut response = String::new();
+                if probe.take(16384).read_to_string(&mut response).is_ok()
+                    && response.starts_with("HTTP/1.0 200")
+                    && response.contains("\"status\":\"ok\"")
+                {
+                    return server;
+                }
+            }
         }
         assert!(server.child.try_wait().unwrap().is_none(), "server exited");
         assert!(Instant::now() < deadline, "server startup timeout");
