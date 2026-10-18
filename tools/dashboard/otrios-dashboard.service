@@ -21,7 +21,7 @@ Environment=LD_LIBRARY_PATH=/opt/otrios-dashboard/lib
 StateDirectory=otrios-dashboard
 StateDirectoryMode=0700
 UMask=0077
-ExecStart=/usr/bin/python3 -u /opt/otrios-dashboard/frame-dashboard-agent.py --url ${DASHBOARD_URL} --cache /var/lib/otrios-dashboard --key /opt/otrios-dashboard/publisher.pem --capture-first-frame
+ExecStart=/usr/bin/python3 -u /opt/otrios-dashboard/frame-dashboard-agent.py --url ${DASHBOARD_URL} --cache /var/lib/otrios-dashboard --runtime-dir /run/spd-kiosk/otrios --cache-bytes 2147483648 --key /opt/otrios-dashboard/publisher.pem --capture-first-frame
 # A successful restart must not queue the conflicting browser start job.
 ExecStopPost=+/bin/sh -c 'test "$$SERVICE_RESULT" = success || exec /usr/bin/systemctl --no-block start spd-browser.service'
 Restart=on-failure

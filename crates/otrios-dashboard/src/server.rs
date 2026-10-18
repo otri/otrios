@@ -109,6 +109,10 @@ fn binary(kind: &str, bytes: Vec<u8>, immutable: bool) -> Response {
                 },
             ),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::HeaderName::from_static("service-worker-allowed"),
+                "/",
+            ),
         ],
         bytes,
     )
@@ -463,6 +467,10 @@ fn asset_type(path: &str) -> Option<&'static str> {
         "index.html" | "web/index.html" => Some("text/html; charset=utf-8"),
         "app.js"
         | "web/app.js"
+        | "artifact-cache-worker.js"
+        | "web/artifact-cache-worker.js"
+        | "artifact-cache.mjs"
+        | "web/artifact-cache.mjs"
         | "state-worker.js"
         | "web/state-worker.js"
         | "monitoring-session.mjs"

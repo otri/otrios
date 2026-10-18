@@ -7,7 +7,7 @@ import argparse,fcntl,hashlib,importlib.util,io,json,os,pathlib,subprocess,tarfi
 IMAGE='caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f'
 spec=importlib.util.spec_from_file_location('frame_agent',pathlib.Path(__file__).with_name('frame-dashboard-agent.py'));agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 WEB={'web/index.html','web/style.css','web/app.js','web/state-worker.js','web/pkg/otrios_dashboard.js','web/pkg/otrios_dashboard_bg.wasm'}
-OPTIONAL={'web/release-gate.mjs','web/monitoring-session.mjs'}
+OPTIONAL={'web/release-gate.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
 NATIVE={'native/armv7/dashboard-native','native/armv7/dashboard-sdl'}
 def bundle(releases,key,openssl,pointer=None):
     if pointer is None:pointer=(releases/'current.json').read_bytes()

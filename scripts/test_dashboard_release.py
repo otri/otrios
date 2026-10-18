@@ -15,7 +15,7 @@ class SignedReleases(unittest.TestCase):
         subprocess.run([OPENSSL,'genpkey','-algorithm','ED25519','-out',str(self.key)],check=True,capture_output=True)
         subprocess.run([OPENSSL,'pkey','-in',str(self.key),'-pubout','-out',str(self.public)],check=True,capture_output=True)
         self.web=self.root/'web';(self.web/'pkg').mkdir(parents=True)
-        for file in ['index.html','app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
+        for file in ['index.html','app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
         (self.web/'pkg/otrios_dashboard_bg.wasm').write_bytes(b'\0asm\x01\0\0\0')
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
@@ -31,6 +31,20 @@ class SignedReleases(unittest.TestCase):
             if source.exists():shutil.copyfile(source,dest/name)
     def test_signed_native_artifact_is_accepted(self):
         id,path=agent.cached(self.cache,self.id,self.public,OPENSSL);self.assertEqual(id,self.id);self.assertEqual(path.read_bytes(),self.native.read_bytes())
+    def test_download_reserves_budget_and_never_evicts_active_release(self):
+        from unittest.mock import patch
+        (self.web/'app.js').write_text('candidate')
+        candidate=self.publish()['id']
+        new=self.out/candidate
+        required=(new/'manifest.json').stat().st_size+64+self.native.stat().st_size
+        used=agent.cache_size(self.cache)
+        def fetch(base,path,limit):return (self.out/path.removeprefix('/releases/')).read_bytes()
+        with patch.object(agent,'fetch',side_effect=fetch):
+            with self.assertRaises(ValueError):agent.qualify('https://example.com',self.cache,self.public,OPENSSL,candidate,limit=used+required-1,pins=(self.id,))
+            self.assertTrue((self.cache/self.id/'dashboard-native').exists())
+            _,exe=agent.qualify('https://example.com',self.cache,self.public,OPENSSL,candidate,limit=used+required,pins=(self.id,))
+            self.assertEqual(exe.read_bytes(),self.native.read_bytes())
+            self.assertLessEqual(agent.cache_size(self.cache),used+required)
     def test_modified_native_bytes_are_rejected(self):
         (self.cache/self.id/'dashboard-native').write_bytes(self.native.read_bytes()+b'changed')
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
@@ -69,6 +83,34 @@ class SignedReleases(unittest.TestCase):
         self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id)
         release,_,_=module_publisher.bundle(self.out,self.public,OPENSSL,json.dumps(staged).encode())
         self.assertEqual(release,staged['id'])
+class ArtifactBudget(unittest.TestCase):
+    def test_lru_pins_blob_bytes_and_oversized_admission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp)
+            for i in range(3):
+                p=root/(str(i)*64);p.mkdir();(p/'payload').write_bytes(b'1234');os.utime(p,(i+1,i+1))
+            agent.trim_cache(root,8,pins=('0'*64,))
+            self.assertTrue((root/('0'*64)).exists());self.assertFalse((root/('1'*64)).exists());self.assertTrue((root/('2'*64)).exists())
+            with self.assertRaises(ValueError):agent.trim_cache(root,3,pins=('0'*64,'2'*64))
+            (root/'objects').mkdir();(root/'objects'/('f'*64)).write_bytes(b'1234')
+            agent.trim_cache(root,8,pins=('0'*64,));self.assertLessEqual(agent.cache_size(root),8)
+    def test_symlinks_never_escape_managed_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);(root/('a'*64)).symlink_to('/etc')
+            with self.assertRaises(ValueError):agent.trim_cache(root,1000)
+    def test_reload_waits_for_server_and_finished_gesture(self):
+        good={'stream_ready':True,'state_confirmed':True,'pending_commands':0,'input_busy':False}
+        self.assertTrue(agent.hot_reload_ready(good))
+        for update in [{'state_confirmed':False},{'pending_commands':1},{'input_busy':True}]:self.assertFalse(agent.hot_reload_ready(dict(good,**update)))
+    def test_blob_hash_is_verified_and_cache_can_survive_offline(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);data=b'immutable blob';digest=hashlib.sha256(data).hexdigest()
+            with patch.object(agent,'fetch',return_value=data):path=agent.cached_blob('https://example.com',root,digest,len(data),limit=100)
+            with patch.object(agent,'fetch',side_effect=AssertionError('Network used for cached blob')):self.assertEqual(agent.cached_blob('https://example.com',root,digest,len(data),limit=100).read_bytes(),data)
+            path.unlink()
+            with patch.object(agent,'fetch',return_value=b'wrong'):
+                with self.assertRaises(ValueError):agent.cached_blob('https://example.com',root,digest,len(data),limit=100)
 class DirectHostContract(unittest.TestCase):
     def test_direct_candidate_cannot_claim_wayland_or_uncalibrated_readiness(self):
         good={'renderer':'opengles2','video':'KMSDRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1}

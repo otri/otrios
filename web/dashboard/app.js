@@ -8,6 +8,7 @@ function showAuth(){const needed=currentScreen==='monitoring'&&!monitoringAuth.a
 const connection=document.querySelector('#connection'),dot=document.querySelector('#connection-dot'),revision=document.querySelector('#revision'),error=document.querySelector('#error');
 function fatal(e){error.hidden=false;error.textContent=String(e);connection.textContent='Unable to open this space';}
 try{
+  if('serviceWorker' in navigator)navigator.serviceWorker.register(new URL('./artifact-cache-worker.js',import.meta.url),{type:'module',scope:'/'}).catch(e=>console.warn('Artifact cache unavailable',e));
   await init();const presenter=new MotionPresenter();
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false;

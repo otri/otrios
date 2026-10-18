@@ -48,7 +48,7 @@ Horizontal glyph runs replace adjacent pixel rectangles without changing pixel
 coverage, clipping, primitives or responder geometry.
 
 Validation: required `scripts/check.sh`, strict all-feature/all-target Clippy,
-native bounded-mailbox/persistence test; coverage tests for glyphs and fractional
+native bounded-mailbox/no-client-persistence test; coverage tests for glyphs and fractional
 clipping, pinned snapshot reuse/invalidation, and rejection of grafted history.
 Physical touch tracking was accepted before this optimization; perceived update
 speed after deployment still needs confirmation on the panel.
@@ -62,7 +62,7 @@ bounded pending intent. A separate application worker owns reconciliation,
 network handoff and durable saves. Absolute control values coalesce independently;
 discrete commands retain order. Acknowledgements cannot erase newer pending
 values, and release feedback stays visible until the corresponding published
-replica is acknowledged. Stop flushes the final commands and waits for persistence.
+replica is acknowledged. Stop applies the final commands and waits up to three seconds for authority acknowledgement; it never writes a client checkpoint. Automatic reload requires confirmation before initiating stop.
 
 The native regression test holds the application worker behind a deterministic
 gate and verifies that drag/release feedback completes while the state file is

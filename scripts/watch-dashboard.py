@@ -33,8 +33,8 @@ def rebuild(config,wanted):
     run(['cargo','test','-p','otrios-core','--features','dashboard','--locked'],cwd=source,env=env)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs','scripts/test-dashboard-monitoring-session.mjs'],cwd=source)
-        for script in ['app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs']:run([config['node'],'--check','web/dashboard/'+script],cwd=source)
+        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs'],cwd=source)
+        for script in ['app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs','artifact-cache-worker.js','artifact-cache.mjs']:run([config['node'],'--check','web/dashboard/'+script],cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:

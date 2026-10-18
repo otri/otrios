@@ -25,7 +25,7 @@ RuntimeDirectoryMode=0700
 UMask=0077
 ExecStartPre=+/usr/bin/python3 /opt/otrios-dashboard/frame-console-mode.py enter
 # The accepted rule path is configured during installation, without changing its bytes.
-ExecStart=/usr/bin/python3 -u /opt/otrios-dashboard/frame-dashboard-agent.py --url ${DASHBOARD_URL} --cache /var/lib/otrios-dashboard --key /opt/otrios-dashboard/publisher.pem --video-driver KMSDRM --rotation 90 --touch-calibration ${DASHBOARD_TOUCH_RULE} --capture-first-frame
+ExecStart=/usr/bin/python3 -u /opt/otrios-dashboard/frame-dashboard-agent.py --url ${DASHBOARD_URL} --cache /var/lib/otrios-dashboard --runtime-dir /run/otrios-direct-console/otrios --cache-bytes 2147483648 --key /opt/otrios-dashboard/publisher.pem --video-driver KMSDRM --rotation 90 --touch-calibration ${DASHBOARD_TOUCH_RULE} --capture-first-frame
 ExecStopPost=+/usr/bin/python3 /opt/otrios-dashboard/frame-console-mode.py restore
 # Native update failures roll back in the agent; complete direct-host failure returns to Weston.
 ExecStopPost=+/bin/sh -c 'test "$$SERVICE_RESULT" = success || exec /usr/bin/systemctl --no-block start otrios-dashboard.service'
