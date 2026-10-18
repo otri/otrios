@@ -23,7 +23,11 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 
+#[path = "server_auth.rs"]
+mod auth;
+
 struct App {
+    auth: Option<Arc<auth::Sessions>>,
     replica: Mutex<Replica>,
     state_file: Option<PathBuf>,
     presentation_file: Option<PathBuf>,
@@ -33,6 +37,7 @@ struct App {
     changed: watch::Sender<u64>,
     origins: Vec<String>,
     peers: Arc<Semaphore>,
+    public_peers: Arc<Semaphore>,
 }
 fn persist(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let nonce = SystemTime::now()
@@ -387,7 +392,7 @@ async fn public_stream(
     {
         return failure(StatusCode::FORBIDDEN, "Origin rejected");
     }
-    let permit = match app.peers.clone().try_acquire_owned() {
+    let permit = match app.public_peers.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "Too many screens"),
     };
@@ -502,6 +507,8 @@ async fn release_asset(
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut bind = "127.0.0.1:8876".to_string();
     let mut public_bind = None;
+    let mut auth_file = None;
+    let mut session_seconds = 8 * 60 * 60;
     let mut state_file = None;
     let mut releases = None;
     let mut origins = Vec::new();
@@ -510,10 +517,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     while let Some(arg) = args.next() {
         match arg.as_str(){
         "--bind"=>bind=args.next().ok_or("Missing bind")?,"--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
+        "--auth-file"=>auth_file=Some(PathBuf::from(args.next().ok_or("Missing auth file")?)),
+        "--session-seconds"=>session_seconds=args.next().ok_or("Missing session duration")?.parse::<u64>()?,
         "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
         "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release folder")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web folder")?),"--origin"=>origins.push(args.next().ok_or("Missing origin")?),
-        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--state FILE] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
+        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--state FILE] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
     }
     }
     let mut replica = if let Some(path) = &state_file {
@@ -541,7 +550,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
     let (changed, _) = watch::channel(0);
+    if !(1..=86400).contains(&session_seconds) {
+        return Err("Session duration must be between 1 and 86400 seconds".into());
+    }
+    let auth = auth_file
+        .map(|path| auth::Sessions::load(&path, Duration::from_secs(session_seconds)).map(Arc::new))
+        .transpose()?;
     let app = Arc::new(App {
+        auth,
         replica: Mutex::new(replica),
         state_file,
         presentation_file,
@@ -551,6 +567,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         changed,
         origins,
         peers: Arc::new(Semaphore::new(64)),
+        public_peers: Arc::new(Semaphore::new(32)),
     });
     let observer = app.clone();
     tokio::spawn(async move {
@@ -575,6 +592,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = tokio::net::TcpListener::bind(address).await?;
         let public_routes = Router::new()
             .route("/stream", get(public_stream))
+            .route("/demo/stream", get(public_stream))
+            .route(
+                "/auth/session",
+                get(auth::session)
+                    .post(auth::login)
+                    .delete(auth::logout)
+                    .layer(DefaultBodyLimit::max(2048)),
+            )
+            .route("/monitoring/presentation", get(auth::presentation))
+            .route("/monitoring/stream", get(auth::stream))
             .route("/health", get(public_health))
             .fallback(|| async { failure(StatusCode::NOT_FOUND, "Not found") })
             .with_state(app.clone());
@@ -607,6 +634,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 )),
         )
         .route("/stream", get(stream))
+        .route("/demo/stream", get(public_stream))
+        .route(
+            "/auth/session",
+            get(auth::session)
+                .post(auth::login)
+                .delete(auth::logout)
+                .layer(DefaultBodyLimit::max(2048)),
+        )
+        .route("/monitoring/presentation", get(auth::presentation))
+        .route("/monitoring/stream", get(auth::stream))
         .route("/releases/{id}/{*path}", get(release_asset))
         .route("/{*path}", get(source_asset))
         .layer(DefaultBodyLimit::max(MAX_DOCUMENT_BYTES))

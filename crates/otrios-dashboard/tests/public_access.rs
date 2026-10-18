@@ -62,7 +62,7 @@ fn request(
         .unwrap();
     (status, bytes[split + 4..].to_vec())
 }
-fn room() -> Room {
+fn room_with_auth(auth: bool, seconds: u64) -> Room {
     let root = std::env::temp_dir().join(format!(
         "otrios-public-{}-{}",
         std::process::id(),
@@ -71,20 +71,43 @@ fn room() -> Room {
     std::fs::create_dir_all(&root).unwrap();
     let private = port();
     let public = port();
-    let child = Command::new(env!("CARGO_BIN_EXE_dashboard-server"))
-        .args([
-            "--bind",
-            &private,
-            "--public-bind",
-            &public,
-            "--origin",
-            ORIGIN,
-            "--state",
-            root.join("state.automerge").to_str().unwrap(),
-        ])
-        .stdout(Stdio::null())
-        .spawn()
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dashboard-server"));
+    command.args([
+        "--bind",
+        &private,
+        "--public-bind",
+        &public,
+        "--origin",
+        ORIGIN,
+        "--state",
+        root.join("state.automerge").to_str().unwrap(),
+    ]);
+    if auth {
+        use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
+        let salt = SaltString::encode_b64(b"test-only-otrios-salt").unwrap();
+        let hash = Argon2::default()
+            .hash_password(b"test-only-password", &salt)
+            .unwrap()
+            .to_string();
+        let path = root.join("auth.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({"username":"test-user","password_hash":hash}).to_string(),
+        )
         .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        command.args([
+            "--auth-file",
+            path.to_str().unwrap(),
+            "--session-seconds",
+            &seconds.to_string(),
+        ]);
+    }
+    let child = command.stdout(Stdio::null()).spawn().unwrap();
     let mut room = Room {
         child,
         private,
@@ -156,7 +179,7 @@ fn private_view(room: &Room) -> Vec<u8> {
 }
 #[test]
 fn anonymous_demo_stream_shares_frame_state_but_never_sends_monitoring_or_admin_routes() {
-    let room = room();
+    let room = room_with_auth(false, 28800);
     let private = private_view(&room);
     for path in [
         "/presentation",
@@ -221,5 +244,206 @@ fn anonymous_demo_stream_shares_frame_state_but_never_sends_monitoring_or_admin_
     assert_eq!(
         request(&room.private, "GET", "/presentation", &[], &[]).1,
         private
+    );
+}
+
+fn login(room: &Room, origin: &str, password: &str, old: Option<&str>) -> (u16, String) {
+    let bytes = serde_json::json!({"username":"test-user","password":password}).to_string();
+    let mut tcp = TcpStream::connect(&room.public).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    write!(tcp,"POST /auth/session HTTP/1.0\r\nHost: {}\r\nOrigin: {origin}\r\nX-OTriOS-Request: session\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",room.public,bytes.len()).unwrap();
+    if let Some(cookie) = old {
+        write!(tcp, "Cookie: {cookie}\r\n").unwrap();
+    }
+    write!(tcp, "\r\n{bytes}").unwrap();
+    let mut reply = String::new();
+    tcp.read_to_string(&mut reply).unwrap();
+    let status = reply.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, reply)
+}
+fn login_cookie(room: &Room) -> String {
+    let (status, reply) = login(room, ORIGIN, "test-only-password", None);
+    assert_eq!(status, 200, "{reply}");
+    let line = reply
+        .lines()
+        .find(|line| line.to_ascii_lowercase().starts_with("set-cookie:"))
+        .unwrap();
+    for attribute in ["Secure", "HttpOnly", "SameSite=Strict", "Path=/"] {
+        assert!(line.contains(attribute));
+    }
+    assert!(
+        !reply
+            .split("\r\n\r\n")
+            .nth(1)
+            .unwrap()
+            .contains("test-only-password")
+    );
+    line.split_once(':')
+        .unwrap()
+        .1
+        .trim()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string()
+}
+fn private_socket(
+    room: &Room,
+    cookie: &str,
+) -> tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>> {
+    let mut request = format!("ws://{}/monitoring/stream", room.public)
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("Origin", ORIGIN.parse().unwrap());
+    request
+        .headers_mut()
+        .insert("Cookie", cookie.parse().unwrap());
+    let (mut socket, _) = tungstenite::connect(request).unwrap();
+    if let tungstenite::stream::MaybeTlsStream::Plain(tcp) = socket.get_mut() {
+        tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    }
+    socket
+}
+#[test]
+fn monitoring_requires_a_cookie_and_logout_revokes_existing_streams_and_admin_access() {
+    let room = room_with_auth(true, 28800);
+    let bytes = private_view(&room);
+    for path in ["/auth/session", "/monitoring/presentation"] {
+        assert_eq!(request(&room.public, "GET", path, &[], &[]).0, 401);
+    }
+    for path in ["/monitoring/stream", "/monitoring/stream?token=forged"] {
+        let mut req = format!("ws://{}{path}", room.public)
+            .into_client_request()
+            .unwrap();
+        req.headers_mut().insert("Origin", ORIGIN.parse().unwrap());
+        assert!(
+            matches!(tungstenite::connect(req),Err(tungstenite::Error::Http(r)) if r.status().as_u16()==401)
+        );
+    }
+    assert_eq!(
+        login(
+            &room,
+            "https://unrelated.example",
+            "test-only-password",
+            None
+        )
+        .0,
+        403
+    );
+    assert_eq!(login(&room, ORIGIN, "wrong-password", None).0, 401);
+    let cookie = login_cookie(&room);
+    assert_eq!(
+        request(
+            &room.public,
+            "GET",
+            "/monitoring/presentation",
+            &[("Cookie", &cookie)],
+            &[]
+        )
+        .1,
+        bytes
+    );
+    for path in ["/layout", "/presentation", "/sync"] {
+        assert_eq!(
+            request(
+                &room.public,
+                "POST",
+                path,
+                &[("Cookie", &cookie), ("Origin", ORIGIN)],
+                &[]
+            )
+            .0,
+            404
+        );
+    }
+    let mut socket = private_socket(&room, &cookie);
+    let Message::Binary(view) = socket.read().unwrap() else {
+        panic!("missing view")
+    };
+    assert_eq!(&view[5..], bytes);
+    assert!(view.starts_with(b"OTML1"));
+    assert_eq!(
+        request(
+            &room.public,
+            "DELETE",
+            "/auth/session",
+            &[
+                ("Cookie", &cookie),
+                ("Origin", "https://unrelated.example"),
+                ("X-OTriOS-Request", "session")
+            ],
+            &[]
+        )
+        .0,
+        403
+    );
+    assert_eq!(
+        request(
+            &room.public,
+            "DELETE",
+            "/auth/session",
+            &[
+                ("Cookie", &cookie),
+                ("Origin", ORIGIN),
+                ("X-OTriOS-Request", "session")
+            ],
+            &[]
+        )
+        .0,
+        200
+    );
+    assert_eq!(
+        request(
+            &room.public,
+            "GET",
+            "/monitoring/presentation",
+            &[("Cookie", &cookie)],
+            &[]
+        )
+        .0,
+        401
+    );
+    assert!(matches!(socket.read(), Ok(Message::Close(_))));
+    assert_eq!(request(&room.public, "GET", "/health", &[], &[]).0, 200);
+}
+#[test]
+fn monitoring_sessions_rotate_and_expire_without_changing_demo_state() {
+    let room = room_with_auth(true, 2);
+    private_view(&room);
+    let before = std::fs::read(room.root.join("state.automerge")).unwrap();
+    let cookie = login_cookie(&room);
+    let (status, _) = login(&room, ORIGIN, "test-only-password", Some(&cookie));
+    assert_eq!(status, 200);
+    assert_eq!(
+        request(
+            &room.public,
+            "GET",
+            "/auth/session",
+            &[("Cookie", &cookie)],
+            &[]
+        )
+        .0,
+        401
+    );
+    let cookie = login_cookie(&room);
+    let mut socket = private_socket(&room, &cookie);
+    assert!(matches!(socket.read(), Ok(Message::Binary(_))));
+    assert!(matches!(socket.read(), Ok(Message::Close(_))));
+    assert_eq!(
+        request(
+            &room.public,
+            "GET",
+            "/auth/session",
+            &[("Cookie", &cookie)],
+            &[]
+        )
+        .0,
+        401
+    );
+    assert_eq!(
+        std::fs::read(room.root.join("state.automerge")).unwrap(),
+        before
     );
 }
