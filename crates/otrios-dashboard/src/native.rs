@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-//! SDL and the presentation clock stay on the main thread. CRDT, Shell,
-//! network reconciliation, static geometry and persistence belong to workers.
+//! SDL presentation host; shared state and network work live in native_worker.
+mod native_worker;
+use native_worker::{DisplayInfo, Frame, Input, options, state_worker};
 use otrios_core::dashboard::{
-    Replica, SyncSession,
-    motion::{Intent, Presenter, Stress},
-    render_scene,
-    shell::Shell,
+    display::{Surface, cached_regions},
+    motion::Presenter,
 };
 use otrios_interfaces::{
     keyboard::Edit,
@@ -17,28 +16,17 @@ use sdl2::{
 };
 use std::{
     fs,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
 };
-struct HostUpdate {
-    document: Vec<u8>,
-    presentation: Option<Vec<u8>>,
-}
-fn update(replica: &mut Replica) -> HostUpdate {
-    HostUpdate {
-        document: replica.save(),
-        presentation: replica.presentation().map(|p| p.bytes().to_vec()),
-    }
-}
-fn gpu_vertices(mesh: &[f32]) -> Vec<Vertex> {
+fn gpu_vertices(mesh: &[f32], surface: Surface) -> Vec<Vertex> {
     mesh.chunks_exact(6)
         .map(|v| Vertex {
-            position: FPoint::new(v[0], v[1]),
+            position: {
+                let p = surface.project([v[0], v[1]]);
+                FPoint::new(p[0], p[1])
+            },
             color: Color::RGBA(
                 (v[2] * 255.).round() as u8,
                 (v[3] * 255.).round() as u8,
@@ -49,259 +37,9 @@ fn gpu_vertices(mesh: &[f32]) -> Vec<Vertex> {
         })
         .collect()
 }
-#[derive(Clone)]
-struct Frame {
-    vertices: Arc<Vec<Vertex>>,
-    snapshot: String,
-    layout: String,
-    screen: String,
-    keyboard: bool,
-    editing: bool,
-    online: bool,
-    intent: Intent,
-    updates: u64,
-    received_updates: u64,
-    serial: u64,
-}
-enum Input {
-    Pointer(PointerEvent),
-    Back,
-    Edit(Edit),
-    First,
-    Cancel,
-    Presented(Frame, String),
-    Stop,
-}
-#[derive(Default)]
-struct Options {
-    url: Option<String>,
-    state: Option<String>,
-    frames: Option<usize>,
-    fullscreen: bool,
-    capture: Option<String>,
-    capture_after: usize,
-    seconds: Option<u64>,
-    exit_file: Option<String>,
-    ready_file: Option<String>,
-    release_file: Option<String>,
-    screen: Option<String>,
-    report: Option<String>,
-    load: u8,
-    objects: u16,
-    stall_ms: u64,
-}
-fn options() -> Result<Options, String> {
-    let mut o = Options::default();
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--fullscreen" {
-            o.fullscreen = true;
-            continue;
-        }
-        let value = args.next().ok_or("Missing argument value")?;
-        match arg.as_str() {
-            "--sync" => o.url = Some(value),
-            "--state" => o.state = Some(value),
-            "--frames" => o.frames = Some(value.parse::<usize>().map_err(|e| e.to_string())?),
-            "--capture-after" => {
-                o.capture_after = value.parse::<usize>().map_err(|e| e.to_string())?
-            }
-            "--capture" => o.capture = Some(value),
-            "--seconds" => o.seconds = Some(value.parse::<u64>().map_err(|e| e.to_string())?),
-            "--exit-file" => o.exit_file = Some(value),
-            "--ready-file" => o.ready_file = Some(value),
-            "--release-file" => o.release_file = Some(value),
-            "--screen" => o.screen = Some(value),
-            "--report" => o.report = Some(value),
-            "--objects" => o.objects = value.parse::<u16>().map_err(|e| e.to_string())?,
-            "--load-hz" => o.load = value.parse::<u8>().map_err(|e| e.to_string())?,
-            "--worker-stall-ms" => o.stall_ms = value.parse::<u64>().map_err(|e| e.to_string())?,
-            _ => return Err(format!("Unknown option {arg}")),
-        }
-    }
-    if o.objects > 64 || (o.objects > 0 && (o.url.is_some() || o.state.is_some())) {
-        return Err(
-            "--objects is an isolated benchmark override (1..64, no --sync or --state)".into(),
-        );
-    }
-    if o.load > 60 || o.stall_ms > 1000 {
-        return Err("Load must be <=60 Hz; stall <=1000 ms".into());
-    }
-    Ok(o)
-}
-fn state_worker(
-    o: Options,
-    input: mpsc::Receiver<Input>,
-    frames: mpsc::SyncSender<Frame>,
-) -> Result<(), String> {
-    let mut replica = match &o.state {
-        Some(p) if std::path::Path::new(p).exists() => {
-            Replica::load(&fs::read(p).map_err(|e| e.to_string())?)?
-        }
-        _ => Replica::new()?,
-    };
-    if let Some(path) = &o.state
-        && let Ok(bytes) = fs::read(format!("{path}.presentation.flex"))
-        && !bytes.is_empty()
-    {
-        replica.set_presentation(Some(&bytes))?;
-    }
-    if o.objects > 0 {
-        replica.set_motion(Intent {
-            count: o.objects,
-            ..replica.motion()?
-        })?;
-    }
-    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(1);
-    let (reply_tx, reply_rx) = mpsc::sync_channel::<HostUpdate>(1);
-    let stream_ready = Arc::new(AtomicBool::new(false));
-    let worker_ready = stream_ready.clone();
-    let network_thread = o
-        .url
-        .map(|url| thread::spawn(move || network(url, rx, reply_tx, o.release_file, worker_ready)));
-    let mut shell = Shell::default();
-    if let Some(path) = &o.state
-        && let Ok(route) = fs::read_to_string(format!("{path}.screen"))
-    {
-        shell.open_name(route.trim());
-    }
-    if let Some(screen) = &o.screen {
-        shell.open_name(screen);
-    }
-    shell.set_stress(o.load);
-    let started = Instant::now();
-    let mut last_sync = Instant::now() - Duration::from_secs(1);
-    let mut sent_id = None;
-    let mut saved_id = None;
-    let mut saved_screen = String::new();
-    let mut observed_stream = false;
-    let mut dirty = true;
-    let mut pending = None;
-    let mut serial = 0;
-    let mut received_updates = 0;
-    let mut scene_cache = None;
-    let mut mesh_cache = Arc::new(Vec::new());
-    let mut stress = Stress::new()?;
-    let mut stall = Instant::now();
-    loop {
-        if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
-            return Err("Live state worker stopped unexpectedly".into());
-        }
-        let now = started.elapsed().as_millis() as u64;
-        for event in input.try_iter() {
-            match event {
-                Input::Stop => {
-                    if let Some(path) = &o.state {
-                        save_state(path, &mut replica)?;
-                    }
-                    return Ok(());
-                }
-                Input::Pointer(e) => dirty |= shell.pointer(&mut replica, e, now)?,
-                Input::Back => dirty |= shell.back(),
-                Input::Edit(e) => dirty |= shell.hardware_edit(&e),
-                Input::Cancel => {
-                    shell.cancel();
-                    dirty = true;
-                }
-                Input::First => {
-                    if let Some(id) = shell.scene(&replica)?.controls().first().map(|c| c.node.id) {
-                        dirty |= shell.activate(&mut replica, id)?;
-                    }
-                }
-                Input::Presented(frame, renderer) => {
-                    if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
-                        let tmp = format!("{path}.tmp");
-                        fs::write(&tmp, info.to_string())
-                            .and_then(|_| fs::rename(tmp, path))
-                            .map_err(|e| e.to_string())?;
-                    }
-                }
-            }
-        }
-        let online = stream_ready.load(Ordering::Acquire);
-        if online != observed_stream {
-            observed_stream = online;
-            dirty = true;
-        }
-        while let Ok(next) = reply_rx.try_recv() {
-            let changed = replica.merge(&next.document)?;
-            received_updates += u64::from(changed);
-            dirty |= changed;
-            dirty |= replica.set_presentation(next.presentation.as_deref())?;
-        }
-        dirty |= shell.tick(now);
-        let stressed = stress.tick(now as f64, shell.stress_hz())?;
-        dirty |= stressed;
-        let stall_ms = o.stall_ms.max(shell.stress_stall_ms());
-        if stall_ms > 0 && stall.elapsed() >= Duration::from_secs(1) {
-            thread::sleep(Duration::from_millis(stall_ms));
-            stall = Instant::now();
-        }
-        if network_thread.is_some() && last_sync.elapsed() >= Duration::from_millis(100) {
-            if sent_id != Some(replica.snapshot().id()) && tx.try_send(replica.save()).is_ok() {
-                sent_id = Some(replica.snapshot().id());
-            }
-            last_sync = Instant::now();
-        }
-        if dirty {
-            let scene = shell.scene(&replica)?;
-            if scene_cache
-                .as_ref()
-                .is_none_or(|old| !Arc::ptr_eq(old, &scene))
-            {
-                mesh_cache = Arc::new(gpu_vertices(&render_scene(&scene).vertices));
-                scene_cache = Some(scene);
-            }
-            serial += 1;
-            pending = Some(Frame {
-                vertices: mesh_cache.clone(),
-                snapshot: replica.snapshot().hex_id(),
-                layout: replica.snapshot().layout().hex_id(),
-                screen: shell.screen_name().into(),
-                keyboard: shell.keyboard_visible(),
-                editing: shell.editing(),
-                online,
-                intent: replica.motion()?,
-                updates: stress.updates,
-                received_updates,
-                serial,
-            });
-            if shell.screen_name() != saved_screen {
-                if let Some(path) = &o.state {
-                    fs::write(format!("{path}.screen"), shell.screen_name())
-                        .map_err(|e| e.to_string())?;
-                }
-                saved_screen = shell.screen_name().into();
-            }
-            if saved_id != Some(replica.snapshot().id()) {
-                if let Some(p) = &o.state {
-                    save_state(p, &mut replica)?;
-                    let path = format!("{p}.presentation.flex");
-                    let tmp = format!("{path}.tmp");
-                    fs::write(
-                        &tmp,
-                        replica
-                            .presentation()
-                            .map(|p| p.bytes())
-                            .unwrap_or_default(),
-                    )
-                    .and_then(|_| fs::rename(tmp, path))
-                    .map_err(|e| e.to_string())?;
-                }
-                saved_id = Some(replica.snapshot().id());
-            }
-            dirty = false;
-        }
-        if let Some(frame) = pending.take() {
-            match frames.try_send(frame) {
-                Ok(()) => {}
-                Err(mpsc::TrySendError::Full(frame)) => pending = Some(frame),
-                Err(_) => return Ok(()),
-            }
-        }
-        thread::sleep(Duration::from_millis(4));
-    }
+fn display_rect(surface: Surface, region: otrios_interfaces::scene::Rect) -> sdl2::rect::Rect {
+    let r = surface.rect(region);
+    sdl2::rect::Rect::new(r.x as i32, r.y as i32, r.width as u32, r.height as u32)
 }
 fn main() -> Result<(), String> {
     let mut o = options()?;
@@ -313,10 +51,19 @@ fn main() -> Result<(), String> {
     let stall_ms = o.stall_ms;
     let mut capture = o.capture.take();
     let capture_after = o.capture_after;
+    let completion_probe = o.completion_probe;
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
-    sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "1");
-    let mut builder = video.window("OTriOS dashboard", 1280, 800);
+    let direct = video.current_video_driver().eq_ignore_ascii_case("kmsdrm");
+    if direct {
+        sdl.mouse().show_cursor(false);
+    }
+    sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", if direct { "0" } else { "1" });
+    sdl2::hint::set("SDL_RENDER_BATCHING", "1");
+    let surface = Surface::new(o.rotation)?;
+    let [width, height] = surface.extent();
+    let calibration = o.touch_matrix;
+    let mut builder = video.window("OTriOS dashboard", width, height);
     builder.position_centered().resizable();
     if o.fullscreen {
         builder.fullscreen_desktop();
@@ -341,10 +88,33 @@ fn main() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     canvas
-        .set_logical_size(1280, 800)
+        .set_logical_size(width, height)
         .map_err(|e| e.to_string())?;
     canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
     video.text_input().stop();
+    let output = canvas.output_size()?;
+    let touch_devices = sdl2::touch::num_touch_devices();
+    if direct && touch_devices < 1 {
+        return Err(
+            "Direct host has no accessible touch device; check udev/netlink and input permissions"
+                .into(),
+        );
+    }
+    if direct && output != (width, height) {
+        return Err(format!(
+            "Direct output {output:?} does not match rotated canvas {width}x{height}"
+        ));
+    }
+    let display_info = DisplayInfo {
+        video: video.current_video_driver(),
+        rotation: o.rotation,
+        output: [output.0, output.1],
+        touch_calibrated: calibration.is_some(),
+        touch_devices,
+        format: "SDL-managed",
+        color_bits: [0; 4],
+        stride: 0,
+    };
     println!(
         "Native video={} renderer={} vsync={}",
         video.current_video_driver(),
@@ -353,11 +123,24 @@ fn main() -> Result<(), String> {
     );
     let texture_creator = canvas.texture_creator();
     let mut static_texture = texture_creator
-        .create_texture_target(sdl2::pixels::PixelFormatEnum::RGBA8888, 1280, 800)
+        .create_texture_target(sdl2::pixels::PixelFormatEnum::RGBA8888, width, height)
         .map_err(|e| e.to_string())?;
     static_texture.set_blend_mode(sdl2::render::BlendMode::None);
-    let mut texture_mesh: Option<Arc<Vec<Vertex>>> = None;
+    let hud_bounds = display_rect(
+        surface,
+        otrios_interfaces::scene::Rect::new(0., 736., 1280., 64.),
+    );
+    let mut hud_texture = texture_creator
+        .create_texture_target(
+            sdl2::pixels::PixelFormatEnum::RGBA8888,
+            hud_bounds.width(),
+            hud_bounds.height(),
+        )
+        .map_err(|e| e.to_string())?;
+    hud_texture.set_blend_mode(sdl2::render::BlendMode::None);
+    let mut texture_mesh: Option<Arc<Vec<f32>>> = None;
     let mut hud_revision = u64::MAX;
+    let mut hud_regions = Vec::new();
     let (input_tx, input_rx) = mpsc::sync_channel(128);
     let (frame_tx, frame_rx) = mpsc::sync_channel(1);
     let worker = thread::spawn(move || state_worker(o, input_rx, frame_tx));
@@ -373,9 +156,12 @@ fn main() -> Result<(), String> {
     let mut dirty = true;
     let mut drawn = 0;
     let mut held = false;
+    let mut finger: Option<(i64, i64)> = None;
     let mut acked = 0;
     let mut last_present = Instant::now();
     let mut compose_us = Vec::new();
+    let mut completion_us = Vec::new();
+    let mut copy_pixels = 0u64;
     let mut present_us = Vec::new();
     let result = (|| -> Result<(), String> {
         'running: loop {
@@ -390,6 +176,53 @@ fn main() -> Result<(), String> {
                 break;
             }
             for event in events.poll_iter() {
+                if direct {
+                    let touch = match &event {
+                        Event::FingerDown {
+                            touch_id,
+                            finger_id,
+                            x,
+                            y,
+                            ..
+                        } if finger.is_none() => {
+                            finger = Some((*touch_id, *finger_id));
+                            Some((PointerPhase::Down, [*x, *y]))
+                        }
+                        Event::FingerMotion {
+                            touch_id,
+                            finger_id,
+                            x,
+                            y,
+                            ..
+                        } if finger == Some((*touch_id, *finger_id)) => {
+                            Some((PointerPhase::Move, [*x, *y]))
+                        }
+                        Event::FingerUp {
+                            touch_id,
+                            finger_id,
+                            x,
+                            y,
+                            ..
+                        } if finger == Some((*touch_id, *finger_id)) => {
+                            finger = None;
+                            Some((PointerPhase::Up, [*x, *y]))
+                        }
+                        _ => None,
+                    };
+                    if let Some((phase, p)) = touch {
+                        if let Some(position) = calibration.and_then(|m| surface.touch(m, p)) {
+                            send(Input::Pointer(PointerEvent {
+                                id: 1,
+                                phase,
+                                position,
+                            }))?;
+                        } else {
+                            finger = None;
+                            send(Input::Cancel)?;
+                        }
+                        continue;
+                    }
+                }
                 let editing = model.as_ref().is_some_and(|f| f.editing);
                 match event {
                     Event::Quit { .. } => break 'running,
@@ -450,7 +283,7 @@ fn main() -> Result<(), String> {
                         send(Input::Pointer(PointerEvent {
                             id: 0,
                             phase: PointerPhase::Down,
-                            position: [x as f32, y as f32],
+                            position: surface.unproject([x as f32, y as f32]),
                         }))?;
                         sdl.mouse().capture(true);
                     }
@@ -458,7 +291,7 @@ fn main() -> Result<(), String> {
                         send(Input::Pointer(PointerEvent {
                             id: 0,
                             phase: PointerPhase::Move,
-                            position: [x as f32, y as f32],
+                            position: surface.unproject([x as f32, y as f32]),
                         }))?;
                     }
                     Event::MouseButtonUp {
@@ -471,7 +304,7 @@ fn main() -> Result<(), String> {
                         send(Input::Pointer(PointerEvent {
                             id: 0,
                             phase: PointerPhase::Up,
-                            position: [x as f32, y as f32],
+                            position: surface.unproject([x as f32, y as f32]),
                         }))?;
                         sdl.mouse().capture(false);
                     }
@@ -485,6 +318,7 @@ fn main() -> Result<(), String> {
                         ..
                     } => {
                         held = false;
+                        finger = None;
                         sdl.mouse().capture(false);
                         send(Input::Cancel)?;
                     }
@@ -524,6 +358,7 @@ fn main() -> Result<(), String> {
                                     f.updates,
                                 )
                                 .vertices,
+                            surface,
                         )
                     } else {
                         Vec::new()
@@ -531,57 +366,103 @@ fn main() -> Result<(), String> {
                     if texture_mesh
                         .as_ref()
                         .is_none_or(|old| !Arc::ptr_eq(old, &f.vertices))
-                        || (animated && hud_revision != presenter.hud_revision())
                     {
+                        let static_vertices = gpu_vertices(&f.vertices, surface);
                         let mut rendered = Ok(());
-                        let hud = gpu_vertices(presenter.hud());
                         canvas
                             .with_texture_canvas(&mut static_texture, |target| {
                                 target.set_draw_color(Color::RGB(16, 28, 41));
                                 target.clear();
-                                rendered = target
-                                    .render_geometry(
-                                        f.vertices.as_slice(),
-                                        None,
-                                        sdl2::render::VertexIndices::Sequential,
-                                    )
-                                    .and_then(|_| {
-                                        if animated {
-                                            target.render_geometry(
-                                                &hud,
-                                                None,
-                                                sdl2::render::VertexIndices::Sequential,
-                                            )
-                                        } else {
-                                            Ok(())
-                                        }
-                                    });
+                                rendered = target.render_geometry(
+                                    &static_vertices,
+                                    None,
+                                    sdl2::render::VertexIndices::Sequential,
+                                );
+                            })
+                            .map_err(|e| e.to_string())?;
+                        rendered?;
+                        texture_mesh = Some(f.vertices.clone());
+                    }
+                    if animated && hud_revision != presenter.hud_revision() {
+                        let mut hud_mesh = gpu_vertices(presenter.hud(), surface);
+                        for v in &mut hud_mesh {
+                            v.position.x -= hud_bounds.x() as f32;
+                            v.position.y -= hud_bounds.y() as f32;
+                        }
+                        hud_regions = cached_regions(
+                            presenter.hud(),
+                            otrios_interfaces::scene::Rect::new(0., 736., 1280., 64.),
+                            [16, 28, 41, 255],
+                        )
+                        .into_iter()
+                        .map(|r| display_rect(surface, r))
+                        .collect();
+                        let mut rendered = Ok(());
+                        canvas
+                            .with_texture_canvas(&mut hud_texture, |target| {
+                                target.set_draw_color(Color::RGB(16, 28, 41));
+                                target.clear();
+                                rendered = target.render_geometry(
+                                    &hud_mesh,
+                                    None,
+                                    sdl2::render::VertexIndices::Sequential,
+                                );
                             })
                             .map_err(|e| e.to_string())?;
                         rendered?;
                         hud_revision = presenter.hud_revision();
-                        texture_mesh = Some(f.vertices.clone());
                     }
                     if animated {
                         // These demo stages are a solid Canvas between header and HUD.
                         // A tile clear avoids sampling a full-screen backdrop every frame.
                         canvas.set_draw_color(Color::RGB(16, 28, 41));
                         canvas.clear();
-                        for region in [
-                            sdl2::rect::Rect::new(0, 0, 1280, 256),
-                            sdl2::rect::Rect::new(0, 736, 1280, 64),
-                        ] {
-                            canvas.copy(&static_texture, region, region)?;
+                        copy_pixels = 0;
+                        for logical in f.copy_regions.iter() {
+                            let r = display_rect(surface, *logical);
+                            canvas.copy(&static_texture, r, r)?;
+                            copy_pixels += u64::from(r.width()) * u64::from(r.height());
+                        }
+                        for r in &hud_regions {
+                            let source = sdl2::rect::Rect::new(
+                                r.x() - hud_bounds.x(),
+                                r.y() - hud_bounds.y(),
+                                r.width(),
+                                r.height(),
+                            );
+                            canvas.copy(&hud_texture, source, *r)?;
+                            copy_pixels += u64::from(r.width()) * u64::from(r.height());
                         }
                     } else {
                         canvas.copy(&static_texture, None, None)?;
                     }
                     if !dynamic.is_empty() {
+                        // Opaque primitives need no destination read/blend. Keep
+                        // source-over behavior available for translucent meshes.
+                        canvas.set_blend_mode(if dynamic.iter().all(|v| v.color.a == 255) {
+                            sdl2::render::BlendMode::None
+                        } else {
+                            sdl2::render::BlendMode::Blend
+                        });
                         canvas.render_geometry(
                             &dynamic,
                             None,
                             sdl2::render::VertexIndices::Sequential,
                         )?;
+                        canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+                    }
+                    if completion_probe {
+                        // Diagnostic only: force GPU completion through SDL's
+                        // safe readback API, separating GPU execution from the
+                        // later GBM buffer/flip wait. Never used in a live room.
+                        let before_completion = Instant::now();
+                        canvas.read_pixels(
+                            sdl2::rect::Rect::new(0, 0, 1, 1),
+                            sdl2::pixels::PixelFormatEnum::RGBA8888,
+                        )?;
+                        if completion_us.len() < 3600 {
+                            completion_us.push(before_completion.elapsed().as_micros() as u64);
+                        }
                     }
                     if drawn >= capture_after
                         && let Some(path) = capture.take()
@@ -601,7 +482,11 @@ fn main() -> Result<(), String> {
                         present_us.push(before_present.elapsed().as_micros() as u64);
                     }
                     if f.serial != acked {
-                        send(Input::Presented(f.clone(), canvas.info().name.into()))?;
+                        send(Input::Presented(
+                            f.clone(),
+                            canvas.info().name.into(),
+                            display_info,
+                        ))?;
                         acked = f.serial;
                     }
                     dirty = false;
@@ -613,7 +498,7 @@ fn main() -> Result<(), String> {
                     // never add a fixed sleep after an already-blocking vsync present.
                     let deadline = last_present + Duration::from_nanos(16_666_667);
                     let now = Instant::now();
-                    if now < deadline {
+                    if !direct && now < deadline {
                         thread::sleep(deadline - now);
                     }
                     last_present = Instant::now();
@@ -647,215 +532,16 @@ fn main() -> Result<(), String> {
                 .copied()
                 .unwrap_or(0)
         };
-        let info = serde_json::json!({"present_p50_us":pp(0.5),"present_p95_us":pp(0.95),"cadence":stats,"compose_submit_p50_us":p(0.5),"compose_submit_p95_us":p(0.95),"seconds":started.elapsed().as_secs_f64(),"load_requested_hz":load,"worker_stall_ms":stall_ms,"load_updates":model.as_ref().map(|f|f.updates),"received_app_updates":model.as_ref().map(|f|f.received_updates),"screen":model.as_ref().map(|f|&f.screen),"objects":model.as_ref().map(|f|f.intent.count),"renderer":canvas.info().name,"video":video.current_video_driver(),"drawn":drawn,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default(),"measurement":"host frame-start cadence; not display scanout latency"});
+        completion_us.sort_unstable();
+        let cp = |f: f64| {
+            completion_us
+                .get(((completion_us.len().saturating_sub(1)) as f64 * f).round() as usize)
+                .copied()
+                .unwrap_or(0)
+        };
+        let info = serde_json::json!({"copy_pixels_per_frame":copy_pixels,"completion_probe":completion_probe,"completion_p50_us":cp(0.5),"completion_p95_us":cp(0.95),"rotation":display_info.rotation,"output":display_info.output,"touch_calibrated":display_info.touch_calibrated,"touch_devices":display_info.touch_devices,"present_p50_us":pp(0.5),"present_p95_us":pp(0.95),"cadence":stats,"compose_submit_p50_us":p(0.5),"compose_submit_p95_us":p(0.95),"seconds":started.elapsed().as_secs_f64(),"load_requested_hz":load,"worker_stall_ms":stall_ms,"load_updates":model.as_ref().map(|f|f.updates),"received_app_updates":model.as_ref().map(|f|f.received_updates),"screen":model.as_ref().map(|f|&f.screen),"objects":model.as_ref().map(|f|f.intent.count),"renderer":canvas.info().name,"video":video.current_video_driver(),"drawn":drawn,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default(),"measurement":"host frame-start cadence; not display scanout latency"});
         fs::write(path, info.to_string()).map_err(|e| e.to_string())?;
         println!("{info}");
     }
     Ok(())
-}
-fn save_state(path: &str, replica: &mut Replica) -> Result<(), String> {
-    use std::io::Write;
-    let temp = format!("{path}.tmp");
-    let mut f = fs::File::create(&temp).map_err(|e| e.to_string())?;
-    f.write_all(&replica.save())
-        .and_then(|_| f.sync_all())
-        .and_then(|_| fs::rename(temp, path))
-        .map_err(|e| e.to_string())
-}
-fn network(
-    url: String,
-    rx: mpsc::Receiver<Vec<u8>>,
-    reply: mpsc::SyncSender<HostUpdate>,
-    release_file: Option<String>,
-    stream_ready: Arc<AtomicBool>,
-) {
-    use tungstenite::{Error, Message, stream::MaybeTlsStream};
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let url = url
-        .replacen("https://", "wss://", 1)
-        .replacen("http://", "ws://", 1);
-    let url = if let Some(prefix) = url.strip_suffix("/sync") {
-        format!("{prefix}/stream")
-    } else {
-        url
-    };
-    let mut replica = match Replica::new() {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Sync startup: {e}");
-            return;
-        }
-    };
-    let mut pending = None;
-    let mut announced_release = String::new();
-    loop {
-        stream_ready.store(false, Ordering::Release);
-        while let Ok(doc) = rx.try_recv() {
-            if let Err(e) = replica.merge(&doc) {
-                eprintln!("Rejected local sync: {e}");
-            }
-        }
-        let mut socket = match tungstenite::connect(url.as_str()) {
-            Ok((s, _)) => s,
-            Err(e) => {
-                eprintln!("Sync disconnected: {e}");
-                thread::sleep(Duration::from_secs(1));
-                continue;
-            }
-        };
-        let tcp = match socket.get_mut() {
-            MaybeTlsStream::Plain(s) => Some(s),
-            MaybeTlsStream::Rustls(s) => Some(&mut s.sock),
-            _ => None,
-        };
-        if let Some(tcp) = tcp {
-            let _ = tcp.set_read_timeout(Some(Duration::from_millis(50)));
-            let _ = tcp.set_write_timeout(Some(Duration::from_secs(5)));
-        }
-        let mut session = SyncSession::default();
-        eprintln!("Live state stream connected");
-        loop {
-            loop {
-                match rx.try_recv() {
-                    Ok(doc) => {
-                        if let Err(e) = replica.merge(&doc) {
-                            eprintln!("Local sync: {e}");
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => return,
-                }
-            }
-            if let Some(bytes) = pending.take() {
-                match reply.try_send(bytes) {
-                    Ok(()) => {}
-                    Err(mpsc::TrySendError::Full(bytes)) => pending = Some(bytes),
-                    Err(_) => return,
-                }
-            }
-            match replica.generate_sync(&mut session) {
-                Ok(Some(bytes)) => {
-                    if socket.send(Message::Binary(bytes.into())).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    eprintln!("Sync generate: {e}");
-                    break;
-                }
-            }
-            match socket.read() {
-                Ok(Message::Binary(bytes)) if bytes.starts_with(b"OTML1") => {
-                    match replica.set_presentation(if bytes.len() == 5 {
-                        None
-                    } else {
-                        Some(&bytes[5..])
-                    }) {
-                        Ok(_) => pending = Some(update(&mut replica)),
-                        Err(e) => {
-                            eprintln!("Rejected monitoring view: {e}");
-                            break;
-                        }
-                    }
-                }
-                Ok(Message::Binary(bytes)) => match replica.receive_sync(&mut session, &bytes) {
-                    Ok(true) => {
-                        pending = Some(update(&mut replica));
-                        stream_ready.store(true, Ordering::Release);
-                    }
-                    Ok(false) => {
-                        stream_ready.store(true, Ordering::Release);
-                    }
-                    Err(e) => {
-                        eprintln!("Rejected stream: {e}");
-                        break;
-                    }
-                },
-                Ok(Message::Text(text)) => {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
-                        && value["type"] == "release"
-                    {
-                        eprintln!("Published code release={}", value["release"]["id"]);
-                        let id = value["release"]["id"].as_str().unwrap_or_default();
-                        if announced_release != id {
-                            if let Some(path) = &release_file {
-                                let tmp = format!("{path}.tmp");
-                                if let Err(e) = fs::write(&tmp, value["release"].to_string())
-                                    .and_then(|_| fs::rename(tmp, path))
-                                {
-                                    eprintln!("Release notice: {e}");
-                                }
-                            }
-                            announced_release = id.to_string();
-                        }
-                    }
-                }
-                Ok(Message::Close(_)) => break,
-                Ok(_) => {
-                    let _ = socket.flush();
-                }
-                Err(Error::Io(e))
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                    ) => {}
-                Err(e) => {
-                    eprintln!("Sync connection: {e}");
-                    break;
-                }
-            }
-        }
-        thread::sleep(Duration::from_millis(500));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn slow_presentation_consumer_does_not_block_state_or_unbound_the_mailbox() {
-        let path = std::env::temp_dir().join(format!(
-            "otrios-state-owner-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let options = Options {
-            state: Some(path.to_string_lossy().into()),
-            screen: Some("3d".into()),
-            ..Options::default()
-        };
-        let (tx, rx) = mpsc::sync_channel(128);
-        let (ft, fr) = mpsc::sync_channel(1);
-        let worker = thread::spawn(move || state_worker(options, rx, ft));
-        // Leave the first view occupying the single frame slot. Navigation and
-        // persistence must still complete without a presentation consumer.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let route = path.with_file_name(format!(
-            "{}.screen",
-            path.file_name().unwrap().to_string_lossy()
-        ));
-        while fs::read_to_string(&route).ok().as_deref() != Some("3d") {
-            assert!(Instant::now() < deadline);
-            thread::yield_now();
-        }
-        tx.send(Input::Back).unwrap();
-        while fs::read_to_string(&route).ok().as_deref() != Some("home") {
-            assert!(Instant::now() < deadline);
-            thread::yield_now();
-        }
-        let first = fr.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(first.screen, "3d");
-        let latest = fr.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(latest.screen, "home");
-        assert!(latest.serial > first.serial);
-        tx.send(Input::Stop).unwrap();
-        worker.join().unwrap().unwrap();
-        for suffix in ["", ".screen", ".presentation.flex"] {
-            let _ = fs::remove_file(format!("{}{suffix}", path.display()));
-        }
-    }
 }

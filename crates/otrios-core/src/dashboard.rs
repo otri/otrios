@@ -3,6 +3,7 @@
 //! This is a bounded, trusted-peer demo; it does not implement Linux shared memory.
 
 pub mod components;
+pub mod display;
 pub mod input;
 pub mod keyboard;
 pub mod layout;
