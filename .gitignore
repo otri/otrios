@@ -4,3 +4,6 @@
 .env.*
 !.env.example
 /bench-results/
+/web/dashboard/pkg/
+/dashboard-state.automerge
+/*-dashboard.automerge

@@ -15,3 +15,23 @@ jobs:
           persist-credentials: false
       - name: Prepare pinned Rust and run checks
         run: bash scripts/cloud-install.sh
+
+  dashboard-hosts:
+    name: Native GLES2 and Wasm hosts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install native display dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev xvfb libgl1-mesa-dri
+      - name: Prepare pinned Rust
+        run: rustup toolchain install 1.90.0 --profile minimal --component clippy --target wasm32-unknown-unknown
+      - name: Check all host adapters
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Compile browser module
+        run: cargo build -p otrios-dashboard --lib --release --locked --target wasm32-unknown-unknown
+      - name: Compile native module
+        run: cargo build -p otrios-dashboard --features native --bin dashboard-native --release --locked
+      - name: Exercise native GLES2 under Mesa
+        run: xvfb-run -a env SDL_RENDER_DRIVER=opengles2 LIBGL_ALWAYS_SOFTWARE=1 target/release/dashboard-native --frames 1

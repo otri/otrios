@@ -3,5 +3,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked --offline -- -D warnings
-cargo test --workspace --locked --offline
+cargo clippy --workspace --all-targets --features otrios-dashboard/server --locked --offline -- -D warnings
+cargo test --workspace --features otrios-dashboard/server --locked --offline

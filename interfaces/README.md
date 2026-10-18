@@ -1,6 +1,6 @@
 # OTriOS interface design requirements
 
-The public interface is Apache-2.0 so independent clients and accelerator implementations can share contracts. There is no generated IDL or stable wire format in this scaffold.
+The public interface is Apache-2.0 so independent clients and accelerator implementations can share contracts. There is no generated unified IDL or stable platform wire format. The dashboard experiment has a provisional FlexBuffers view contract documented in [DASHBOARD.md](../docs/DASHBOARD.md); it does not select the final IDL.
 
 Before choosing a FlatBuffers-like format, write an RFC and a small codec spike covering:
 

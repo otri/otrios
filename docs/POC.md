@@ -2,6 +2,10 @@
 
 Validate whether independent Linux processes can share immutable object revisions, publish a coherent aggregate snapshot, and react to updates without observing torn state. Use a userspace daemon and two clients; retain Linux's existing driver and scheduling model.
 
+## Active dashboard experiment
+
+The user requested a shared touch dashboard after this initial research plan. [DASHBOARD.md](DASHBOARD.md) defines that bounded product experiment: native GLES2 on the Rockchip frame, WebGL in a browser, a shared Rust compositor, CRDT edits and complete immutable view snapshots. It does not satisfy P1–P5's Linux IPC/shared-memory acceptance gates. The milestones below remain the runtime research backlog.
+
 ## Scope
 
 Rust 1.90.0, Linux x86_64 first, aarch64 as a follow-up; one local authority, one named aggregate, one writer, and two readers. Each update replaces two related counter objects in one manifest. Readers must always observe equal counters within a pinned snapshot, even during rapid publication. The same mechanism supports more objects, but this demo is deliberately small.

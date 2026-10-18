@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 [workspace]
 resolver = "2"
-members = ["crates/otrios-core", "crates/otrios-interfaces", "crates/otrios-sdk"]
+members = ["crates/otrios-core", "crates/otrios-interfaces", "crates/otrios-sdk", "crates/otrios-dashboard"]
 
 [workspace.package]
 version = "0.1.0"

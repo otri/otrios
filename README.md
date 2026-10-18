@@ -2,7 +2,9 @@
 
 OTriOS explores an operating environment built on Linux hardware support, immutable shared objects, reactive views, and streamable executable modules. This repository starts with a small Linux userspace proof of concept for the object model.
 
-The scaffold currently contains experimental Rust contract types and immutable aggregate manifest validation with unit tests. Object storage, hashing, IPC, shared memory, subscriptions, module execution, and capability enforcement are not implemented yet.
+The repository contains experimental Rust contract types, immutable aggregate manifest validation, and a [shared dashboard experiment](docs/DASHBOARD.md): Automerge state, immutable FlexBuffers view snapshots, and a Rust compositor shared by native OpenGL ES 2 and browser WebGL hosts. Touch updates synchronize through a local research-room service. The photo frame target uses native graphics, without a browser.
+
+The general content store, Linux shared-memory IPC, subscriptions, module execution, and capability enforcement remain unimplemented. Dashboard view hashing and publication are a bounded in-process experiment, not completion of the planned Linux runtime.
 
 ## Build and check
 
@@ -12,7 +14,7 @@ Install Rust through [official rustup](https://rustup.rs/), then run:
 bash scripts/cloud-install.sh
 ```
 
-After setup, the current dependency-free workspace can be checked offline:
+After setup, the workspace (after dependencies have been fetched) can be checked offline:
 
 ```sh
 bash scripts/check.sh
@@ -27,6 +29,8 @@ Rust 1.90.0 is pinned for reproducibility. Linux CI is configured for Ubuntu 24.
 | `crates/otrios-core` | Covered runtime implementation | LGPL-3.0-only |
 | `crates/otrios-interfaces` | Experimental shared contract types | Apache-2.0 |
 | `crates/otrios-sdk` | Client-facing SDK, currently contract reexports | Apache-2.0 |
+| `crates/otrios-dashboard` | Thin native/browser hosts and demo sync server | Apache-2.0 |
+| `web/dashboard` | Browser host for the shared compositor | Apache-2.0 |
 | `interfaces` | IDL requirements before choosing a generator | Apache-2.0 |
 | `docs` | Architecture, PoC milestones, and collaboration setup | Apache-2.0 |
 

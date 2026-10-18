@@ -91,3 +91,6 @@ mod tests {
         assert_eq!(a.get(ObjectId([9; 16])), None);
     }
 }
+
+#[cfg(feature = "dashboard")]
+pub mod dashboard;
