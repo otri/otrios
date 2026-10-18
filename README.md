@@ -41,3 +41,5 @@ Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), [T
 The runtime uses LGPLv3 only; interfaces, SDK, documentation, and tooling use Apache 2.0. These are path-specific licenses, not a choice of either license for all files. Separate proprietary hardware, firmware, and accelerator implementations are an intended integration model, subject to the applicable licenses. See [the license boundary](LICENSE.md).
 
 Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](docs/ANIMATION.md). The [direct KMS display path](docs/DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](docs/experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](docs/rfcs/0001-direct-linux-gles2.md).
+
+A [password-protected module host](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica from OrbStack independently of the private CRDT authority. Code becomes active only after the configured replica is ready.

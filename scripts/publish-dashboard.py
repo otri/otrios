@@ -11,14 +11,14 @@ def atomic(path, data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
-def publish(web,native,out,key,openssl,sdl=None):
+def publish(web,native,out,key,openssl,sdl=None,activate=True):
     web,native,out,key=map(pathlib.Path,(web,native,out,key));out.mkdir(parents=True,exist_ok=True)
     elf=native.read_bytes()
     if len(elf)<52 or elf[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(elf[18:20],'little')!=40:raise ValueError('Expected ARM32 little-endian ELF app')
     assets={}
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
-        names=['index.html','style.css','app.js','state-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
+        names=['index.html','style.css','app.js','state-worker.js','release-gate.mjs','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
         for name in names:
             data=(web/name).read_bytes()
             if name.endswith('.wasm') and data[:8]!=b'\0asm\x01\0\0\0':raise ValueError('Invalid Wasm artifact')
@@ -41,7 +41,7 @@ def publish(web,native,out,key,openssl,sdl=None):
             if (destination/'manifest.json').read_bytes()!=raw:raise ValueError('Existing release is corrupt')
         else:os.replace(stage,destination);pathlib.Path(stage).mkdir()
         pointer={'id':release,'web_entry':f'/releases/{release}/web/index.html','manifest':f'/releases/{release}/manifest.json','signature':f'/releases/{release}/manifest.sig','state_schema':manifest['state_schema'],'sync_protocol':manifest['sync_protocol']}
-        atomic(out/'current.json',json.dumps(pointer,sort_keys=True).encode())
+        if activate:atomic(out/'current.json',json.dumps(pointer,sort_keys=True).encode())
         return pointer
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--web',required=True);p.add_argument('--native',required=True);p.add_argument('--sdl');p.add_argument('--out',required=True);p.add_argument('--key',required=True);p.add_argument('--openssl',default='openssl');a=p.parse_args()

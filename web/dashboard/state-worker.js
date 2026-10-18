@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sole owner of CRDT, Shell, network protocol, projection and durable storage.
 import init,{Dashboard} from './pkg/otrios_dashboard.js';
+import {awaitRelease,validRelease} from './release-gate.mjs';
+let pendingRelease,releaseAbort;
 let dashboard,db,socket,retry=250,stopped=false,activeRelease,lastSnapshot,lastPresentation;
 let durable=true;
 function storageError(e){durable=false;postMessage({type:'warning',message:`Changes live in this tab; durable cache unavailable: ${e}`});}
@@ -41,11 +43,18 @@ function connect(){
         const message=JSON.parse(event.data);
         if(message.type==='release'){
           const r=message.release;
-          if(activeRelease&&r.id!==activeRelease&&r.web_entry){
+          if(!validRelease(r))return;
+          if(activeRelease&&r.id!==activeRelease){
             if(!db||!durable){postMessage({type:'warning',message:'A code update is ready; reload paused because durable storage is unavailable'});return;}
-            persist().then(()=>{stopped=true;socket.close();postMessage({type:'release',entry:r.web_entry});}).catch(fatal);return;
+            if(pendingRelease?.id===r.id)return;
+            releaseAbort?.abort();releaseAbort=new AbortController();pendingRelease=r;
+            const isCurrent=()=>pendingRelease===r&&!stopped&&durable;
+            awaitRelease(r,{isCurrent,signal:releaseAbort.signal}).then(async ready=>{
+              if(!ready||!isCurrent())return;await persist();if(!isCurrent())return;
+              stopped=true;socket?.close();postMessage({type:'release',entry:r.web_entry});
+            }).catch(storageError);return;
           }
-          activeRelease=r.id;postMessage({type:'release-id',id:r.id});
+          pendingRelease=null;releaseAbort?.abort();activeRelease=r.id;postMessage({type:'release-id',id:r.id});
         }
       }else{
         const bytes=new Uint8Array(event.data);let changed=false;

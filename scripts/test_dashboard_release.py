@@ -6,6 +6,7 @@ HERE=pathlib.Path(__file__).parent
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,HERE/file);value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
 publisher=module('publisher','publish-dashboard.py');agent=module('frame_agent','frame-dashboard-agent.py')
+module_publisher=module('module_publisher','publish-dashboard-module.py')
 OPENSSL=os.environ.get('OTRIOS_TEST_OPENSSL','/opt/homebrew/opt/openssl@3/bin/openssl' if pathlib.Path('/opt/homebrew/opt/openssl@3/bin/openssl').exists() else 'openssl')
 class SignedReleases(unittest.TestCase):
     def setUp(self):
@@ -14,7 +15,7 @@ class SignedReleases(unittest.TestCase):
         subprocess.run([OPENSSL,'genpkey','-algorithm','ED25519','-out',str(self.key)],check=True,capture_output=True)
         subprocess.run([OPENSSL,'pkey','-in',str(self.key),'-pubout','-out',str(self.public)],check=True,capture_output=True)
         self.web=self.root/'web';(self.web/'pkg').mkdir(parents=True)
-        for file in ['index.html','app.js','state-worker.js','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
+        for file in ['index.html','app.js','state-worker.js','release-gate.mjs','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
         (self.web/'pkg/otrios_dashboard_bg.wasm').write_bytes(b'\0asm\x01\0\0\0')
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
@@ -55,6 +56,19 @@ class SignedReleases(unittest.TestCase):
         self.assertEqual(recovery.read_bytes(),fallback.read_bytes())
         recovery.write_bytes(recovery.read_bytes()+b'tampered')
         with self.assertRaises(ValueError):agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
+    def test_module_replica_checks_all_assets_before_transfer(self):
+        release,pointer,payload=module_publisher.bundle(self.out,self.public,OPENSSL)
+        self.assertEqual(release,self.id);self.assertIn('web/pkg/otrios_dashboard_bg.wasm',payload)
+        self.assertEqual(json.loads(pointer)['id'],self.id)
+        (self.out/self.id/'web/app.js').write_text('tampered module')
+        with self.assertRaises(ValueError):module_publisher.bundle(self.out,self.public,OPENSSL)
+    def test_staged_module_does_not_announce_until_replica_is_ready(self):
+        (self.web/'app.js').write_text('staged code')
+        staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False)
+        self.assertNotEqual(staged['id'],self.id)
+        self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id)
+        release,_,_=module_publisher.bundle(self.out,self.public,OPENSSL,json.dumps(staged).encode())
+        self.assertEqual(release,staged['id'])
 class DirectHostContract(unittest.TestCase):
     def test_direct_candidate_cannot_claim_wayland_or_uncalibrated_readiness(self):
         good={'renderer':'opengles2','video':'KMSDRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1}

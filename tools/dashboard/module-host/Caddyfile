@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+{
+    admin off
+    auto_https off
+}
+:8080 {
+    route {
+        # The private snippet contains the Argon2id hash, never plaintext.
+        # Authentication precedes *every* handler, including files and WebSockets.
+        import /run/otrios/auth.caddy
+        header {
+            X-Content-Type-Options nosniff
+            Referrer-Policy same-origin
+            Cache-Control no-store
+        }
+        handle / {
+            root * /srv/bootstrap
+            rewrite * /index.html
+            file_server
+        }
+        handle /release {
+            root * /srv/modules
+            rewrite * /current.json
+            file_server
+        }
+        handle /releases/* {
+            root * /srv/modules
+            header Cache-Control "private, max-age=31536000, immutable"
+            file_server
+        }
+        @state path /sync /stream /layout /presentation /health
+        handle @state {
+            reverse_proxy {$OTRIOS_STATE_UPSTREAM:host.docker.internal:8876} {
+                # Credential verification ends here; never forward the password.
+                header_up -Authorization
+            }
+        }
+        handle {
+            respond "Not found" 404
+        }
+    }
+}

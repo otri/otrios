@@ -10,7 +10,7 @@ def inputs(repo):
     files=[repo/x for x in exact]
     for tree in ['crates','scripts','web','tools/dashboard']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()
@@ -33,7 +33,8 @@ def rebuild(config,wanted):
     run(['cargo','test','-p','otrios-core','--features','dashboard','--locked'],cwd=source,env=env)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        for script in ['app.js','state-worker.js']:run([config['node'],'--check','web/dashboard/'+script],cwd=source)
+        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs'],cwd=source)
+        for script in ['app.js','state-worker.js','release-gate.mjs']:run([config['node'],'--check','web/dashboard/'+script],cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:
@@ -56,7 +57,10 @@ def rebuild(config,wanted):
         run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features','native','--bin','dashboard-native','--target','armv7-unknown-linux-gnueabihf'])
         fallback=build/'dashboard-sdl';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/dashboard-native',fallback])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/dashboard',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback)
+    release=publisher.publish(source/'web/dashboard',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=not bool(config.get('module_volume')))
+    if config.get('module_volume'):
+        pointer=build/'module-pointer.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
+        run([sys.executable,source/'scripts/publish-dashboard-module.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--volume',config['module_volume'],'--marker',runtime/'module-host/published-release','--pointer',pointer,'--activate-origin'])
     publisher.atomic(build/'source-id',wanted.encode());print('PUBLISHED '+release['id'],flush=True)
     return release
 

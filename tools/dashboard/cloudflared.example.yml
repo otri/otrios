@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Use the dedicated tunnel, not an existing unrelated development connector.
+tunnel: TUNNEL_UUID
+credentials-file: /private/runtime/otrios-tunnel-credentials.json
+metrics: 127.0.0.1:20249
+no-autoupdate: true
+loglevel: info
+ingress:
+  - hostname: otrios.otri.ca
+    # Caddy checks the password before all module and state handlers.
+    service: http://127.0.0.1:8877
+  - service: http_status:404

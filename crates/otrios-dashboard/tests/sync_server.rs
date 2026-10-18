@@ -74,6 +74,7 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("index.html"), html).unwrap();
         std::fs::write(dir.join("state-worker.js"), "// worker asset").unwrap();
+        std::fs::write(dir.join("release-gate.mjs"), "// module handoff fixture").unwrap();
         let recovery = root.join(id).join("native/armv7");
         std::fs::create_dir_all(&recovery).unwrap();
         std::fs::write(recovery.join("dashboard-sdl"), b"signed-recovery-fixture").unwrap();
@@ -145,6 +146,10 @@ fn code_release_is_pushed_to_existing_peer_and_preserves_state_and_old_assets() 
     assert!(old.ends_with("first code"));
     assert!(get(&format!("/releases/{second}/web/state-worker.js")).ends_with("// worker asset"));
     assert!(old.contains("max-age=31536000, immutable"));
+    assert!(
+        get(&format!("/releases/{second}/web/release-gate.mjs"))
+            .ends_with("// module handoff fixture")
+    );
     assert!(
         get(&format!("/releases/{second}/native/armv7/dashboard-sdl"))
             .ends_with("signed-recovery-fixture")
