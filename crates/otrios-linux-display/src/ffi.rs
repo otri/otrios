@@ -52,6 +52,27 @@ unsafe extern "C" {
     fn ot_get_info(d: *mut c_void, info: *mut Info);
     fn ot_upload(d: *mut c_void, slot: u32, vertices: *const f32, floats: usize) -> c_int;
     fn ot_draw(d: *mut c_void, projection: *const f32, animated: c_int) -> c_int;
+    fn ot_set_font(
+        d: *mut c_void,
+        cw: u32,
+        ch: u32,
+        curves: *const f32,
+        cf: usize,
+        bw: u32,
+        bh: u32,
+        bands: *const u8,
+        bb: usize,
+    ) -> c_int;
+    fn ot_upload_text(
+        d: *mut c_void,
+        slot: u32,
+        vertices: *const f32,
+        floats: usize,
+        draws: *const u32,
+        draw_words: usize,
+    ) -> c_int;
+    fn ot_linear_scene(d: *mut c_void) -> c_int;
+    fn ot_text_stats(d: *mut c_void, stats: *mut u64);
     fn ot_present(d: *mut c_void, flip: *mut Flip) -> c_int;
     fn ot_input(d: *mut c_void, events: *mut Touch, capacity: usize) -> c_int;
     fn ot_pixels(d: *mut c_void, rgba: *mut u8, length: usize) -> c_int;
@@ -131,6 +152,81 @@ impl Display {
             ot_upload(self.owner.as_ptr(), slot, vertices.as_ptr(), vertices.len())
         })
     }
+    /// Upload the immutable quadratic/band resource once; no font ownership crosses FFI.
+    pub fn set_font(
+        &mut self,
+        cw: u32,
+        ch: u32,
+        curves: &[f32],
+        bw: u32,
+        bh: u32,
+        bands: &[u8],
+    ) -> Result<(), String> {
+        for (w, h, len) in [(cw, ch, curves.len()), (bw, bh, bands.len())] {
+            if w == 0
+                || h == 0
+                || w > 4096
+                || h > 4096
+                || u64::from(w) * u64::from(h) > 65536
+                || len as u64 != u64::from(w) * u64::from(h) * 4
+            {
+                return Err("Invalid font texture dimensions".into());
+            }
+        }
+        if curves.iter().any(|v| !v.is_finite() || v.abs() > 4.) {
+            return Err("Invalid font curve coordinate".into());
+        }
+        // SAFETY: validated dimensions exactly bound both borrowed arrays. C
+        // converts/copies before return and retains only owned GL textures.
+        self.result(unsafe {
+            ot_set_font(
+                self.owner.as_ptr(),
+                cw,
+                ch,
+                curves.as_ptr(),
+                curves.len(),
+                bw,
+                bh,
+                bands.as_ptr(),
+                bands.len(),
+            )
+        })
+    }
+    /// Retained colored triangles and indexed glyph quads share one ordered plan.
+    pub fn upload_scene(
+        &mut self,
+        slot: u32,
+        vertices: &[f32],
+        glyphs: &[f32],
+        draws: &[u32],
+    ) -> Result<(), String> {
+        crate::validate_text_mesh(glyphs, draws, vertices.len() / 6)?;
+        self.upload(slot, vertices)?;
+        // SAFETY: complete bounded quads and validated ranges; C copies the
+        // arrays synchronously and creates its own vertex/index buffers.
+        self.result(unsafe {
+            ot_upload_text(
+                self.owner.as_ptr(),
+                slot,
+                glyphs.as_ptr(),
+                glyphs.len(),
+                draws.as_ptr(),
+                draws.len(),
+            )
+        })
+    }
+    /// Exact linear-light composition is an explicit diagnostic mode. The
+    /// default directly blends authored sRGB colors using coverage alpha.
+    pub fn linear_scene_enabled(&self) -> bool {
+        // SAFETY: live, same-thread owner; reads a construction-time flag.
+        unsafe { ot_linear_scene(self.owner.as_ptr()) != 0 }
+    }
+    pub fn glyph_cache_stats(&self) -> [u64; 3] {
+        let mut stats = [0; 3];
+        // SAFETY: fixed ABI writes exactly three u64 counters, no retention.
+        unsafe { ot_text_stats(self.owner.as_ptr(), stats.as_mut_ptr()) };
+        stats
+    }
     pub fn draw(&mut self, projection: [f32; 9], animated: bool) -> Result<(), String> {
         if projection
             .iter()
@@ -184,6 +280,190 @@ mod tests {
     }
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
+    fn mesa_slug_quadratic_holes_cache_and_selected_color_pipeline() {
+        let mut d = Display::headless([128, 128], false).unwrap();
+        // Two oppositely wound quadratic contours. A hole must survive analytic
+        // coverage and cached composition; this is not a bitmap/SDF fixture.
+        let curves = [
+            0.5, 0.1, 0.9, 0.1, 0.9, 0.5, 0., 0., 0.9, 0.5, 0.9, 0.9, 0.5, 0.9, 0., 0., 0.5, 0.9,
+            0.1, 0.9, 0.1, 0.5, 0., 0., 0.1, 0.5, 0.1, 0.1, 0.5, 0.1, 0., 0., 0.5, 0.3, 0.3, 0.3,
+            0.3, 0.5, 0., 0., 0.3, 0.5, 0.3, 0.7, 0.5, 0.7, 0., 0., 0.5, 0.7, 0.7, 0.7, 0.7, 0.5,
+            0., 0., 0.7, 0.5, 0.7, 0.3, 0.5, 0.3, 0., 0.,
+        ];
+        let mut bands = vec![0; 128];
+        let mut band = |index: usize, a: u16, b: u16| {
+            bands[index * 4..index * 4 + 2].copy_from_slice(&a.to_le_bytes());
+            bands[index * 4 + 2..index * 4 + 4].copy_from_slice(&b.to_le_bytes());
+        };
+        for i in 0..8 {
+            band(i, 8, 16);
+            band(8 + i, 8, 24);
+            band(16 + i, [0, 1, 6, 7, 2, 3, 4, 5][i] * 2, 0);
+            band(24 + i, [1, 2, 5, 6, 0, 3, 4, 7][i] * 2, 0);
+        }
+        d.set_font(16, 1, &curves, 32, 1, &bands).unwrap();
+        let mut glyphs = Vec::new();
+        for (position, em) in [
+            ([-1., -1.], [0., 0.]),
+            ([1., -1.], [1., 0.]),
+            ([-1., 1.], [0., 1.]),
+            ([1., 1.], [1., 1.]),
+        ] {
+            glyphs.extend([
+                position[0],
+                position[1],
+                em[0],
+                em[1],
+                1.,
+                1.,
+                1.,
+                1.,
+                8.,
+                8.,
+                0.,
+                0.,
+                0.,
+                7.,
+                7.,
+                0.,
+            ]);
+        }
+        let projection = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+        d.upload_scene(0, &[], &glyphs, &[1, 0, 4]).unwrap();
+        d.draw(projection, false).unwrap();
+        let first = d.pixels().unwrap();
+        let stats = d.glyph_cache_stats();
+        assert_eq!(stats[1..], [1, 4 * 1024 * 1024]);
+        assert!(first[(64 * 128 + 64) * 4] < 25); // central hole
+        assert!(first[(24 * 128 + 64) * 4] > 240); // opaque ring
+        let fractional = first
+            .chunks_exact(4)
+            .filter(|p| p[0] > 25 && p[0] < 250)
+            .count();
+        assert!(
+            fractional > 100,
+            "Analytic edges must have fractional coverage"
+        );
+        d.draw(projection, false).unwrap();
+        assert_eq!(d.pixels().unwrap(), first);
+        assert_eq!(d.glyph_cache_stats()[1], 1); // no rerasterization on a cache hit
+        assert!(d.glyph_cache_stats()[0] > stats[0]);
+        // Exact subpixel phase and a new font generation cause fresh coverage.
+        for v in glyphs.chunks_exact_mut(16) {
+            v[0] += 0.25 / 64.;
+        }
+        d.upload_scene(0, &[], &glyphs, &[1, 0, 4]).unwrap();
+        d.draw(projection, false).unwrap();
+        assert_eq!(d.glyph_cache_stats()[1], 2);
+        assert_ne!(d.pixels().unwrap(), first);
+        d.set_font(16, 1, &curves, 32, 1, &bands).unwrap();
+        d.draw(projection, false).unwrap();
+        assert_eq!(d.glyph_cache_stats()[1], 3);
+        // Recoloring reuses coverage. Premultiplied RGB/alpha must each receive
+        // coverage once, including fractional edge pixels and non-unit tint alpha.
+        let opaque = d.pixels().unwrap();
+        for vertex in glyphs.chunks_exact_mut(16) {
+            vertex[7] = 0.5;
+        }
+        d.upload_scene(0, &[], &glyphs, &[1, 0, 4]).unwrap();
+        d.draw(projection, false).unwrap();
+        let tinted = d.pixels().unwrap();
+        assert_eq!(d.glyph_cache_stats()[1], 3);
+        if !d.linear_scene_enabled() {
+            for (full, half) in opaque.chunks_exact(4).zip(tinted.chunks_exact(4)) {
+                for channel in 0..3 {
+                    let expected =
+                        (u16::from(full[channel]) + [16_u16, 28, 41][channel]).div_ceil(2) as u8;
+                    assert!(
+                        half[channel].abs_diff(expected) <= 2,
+                        "Premultiplied coverage was applied more than once"
+                    );
+                }
+            }
+        }
+        // The default uses conventional sRGB alpha. The explicit diagnostic
+        // mode must instead encode linear-light50% near188.
+        let mut base = Vec::new();
+        for [x, y] in [
+            [-1., -1.],
+            [1., -1.],
+            [-1., 1.],
+            [-1., 1.],
+            [1., -1.],
+            [1., 1.],
+        ] {
+            base.extend([x, y, 0., 0., 0., 1.]);
+        }
+        d.upload(0, &base).unwrap();
+        for v in base.chunks_exact_mut(6) {
+            v[2] = 1.;
+            v[3] = 1.;
+            v[4] = 1.;
+            v[5] = 0.5;
+        }
+        d.upload(1, &base).unwrap();
+        d.draw(projection, true).unwrap();
+        let pixels = d.pixels().unwrap();
+        let range = if d.linear_scene_enabled() {
+            180..=196
+        } else {
+            120..=136
+        };
+        assert!(
+            pixels
+                .chunks_exact(4)
+                .all(|v| range.contains(&v[0]) && range.contains(&v[1]) && range.contains(&v[2]))
+        );
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
+    fn mesa_color_transfer_matches_selected_pipeline_all_256_bytes() {
+        let mut display = Display::headless([256, 8], false).unwrap();
+        let corners = [
+            [-1., -1.],
+            [1., -1.],
+            [-1., 1.],
+            [-1., 1.],
+            [1., -1.],
+            [1., 1.],
+        ];
+        let mut background = Vec::new();
+        for [x, y] in corners {
+            background.extend([x, y, 0., 0., 0., 1.]);
+        }
+        display.upload(0, &background).unwrap();
+        let mut ramp = Vec::new();
+        for byte in 0..256 {
+            for [x, y] in corners {
+                let position = (byte as f32 + (x + 1.) * 0.5) * 2. / 256. - 1.;
+                ramp.extend([position, y, 1., 1., 1., byte as f32 / 255.]);
+            }
+        }
+        display.upload(1, &ramp).unwrap();
+        display
+            .draw([1., 0., 0., 0., 1., 0., 0., 0., 1.], true)
+            .unwrap();
+        let pixels = display.pixels().unwrap();
+        for byte in 0..256 {
+            let linear = byte as f32 / 255.;
+            let encoded = if !display.linear_scene_enabled() {
+                linear
+            } else if linear <= 0.0031308 {
+                linear * 12.92
+            } else {
+                1.055 * linear.powf(1. / 2.4) - 0.055
+            };
+            let expected = (encoded * 255.).round() as u8;
+            for actual in &pixels[(4 * 256 + byte) * 4..(4 * 256 + byte) * 4 + 3] {
+                assert!(
+                    actual.abs_diff(expected) <= 1,
+                    "linear byte {byte}: expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_retained_geometry_and_alpha_pixels() {
         for rgb565 in [false, true] {
             let mut d = Display::headless([64, 64], rgb565).unwrap();
@@ -213,10 +493,14 @@ mod tests {
             d.upload(1, &vertices).unwrap();
             d.draw([1., 0., 0., 0., 1., 0., 0., 0., 1.], true).unwrap();
             let p = d.pixels().unwrap();
+            let range = if d.linear_scene_enabled() {
+                175..=200
+            } else {
+                115..=140
+            };
             assert!(
-                p.chunks_exact(4).all(|v| (115..=140).contains(&v[0])
-                    && v[1] < 5
-                    && (115..=140).contains(&v[2]))
+                p.chunks_exact(4)
+                    .all(|v| range.contains(&v[0]) && v[1] < 5 && range.contains(&v[2]))
             );
             d.present().unwrap();
         }
