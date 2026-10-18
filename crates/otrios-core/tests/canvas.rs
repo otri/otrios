@@ -10,6 +10,17 @@ mod layout;
 mod playground;
 use otrios_core::canvas::*;
 use otrios_interfaces::canvas::*;
+fn edit(c: &mut Client, label: &str, a: u16, b: u16) {
+    let scene = c.scene().unwrap();
+    let node = scene
+        .controls()
+        .iter()
+        .find(|n| n.node.semantics.as_ref().is_some_and(|s| s.label == label))
+        .unwrap()
+        .node
+        .id;
+    c.event_for_node(c.epoch(), node, a, b).unwrap();
+}
 fn code() -> Vec<u8> {
     wat::parse_str(include_str!(
         "../../../apps/component-playground/behavior/main.wat"
@@ -75,16 +86,27 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
     let mut sb = Session::default();
     pump(&mut a, &mut da, &mut sa);
     pump(&mut b, &mut db, &mut sb);
-    a.event(a.epoch(), 1, 870, 0).unwrap();
+    edit(&mut a, "Linear slider", 870, 0);
     pump(&mut a, &mut da, &mut sa);
     assert_eq!(a.value(1).unwrap(), 870);
     assert_eq!(b.value(1).unwrap(), 420);
     let s = a.scene().unwrap();
-    let slider = s.path(22).unwrap();
-    assert_eq!(slider.last().unwrap().node.frame.width, 870. * 0.488 + 32.);
-    assert!(
-        matches!(&s.path(16).unwrap().last().unwrap().node.primitive,otrios_interfaces::scene::Primitive::Text{value,..} if value=="87%")
-    );
+    let controls = s.controls();
+    let slider = controls
+        .iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Linear slider")
+        })
+        .unwrap();
+    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,870.*0.488+32.);
+    fn has_text(n: &otrios_interfaces::scene::SceneNode, value: &str) -> bool {
+        matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value:v,..} if v==value)
+            || n.children.iter().any(|c| has_text(c, value))
+    }
+    assert!(has_text(s.root(), "87%"));
     let old = a.epoch();
     activate(&mut a, layout::ui(), "layout:state", vec![]);
     assert!(!a.event(old, 1, 0, 0).unwrap());
@@ -115,7 +137,7 @@ fn wasm_reducer_and_declarative_app_are_qualified_at_extremes() {
             c.scene().unwrap();
         }
     }
-    assert_eq!(playground::manifest().dependencies.len(), 4);
+    assert_eq!(playground::manifest().dependencies.len(), 5);
     assert_eq!(layout::manifest().id, "layout-lab");
     assert_eq!(home::manifest().state_ref, "app:home/state");
 }
@@ -190,4 +212,90 @@ fn corrupt_candidate_retains_previous_view_without_applying_code() {
     );
     assert_eq!(c.title(), "Home");
     c.scene().unwrap();
+}
+
+#[test]
+fn declarative_navigation_and_bindings_survive_reordering_without_manual_ids() {
+    use otrios_interfaces::{
+        layout::{Blueprint, Responder, TemplateNode},
+        scene::TouchResponder,
+    };
+    fn navigation(ui: &Ui, label: &str) -> (String, String) {
+        let layout = otrios_core::dashboard::layout::Layout::from_bytes(&ui.layout).unwrap();
+        fn find<'a>(node: &'a TemplateNode, label: &str) -> Option<&'a TemplateNode> {
+            if node.semantics.as_ref().is_some_and(|s|matches!(&s.label,otrios_interfaces::layout::Expr::Literal(otrios_interfaces::layout::Value::Text(t)) if t==label)){return Some(node)}
+            node.children.iter().find_map(|c| find(c, label))
+        }
+        let Blueprint { templates, .. } = layout.blueprint();
+        let node = find(&templates[0].root, label).unwrap();
+        let Some(Responder::AppNavigate(action)) = node.responder else {
+            panic!("missing navigation")
+        };
+        let destination = ui.navigation.iter().find(|n| n.action == action).unwrap();
+        (destination.ui_ref.clone(), destination.state_ref.clone())
+    }
+    for reverse in [false, true] {
+        let mut children = vec![
+            authoring::button("Playground")
+                .navigate_to(authoring::Destination::app("component-playground"))
+                .frame([40., 200., 300., 90.]),
+            authoring::button("Layout")
+                .navigate_to(authoring::Destination::app("layout-lab"))
+                .frame([40., 350., 300., 90.]),
+        ];
+        if reverse {
+            children.reverse();
+        }
+        let ui = authoring::AppUi::new("launcher", "Launcher", authoring::schema("empty-v1", &[]))
+            .build("Apps", children);
+        assert_eq!(
+            navigation(&ui, "Playground"),
+            (
+                "app:component-playground/ui".into(),
+                "app:component-playground/state".into()
+            )
+        );
+        assert_eq!(
+            navigation(&ui, "Layout"),
+            ("app:layout-lab/ui".into(), "app:layout-lab/state".into())
+        );
+        let mut c = Client::default();
+        activate(&mut c, ui, "launcher", vec![]);
+        let scene = c.scene().unwrap();
+        assert!(
+            scene
+                .controls()
+                .iter()
+                .all(|n| matches!(n.node.responder, Some(TouchResponder::Activate(_))))
+        );
+        for control in scene.controls() {
+            assert_eq!(
+                control.node.children[0].frame.width, control.node.frame.width,
+                "button background follows its own canvas, not the screen"
+            );
+        }
+    }
+    let level = authoring::StateField::normalized(1, "level", 500);
+    let ui = authoring::AppUi::new(
+        "labels",
+        "Labels",
+        authoring::schema("label-state-v1", &[level]),
+    )
+    .build(
+        "Labels",
+        vec![
+            authoring::text(level.percent()).position([50., 200.]),
+            authoring::text(level.percent()).position([50., 300.]),
+        ],
+    );
+    assert_eq!(
+        ui.selectors.len(),
+        1,
+        "shared field/projection is interned once"
+    );
+    assert_eq!(
+        encode_ui(&home::ui()).unwrap(),
+        encode_ui(&home::ui()).unwrap(),
+        "same source compiles deterministically"
+    );
 }

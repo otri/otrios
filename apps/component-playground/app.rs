@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#[path = "behavior/events.rs"]
+mod behavior;
 #[path = "state/schema.rs"]
 mod state;
 mod ui;
@@ -12,6 +14,7 @@ pub fn manifest() -> App {
             "ui.rs",
             "state/schema.rs",
             "behavior/main.wat",
+            "behavior/events.rs",
             "sdk:canvas-authoring-v1",
         ],
     )

@@ -100,3 +100,61 @@ and web behavior, input capture cleanup, and no state or executable-instance lea
 across navigation. See RFC 0004 and `scripts/check-canvas-prototype.sh`.
 
 Validation evidence and prototype resource limits are recorded in [canvas-apps-validation.md](../docs/experiments/canvas-apps-validation.md).
+
+## Declarative UI authoring
+
+The source builder keeps relationships together. This is the Home launcher code:
+
+```rust
+button("Component Playground")
+    .navigate_to(Destination::app("component-playground"))
+    .frame([55., 230., 550., 120.])
+```
+
+The destination owns both UI and State refs. The compiler creates the button's
+Canvas, rounded background, text, semantic label, responder and navigation-table
+entry together. There is no manually paired `button(..., 1)` / `action: 1`.
+A custom State input will need an explicit destination-ref constructor; the
+current convenience constructor uses the app's default UI/State pair.
+
+Bindings and event declarations follow the same pattern:
+
+```rust
+text(LEVEL.percent()).position([440., 180.]).font_scale(3.)
+rounded_rect(ACCENT)
+    .frame([0., 22., 520., 36.])
+    .width(LEVEL.mapped(32., 520.))
+canvas(slider_primitives)
+    .frame([80., 260., 520., 80.])
+    .on_drag("Linear slider", Event::slider(LEVEL).reduced_by(SET_LEVEL))
+```
+
+`LEVEL` is declared once in the app's state schema. `SET_LEVEL` names the versioned
+Wasm event ABI in `behavior/events.rs`. The compiler interns repeated typed
+field/projection bindings, assigns control indices and emits all responder tables.
+Layout Lab's standard setters omit `reduced_by`; no custom code is required.
+
+There are deliberately separate identity domains:
+
+- **Node IDs** identify retained primitives for input capture/semantics in one
+  compiled UI. They are not paint priorities. Sibling order determines painting;
+  hit testing visits the reverse paint order.
+- **Navigation indices** join compiled navigation responders to their destination
+  refs. **Control indices** join event responders to their handlers. The builder
+  generates both, and their enum variants keep the domains distinct.
+- **State field IDs** are durable schema identities. **Behavior event IDs** are
+  guest ABI identities. These remain explicit named constants; changing/reusing
+  them needs compatibility or migration work.
+
+Generated UI IDs follow deterministic tree traversal. They are stable for the
+same compiled description, but inserting/reordering nodes can change them on
+rebuild. They are scoped to the UI activation generation; never persist them as
+app-state references. The Canvas invalidates stale input/capture on replacement.
+Persistent logical UI keys for editing a UI graph itself remain separate work;
+this builder does not claim identity preservation across structural edits.
+
+The builder is source authoring, not a new host toolkit. Its output is still the
+same FlexBuffers primitives, selectors, responders and navigation data. Renderers
+consume that data and do not execute these Rust builder functions. Absolute
+frames remain explicit geometry in this prototype; a stack/constraint layout DSL
+can be added independently of these identity/binding improvements.

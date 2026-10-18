@@ -1,170 +1,57 @@
 // SPDX-License-Identifier: Apache-2.0
+use super::{
+    behavior::*,
+    state::{self, *},
+};
 use crate::authoring::*;
-use otrios_interfaces::{canvas::*, layout::*};
+use otrios_interfaces::canvas::{StateSchema, Ui};
 pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
-    let mut slider = control(
-        node(20, [80., 260., 520., 80.], Shape::Canvas { clip: true }),
-        "Linear slider",
-        1,
-        true,
-    );
-    slider.children = vec![round(21, [0., 22., 520., 36.], CARD), {
-        let mut fill = round(22, [0., 22., 520., 36.], ACCENT);
-        fill.frame[2] = binding(1);
-        fill
-    }];
-    let mut dial = control(
-        node(30, [720., 230., 180., 180.], Shape::Canvas { clip: true }),
-        "Rotary dial",
-        2,
-        true,
-    );
-    let mut dot = node(
-        32,
-        [80., 0., 20., 20.],
-        Shape::Circle {
-            color: color(ACCENT),
-        },
-    );
-    dot.frame[1] = binding(3);
-    dial.children = vec![
-        node(
-            31,
-            [0., 0., 180., 180.],
-            Shape::Circle { color: color(CARD) },
-        ),
-        dot,
-    ];
-    let mut pad = control(
-        node(40, [80., 460., 520., 230.], Shape::Canvas { clip: true }),
-        "Touch pad",
-        3,
-        true,
-    );
-    let mut cursor = node(
-        42,
-        [0., 0., 20., 20.],
-        Shape::Circle {
-            color: color(ACCENT),
-        },
-    );
-    cursor.frame[0] = binding(5);
-    cursor.frame[1] = binding(6);
-    pad.children = vec![round(41, [0., 0., 520., 230.], CARD), cursor];
-    // An ordinary activating responder routes through the same app event table.
-    let mut toggle = button(50, [720., 480., 380., 100.], "Toggle", 5);
-    toggle.responder = Some(Responder::AppEvent {
-        control: 5,
-        drag: false,
-    });
-    let layout = blueprint(
-        "Component Playground",
-        vec![
-            button(10, [1020., 35., 200., 80.], "Home", 0),
-            label(15, [80., 180.], text("01 / Linear"), 2.),
-            label(16, [440., 180.], binding(2), 3.),
-            slider,
-            label(25, [720., 180.], text("02 / Dial"), 2.),
-            dial,
-            label(35, [920., 290.], binding(4), 3.),
-            label(36, [80., 410.], text("03 / Touch pad"), 2.),
-            pad,
-            toggle,
-            label(55, [760., 610.], binding(7), 3.),
-            label(
-                60,
-                [80., 740.],
-                text("Binary UI + shared CRDT state + loaded WASM behavior"),
-                2.,
-            ),
-        ],
-    );
-    Ui {
-        format: "otrios-canvas-v1".into(),
-        ui_ref: "app:component-playground/ui".into(),
-        title: "Component Playground".into(),
-        state_schema,
-        layout,
-        selectors: vec![
-            Selector {
-                local: 1,
-                field: 1,
-                projection: Projection::Number {
-                    scale: 0.488,
-                    offset: 32.,
-                },
-            },
-            Selector {
-                local: 2,
-                field: 1,
-                projection: Projection::Percent,
-            },
-            Selector {
-                local: 3,
-                field: 2,
-                projection: Projection::Number {
-                    scale: 0.16,
-                    offset: 0.,
-                },
-            },
-            Selector {
-                local: 4,
-                field: 2,
-                projection: Projection::Percent,
-            },
-            Selector {
-                local: 5,
-                field: 3,
-                projection: Projection::Number {
-                    scale: 0.5,
-                    offset: 0.,
-                },
-            },
-            Selector {
-                local: 6,
-                field: 4,
-                projection: Projection::Number {
-                    scale: 0.21,
-                    offset: 0.,
-                },
-            },
-            Selector {
-                local: 7,
-                field: 5,
-                projection: Projection::EnabledText,
-            },
-        ],
-        handlers: vec![
-            Handler {
-                control: 1,
-                event: 1,
-                kind: GestureKind::Slider,
-                fields: vec![1],
-            },
-            Handler {
-                control: 2,
-                event: 2,
-                kind: GestureKind::Dial,
-                fields: vec![2],
-            },
-            Handler {
-                control: 3,
-                event: 3,
-                kind: GestureKind::Pad,
-                fields: vec![3, 4],
-            },
-            Handler {
-                control: 5,
-                event: 5,
-                kind: GestureKind::Activate,
-                fields: vec![5],
-            },
-        ],
-        navigation: vec![home_nav()],
-        behavior: Some(BehaviorRef {
-            sha256: otrios_core::canvas::hash(code),
-            abi: 1,
-            writes: vec![1, 2, 3, 4, 5],
-        }),
-    }
+    let slider = canvas(vec![
+        rounded_rect(CARD).frame([0., 22., 520., 36.]),
+        rounded_rect(ACCENT)
+            .frame([0., 22., 520., 36.])
+            .width(LEVEL.mapped(32., 520.)),
+    ])
+    .frame([80., 260., 520., 80.])
+    .on_drag("Linear slider", Event::slider(LEVEL).reduced_by(SET_LEVEL));
+    let dial = canvas(vec![
+        circle(CARD).frame([0., 0., 180., 180.]),
+        circle(ACCENT)
+            .frame([80., 0., 20., 20.])
+            .y(ANGLE.mapped(0., 160.)),
+    ])
+    .frame([720., 230., 180., 180.])
+    .on_drag("Rotary dial", Event::dial(ANGLE).reduced_by(SET_ANGLE));
+    let pad = canvas(vec![
+        rounded_rect(CARD).frame([0., 0., 520., 230.]),
+        circle(ACCENT)
+            .frame([0., 0., 20., 20.])
+            .x(PAD_X.mapped(0., 500.))
+            .y(PAD_Y.mapped(0., 210.)),
+    ])
+    .frame([80., 460., 520., 230.])
+    .on_drag("Touch pad", Event::pad(PAD_X, PAD_Y).reduced_by(SET_PAD));
+    AppUi::new("component-playground", "Component Playground", state_schema)
+        .with_behavior(code, &state::FIELDS)
+        .build(
+            "Component Playground",
+            vec![
+                button("Home")
+                    .navigate_to(Destination::app("home"))
+                    .frame([1020., 35., 200., 80.]),
+                text("01 / Linear").position([80., 180.]),
+                text(LEVEL.percent()).position([440., 180.]).font_scale(3.),
+                slider,
+                text("02 / Dial").position([720., 180.]),
+                dial,
+                text(ANGLE.percent()).position([920., 290.]).font_scale(3.),
+                text("03 / Touch pad").position([80., 410.]),
+                pad,
+                button("Toggle")
+                    .on_press(Event::press(ENABLED).reduced_by(TOGGLE))
+                    .frame([720., 480., 380., 100.]),
+                text(ENABLED.on_off()).position([760., 610.]).font_scale(3.),
+                text("Binary UI + shared CRDT state + loaded WASM behavior").position([80., 740.]),
+            ],
+        )
 }

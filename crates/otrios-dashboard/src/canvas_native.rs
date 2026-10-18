@@ -5,6 +5,8 @@ use otrios_core::{
     dashboard::render_scene,
 };
 use std::time::{Duration, Instant};
+// Stable persisted schema field used by this Playground-specific acceptance probe.
+const LEVEL_FIELD_ID: u16 = 1;
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     let endpoint = args
@@ -45,7 +47,19 @@ fn main() -> Result<()> {
         }
         if !client.ui_ref().is_empty() && client.confirmed() {
             if !edited {
-                client.event(client.epoch(), 1, 730, 0)?;
+                let scene = client.scene()?;
+                let slider = scene
+                    .controls()
+                    .iter()
+                    .find(|c| {
+                        c.node
+                            .semantics
+                            .as_ref()
+                            .is_some_and(|s| s.label == "Linear slider")
+                    })
+                    .map(|c| c.node.id)
+                    .ok_or("Missing slider control")?;
+                client.event_for_node(client.epoch(), slider, 730, 0)?;
                 edited = true;
             } else {
                 let scene = client.scene()?;
@@ -53,7 +67,7 @@ fn main() -> Result<()> {
                     "Loaded app={} state={} WASM reducer level={} primitive_vertices={} acknowledged=true",
                     client.ui_ref(),
                     client.state_ref(),
-                    client.value(1)?,
+                    client.value(LEVEL_FIELD_ID)?,
                     render_scene(&scene).vertices.len() / 6
                 );
                 break;

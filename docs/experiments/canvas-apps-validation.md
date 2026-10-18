@@ -66,3 +66,25 @@ admission, and rollback of a rejected remote mount remain later work. A failed
 candidate retains the old view but suspends input until reconnect. The isolated
 viewer accepts exact loopback Origin and locally configured packages; it must not
 be exposed as the production app loader without the signed-admission milestone.
+
+## Declarative authoring follow-up
+
+After the initial ARM prototype acceptance above, the source builder was refactored
+so node IDs, navigation actions, control indices and selector slots are generated.
+Home, Playground and Layout Lab use composed primitives/modifiers, named StateField
+values and colocated destinations/events. The binary contract and durable schema
+IDs remain unchanged. The native acceptance probe now resolves its slider from
+scene semantics rather than assuming a generated numeric control index.
+
+Required repository checks, strict all-feature/all-target Clippy, the browser
+Wasm build, all 72 core unit tests, six Canvas integration tests and the real
+server/process test pass after this refactor. A new test reorders launcher
+buttons and verifies their target refs, checks parent-sized button backgrounds,
+checks selector interning and deterministic compilation. Browser navigation and
+the Wasm-backed Toggle were checked again; the updated launcher screenshot is
+saved at the path above. The physical frame was not taken over for this follow-up.
+
+The updated Playground UI is 16,372 bytes; Layout Lab/Home remain 10,928/9,720
+bytes. The complete browser host is 4,664,962 bytes uncompressed. The earlier
+ARM headless result records the initial prototype; it is not a new frame FPS or
+touch measurement for the authoring refactor.

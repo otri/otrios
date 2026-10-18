@@ -186,6 +186,19 @@ impl Client {
         }
         m.doc.set(&commands)
     }
+    /// Resolve a node's generated event index within its Canvas generation.
+    pub fn event_for_node(&mut self, epoch: u32, node: u32, a: u16, b: u16) -> Result<bool> {
+        if epoch != self.epoch || self.requested.is_some() {
+            return Ok(false);
+        }
+        let scene = self.scene()?;
+        let action = InputRouter::activate(scene.as_ref(), node).action;
+        if let Some(Action::AppEvent(control)) = action {
+            self.event(epoch, control, a, b)
+        } else {
+            Err("Node is not an app event responder".into())
+        }
+    }
     pub fn pointer(&mut self, epoch: u32, event: PointerEvent) -> Result<bool> {
         if epoch != self.epoch || self.requested.is_some() {
             return Ok(false);

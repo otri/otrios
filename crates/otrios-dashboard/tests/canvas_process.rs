@@ -113,6 +113,17 @@ fn spawn(root: &std::path::Path, port: u16) -> Child {
         .spawn()
         .unwrap()
 }
+fn edit(c: &mut Client, label: &str, value: u16) {
+    let scene = c.scene().unwrap();
+    let node = scene
+        .controls()
+        .iter()
+        .find(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == label))
+        .unwrap()
+        .node
+        .id;
+    c.event_for_node(c.epoch(), node, value, 0).unwrap();
+}
 struct Peer {
     ws: WebSocket<MaybeTlsStream<TcpStream>>,
     c: Client,
@@ -164,7 +175,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         "app:component-playground/state",
     );
     let mut layout = server.peer("app:layout-lab/ui", "app:layout-lab/state");
-    a.c.event(a.c.epoch(), 1, 810, 0).unwrap();
+    edit(&mut a.c, "Linear slider", 810);
     a.settle();
     b.settle();
     assert_eq!(b.c.value(1).unwrap(), 810);
@@ -200,7 +211,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         "app:component-playground/state",
     );
     a.settle();
-    a.c.event(a.c.epoch(), 1, 999, 0).unwrap();
+    edit(&mut a.c, "Linear slider", 999);
     a.settle();
     assert_eq!(a.c.value(1).unwrap(), 123, "New guest bytes must execute");
     drop(a);

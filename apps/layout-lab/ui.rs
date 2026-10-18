@@ -1,98 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
+use super::state::*;
 use crate::authoring::*;
-use otrios_interfaces::{canvas::*, layout::*};
+use otrios_interfaces::canvas::{StateSchema, Ui};
+fn slider(label: &str, field: StateField, y: f32) -> Element {
+    canvas(vec![
+        rounded_rect(CARD).frame([0., 20., 520., 40.]),
+        rounded_rect(ACCENT)
+            .frame([0., 20., 520., 40.])
+            .width(field.mapped(32., 520.)),
+    ])
+    .frame([80., y, 520., 80.])
+    .on_drag(label, Event::slider(field))
+}
 pub fn description(state_schema: StateSchema) -> Ui {
-    let mut panel = round(40, [720., 250., 400., 300.], ACCENT);
-    panel.frame[2] = binding(1);
-    panel.shape = Shape::Superellipse {
-        radius: binding(2),
-        exponent: 4.,
-        color: color(ACCENT),
-    };
-    let sliders =
-        [(20, 230., "Panel width", 1), (30, 450., "Corner radius", 2)].map(|(id, y, title, c)| {
-            let mut n = control(
-                node(id, [80., y, 520., 80.], Shape::Canvas { clip: true }),
-                title,
-                c,
-                true,
-            );
-            let mut fill = round(id + 2, [0., 20., 520., 40.], ACCENT);
-            fill.frame[2] = binding(if c == 1 { 3 } else { 4 });
-            n.children = vec![round(id + 1, [0., 20., 520., 40.], CARD), fill];
-            n
-        });
-    Ui {
-        format: "otrios-canvas-v1".into(),
-        ui_ref: "app:layout-lab/ui".into(),
-        title: "Layout Lab".into(),
-        state_schema,
-        layout: blueprint(
-            "Layout Lab",
-            vec![
-                button(10, [1020., 35., 200., 80.], "Home", 0),
-                label(15, [80., 170.], text("Panel width"), 3.),
-                sliders[0].clone(),
-                label(25, [80., 390.], text("Corner radius"), 3.),
-                sliders[1].clone(),
-                panel,
-                label(
-                    50,
-                    [80., 700.],
-                    text("Independent UI and State roots / standard declarative setters"),
-                    2.,
-                ),
-            ],
-        ),
-        selectors: vec![
-            Selector {
-                local: 1,
-                field: 1,
-                projection: Projection::Number {
-                    scale: 0.35,
-                    offset: 160.,
-                },
-            },
-            Selector {
-                local: 2,
-                field: 2,
-                projection: Projection::Number {
-                    scale: 0.075,
-                    offset: 0.,
-                },
-            },
-            Selector {
-                local: 3,
-                field: 1,
-                projection: Projection::Number {
-                    scale: 0.488,
-                    offset: 32.,
-                },
-            },
-            Selector {
-                local: 4,
-                field: 2,
-                projection: Projection::Number {
-                    scale: 0.488,
-                    offset: 32.,
-                },
-            },
+    AppUi::new("layout-lab", "Layout Lab", state_schema).build(
+        "Layout Lab",
+        vec![
+            button("Home")
+                .navigate_to(Destination::app("home"))
+                .frame([1020., 35., 200., 80.]),
+            text("Panel width").position([80., 170.]).font_scale(3.),
+            slider("Panel width", PANEL_WIDTH, 230.),
+            text("Corner radius").position([80., 390.]).font_scale(3.),
+            slider("Corner radius", CORNER_RADIUS, 450.),
+            rounded_rect(ACCENT)
+                .frame([720., 250., 400., 300.])
+                .width(PANEL_WIDTH.mapped(160., 510.))
+                .corner_radius(CORNER_RADIUS.mapped(0., 75.)),
+            text("Independent UI and State roots / standard declarative setters")
+                .position([80., 700.]),
         ],
-        handlers: vec![
-            Handler {
-                control: 1,
-                event: 1,
-                kind: GestureKind::Slider,
-                fields: vec![1],
-            },
-            Handler {
-                control: 2,
-                event: 2,
-                kind: GestureKind::Slider,
-                fields: vec![2],
-            },
-        ],
-        navigation: vec![home_nav()],
-        behavior: None,
-    }
+    )
 }

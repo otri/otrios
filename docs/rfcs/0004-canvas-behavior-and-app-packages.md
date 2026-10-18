@@ -94,3 +94,20 @@ state, and stale events/wrong hashes/ABIs/imports/fuel exhaustion/bad commands
 are rejected without changing state. Render through the existing primitive
 compositor. Report headless native evidence separately from physical display
 acceptance. Keep the existing live dashboard intact during the opt-in prototype.
+
+## Declarative source authoring
+
+App sources compose `canvas`, `text`, `rounded_rect`, `circle` and `button` values
+with modifiers. A button carries its destination; an event responder carries its
+field focus/guest event; a visual property carries its typed field projection.
+The packer generates node IDs, local selector slots, navigation indices and event
+control indices together with their tables. These wire details are not authored
+as separately paired numbers. Identical field/projection plans are interned.
+
+Durable schema field IDs and guest ABI event IDs remain explicit, named and
+versioned. UI node IDs are deterministic structural indices within a compiled UI
+revision/activation, not durable component keys. Reordering can change them;
+stale input generations cannot target a replacement UI. Stable logical keys for
+collaborative UI-graph editing and a general stack/constraint layout language are
+not implemented by this source builder. Binary UI transport/runtime interpretation
+remain unchanged. See the app guide for concrete source examples.
