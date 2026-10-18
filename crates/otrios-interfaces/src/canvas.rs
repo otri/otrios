@@ -162,6 +162,14 @@ pub enum ClientMessage {
         catalog_hash: Vec<u8>,
         known_code: Vec<Vec<u8>>,
     },
+    /// Activate an already-qualified candidate; no new app Sync precedes this.
+    AcceptMount {
+        epoch: u32,
+    },
+    /// Reject a staged candidate while retaining the previous active lease.
+    CancelMount {
+        epoch: u32,
+    },
     Sync {
         epoch: u32,
         bytes: Vec<u8>,

@@ -94,6 +94,9 @@ fn activate_snapshot(
         .unwrap(),
     )
     .unwrap();
+    assert!(
+        matches!(decode_client(&c.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:e} if e==epoch)
+    );
 }
 fn pump(c: &mut Client, authority: &mut Document, session: &mut Session) {
     for step in 0..20 {
@@ -1070,4 +1073,155 @@ fn admission_rejects_gesture_arity_and_numeric_operations_on_text() {
         );
         assert!(client.scene().is_err());
     }
+}
+
+#[test]
+fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() {
+    let code = code();
+    let ui = playground::ui(&code);
+    let bytes = encode_ui(&ui).unwrap();
+    let mut client = Client::default();
+    activate(&mut client, ui.clone(), "decisions", code.clone());
+    let mut authority = Document::new(ui.state_schema, "decisions").unwrap();
+    let mut session = Session::default();
+    pump(&mut client, &mut authority, &mut session);
+    let old_epoch = client.epoch();
+    client.open(&client.ui_ref(), "decisions");
+    let ClientMessage::Mount { epoch: request, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Mount")
+    };
+    assert!(
+        client
+            .receive(
+                &encode_server(&ServerMessage::Mounted {
+                    epoch: request,
+                    ui: bytes.clone(),
+                    ui_hash: vec![0; 32],
+                    code: code.clone(),
+                    state: authority.save()
+                })
+                .unwrap()
+            )
+            .is_err()
+    );
+    assert!(client.rejected_mount_pending());
+    assert_eq!(client.epoch(), old_epoch);
+    edit(&mut client, "Linear slider", 870, 0);
+    client.tick(3000, 0).unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::CancelMount{epoch} if epoch==request)
+    );
+    let ClientMessage::Sync { epoch, bytes: sync } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Old-app Sync")
+    };
+    assert_eq!(epoch, old_epoch);
+    authority.receive(&mut session, &sync).unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    assert_eq!(authority.value(1).unwrap(), 870);
+    client.open(&client.ui_ref(), "decisions");
+    let ClientMessage::Mount { epoch: request, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Mount")
+    };
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch: request,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code,
+                state: authority.save(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!client.confirmed());
+    assert_eq!(client.epoch(), request);
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch} if epoch==request)
+    );
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::Sync{epoch,..} if epoch==request)
+    );
+}
+
+#[test]
+fn old_private_lease_revocation_preserves_newer_public_mount() {
+    let home = home::ui();
+    let public = layout::ui();
+    let mut client = Client::default();
+    activate_access(&mut client, home.clone(), "private:home", vec![], true);
+    let mut authority = Document::new(home.state_schema.clone(), "private:home").unwrap();
+    pump(&mut client, &mut authority, &mut Session::default());
+    let entries = [
+        (home, "private:home", true),
+        (public.clone(), "public:layout", false),
+    ]
+    .into_iter()
+    .map(|(ui, state, private)| CatalogEntry {
+        app: App {
+            id: ui
+                .ui_ref
+                .strip_prefix("app:")
+                .unwrap()
+                .strip_suffix("/ui")
+                .unwrap()
+                .into(),
+            title: ui.title.clone(),
+            ui_ref: ui.ui_ref.clone(),
+            state_ref: state.into(),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        },
+        ui_hash: hash(&encode_ui(&ui).unwrap()),
+        private,
+    })
+    .collect();
+    client
+        .admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: entries,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let old = client.epoch();
+    client.open(&public.ui_ref, "public:layout");
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Public mount")
+    };
+    assert!(
+        client
+            .receive(&encode_server(&ServerMessage::AccessRequired { epoch: old }).unwrap())
+            .unwrap()
+    );
+    assert!(client.ui_ref().is_empty());
+    assert!(!client.auth_required());
+    assert_eq!(client.pending_ui_ref(), public.ui_ref);
+    let bytes = encode_ui(&public).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(client.ui_ref(), "app:layout-lab/ui");
+    assert!(!client.private());
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:e} if e==epoch)
+    );
 }

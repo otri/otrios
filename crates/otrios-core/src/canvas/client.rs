@@ -50,6 +50,10 @@ struct Request {
     pair: (String, String),
     sent: bool,
 }
+enum MountDecision {
+    Accept(u32),
+    Cancel(u32),
+}
 /// Disposable two-peer CRDT workload. It never shares a document, session or
 /// persistence path with the admitted app's authoritative state.
 struct StressWorkload {
@@ -103,6 +107,7 @@ impl StressWorkload {
 pub struct Client {
     generation: u32,
     requested: Option<Request>,
+    decision: Option<MountDecision>,
     active: Option<Mount>,
     cache: VecDeque<(Vec<u8>, Vec<u8>)>,
     local: bool,
@@ -166,6 +171,10 @@ impl Client {
             .as_ref()
             .map_or_else(String::new, |r| r.pair.1.clone())
     }
+    /// A recoverable candidate rejection leaves the current app/session intact.
+    pub fn rejected_mount_pending(&self) -> bool {
+        matches!(self.decision, Some(MountDecision::Cancel(_)))
+    }
     pub fn auth_required(&self) -> bool {
         self.auth_required
     }
@@ -193,7 +202,7 @@ impl Client {
         self.active.as_ref().ok_or("No Canvas")?.read(id)
     }
     pub fn confirmed(&mut self) -> bool {
-        if self.requested.is_some() {
+        if self.requested.is_some() || self.decision.is_some() {
             return false;
         }
         self.local
@@ -283,14 +292,16 @@ impl Client {
         }
     }
     pub fn open(&mut self, ui_ref: &str, state_ref: &str) {
-        if self.auth_required {
-            self.requested = None;
-            self.auth_required = false;
+        if let Some(request) = self.requested.take()
+            && request.sent
+        {
+            self.decision = Some(MountDecision::Cancel(request.epoch));
         }
-        self.requested = None;
+        self.auth_required = false;
         self.navigation = Some((ui_ref.into(), state_ref.into()));
     }
     pub fn reset_connection(&mut self) {
+        self.decision = None;
         self.auth_required = false;
         if let Some(r) = &mut self.requested {
             r.sent = false;
@@ -316,11 +327,17 @@ impl Client {
         if self.private() {
             self.active = None;
         }
-        self.requested = None;
         self.auth_required = false;
         self.open("app:home/ui", "app:home/state");
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        if let Some(decision) = self.decision.take() {
+            let message = match decision {
+                MountDecision::Accept(epoch) => ClientMessage::AcceptMount { epoch },
+                MountDecision::Cancel(epoch) => ClientMessage::CancelMount { epoch },
+            };
+            return encode_client(&message).map(Some);
+        }
         if self.requested.is_none()
             && !self.input_busy()
             && self.confirmed()
@@ -386,6 +403,7 @@ impl Client {
             state: state.into(),
         })?)?;
         self.local = true;
+        self.decision = None;
         Ok(changed)
     }
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
@@ -474,12 +492,14 @@ impl Client {
                             }
                         }
                         self.active = Some(candidate);
+                        self.decision = Some(MountDecision::Accept(epoch));
                         self.local = false;
                         self.requested = None;
                         self.auth_required = false;
                         Ok(true)
                     }
                     Err(e) => {
+                        self.decision = Some(MountDecision::Cancel(epoch));
                         self.requested = None;
                         self.auth_required = false;
                         Err(e)
@@ -521,16 +541,20 @@ impl Client {
                     .is_some_and(|m| m.epoch == epoch && m.private)
                 {
                     let old = self.active.take().ok_or("Missing private activation")?;
-                    self.generation = self
-                        .generation
-                        .checked_add(1)
-                        .ok_or("Canvas epoch exhausted")?;
-                    self.requested = Some(Request {
-                        epoch: self.generation,
-                        pair: (old.ui.ui_ref, old.state_ref),
-                        sent: true,
-                    });
-                    self.auth_required = true;
+                    // Revocation belongs to the old lease. A newer staged public
+                    // navigation must still be able to qualify its Mounted reply.
+                    if self.requested.is_none() {
+                        self.generation = self
+                            .generation
+                            .checked_add(1)
+                            .ok_or("Canvas epoch exhausted")?;
+                        self.requested = Some(Request {
+                            epoch: self.generation,
+                            pair: (old.ui.ui_ref, old.state_ref),
+                            sent: false,
+                        });
+                        self.auth_required = true;
+                    }
                     return Ok(true);
                 }
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
@@ -540,6 +564,7 @@ impl Client {
             }
             ServerMessage::Error { epoch, message } => {
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    self.decision = Some(MountDecision::Cancel(epoch));
                     self.requested = None;
                     self.auth_required = false;
                     return Err(message);

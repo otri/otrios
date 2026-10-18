@@ -70,6 +70,7 @@ fn monitoring_signin_and_logout_revoke_existing_app_lease() {
         read(&mut s),
         ServerMessage::Mounted { epoch: 1, .. }
     ));
+    accept(&mut s, 1);
     loop {
         if let ServerMessage::View { bytes, .. } = read(&mut s) {
             assert_eq!(bytes, expected);
@@ -131,7 +132,7 @@ fn monitoring_signin_and_logout_revoke_existing_app_lease() {
 fn rotated_and_expired_sessions_revoke_private_bytes_without_writing_state() {
     let room = room(true, 2);
     view(&room);
-    let before = std::fs::read(room.root.join("state.apps/demo.automerge")).unwrap();
+    let before = std::fs::read(state_file(&room, "demo")).unwrap();
     let old = cookie(&room);
     assert_eq!(login(&room, Some(&old)).0, 200);
     assert_eq!(
@@ -149,15 +150,13 @@ fn rotated_and_expired_sessions_revoke_private_bytes_without_writing_state() {
     let mut s = socket(&room.public, Some(&cookie));
     mount(&mut s, &room, "monitoring", 1);
     assert!(matches!(read(&mut s), ServerMessage::Mounted { .. }));
+    accept(&mut s, 1);
     loop {
         if let ServerMessage::AccessRequired { epoch: 1 } = read(&mut s) {
             break;
         }
     }
-    assert_eq!(
-        std::fs::read(room.root.join("state.apps/demo.automerge")).unwrap(),
-        before
-    );
+    assert_eq!(std::fs::read(state_file(&room, "demo")).unwrap(), before);
 }
 
 #[test]
@@ -165,7 +164,7 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
     use otrios_interfaces::ink::{self, Point};
     let room = room(false, 28800);
     let private = view(&room);
-    let state = std::fs::read(room.root.join("state.apps/demo.automerge")).ok();
+    let state = std::fs::read(state_file(&room, "demo")).ok();
     let mut bad = format!("ws://{}/demo/ink", room.public)
         .into_client_request()
         .unwrap();
@@ -241,12 +240,44 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
     assert!(
         matches!(late.read(),Err(tungstenite::Error::Io(e)) if matches!(e.kind(),std::io::ErrorKind::WouldBlock|std::io::ErrorKind::TimedOut))
     );
-    assert_eq!(
-        std::fs::read(room.root.join("state.apps/demo.automerge")).ok(),
-        state
-    );
+    assert_eq!(std::fs::read(state_file(&room, "demo")).ok(), state);
     assert_eq!(
         request(&room.private, "GET", "/presentation", &[], &[]).1,
         private
     );
+}
+
+#[test]
+fn private_candidate_expiry_preserves_the_previous_public_activation() {
+    let room = room(true, 2);
+    view(&room);
+    let cookie = cookie(&room);
+    let mut s = socket(&room.public, Some(&cookie));
+    mount(&mut s, &room, "demo", 1);
+    assert!(matches!(
+        read(&mut s),
+        ServerMessage::Mounted { epoch: 1, .. }
+    ));
+    accept(&mut s, 1);
+    assert!(matches!(read(&mut s), ServerMessage::Sync { epoch: 1, .. }));
+    mount(&mut s, &room, "monitoring", 2);
+    assert!(matches!(
+        read(&mut s),
+        ServerMessage::Mounted { epoch: 2, .. }
+    ));
+    // No private Sync or View may be sent before acceptance, including at expiry.
+    assert!(matches!(
+        read(&mut s),
+        ServerMessage::AccessRequired { epoch: 2 }
+    ));
+    accept(&mut s, 2);
+    send(
+        &mut s,
+        otrios_interfaces::canvas::ClientMessage::CancelMount { epoch: 2 },
+    );
+    mount(&mut s, &room, "demo", 3);
+    assert!(matches!(
+        read(&mut s),
+        ServerMessage::Mounted { epoch: 3, .. }
+    ));
 }

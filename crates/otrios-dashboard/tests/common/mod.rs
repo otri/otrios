@@ -292,3 +292,16 @@ pub fn view(room: &Room) -> Vec<u8> {
     );
     bytes
 }
+
+pub fn state_file(room: &Room, id: &str) -> PathBuf {
+    state_file_ref(room, id, &format!("app:{id}/state"))
+}
+pub fn state_file_ref(room: &Room, id: &str, state_ref: &str) -> PathBuf {
+    room.root.join("state.apps").join(format!(
+        "{id}-{}.automerge",
+        canvas::hex(&canvas::hash(state_ref.as_bytes()))
+    ))
+}
+pub fn accept(s: &mut Socket, epoch: u32) {
+    send(s, ClientMessage::AcceptMount { epoch });
+}

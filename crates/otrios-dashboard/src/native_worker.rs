@@ -90,6 +90,7 @@ pub(super) struct DisplayInfo {
 pub(super) enum Input {
     CanvasPointer(u32, PointerEvent),
     CanvasCancel(u32),
+    #[cfg(test)]
     Back,
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
@@ -315,6 +316,7 @@ pub(super) fn state_worker(
                         dirty |= client.cancel()?;
                     }
                 }
+                #[cfg(test)]
                 Input::Back => dirty |= client.back()?,
                 Input::Presented(frame, renderer, display) => {
                     if let Some((id, at)) = frame.remote_sample
@@ -369,6 +371,9 @@ pub(super) fn state_worker(
                                     remote_sample = Some((received_updates, received_at));
                                     dirty = true;
                                 }
+                            }
+                            Err(e) if client.rejected_mount_pending() => {
+                                eprintln!("Rejected app candidate; continuing current app: {e}");
                             }
                             Err(e) => {
                                 eprintln!("Rejected app stream: {e}");
@@ -1003,6 +1008,7 @@ mod tests {
                 let mut socket = tungstenite::accept(tcp).unwrap();
                 let mut sync = Session::default();
                 let mut epoch = None;
+                let mut staged = None;
                 loop {
                     if server_stop.load(Ordering::Acquire) {
                         return;
@@ -1033,8 +1039,7 @@ mod tests {
                     match socket.read() {
                         Ok(Message::Binary(bytes)) => match decode_client(&bytes).unwrap() {
                             ClientMessage::Mount { epoch: id, .. } => {
-                                epoch = Some(id);
-                                sync = Session::default();
+                                staged = Some(id);
                                 let state = authority.save();
                                 socket
                                     .send(Message::Binary(
@@ -1050,7 +1055,14 @@ mod tests {
                                     ))
                                     .unwrap();
                             }
-                            ClientMessage::Sync { bytes, .. } => {
+                            ClientMessage::AcceptMount { epoch: id } if staged == Some(id) => {
+                                epoch = staged.take();
+                                sync = Session::default();
+                            }
+                            ClientMessage::CancelMount { epoch: id } if staged == Some(id) => {
+                                staged = None;
+                            }
+                            ClientMessage::Sync { epoch: id, bytes } if epoch == Some(id) => {
                                 authority.receive(&mut sync, &bytes).unwrap();
                             }
                             _ => {}

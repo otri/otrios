@@ -41,6 +41,27 @@ struct Lease {
     sync: Session,
     view_id: Vec<u8>,
 }
+#[derive(Default)]
+struct Leases {
+    active: Option<Lease>,
+    staged: Option<Lease>,
+    last_epoch: u32,
+}
+impl Leases {
+    fn revoke_private(&mut self, allowed: bool) -> Vec<ServerMessage> {
+        if allowed {
+            return vec![];
+        }
+        let mut messages = vec![];
+        for slot in [&mut self.active, &mut self.staged] {
+            if slot.as_ref().is_some_and(|l| l.private) {
+                let l = slot.take().expect("present lease");
+                messages.push(ServerMessage::AccessRequired { epoch: l.epoch });
+            }
+        }
+        messages
+    }
+}
 type Result<T> = std::result::Result<T, String>;
 fn bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -164,10 +185,13 @@ impl Hub {
                 if self.rooms.len() + new_rooms.len() >= 128 {
                     return Err("App root budget exhausted".into());
                 }
-                let file = self
-                    .state
-                    .as_ref()
-                    .map(|p| p.join(format!("{}.automerge", a.id)));
+                let file = self.state.as_ref().map(|p| {
+                    p.join(format!(
+                        "{}-{}.automerge",
+                        a.id,
+                        canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
+                    ))
+                });
                 let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
                     Document::load(
                         description.state_schema.clone(),
@@ -242,11 +266,11 @@ impl Hub {
     }
     fn process(
         &mut self,
-        lease: &mut Option<Lease>,
+        leases: &mut Leases,
         message: ClientMessage,
         allow_private: bool,
     ) -> Result<(Vec<ServerMessage>, bool)> {
-        let mut messages = vec![];
+        let mut messages = leases.revoke_private(allow_private);
         let mut changed = false;
         match message {
             ClientMessage::Mount {
@@ -257,16 +281,18 @@ impl Hub {
                 known_code,
             } => {
                 if epoch == 0
-                    || lease.as_ref().is_some_and(|l| epoch <= l.epoch)
+                    || epoch <= leases.last_epoch
                     || known_code.len() > 8
                     || known_code.iter().any(|h| h.len() != 32)
                 {
                     return Err("Invalid Canvas mount generation/cache".into());
                 }
+                leases.last_epoch = epoch;
+                leases.staged = None;
                 let p = self.package(&catalog_hash, &ui_ref)?;
                 if p.private && !allow_private {
-                    *lease = None;
-                    return Ok((vec![ServerMessage::AccessRequired { epoch }], false));
+                    messages.push(ServerMessage::AccessRequired { epoch });
+                    return Ok((messages, false));
                 }
                 if state_ref != p.app.state_ref {
                     return Err("State root is not granted by app catalog".into());
@@ -286,22 +312,47 @@ impl Hub {
                     },
                     state: room.doc.save(),
                 });
-                *lease = Some(Lease {
+                leases.staged = Some(Lease {
                     epoch,
                     state_ref,
                     private: p.private,
                     sync: Session::default(),
                     view_id: vec![],
                 });
+                // The previous activation/session remains authoritative until the client
+                // has qualified every candidate dependency and explicitly accepts it.
+                return Ok((messages, false));
+            }
+            ClientMessage::AcceptMount { epoch } => {
+                if leases.staged.as_ref().is_none_or(|l| l.epoch != epoch) {
+                    if messages
+                        .iter()
+                        .any(|m| matches!(m,ServerMessage::AccessRequired{epoch:e} if *e==epoch))
+                    {
+                        return Ok((messages, false));
+                    }
+                    if epoch <= leases.last_epoch {
+                        return Ok((messages, false));
+                    }
+                    return Err("No matching staged Canvas mount".into());
+                }
+                leases.active = leases.staged.take();
+            }
+            ClientMessage::CancelMount { epoch } => {
+                if leases.staged.as_ref().is_some_and(|l| l.epoch == epoch) {
+                    leases.staged = None;
+                }
+                return Ok((messages, false));
             }
             ClientMessage::Sync { epoch, bytes } => {
-                let l = lease.as_mut().ok_or("Sync without Canvas mount")?;
+                let Some(l) = leases.active.as_mut() else {
+                    if !messages.is_empty() {
+                        return Ok((messages, false));
+                    }
+                    return Err("Sync without accepted Canvas mount".into());
+                };
                 if l.epoch != epoch {
-                    return Ok((vec![], false));
-                }
-                if l.private && !allow_private {
-                    *lease = None;
-                    return Ok((vec![ServerMessage::AccessRequired { epoch }], false));
+                    return Ok((messages, false));
                 }
                 let room = self
                     .rooms
@@ -317,31 +368,27 @@ impl Hub {
                 l.sync = session;
             }
             ClientMessage::Leave { epoch } => {
-                if lease.as_ref().is_some_and(|l| l.epoch == epoch) {
-                    *lease = None;
+                if leases.active.as_ref().is_some_and(|l| l.epoch == epoch) {
+                    leases.active = None;
                 }
-                return Ok((vec![], false));
+                if leases.staged.as_ref().is_some_and(|l| l.epoch == epoch) {
+                    leases.staged = None;
+                }
+                return Ok((messages, false));
             }
         }
-        messages.extend(self.updates(lease, allow_private)?);
+        messages.extend(self.updates(leases, allow_private)?);
         Ok((messages, changed))
     }
-    fn updates(
-        &mut self,
-        lease: &mut Option<Lease>,
-        allow_private: bool,
-    ) -> Result<Vec<ServerMessage>> {
-        let Some(l) = lease else { return Ok(vec![]) };
-        if l.private && !allow_private {
-            let epoch = l.epoch;
-            *lease = None;
-            return Ok(vec![ServerMessage::AccessRequired { epoch }]);
-        }
+    fn updates(&mut self, leases: &mut Leases, allow_private: bool) -> Result<Vec<ServerMessage>> {
+        let mut messages = leases.revoke_private(allow_private);
+        let Some(l) = &mut leases.active else {
+            return Ok(messages);
+        };
         let room = self
             .rooms
             .get_mut(&l.state_ref)
             .ok_or("Missing app State root")?;
-        let mut messages = vec![];
         if let Some(bytes) = room.doc.generate(&mut l.sync)? {
             messages.push(ServerMessage::Sync {
                 epoch: l.epoch,
@@ -455,7 +502,7 @@ async fn send(
 }
 async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String>) {
     let (mut output, mut input) = socket.split();
-    let mut lease = None;
+    let mut leases = Leases::default();
     let mut notice = app.changed.subscribe();
     let mut expiry = tokio::time::interval(Duration::from_secs(1));
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
@@ -486,6 +533,12 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
             _=heartbeat.tick()=>{if !matches!(tokio::time::timeout(Duration::from_secs(2),output.send(Message::Ping(Bytes::new()))).await,Ok(Ok(()))){break;}continue;},
         };
         let allowed = private_allowed(&app, public, &key).await;
+        for revoked in leases.revoke_private(allowed) {
+            if !send(&mut output, revoked).await {
+                return;
+            }
+        }
+        let mut recoverable_epoch = None;
         let result = if let Some(bytes) = incoming {
             if window.elapsed() >= Duration::from_secs(1) {
                 window = std::time::Instant::now();
@@ -498,14 +551,22 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
             let release = app.release.read().await.clone();
             let mut hub = app.apps.lock().await;
             canvas::decode_client(&bytes).and_then(|message| {
-                hub.refresh(&app.releases, &release)?;
-                hub.process(&mut lease, message, allowed)
+                recoverable_epoch = match &message {
+                    ClientMessage::Mount { epoch, .. }
+                    | ClientMessage::AcceptMount { epoch }
+                    | ClientMessage::CancelMount { epoch } => Some(*epoch),
+                    _ => None,
+                };
+                if matches!(message, ClientMessage::Mount { .. }) {
+                    hub.refresh(&app.releases, &release)?;
+                }
+                hub.process(&mut leases, message, allowed)
             })
         } else {
             app.apps
                 .lock()
                 .await
-                .updates(&mut lease, allowed)
+                .updates(&mut leases, allowed)
                 .map(|m| (m, false))
         };
         match result {
@@ -513,16 +574,29 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                 if changed {
                     announce(&app).await;
                 }
+                let private_epochs = [leases.active.as_ref(), leases.staged.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|l| l.private)
+                    .map(|l| l.epoch)
+                    .collect::<Vec<_>>();
                 for message in messages {
-                    if lease.as_ref().is_some_and(|l| l.private)
-                        && !private_allowed(&app, public, &key).await
+                    let epoch = match &message {
+                        ServerMessage::Mounted { epoch, .. }
+                        | ServerMessage::Sync { epoch, .. }
+                        | ServerMessage::View { epoch, .. }
+                        | ServerMessage::Snapshot { epoch, .. }
+                        | ServerMessage::AccessRequired { epoch }
+                        | ServerMessage::Error { epoch, .. } => *epoch,
+                    };
+                    if private_epochs.contains(&epoch) && !private_allowed(&app, public, &key).await
                     {
-                        let epoch = lease.as_ref().unwrap().epoch;
-                        lease = None;
-                        if !send(&mut output, ServerMessage::AccessRequired { epoch }).await {
-                            return;
+                        for revoked in leases.revoke_private(false) {
+                            if !send(&mut output, revoked).await {
+                                return;
+                            }
                         }
-                        break;
+                        continue;
                     }
                     if !send(&mut output, message).await {
                         return;
@@ -530,9 +604,14 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                 }
             }
             Err(message) => {
-                let epoch = lease.as_ref().map_or(1, |l| l.epoch);
-                let _ = send(&mut output, ServerMessage::Error { epoch, message }).await;
-                break;
+                let epoch = recoverable_epoch
+                    .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
+                if !send(&mut output, ServerMessage::Error { epoch, message }).await {
+                    return;
+                }
+                if recoverable_epoch.is_none() {
+                    break;
+                }
             }
         }
     }

@@ -53,6 +53,9 @@ impl CanvasApp {
     pub fn auth_required(&self) -> bool {
         self.inner.auth_required()
     }
+    pub fn rejected_mount_pending(&self) -> bool {
+        self.inner.rejected_mount_pending()
+    }
     pub fn private(&self) -> bool {
         self.inner.private()
     }
