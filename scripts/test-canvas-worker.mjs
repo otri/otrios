@@ -43,7 +43,7 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
     screen:()=> 'layout-lab',epoch:()=>7,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'app:layout-lab/state',
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,
     vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
-    tick:()=>false,activate:()=>{activations++;return true;}};
+    tick:()=>false,take_sign_out:()=>false,activate:()=>{activations++;return true;}};
   const context=vm.createContext({URL,WebSocket:Peer,location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),setTimeout(){},clearTimeout(){},fake});
   vm.runInContext(source,context);vm.runInContext('app=fake;connect()',context);
   peers[0].onmessage({data:new ArrayBuffer(1)});
@@ -51,4 +51,19 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
   assert.equal(messages.find(m=>m.type==='frame').ui,'app:layout-lab/ui');assert(messages.some(m=>m.type==='warning'));
   await context.onmessage({data:{type:'activate',epoch:7,id:12}});assert.equal(activations,1);assert(messages.some(m=>m.type==='command-ack'));
   peers[0].onmessage({data:new ArrayBuffer(1)});assert(peers[0].closed);assert(messages.some(m=>m.type==='error'));
+});
+
+test('a Canvas sign-out action clears private pixels and revokes the browser session without syncing it',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const messages=[],calls=[];let requested=false,privateMount=true;
+  const fake={tick:()=>false,ui_ref:()=>privateMount?'app:monitoring/ui':'',presentation_kind:()=> 'none',
+    private:()=>privateMount,clear_private(){calls.push('clear');privateMount=false;},
+    set_session_controls(value){calls.push(['session-controls',value]);},navigate:screen=>calls.push(['navigate',screen]),
+    activate(){requested=true;return true;},take_sign_out(){const value=requested;requested=false;return value;},
+    screen:()=> 'home',epoch:()=>1,state_ref:()=>'',keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,motion_intent:()=>[],stress_updates:()=>0};
+  const context=vm.createContext({URL,WebSocket:{OPEN:1},location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),clearTimeout(){},fake,monitoringFake:{logout(){calls.push('logout');}}});
+  vm.runInContext(source,context);vm.runInContext('app=fake;monitoring=monitoringFake',context);
+  await context.onmessage({data:{type:'activate',id:12}});
+  assert.deepEqual(calls,['clear',['session-controls',false],['navigate','home'],'logout']);
+  assert(messages.some(m=>m.type==='clear-private'));assert(messages.some(m=>m.type==='command-ack'));assert(!messages.some(m=>m.type==='error'));
 });

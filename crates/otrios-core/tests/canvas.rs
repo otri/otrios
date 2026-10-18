@@ -1391,3 +1391,52 @@ fn rotary_pointer_and_indicator_share_clockwise_turns_and_accent_is_only_present
             && n.frame.width == 40.
     ));
 }
+
+#[test]
+fn monitoring_session_controls_share_navigation_style_and_only_request_local_logout() {
+    use otrios_interfaces::scene::Primitive;
+    let ui = monitoring_app::ui();
+    let mut c = Client::default();
+    activate_access(&mut c, ui.clone(), "private:monitoring", vec![], true);
+    let mut authority = Document::new(ui.state_schema, "private:monitoring").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    let control = |s: &otrios_core::dashboard::scene::Scene, label: &str| {
+        s.controls()
+            .into_iter()
+            .find(|n| n.node.semantics.as_ref().is_some_and(|s| s.label == label))
+            .map(|n| n.node.clone())
+    };
+    assert!(
+        control(&c.scene().unwrap(), "Sign out").is_none(),
+        "trusted native mounts do not expose a browser cookie action"
+    );
+    assert!(c.set_session_controls(true));
+    let scene = c.scene().unwrap();
+    let home = control(&scene, "Home").unwrap();
+    let logout = control(&scene, "Sign out").unwrap();
+    assert_eq!(
+        (logout.frame.y, logout.frame.width, logout.frame.height),
+        (home.frame.y, home.frame.width, home.frame.height)
+    );
+    assert!(logout.frame.x + logout.frame.width + 20. <= home.frame.x);
+    assert_eq!(logout.children[0].primitive, home.children[0].primitive);
+    assert!(
+        matches!((&logout.children[1].primitive, &home.children[1].primitive), (Primitive::Text { scale: a, color: ac, .. }, Primitive::Text { scale: b, color: bc, .. }) if a == b && ac == bc)
+    );
+    let before = authority.save();
+    assert!(c.activate(c.epoch(), logout.id).unwrap());
+    assert!(c.take_sign_out());
+    assert!(!c.take_sign_out(), "host actions are consumed once");
+    assert!(
+        c.outgoing().unwrap().is_none(),
+        "sign out never emits CRDT writes"
+    );
+    assert_eq!(authority.save(), before);
+    c.activate(c.epoch(), logout.id).unwrap();
+    c.set_session_controls(false);
+    assert!(
+        !c.take_sign_out(),
+        "session revocation cancels pending local actions"
+    );
+    assert!(control(&c.scene().unwrap(), "Sign out").is_none());
+}

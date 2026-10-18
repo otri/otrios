@@ -50,6 +50,12 @@ impl CanvasApp {
         self.inner.open(&app.ui_ref, &app.state_ref);
         Ok(())
     }
+    pub fn set_session_controls(&mut self, enabled: bool) -> bool {
+        self.inner.set_session_controls(enabled)
+    }
+    pub fn take_sign_out(&mut self) -> bool {
+        self.inner.take_sign_out()
+    }
     pub fn auth_required(&self) -> bool {
         self.inner.auth_required()
     }

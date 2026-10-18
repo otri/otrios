@@ -26,6 +26,7 @@ struct Mount {
     input: InputRouter,
     state_ref: String,
     private: bool,
+    session_controls: bool,
     scene: OnceLock<Arc<Scene>>,
     visible: BTreeMap<u16, Value>,
     snapshot: BTreeMap<u16, Value>,
@@ -115,8 +116,28 @@ pub struct Client {
     catalog: Option<Catalog>,
     catalog_hash: Vec<u8>,
     auth_required: bool,
+    session_controls: bool,
+    sign_out_requested: bool,
 }
 impl Client {
+    /// Controls presentation only; the host still verifies and revokes its cookie session.
+    pub fn set_session_controls(&mut self, enabled: bool) -> bool {
+        self.session_controls = enabled;
+        if !enabled {
+            self.sign_out_requested = false;
+        }
+        if let Some(m) = &mut self.active
+            && m.session_controls != enabled
+        {
+            m.session_controls = enabled;
+            m.invalidate();
+            return true;
+        }
+        false
+    }
+    pub fn take_sign_out(&mut self) -> bool {
+        std::mem::take(&mut self.sign_out_requested)
+    }
     pub fn admit_catalog(&mut self, bytes: &[u8]) -> Result<()> {
         let c = decode_catalog(bytes)?;
         if c.format != "otrios-app-catalog-v1" || c.apps.is_empty() || c.apps.len() > 32 {
@@ -292,6 +313,7 @@ impl Client {
         }
     }
     pub fn open(&mut self, ui_ref: &str, state_ref: &str) {
+        self.sign_out_requested = false;
         if let Some(request) = self.requested.take()
             && request.sent
         {
@@ -477,6 +499,8 @@ impl Client {
                         }
                         candidate.refresh()?;
                     }
+                    candidate.session_controls = self.session_controls;
+                    candidate.invalidate();
                     cached_scene(&candidate)?;
                     Ok(candidate)
                 })();
@@ -590,6 +614,13 @@ impl Client {
             return Ok(false);
         }
         match h.operation {
+            Operation::SignOut => {
+                if !self.session_controls || !self.private() {
+                    return Ok(false);
+                }
+                self.sign_out_requested = true;
+                return Ok(true);
+            }
             Operation::Back => return self.back(),
             Operation::Focus => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
@@ -1088,7 +1119,7 @@ fn qualify(
                 Projection::KeyboardLabel { key } => {
                     s.field != 0 || key >= crate::dashboard::keyboard::KEY_COUNT
                 }
-                Projection::KeyboardVisible => s.field != 0,
+                Projection::KeyboardVisible | Projection::SessionControls => s.field != 0,
                 _ => field(s.field).is_none(),
             }
         {
@@ -1121,7 +1152,7 @@ fn qualify(
             return Err("Gesture does not match its typed fields".into());
         }
         let valid = match &h.operation {
-            Operation::Back | Operation::Stress => h.fields.is_empty(),
+            Operation::Back | Operation::Stress | Operation::SignOut => h.fields.is_empty(),
             Operation::Key(k) => h.fields.is_empty() && *k < crate::dashboard::keyboard::KEY_COUNT,
             Operation::Focus => {
                 h.fields.len() == 1
@@ -1233,6 +1264,7 @@ fn qualify(
         input: InputRouter::default(),
         state_ref: state_ref.into(),
         private,
+        session_controls: false,
         scene: OnceLock::new(),
         visible: BTreeMap::new(),
         snapshot: BTreeMap::new(),
@@ -1270,6 +1302,8 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
     for s in &m.ui.selectors {
         let value = if let Projection::KeyboardLabel { key } = s.projection {
             Value::Text(m.keyboard.label(key))
+        } else if matches!(s.projection, Projection::SessionControls) {
+            Value::Boolean(m.private && m.session_controls)
         } else if matches!(s.projection, Projection::KeyboardVisible) {
             Value::Boolean(m.keyboard.visible)
         } else {
@@ -1327,7 +1361,9 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
                 Projection::WindowSignal { seconds } => {
                     Value::TimedSeries(m.doc.signal(s.field, m.wall, *seconds))
                 }
-                Projection::KeyboardLabel { .. } | Projection::KeyboardVisible => unreachable!(),
+                Projection::KeyboardLabel { .. }
+                | Projection::KeyboardVisible
+                | Projection::SessionControls => unreachable!(),
             }
         };
         bindings.insert(s.local, value);

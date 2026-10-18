@@ -13,6 +13,10 @@ pub fn description() -> Ui {
     .build(
         "Monitoring",
         vec![
+            button("Sign out")
+                .frame([800., 20., 200., 70.])
+                .visible(session_controls_visible())
+                .on_press(Event::sign_out()),
             button("Home")
                 .navigate_to(Destination::app("home"))
                 .frame([1020., 20., 200., 70.]),

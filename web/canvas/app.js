@@ -5,9 +5,9 @@ import {SceneRenderer} from './gpu-scene.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppCatalog} from './app-catalog.mjs';
 const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls');
-const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),signout=document.querySelector('#monitoring-signout'),loginError=document.querySelector('#login-error');
+const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),loginError=document.querySelector('#login-error');
 let monitoringAuth={authenticated:false},currentScreen='home',modelAuthRequired=false;
-function showAuth(){const needed=(currentScreen==='monitoring'||modelAuthRequired)&&!monitoringAuth.authenticated;signout.hidden=currentScreen!=='monitoring'||!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
+function showAuth(){const needed=(currentScreen==='monitoring'||modelAuthRequired)&&!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
 const connection=document.querySelector('#connection'),dot=document.querySelector('#connection-dot'),revision=document.querySelector('#revision'),error=document.querySelector('#error');
 function fatal(e){error.hidden=false;error.textContent=String(e);connection.textContent='Unable to open this space';}
 try{
@@ -49,7 +49,7 @@ try{
   worker.onerror=e=>fatal(e.message);
   form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
   function leaveLogin(){command({type:'route',route:'#/home'});}
-  document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});signout.addEventListener('click',()=>command({type:'logout'}));
+  document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
   worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes,release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
   const pointers=new Set(),moves=new Map();

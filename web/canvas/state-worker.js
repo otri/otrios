@@ -14,6 +14,7 @@ function publish(geometry=true){
   pendingFrame={...pendingFrame,...frame};sendFrame();
 }
 function clearPresentation(){syncInk();pendingFrame=null;postMessage({type:'clear-private'});}
+function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('home');monitoring.logout();}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){if(socket?.readyState===WebSocket.OPEN)for(let i=0;i<8;i++){const bytes=app.outgoing();if(!bytes)break;socket.send(bytes);}}
 function release(message){
@@ -56,7 +57,8 @@ onmessage=async({data:m})=>{try{
       if(!state.authenticated&&app.private()){dropPrivate();app.navigate('home');outgoing();}
       const signedIn=state.authenticated&&!authenticated;authenticated=state.authenticated;
       if(signedIn&&app.auth_required()){app.retry_mount();socket?.close();}
-      postMessage({type:'monitoring-auth',...state});publish(false);
+      const chromeChanged=app.set_session_controls(authenticated);
+      postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
     }});
     route(m.route||'#/home');connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()){const ink=app.ink_outgoing(now);if(ink.length&&inkSocket?.readyState===WebSocket.OPEN)inkSocket.send(ink);}outgoing();}catch(e){error(e);}},8);return;
@@ -67,7 +69,7 @@ onmessage=async({data:m})=>{try{
   app.tick(performance.now(),Date.now()/1000);let changed=false;
   switch(m.type){
     case 'login':monitoring.login(m.username,m.password);break;
-    case 'logout':dropPrivate();app.navigate('home');monitoring.logout();changed=true;break;
+    case 'logout':signOut();changed=true;break;
     case 'pointer':if(!app.ui_ref())break;changed=app.pointer(m.epoch??app.epoch(),...m.args.slice(0,4));break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;
@@ -78,5 +80,6 @@ onmessage=async({data:m})=>{try{
     case 'cancel':changed=app.cancel_input();break;
     case 'reload':app.open(app.ui_ref(),app.state_ref());changed=true;break;
   }
+  if(app.take_sign_out()){signOut();changed=true;}
   if(changed)publish();outgoing();postMessage({type:'command-ack'});
 }catch(e){error(e);postMessage({type:'command-ack'});}};

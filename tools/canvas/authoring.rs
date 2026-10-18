@@ -274,6 +274,14 @@ impl Event {
             operation: Operation::Back,
         }
     }
+    pub fn sign_out() -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::SignOut,
+        }
+    }
     pub fn stress() -> Self {
         Self {
             kind: GestureKind::Activate,
@@ -543,6 +551,12 @@ pub fn timed_series(value: ValueExpr, color: [u8; 4]) -> Element {
             color,
         },
         [0., 0., 100., 100.],
+    )
+}
+pub fn session_controls_visible() -> ValueExpr {
+    ValueExpr::State(
+        StateField::normalized(0, "session", 0),
+        Projection::SessionControls,
     )
 }
 pub fn keyboard_visible() -> ValueExpr {

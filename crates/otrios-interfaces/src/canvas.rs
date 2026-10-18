@@ -48,6 +48,8 @@ pub enum Projection {
     },
     /// Local input-method label. Its selector uses reserved field 0.
     KeyboardVisible,
+    /// Local browser session controls; never an authorization grant or shared state.
+    SessionControls,
     KeyboardLabel {
         key: u16,
     },
@@ -85,6 +87,8 @@ pub enum Operation {
     Key(u16),
     Back,
     Stress,
+    /// Request local cookie-session revocation. Never creates a state mutation.
+    SignOut,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
