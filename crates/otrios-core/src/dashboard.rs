@@ -5,6 +5,7 @@
 pub mod components;
 pub mod controls;
 pub mod display;
+pub mod ink;
 pub mod input;
 pub mod keyboard;
 pub mod layout;

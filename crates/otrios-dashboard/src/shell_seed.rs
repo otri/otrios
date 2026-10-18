@@ -399,7 +399,7 @@ fn playground() -> Blueprint {
     for (x, w, title, subtitle) in [
         (48., 370., "01 / LINEAR", "Drag the thumb"),
         (440., 370., "02 / ROTARY", "Turn the ring"),
-        (832., 400., "03 / TOUCH PAD", "Drag in two axes"),
+        (832., 400., "03 / TOUCH PAD", "Draw / fades in 5s"),
     ] {
         a.add(3, [x, 230., w, 382.], vec![]);
         let parent = a.b.root.children.len() - 1;
@@ -573,29 +573,6 @@ fn playground() -> Blueprint {
             c([40, 61, 76, 255]),
             0.,
         ));
-    }
-    for i in 0..12 {
-        let mut dot = circle(
-            40 + i,
-            [
-                sub(
-                    add(n(14.), mul(sub(Expr::Width, n(28.)), local(640 + i * 2))),
-                    n(3.),
-                ),
-                sub(
-                    add(
-                        n(14.),
-                        mul(sub(Expr::Height, n(28.)), sub(n(1.), local(641 + i * 2))),
-                    ),
-                    n(3.),
-                ),
-                n(6.),
-                n(6.),
-            ],
-            c([94, 169, 181, 120]),
-        );
-        dot.visible = local(680 + i);
-        pad.children.push(dot);
     }
     let px = add(n(14.), mul(sub(Expr::Width, n(28.)), local(602)));
     let py = add(

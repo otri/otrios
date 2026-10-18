@@ -344,6 +344,13 @@ pub(super) fn state_worker(
     let mut mesh_cache = Arc::new(Vec::new());
     let mut copy_cache = Arc::new(Vec::new());
     let mut updates = 0;
+    let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
+    let (ink_publish, ink_rx) = mpsc::sync_channel(64);
+    let ink_connected = o.url.is_some();
+    if let Some(url) = o.url.clone() {
+        thread::spawn(move || ink_network(url, ink_out, ink_publish));
+    }
+    let mut ink_pending = None;
     loop {
         if app_worker.is_finished() {
             return app_worker
@@ -401,6 +408,28 @@ pub(super) fn state_worker(
             received_updates = next.received_updates;
         }
         dirty |= shell.tick(now);
+        for _ in 0..64 {
+            let Ok(bytes) = ink_rx.try_recv() else {
+                break;
+            };
+            match shell.receive_ink(&bytes, now) {
+                Ok(changed) => dirty |= changed,
+                Err(e) => eprintln!("Rejected ink: {e}"),
+            }
+        }
+        if ink_connected {
+            if ink_pending.is_none() {
+                let bytes = shell.ink_outgoing(now);
+                if !bytes.is_empty() {
+                    ink_pending = Some((Instant::now(), bytes));
+                }
+            }
+            if let Some(bytes) = ink_pending.take()
+                && let Err(mpsc::TrySendError::Full(bytes)) = ink_tx.try_send(bytes)
+            {
+                ink_pending = Some(bytes);
+            }
+        }
         dirty |= shell.flush_controls(&mut replica, now)?;
         let wanted = (
             replica.sequence(),
@@ -491,6 +520,81 @@ fn save_state(path: &str, replica: &mut Replica) -> Result<(), String> {
         .and_then(|_| f.sync_all())
         .and_then(|_| fs::rename(temp, path))
         .map_err(|e| e.to_string())
+}
+fn ink_network(
+    url: String,
+    outgoing: mpsc::Receiver<(Instant, Vec<u8>)>,
+    incoming: mpsc::SyncSender<Vec<u8>>,
+) {
+    use tungstenite::{Error, Message, stream::MaybeTlsStream};
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mut url = url
+        .replacen("https://", "wss://", 1)
+        .replacen("http://", "ws://", 1);
+    for suffix in ["/stream", "/sync"] {
+        if let Some(root) = url.strip_suffix(suffix) {
+            url = format!("{root}/demo/ink");
+            break;
+        }
+    }
+    loop {
+        let initial = match outgoing.try_recv() {
+            Ok(p) => Some(p),
+            Err(mpsc::TryRecvError::Disconnected) => return,
+            Err(_) => None,
+        };
+        let mut socket = match tungstenite::connect(url.as_str()) {
+            Ok((s, _)) => s,
+            Err(_) => {
+                thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+        };
+        let tcp = match socket.get_mut() {
+            MaybeTlsStream::Plain(s) => Some(s),
+            MaybeTlsStream::Rustls(s) => Some(&mut s.sock),
+            _ => None,
+        };
+        if let Some(tcp) = tcp {
+            let _ = tcp.set_read_timeout(Some(Duration::from_millis(5)));
+            let _ = tcp.set_write_timeout(Some(Duration::from_secs(1)));
+        }
+        let mut pending = initial;
+        loop {
+            let packet = pending.take().or_else(|| outgoing.try_recv().ok());
+            if let Some((at, bytes)) = packet
+                && at.elapsed() < Duration::from_secs(1)
+                && socket.send(Message::Binary(bytes.into())).is_err()
+            {
+                break;
+            }
+            match socket.read() {
+                Ok(Message::Binary(bytes)) => {
+                    if bytes.len() > 1024 * otrios_interfaces::ink::SERVER_BYTES
+                        || incoming.try_send(bytes.to_vec()).is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) => break,
+                Ok(_) => {
+                    let _ = socket.flush();
+                }
+                Err(Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(_) => break,
+            }
+            match outgoing.try_recv() {
+                Ok(packet) => pending = Some(packet),
+                Err(mpsc::TryRecvError::Disconnected) => return,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
 }
 fn network(
     url: String,

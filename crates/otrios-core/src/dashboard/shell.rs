@@ -46,6 +46,7 @@ fn remap(mut node: SceneNode, offset: u32) -> Result<SceneNode> {
     Ok(node)
 }
 pub struct Shell {
+    ink: super::ink::Ink,
     screen: Screen,
     controls: super::controls::Interactions,
     monitoring_allowed: bool,
@@ -61,6 +62,7 @@ pub struct Shell {
 impl Default for Shell {
     fn default() -> Self {
         Self {
+            ink: Default::default(),
             screen: Screen::Home,
             controls: Default::default(),
             monitoring_allowed: true,
@@ -179,6 +181,7 @@ impl Shell {
         }
     }
     pub fn cancel(&mut self) {
+        self.ink.cancel();
         self.input.cancel_all();
         self.controls.cancel();
         self.keyboard.cancel();
@@ -223,11 +226,38 @@ impl Shell {
         self.edit(edit)
     }
     pub fn tick(&mut self, now: u64) -> bool {
-        if let Some(edit) = self.keyboard.tick(now) {
+        let ink = self.ink.tick(now) && self.screen == Screen::Controls && !self.controls_layout;
+        if ink {
+            self.changed();
+        }
+        let edited = if let Some(edit) = self.keyboard.tick(now) {
             self.edit(&edit)
         } else {
             false
+        };
+        ink | edited
+    }
+    pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
+        self.ink.outgoing(now)
+    }
+    pub fn receive_ink(&mut self, bytes: &[u8], now: u64) -> Result<bool> {
+        if bytes.is_empty()
+            || bytes.len() > 1024 * otrios_interfaces::ink::SERVER_BYTES
+            || !bytes
+                .len()
+                .is_multiple_of(otrios_interfaces::ink::SERVER_BYTES)
+        {
+            return Err("Invalid ink batch".into());
         }
+        let mut changed = false;
+        for point in bytes.chunks_exact(otrios_interfaces::ink::SERVER_BYTES) {
+            changed |= self.ink.receive(point, now)?;
+        }
+        let changed = changed && self.screen == Screen::Controls && !self.controls_layout;
+        if changed {
+            self.changed();
+        }
+        Ok(changed)
     }
     fn apply(&mut self, replica: &mut impl Model, action: Option<Action>) -> Result<bool> {
         let changed = match action {
@@ -379,6 +409,7 @@ impl Shell {
         if self.screen == Screen::Controls
             && let Some(gesture) = &delivery.gesture
         {
+            self.ink.gesture(event.id, gesture, now);
             let changed = self.controls.gesture(replica, event.id, gesture, now)?;
             if changed {
                 self.changed();
@@ -415,11 +446,14 @@ impl Shell {
             return Ok(false);
         };
         let mut value = replica.controls()?.value(control)?;
+        let previous = value;
         value[0] =
             (i32::from(value[0]) + i32::from(dx) + if control < 2 { i32::from(dy) } else { 0 })
                 .clamp(0, 1000) as u16;
         if control == 2 {
             value[1] = (i32::from(value[1]) + i32::from(dy)).clamp(0, 1000) as u16;
+            self.ink.step(previous, value);
+            self.changed();
         }
         replica.set_control(control, value)
     }
@@ -611,19 +645,6 @@ impl Shell {
             )),
         );
         for i in 0..12 {
-            let point = self.controls.trail.get(i).copied().unwrap_or([500, 500]);
-            local.insert(
-                640 + i as u16 * 2,
-                Value::Number(f32::from(point[0]) / 1000.),
-            );
-            local.insert(
-                641 + i as u16 * 2,
-                Value::Number(f32::from(point[1]) / 1000.),
-            );
-            local.insert(
-                680 + i as u16,
-                Value::Boolean(i < self.controls.trail.len()),
-            );
             local.insert(
                 700 + i as u16,
                 Value::Boolean(f32::from(controls.dial) / 1000. >= i as f32 / 11.),
@@ -631,7 +652,7 @@ impl Shell {
         }
         let assets = assets()?;
         let view = replica.snapshot().view();
-        let page = match self.screen {
+        let mut page = match self.screen {
             Screen::Home => remap(
                 assets[0].resolve_local(view, &local)?.root().clone(),
                 SYSTEM + 1_000_000,
@@ -695,6 +716,20 @@ impl Shell {
                 node
             }
         };
+        if self.screen == Screen::Controls && !self.controls_layout {
+            fn ink(node: &mut SceneNode, layer: &super::ink::Ink) {
+                if node.responder == Some(TouchResponder::Drag(Action::Control(2))) {
+                    node.children.extend(
+                        layer.nodes([node.frame.width, node.frame.height], SYSTEM + 8_000_000),
+                    );
+                } else {
+                    for child in &mut node.children {
+                        ink(child, layer);
+                    }
+                }
+            }
+            ink(&mut page, &self.ink);
+        }
         let navigation = remap(
             assets[1].resolve_local(view, &local)?.root().clone(),
             SYSTEM,

@@ -3,7 +3,7 @@
 import init,{Dashboard} from './pkg/otrios_dashboard.js';
 import {awaitRelease,validRelease} from './release-gate.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
-let monitoring;
+let monitoring,inkSocket,inkRetry=250;
 let pendingRelease,releaseAbort;
 let dashboard,db,socket,retry=250,stopped=false,activeRelease,lastSnapshot;
 let durable=true;
@@ -61,7 +61,7 @@ function connect(){
             const isCurrent=()=>pendingRelease===r&&!stopped&&durable;
             awaitRelease(r,{isCurrent,signal:releaseAbort.signal}).then(async ready=>{
               if(!ready||!isCurrent())return;await persist();if(!isCurrent())return;
-              stopped=true;socket?.close();postMessage({type:'release',entry:r.web_entry});
+              stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});
             }).catch(storageError);return;
           }
           pendingRelease=null;releaseAbort?.abort();activeRelease=r.id;postMessage({type:'release-id',id:r.id});
@@ -78,6 +78,14 @@ function connect(){
   socket.onclose=()=>{postMessage({type:'online',online:false});if(!stopped){setTimeout(connect,retry);retry=Math.min(retry*2,5000);}};
   socket.onerror=()=>socket.close();
 }
+function connectInk(){
+  const url=new URL('/demo/ink',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';
+  inkSocket=new WebSocket(url);inkSocket.binaryType='arraybuffer';
+  inkSocket.onopen=()=>{inkRetry=250;};
+  inkSocket.onmessage=event=>{try{if(typeof event.data!=='string'&&dashboard.receive_ink(new Uint8Array(event.data),performance.now()))publish();}catch{inkSocket.close();}};
+  inkSocket.onclose=()=>{if(!stopped){setTimeout(connectInk,inkRetry);inkRetry=Math.min(5000,inkRetry*2);}};
+  inkSocket.onerror=()=>inkSocket.close();
+}
 function fatal(e){postMessage({type:'error',message:String(e)});}
 onmessage=async event=>{
   const m=event.data;
@@ -89,9 +97,12 @@ onmessage=async event=>{
       monitoring=new MonitoringSession({onStatus:state=>{
         dashboard.set_monitoring_access(state.authenticated);publish();postMessage({type:'monitoring-auth',...state});
       },onView:bytes=>{if(dashboard.present(bytes))publish();}});
-      activeRelease=m.release;applyRoute(m.route);publish();await persist().catch(storageError);connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
+      activeRelease=m.release;applyRoute(m.route);publish();await persist().catch(storageError);connect();connectInk();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
       setInterval(()=>{try{
-        const now=performance.now();const changed=dashboard.tick(now);const stressed=dashboard.stress_tick(now);
+        const now=performance.now();
+        const ink=dashboard.ink_outgoing(now);
+        if(ink.length&&inkSocket?.readyState===WebSocket.OPEN)inkSocket.send(ink);
+        const changed=dashboard.tick(now);const stressed=dashboard.stress_tick(now);
         const stall=dashboard.stress_stall_ms();
         if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the state worker. */}}
         if(changed){publish();sendChanges();persist().catch(storageError);}else if(stressed)publish(false);

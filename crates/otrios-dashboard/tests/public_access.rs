@@ -11,6 +11,93 @@ use std::{
 };
 use tungstenite::{Message, client::IntoClientRequest};
 const ORIGIN: &str = "https://otrios.otri.ca";
+#[test]
+fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers() {
+    use otrios_interfaces::ink::{self, Point};
+    let room = room_with_auth(false, 28800);
+    let private = private_view(&room);
+    let state = std::fs::read(room.root.join("state.automerge")).ok();
+    let mut bad = format!("ws://{}/demo/ink", room.public)
+        .into_client_request()
+        .unwrap();
+    bad.headers_mut()
+        .insert("Origin", "https://unrelated.example".parse().unwrap());
+    assert!(
+        matches!(tungstenite::connect(bad),Err(tungstenite::Error::Http(r)) if r.status().as_u16()==403)
+    );
+    let mut a = socket(&room.public, "/demo/ink", ORIGIN);
+    let mut b = socket(&room.private, "/demo/ink", ORIGIN);
+    let read = |s: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>| {
+        let until = Instant::now() + Duration::from_secs(2);
+        loop {
+            match s.read() {
+                Ok(Message::Binary(b)) => return b,
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    assert!(Instant::now() < until)
+                }
+                other => panic!("Unexpected ink message: {other:?}"),
+            }
+        }
+    };
+    let first = ink::decode_server(&read(&mut a)).unwrap();
+    let second = ink::decode_server(&read(&mut b)).unwrap();
+    assert!(first.2.is_none());
+    assert!(second.2.is_none());
+    assert_ne!(first.0, second.0);
+    let points = [
+        Point {
+            phase: 0,
+            stroke: 1,
+            position: [100, 200],
+        },
+        Point {
+            phase: 1,
+            stroke: 1,
+            position: [400, 600],
+        },
+        Point {
+            phase: 2,
+            stroke: 1,
+            position: [800, 900],
+        },
+    ];
+    a.send(Message::Binary(
+        points
+            .iter()
+            .copied()
+            .flat_map(Point::encode)
+            .collect::<Vec<_>>()
+            .into(),
+    ))
+    .unwrap();
+    let live = read(&mut b);
+    assert_eq!(live.len(), points.len() * ink::SERVER_BYTES);
+    for (bytes, point) in live.chunks_exact(ink::SERVER_BYTES).zip(points) {
+        let (peer, _, p) = ink::decode_server(bytes).unwrap();
+        assert_eq!(peer, first.0);
+        assert_eq!(p, Some(point));
+    }
+    let mut c = socket(&room.public, "/demo/ink", ORIGIN);
+    read(&mut c);
+    let history = read(&mut c);
+    assert_eq!(history.len(), live.len());
+    std::thread::sleep(Duration::from_millis(5200));
+    let mut late = socket(&room.public, "/demo/ink", ORIGIN);
+    read(&mut late);
+    assert!(
+        matches!(late.read(),Err(tungstenite::Error::Io(e)) if matches!(e.kind(),std::io::ErrorKind::WouldBlock|std::io::ErrorKind::TimedOut))
+    );
+    assert_eq!(std::fs::read(room.root.join("state.automerge")).ok(), state);
+    assert_eq!(
+        request(&room.private, "GET", "/presentation", &[], &[]).1,
+        private
+    );
+}
 struct Room {
     child: Child,
     private: String,

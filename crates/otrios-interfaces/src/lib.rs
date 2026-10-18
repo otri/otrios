@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Experimental contract types. No stable wire format or ABI is promised.
 
+pub mod ink;
 #[cfg(feature = "layout")]
 pub mod layout;
 pub mod scene;

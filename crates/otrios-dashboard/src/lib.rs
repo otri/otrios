@@ -116,6 +116,12 @@ impl Dashboard {
         let now = now.max(0.) as u64;
         Ok(self.shell.tick(now) | self.shell.flush_controls(&mut self.replica, now)?)
     }
+    pub fn ink_outgoing(&mut self, now: f64) -> Vec<u8> {
+        self.shell.ink_outgoing(now.max(0.) as u64)
+    }
+    pub fn receive_ink(&mut self, bytes: &[u8], now: f64) -> Result<bool, String> {
+        self.shell.receive_ink(bytes, now.max(0.) as u64)
+    }
     pub fn adjust_control(&mut self, id: u32, dx: i16, dy: i16) -> Result<bool, String> {
         self.shell.adjust_control(&mut self.replica, id, dx, dy)
     }

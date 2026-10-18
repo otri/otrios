@@ -25,8 +25,11 @@ use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 
 #[path = "server_auth.rs"]
 mod auth;
+#[path = "server_ink.rs"]
+mod ink;
 
 struct App {
+    ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
     replica: Mutex<Replica>,
     state_file: Option<PathBuf>,
@@ -559,6 +562,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(|path| auth::Sessions::load(&path, Duration::from_secs(session_seconds)).map(Arc::new))
         .transpose()?;
     let app = Arc::new(App {
+        ink: ink::Room::new()?,
         auth,
         replica: Mutex::new(replica),
         state_file,
@@ -576,6 +580,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         loop {
             tick.tick().await;
+            observer.ink.expire().await;
             if let Some(next) = read_release(&observer.releases) {
                 let mut current = observer.release.write().await;
                 if *current != next {
@@ -593,6 +598,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         let listener = tokio::net::TcpListener::bind(address).await?;
         let public_routes = Router::new()
+            .route("/demo/ink", get(ink::public))
             .route("/stream", get(public_stream))
             .route("/demo/stream", get(public_stream))
             .route(
@@ -615,6 +621,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         });
     }
     let routes = Router::new()
+        .route("/demo/ink", get(ink::trusted))
         .route("/", get(root))
         .route("/health", get(health))
         .route("/release", get(current_release))

@@ -102,7 +102,7 @@ impl Interactions {
     pub fn flush(&mut self, replica: &mut impl Model, now: u64) -> Result<bool> {
         let mut changed = false;
         for drag in self.drags.values_mut() {
-            if drag.dirty && now.saturating_sub(drag.last) >= 50 {
+            if drag.control != 2 && drag.dirty && now.saturating_sub(drag.last) >= 50 {
                 changed |= replica.set_control(drag.control, drag.value)?;
                 drag.last = now;
                 drag.dirty = false;
@@ -190,7 +190,11 @@ impl Interactions {
                 "CAPTURED"
             }
         );
-        if matches!(gesture.phase, PointerPhase::Down | PointerPhase::Up) {
+        // Ink samples travel on ephemeral presence. Only the final pad value is
+        // durable app intent; moving a finger must not grow document history.
+        if gesture.phase == PointerPhase::Up
+            || (control != 2 && gesture.phase == PointerPhase::Down)
+        {
             replica.set_control(control, value)?;
             drag.dirty = false;
             drag.last = now;
@@ -207,6 +211,33 @@ impl Interactions {
 mod tests {
     use super::*;
     use crate::dashboard::Replica;
+    #[test]
+    fn drawing_only_publishes_the_final_pad_position() {
+        let mut r = Replica::new().unwrap();
+        let before = r.save();
+        let mut input = Interactions::default();
+        input
+            .gesture(&mut r, 1, &event(2, PointerPhase::Down, [14., 14.]), 0)
+            .unwrap();
+        for t in 1..100 {
+            input
+                .gesture(
+                    &mut r,
+                    1,
+                    &event(2, PointerPhase::Move, [100., 100.]),
+                    t * 50,
+                )
+                .unwrap();
+            input.flush(&mut r, t * 50).unwrap();
+        }
+        assert_eq!(r.save(), before);
+        let preview = input.preview(r.controls().unwrap()).pad;
+        input
+            .gesture(&mut r, 1, &event(2, PointerPhase::Up, [100., 100.]), 5000)
+            .unwrap();
+        assert_eq!(r.controls().unwrap().pad, preview);
+        assert_ne!(r.save(), before);
+    }
     fn event(control: u8, phase: PointerPhase, p: [f32; 2]) -> Gesture {
         Gesture {
             action: Action::Control(control),
@@ -258,7 +289,10 @@ mod tests {
             .gesture(&mut r, 1, &event(2, PointerPhase::Cancel, [306., 14.]), 3)
             .unwrap();
         assert_eq!(r.snapshot().id(), before);
-        assert_eq!(input.preview(r.controls().unwrap()).pad, [0, 0]);
+        assert_eq!(
+            input.preview(r.controls().unwrap()).pad,
+            State::default().pad
+        );
         assert!(!input.flush(&mut r, 1000).unwrap());
     }
 }
