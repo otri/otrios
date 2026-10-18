@@ -103,12 +103,6 @@ impl Dashboard {
     pub fn screen(&self) -> String {
         self.shell.screen_name().into()
     }
-    pub fn controls_layout(&self) -> bool {
-        self.shell.controls_layout()
-    }
-    pub fn show_controls_layout(&mut self, value: bool) {
-        self.shell.show_controls_layout(value);
-    }
     pub fn navigate(&mut self, name: &str) -> bool {
         self.shell.open_name(name)
     }
@@ -117,6 +111,16 @@ impl Dashboard {
     }
     pub fn editing(&self) -> bool {
         self.shell.editing()
+    }
+    /// Wall-clock event time is independent of the monotonic animation clock.
+    pub fn set_wall_time(&mut self, seconds: f64) -> bool {
+        let seconds = if seconds.is_finite() {
+            seconds.max(0.) as i64
+        } else {
+            0
+        };
+        self.replica.set_wall_time(seconds);
+        self.shell.set_wall_time(seconds)
     }
     pub fn tick(&mut self, now: f64) -> Result<bool, String> {
         let now = now.max(0.) as u64;

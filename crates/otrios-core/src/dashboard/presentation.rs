@@ -9,7 +9,7 @@ pub trait Model {
     fn snapshot(&self) -> &ViewSnapshot;
     fn controls(&self) -> Result<State>;
     fn motion(&self) -> Result<Intent>;
-    fn base_layout(&self) -> Result<Layout>;
+    fn toggle_signal(&self) -> Result<super::signal::ToggleSignal>;
     fn presentation(&self) -> Option<&Layout>;
     fn set_control(&mut self, control: u8, value: [u16; 2]) -> Result<bool>;
     fn set_motion(&mut self, intent: Intent) -> Result<bool>;
@@ -39,8 +39,8 @@ impl Model for Replica {
     fn motion(&self) -> Result<Intent> {
         Replica::motion(self)
     }
-    fn base_layout(&self) -> Result<Layout> {
-        Replica::base_layout(self)
+    fn toggle_signal(&self) -> Result<super::signal::ToggleSignal> {
+        Replica::toggle_signal(self)
     }
     fn presentation(&self) -> Option<&Layout> {
         Replica::presentation(self)
@@ -59,7 +59,7 @@ impl Model for Replica {
 pub enum Edit {
     Control(u8, [u16; 2]),
     Motion(Intent),
-    Enabled(bool),
+    Enabled(bool, i64),
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Command {
@@ -71,7 +71,7 @@ impl Command {
         match self.edit {
             Edit::Control(c, v) => replica.set_control(c, v),
             Edit::Motion(v) => replica.set_motion(v),
-            Edit::Enabled(v) => replica.set_enabled(v),
+            Edit::Enabled(v, at) => replica.set_enabled_at(v, at),
         }
     }
 }
@@ -80,6 +80,7 @@ pub struct Presentation {
     pending: Vec<Command>,
     issued: u64,
     acknowledged: u64,
+    wall_time_seconds: i64,
 }
 impl Presentation {
     pub fn published(&self) -> &Arc<Replica> {
@@ -91,7 +92,11 @@ impl Presentation {
             pending: vec![],
             issued: 0,
             acknowledged: 0,
+            wall_time_seconds: super::signal::wall_time_seconds(),
         }
+    }
+    pub fn set_wall_time(&mut self, seconds: i64) {
+        self.wall_time_seconds = seconds.max(0);
     }
     pub fn sequence(&self) -> u64 {
         self.issued
@@ -165,7 +170,7 @@ impl Model for Presentation {
             .iter()
             .rev()
             .find_map(|c| {
-                if let Edit::Enabled(v) = c.edit {
+                if let Edit::Enabled(v, _) = c.edit {
                     Some(v)
                 } else {
                     None
@@ -173,8 +178,8 @@ impl Model for Presentation {
             })
             .unwrap_or_else(|| self.published.enabled())
     }
-    fn base_layout(&self) -> Result<Layout> {
-        self.published.base_layout()
+    fn toggle_signal(&self) -> Result<super::signal::ToggleSignal> {
+        self.published.toggle_signal()
     }
     fn presentation(&self) -> Option<&Layout> {
         self.published.presentation()
@@ -200,7 +205,7 @@ impl Model for Presentation {
         if self.enabled() == v {
             Ok(false)
         } else {
-            self.push(Edit::Enabled(v))
+            self.push(Edit::Enabled(v, self.wall_time_seconds))
         }
     }
 }
@@ -208,6 +213,22 @@ impl Model for Presentation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn queued_toggle_carries_interaction_time_across_worker_delays() {
+        let mut authority = Replica::new().unwrap();
+        let mut view = Presentation::new(Arc::new(authority.clone()));
+        view.set_wall_time(1000);
+        view.set_enabled(false).unwrap();
+        let command = view.pending()[0];
+        view.set_wall_time(1301);
+        authority.set_wall_time(1301);
+        command.apply(&mut authority).unwrap();
+        assert_eq!(
+            authority.toggle_signal().unwrap().project(1000),
+            vec![[1., 24.]]
+        );
+        assert!(authority.toggle_signal().unwrap().project(1301).is_empty());
+    }
     #[test]
     fn pending_intent_survives_old_ack_and_repeated_toggles_keep_their_order() {
         let mut authority = Replica::new().unwrap();

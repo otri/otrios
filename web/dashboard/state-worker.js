@@ -13,7 +13,7 @@ function sendFrame(){
   postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer]:[]);
 }
 function publish(geometry=true){
-  const frame={screen:dashboard.screen(),controlsLayout:dashboard.controls_layout(),keyboard:dashboard.keyboard_visible(),editing:dashboard.editing(),intent:Array.from(dashboard.motion_intent()),updates:dashboard.stress_updates()};
+  const frame={screen:dashboard.screen(),keyboard:dashboard.keyboard_visible(),editing:dashboard.editing(),intent:Array.from(dashboard.motion_intent()),updates:dashboard.stress_updates()};
   if(geometry){
     frame.vertices=dashboard.vertices();frame.text=dashboard.scene_text();frame.snapshot=dashboard.snapshot_id();frame.layout=dashboard.layout_id();
     frame.controls=Array.from(dashboard.control_ids(),id=>({id,label:dashboard.control_label(id),disabled:dashboard.control_disabled(id),role:dashboard.control_role(id),checked:dashboard.control_checked(id),bounds:Array.from(dashboard.control_bounds(id)),value:dashboard.control_value(id),draggable:dashboard.control_draggable(id)}));
@@ -78,7 +78,7 @@ onmessage=async event=>{
   const m=event.data;
   try{
     if(m.type==='start'){
-      await init();retireDocumentCaches();dashboard=new Dashboard();
+      await init();retireDocumentCaches();dashboard=new Dashboard();dashboard.set_wall_time(Date.now()/1000);
       monitoring=new MonitoringSession({onStatus:state=>{
         dashboard.set_monitoring_access(state.authenticated);publish();postMessage({type:'monitoring-auth',...state});
       },onView:bytes=>{if(dashboard.present(bytes))publish();}});
@@ -87,7 +87,8 @@ onmessage=async event=>{
         const now=performance.now();
         const ink=dashboard.ink_outgoing(now);
         if(ink.length&&inkSocket?.readyState===WebSocket.OPEN)inkSocket.send(ink);
-        const changed=dashboard.tick(now);const stressed=dashboard.stress_tick(now);
+        const clockChanged=dashboard.set_wall_time(Date.now()/1000);
+        const changed=dashboard.tick(now)||clockChanged;const stressed=dashboard.stress_tick(now);
         const stall=dashboard.stress_stall_ms();
         if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the state worker. */}}
         if(changed){publish();sendChanges();}else if(stressed)publish(false);
@@ -103,6 +104,7 @@ onmessage=async event=>{
     }
     if(m.type==='frame-ack'){inFlight=false;sendFrame();return;}
     if(!dashboard)return;
+    const clockChanged=dashboard.set_wall_time(Date.now()/1000);
     let changed=false;
     switch(m.type){
       case 'login':monitoring.login(m.username,m.password);break;
@@ -117,8 +119,8 @@ onmessage=async event=>{
       case 'cancel':dashboard.cancel_input();changed=true;break;
     }
     monitoring.setActive(dashboard.screen()==='monitoring');
-    if(changed){publish();sendChanges();}
+    if(changed||clockChanged){publish();if(changed)sendChanges();}
     postMessage({type:'command-ack'});
   }catch(e){fatal(e);postMessage({type:'command-ack'});}
 };
-function applyRoute(route){const p=route.replace(/^#\/?/,'').split('/');dashboard.navigate(p[0]);dashboard.show_controls_layout(p[0]==='controls'&&p[1]==='layout');if(p[0]==='keyboard'&&p[1]==='input'&&!dashboard.keyboard_visible())dashboard.show_keyboard();else if(dashboard.keyboard_visible()&&p[1]!=='input')dashboard.back();monitoring?.setActive(dashboard.screen()==='monitoring');}
+function applyRoute(route){const p=route.replace(/^#\/?/,'').split('/');dashboard.navigate(p[0]);if(p[0]==='keyboard'&&p[1]==='input'&&!dashboard.keyboard_visible())dashboard.show_keyboard();else if(dashboard.keyboard_visible()&&p[1]!=='input')dashboard.back();monitoring?.setActive(dashboard.screen()==='monitoring');}

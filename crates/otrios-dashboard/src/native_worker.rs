@@ -419,6 +419,9 @@ pub(super) fn state_worker(
                 .and(Err("Application worker stopped unexpectedly".into()));
         }
         let now = started.elapsed().as_millis() as u64;
+        let wall_seconds = otrios_core::dashboard::signal::wall_time_seconds();
+        replica.set_wall_time(wall_seconds);
+        dirty |= shell.set_wall_time(wall_seconds);
         for event in input.try_iter() {
             match event {
                 Input::Stop => {

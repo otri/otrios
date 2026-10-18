@@ -156,7 +156,7 @@ pub fn blueprint() -> Blueprint {
         4,
         "Switch",
         vec![
-            param(1, "label", ValueType::Text, s("Focus mode")),
+            param(1, "label", ValueType::Text, s("Toggle")),
             param(2, "on-color", ValueType::Color, c(accent)),
             param(3, "off-color", ValueType::Color, c(card)),
             param(
@@ -239,7 +239,7 @@ pub fn blueprint() -> Blueprint {
         text(
             3,
             [n(32.), n(76.), sub(Expr::Width, n(64.)), n(16.)],
-            s("DEMO DATA  /  LAST 32 EVENTS"),
+            s("Data from Last 5min"),
             2.,
             c(muted),
         ),
@@ -271,31 +271,12 @@ pub fn blueprint() -> Blueprint {
         },
         vec![],
     ));
-    let mut marker = node(
-        31,
-        [
-            sub(Expr::Width, n(47.)),
-            sub(
-                add(n(136.), gh.clone()),
-                add(
-                    mul(mul(Expr::State(Binding::LastSample), n(0.01)), gh),
-                    n(7.),
-                ),
-            ),
-            n(14.),
-            n(14.),
-        ],
-        Shape::Circle { color: p(3) },
-        vec![],
-    );
-    marker.visible = Expr::State(Binding::HasSamples);
-    graphchildren.push(marker);
     graphchildren.push(slot());
     let graph = template(
         5,
         "Graph",
         vec![
-            param(1, "label", ValueType::Text, s("Sample signal")),
+            param(1, "label", ValueType::Text, s("Toggle signal")),
             param(2, "background", ValueType::Color, c(card)),
             param(3, "line-color", ValueType::Color, c(accent)),
         ],
@@ -338,16 +319,6 @@ pub fn blueprint() -> Blueprint {
                         vec![prop(1, Expr::State(Binding::TouchLabel)), prop(3, n(4.))],
                         vec![],
                     )],
-                ),
-                instance(
-                    5,
-                    2,
-                    [64., 698., 1152., 16.],
-                    vec![
-                        prop(1, s("Touch a tile. Your other screen follows.")),
-                        prop(2, c(muted)),
-                    ],
-                    vec![],
                 ),
             ],
         ),

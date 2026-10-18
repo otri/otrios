@@ -14,8 +14,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 const SYSTEM: u32 = 4_100_000_000;
-fn assets() -> Result<&'static [Layout; 6]> {
-    static ASSETS: OnceLock<Result<[Layout; 6]>> = OnceLock::new();
+fn assets() -> Result<&'static [Layout; 7]> {
+    static ASSETS: OnceLock<Result<[Layout; 7]>> = OnceLock::new();
     ASSETS
         .get_or_init(|| {
             Ok([
@@ -25,6 +25,7 @@ fn assets() -> Result<&'static [Layout; 6]> {
                 Layout::from_bytes(include_bytes!("shell-assets/keyboard.flex"))?,
                 Layout::from_bytes(include_bytes!("shell-assets/motion.flex"))?,
                 Layout::from_bytes(include_bytes!("shell-assets/playground.flex"))?,
+                Layout::from_bytes(include_bytes!("shell-assets/layout.flex"))?,
             ])
         })
         .as_ref()
@@ -50,7 +51,7 @@ pub struct Shell {
     screen: Screen,
     controls: super::controls::Interactions,
     monitoring_allowed: bool,
-    controls_layout: bool,
+    wall_time_seconds: i64,
     keyboard: Keyboard,
     fields: [TextBuffer; 2],
     focused: Option<u8>,
@@ -66,7 +67,7 @@ impl Default for Shell {
             screen: Screen::Home,
             controls: Default::default(),
             monitoring_allowed: true,
-            controls_layout: false,
+            wall_time_seconds: 0,
             keyboard: Keyboard::default(),
             fields: Default::default(),
             focused: None,
@@ -99,9 +100,23 @@ impl Shell {
             Screen::Home => "home",
             Screen::Monitoring => "monitoring",
             Screen::Controls => "controls",
+            Screen::Layout => "layout",
             Screen::Keyboard => "keyboard",
             Screen::Animation => "animation",
             Screen::ThreeD => "3d",
+        }
+    }
+    /// Presentation wall clock for the rolling signal; never enters CRDT state.
+    pub fn set_wall_time(&mut self, epoch_seconds: i64) -> bool {
+        if self.wall_time_seconds == epoch_seconds {
+            return false;
+        }
+        self.wall_time_seconds = epoch_seconds;
+        if self.screen == Screen::Layout {
+            self.changed();
+            true
+        } else {
+            false
         }
     }
     pub fn stress_hz(&self) -> u8 {
@@ -141,6 +156,7 @@ impl Shell {
         self.open(match name {
             "monitoring" => Screen::Monitoring,
             "controls" => Screen::Controls,
+            "layout" => Screen::Layout,
             "keyboard" => Screen::Keyboard,
             "animation" => Screen::Animation,
             "3d" => Screen::ThreeD,
@@ -154,26 +170,11 @@ impl Shell {
         self.cancel();
         self.keyboard.hide();
         self.focused = None;
-        self.controls_layout = false;
         self.screen = screen;
         self.changed();
         true
     }
-    pub fn controls_layout(&self) -> bool {
-        self.screen == Screen::Controls && self.controls_layout
-    }
-    pub fn show_controls_layout(&mut self, value: bool) {
-        if self.controls_layout != value {
-            self.cancel();
-            self.controls_layout = value;
-            self.changed();
-        }
-    }
     pub fn back(&mut self) -> bool {
-        if self.controls_layout() {
-            self.show_controls_layout(false);
-            return true;
-        }
         if self.keyboard_visible() {
             self.keyboard.hide();
             self.input.cancel_all();
@@ -229,7 +230,7 @@ impl Shell {
         self.edit(edit)
     }
     pub fn tick(&mut self, now: u64) -> bool {
-        let ink = self.ink.tick(now) && self.screen == Screen::Controls && !self.controls_layout;
+        let ink = self.ink.tick(now) && self.screen == Screen::Controls;
         if ink {
             self.changed();
         }
@@ -256,7 +257,7 @@ impl Shell {
         for point in bytes.chunks_exact(otrios_interfaces::ink::SERVER_BYTES) {
             changed |= self.ink.receive(point, now)?;
         }
-        let changed = changed && self.screen == Screen::Controls && !self.controls_layout;
+        let changed = changed && self.screen == Screen::Controls;
         if changed {
             self.changed();
         }
@@ -272,10 +273,6 @@ impl Shell {
                     (value[0] + 100).min(1000)
                 };
                 replica.set_control(control, value)?
-            }
-            Some(Action::LayoutLab) if self.screen == Screen::Controls => {
-                self.show_controls_layout(true);
-                true
             }
             Some(Action::ResetControls) if self.screen == Screen::Controls => {
                 self.cancel();
@@ -338,7 +335,9 @@ impl Shell {
                 self.changed();
                 true
             }
-            Some(Action::ToggleFocus) if self.screen == Screen::Controls => {
+            Some(Action::ToggleFocus)
+                if matches!(self.screen, Screen::Controls | Screen::Layout) =>
+            {
                 replica.apply_action(action)?
             }
             _ => false,
@@ -484,13 +483,8 @@ impl Shell {
         let title = match self.screen {
             Screen::Home => "HOME",
             Screen::Monitoring => "MONITORING",
-            Screen::Controls => {
-                if self.controls_layout {
-                    "LAYOUT LAB"
-                } else {
-                    "LIVE CONTROLS"
-                }
-            }
+            Screen::Controls => "COMPONENT PLAYGROUND",
+            Screen::Layout => "LAYOUT LAB",
             Screen::Keyboard => "INPUT LAB",
             Screen::Animation => "MOTION LAB",
             Screen::ThreeD => "3D LAB",
@@ -538,7 +532,7 @@ impl Shell {
             local.insert(1000 + key, Value::Text(self.keyboard.label(key)));
             local.insert(
                 4000 + key,
-                Value::Number(self.keyboard.label(key).chars().count() as f32 * 18.),
+                Value::Number(super::render::text_width(&self.keyboard.label(key), 2.)),
             );
             local.insert(
                 2000 + key,
@@ -632,9 +626,9 @@ impl Shell {
             616,
             Value::Text(
                 if view_enabled(replica) {
-                    "OUTPUT ON"
+                    "TOGGLE ON"
                 } else {
-                    "OUTPUT OFF"
+                    "TOGGLE OFF"
                 }
                 .into(),
             ),
@@ -653,6 +647,12 @@ impl Shell {
                 Value::Boolean(f32::from(controls.dial) / 1000. >= i as f32 / 11.),
             );
         }
+        if self.screen == Screen::Layout {
+            local.insert(
+                730,
+                Value::TimedSeries(replica.toggle_signal()?.project(self.wall_time_seconds)),
+            );
+        }
         let assets = assets()?;
         let view = replica.snapshot().view();
         let mut page = match self.screen {
@@ -668,47 +668,40 @@ impl Shell {
                 assets[4].resolve_local(view, &local)?.root().clone(),
                 SYSTEM + 6_000_000,
             )?,
-            Screen::Controls => {
-                if self.controls_layout {
-                    let mut node = super::components::node(
-                        SYSTEM + 4_000_000,
-                        Rect::new(64., 80., 1152., 720.),
-                        Primitive::Viewport { scale: 0.9 },
-                    );
-                    node.children
-                        .push(replica.base_layout()?.resolve(view)?.root().clone());
-                    node
-                } else {
-                    remap(
-                        assets[5].resolve_local(view, &local)?.root().clone(),
-                        SYSTEM + 7_000_000,
-                    )?
-                }
+            Screen::Controls => remap(
+                assets[5].resolve_local(view, &local)?.root().clone(),
+                SYSTEM + 7_000_000,
+            )?,
+            Screen::Layout => {
+                let mut node = super::components::node(
+                    SYSTEM + 4_000_000,
+                    Rect::new(64., 80., 1152., 720.),
+                    Primitive::Viewport { scale: 0.9 },
+                );
+                node.children
+                    .push(assets[6].resolve_local(view, &local)?.root().clone());
+                node
             }
             Screen::Monitoring => {
-                let content = if self.screen == Screen::Monitoring {
-                    if self.monitoring_allowed && replica.presentation().is_some() {
-                        replica.snapshot().scene().as_ref().clone()
-                    } else {
-                        use super::components::*;
-                        Scene::new(canvas(
-                            0,
-                            Rect::new(0., 0., 1280., 800.),
-                            vec![text(
-                                1,
-                                Rect::new(48., 100., 1184., 32.),
-                                if self.monitoring_allowed {
-                                    "Waiting for the monitoring stream"
-                                } else {
-                                    "Sign in to open Monitoring"
-                                },
-                                3,
-                                WHITE,
-                            )],
-                        ))?
-                    }
+                let content = if self.monitoring_allowed && replica.presentation().is_some() {
+                    replica.snapshot().scene().as_ref().clone()
                 } else {
-                    replica.base_layout()?.resolve(view)?
+                    use super::components::*;
+                    Scene::new(canvas(
+                        0,
+                        Rect::new(0., 0., 1280., 800.),
+                        vec![text(
+                            1,
+                            Rect::new(48., 100., 1184., 32.),
+                            if self.monitoring_allowed {
+                                "Waiting for the monitoring stream"
+                            } else {
+                                "Sign in to open Monitoring"
+                            },
+                            3,
+                            WHITE,
+                        )],
+                    ))?
                 };
                 let mut node = super::components::node(
                     SYSTEM + 4_000_000,
@@ -719,7 +712,7 @@ impl Shell {
                 node
             }
         };
-        if self.screen == Screen::Controls && !self.controls_layout {
+        if self.screen == Screen::Controls {
             fn ink(node: &mut SceneNode, layer: &super::ink::Ink) {
                 if node.responder == Some(TouchResponder::Drag(Action::Control(2))) {
                     node.children.extend(
@@ -733,11 +726,13 @@ impl Shell {
             }
             ink(&mut page, &self.ink);
         }
-        let navigation = remap(
-            assets[1].resolve_local(view, &local)?.root().clone(),
-            SYSTEM,
-        )?;
-        let mut children = vec![page, navigation];
+        let mut children = vec![page];
+        if self.screen != Screen::Home {
+            children.push(remap(
+                assets[1].resolve_local(view, &local)?.root().clone(),
+                SYSTEM,
+            )?);
+        }
         if self.keyboard_visible() {
             children.push(remap(
                 assets[3].resolve_local(view, &local)?.root().clone(),
@@ -865,7 +860,7 @@ mod tests {
         assert_eq!(s.screen(), Screen::Controls);
         assert!(s.back());
         // The last card's decorative lock still bubbles to its Open responder.
-        tap(&mut s, &mut r, [795., 525.]);
+        tap(&mut s, &mut r, [1195., 525.]);
         assert_eq!(s.screen(), Screen::Monitoring);
         assert!(s.back());
         assert_eq!(s.screen(), Screen::Home);
@@ -889,6 +884,39 @@ mod tests {
         tap(&mut s, &mut r, p);
         assert_ne!(r.save(), before);
         assert_eq!(Shell::default().screen(), Screen::Home);
+    }
+    #[test]
+    fn launcher_has_six_apps_and_no_self_navigation() {
+        let replica = Replica::new().unwrap();
+        let mut shell = Shell::default();
+        let scene = shell.scene(&replica).unwrap();
+        let actions: Vec<_> = scene
+            .controls()
+            .into_iter()
+            .filter_map(|control| control.node.responder)
+            .collect();
+        assert_eq!(actions.len(), 6);
+        assert!(
+            actions
+                .iter()
+                .all(|action| matches!(action, TouchResponder::Activate(Action::Open(_))))
+        );
+        assert!(actions.contains(&TouchResponder::Activate(Action::Open(Screen::Layout))));
+        assert_eq!(
+            actions.last(),
+            Some(&TouchResponder::Activate(Action::Open(Screen::Monitoring)))
+        );
+        shell.open(Screen::Layout);
+        let layout = shell.scene(&replica).unwrap();
+        assert!(
+            layout
+                .controls()
+                .iter()
+                .any(|control| control.node.responder
+                    == Some(TouchResponder::Activate(Action::ToggleFocus)))
+        );
+        assert!(shell.back());
+        assert_eq!(shell.screen(), Screen::Home);
     }
     #[test]
     fn keyboard_fields_back_and_remote_refresh_preserve_focus_boundaries() {
@@ -973,14 +1001,13 @@ mod tests {
         }
         assert_eq!(r.controls().unwrap().level, 1000);
         let before = r.save();
-        s.show_controls_layout(true);
-        assert!(s.controls_layout());
+        s.open(Screen::Layout);
+        assert_eq!(s.screen(), Screen::Layout);
         s.scene(&r).unwrap();
         assert!(s.back());
-        assert!(!s.controls_layout());
-        assert_eq!(s.screen(), Screen::Controls);
+        assert_eq!(s.screen(), Screen::Home);
         assert_eq!(r.save(), before);
-        assert!(s.back());
+        assert!(!s.back());
         assert_eq!(s.screen(), Screen::Home);
     }
     #[test]
@@ -1012,6 +1039,7 @@ mod tests {
             Screen::Home,
             Screen::Monitoring,
             Screen::Controls,
+            Screen::Layout,
             Screen::Keyboard,
             Screen::Animation,
             Screen::ThreeD,

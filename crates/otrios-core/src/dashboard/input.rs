@@ -342,7 +342,7 @@ mod tests {
         local.apply_action(result.action).unwrap();
         assert!(local.snapshot().view().nodes.iter().any(|n| n.content
             == otrios_interfaces::ViewContent::Switch {
-                label: "Focus mode".into(),
+                label: "Toggle".into(),
                 enabled: true
             }));
     }

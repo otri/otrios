@@ -14,12 +14,13 @@ pub mod presentation;
 mod render;
 pub mod scene;
 pub mod shell;
+pub mod signal;
 mod snapshot;
 pub use render::{Mesh, font_notice, render, render_scene, text_width};
 pub use snapshot::ViewSnapshot;
 
 use automerge::sync::SyncDoc;
-use automerge::transaction::Transactable;
+use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{ActorId, AutoCommit, ObjType, ROOT, ReadDoc, ScalarValue, TextEncoding};
 use otrios_interfaces::{DashboardView, ViewContent, ViewNode};
 
@@ -67,18 +68,23 @@ pub struct Replica {
     base_snapshot: ViewSnapshot,
     saved: std::sync::Arc<[u8]>,
     presentation: Option<layout::Layout>,
+    toggle_signal: signal::ToggleSignal,
+    wall_time_seconds: i64,
 }
 impl Replica {
     pub fn new() -> Result<Self> {
         let mut doc = seed()?.fork();
         let (base_snapshot, snapshot) = project_cached(&mut doc, None, None, None)?;
         let saved = doc.save().into();
+        let toggle_signal = signal::ToggleSignal::read(&mut doc)?;
         Ok(Self {
             doc,
             snapshot,
             base_snapshot,
             saved,
             presentation: None,
+            toggle_signal,
+            wall_time_seconds: signal::wall_time_seconds(),
         })
     }
     /// A fresh actor on every load prevents two tabs/processes sharing an actor.
@@ -86,12 +92,15 @@ impl Replica {
         let mut doc = load_document(bytes)?.fork();
         let (base_snapshot, snapshot) = project_cached(&mut doc, None, None, None)?;
         let saved = doc.save().into();
+        let toggle_signal = signal::ToggleSignal::read(&mut doc)?;
         Ok(Self {
             doc,
             snapshot,
             base_snapshot,
             saved,
             presentation: None,
+            toggle_signal,
+            wall_time_seconds: signal::wall_time_seconds(),
         })
     }
     pub fn controls(&self) -> Result<controls::State> {
@@ -332,7 +341,17 @@ impl Replica {
         candidate.merge(&mut incoming).map_err(err)?;
         self.publish(candidate)
     }
+    pub fn toggle_signal(&self) -> Result<signal::ToggleSignal> {
+        Ok(self.toggle_signal.clone())
+    }
+    pub fn set_wall_time(&mut self, seconds: i64) {
+        self.wall_time_seconds = seconds.max(0);
+    }
     pub fn set_enabled(&mut self, enabled: bool) -> Result<bool> {
+        self.set_enabled_at(enabled, self.wall_time_seconds)
+    }
+    /// Timestamp the discrete interaction once, before any worker/network delay.
+    pub fn set_enabled_at(&mut self, enabled: bool, seconds: i64) -> Result<bool> {
         let mut candidate = self.doc.clone();
         candidate.put(ROOT, "enabled", enabled).map_err(err)?;
         candidate.increment(ROOT, "touches", 1).map_err(err)?;
@@ -348,7 +367,7 @@ impl Replica {
         candidate
             .insert(&samples, n, if enabled { 78_i64 } else { 24_i64 })
             .map_err(err)?;
-        candidate.commit(); // switch, count and sample are one CRDT change
+        candidate.commit_with(CommitOptions::default().with_time(seconds.max(0))); // one CRDT change
         self.publish(candidate)
     }
     /// Compatibility tap adapter; real hosts deliver the complete pointer sequence.
@@ -410,8 +429,14 @@ impl Replica {
             self.presentation.as_ref(),
             Some(&self.snapshot),
         )?;
+        let toggle_signal = if signal::ToggleSignal::changed(&mut candidate, &known)? {
+            signal::ToggleSignal::read(&mut candidate)?
+        } else {
+            self.toggle_signal.clone()
+        };
         let changed = snapshot.id() != self.snapshot.id();
         self.doc = candidate;
+        self.toggle_signal = toggle_signal;
         self.saved = saved.into();
         self.base_snapshot = base;
         self.snapshot = snapshot;
@@ -526,7 +551,7 @@ fn project_cached(
                 id: 2,
                 bounds: [64, 208, 440, 240],
                 content: ViewContent::Switch {
-                    label: "Focus mode".into(),
+                    label: "Toggle".into(),
                     enabled,
                 },
             },
@@ -534,19 +559,17 @@ fn project_cached(
                 id: 3,
                 bounds: [536, 208, 680, 400],
                 content: ViewContent::Graph {
-                    label: "Sample signal".into(),
+                    label: "Toggle signal".into(),
                     samples,
                 },
             },
             ViewNode {
                 id: 4,
                 bounds: [64, 500, 440, 108],
-                content: ViewContent::Label(format!("{touches} touches")),
-            },
-            ViewNode {
-                id: 5,
-                bounds: [64, 676, 1152, 60],
-                content: ViewContent::Label("Touch a tile. Your other screen follows.".into()),
+                content: ViewContent::Label(format!(
+                    "{touches} {}",
+                    if touches == 1 { "touch" } else { "touches" }
+                )),
             },
         ],
     };
@@ -785,7 +808,7 @@ mod tests {
     fn independently_started_peers_have_identical_seed_and_snapshot() {
         assert_eq!(
             Replica::new().unwrap().snapshot.hex_id(),
-            "d101fac0c9bc309dd8067bb52ceac20001c7c4dce513fe8e7c93820f623f4daf"
+            "8f22b8892d1a5ff919f50fe078fdde1ad34d8249a776d2caea81a8f0c397e0e9"
         );
         assert_eq!(
             Replica::new().unwrap().snapshot.id(),

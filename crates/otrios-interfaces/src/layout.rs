@@ -8,6 +8,8 @@ pub enum Value {
     Text(String),
     Color([u8; 4]),
     Series(Vec<f32>),
+    /// Explicit normalized time x (0..1) and signal value y (0..100).
+    TimedSeries(Vec<[f32; 2]>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ValueType {
@@ -16,6 +18,7 @@ pub enum ValueType {
     Text,
     Color,
     Series,
+    TimedSeries,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Binding {
@@ -67,6 +70,7 @@ pub enum Shape {
         scale: Expr,
         color: Expr,
     },
+    /// Rounded rectangle with local superelliptic corner arcs; see scene::Primitive.
     Superellipse {
         radius: Expr,
         exponent: f32,
@@ -76,6 +80,12 @@ pub enum Shape {
         color: Expr,
     },
     SeriesPath {
+        series: Expr,
+        width: f32,
+        color: Expr,
+    },
+    /// Time-spaced points; the horizontal axis is independent of event count.
+    TimedSeriesPath {
         series: Expr,
         width: f32,
         color: Expr,
@@ -95,7 +105,6 @@ pub enum Responder {
     Consume,
     ToggleFocus,
     ResetControls,
-    LayoutLab,
     Motion(u8),
     Stress,
     Open(crate::scene::Screen),

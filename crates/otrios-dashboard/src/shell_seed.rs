@@ -114,6 +114,36 @@ impl Author {
 const WHITE: [u8; 4] = [239, 244, 236, 255];
 const MUTED: [u8; 4] = [150, 171, 185, 255];
 const GREEN: [u8; 4] = [185, 238, 143, 255];
+/// The independent Layout Lab app projects time on its host presentation clock.
+fn layout_app() -> Blueprint {
+    let mut layout = layout_seed::blueprint();
+    layout.root.children.retain(|child| child.id != 6);
+    layout
+        .root
+        .children
+        .iter_mut()
+        .find(|child| child.id == 1)
+        .unwrap()
+        .properties = vec![prop(1, s("Layout Lab")), prop(3, n(6.))];
+    let graph = layout
+        .templates
+        .iter_mut()
+        .find(|template| template.id == 5)
+        .unwrap();
+    graph
+        .root
+        .children
+        .iter_mut()
+        .find(|node| node.id == 30)
+        .unwrap()
+        .shape = Shape::TimedSeriesPath {
+        series: Expr::State(Binding::Local(730)),
+        width: 3.,
+        color: Expr::Parameter(3),
+    };
+    layout
+}
+
 fn home() -> Blueprint {
     let mut a = Author::new(false);
     a.label([48., 116., 1184., 64.], s("OTriOS"), 6., WHITE);
@@ -126,9 +156,15 @@ fn home() -> Blueprint {
     for (i, (screen, title, line1, line2)) in [
         (
             Screen::Controls,
-            "LIVE CONTROLS",
+            "COMPONENT PLAYGROUND",
             "Touch + CRDT state",
             "Changes follow across devices",
+        ),
+        (
+            Screen::Layout,
+            "LAYOUT LAB",
+            "Reusable components",
+            "A five minute toggle signal",
         ),
         (
             Screen::Keyboard,
@@ -186,17 +222,11 @@ fn home() -> Blueprint {
             2.,
             WHITE,
         );
-        a.label([16., 112., 352., 32.], s(line2), 1., MUTED);
+        a.label([16., 112., 352., 32.], s(line2), 2., MUTED);
         a.label([16., 156., 320., 16.], s("OPEN  ->"), 2., GREEN);
         let children = a.b.root.children.drain(button + 1..).collect();
         a.b.root.children[button].children = children;
     }
-    a.label(
-        [48., 712., 1184., 24.],
-        s("Back and Home on every screen. Navigation stays on this device."),
-        2.,
-        MUTED,
-    );
     a.b
 }
 fn navigation() -> Blueprint {
@@ -629,12 +659,6 @@ fn playground() -> Blueprint {
             [240., 636., 224., 64.],
             local(616),
         ),
-        (
-            52,
-            Responder::LayoutLab,
-            [480., 636., 232., 64.],
-            s("LAYOUT LAB"),
-        ),
     ] {
         a.button_template(id, responder);
         if id == 51 {
@@ -667,6 +691,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("keyboard", keyboard()),
         ("motion", motion()),
         ("playground", playground()),
+        ("layout", layout_app()),
     ] {
         std::fs::write(
             root.join(format!("{name}.flex")),
@@ -682,6 +707,11 @@ mod tests {
     #[test]
     fn binary_system_assets_match_their_authoring_fixtures() {
         for (b, bytes) in [
+            (
+                layout_app(),
+                include_bytes!("../../otrios-core/src/dashboard/shell-assets/layout.flex")
+                    .as_slice(),
+            ),
             (
                 playground(),
                 include_bytes!("../../otrios-core/src/dashboard/shell-assets/playground.flex")

@@ -209,6 +209,9 @@ fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
             {
                 return Err("Invalid series literal".into());
             }
+            Value::TimedSeries(v) if !valid_timed_series(v) => {
+                return Err("Invalid timed series literal".into());
+            }
             _ => {}
         },
         Expr::Parameter(_) if !parameters => {
@@ -288,6 +291,11 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
                 }
                 Shape::Circle { color } => bounded_expr(color, 0, true)?,
                 Shape::SeriesPath {
+                    series,
+                    width,
+                    color,
+                }
+                | Shape::TimedSeriesPath {
                     series,
                     width,
                     color,
@@ -467,6 +475,16 @@ fn color(v: Value) -> Result<Color> {
         Err("Expected colour expression".into())
     }
 }
+fn valid_timed_series(points: &[[f32; 2]]) -> bool {
+    points.len() <= 256
+        && points.iter().all(|p| {
+            p[0].is_finite()
+                && (0. ..=1.).contains(&p[0])
+                && p[1].is_finite()
+                && (0. ..=100.).contains(&p[1])
+        })
+        && points.windows(2).all(|p| p[0][0] <= p[1][0])
+}
 fn value_type(v: &Value) -> ValueType {
     match v {
         Value::Number(_) => ValueType::Number,
@@ -474,6 +492,7 @@ fn value_type(v: &Value) -> ValueType {
         Value::Text(_) => ValueType::Text,
         Value::Color(_) => ValueType::Color,
         Value::Series(_) => ValueType::Series,
+        Value::TimedSeries(_) => ValueType::TimedSeries,
     }
 }
 fn eval(
@@ -598,6 +617,32 @@ fn expand(
             Shape::Circle { color: paint } => Primitive::Circle {
                 color: color(run(paint)?)?,
             },
+            Shape::TimedSeriesPath {
+                series,
+                width,
+                color: paint,
+            } => {
+                let Value::TimedSeries(values) = run(series)? else {
+                    return Err("Expected timed series binding".into());
+                };
+                if !valid_timed_series(&values) {
+                    return Err("Invalid timed series binding".into());
+                }
+                let mut points: Vec<_> = values
+                    .iter()
+                    .map(|p| [p[0] * r.width, r.height - p[1] * r.height / 100.])
+                    .collect();
+                // A single transition is still visible without inventing older history.
+                if points.len() == 1 {
+                    let p = points[0];
+                    points.insert(0, [(p[0] - *width).max(0.), p[1]]);
+                }
+                Primitive::Path {
+                    points,
+                    width: *width,
+                    color: color(run(paint)?)?,
+                }
+            }
             Shape::SeriesPath {
                 series,
                 width,
