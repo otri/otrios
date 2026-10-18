@@ -4,14 +4,14 @@ import {SceneRenderer} from './gpu-scene.mjs';
 import {loadFontResource} from './font-resource.mjs';
 const canvas=document.querySelector('#view'),layer=document.querySelector('#controls'),status=document.querySelector('#status');
 const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
-let epoch=0,dirty=true,fontProbed=false;const fontProbeRequested=new URL(location.href).searchParams.get('font-probe')==='1';
+let epoch=0,dirty=true,fontProbed=false;const query=new URL(location.href).searchParams,fontProbeRequested=['1','direct'].includes(query.get('font-probe'));
 function fatal(e){const box=document.querySelector('#error');box.hidden=false;box.textContent=String(e);}
 try{
  const gl=canvas.getContext('webgl',{alpha:false,antialias:false});if(!gl)throw Error('WebGL is required');
- const renderer=new SceneRenderer(gl),scene=renderer.createLayer();
+ const renderer=new SceneRenderer(gl,{linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'}),scene=renderer.createLayer();
  function resize(){try{dirty=renderer.fitCanvas(canvas)||dirty;}catch(error){fatal(error);}}
  resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',resize);
- worker.onmessage=({data:m})=>{try{if(m.type==='font'){renderer.setFont(m.font);canvas.dataset.fontRenderer='analytic-quadratic-cached';canvas.dataset.gamma='linear-light-srgb';dirty=true;return;}if(m.type==='error'){fatal(m.message);return;}if(m.type==='status'){status.textContent=m.value;return;}if(m.type==='online'){status.textContent=m.value?'Connected':'Reconnecting · unconfirmed edits are volatile';return;}if(m.type!=='frame')return;
+ worker.onmessage=({data:m})=>{try{if(m.type==='font'){renderer.setFont(m.font);canvas.dataset.fontRenderer='analytic-quadratic-cached';canvas.dataset.gamma=renderer.linearLight?'linear-light-srgb':'authored-srgb';canvas.dataset.alpha='premultiplied';dirty=true;return;}if(m.type==='error'){fatal(m.message);return;}if(m.type==='status'){status.textContent=m.value;return;}if(m.type==='online'){status.textContent=m.value?'Connected':'Reconnecting · unconfirmed edits are volatile';return;}if(m.type!=='frame')return;
   epoch=m.epoch;scene.setFrame(m);dirty=true;canvas.setAttribute('aria-label',m.text);document.title=`${m.title} · OTriOS`;document.querySelector('#scope').textContent=`UI ${m.ui}   ·   State ${m.state}`;
   layer.replaceChildren();for(const c of m.controls){const b=document.createElement('button');b.setAttribute('aria-label',c.label);b.type='button';b.dataset.node=c.id;const [x,y,w,h]=c.bounds;Object.assign(b.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});const generation=m.epoch;b.onclick=()=>worker.postMessage({type:'activate',epoch:generation,id:c.id});layer.append(b);}
  }catch(error){fatal(error);}};
