@@ -165,6 +165,13 @@ separate. Do not execute every selector or walk every app tree per edit.
 Intern identical selector plans within a module activation; one selected value
 can invalidate multiple consumers without duplicate network subscriptions.
 
+Path resolution also watches traversed parent links and absent lookup slots,
+not only the last leaf. Replacing `controls.linear`, removing an intermediate
+object, or creating a previously missing field must re-resolve its descendants.
+A binding cannot remain attached to an obsolete leaf just because that leaf's
+hash did not change. Resolving and registering this dependency set uses the same
+snapshot/publication boundary as subscription setup.
+
 Filters watch predicate inputs for *all candidate members*, including currently
 excluded items; otherwise an item that becomes visible would never enter the
 result. New members are also candidates. Unindexed filters have O(candidate
