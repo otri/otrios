@@ -11,6 +11,9 @@ pub struct Resizing {
 pub const BG: [u8; 4] = [16, 28, 41, 255];
 pub const CARD: [u8; 4] = [27, 44, 61, 255];
 pub const WHITE: [u8; 4] = [239, 244, 236, 255];
+pub const MUTED: [u8; 4] = [150, 171, 185, 255];
+pub const TRACK: [u8; 4] = [45, 65, 78, 255];
+pub const TEAL: [u8; 4] = [84, 174, 183, 255];
 pub const ACCENT: [u8; 4] = [185, 238, 143, 255];
 const SCREEN: [f32; 4] = [0., 0., 1280., 800.];
 const NORMALIZED_MAX: f32 = 1000.;
@@ -108,6 +111,15 @@ impl StateField {
             },
         )
     }
+    pub fn choose_color(self, zero: [u8; 4], nonzero: [u8; 4]) -> ValueExpr {
+        ValueExpr::State(self, Projection::ChooseColor { zero, nonzero })
+    }
+    pub fn turn_x(self, center: f32, radius: f32) -> ValueExpr {
+        ValueExpr::State(self, Projection::TurnX { center, radius })
+    }
+    pub fn turn_y(self, center: f32, radius: f32) -> ValueExpr {
+        ValueExpr::State(self, Projection::TurnY { center, radius })
+    }
     pub fn window_signal(self, seconds: u32) -> ValueExpr {
         ValueExpr::State(self, Projection::WindowSignal { seconds })
     }
@@ -154,6 +166,11 @@ pub enum ValueExpr {
 impl From<f32> for ValueExpr {
     fn from(n: f32) -> Self {
         Self::Literal(Expr::Literal(Value::Number(n)))
+    }
+}
+impl From<[u8; 4]> for ValueExpr {
+    fn from(c: [u8; 4]) -> Self {
+        Self::Literal(tint(c))
     }
 }
 impl From<&str> for ValueExpr {
@@ -281,12 +298,13 @@ enum Paint {
     Text {
         value: ValueExpr,
         font_scale: f32,
+        color: ValueExpr,
     },
     Round {
         radius: ValueExpr,
-        color: [u8; 4],
+        color: ValueExpr,
     },
-    Circle([u8; 4]),
+    Circle(ValueExpr),
     Series {
         value: ValueExpr,
         timed: bool,
@@ -452,6 +470,15 @@ impl Element {
         }
         self
     }
+    pub fn color(mut self, value: impl Into<ValueExpr>) -> Self {
+        match &mut self.paint {
+            Paint::Text { color, .. } | Paint::Round { color, .. } | Paint::Circle(color) => {
+                *color = value.into()
+            }
+            _ => panic!("color requires a painted primitive"),
+        }
+        self
+    }
     pub fn corner_radius(mut self, value: ValueExpr) -> Self {
         match &mut self.paint {
             Paint::Round { radius, .. } => *radius = value,
@@ -478,6 +505,7 @@ pub fn text(value: impl Into<ValueExpr>) -> Element {
         Paint::Text {
             value: value.into(),
             font_scale: 2.,
+            color: WHITE.into(),
         },
         [0., 0., 1100., 48.],
     )
@@ -486,13 +514,16 @@ pub fn rounded_rect(color: [u8; 4]) -> Element {
     Element::new(
         Paint::Round {
             radius: 16.0.into(),
-            color,
+            color: color.into(),
         },
         [0., 0., 100., 100.],
     )
 }
+pub fn rectangle(color: [u8; 4]) -> Element {
+    rounded_rect(color).corner_radius(0.0.into())
+}
 pub fn circle(color: [u8; 4]) -> Element {
-    Element::new(Paint::Circle(color), [0., 0., 100., 100.])
+    Element::new(Paint::Circle(color.into()), [0., 0., 100., 100.])
 }
 pub fn series(value: ValueExpr, color: [u8; 4]) -> Element {
     Element::new(
@@ -662,17 +693,23 @@ impl Compiler {
         let frame = n.frame.map(|v| self.value(v));
         let shape = match n.paint {
             Paint::Canvas => Shape::Canvas { clip: true },
-            Paint::Text { value, font_scale } => Shape::Text {
+            Paint::Text {
+                value,
+                font_scale,
+                color,
+            } => Shape::Text {
                 value: self.value(value),
                 scale: Expr::Literal(Value::Number(font_scale)),
-                color: tint(WHITE),
+                color: self.value(color),
             },
             Paint::Round { radius, color } => Shape::Superellipse {
                 radius: self.value(radius),
                 exponent: 4.,
-                color: tint(color),
+                color: self.value(color),
             },
-            Paint::Circle(color) => Shape::Circle { color: tint(color) },
+            Paint::Circle(color) => Shape::Circle {
+                color: self.value(color),
+            },
             Paint::Series {
                 value,
                 timed: false,

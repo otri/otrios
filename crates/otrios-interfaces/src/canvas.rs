@@ -33,6 +33,19 @@ pub enum Projection {
         zero: String,
         nonzero: String,
     },
+    ChooseColor {
+        zero: [u8; 4],
+        nonzero: [u8; 4],
+    },
+    /// Normalized register 0..1000 is one clockwise turn, starting at twelve o'clock.
+    TurnX {
+        center: f32,
+        radius: f32,
+    },
+    TurnY {
+        center: f32,
+        radius: f32,
+    },
     /// Local input-method label. Its selector uses reserved field 0.
     KeyboardVisible,
     KeyboardLabel {

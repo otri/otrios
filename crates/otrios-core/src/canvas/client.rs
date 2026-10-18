@@ -1297,6 +1297,15 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
                 Projection::ChooseText { zero, nonzero } => {
                     Value::Text(if number()? == 0. { zero } else { nonzero }.clone())
                 }
+                Projection::ChooseColor { zero, nonzero } => {
+                    Value::Color(if number()? == 0. { *zero } else { *nonzero })
+                }
+                Projection::TurnX { center, radius } => Value::Number(
+                    center + radius * (number()? * std::f32::consts::TAU / 1000.).sin(),
+                ),
+                Projection::TurnY { center, radius } => Value::Number(
+                    center - radius * (number()? * std::f32::consts::TAU / 1000.).cos(),
+                ),
                 Projection::NumberText {
                     prefix,
                     suffix,

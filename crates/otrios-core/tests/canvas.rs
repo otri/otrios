@@ -155,7 +155,7 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
                 .is_some_and(|s| s.label == "Linear slider")
         })
         .unwrap();
-    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,870.*0.488+32.);
+    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,870.*0.281+1.);
     fn has_text(n: &otrios_interfaces::scene::SceneNode, value: &str) -> bool {
         matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value:v,..} if v==value)
             || n.children.iter().any(|c| has_text(c, value))
@@ -429,7 +429,10 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
             body.frame.height / 2.
         );
     }
-    let point = [1150., wide_card.frame.y + wide_card.frame.height - 48.];
+    let point = [
+        wide_card.frame.x + wide_card.frame.width - 50.,
+        wide_card.frame.y + wide_card.frame.height - 48.,
+    ];
     let has_button = |s: &otrios_core::dashboard::scene::Scene| {
         s.hit_path(point).iter().any(|n| {
             n.node
@@ -885,6 +888,19 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
     let mut session = Session::default();
     pump(&mut client, &mut authority, &mut session);
     client.tick(0, 0).unwrap();
+    let scene = client.scene().unwrap();
+    let controls = scene.controls();
+    let pad = controls
+        .iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Touch pad")
+        })
+        .unwrap();
+    let pad_origin = pad.origin;
+    let pad_size = [pad.node.frame.width, pad.node.frame.height];
     for (phase, x, y) in [
         (PointerPhase::Down, 0.2, 0.25),
         (PointerPhase::Move, 0.8, 0.75),
@@ -895,7 +911,10 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
                 PointerEvent {
                     id: 9,
                     phase,
-                    position: [80. + x * 520., 460. + y * 230.],
+                    position: [
+                        pad_origin[0] + x * pad_size[0],
+                        pad_origin[1] + y * pad_size[1],
+                    ],
                 },
             )
             .unwrap();
@@ -915,7 +934,7 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
     assert_eq!(last.position, [800, 750]);
     let scene = client.scene().unwrap();
     fn contains_point(n: &otrios_interfaces::scene::SceneNode) -> bool {
-        matches!(&n.primitive,Primitive::Path{points,..} if points.last().is_some_and(|p|(p[0]-416.).abs()<0.1&&(p[1]-172.5).abs()<0.1))
+        matches!(&n.primitive,Primitive::Path{points,..} if points.last().is_some_and(|p|(p[0]-281.6).abs()<0.1&&(p[1]-157.5).abs()<0.1))
             || n.children.iter().any(contains_point)
     }
     assert!(contains_point(scene.root()));
@@ -925,7 +944,10 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
             PointerEvent {
                 id: 9,
                 phase: PointerPhase::Up,
-                position: [80. + 0.9 * 520., 460. + 0.6 * 230.],
+                position: [
+                    pad_origin[0] + 0.9 * pad_size[0],
+                    pad_origin[1] + 0.6 * pad_size[1],
+                ],
             },
         )
         .unwrap();
@@ -1279,4 +1301,93 @@ fn aggregate_content_cannot_cover_app_navigation_or_header() {
         content < header,
         "content paints below the app-owned header"
     );
+}
+
+#[test]
+fn rotary_pointer_and_indicator_share_clockwise_turns_and_accent_is_only_presentation() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
+    let mut client = Client::default();
+    activate(&mut client, playground::ui(&code()), "instruments", code());
+    for (fraction, expected) in [
+        (0., [96., 20.]),
+        (250., [172., 96.]),
+        (500., [96., 172.]),
+        (750., [20., 96.]),
+    ] {
+        let angle = fraction * std::f32::consts::TAU / 1000.;
+        let scene = client.scene().unwrap();
+        let controls = scene.controls();
+        let dial = controls
+            .iter()
+            .find(|n| {
+                n.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Rotary dial")
+            })
+            .unwrap();
+        let position = [
+            dial.origin[0] + 105. + angle.sin() * 76.,
+            dial.origin[1] + 105. - angle.cos() * 76.,
+        ];
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
+            client
+                .pointer(
+                    client.epoch(),
+                    PointerEvent {
+                        id: 1,
+                        phase,
+                        position,
+                    },
+                )
+                .unwrap();
+        }
+        assert_eq!(client.value(2).unwrap(), fraction as u16);
+        let scene = client.scene().unwrap();
+        let controls = scene.controls();
+        let dial = controls
+            .iter()
+            .find(|n| {
+                n.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Rotary dial")
+            })
+            .unwrap();
+        let marker = dial
+            .node
+            .children
+            .iter()
+            .find(|n| {
+                matches!(n.primitive, Primitive::Circle { color } if color == authoring::ACCENT)
+                    && n.frame.width == 18.
+            })
+            .unwrap();
+        assert!(
+            (marker.frame.x - expected[0]).abs() < 0.01
+                && (marker.frame.y - expected[1]).abs() < 0.01
+        );
+    }
+    edit(&mut client, "Toggle", 0, 0);
+    edit(&mut client, "Linear slider", 700, 0);
+    assert_eq!(
+        client.value(1).unwrap(),
+        700,
+        "muted accent does not disable the controls"
+    );
+    let scene = client.scene().unwrap();
+    let controls = scene.controls();
+    let slider = controls
+        .iter()
+        .find(|n| {
+            n.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Linear slider")
+        })
+        .unwrap();
+    assert!(slider.node.children.iter().any(
+        |n| matches!(n.primitive, Primitive::Circle { color } if color == authoring::MUTED)
+            && n.frame.width == 40.
+    ));
 }
