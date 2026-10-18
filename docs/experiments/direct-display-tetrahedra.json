@@ -1,0 +1,115 @@
+{
+  "development_binary_sha256": "c508ec5ef6f59a1956bb0e4c280db99df681e49bee8b9cb43fa8b04aaa8eba7c",
+  "measured_at_unix": 1792344092.3977232,
+  "scenarios": [
+    {
+      "cadence": {
+        "fps": 54.97,
+        "frames": 1093,
+        "over_25ms": 2,
+        "p50_ms": 17.653,
+        "p95_ms": 17.695,
+        "p99_ms": 17.776,
+        "samples": 1093
+      },
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "compose_submit_max_us": 31472,
+      "compose_submit_p50_us": 618,
+      "compose_submit_p95_us": 815,
+      "compose_submit_p99_us": 5943,
+      "drawn": 1094,
+      "kernel_flips": {
+        "crtc": 37,
+        "events": 1021,
+        "fps": 56.64656343071136,
+        "max_us": 17673,
+        "missed_vblanks": 0,
+        "p50_us": 17653,
+        "p95_us": 17658,
+        "p99_us": 17663,
+        "seconds": 18.006388
+      },
+      "load_requested_hz": 0,
+      "load_updates": 0,
+      "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+      "objects": 12,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 17006,
+      "present_p95_us": 17066,
+      "received_app_updates": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "scanout_format": "RGB565",
+      "screen": "3d",
+      "seconds": 20.014365531,
+      "stride": 1600,
+      "video": "DRM",
+      "worker_stall_ms": 0,
+      "scenario": "cubes-12-idle"
+    },
+    {
+      "cadence": {
+        "fps": 54.75,
+        "frames": 1088,
+        "over_25ms": 6,
+        "p50_ms": 17.654,
+        "p95_ms": 17.786,
+        "p99_ms": 18.868,
+        "samples": 1088
+      },
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "compose_submit_max_us": 34117,
+      "compose_submit_p50_us": 1448,
+      "compose_submit_p95_us": 1905,
+      "compose_submit_p99_us": 6088,
+      "drawn": 1089,
+      "kernel_flips": {
+        "crtc": 37,
+        "events": 1019,
+        "fps": 56.5354728992379,
+        "max_us": 35306,
+        "missed_vblanks": 2,
+        "p50_us": 17653,
+        "p95_us": 17664,
+        "p99_us": 17777,
+        "seconds": 18.006394
+      },
+      "load_requested_hz": 30,
+      "load_updates": 199,
+      "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+      "objects": 64,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 16164,
+      "present_p95_us": 16338,
+      "received_app_updates": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "scanout_format": "RGB565",
+      "screen": "3d",
+      "seconds": 20.046348191,
+      "stride": 1600,
+      "video": "DRM",
+      "worker_stall_ms": 250,
+      "scenario": "cubes-64-load-stall"
+    }
+  ],
+  "geometry": "regular tetrahedra",
+  "signed_release": "07ace9cb376f30d81257c40386beecf0e294e28ac27978bb4746dce748c5a382",
+  "scenario_label_note": "The harness retains historical cubes-* scenario names; these runs use the signed tetrahedron binary."
+}

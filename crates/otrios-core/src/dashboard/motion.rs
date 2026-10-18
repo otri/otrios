@@ -4,6 +4,18 @@
 use super::{Mesh, Replica, Result, SyncSession, components::*, render_scene, scene::Scene};
 use otrios_interfaces::scene::*;
 use std::collections::VecDeque;
+
+// Regular tetrahedron centered on the origin, with the same sqrt(3)
+// circumradius as the former cube. The equilateral near face starts face-on.
+const TETRAHEDRON_VERTICES: [[f32; 3]; 4] = [
+    [0., -1.632_993_2, -0.577_350_26],
+    [-std::f32::consts::SQRT_2, 0.816_496_6, -0.577_350_26],
+    [std::f32::consts::SQRT_2, 0.816_496_6, -0.577_350_26],
+    [0., 0., 1.732_050_8],
+];
+// Inward winding: visible faces have positive signed area after projection
+// into the dashboard's downward-positive screen coordinates.
+const TETRAHEDRON_FACES: [[usize; 3]; 4] = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Intent {
     pub playing: bool,
@@ -146,8 +158,8 @@ impl Presenter {
         let mut children = Vec::new();
         let t = self.phase as f32;
         if three_d {
-            // Bounded, nonintersecting cube cells. CPU project + painter-sort each
-            // convex cube; existing GLES2/WebGL triangle rasterizers do the fill.
+            // Bounded, nonintersecting tetrahedron cells. CPU projection and
+            // painter sorting feed the shared GLES2/WebGL triangle rasterizers.
             for i in 0..intent.count {
                 let columns = (f32::from(intent.count).sqrt().ceil() as u16).max(1);
                 let rows = intent.count.div_ceil(columns);
@@ -158,42 +170,24 @@ impl Presenter {
                     80. + cw * (f32::from(i % columns) + 0.5),
                     280. + ch * (f32::from(i / columns) + 0.5),
                 ];
-                let a = t * 0.8 + f32::from(i) * 0.31;
-                let b = t * 0.6;
+                let f = f32::from(i);
+                let a = t * (0.8 + f * 0.004) + f * 0.31;
+                let b = t * (0.6 + f * 0.003) + f * 0.23;
                 let (sa, ca) = a.sin_cos();
                 let (sb, cb) = b.sin_cos();
-                let vertices: Vec<[f32; 3]> = [
-                    [-1., -1., -1.],
-                    [1., -1., -1.],
-                    [1., 1., -1.],
-                    [-1., 1., -1.],
-                    [-1., -1., 1.],
-                    [1., -1., 1.],
-                    [1., 1., 1.],
-                    [-1., 1., 1.],
-                ]
-                .iter()
-                .map(|p| {
+                let vertices = TETRAHEDRON_VERTICES.map(|p| {
                     let x = p[0] * ca + p[2] * sa;
                     let z = -p[0] * sa + p[2] * ca;
                     [x, p[1] * cb - z * sb, p[1] * sb + z * cb]
-                })
-                .collect();
-                let mut faces: Vec<_> = [
-                    [0, 1, 2, 3],
-                    [4, 7, 6, 5],
-                    [0, 4, 5, 1],
-                    [3, 2, 6, 7],
-                    [0, 3, 7, 4],
-                    [1, 5, 6, 2],
-                ]
-                .into_iter()
-                .enumerate()
-                .map(|(face, idx)| {
-                    let z = idx.iter().map(|j| vertices[*j][2]).sum::<f32>() / 4.;
-                    (z, face, idx)
-                })
-                .collect();
+                });
+                let mut faces: Vec<_> = TETRAHEDRON_FACES
+                    .into_iter()
+                    .enumerate()
+                    .map(|(face, idx)| {
+                        let z = idx.iter().map(|j| vertices[*j][2]).sum::<f32>() / 3.;
+                        (z, face, idx)
+                    })
+                    .collect();
                 faces.sort_by(|a, b| b.0.total_cmp(&a.0));
                 for (_, face, idx) in faces {
                     let project = |j: usize| {
@@ -204,24 +198,22 @@ impl Presenter {
                             center[1] + p[1] * size * perspective,
                         ]
                     };
+                    // These closed, opaque convex cells never intersect. Their
+                    // inward winding projects counterclockwise on hidden faces;
+                    // skip those faces rather than rasterizing and covering them.
                     let [a, b, c] = [project(idx[0]), project(idx[1]), project(idx[2])];
                     if (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) <= 0. {
                         continue;
                     }
-                    let points = [idx[0], idx[1], idx[2], idx[0], idx[2], idx[3]]
-                        .into_iter()
-                        .map(project)
-                        .collect();
+                    let points = idx.into_iter().map(project).collect();
                     let palette = [
                         [185, 238, 143, 255],
                         [84, 174, 183, 255],
                         [230, 170, 100, 255],
                         [132, 145, 218, 255],
-                        [73, 112, 127, 255],
-                        [117, 183, 124, 255],
                     ];
                     children.push(node(
-                        10 + u32::from(i) * 6 + face as u32,
+                        10 + u32::from(i) * 4 + face as u32,
                         Rect::new(0., 0., 1280., 800.),
                         Primitive::Triangles {
                             points,
@@ -357,6 +349,177 @@ impl Stress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tetrahedron_is_regular_closed_and_inward_wound() {
+        let mut edges = std::collections::BTreeMap::new();
+        for (i, a) in TETRAHEDRON_VERTICES.iter().enumerate() {
+            for b in &TETRAHEDRON_VERTICES[i + 1..] {
+                let length_squared: f32 = a.iter().zip(b).map(|(a, b)| (a - b).powi(2)).sum();
+                assert!((length_squared - 8.).abs() < 0.00001);
+            }
+        }
+        for [a, b, c] in TETRAHEDRON_FACES {
+            let [a, b, c] = [a, b, c].map(|i| TETRAHEDRON_VERTICES[i]);
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let normal = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            assert!(normal.iter().zip(a).map(|(n, p)| n * p).sum::<f32>() < 0.);
+        }
+        for indices in TETRAHEDRON_FACES {
+            for i in 0..3 {
+                *edges.entry((indices[i], indices[(i + 1) % 3])).or_insert(0) += 1;
+            }
+        }
+        assert_eq!(edges.len(), 12);
+        for ((a, b), count) in &edges {
+            assert_eq!(*count, 1);
+            assert_eq!(edges.get(&(*b, *a)), Some(&1));
+        }
+    }
+    #[test]
+    fn face_on_tetrahedron_has_the_expected_triangular_silhouette() {
+        let mesh = Presenter::default().geometry(
+            true,
+            Intent {
+                count: 1,
+                ..Intent::default()
+            },
+            0.,
+        );
+        // The far apex projects inside this single near equilateral face.
+        assert_eq!(mesh.vertices.len(), 3 * 6);
+        let perspective = 4. / (4. - 1. / 3f32.sqrt());
+        let expected = [
+            [640., 480. - 100. * (8f32 / 3.).sqrt() * perspective],
+            [
+                640. + 100. * 2f32.sqrt() * perspective,
+                480. + 100. * (2f32 / 3.).sqrt() * perspective,
+            ],
+            [
+                640. - 100. * 2f32.sqrt() * perspective,
+                480. + 100. * (2f32 / 3.).sqrt() * perspective,
+            ],
+        ];
+        for (v, xy) in mesh.vertices.chunks_exact(6).zip(expected) {
+            assert!((v[0] - xy[0]).abs() < 0.001);
+            assert!((v[1] - xy[1]).abs() < 0.001);
+            assert_eq!(&v[2..], &[185. / 255., 238. / 255., 143. / 255., 1.]);
+        }
+    }
+    #[test]
+    fn rotating_tetrahedra_cull_hidden_faces_without_silhouette_holes() {
+        fn cross(a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
+            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        }
+        fn inside(p: [f32; 2], points: &[[f32; 2]]) -> bool {
+            let sides: Vec<_> = (0..points.len())
+                .map(|i| cross(points[i], points[(i + 1) % points.len()], p))
+                .collect();
+            sides.iter().all(|s| *s >= -0.001) || sides.iter().all(|s| *s <= 0.001)
+        }
+        for step in 0..120 {
+            let phase = step as f32 * 0.1;
+            let mesh = Presenter {
+                phase: f64::from(phase),
+                ..Presenter::default()
+            }
+            .geometry(
+                true,
+                Intent {
+                    count: 1,
+                    ..Intent::default()
+                },
+                0.,
+            );
+            let triangles: Vec<Vec<[f32; 2]>> = mesh
+                .vertices
+                .chunks_exact(18)
+                .map(|t| t.chunks_exact(6).map(|v| [v[0], v[1]]).collect())
+                .collect();
+            assert!((1..=3).contains(&triangles.len()));
+            assert!(triangles.iter().all(|t| cross(t[0], t[1], t[2]) > 0.));
+            // Build an independent 2D convex hull of all four projected points.
+            // Its coverage must equal the union of the retained front faces.
+            let (sa, ca) = (phase * 0.8).sin_cos();
+            let (sb, cb) = (phase * 0.6).sin_cos();
+            let mut points = TETRAHEDRON_VERTICES.map(|[x, y, z]| {
+                let xx = x * ca + z * sa;
+                let zz = -x * sa + z * ca;
+                let yy = y * cb - zz * sb;
+                let depth = y * sb + zz * cb;
+                let perspective = 400. / (4. + depth);
+                [640. + xx * perspective, 480. + yy * perspective]
+            });
+            points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+            // Separate monotone chains keep the lower hull intact.
+            let chain = |points: Vec<[f32; 2]>| {
+                let mut h = Vec::new();
+                for point in points {
+                    while h.len() >= 2 && cross(h[h.len() - 2], h[h.len() - 1], point) <= 0. {
+                        h.pop();
+                    }
+                    h.push(point);
+                }
+                h.pop();
+                h
+            };
+            let mut hull = chain(points.to_vec());
+            hull.extend(chain(points.into_iter().rev().collect()));
+            assert!(
+                hull.iter()
+                    .all(|p| p[0] > 80. && p[0] < 1200. && p[1] > 280. && p[1] < 680.)
+            );
+            for x in (480..800).step_by(11) {
+                for y in (300..660).step_by(11) {
+                    let p = [x as f32 + 0.37, y as f32 + 0.19];
+                    assert_eq!(
+                        inside(p, &hull),
+                        triangles.iter().any(|t| inside(p, t)),
+                        "silhouette mismatch at phase {phase}, point {p:?}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn independently_rotating_tetrahedra_stay_inside_their_64_cells() {
+        let intent = Intent {
+            count: 64,
+            ..Intent::default()
+        };
+        for step in 0..24 {
+            let mesh = Presenter {
+                phase: f64::from(step) * 0.5,
+                ..Presenter::default()
+            }
+            .geometry(true, intent, 0.);
+            let mut occupied = std::collections::BTreeSet::new();
+            for triangle in mesh.vertices.chunks_exact(18) {
+                let x = triangle.chunks_exact(6).map(|v| v[0]).sum::<f32>() / 3.;
+                let y = triangle.chunks_exact(6).map(|v| v[1]).sum::<f32>() / 3.;
+                let column = ((x - 80.) / 140.).floor() as u16;
+                let row = ((y - 280.) / 50.).floor() as u16;
+                assert!(column < 8 && row < 8);
+                occupied.insert((column, row));
+                for v in triangle.chunks_exact(6) {
+                    assert!(
+                        v[0] > 80. + f32::from(column) * 140.
+                            && v[0] < 80. + f32::from(column + 1) * 140.
+                    );
+                    assert!(
+                        v[1] > 280. + f32::from(row) * 50.
+                            && v[1] < 280. + f32::from(row + 1) * 50.
+                    );
+                    assert_eq!(v[5], 1.);
+                }
+            }
+            assert_eq!(occupied.len(), 64);
+        }
+    }
     #[test]
     fn ticking_never_changes_crdt_or_resets_on_publication() {
         let mut r = Replica::new().unwrap();

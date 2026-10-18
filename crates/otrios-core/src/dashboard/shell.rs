@@ -414,7 +414,7 @@ impl Shell {
             504,
             Value::Text(
                 if self.screen == Screen::ThreeD {
-                    "Perspective cubes / CPU projection + GPU triangles"
+                    "Perspective tetrahedra / CPU projection + GPU triangles"
                 } else {
                     "Orbiting circles / local clock + smooth speed changes"
                 }

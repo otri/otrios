@@ -52,3 +52,20 @@ All rows below are kernel completion feedback after two seconds of warm-up in 20
 | 64 cubes, local CRDT/stalls | 54.423 / 40 | 55.980 / 12 |
 
 RGB565 uses pitch 1,600 bytes versus 3,200 bytes for 32-bit output. The 12-cube RGB565 row has p95 17.658 ms, p99 17.665 ms, max 17.679 ms, with 1,021 completion events over 18.006 seconds. The loaded 64-cube RGB565 row still misses 12 vblanks, p99 35.290 ms; its isolated CRDT worker achieved 197 updates in 20.068 seconds (9.82/s), not the requested 30/s. The 64-circle case remains below refresh rate. Therefore **only the bounded 12-cube row meets the no-missed-refresh target**; this does not establish universal refresh lock or later tetrahedron performance.
+
+The shared demo now uses regular tetrahedra with four triangular faces and independent two-axis rotation. Older cube captures and results are deliberately retained as historical measurements, not relabelled.
+
+## Signed tetrahedron release
+
+The actual signed tetrahedron release `07ace9cb376f30d81257c40386beecf0e294e28ac27978bb4746dce748c5a382` was measured separately, using the same RGB565 mode and 20-second isolated trials. [Raw results](direct-display-tetrahedra.json) retain the harness's older `cubes-*` scenario labels with an explicit geometry annotation.
+
+| Tetrahedron scene | Kernel FPS | Missed vblanks | p95 / p99 |
+|---|---:|---:|---:|
+| 12, idle | **56.6466** | **0** | 17.658 / 17.663 ms |
+| 64, local CRDT/stalls | **56.5355** | **2** | 17.664 / 17.777 ms |
+
+These samples cover about 18 seconds after warm-up. The loaded case committed 199 isolated stress revisions over 20.046 seconds (9.93/s), with deliberate 250 ms state-worker stalls. Its maximum completion interval was 35.306 ms, so it still falls short of a universal no-missed-vblank claim. Median CPU composition/submission fell to 0.618 ms for 12 objects and 1.448 ms for 64 loaded objects. A later release-handoff JavaScript change does not alter this geometry; these remain measurements of the exact named signed release.
+
+![Tetrahedron GPU framebuffer readback, rotated into logical orientation](tetrahedron-native-readback.png)
+
+The image is a GLES framebuffer readback, not a photograph of the panel. It was captured during startup: its rolling HUD includes cold shader/upload hitches and is not the warmed kernel-completion sample reported above. Live readiness and kernel inspection additionally confirmed `gles2-direct`, 5/6/5/0 colour bits, RG16 scanout, 1,600-byte pitch, one DRM owner, an accessible touch descriptor and a connected state stream. Physical touch/orientation confirmation on this new evdev host remains a user check.

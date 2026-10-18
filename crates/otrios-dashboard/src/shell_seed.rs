@@ -150,7 +150,7 @@ fn home() -> Blueprint {
         (
             Screen::ThreeD,
             "3D LAB",
-            "Perspective + rotation",
+            "Tetrahedra + rotation",
             "Shared intent, independent playback",
         ),
     ]
