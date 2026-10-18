@@ -111,10 +111,38 @@ pub struct Semantics {
     pub label: Expr,
     pub checked: Expr,
 }
+/// One axis of a component's parent-relative layout, in logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AxisResize {
+    Fixed,
+    /// One pin preserves length; two pins stretch between the edge gaps.
+    Pins {
+        leading: Option<f32>,
+        trailing: Option<f32>,
+    },
+    Center {
+        offset: f32,
+    },
+    /// Distribute parent delta among the selected design segments.
+    Springs {
+        leading: bool,
+        length: bool,
+        trailing: bool,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResizeRule {
+    pub reference_size: [f32; 2],
+    pub horizontal: AxisResize,
+    pub vertical: AxisResize,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemplateNode {
     pub id: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resize: Option<ResizeRule>,
     pub frame: [Expr; 4],
     pub visible: Expr,
     pub shape: Shape,

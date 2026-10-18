@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Declarative source builder. Numeric node/action/binding IDs are compiled details.
+pub use otrios_interfaces::layout::AxisResize;
 use otrios_interfaces::{canvas::*, layout::*};
+/// Advanced six-segment spring configuration; convenience pin methods cover common cases.
+#[derive(Clone, Copy)]
+pub struct Resizing {
+    pub horizontal: AxisResize,
+    pub vertical: AxisResize,
+}
 pub const BG: [u8; 4] = [16, 28, 41, 255];
 pub const CARD: [u8; 4] = [27, 44, 61, 255];
 pub const WHITE: [u8; 4] = [239, 244, 236, 255];
@@ -147,7 +154,9 @@ pub struct Element {
     children: Vec<Element>,
     label: Option<String>,
     interaction: Option<Interaction>,
-    fill_parent: bool,
+    resize: Option<[AxisResize; 2]>,
+    frame_size: [f32; 2],
+    design_size: Option<[f32; 2]>,
 }
 impl Element {
     fn new(paint: Paint, frame: [f32; 4]) -> Self {
@@ -157,11 +166,14 @@ impl Element {
             children: vec![],
             label: None,
             interaction: None,
-            fill_parent: false,
+            resize: None,
+            frame_size: [frame[2], frame[3]],
+            design_size: None,
         }
     }
     pub fn frame(mut self, frame: [f32; 4]) -> Self {
         self.frame = frame.map(ValueExpr::from);
+        self.frame_size = [frame[2], frame[3]];
         self
     }
     pub fn position(mut self, xy: [f32; 2]) -> Self {
@@ -179,6 +191,102 @@ impl Element {
     }
     pub fn width(mut self, value: ValueExpr) -> Self {
         self.frame[2] = value;
+        self
+    }
+    fn pin_axis(&mut self, axis: usize, leading: bool, inset: f32) {
+        let rules = self.resize.get_or_insert([AxisResize::Fixed; 2]);
+        let current = match rules[axis] {
+            AxisResize::Fixed => AxisResize::Pins {
+                leading: None,
+                trailing: None,
+            },
+            v @ AxisResize::Pins { .. } => v,
+            _ => panic!("Pins cannot be combined with centering or springs on the same axis"),
+        };
+        let AxisResize::Pins {
+            leading: mut a,
+            trailing: mut b,
+        } = current
+        else {
+            unreachable!()
+        };
+        if leading {
+            a = Some(inset)
+        } else {
+            b = Some(inset)
+        }
+        rules[axis] = AxisResize::Pins {
+            leading: a,
+            trailing: b,
+        };
+    }
+    pub fn pin_left(mut self, inset: f32) -> Self {
+        self.pin_axis(0, true, inset);
+        self
+    }
+    pub fn pin_right(mut self, inset: f32) -> Self {
+        self.pin_axis(0, false, inset);
+        self
+    }
+    pub fn pin_top(mut self, inset: f32) -> Self {
+        self.pin_axis(1, true, inset);
+        self
+    }
+    pub fn pin_bottom(mut self, inset: f32) -> Self {
+        self.pin_axis(1, false, inset);
+        self
+    }
+    pub fn pin_edges(self, inset: f32) -> Self {
+        self.pin_left(inset)
+            .pin_right(inset)
+            .pin_top(inset)
+            .pin_bottom(inset)
+    }
+    fn set_axis(&mut self, axis: usize, rule: AxisResize) {
+        let rules = self.resize.get_or_insert([AxisResize::Fixed; 2]);
+        assert!(
+            matches!(rules[axis], AxisResize::Fixed),
+            "Choose one resize policy per axis"
+        );
+        rules[axis] = rule;
+    }
+    pub fn resizing(mut self, rules: Resizing) -> Self {
+        if !matches!(rules.horizontal, AxisResize::Fixed) {
+            self.set_axis(0, rules.horizontal)
+        }
+        if !matches!(rules.vertical, AxisResize::Fixed) {
+            self.set_axis(1, rules.vertical)
+        }
+        self
+    }
+    pub fn center_x(mut self) -> Self {
+        self.set_axis(0, AxisResize::Center { offset: 0. });
+        self
+    }
+    pub fn center_y(mut self) -> Self {
+        self.set_axis(1, AxisResize::Center { offset: 0. });
+        self
+    }
+    pub fn spring_width(mut self) -> Self {
+        self.set_axis(
+            0,
+            AxisResize::Springs {
+                leading: false,
+                length: true,
+                trailing: false,
+            },
+        );
+        self
+    }
+    pub fn spring_height(mut self) -> Self {
+        self.set_axis(
+            1,
+            AxisResize::Springs {
+                leading: false,
+                length: true,
+                trailing: false,
+            },
+        );
         self
     }
     pub fn font_scale(mut self, scale: f32) -> Self {
@@ -236,12 +344,23 @@ pub fn canvas(children: Vec<Element>) -> Element {
     n
 }
 pub fn button(label: &str) -> Element {
-    let mut background = rounded_rect(CARD);
-    background.fill_parent = true;
-    let mut b =
-        canvas(vec![background, text(label).position([24., 26.])]).frame([0., 0., 200., 80.]);
+    let mut b = canvas(vec![
+        rounded_rect(CARD).pin_edges(0.),
+        text(label)
+            .frame([24., 0., 152., 16.])
+            .pin_left(24.)
+            .pin_right(24.)
+            .center_y(),
+    ])
+    .frame([0., 0., 200., 80.]);
     b.label = Some(label.into());
     b
+}
+/// A reusable component's design size is retained when an instance gets a new frame.
+pub fn component(design_size: [f32; 2], children: Vec<Element>) -> Element {
+    let mut n = canvas(children).frame([0., 0., design_size[0], design_size[1]]);
+    n.design_size = Some(design_size);
+    n
 }
 pub struct AppUi {
     id: String,
@@ -279,9 +398,9 @@ impl AppUi {
             navigation: vec![],
             has_behavior: self.behavior.is_some(),
         };
-        let root = compiler.node(canvas(body));
+        let root = compiler.node(canvas(body), [SCREEN[2], SCREEN[3]]);
         let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
-            schema: "otrios-layout-v1".into(),
+            schema: "otrios-layout-v2".into(),
             templates: vec![Template {
                 id: 1,
                 name: "App canvas".into(),
@@ -341,10 +460,10 @@ impl Compiler {
             }
         }
     }
-    fn node(&mut self, n: Element) -> TemplateNode {
+    fn node(&mut self, n: Element, parent_reference: [f32; 2]) -> TemplateNode {
         let id = self.next_node;
         self.next_node = self.next_node.checked_add(1).expect("node budget");
-        let own_frame = n.frame.clone();
+        let child_reference = n.design_size.unwrap_or(n.frame_size);
         let frame = n.frame.map(|v| self.value(v));
         let shape = match n.paint {
             Paint::Canvas => Shape::Canvas { clip: true },
@@ -408,6 +527,11 @@ impl Compiler {
         };
         TemplateNode {
             id,
+            resize: n.resize.map(|r| ResizeRule {
+                reference_size: parent_reference,
+                horizontal: r[0],
+                vertical: r[1],
+            }),
             frame,
             visible: yes(),
             shape,
@@ -416,17 +540,7 @@ impl Compiler {
             children: n
                 .children
                 .into_iter()
-                .map(|mut child| {
-                    if child.fill_parent {
-                        child.frame = [
-                            0.0.into(),
-                            0.0.into(),
-                            own_frame[2].clone(),
-                            own_frame[3].clone(),
-                        ];
-                    }
-                    self.node(child)
-                })
+                .map(|child| self.node(child, child_reference))
                 .collect(),
         }
     }

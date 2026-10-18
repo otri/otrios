@@ -90,6 +90,7 @@ impl Author {
         });
 
         t.root.children.push(TemplateNode {
+            resize: None,
             id: 2,
             frame: [
                 n(16.),
@@ -360,6 +361,7 @@ fn playground() -> Blueprint {
     }
     fn node(id: u16, frame: [Expr; 4], shape: Shape) -> TemplateNode {
         TemplateNode {
+            resize: None,
             id,
             frame,
             shape,

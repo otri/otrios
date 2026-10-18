@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 #![cfg(feature = "canvas")]
 #[path = "../../../tools/canvas/authoring.rs"]
-mod authoring;
+pub mod authoring;
 #[path = "../../../apps/home/app.rs"]
 mod home;
 #[path = "../../../apps/layout-lab/app.rs"]
@@ -297,5 +297,175 @@ fn declarative_navigation_and_bindings_survive_reordering_without_manual_ids() {
         encode_ui(&home::ui()).unwrap(),
         encode_ui(&home::ui()).unwrap(),
         "same source compiles deterministically"
+    );
+}
+
+#[test]
+fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() {
+    use otrios_core::dashboard::input::InputRouter;
+    use otrios_interfaces::scene::{Action, PointerEvent, PointerPhase, Primitive, SceneNode};
+    fn card<'a>(n: &'a SceneNode, title: &str) -> Option<&'a SceneNode> {
+        if matches!(n.primitive, Primitive::Canvas { .. })
+            && n.children
+                .iter()
+                .any(|c| matches!(&c.primitive,Primitive::Text{value,..} if value==title))
+        {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| card(c, title))
+    }
+    let mut c = Client::default();
+    let ui = layout::ui();
+    activate(&mut c, ui, "lab", vec![]);
+    let old = c.scene().unwrap();
+    let old_card = card(old.root(), "Reusable").unwrap();
+    assert_eq!(old_card.frame.width, 420.);
+    let old_id = old_card.id;
+    edit(&mut c, "Panel width", 1000, 0);
+    let wide = c.scene().unwrap();
+    let wide_card = card(wide.root(), "Reusable").unwrap();
+    assert_eq!(wide_card.id, old_id);
+    assert_eq!(wide_card.frame.width, 520.);
+    assert_eq!(
+        card(old.root(), "Reusable").unwrap().frame.width,
+        420.,
+        "pinned old snapshot is unchanged"
+    );
+    // Two instances preserve the same design, with different width/height inputs.
+    let compact = card(wide.root(), "Compact").unwrap();
+    assert_eq!((compact.frame.width, compact.frame.height), (420., 220.));
+    for card in [wide_card, compact] {
+        let dot = card
+            .children
+            .iter()
+            .find(|c| matches!(c.primitive, Primitive::Circle { .. }))
+            .unwrap();
+        assert_eq!(card.frame.width - dot.frame.x - dot.frame.width, 24.);
+        let button = card
+            .children
+            .iter()
+            .find(|c| c.semantics.as_ref().is_some_and(|s| s.label == "Min width"))
+            .unwrap();
+        assert_eq!(button.frame.width, card.frame.width - 48.);
+        assert_eq!(
+            card.frame.height - button.frame.y - button.frame.height,
+            24.
+        );
+        let body = card
+            .children
+            .iter()
+            .find(|c| matches!(c.primitive, Primitive::Canvas { .. }) && c.semantics.is_none())
+            .unwrap();
+        let center = body
+            .children
+            .iter()
+            .find(|c| matches!(c.primitive, Primitive::Circle { .. }))
+            .unwrap();
+        assert_eq!(
+            center.frame.x + center.frame.width / 2.,
+            body.frame.width / 2.
+        );
+        assert_eq!(
+            center.frame.y + center.frame.height / 2.,
+            body.frame.height / 2.
+        );
+    }
+    let point = [1150., wide_card.frame.y + wide_card.frame.height - 48.];
+    let has_button = |s: &otrios_core::dashboard::scene::Scene| {
+        s.hit_path(point).iter().any(|n| {
+            n.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Min width")
+        })
+    };
+    assert!(!has_button(&old));
+    assert!(has_button(&wide));
+    let mut input = InputRouter::default();
+    input.dispatch(
+        wide.clone(),
+        PointerEvent {
+            id: 1,
+            phase: PointerPhase::Down,
+            position: point,
+        },
+    );
+    let up = input.dispatch(
+        wide,
+        PointerEvent {
+            id: 1,
+            phase: PointerPhase::Up,
+            position: point,
+        },
+    );
+    assert!(
+        matches!(up.action, Some(Action::AppEvent(_))),
+        "hit testing uses the newly resolved component frame"
+    );
+    assert_eq!(
+        c.value(1).unwrap(),
+        1000,
+        "layout does not write resolved geometry into app state"
+    );
+}
+
+#[test]
+fn legacy_layout_bytes_are_unchanged_and_resize_rules_require_v2() {
+    use otrios_core::dashboard::layout::{DEFAULT_LAYOUT, Layout};
+    let legacy = Layout::bootstrap().unwrap();
+    assert_eq!(Layout::encode(legacy.blueprint()).unwrap(), DEFAULT_LAYOUT);
+    let ui = layout::ui();
+    let parsed = Layout::from_bytes(&ui.layout).unwrap();
+    assert_eq!(parsed.blueprint().schema, "otrios-layout-v2");
+    let mut downgraded = parsed.blueprint().clone();
+    downgraded.schema = "otrios-layout-v1".into();
+    assert!(
+        Layout::encode(&downgraded).is_err(),
+        "old format cannot silently reinterpret new geometry rules"
+    );
+    let mut invalid = parsed.blueprint().clone();
+    invalid.templates[0].root.resize = Some(otrios_interfaces::layout::ResizeRule {
+        reference_size: [1280., 800.],
+        horizontal: otrios_interfaces::layout::AxisResize::Fixed,
+        vertical: otrios_interfaces::layout::AxisResize::Fixed,
+    });
+    assert!(
+        Layout::encode(&invalid).is_err(),
+        "component root size belongs to its instance"
+    );
+}
+
+#[test]
+fn authored_spring_masks_are_serialized_and_resolved_at_instance_size() {
+    let graphic = authoring::component(
+        [200., 100.],
+        vec![
+            authoring::rounded_rect(authoring::CARD)
+                .frame([20., 20., 100., 40.])
+                .resizing(authoring::Resizing {
+                    horizontal: authoring::AxisResize::Springs {
+                        leading: true,
+                        length: false,
+                        trailing: true,
+                    },
+                    vertical: authoring::AxisResize::Fixed,
+                }),
+        ],
+    )
+    .frame([40., 200., 300., 100.]);
+    let ui = authoring::AppUi::new("springs", "Springs", authoring::schema("empty-v1", &[]))
+        .build("Springs", vec![graphic]);
+    let mut client = Client::default();
+    activate(&mut client, ui, "springs", vec![]);
+    let scene = client.scene().unwrap();
+    let instance = scene
+        .root()
+        .children
+        .iter()
+        .find(|n| n.frame.width == 300.)
+        .unwrap();
+    assert_eq!(
+        instance.children[0].frame,
+        otrios_interfaces::scene::Rect::new(40., 20., 100., 40.)
     );
 }

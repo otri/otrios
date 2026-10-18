@@ -2,7 +2,7 @@
 #[path = "../../../apps/animation-lab/app.rs"]
 mod animation;
 #[path = "../../../tools/canvas/authoring.rs"]
-mod authoring;
+pub mod authoring;
 #[path = "../../../apps/home/app.rs"]
 mod home;
 #[path = "../../../apps/input-lab/app.rs"]

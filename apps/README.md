@@ -155,6 +155,36 @@ this builder does not claim identity preservation across structural edits.
 
 The builder is source authoring, not a new host toolkit. Its output is still the
 same FlexBuffers primitives, selectors, responders and navigation data. Renderers
-consume that data and do not execute these Rust builder functions. Absolute
-frames remain explicit geometry in this prototype; a stack/constraint layout DSL
-can be added independently of these identity/binding improvements.
+consume that data and do not execute these Rust builder functions. Frames define component design coordinates; pins and springs handle parent
+resizing. Stack layout and intrinsic sizing can be added independently of these
+identity/binding improvements.
+
+## Pins, springs and struts
+
+Reusable controls can define their local design canvas with
+`component([width, height], children)`. Placing that component in a different
+`.frame(...)` preserves its original child design reference. Children express
+resizing directly:
+
+```rust
+rounded_rect(CARD).pin_edges(0.)
+text("Title").pin_left(24.).pin_right(72.).pin_top(16.)
+circle(ACCENT).frame([0., 0., 24., 24.]).center_x().center_y()
+canvas(children).frame([24., 64., 412., 88.]).spring_width().spring_height()
+```
+
+One edge pin keeps size; opposite edge pins stretch between gaps. Centering keeps
+size. Springs absorb size changes using the original design lengths; fixed
+segments act as struts. Rules are serialized in layout v2 and resolved by the
+shared runtime, including input geometry. Fixed v1 layouts remain supported.
+
+`layout-lab/components.rs` defines one reusable card; two instances resize with
+the same app state while retaining different instance frames. Button backgrounds
+and labels also use pins/centering. See [RFC 0005](../docs/rfcs/0005-pins-and-struts-layout.md)
+for weighting, size limits, binary compatibility and the current surface scope.
+
+For the full six-segment spring mask, use `.resizing(Resizing { horizontal:
+AxisResize::Springs { leading: true, length: false, trailing: true }, vertical:
+AxisResize::Fixed })`. Named fields preserve the relationship without a numeric
+bitmask in authored UI code. With 20/80 design margins, these two margin springs
+share added width in a 1:4 ratio; `.center_x()` expresses exact centering instead.

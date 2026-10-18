@@ -31,6 +31,7 @@ fn choose(test: Expr, yes: Expr, no: Expr) -> Expr {
 }
 fn node(id: u16, frame: [Expr; 4], shape: Shape, children: Vec<TemplateNode>) -> TemplateNode {
     TemplateNode {
+        resize: None,
         id,
         frame,
         visible: Expr::Literal(Value::Boolean(true)),

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Bounded FlexBuffers reader and typed component/binding interpreter. No JSON path.
 use super::{Result, scene::Scene};
+pub mod resizing;
 use flexbuffers::{FlexBufferType, Reader};
 use otrios_interfaces::{DashboardView, ViewContent, layout::*, scene::*};
 use sha2::{Digest, Sha256};
@@ -212,7 +213,10 @@ fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
     Ok(())
 }
 fn validate_blueprint(b: &Blueprint) -> Result<()> {
-    if b.schema != "otrios-layout-v1" || b.templates.is_empty() || b.templates.len() > 32 {
+    if !matches!(b.schema.as_str(), "otrios-layout-v1" | "otrios-layout-v2")
+        || b.templates.is_empty()
+        || b.templates.len() > 32
+    {
         return Err("Unknown/invalid layout schema/templates".into());
     }
     let mut templates = BTreeSet::new();
@@ -238,6 +242,9 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
             *total += 1;
             if depth > 12 || n.id >= 1000 || !ids.insert(n.id) || *total > 512 {
                 return Err("Template node limits/identity".into());
+            }
+            if let Some(rule) = n.resize {
+                resizing::validate(rule)?;
             }
             for e in &n.frame {
                 bounded_expr(e, 0, true)?;
@@ -298,6 +305,12 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
         }
         let mut slots = 0;
         node(&t.root, 0, &mut BTreeSet::new(), &mut slots, &mut total)?;
+        fn has_resize(n: &TemplateNode) -> bool {
+            n.resize.is_some() || n.children.iter().any(has_resize)
+        }
+        if t.root.resize.is_some() || (b.schema == "otrios-layout-v1" && has_resize(&t.root)) {
+            return Err("Resize rules require layout v2 and an instance-owned root".into());
+        }
         if t.root.id != 0 || slots > 1 {
             return Err("Template root must be local ID zero; at most one child slot".into());
         }
@@ -510,6 +523,8 @@ fn expand(
     fn walk(
         n: &TemplateNode,
         c: &Context<'_, '_>,
+        parent_size: [f32; 2],
+        is_root: bool,
         count: &mut usize,
         slots: &mut usize,
     ) -> Result<Option<SceneNode>> {
@@ -524,6 +539,11 @@ fn expand(
         let mut f = [0.; 4];
         for (v, e) in f.iter_mut().zip(&n.frame) {
             *v = number(run(e)?)?;
+        }
+        if is_root && c.b.schema == "otrios-layout-v2" {
+            f = c.i.frame;
+        } else if let Some(rule) = n.resize {
+            f = resizing::resolve(f, parent_size, rule)?;
         }
         let r = Rect::new(f[0], f[1], f[2], f[3]);
         let primitive = match &n.shape {
@@ -589,7 +609,7 @@ fn expand(
             }
         } else {
             for child in &n.children {
-                if let Some(node) = walk(child, c, count, slots)? {
+                if let Some(node) = walk(child, c, [r.width, r.height], false, count, slots)? {
                     children.push(node);
                 }
             }
@@ -661,8 +681,15 @@ fn expand(
         depth,
     };
     let mut slots = 0;
-    let mut root =
-        walk(&t.root, &c, count, &mut slots)?.ok_or("Component root cannot be hidden")?;
+    let mut root = walk(
+        &t.root,
+        &c,
+        [i.frame[2], i.frame[3]],
+        true,
+        count,
+        &mut slots,
+    )?
+    .ok_or("Component root cannot be hidden")?;
     if slots == 0 && !i.children.is_empty() {
         return Err("Component has children but no visible slot".into());
     }

@@ -111,3 +111,7 @@ stale input generations cannot target a replacement UI. Stable logical keys for
 collaborative UI-graph editing and a general stack/constraint layout language are
 not implemented by this source builder. Binary UI transport/runtime interpretation
 remain unchanged. See the app guide for concrete source examples.
+
+[RFC 0005](0005-pins-and-struts-layout.md) adds parent-local pins, centers and
+spring/strut resizing to the same binary primitive descriptions, with reusable
+component design sizes and layout-v2 admission.
