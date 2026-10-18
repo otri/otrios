@@ -279,13 +279,22 @@ impl Presenter {
 /// Telemetry remains a Text primitive. Hosts may render this immutable label
 /// independently from the animation clock and the CRDT/state worker.
 pub fn render_hud(label: &str) -> Mesh {
+    render_hud_font(label, None)
+}
+pub fn render_hud_with_font(label: &str, font: &super::font::Font) -> Mesh {
+    render_hud_font(label, Some(font))
+}
+fn render_hud_font(label: &str, font: Option<&super::font::Font>) -> Mesh {
     let scene = Scene::new(canvas(
         0,
         Rect::new(0., 0., 1280., 800.),
         vec![text(1, Rect::new(48., 748., 1184., 24.), label, 2, WHITE)],
     ))
     .unwrap();
-    render_scene(&scene)
+    match font {
+        Some(font) => super::render_scene_with_font(&scene, font),
+        None => render_scene(&scene),
+    }
 }
 /// Isolated CRDT load: exercises real mutation, incremental encoding, merge,
 /// validation and projection. It never touches the user's room or disk history.

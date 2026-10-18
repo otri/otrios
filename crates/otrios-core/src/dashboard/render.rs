@@ -1,24 +1,15 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-use super::{ViewSnapshot, scene::Scene};
-#[path = "font.rs"]
-mod font;
+use super::{ViewSnapshot, font::Font, scene::Scene};
 use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
-/// Roboto copyright and license notice, embedded with the glyph data in every host.
-pub fn font_notice() -> &'static str {
-    font::notice()
-}
-
-/// Proportional text advance in logical units, using the same metrics as rendering.
-pub fn text_width(value: &str, scale: f32) -> f32 {
-    value
-        .chars()
-        .map(|ch| font::glyph(ch).advance * scale)
-        .sum()
-}
-
-/// Triangle list: logical x/y and RGBA. Both GPU hosts consume this geometry.
+/// Ordered geometry and Slug glyph runs, retained by both GPU hosts.
+#[derive(Default)]
 pub struct Mesh {
+    /// Triangle list: logical xy and RGBA (six floats per vertex).
     pub vertices: Vec<f32>,
+    /// Indexed quads TL,TR,BL,BR: xy, emxy, RGBA, bandTransform, glyphData.
+    pub glyph_vertices: Vec<f32>,
+    /// Triples (kind,firstVertex,countVertices): kind 0 triangles, kind 1 glyph quads.
+    pub draws: Vec<u32>,
 }
 #[derive(Clone, Copy)]
 struct Clip {
@@ -43,8 +34,18 @@ impl Clip {
 pub fn render(snapshot: &ViewSnapshot) -> Mesh {
     render_scene(snapshot.scene())
 }
+/// Geometry-only projection for headless use; text requires an explicit admitted font.
 pub fn render_scene(scene: &Scene) -> Mesh {
-    let mut mesh = Mesh { vertices: vec![] };
+    render_optional_font(scene, None)
+}
+pub fn render_with_font(snapshot: &ViewSnapshot, font: &Font) -> Mesh {
+    render_scene_with_font(snapshot.scene(), font)
+}
+pub fn render_scene_with_font(scene: &Scene, font: &Font) -> Mesh {
+    render_optional_font(scene, Some(font))
+}
+fn render_optional_font(scene: &Scene, font: Option<&Font>) -> Mesh {
+    let mut mesh = Mesh::default();
     mesh.paint(
         scene.root(),
         [0., 0.],
@@ -55,11 +56,24 @@ pub fn render_scene(scene: &Scene) -> Mesh {
             right: 1280.,
             bottom: 800.,
         },
+        font,
     );
     mesh
 }
 impl Mesh {
+    fn run(&mut self, kind: u32, first: u32, count: u32) {
+        let length = self.draws.len();
+        if length >= 3 {
+            let last = &mut self.draws[length - 3..];
+            if last[0] == kind && last[1] + last[2] == first {
+                last[2] += count;
+                return;
+            }
+        }
+        self.draws.extend([kind, first, count]);
+    }
     fn vertex(&mut self, p: [f32; 2], c: Color) {
+        self.run(0, (self.vertices.len() / 6) as u32, 1);
         self.vertices.extend([
             p[0],
             p[1],
@@ -175,21 +189,45 @@ impl Mesh {
         }
         self.fan([r.x + r.width / 2., r.y + r.height / 2.], &outline, c, clip);
     }
-    fn text(&mut self, r: Rect, value: &str, scale: f32, c: Color, clip: Clip) {
-        let clip = clip.intersect(r);
-        let mut x = r.x;
+    fn text(&mut self, r: Rect, value: &str, scale: f32, c: Color, clip: Clip, font: &Font) {
+        // The scene's old height was an 8px bitmap box. It is not a glyph ink clip:
+        // ascenders and descenders use font metrics, while ancestor canvases still clip.
+        // Advance width controls where the logical run ends. It does not clip ink:
+        // a negative side bearing or overhang may cross the text frame's x edges.
+        // Explicit ancestor canvases provide field/panel clipping when required.
+        if clip.empty() || r.width <= 0. {
+            return;
+        }
+        let factor = font.metrics().scale(scale);
+        let em_size = factor * f32::from(font.metrics().units_per_em);
+        let baseline = r.y + font.metrics().baseline_from_top(scale);
+        let mut pen = r.x;
         for ch in value.chars() {
-            let glyph = font::glyph(ch);
-            let mut points = glyph.points();
-            while let (Some(a), Some(b), Some(d)) = (points.next(), points.next(), points.next()) {
-                self.triangle(
-                    [a, b, d].map(|p| [x + p[0] * scale, r.y + p[1] * scale]),
-                    c,
-                    clip,
-                );
+            let glyph = font.glyph(ch);
+            if glyph.curve_count != 0 && self.glyph_vertices.len() / 16 + 4 <= 65536 {
+                let b = glyph.ink_bounds;
+                let left = (pen + b[0] * factor - 1.).max(clip.left);
+                let right = (pen + b[2] * factor + 1.).min(clip.right);
+                let top = (baseline - b[3] * factor - 1.).max(clip.top);
+                let bottom = (baseline - b[1] * factor + 1.).min(clip.bottom);
+                if left < right && top < bottom {
+                    let first = (self.glyph_vertices.len() / 16) as u32;
+                    for (x, y) in [(left, top), (right, top), (left, bottom), (right, bottom)] {
+                        self.glyph_vertices.extend([
+                            x,
+                            y,
+                            (x - pen) / em_size,
+                            (baseline - y) / em_size,
+                        ]);
+                        self.glyph_vertices.extend(c.map(|v| f32::from(v) / 255.));
+                        self.glyph_vertices.extend(glyph.band_transform);
+                        self.glyph_vertices.extend(glyph.band_data());
+                    }
+                    self.run(1, first, 4);
+                }
             }
-            x += glyph.advance * scale;
-            if x >= clip.right {
+            pen += glyph.advance * factor;
+            if pen >= r.x + r.width {
                 break;
             }
         }
@@ -211,7 +249,14 @@ impl Mesh {
         self.triangle([p[0], p[1], p[2]], c, clip);
         self.triangle([p[2], p[1], p[3]], c, clip);
     }
-    fn paint(&mut self, node: &SceneNode, parent: [f32; 2], factor: f32, clip: Clip) {
+    fn paint(
+        &mut self,
+        node: &SceneNode,
+        parent: [f32; 2],
+        factor: f32,
+        clip: Clip,
+        font: Option<&Font>,
+    ) {
         let f = node.frame;
         let r = Rect::new(
             parent[0] + f.x * factor,
@@ -224,7 +269,7 @@ impl Mesh {
                 let clip = if *enabled { clip.intersect(r) } else { clip };
                 if !clip.empty() {
                     for child in &node.children {
-                        self.paint(child, [r.x, r.y], factor, clip);
+                        self.paint(child, [r.x, r.y], factor, clip, font);
                     }
                 }
             }
@@ -232,7 +277,7 @@ impl Mesh {
                 let clip = clip.intersect(r);
                 if !clip.empty() {
                     for child in &node.children {
-                        self.paint(child, [r.x, r.y], factor * scale, clip);
+                        self.paint(child, [r.x, r.y], factor * scale, clip, font);
                     }
                 }
             }
@@ -240,7 +285,11 @@ impl Mesh {
                 value,
                 scale,
                 color,
-            } => self.text(r, value, *scale as f32 * factor, *color, clip),
+            } => {
+                if let Some(font) = font {
+                    self.text(r, value, *scale as f32 * factor, *color, clip, font);
+                }
+            }
             Primitive::Superellipse {
                 radius,
                 exponent,
@@ -280,51 +329,113 @@ impl Mesh {
 mod tests {
     use super::*;
     #[test]
-    fn vector_text_preserves_holes_and_fractional_clipping() {
-        let mut mesh = Mesh { vertices: vec![] };
+    fn glyph_quads_use_baselines_and_ancestor_clip_without_truncating_descenders() {
+        let font = super::super::font::test_font();
+        let mut mesh = Mesh::default();
         let clip = Clip {
             left: 0.,
             top: 0.,
             right: 100.,
             bottom: 100.,
         };
-        mesh.text(Rect::new(0., 0., 100., 100.), "O", 4., [255; 4], clip);
-        let covered = |p: [f32; 2]| {
-            mesh.vertices.chunks_exact(18).any(|t| {
-                let cross = |a: usize, b: usize| {
-                    (t[b] - t[a]) * (p[1] - t[a + 1]) - (t[b + 1] - t[a + 1]) * (p[0] - t[a])
-                };
-                let signs = [cross(0, 6), cross(6, 12), cross(12, 0)];
-                signs.iter().all(|s| *s >= 0.) || signs.iter().all(|s| *s <= 0.)
-            })
-        };
-        assert!(!mesh.vertices.is_empty());
-        assert!(
-            !covered([font::glyph('O').advance * 2., 16.]),
-            "O counter must be empty"
+        mesh.text(
+            Rect::new(0., 0., 100., 8.),
+            "Égy",
+            1.,
+            [255; 4],
+            clip,
+            &font,
         );
-        assert!(covered([3., 16.]), "O stem must be filled");
+        assert!(
+            mesh.vertices.is_empty(),
+            "Text must not be tessellated into geometry"
+        );
+        assert_eq!(mesh.glyph_vertices.len(), 3 * 4 * 16);
+        let baseline = font.metrics().baseline_from_top(1.);
+        let ys: Vec<_> = mesh.glyph_vertices.chunks_exact(16).map(|v| v[1]).collect();
+        assert!(
+            ys.iter().any(|y| *y > baseline),
+            "descenders must extend below baseline"
+        );
+        assert!(
+            ys.iter().any(|y| *y > 8.),
+            "old bitmap height must not clip descenders"
+        );
+        assert_eq!(mesh.draws, [1, 0, 12]);
+        mesh.glyph_vertices.clear();
+        mesh.draws.clear();
         let clip = Clip {
             left: 3.25,
             top: 1.25,
-            right: 73.75,
+            right: 20.75,
             bottom: 7.75,
         };
-        mesh.vertices.clear();
         mesh.text(
-            Rect::new(0., 0., 1280., 800.),
+            Rect::new(0., 0., 1280., 8.),
             "ABCxyz09?",
             1.,
             [255; 4],
             clip,
+            &font,
         );
-        assert!(!mesh.vertices.is_empty());
-        assert_eq!(mesh.vertices.len() % 18, 0);
-        for p in mesh.vertices.chunks_exact(6) {
-            assert!(p.iter().all(|v| v.is_finite()));
-            assert!((clip.left..=clip.right).contains(&p[0]));
-            assert!((clip.top..=clip.bottom).contains(&p[1]));
+        assert!(!mesh.glyph_vertices.is_empty());
+        for v in mesh.glyph_vertices.chunks_exact(16) {
+            assert!(v.iter().all(|v| v.is_finite()));
+            assert!((clip.left..=clip.right).contains(&v[0]));
+            assert!((clip.top..=clip.bottom).contains(&v[1]));
         }
+    }
+    #[test]
+    fn glyph_ink_retains_negative_bearings_and_overhang_past_a_short_text_frame() {
+        let font = super::super::font::test_font();
+        let mut mesh = Mesh::default();
+        let clip = Clip {
+            left: 0.,
+            top: 0.,
+            right: 100.,
+            bottom: 100.,
+        };
+        mesh.text(
+            Rect::new(20., 0., 1., 8.),
+            "jgyÉ",
+            1.,
+            [255; 4],
+            clip,
+            &font,
+        );
+        // One logical glyph is emitted before its advance reaches the run's width.
+        assert_eq!(mesh.glyph_vertices.len(), 4 * 16);
+        let left = mesh.glyph_vertices[0];
+        let right = mesh.glyph_vertices[16];
+        let expected = 20. + font.glyph('j').ink_bounds[0] * font.metrics().scale(1.) - 1.;
+        assert_eq!(left, expected);
+        assert!(
+            left < 19.,
+            "negative bearing must survive, beyond the AA margin"
+        );
+        assert!(
+            right > 21.,
+            "glyph ink must not be cut to the logical advance box"
+        );
+        assert!(
+            mesh.glyph_vertices[2 * 16 + 1] > 8.,
+            "descender must survive old bitmap height"
+        );
+    }
+    #[test]
+    fn geometry_and_text_draws_preserve_painter_order() {
+        let font = super::super::font::test_font();
+        let mut mesh = Mesh::default();
+        let clip = Clip {
+            left: 0.,
+            top: 0.,
+            right: 100.,
+            bottom: 100.,
+        };
+        mesh.rect(Rect::new(0., 0., 10., 10.), [255; 4], clip);
+        mesh.text(Rect::new(0., 0., 100., 8.), "Hi", 1., [255; 4], clip, &font);
+        mesh.rect(Rect::new(0., 0., 10., 10.), [255; 4], clip);
+        assert_eq!(mesh.draws, [0, 0, 6, 1, 0, 8, 0, 6, 6]);
     }
     #[test]
     fn same_snapshot_produces_same_mesh_and_touch_changes_it() {

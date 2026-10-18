@@ -5,6 +5,8 @@
 pub mod components;
 pub mod controls;
 pub mod display;
+pub mod font;
+pub mod font_reference;
 pub mod ink;
 pub mod input;
 pub mod keyboard;
@@ -16,7 +18,7 @@ pub mod scene;
 pub mod shell;
 pub mod signal;
 mod snapshot;
-pub use render::{Mesh, font_notice, render, render_scene, text_width};
+pub use render::{Mesh, render, render_scene, render_scene_with_font, render_with_font};
 pub use snapshot::ViewSnapshot;
 
 use automerge::sync::SyncDoc;

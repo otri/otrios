@@ -1,0 +1,20 @@
+{
+  "ascent": 3800,
+  "capHeight": 2912,
+  "compressedBytes": 34043,
+  "compressedSha256": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+  "curves": 5440,
+  "decodedBytes": 76530,
+  "decodedSha256": "8b14c1e169d44c56edb1743b0ade0950e1e661a9411d97be31c1d6713d078202",
+  "descent": -1000,
+  "family": "Roboto",
+  "format": "otrios-quadratic-font-v1",
+  "generator": "FontTools 4.60.1 / Zstandard 1.5.6 level 3",
+  "glyphs": 213,
+  "license": "OFL-1.1",
+  "lineGap": 0,
+  "resource": "fonts/Roboto-Regular.otq.zst",
+  "sourceSha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134",
+  "style": "Regular",
+  "unitsPerEm": 4096
+}

@@ -1,176 +1,119 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Bake bounded Roboto Regular outlines into shared renderer triangle geometry.
+"""Prepare a bounded quadratic Roboto resource; no outline tessellation or embedded font.
 
-Requires tools/fonts/requirements.txt (offline authoring tools only).
-Run from anywhere: python tools/fonts/generate_roboto.py [--check].
+Requires tools/fonts/requirements.txt and Zstandard CLI 1.5.6.
+Run python tools/fonts/generate_roboto.py [--check].
 """
 import argparse
 import hashlib
+import json
+import math
 from pathlib import Path
 import struct
+import subprocess
 
 from fontTools.pens.basePen import BasePen
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTFont
-from fontTools.ttLib.removeOverlaps import removeOverlaps
 from fontTools.varLib.instancer import instantiateVariableFont
-import mapbox_earcut
-import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "assets/fonts/roboto/Roboto.ttf"
-OUTPUT = ROOT / "crates/otrios-core/src/dashboard/roboto_data.rs"
+OUTPUT = ROOT / "web/dashboard/fonts/Roboto-Regular.otq.zst"
+METADATA = ROOT / "assets/fonts/roboto/resource.json"
+RUST_REF = ROOT / "crates/otrios-core/src/dashboard/font_reference.rs"
+JS_REF = ROOT / "web/shared/font-reference.mjs"
 SOURCE_SHA256 = "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134"
-TOLERANCE = 6.0  # font units: <0.14 logical pixels at text scale 4
 
 
-def flat(control, a, b):
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    length = (dx * dx + dy * dy) ** 0.5
-    if length == 0:
-        return all((p[0] - a[0]) ** 2 + (p[1] - a[1]) ** 2 <= TOLERANCE**2 for p in control)
-    return all(abs(dx * (a[1] - p[1]) - dy * (a[0] - p[0])) / length <= TOLERANCE for p in control)
-
-
-def midpoint(a, b):
-    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-
-
-class Outlines(BasePen):
+class Quadratics(BasePen):
     def __init__(self, glyphs):
         super().__init__(glyphs)
-        self.contours = []
-        self.points = []
+        self.curves = []
+        self.first = None
 
     def _moveTo(self, p):
-        self.points = [p]
+        self.first = p
 
-    def _lineTo(self, p):
-        self.points.append(p)
+    def _lineTo(self, end):
+        start = self._getCurrentPoint()
+        if start != end:
+            middle = tuple((a + b) / 2 for a, b in zip(start, end))
+            self.curves.append((start, middle, end))
 
-    def quadratic(self, a, b, c, depth=0):
-        if flat([b], a, c) or depth == 16:
-            self.points.append(c)
-            return
-        ab, bc = midpoint(a, b), midpoint(b, c)
-        center = midpoint(ab, bc)
-        self.quadratic(a, ab, center, depth + 1)
-        self.quadratic(center, bc, c, depth + 1)
+    def _qCurveToOne(self, control, end):
+        self.curves.append((self._getCurrentPoint(), control, end))
 
-    def _qCurveToOne(self, b, c):
-        self.quadratic(self._getCurrentPoint(), b, c)
-
-    def cubic(self, a, b, c, d, depth=0):
-        if flat([b, c], a, d) or depth == 16:
-            self.points.append(d)
-            return
-        ab, bc, cd = midpoint(a, b), midpoint(b, c), midpoint(c, d)
-        abc, bcd = midpoint(ab, bc), midpoint(bc, cd)
-        center = midpoint(abc, bcd)
-        self.cubic(a, ab, abc, center, depth + 1)
-        self.cubic(center, bcd, cd, d, depth + 1)
-
-    def _curveToOne(self, b, c, d):
-        self.cubic(self._getCurrentPoint(), b, c, d)
+    def _curveToOne(self, *points):
+        raise ValueError("This bounded packet accepts quadratic TrueType outlines only")
 
     def _closePath(self):
-        clean = []
-        for p in self.points:
-            p = tuple(round(x) for x in p)
-            if not clean or p != clean[-1]:
-                clean.append(p)
-        if len(clean) > 1 and clean[0] == clean[-1]:
-            clean.pop()
-        if len(clean) >= 3:
-            self.contours.append(clean)
-        self.points = []
+        if self.first is not None:
+            self._lineTo(self.first)
+        self.first = None
 
     def _endPath(self):
-        self._closePath()
-
-
-def area(points):
-    return sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1])) / 2
-
-
-def contains(points, p):
-    x, y = p
-    inside = False
-    for a, b in zip(points, points[1:] + points[:1]):
-        if (a[1] > y) != (b[1] > y) and x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]:
-            inside = not inside
-    return inside
-
-
-def triangles(contours):
-    areas = [abs(area(p)) for p in contours]
-    parents = []
-    for i, contour in enumerate(contours):
-        enclosing = [j for j, other in enumerate(contours) if areas[j] > areas[i] and contains(other, contour[0])]
-        parents.append(min(enclosing, key=areas.__getitem__) if enclosing else None)
-    depths = []
-    for parent in parents:
-        depth = 0
-        while parent is not None:
-            depth += 1
-            parent = parents[parent]
-        depths.append(depth)
-    result = []
-    for i, outer in enumerate(contours):
-        if depths[i] % 2:
-            continue
-        rings = [outer] + [p for j, p in enumerate(contours) if parents[j] == i and depths[j] % 2]
-        points = [p for ring in rings for p in ring]
-        ends = np.cumsum([len(ring) for ring in rings], dtype=np.uint32)
-        indices = mapbox_earcut.triangulate_float64(np.array(points, dtype=np.float64), ends)
-        for index in indices:
-            result.append(points[index])
-        # Validate tessellation covers the filled outline, including counters.
-        expected = abs(area(outer)) - sum(abs(area(hole)) for hole in rings[1:])
-        actual = sum(abs(area([points[k] for k in indices[n:n + 3]])) for n in range(0, len(indices), 3))
-        if abs(expected - actual) > max(1, expected * 0.00001):
-            raise ValueError(f"Tessellation area mismatch: {expected} != {actual}")
-    return result
+        raise ValueError("Font outline contour must be closed")
 
 
 def generate():
     if hashlib.sha256(SOURCE.read_bytes()).hexdigest() != SOURCE_SHA256:
-        raise ValueError("Roboto source hash changed; review its source and license before regenerating")
+        raise ValueError("Roboto source changed; review its source and license first")
+    version = subprocess.check_output(["zstd", "--version"], text=True)
+    if "v1.5.6" not in version:
+        raise ValueError("Use pinned Zstandard CLI 1.5.6 for reproducible resource bytes")
     font = instantiateVariableFont(TTFont(SOURCE), {"wght": 400, "wdth": 100}, inplace=True)
-    removeOverlaps(font)
     glyphs, cmap = font.getGlyphSet(), font.getBestCmap()
     codepoints = sorted(set(range(32, 127)) | set(range(160, 256)) | set(range(0x2010, 0x2028)) | set(range(0x2190, 0x2194)) | {0x2212, 0xFFFD})
-    codepoints = [c for c in codepoints if c in cmap]
-    cap = font["OS/2"].sCapHeight
-    records, vertices = bytearray(), bytearray()
-    for code in codepoints:
-        name = cmap[code]
-        pen = Outlines(glyphs)
+    entries = [(0, ".notdef")] + [(c, cmap[c]) for c in codepoints if c in cmap]
+    records, curves = bytearray(), bytearray()
+    for code, name in entries:
+        pen = Quadratics(glyphs)
         glyphs[name].draw(pen)
-        try:
-            points = triangles(pen.contours)
-        except ValueError as error:
-            raise ValueError(f"{code}: {name}: {error}") from error
-        records.extend(struct.pack("<IIIHH", code, len(vertices), len(points), font["hmtx"][name][0], 0))
-        for x, y in points:
-            vertices.extend(struct.pack("<hh", x, cap - y))
-    notice = "\n".join(line.rstrip() for line in (ROOT / "assets/fonts/roboto/OFL.txt").read_text().splitlines())
-    data = b"OTRFONT1" + struct.pack("<II", len(codepoints), cap) + records + vertices + notice.encode()
-    lines = ["// SPDX-License-Identifier: OFL-1.1", "// Generated by tools/fonts/generate_roboto.py; do not edit.", f"// Source SHA-256: {SOURCE_SHA256}; wght=400, wdth=100; {len(codepoints)} glyphs.", "/*", notice, "*/", "#[rustfmt::skip]", "pub(super) const DATA: &[u8] = &["]
-    for i in range(0, len(data), 32):
-        lines.append("    " + ",".join(str(n) for n in data[i:i+32]) + ",")
-    lines.append("];\n")
-    return "\n".join(lines).encode()
+        bounds = BoundsPen(glyphs)
+        glyphs[name].draw(bounds)
+        xmin, ymin, xmax, ymax = bounds.bounds or (0, 0, 0, 0)
+        # Curve coordinates use signed half-font-units, preserving odd line midpoints.
+        # The packet's unitsPerEm and all metrics are doubled accordingly.
+        ink = (math.floor(xmin * 2), math.floor(ymin * 2), math.ceil(xmax * 2), math.ceil(ymax * 2))
+        records.extend(struct.pack("<IIIIhhhhhHI", code, font.getGlyphID(name), len(curves) // 12, len(pen.curves), font["hmtx"][name][0] * 2, *ink, 0, 0))
+        for curve in pen.curves:
+            curves.extend(struct.pack("<hhhhhh", *(round(v * 2) for point in curve for v in point)))
+    notice = (ROOT / "assets/fonts/roboto/OFL.txt").read_bytes()
+    cap = font["OS/2"].sCapHeight * 2
+    metrics = [font["head"].unitsPerEm * 2, font["hhea"].ascent * 2, font["hhea"].descent * 2, font["hhea"].lineGap * 2, cap]
+    length = 40 + len(records) + len(curves) + len(notice)
+    header = b"OTRQFNT1" + struct.pack("<IHhhhhHIIII", length, *metrics, 0, len(entries), len(curves) // 12, len(notice), 0)
+    assert len(header) == 40
+    raw = header + records + curves + notice
+    # Content size and checksum included; one bounded frame, no dictionary.
+    compressed = subprocess.run(["zstd", "-q", "-3", "--check", "--single-thread", "--stream-size=" + str(len(raw)), "-c"], input=raw, capture_output=True, check=True).stdout
+    metadata = {
+        "format": "otrios-quadratic-font-v1", "family": "Roboto", "style": "Regular",
+        "sourceSha256": SOURCE_SHA256, "compressedSha256": hashlib.sha256(compressed).hexdigest(),
+        "decodedSha256": hashlib.sha256(raw).hexdigest(), "compressedBytes": len(compressed),
+        "decodedBytes": len(raw), "glyphs": len(entries), "curves": len(curves) // 12,
+        "unitsPerEm": metrics[0], "ascent": metrics[1], "descent": metrics[2],
+        "lineGap": metrics[3], "capHeight": metrics[4], "license": "OFL-1.1",
+        "resource": "fonts/Roboto-Regular.otq.zst", "generator": "FontTools 4.60.1 / Zstandard 1.5.6 level 3",
+    }
+    return compressed, (json.dumps(metadata, indent=2, sort_keys=True) + "\n").encode()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    data = generate()
-    if args.check:
-        if OUTPUT.read_bytes() != data:
-            raise SystemExit("Roboto mesh is stale; regenerate it")
-    else:
-        OUTPUT.write_bytes(data)
-    print(f"Roboto Regular generated Rust: {len(data):,} bytes; SHA-256 {hashlib.sha256(data).hexdigest()}")
+    compressed, metadata = generate()
+    sha = hashlib.sha256(compressed).hexdigest()
+    rust_ref = f'// SPDX-License-Identifier: Apache-2.0\n// Generated resource identity; font bytes are fetched and cached separately.\npub const RESOURCE_SHA256: &str =\n    "{sha}";\npub const RESOURCE_FILE: &str = "Roboto-Regular.otq.zst";\n'.encode()
+    js_ref = f'// SPDX-License-Identifier: Apache-2.0\n// Generated resource identity; font bytes are fetched and cached separately.\nexport const FONT_SHA256 = "{sha}";\nexport const FONT_PATH = "fonts/Roboto-Regular.otq.zst";\n'.encode()
+    for path, data in [(OUTPUT, compressed), (METADATA, metadata), (RUST_REF,rust_ref), (JS_REF,js_ref)]:
+        if args.check:
+            if path.read_bytes() != data:
+                raise SystemExit(f"Stale generated font resource: {path}")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+    print(metadata.decode())

@@ -47,6 +47,7 @@ fn remap(mut node: SceneNode, offset: u32) -> Result<SceneNode> {
     Ok(node)
 }
 pub struct Shell {
+    font: Option<Arc<super::font::Font>>,
     ink: super::ink::Ink,
     screen: Screen,
     controls: super::controls::Interactions,
@@ -63,6 +64,7 @@ pub struct Shell {
 impl Default for Shell {
     fn default() -> Self {
         Self {
+            font: None,
             ink: Default::default(),
             screen: Screen::Home,
             controls: Default::default(),
@@ -79,6 +81,18 @@ impl Default for Shell {
     }
 }
 impl Shell {
+    pub fn set_font(&mut self, font: Arc<super::font::Font>) -> bool {
+        if self
+            .font
+            .as_ref()
+            .is_some_and(|old| old.hash() == font.hash())
+        {
+            return false;
+        }
+        self.font = Some(font);
+        self.changed();
+        true
+    }
     pub fn input_busy(&self) -> bool {
         self.input.active()
     }
@@ -532,7 +546,11 @@ impl Shell {
             local.insert(1000 + key, Value::Text(self.keyboard.label(key)));
             local.insert(
                 4000 + key,
-                Value::Number(super::render::text_width(&self.keyboard.label(key), 2.)),
+                Value::Number(
+                    self.font
+                        .as_ref()
+                        .map_or(0., |font| font.text_width(&self.keyboard.label(key), 2.)),
+                ),
             );
             local.insert(
                 2000 + key,
