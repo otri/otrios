@@ -100,7 +100,7 @@ with 4,194,304 atlas bytes. See [the raw report](slug-font-frame-results.json)
 for the candidate binary digest and complete measurements. This was a local
 isolated state-load test, not upstream network-latency evidence.
 
-Actual native acceptance passed all three ignored EGL pixel tests in both direct
+Preliminary native synthetic checks passed all three ignored EGL pixel tests in both direct
 and linear-reference modes on Mali400. These cover all 256 coverage levels,
 holes, fractional phases, cache generation, RGB888/RGB565 output and half-alpha
 tints without double alpha. The user-approved direct mode avoids the slower
@@ -146,4 +146,34 @@ Overall cadence including startup and capture was 48.72 FPS; this is not a
 refresh-lock claim. Composition submission measured 3.365 ms median / 4.968 ms
 p95. The coverage cache recorded 119,519 hits / 313 misses and 4,194,304 bytes.
 Raw measurements and the tested binary digest are in the linked JSON report.
-Signed production deployment is recorded after final screenshot review.
+A separate eight-second visual trial captured frame 250, rather than the fifth
+startup frame. Its report includes the roughly 300 ms synchronous screenshot
+stall inside the measured interval: 51.81 warm-window FPS / 45.69 overall FPS.
+It is recorded alongside the accepted 12-second trial, rather than presented as
+an ordinary rendering run. The late image confirms readable letters and an
+updated on-screen FPS counter. That counter averages up to 3,600 recent
+intervals, including startup, so it differs from the kernel report’s explicit
+two-second warm-up exclusion.
+
+## Signed deployment
+
+Published release:
+`ef2c34cd77e3f6296b6015925cea8bbfbe8bb396bf6b97a9e8b3baeb216d74f8`.
+
+- The live public host passes **51** code/font/auth/isolation checks. Monitoring
+  still requires its protected session, including stream revocation on logout.
+- Actual browser navigation at `https://otrios.otri.ca` loads Home and Component
+  Playground with premultiplied alpha, direct authored-sRGB rendering, the 4 MiB
+  coverage atlas and increasing warm hits. The immutable artifact cache reports
+  22,042,505 bytes / 57 entries under its 536,870,912-byte cap at observation.
+- The frame runs exactly one signed `gles2-direct` instance for this release,
+  with DRM, 90° rotation, a ready stream, server-confirmed state and no pending
+  commands. Its installed supervisor validates the executable, manifest,
+  signature, 34,043-byte font and license notice in the 2 GiB bounded cache.
+- New manifests contain no SDL binary. Previous signed release `6c06abee…` is
+  still cached, and previous service/tooling copies were retained before update.
+- Deployment uses the existing feature-branch watcher and signed module host;
+  the production dashboard still uses the legacy Shell, not Canvas app admission.
+
+The source, tests, font/host work and approved SDL retirement were committed as
+logical steps. Runtime durable state and Monitoring policy were preserved.
