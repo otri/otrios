@@ -378,6 +378,3 @@ impl MotionPresenter {
         self.inner.stats()
     }
 }
-
-#[cfg(feature = "canvas")]
-mod canvas_web;

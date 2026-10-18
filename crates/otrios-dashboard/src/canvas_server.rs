@@ -150,11 +150,9 @@ async fn asset(
 async fn file(s: &Server, path: &str) -> Response {
     let mime = match path {
         "index.html" => "text/html; charset=utf-8",
-        "app.js" | "state-worker.js" | "pkg/otrios_dashboard.js" => {
-            "text/javascript; charset=utf-8"
-        }
+        "app.js" | "state-worker.js" | "pkg/host.js" => "text/javascript; charset=utf-8",
         "style.css" => "text/css; charset=utf-8",
-        "pkg/otrios_dashboard_bg.wasm" => "application/wasm",
+        "pkg/host_bg.wasm" => "application/wasm",
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
     match tokio::fs::read(s.web.join(path)).await {

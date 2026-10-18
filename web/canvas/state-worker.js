@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import init,{CanvasApp} from './pkg/otrios_dashboard.js';
+import init,{CanvasApp} from './pkg/host.js';
 await init();
 let app,ws,dirty=false;
 function error(e){postMessage({type:'error',message:String(e)});}

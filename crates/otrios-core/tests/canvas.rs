@@ -469,3 +469,106 @@ fn authored_spring_masks_are_serialized_and_resolved_at_instance_size() {
         otrios_interfaces::scene::Rect::new(40., 20., 100., 40.)
     );
 }
+
+#[test]
+fn projected_scene_is_reused_until_selected_state_changes() {
+    use std::sync::Arc;
+    let level = authoring::StateField::normalized(1, "level", 500);
+    let other = authoring::StateField::normalized(2, "other", 100);
+    let ui = authoring::AppUi::new(
+        "cache",
+        "Cache",
+        authoring::schema("cache-v1", &[level, other]),
+    )
+    .build(
+        "Cache",
+        vec![
+            authoring::text(level.percent()).position([40., 200.]),
+            authoring::canvas(vec![authoring::rounded_rect(authoring::CARD)])
+                .frame([40., 300., 200., 100.])
+                .on_drag("Other", authoring::Event::slider(other)),
+            authoring::canvas(vec![authoring::rounded_rect(authoring::CARD)])
+                .frame([300., 300., 200., 100.])
+                .on_drag("Level", authoring::Event::slider(level)),
+        ],
+    );
+    let schema = ui.state_schema.clone();
+    let mut c = Client::default();
+    activate(&mut c, ui, "cache", vec![]);
+    let before = c.scene().unwrap();
+    assert!(Arc::ptr_eq(&before, &c.scene().unwrap()));
+    edit(&mut c, "Other", 900, 0);
+    assert_eq!(c.value(2).unwrap(), 900);
+    assert!(
+        Arc::ptr_eq(&before, &c.scene().unwrap()),
+        "unselected fields do not rebuild UI"
+    );
+    let mut authority = Document::new(schema, "cache").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    assert_eq!(
+        authority.value(2).unwrap(),
+        900,
+        "nonvisual edits still sync"
+    );
+    assert!(
+        Arc::ptr_eq(&before, &c.scene().unwrap()),
+        "protocol acknowledgements retain the frame"
+    );
+    edit(&mut c, "Level", 500, 0);
+    assert!(
+        Arc::ptr_eq(&before, &c.scene().unwrap()),
+        "no-op edit retains the frame"
+    );
+    edit(&mut c, "Level", 700, 0);
+    let changed = c.scene().unwrap();
+    assert!(!Arc::ptr_eq(&before, &changed));
+    assert!(Arc::ptr_eq(&changed, &c.scene().unwrap()));
+}
+#[test]
+fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
+    use otrios_core::dashboard::layout::Layout;
+    use otrios_interfaces::layout::{Binding, Expr, Responder, Shape};
+    let ui = home::ui();
+    let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
+    let heading = blueprint.templates[0]
+        .root
+        .children
+        .iter_mut()
+        .find(|n| matches!(n.shape, Shape::Text { .. }))
+        .unwrap();
+    if let Shape::Text { value, .. } = &mut heading.shape {
+        *value = Expr::State(Binding::Enabled);
+    }
+    let bytes = Layout::encode(&blueprint).unwrap();
+    let err = Layout::from_bytes(&bytes)
+        .unwrap()
+        .resolve_slots(&std::collections::BTreeMap::new())
+        .unwrap_err();
+    assert!(err.contains("Dashboard bindings are unavailable"));
+    // Even an unlabeled/hidden old responder is rejected, rather than ignored or
+    // interpreted as an event with the same numeric index.
+    for responder in [Responder::ToggleFocus, Responder::AppNavigate(250)] {
+        let mut bad = home::ui();
+        let mut b = Layout::from_bytes(&bad.layout).unwrap().blueprint().clone();
+        let root = &mut b.templates[0].root;
+        root.children[0].responder = Some(responder);
+        root.children[0].semantics = None;
+        bad.layout = Layout::encode(&b).unwrap();
+        let data = encode_ui(&bad).unwrap();
+        let mut c = Client::default();
+        c.open(&bad.ui_ref, "scope");
+        c.outgoing().unwrap();
+        assert!(
+            c.receive(
+                &encode_server(&ServerMessage::Mounted {
+                    epoch: c.epoch(),
+                    ui_hash: hash(&data),
+                    ui: data,
+                    code: vec![]
+                })
+                .unwrap()
+            )
+            .is_err()
+        );
+    }
+}

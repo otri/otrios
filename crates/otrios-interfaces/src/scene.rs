@@ -36,7 +36,9 @@ pub enum Primitive {
         scale: u32,
         color: Color,
     },
-    /// Rectangle with superelliptic corners; exponent 2 is circular rounding.
+    /// Rounded rectangle with four superellipse corner arcs and straight sides.
+    /// Exponent 2 gives circular corners; 4 is the default squarer corner profile.
+    /// Radius is the corner-box extent, not a global whole-rectangle ellipse.
     Superellipse {
         radius: f32,
         exponent: f32,

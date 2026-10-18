@@ -129,9 +129,24 @@ impl Layout {
         local: &BTreeMap<u16, Value>,
     ) -> Result<Scene> {
         let bindings = Bindings {
-            view,
+            view: Some(view),
             enabled: None,
             local: Some(local),
+        };
+        Scene::new(expand(
+            &self.blueprint,
+            &self.blueprint.root,
+            &bindings,
+            0,
+            &mut 0,
+        )?)
+    }
+    /// App layouts can read only their explicitly projected slots. No dashboard scope.
+    pub fn resolve_slots(&self, slots: &BTreeMap<u16, Value>) -> Result<Scene> {
+        let bindings = Bindings {
+            view: None,
+            enabled: None,
+            local: Some(slots),
         };
         Scene::new(expand(
             &self.blueprint,
@@ -163,7 +178,7 @@ impl Layout {
     }
     fn resolve_enabled(&self, view: &DashboardView, enabled: Option<bool>) -> Result<Scene> {
         let bindings = Bindings {
-            view,
+            view: Some(view),
             enabled,
             local: None,
         };
@@ -350,11 +365,15 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
     instance(&b.root, b, 0, &mut BTreeSet::new())
 }
 struct Bindings<'a> {
-    view: &'a DashboardView,
+    view: Option<&'a DashboardView>,
     enabled: Option<bool>,
     local: Option<&'a BTreeMap<u16, Value>>,
 }
 impl Bindings<'_> {
+    fn dashboard(&self) -> Result<&DashboardView> {
+        self.view
+            .ok_or("Dashboard bindings are unavailable in app scope".into())
+    }
     fn value(&self, b: Binding) -> Result<Value> {
         match b {
             Binding::Local(id) => self
@@ -362,22 +381,24 @@ impl Bindings<'_> {
                 .and_then(|v| v.get(&id))
                 .cloned()
                 .ok_or("Missing local binding".into()),
-            Binding::Enabled => Ok(Value::Boolean(self.enabled.unwrap_or_else(|| {
-                self.view
-                    .nodes
-                    .iter()
-                    .find_map(|n| {
-                        if let ViewContent::Switch { enabled, .. } = n.content {
-                            Some(enabled)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(false)
-            }))),
+            Binding::Enabled => {
+                let view = self.dashboard()?;
+                Ok(Value::Boolean(self.enabled.unwrap_or_else(|| {
+                    view.nodes
+                        .iter()
+                        .find_map(|n| {
+                            if let ViewContent::Switch { enabled, .. } = n.content {
+                                Some(enabled)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(false)
+                })))
+            }
             Binding::Title | Binding::TouchLabel => {
                 let id = if b == Binding::Title { 1 } else { 4 };
-                self.view
+                self.dashboard()?
                     .nodes
                     .iter()
                     .find_map(|n| {
@@ -395,7 +416,7 @@ impl Bindings<'_> {
             }
             Binding::Samples | Binding::LastSample | Binding::HasSamples => {
                 let values = self
-                    .view
+                    .dashboard()?
                     .nodes
                     .iter()
                     .find_map(|n| {
@@ -415,6 +436,7 @@ impl Bindings<'_> {
         }
     }
 }
+
 fn number(v: Value) -> Result<f32> {
     if let Value::Number(n) = v
         && n.is_finite()
@@ -636,7 +658,6 @@ fn expand(
                 Responder::Bubble => TouchResponder::Bubble,
                 Responder::Consume => TouchResponder::Consume,
                 Responder::Motion(id) => TouchResponder::Activate(Action::Motion(id)),
-                Responder::LayoutLab => TouchResponder::Activate(Action::LayoutLab),
                 Responder::ResetControls => TouchResponder::Activate(Action::ResetControls),
                 Responder::Stress => TouchResponder::Activate(Action::Stress),
                 Responder::ToggleFocus => TouchResponder::Activate(Action::ToggleFocus),

@@ -6,13 +6,12 @@ use crate::dashboard::{
     scene::Scene,
 };
 use otrios_interfaces::{
-    DashboardView,
     layout::Value,
     scene::{Action, PointerEvent, PointerPhase},
 };
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 struct Mount {
     ui: Ui,
@@ -22,6 +21,8 @@ struct Mount {
     behavior: Option<Behavior>,
     input: InputRouter,
     state_ref: String,
+    scene: OnceLock<Arc<Scene>>,
+    visible: BTreeMap<u16, u16>,
 }
 #[derive(Default)]
 pub struct Client {
@@ -29,7 +30,6 @@ pub struct Client {
     requested: Option<(String, String)>,
     active: Option<Mount>,
     cache: VecDeque<(Vec<u8>, Vec<u8>)>,
-    out: VecDeque<Vec<u8>>,
     navigation: Option<(String, String)>,
 }
 impl Client {
@@ -66,9 +66,6 @@ impl Client {
         self.navigation = Some((ui_ref.into(), state_ref.into()));
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
-        if let Some(b) = self.out.pop_front() {
-            return Ok(Some(b));
-        }
         let idle = self.active.as_ref().is_none_or(|a| !a.input.active());
         if self.requested.is_none()
             && idle
@@ -119,9 +116,9 @@ impl Client {
                 if ui.ui_ref != pair.0 {
                     return Err("Wrong UI reference".into());
                 }
-                let mut candidate = qualify(ui, &pair.1, &code, &self.cache)?;
+                let candidate = qualify(ui, &pair.1, &code, &self.cache)?;
                 // Qualify a primitive scene before discarding the old input/subscription scope.
-                scene(&candidate)?;
+                cached_scene(&candidate)?;
                 if let Some(reference) = &candidate.ui.behavior
                     && !code.is_empty()
                     && !self.cache.iter().any(|(id, _)| *id == reference.sha256)
@@ -131,7 +128,6 @@ impl Client {
                         self.cache.pop_front();
                     }
                 }
-                candidate.input.cancel_all();
                 self.active = Some(candidate);
                 self.requested = None;
                 Ok(true)
@@ -141,7 +137,11 @@ impl Client {
                     return Ok(false);
                 }
                 let a = self.active.as_mut().ok_or("No Canvas")?;
-                a.doc.receive(&mut a.session, &bytes)
+                if a.doc.receive(&mut a.session, &bytes)? {
+                    a.refresh_inputs()
+                } else {
+                    Ok(false)
+                }
             }
             ServerMessage::Error { epoch, message } => {
                 if epoch != self.epoch {
@@ -153,8 +153,9 @@ impl Client {
         }
     }
     pub fn scene(&self) -> Result<Arc<Scene>> {
-        scene(self.active.as_ref().ok_or("No Canvas")?).map(Arc::new)
+        cached_scene(self.active.as_ref().ok_or("No Canvas")?)
     }
+    /// Returns whether projected presentation inputs changed. Nonvisual edits still sync.
     pub fn event(&mut self, epoch: u32, control: u8, a: u16, b: u16) -> Result<bool> {
         if epoch != self.epoch || self.requested.is_some() {
             return Ok(false);
@@ -184,7 +185,11 @@ impl Client {
         if commands.iter().any(|(id, _)| !h.fields.contains(id)) {
             return Err("Behavior exceeded event field scope".into());
         }
-        m.doc.set(&commands)
+        if m.doc.set(&commands)? {
+            m.refresh_inputs()
+        } else {
+            Ok(false)
+        }
     }
     /// Resolve a node's generated event index within its Canvas generation.
     pub fn event_for_node(&mut self, epoch: u32, node: u32, a: u16, b: u16) -> Result<bool> {
@@ -256,12 +261,6 @@ impl Client {
                     {
                         self.open(&nav.ui_ref, &nav.state_ref);
                         return Ok(true);
-                    } else if self
-                        .active
-                        .as_ref()
-                        .is_some_and(|m| m.ui.handlers.iter().any(|h| h.control == id))
-                    {
-                        return self.event(self.epoch, id, 0, 0);
                     }
                 }
                 Action::AppEvent(id) => return self.event(self.epoch, id, 0, 0),
@@ -333,7 +332,11 @@ fn qualify(
         session: Session::default(),
         input: InputRouter::default(),
         state_ref: state_ref.into(),
+        scene: OnceLock::new(),
+        visible: BTreeMap::new(),
     };
+    mount.visible = selected_values(&mount.ui, &mount.doc)?;
+    validate_responders(&mount.ui, mount.layout.blueprint())?;
     let original = mount.doc.clone();
     for bits in 0..(1 << mount.ui.state_schema.fields.len()) {
         let commands: Vec<_> = mount
@@ -345,28 +348,12 @@ fn qualify(
             .map(|(i, f)| (f.id, if bits & (1 << i) == 0 { 0 } else { 1000 }))
             .collect();
         mount.doc.set(&commands)?;
-        let scene = scene(&mount)?;
-        for c in scene.controls() {
-            match c.node.responder {
-                Some(
-                    otrios_interfaces::scene::TouchResponder::Drag(Action::AppEvent(id))
-                    | otrios_interfaces::scene::TouchResponder::Activate(Action::AppEvent(id)),
-                ) if !mount.ui.handlers.iter().any(|h| h.control == id) => {
-                    return Err("Unbound app event".into());
-                }
-                Some(otrios_interfaces::scene::TouchResponder::Activate(Action::AppNavigate(
-                    id,
-                ))) if !mount.ui.navigation.iter().any(|n| n.action == id) => {
-                    return Err("Unbound app navigation".into());
-                }
-                _ => {}
-            }
-        }
+        resolve_scene(&mount)?;
     }
     mount.doc = original;
     Ok(mount)
 }
-fn scene(m: &Mount) -> Result<Scene> {
+fn resolve_scene(m: &Mount) -> Result<Scene> {
     let mut bindings = BTreeMap::new();
     for s in &m.ui.selectors {
         let n = m.doc.value(s.field)?;
@@ -377,11 +364,58 @@ fn scene(m: &Mount) -> Result<Scene> {
         };
         bindings.insert(s.local, v);
     }
-    m.layout.resolve_local(
-        &DashboardView {
-            heads: vec![],
-            nodes: vec![],
-        },
-        &bindings,
-    )
+    m.layout.resolve_slots(&bindings)
+}
+
+fn selected_values(ui: &Ui, doc: &Document) -> Result<BTreeMap<u16, u16>> {
+    let mut values = BTreeMap::new();
+    for s in &ui.selectors {
+        if let std::collections::btree_map::Entry::Vacant(entry) = values.entry(s.field) {
+            entry.insert(doc.value(s.field)?);
+        }
+    }
+    Ok(values)
+}
+impl Mount {
+    fn refresh_inputs(&mut self) -> Result<bool> {
+        let visible = selected_values(&self.ui, &self.doc)?;
+        if visible == self.visible {
+            return Ok(false);
+        }
+        self.visible = visible;
+        self.scene.take();
+        Ok(true)
+    }
+}
+fn cached_scene(m: &Mount) -> Result<Arc<Scene>> {
+    if let Some(scene) = m.scene.get() {
+        return Ok(scene.clone());
+    }
+    let scene = Arc::new(resolve_scene(m)?);
+    let _ = m.scene.set(scene.clone());
+    Ok(scene)
+}
+fn validate_responders(ui: &Ui, blueprint: &otrios_interfaces::layout::Blueprint) -> Result<()> {
+    use otrios_interfaces::layout::{Responder, TemplateNode};
+    fn node(n: &TemplateNode, ui: &Ui) -> Result<()> {
+        match n.responder {
+            None | Some(Responder::Bubble | Responder::Consume) => {}
+            Some(Responder::AppNavigate(id)) if ui.navigation.iter().any(|n| n.action == id) => {}
+            Some(Responder::AppEvent { control, drag })
+                if ui
+                    .handlers
+                    .iter()
+                    .any(|h| h.control == control && drag == (h.kind != GestureKind::Activate)) => {
+            }
+            _ => return Err("App UI contains a legacy or unbound responder".into()),
+        }
+        for child in &n.children {
+            node(child, ui)?;
+        }
+        Ok(())
+    }
+    for template in &blueprint.templates {
+        node(&template.root, ui)?;
+    }
+    Ok(())
 }
