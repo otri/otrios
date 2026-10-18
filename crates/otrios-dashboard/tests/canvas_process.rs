@@ -271,7 +271,8 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     let bytes = loop {
         match bad.read().unwrap() {
             Message::Binary(b) => break b,
-            Message::Text(_) => {}
+            Message::Text(_) | Message::Pong(_) => {}
+            Message::Ping(bytes) => bad.send(Message::Pong(bytes)).unwrap(),
             other => panic!("Unexpected {other:?}"),
         }
     };
