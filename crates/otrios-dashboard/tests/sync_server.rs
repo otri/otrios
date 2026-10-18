@@ -469,7 +469,7 @@ fn binary_layout_cli_publish_push_cas_and_restart_preserve_app_state() {
             .view()
             .nodes
             .iter()
-            .any(|n| n.content == otrios_interfaces::ViewContent::Label("1 touches".into()))
+            .any(|n| n.content == otrios_interfaces::ViewContent::Label("1 touch".into()))
     );
     fn post_layout(address: &str, body: &[u8], expected: &str, origin: &str) -> u16 {
         let mut stream = TcpStream::connect(address).unwrap();
