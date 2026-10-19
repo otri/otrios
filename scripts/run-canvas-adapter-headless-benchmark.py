@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Run on Linux beside baseline/merkle folders; emit per-child CPU and protocol results."""
+import argparse
 import json
 import os
 import pathlib
 import subprocess
 import time
 
-root = pathlib.Path(__file__).resolve().parent
+parser = argparse.ArgumentParser(description='Run matched baseline/merkle frame clients against isolated authorities.')
+parser.add_argument('--root', type=pathlib.Path, default=pathlib.Path(__file__).resolve().parent)
+root = parser.parse_args().root
 for repetition in range(3):
     for hz, updates in [(10, 180), (30, 300)]:
         order = ['baseline', 'merkle'] if repetition % 2 == 0 else ['merkle', 'baseline']
