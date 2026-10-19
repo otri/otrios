@@ -65,5 +65,4 @@ fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding
 workspace, with a separately measured interactive-socket change. Their
 [frame measurements](docs/experiments/canvas-replication-pipeline.md) compare each
 increment against its immediate control using fresh disposable authorities.
-These changes remain on the feature branch; packed envelopes and optional
-compression are subsequent experiments.
+These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery now polls the code host independently of state sync. Packed envelopes and optional compression are subsequent experiments.

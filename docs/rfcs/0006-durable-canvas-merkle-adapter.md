@@ -7,7 +7,7 @@ The [RFC 0007 follow-up](0007-bounded-replication-pipeline.md) adds negotiated
 binary responses, opt-in signal retention, reusable encoding workspace and
 interactive socket flushing on the feature branch. Those increments are
 [benchmarked separately](../experiments/canvas-replication-pipeline.md) and have
-not replaced the deployed baseline.
+[replaced the deployed baseline](../experiments/release-discovery-deployment.md).
 
 ## Ownership and conflict policy
 

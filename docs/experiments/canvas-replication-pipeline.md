@@ -13,7 +13,9 @@ At a requested 10 Hz, binary wrapping reduces observer payload from 8,157 to
 (32%, including mount/warm-up). Opt-in history saves another 22% of payload
 in its separate short trials. No consistent remote p95 latency win appears across the
 remaining increments; socket flushing is not demonstrated as a latency fix.
-These changes are committed on the feature branch and **not deployed**.
+These changes were committed on the feature branch and **not deployed at
+measurement time**. The [subsequent rollout](release-discovery-deployment.md)
+deploys them together with independent release discovery.
 
 ## Versions and semantics
 

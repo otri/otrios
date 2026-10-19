@@ -156,7 +156,10 @@ cache restoration. Entry paths must exactly match their 64-digit release ID.
 Unavailable or malformed pointers preserve the running release. State-stream
 release hints no longer select browser code. The frame supervisor also discovers
 code exclusively through its HTTP pointer, every five seconds; stale state-stream
-notice files cannot roll it back or suppress a release.
+notice files cannot roll it back or suppress a release. A failed candidate keeps
+the previous verified host and can retry after 30 seconds. A native client with
+no initial mount still presents clean reload readiness; startup blank frames do
+not consume the diagnostic app capture.
 
 A clean reconnect or first-mount handshake does not block replacement. The
 runtime's `reload_ready` reports whether user edits are confirmed and input is

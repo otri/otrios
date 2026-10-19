@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0007: Bounded allocation and batched replication
 
-Status: initial increments implemented on `feat/canvas-replication-pipeline`;
+Status: initial increments implemented on `feat/canvas-replication-pipeline` and
+[deployed on browser and frame](../experiments/release-discovery-deployment.md);
 see [frame measurements](../experiments/canvas-replication-pipeline.md).
 Packed-envelope/dispatch-policy and compression prototypes remain planned.
 Extends RFCs 0002, 0005 and 0006. Main remains at the dashboard milestone;
-experiments use disposable authorities and do not change the live room.
+performance experiments use disposable authorities; the subsequent authorized
+rollout retains the live room and its durable stores.
 
 ## Pipeline and invariants
 
