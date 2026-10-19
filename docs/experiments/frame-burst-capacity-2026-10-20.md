@@ -50,6 +50,38 @@ criteria, not browser GPU/FPS, physical touch or Cloudflare Tunnel latency claim
 Test authorities use fresh disposable state while production services continue.
 Raw telemetry remains local; only sanitized aggregate results are published.
 
+## Why these limits
+
+The 64-public-session admission quota preserves the existing deployment target;
+it is not a drawing-latency guarantee. Idle socket memory and active shared-room
+fanout need separate qualification. Ink subscriptions now match all 4 trusted plus
+64 public permits so that an admitted client can actually use the app.
+
+Under independent 1% activity, the instantaneous active-writer count is
+binomial with mean `0.01 × clients`. At 64 clients that mean is 0.64, and three
+writers cover approximately 99% of observation instants. This is not a 99%
+probability that an entire session avoids a larger collision. Coordinated users
+can also exceed it. The aligned probe deliberately exercises that collision,
+while the sparse profiles measure the proposed duty cycle.
+
+Broadcast work grows faster than socket count: with every gesture drawing,
+average move delivery demand is approximately `0.01 × clients × 30 × (clients−1)`.
+That is 72 remote move deliveries/second at 16 clients, 298 at 32, and 1,210 at
+64, before stroke boundaries, state replication or other overhead. These are
+offered-work estimates, not measured server throughput. Thus 128 is a stretch
+and 256 exploratory; neither follows from proving that thousands of idle sockets
+fit in RAM.
+
+The 250/500 ms ink thresholds bound typical and tail delay visible to another
+viewer. They are provisional usability budgets, not a claim that local drawing
+tolerates that delay; local previews are a separate path. The one-second durable
+release budget allows slower persistence after a gesture, and the two-second
+convergence gate bounds residual backlog. The 95% sample floor prevents a slow
+generator from passing by offering much less work. Zero lost measured deliveries
+checks correctness independently of latency. A 256 MiB authority cap and 256 MiB
+remaining-system-memory guard reserve room for the native renderer, tunnel, OS
+and transient load; they do not establish the host's physical capacity.
+
 ## Downward search after the first miss
 
 The 64-client aligned mixed probe missed the prospective ink and confirmation
