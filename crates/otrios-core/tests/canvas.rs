@@ -141,6 +141,20 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
     pump(&mut a, &mut da, &mut sa);
     pump(&mut b, &mut db, &mut sb);
     edit(&mut a, "Linear slider", 870, 0);
+    let pending_scene = a.scene().unwrap();
+    let slider = pending_scene
+        .controls()
+        .iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Linear slider")
+        })
+        .unwrap()
+        .node
+        .id;
+    assert_eq!(a.control_value(slider).unwrap(), Some(87.));
     pump(&mut a, &mut da, &mut sa);
     assert_eq!(a.value(1).unwrap(), 870);
     assert_eq!(b.value(1).unwrap(), 420);
@@ -1563,4 +1577,46 @@ fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
         text.text(),
         format!("{}!{}", "W".repeat(24), "W".repeat(36))
     );
+}
+
+#[test]
+fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
+    let ui = playground::ui(&code());
+    let mut c = Client::default();
+    activate(&mut c, ui.clone(), "offline-input", code());
+    let mut authority = Document::new(ui.state_schema, "offline-input").unwrap();
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    c.reset_connection();
+    let ClientMessage::Mount {
+        epoch,
+        writer,
+        resume,
+        ..
+    } = decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("missing reconnect")
+    };
+    edit(&mut c, "Linear slider", 870, 0);
+    c.tick(5000, 0).unwrap();
+    assert_eq!(c.value(1).unwrap(), 870);
+    assert!(!c.confirmed());
+    assert_eq!(authority.value(1).unwrap(), 420);
+    let (mut next, _) = authority.open_session(&writer, resume).unwrap();
+    let state = authority.generate(&mut next).unwrap().unwrap();
+    let bytes = encode_ui(&ui_for_cache()).unwrap();
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&bytes),
+            ui: bytes,
+            code: vec![],
+            state,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(c.value(1).unwrap(), 870);
+    pump(&mut c, &mut authority, &mut next);
+    assert_eq!(authority.value(1).unwrap(), 870);
 }

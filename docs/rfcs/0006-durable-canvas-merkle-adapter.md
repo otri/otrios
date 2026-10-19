@@ -21,6 +21,9 @@ map and at most one in-flight intent batch. New edits coalesce by field behind
 that batch. Reads see the latest pending value, then in-flight value, then the
 authority. Remote changes do not erase local pending edits. A reconnect prepares
 a new lease, installs a complete authority snapshot and restores the RAM overlay.
+Same-app reconnects keep the current signed UI editable and preserve focus/capture;
+app replacement still freezes input while the new candidate is qualified.
+Presentation and accessibility control values read the same pending overlay.
 Process/browser termination can lose unacknowledged edits; code/font/blob caches
 never act as document checkpoints.
 
