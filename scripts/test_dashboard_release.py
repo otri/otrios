@@ -224,6 +224,28 @@ class ArtifactBudget(unittest.TestCase):
             with patch.object(agent,'fetch',return_value=b'wrong'):
                 with self.assertRaises(ValueError):agent.cached_blob('https://example.com',root,digest,len(data),limit=100)
 class DirectHostContract(unittest.TestCase):
+    def test_bootstrap_never_resumes_the_synthetic_locked_route(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            args=SimpleNamespace(runtime_dir=pathlib.Path(tmp),video_driver='wayland',url='https://state.example',capture_first_frame=False)
+            with patch.object(agent.subprocess,'Popen')as launch:
+                agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='locked')
+                self.assertNotIn('--screen',launch.call_args.args[0])
+                agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='home')
+                self.assertEqual(launch.call_args.args[0][-2:],['--screen','home'])
+    def test_connected_candidate_waits_for_an_admitted_confirmed_app(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            host=agent.Host.__new__(agent.Host);host.a=SimpleNamespace(video_driver='wayland',rotation=0)
+            host.ready=pathlib.Path(tmp)/'ready.json';host.process=SimpleNamespace(poll=lambda:None)
+            info={'renderer':'opengles2','stream_ready':True,'ui_ref':'','state_confirmed':False};host.ready.write_text(json.dumps(info))
+            waited=[]
+            def tick(seconds):
+                waited.append(seconds);info.update(ui_ref='app:home/ui',state_confirmed=True);host.ready.write_text(json.dumps(info))
+            with patch.object(agent.time,'sleep',side_effect=tick):host.wait_ready()
+            self.assertEqual(waited,[.1])
     def test_direct_candidate_cannot_claim_wayland_or_uncalibrated_readiness(self):
         good={'renderer':'opengles2','video':'KMSDRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1}
         agent.ready_contract(good,'KMSDRM',90)

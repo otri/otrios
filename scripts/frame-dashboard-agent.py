@@ -180,7 +180,7 @@ class Host:
         env=dict(os.environ,OTRIOS_RELEASE_ID=release,SDL_RENDER_DRIVER='opengles2',SDL_VIDEODRIVER=a.video_driver)
         if a.video_driver=='KMSDRM':env.update(SDL_KMSDRM_DEVICE_INDEX='0',SDL_KMSDRM_REQUIRE_DRM_MASTER='1')
         command=[str(exe),'--sync',a.url.rstrip('/')+'/apps/stream','--exit-file',str(self.stop),'--ready-file',str(self.ready),'--release-file',str(a.runtime_dir/'release-notice.json')]
-        if screen:command+=['--screen',screen]
+        if screen and screen!='locked':command+=['--screen',screen]
         if a.video_driver=='KMSDRM':command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]
         if a.capture_first_frame:command+=['--capture',str(a.runtime_dir/'first-frame.ppm')]
         self.process=subprocess.Popen(command,env=env)
@@ -191,7 +191,7 @@ class Host:
             if self.ready.exists():
                 info=json.loads(self.ready.read_text())
                 ready_contract(info,self.a.video_driver,self.a.rotation)
-                if not require_stream or info.get('stream_ready'):return
+                if not require_stream or (info.get('stream_ready') and info.get('ui_ref') and info.get('state_confirmed')):return
             time.sleep(.1)
         raise RuntimeError('Native candidate did not become ready')
     def info(self):
@@ -278,7 +278,7 @@ def main(a):
                 release,exe=qualify(code_url,a.cache,a.key,a.openssl,release,sdl=a.video_driver=='wayland',limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
                 host=None
                 if old:old.close()
-                candidate=Host(a,release,exe,screen=info.get('screen'))
+                candidate=Host(a,release,exe,screen=info.get('screen') if info.get('ui_ref') else None)
                 try:candidate.wait_ready(require_stream=info.get('stream_ready') is not False)
                 except Exception:
                     candidate.close();retry_at=time.monotonic()+30
