@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0009: one server and negotiated client session
 
-Status: implementation in progress. Supersedes RFC 0008's deployment/process
+Status: implemented and deployed on browser and frame on 2026-10-19.
+Acceptance: [deployment record](../experiments/unified-session-deployment.md). Supersedes RFC 0008's deployment/process
 separation, preserving its stable v1 bootstrap envelope and offline-edit policy.
 
 ## Deployment target
