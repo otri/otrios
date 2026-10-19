@@ -362,7 +362,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
     let (catalogs, roots) = hub.counts();
     let presentation = !hub.view().is_empty();
     drop(guard);
-    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":app.peer_limits[1]-app.public_peers.available_permits(),"trusted_sessions":app.peer_limits[0]-app.peers.available_permits(),"peer_limits":app.peer_limits,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
+    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":app.peer_limits[1]-app.public_peers.available_permits(),"trusted_sessions":app.peer_limits[0]-app.peers.available_permits(),"peer_limits":app.peer_limits,"ink_subscribers":app.ink.subscribers(),"ink_limit":app.peer_limits.iter().sum::<usize>(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
     match path {
@@ -537,7 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (state_available, _) = watch::channel(false);
     let (release_changed, _) = watch::channel(release.clone());
     let app = Arc::new(App {
-        ink: ink::Room::new()?,
+        ink: ink::Room::new(trusted_peers + public_peers)?,
         auth,
         apps: Mutex::new(None),
         state_config: StateConfig {

@@ -377,7 +377,7 @@ mod tests {
         let (state_available, _) = watch::channel(true);
         let (release_changed, _) = watch::channel(release('a'));
         let app = Arc::new(App {
-            ink: ink::Room::new().unwrap(),
+            ink: ink::Room::new(8).unwrap(),
             auth: None,
             apps: Mutex::new(None),
             state_config: StateConfig {

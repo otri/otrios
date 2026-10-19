@@ -20,6 +20,7 @@ pub(super) struct Room {
     recent: Mutex<VecDeque<Event>>,
     bus: broadcast::Sender<Vec<Event>>,
     slots: Arc<Semaphore>,
+    limit: usize,
     next: AtomicU32,
 }
 pub(super) struct Subscription {
@@ -30,15 +31,21 @@ pub(super) struct Subscription {
     count: usize,
 }
 impl Room {
-    pub(super) fn new() -> Result<Self, String> {
+    pub(super) fn new(peers: usize) -> Result<Self, String> {
         let mut seed = [0; 4];
         getrandom::fill(&mut seed).map_err(|_| "Ink session seed unavailable")?;
         Ok(Self {
             recent: Mutex::new(VecDeque::new()),
             bus: broadcast::channel(128).0,
-            slots: Arc::new(Semaphore::new(16)),
+            // One ink subscription per admitted session; never impose a hidden
+            // lower quota on clients viewing an ink-enabled app while idle.
+            slots: Arc::new(Semaphore::new(peers)),
+            limit: peers,
             next: AtomicU32::new(u32::from_le_bytes(seed).max(1)),
         })
+    }
+    pub(super) fn subscribers(&self) -> usize {
+        self.limit - self.slots.available_permits()
     }
     pub(super) async fn expire(&self) {
         self.recent

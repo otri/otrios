@@ -297,3 +297,82 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     assert_eq!(request(&rig.public, "GET", "/apps/stream", &[], &[]).0, 410);
     assert_eq!(request(&rig.public, "GET", "/demo/ink", &[], &[]).0, 410);
 }
+
+#[test]
+fn ink_subscriptions_follow_peer_admission_and_release_their_slots() {
+    let room = common::room(false, 60);
+    let mut peers = Vec::new();
+    for _ in 0..24 {
+        let mut peer = socket(&room.public, "/session");
+        common::session_client::negotiate(&mut peer).unwrap();
+        peer.send(Message::Text(
+            serde_json::to_string(&ClientControl::Ink { enabled: true })
+                .unwrap()
+                .into(),
+        ))
+        .unwrap();
+        let Message::Binary(bytes) = peer.read().unwrap() else {
+            panic!("Every admitted session must receive its ink welcome, including peers after 16")
+        };
+        let payload = bytes
+            .strip_prefix(&[otrios_interfaces::session::INK])
+            .unwrap();
+        assert!(
+            otrios_interfaces::ink::decode_server(payload)
+                .unwrap()
+                .2
+                .is_none()
+        );
+        peers.push(peer);
+    }
+    let health = || {
+        serde_json::from_slice::<serde_json::Value>(
+            &request(&room.private, "GET", "/health", &[], &[]).1,
+        )
+        .unwrap()
+    };
+    assert_eq!(health()["ink_limit"], 96);
+    assert_eq!(health()["ink_subscribers"], 24);
+    let point = otrios_interfaces::ink::Point {
+        phase: 0,
+        stroke: 1,
+        position: [123, 456],
+    };
+    peers[0]
+        .send(Message::Binary(
+            otrios_interfaces::session::frame(otrios_interfaces::session::INK, point.encode())
+                .into(),
+        ))
+        .unwrap();
+    for peer in &mut peers {
+        let Message::Binary(bytes) = peer.read().unwrap() else {
+            panic!("Ink must reach every subscriber")
+        };
+        let payload = bytes
+            .strip_prefix(&[otrios_interfaces::session::INK])
+            .unwrap();
+        assert_eq!(
+            otrios_interfaces::ink::decode_server(payload).unwrap().2,
+            Some(point)
+        );
+    }
+    peers[0]
+        .send(Message::Text(
+            serde_json::to_string(&ClientControl::Ink { enabled: false })
+                .unwrap()
+                .into(),
+        ))
+        .unwrap();
+    peers[0].send(Message::Ping(vec![7].into())).unwrap();
+    assert!(matches!(peers[0].read().unwrap(), Message::Pong(_)));
+    assert_eq!(health()["ink_subscribers"], 23);
+    drop(peers);
+    let until = Instant::now() + Duration::from_secs(3);
+    while health()["ink_subscribers"] != 0 {
+        assert!(
+            Instant::now() < until,
+            "Disconnected subscriptions must release permits"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
