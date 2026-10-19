@@ -3,6 +3,12 @@
 
 Status: deployed on browser and photo frame; [acceptance evidence](../experiments/canvas-merkle-adapter-validation.md) records migration, reconnect and policy checks. Extends RFC 0005 without changing primitive rendering or app UI v2.
 
+The [RFC 0007 follow-up](0007-bounded-replication-pipeline.md) adds negotiated
+binary responses, opt-in signal retention, reusable encoding workspace and
+interactive socket flushing on the feature branch. Those increments are
+[benchmarked separately](../experiments/canvas-replication-pipeline.md) and have
+not replaced the deployed baseline.
+
 ## Ownership and conflict policy
 
 Every admitted app State reference owns a separate immutable Merkle tree. Only
@@ -74,7 +80,12 @@ a general collection query/dependency engine remains outside this cutover.
 
 Signal windows use authority receipt time, retain at most one final sample per
 second for five minutes, and expire from the read projection without storage
-writes. They do not reconstruct a full history or trust client timestamps.
+writes. The RFC 0007 branch enables retention only for WindowSignal fields in
+the retained admitted UI catalogs (currently eight versions); unrelated fields
+do not maintain history. Old stored samples stay readable but stop changing
+when no retained catalog requests them. This policy is reloaded from admitted
+UI, not from a client command or checkpoint. They do not reconstruct a full
+history or trust client timestamps.
 
 ## Commit and recovery
 
@@ -115,6 +126,14 @@ ACKs and explicit full resync. Reliable WebSockets do not repeatedly resend a
 frame already emitted; latest roots coalesce while its ACK is pending. The
 state-message ceiling is 192 per second to allow write intents plus read ACKs
 when multiple devices edit, while peer/size/batch budgets remain bounded.
+
+The RFC 0007 branch extends mounts with an optional `binary` response capability.
+Missing/false preserves byte-for-byte legacy mount serialization and response
+vectors; true opts that epoch into Blob fields in both StateResponse and the
+outer server envelope. New decoders accept both forms. Old authorities ignore
+the added field and keep sending vectors, so this compatible negotiation does
+not alter signed UI/catalog formats or canonical Merkle bytes. Policy and
+durability checks still precede every payload delivery.
 
 Monitoring remains protected before UI/code/state delivery, on every incoming
 command, before outgoing private payloads, and on expiry/logout. Rebinding the

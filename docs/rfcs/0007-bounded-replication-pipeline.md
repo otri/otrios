@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0007: Bounded allocation and batched replication
 
-Status: accepted direction; implement and measure the increments below separately.
+Status: initial increments implemented on `feat/canvas-replication-pipeline`;
+see [frame measurements](../experiments/canvas-replication-pipeline.md).
+Packed-envelope/dispatch-policy and compression prototypes remain planned.
 Extends RFCs 0002, 0005 and 0006. Main remains at the dashboard milestone;
 experiments use disposable authorities and do not change the live room.
 
@@ -21,6 +23,14 @@ write plus bounded pending map already consolidates those assignments. Merkle
 These are existing mechanisms, not new optimization claims.
 
 ## Memory ownership
+
+The first implementation uses one size-class hash-encoding workspace per Canvas
+authority document. Its safe Arc/Mutex ownership permits staged document clones
+to reuse scratch without sharing mutable published data. Generic callers can
+borrow `merkle::Workspace` across `edit_with_workspace` calls. The retained
+classes are 512 B, 2 KiB, 8 KiB, 32 KiB, 128 KiB and 256 KiB. Transfer-node vectors
+are presized. Counters measure hash-buffer growth requests only; they do not
+claim that registers, maps, immutable nodes or network buffers allocate nothing.
 
 Keep immutable published nodes pinned until all readers release them. Reuse
 working memory separately: node-encoding scratch, dirty-path lists, serializer
@@ -52,6 +62,14 @@ New byte representations require explicit negotiation or a coordinated protocol
 version; silently emitting blobs to old Vec-only readers is forbidden.
 
 ## Dispatch, packing and compression
+
+Interactive authority sockets now explicitly enable TCP_NODELAY, separately
+benchmarked from payload changes. Runtime batching should define when a packet
+is ready rather than inherit TCP small-packet delays. The existing Canvas host
+already coalesces continuous controls on a 33 ms tick and flushes on release;
+the one-flight state adapter retains newer assignments behind its current batch.
+Configurable deadlines, packed transport and open-loop burst measurements remain
+separate work. No new compression or FlatBuffers protocol is selected here.
 
 Use a monotonic deadline and a maximum byte/operation count for each dispatch.
 Continuous controls can replace unsent assignments; release requests a final

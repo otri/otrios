@@ -59,3 +59,11 @@ Browser/frame [deployment acceptance](docs/experiments/canvas-merkle-adapter-val
 updates from network, durable storage and display latency.
 
 The [photo-frame Canvas adapter comparison](docs/experiments/canvas-adapter-frame-benchmark.md) measures durable latency, native presentation, application/device CPU and actual replication traffic against the dated pre-Merkle milestone. It also isolates a binary-envelope encoding cost; measured results distinguish application CPU savings from total system cost.
+
+The [bounded replication increments](docs/rfcs/0007-bounded-replication-pipeline.md)
+fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding
+workspace, with a separately measured interactive-socket change. Their
+[frame measurements](docs/experiments/canvas-replication-pipeline.md) compare each
+increment against its immediate control using fresh disposable authorities.
+These changes remain on the feature branch; packed envelopes and optional
+compression are subsequent experiments.
