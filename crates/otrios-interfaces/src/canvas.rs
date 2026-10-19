@@ -181,6 +181,9 @@ pub enum ClientMessage {
         /// RAM-only nonce for durable deduplication; never an access grant.
         writer: Vec<u8>,
         resume: u64,
+        /// Opt in to Blob response fields. Missing/false preserves legacy vectors.
+        #[serde(default, skip_serializing_if = "is_false")]
+        binary: bool,
     },
     /// Activate an already-qualified candidate; no new app Sync precedes this.
     AcceptMount {
@@ -202,18 +205,24 @@ pub enum ClientMessage {
 pub enum ServerMessage {
     View {
         epoch: u32,
+        #[serde(deserialize_with = "opaque_bytes")]
         bytes: Vec<u8>,
     },
     Mounted {
         epoch: u32,
+        #[serde(deserialize_with = "opaque_bytes")]
         ui: Vec<u8>,
+        #[serde(deserialize_with = "opaque_bytes")]
         ui_hash: Vec<u8>,
+        #[serde(deserialize_with = "opaque_bytes")]
         code: Vec<u8>,
         /// Complete authoritative state used to qualify a candidate before activation.
+        #[serde(deserialize_with = "opaque_bytes")]
         state: Vec<u8>,
     },
     Sync {
         epoch: u32,
+        #[serde(deserialize_with = "opaque_bytes")]
         bytes: Vec<u8>,
     },
     Snapshot {
@@ -255,9 +264,37 @@ pub enum StateResponse {
     Mount {
         authority: u64,
         lease: u64,
+        #[serde(deserialize_with = "opaque_bytes")]
         frame: Vec<u8>,
     },
     Update {
+        #[serde(deserialize_with = "opaque_bytes")]
         frame: Vec<u8>,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+/// Accept both legacy integer vectors and negotiated opaque binary fields.
+fn opaque_bytes<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<u8>, D::Error> {
+    struct Bytes;
+    impl<'de> serde::de::Visitor<'de> for Bytes {
+        type Value = Vec<u8>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("binary bytes or a legacy byte vector")
+        }
+        fn visit_bytes<E: serde::de::Error>(self, value: &[u8]) -> Result<Vec<u8>, E> {
+            Ok(value.to_vec())
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<u8>, A::Error> {
+            let mut result = Vec::new();
+            while let Some(byte) = seq.next_element::<u8>()? {
+                result.push(byte);
+            }
+            Ok(result)
+        }
+    }
+    de.deserialize_any(Bytes)
 }

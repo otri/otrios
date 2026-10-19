@@ -41,6 +41,7 @@ struct Lease {
     private: bool,
     sync: Session,
     view_id: Vec<u8>,
+    binary: bool,
 }
 #[derive(Default)]
 struct Leases {
@@ -312,6 +313,7 @@ impl Hub {
                 known_code,
                 writer,
                 resume,
+                binary,
             } => {
                 if epoch == 0
                     || epoch <= leases.last_epoch
@@ -345,6 +347,7 @@ impl Hub {
                         .as_secs() as i64,
                 );
                 let (mut sync, changed) = candidate.open_session(&writer, resume)?;
+                sync.set_binary_transport(binary);
                 if changed
                     && let Some(file) = &room.file
                     && let Err(e) = store::append(file, &room.doc, &candidate)
@@ -374,6 +377,7 @@ impl Hub {
                     private: p.private,
                     sync,
                     view_id: vec![],
+                    binary,
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.
@@ -559,8 +563,14 @@ async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool 
 async fn send(
     output: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     message: ServerMessage,
+    binary: bool,
 ) -> bool {
-    let Ok(bytes) = canvas::encode_server(&message) else {
+    let encode = if binary {
+        canvas::encode_server_binary
+    } else {
+        canvas::encode_server
+    };
+    let Ok(bytes) = encode(&message) else {
         return false;
     };
     matches!(
@@ -606,7 +616,7 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
         };
         let allowed = private_allowed(&app, public, &key).await;
         for revoked in leases.revoke_private(allowed) {
-            if !send(&mut output, revoked).await {
+            if !send(&mut output, revoked, false).await {
                 return;
             }
         }
@@ -664,13 +674,22 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                     if private_epochs.contains(&epoch) && !private_allowed(&app, public, &key).await
                     {
                         for revoked in leases.revoke_private(false) {
-                            if !send(&mut output, revoked).await {
+                            if !send(&mut output, revoked, false).await {
                                 return;
                             }
                         }
                         continue;
                     }
-                    if !send(&mut output, message).await {
+                    if !send(
+                        &mut output,
+                        message,
+                        [leases.active.as_ref(), leases.staged.as_ref()]
+                            .into_iter()
+                            .flatten()
+                            .any(|l| l.epoch == epoch && l.binary),
+                    )
+                    .await
+                    {
                         return;
                     }
                 }
@@ -678,7 +697,7 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
             Err(message) => {
                 let epoch = recoverable_epoch
                     .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
-                if !send(&mut output, ServerMessage::Error { epoch, message }).await {
+                if !send(&mut output, ServerMessage::Error { epoch, message }, false).await {
                     return;
                 }
                 if recoverable_epoch.is_none() {

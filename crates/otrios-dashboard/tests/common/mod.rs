@@ -239,6 +239,7 @@ pub fn mount(s: &mut Socket, room: &Room, id: &str, epoch: u32) {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+            binary: false,
         },
     );
 }

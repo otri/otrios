@@ -118,8 +118,14 @@ pub struct Client {
     session_controls: bool,
     sign_out_requested: bool,
     writer: Option<[u8; 16]>,
+    legacy_transport: bool,
 }
 impl Client {
+    /// Select legacy response vectors for interoperability diagnostics.
+    /// Configure before mounting; negotiated response encoding belongs to a lease.
+    pub fn set_legacy_transport(&mut self, legacy: bool) {
+        self.legacy_transport = legacy;
+    }
     pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
         self.font = Some(font);
     }
@@ -400,6 +406,7 @@ impl Client {
                 catalog_hash: self.catalog_hash.clone(),
                 known_code: self.cache.iter().map(|v| v.0.clone()).collect(),
                 writer: writer.to_vec(),
+                binary: !self.legacy_transport,
                 resume: self
                     .active
                     .as_ref()

@@ -29,6 +29,7 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+            binary: false,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -44,6 +45,7 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+            binary: false,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -166,6 +168,7 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+            binary: false,
         },
     );
     assert!(matches!(
@@ -219,6 +222,7 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+            binary: false,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 2) else {
@@ -250,6 +254,7 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+            binary: false,
         },
     );
     assert!(matches!(
@@ -337,6 +342,7 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: client.resume_sequence(),
+            binary: false,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
@@ -348,4 +354,44 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
     accept(&mut s, 1);
     persisted_edit(&room, &mut s, &mut resumed, 1, 731);
     assert!(resumed.confirmed());
+}
+
+#[test]
+fn negotiated_blob_and_legacy_mounts_both_confirm_durable_edits() {
+    let room = room(false, 28800);
+    for binary in [false, true] {
+        let mut socket = socket(&room.public, None);
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: "app:demo/ui".into(),
+                state_ref: "app:demo/state".into(),
+                catalog_hash: canvas::hash(&room.catalog),
+                known_code: vec![],
+                writer: vec![if binary { 12 } else { 11 }; 16],
+                resume: 0,
+                binary,
+            },
+        );
+        let ServerMessage::Mounted { state, .. } = read(&mut socket) else {
+            panic!("no mount")
+        };
+        let mut client = StateAdapter::new(
+            room.schema.clone(),
+            "app:demo/state",
+            &state,
+            [if binary { 12 } else { 11 }; 16],
+        )
+        .unwrap();
+        accept(&mut socket, 1);
+        persisted_edit(
+            &room,
+            &mut socket,
+            &mut client,
+            1,
+            if binary { 882 } else { 881 },
+        );
+        assert!(client.confirmed());
+    }
 }

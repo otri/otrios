@@ -32,6 +32,7 @@ impl Peer {
             return Err("Use a loopback endpoint/SSH forward for controlled transport".into());
         }
         let mut client = Client::default();
+        client.set_legacy_transport(std::env::var_os("OTRIOS_BENCH_LEGACY_TRANSPORT").is_some());
         client.admit_catalog(catalog)?;
         client.open("app:three-d-lab/ui", "app:three-d-lab/state");
         Ok(Self {

@@ -3,11 +3,13 @@
 mod behavior;
 mod client;
 mod state;
+mod transport;
 pub use behavior::Behavior;
 pub use client::Client;
 use otrios_interfaces::canvas::*;
 use sha2::{Digest, Sha256};
 pub use state::{Document, Session, StateAdapter};
+pub use transport::{encode_server_binary, encode_state_response_binary};
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;
 pub fn hash(bytes: &[u8]) -> Vec<u8> {

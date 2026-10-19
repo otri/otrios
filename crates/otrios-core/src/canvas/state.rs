@@ -41,6 +41,13 @@ pub struct Session {
     subscription: Option<Subscription>,
     initial: bool,
     last_sent: Option<Cursor>,
+    binary: bool,
+}
+impl Session {
+    /// Opt in only when the admitted mount explicitly advertises Blob support.
+    pub fn set_binary_transport(&mut self, enabled: bool) {
+        self.binary = enabled;
+    }
 }
 fn random<const N: usize>() -> Result<[u8; N]> {
     let mut bytes = [0; N];
@@ -507,6 +514,7 @@ impl Document {
                 subscription: None,
                 initial: true,
                 last_sent: None,
+                binary: false,
             },
             changed,
         ))
@@ -630,7 +638,12 @@ impl Document {
                 frame: offer.bytes().to_vec(),
             }
         };
-        encode_state_response(&response).map(Some)
+        if session.binary {
+            encode_state_response_binary(&response)
+        } else {
+            encode_state_response(&response)
+        }
+        .map(Some)
     }
     /// One-time trusted-file import. The network protocol never accepts Automerge.
     pub fn import_legacy(schema: StateSchema, scope: &str, data: &[u8]) -> Result<Self> {
