@@ -84,6 +84,15 @@ not a prerequisite for narrowing today's fixed-field replication.
    navigation, input, final release, remote changes, reconnect/upgrade, private
    Monitoring and authority recovery. Record automated versus physical evidence.
 
+### Source qualification so far
+
+The adapter exposes `DispatchUsage` and a 256 KiB combined pending/issued value
+payload limit. Core tests cover all-or-nothing rejection, immutable-flight
+charging, and ages preserved through coalescing/replay/restore. Canvas app tests
+exercise immediate slider feedback under delayed confirmation, pointer Up and
+Cancel flushes, and discrete controls/text bypassing continuous deadlines.
+These are shared-runtime tests, not live browser or physical touch acceptance.
+
 Use fresh matched authorities for performance experiments. Report delivered
 value age, final settlement, useful bytes, CPU, queue age and retained memory;
 keep input rate, toolchain, UI and signed resources matched. A noisy three-run

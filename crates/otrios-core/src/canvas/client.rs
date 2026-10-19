@@ -320,6 +320,11 @@ impl Client {
     pub fn stress_stall_ms(&self) -> u64 {
         if self.stress_hz() == 31 { 250 } else { 0 }
     }
+    pub fn dispatch_usage(&self) -> DispatchUsage {
+        self.active
+            .as_ref()
+            .map_or_else(DispatchUsage::default, |m| m.doc.dispatch_usage())
+    }
     pub fn pending_count(&mut self) -> usize {
         if self.confirmed() {
             0

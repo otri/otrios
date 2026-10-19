@@ -720,6 +720,7 @@ struct Flight {
     sequence: u64,
     values: Vec<(u16, Value)>,
     sent: bool,
+    issued_at: u64,
 }
 /// Bounded scheduling of unissued continuous numeric assignments. Transactions
 /// and issued causal writes are never split or replaced by this policy.
@@ -747,12 +748,38 @@ impl DispatchPolicy {
         })
     }
 }
+/// Maximum retained value payload across pending and issued intents. This is
+/// separate from wire size and excludes allocator/container overhead.
+pub const MAX_INTENT_PAYLOAD_BYTES: usize = MAX_BYTES / 2;
+
+/// Read-only RAM queue diagnostics. Ages use the host's monotonic clock, never
+/// wall time. Payload counts exclude containers, authoritative trees and codecs.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DispatchUsage {
+    pub pending_fields: usize,
+    pub issued_fields: usize,
+    pub pending_payload_bytes: usize,
+    pub issued_payload_bytes: usize,
+    pub pending_age_ms: Option<u64>,
+    pub issued_age_ms: Option<u64>,
+    pub ready_in_ms: Option<u64>,
+}
+fn value_payload_bytes(value: &Value) -> usize {
+    match value {
+        Value::Number(_) | Value::Color(_) => 4,
+        Value::Boolean(_) => 1,
+        Value::Text(s) => s.len(),
+        Value::Series(v) => v.len() * 4,
+        Value::TimedSeries(v) => v.len() * 8,
+    }
+}
 /// RAM-only pending intents, separate from authoritative causal metadata.
 pub struct StateAdapter {
     doc: Document,
     writer: [u8; 16],
     replica: Option<merkle::Replica>,
     pending: BTreeMap<u16, Value>,
+    pending_since: Option<u64>,
     dispatch: DispatchPolicy,
     clock: u64,
     last_issue: Option<u64>,
@@ -777,6 +804,7 @@ impl StateAdapter {
             writer,
             replica: None,
             pending: BTreeMap::new(),
+            pending_since: None,
             dispatch: DispatchPolicy::default(),
             clock: 0,
             last_issue: None,
@@ -798,6 +826,7 @@ impl StateAdapter {
             return Err("Pending intent scope mismatch".into());
         }
         self.pending = old.pending.clone();
+        self.pending_since = old.pending_since;
         self.dispatch = old.dispatch;
         self.clock = old.clock;
         self.last_issue = old.last_issue;
@@ -890,6 +919,22 @@ impl StateAdapter {
     pub fn pending_count(&self) -> usize {
         self.pending.len() + self.flight.as_ref().map_or(0, |f| f.values.len())
     }
+    pub fn dispatch_usage(&self) -> DispatchUsage {
+        DispatchUsage {
+            pending_fields: self.pending.len(),
+            issued_fields: self.flight.as_ref().map_or(0, |f| f.values.len()),
+            pending_payload_bytes: self.pending.values().map(value_payload_bytes).sum(),
+            issued_payload_bytes: self.flight.as_ref().map_or(0, |f| {
+                f.values.iter().map(|(_, v)| value_payload_bytes(v)).sum()
+            }),
+            pending_age_ms: self.pending_since.map(|at| self.clock.saturating_sub(at)),
+            issued_age_ms: self
+                .flight
+                .as_ref()
+                .map(|f| self.clock.saturating_sub(f.issued_at)),
+            ready_in_ms: self.deadline.map(|at| at.saturating_sub(self.clock)),
+        }
+    }
     /// Finish a gesture immediately; acknowledgements and replay bypass this timer.
     pub fn flush_pending(&mut self) {
         self.deadline = (!self.pending.is_empty()).then_some(self.clock);
@@ -924,14 +969,30 @@ impl StateAdapter {
     }
     fn queue(&mut self, values: &[(u16, Value)]) -> Result<bool> {
         self.doc.validate_commands(values, false)?;
-        let mut changed = false;
-        for (id, value) in values {
-            if self.typed_value(*id)? != *value {
+        // Check the whole candidate before cloning any payload or changing the
+        // overlay. Replacement frees its previous pending payload in this budget;
+        // immutable issued values remain charged until durably confirmed.
+        let usage = self.dispatch_usage();
+        let mut retained = usage.pending_payload_bytes + usage.issued_payload_bytes;
+        let mut changed = 0_u64;
+        for (index, (id, value)) in values.iter().enumerate() {
+            if self.typed_value(*id)? == *value {
+                continue;
+            }
+            changed |= 1 << index;
+            retained -= self.pending.get(id).map_or(0, value_payload_bytes);
+            retained += value_payload_bytes(value);
+        }
+        if retained > MAX_INTENT_PAYLOAD_BYTES {
+            return Err("Canvas RAM intent payload limit".into());
+        }
+        for (index, (id, value)) in values.iter().enumerate() {
+            if changed & (1 << index) != 0 {
                 self.pending.insert(*id, value.clone());
-                changed = true;
+                self.pending_since.get_or_insert(self.clock);
             }
         }
-        Ok(changed)
+        Ok(changed != 0)
     }
     pub fn generate(&mut self) -> Result<Option<Vec<u8>>> {
         if std::mem::take(&mut self.resync) {
@@ -963,6 +1024,7 @@ impl StateAdapter {
             }
             self.deadline = None;
             self.last_issue = Some(self.clock);
+            self.pending_since = None;
             let values = std::mem::take(&mut self.pending).into_iter().collect();
             self.flight = Some(Flight {
                 sequence: self
@@ -971,6 +1033,7 @@ impl StateAdapter {
                     .ok_or("Intent sequence exhausted")?,
                 values,
                 sent: false,
+                issued_at: self.clock,
             });
         }
         if let Some(f) = &mut self.flight
@@ -1174,6 +1237,84 @@ mod tests {
         assert!(DispatchPolicy::new(1001, 1).is_err());
         assert!(DispatchPolicy::new(1, 0).is_err());
         assert!(DispatchPolicy::new(1, MAX_FIELDS + 1).is_err());
+    }
+    #[test]
+    fn dispatch_accounting_keeps_original_age_across_coalescing_replay_and_restore() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        c.advance(100);
+        c.defer(&[(1, 100)]).unwrap();
+        let issued = c.generate().unwrap().unwrap();
+        c.advance(110);
+        c.defer(&[(1, 200)]).unwrap();
+        c.advance(120);
+        c.defer(&[(1, 300)]).unwrap();
+        let usage = c.dispatch_usage();
+        assert_eq!(usage.pending_fields, 1);
+        assert_eq!(usage.issued_fields, 1);
+        assert_eq!(usage.pending_payload_bytes, 4);
+        assert_eq!(usage.issued_payload_bytes, 4);
+        assert_eq!(usage.pending_age_ms, Some(10));
+        assert_eq!(usage.issued_age_ms, Some(20));
+        assert_eq!(usage.ready_in_ms, Some(13));
+        c.reconnect();
+        assert_eq!(c.generate().unwrap().unwrap(), issued);
+        assert_eq!(
+            c.dispatch_usage(),
+            usage,
+            "replay cannot reset measured age"
+        );
+        let mut restored = client(1);
+        restored.restore_pending(&c).unwrap();
+        assert_eq!(restored.dispatch_usage(), usage);
+        doc.receive(&mut session, &issued).unwrap();
+        c.advance(140);
+        c.flush_pending();
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+        assert_eq!(doc.value(1).unwrap(), 300);
+    }
+    #[test]
+    fn intent_payload_budget_checks_a_whole_batch_before_mutation_and_counts_flight() {
+        let schema = StateSchema {
+            id: "large-intents".into(),
+            fields: (1..=18)
+                .map(|id| Field {
+                    id,
+                    name: format!("series-{id}"),
+                    default: Value::TimedSeries(vec![]),
+                    writable: true,
+                })
+                .collect(),
+        };
+        let mut doc = Document::new(schema.clone(), "budget").unwrap();
+        let mut c = StateAdapter::new(schema, "budget", &[], [1; 16]).unwrap();
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        session.set_binary_transport(true);
+        let large = Value::TimedSeries(vec![[0., 1.]; MAX_SERIES_POINTS]);
+        let assignments: Vec<_> = (1..=17).map(|id| (id, large.clone())).collect();
+        assert!(c.set_typed(&assignments).is_err());
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+        assert_eq!(c.typed_value(1).unwrap(), Value::TimedSeries(vec![]));
+        c.set_typed(&assignments[..16]).unwrap();
+        assert_eq!(
+            c.dispatch_usage().pending_payload_bytes,
+            16 * MAX_SERIES_POINTS * 8
+        );
+        let issued = c.generate().unwrap().unwrap();
+        assert_eq!(c.dispatch_usage().issued_fields, 16);
+        assert!(c.set_typed(&[(17, large.clone())]).is_err());
+        assert_eq!(c.dispatch_usage().pending_fields, 0);
+        // A no-op against the issued overlay consumes no extra budget.
+        assert!(!c.set_typed(&assignments[..16]).unwrap());
+        doc.receive(&mut session, &issued).unwrap();
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+        c.set_typed(&[(17, large)]).unwrap();
+        assert_eq!(c.dispatch_usage().pending_fields, 1);
     }
     #[test]
     fn ram_pending_writes_coalesce_and_receipts_survive_durable_reload() {

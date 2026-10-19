@@ -6,7 +6,9 @@ Status: initial increments implemented on `feat/canvas-replication-pipeline` and
 see [frame measurements](../experiments/canvas-replication-pipeline.md).
 A [measured dispatch prototype](../experiments/canvas-dispatch.md) consolidates
 continuous numeric edits in the adapter's single RAM queue; it is not promoted
-to the live client release because measurements show no reliable overall win. Packed envelopes and compression remain planned.
+to the live client release. Measurements show no reliable overall speed win;
+[RFC 0010](0010-runtime-foundation.md) now qualifies its ownership simplification
+separately from optimization claims. Packed envelopes and compression remain planned.
 Extends RFCs 0002, 0005 and 0006. Main remains at the dashboard milestone;
 performance experiments use disposable authorities; the subsequent authorized
 rollout retains the live room and its durable stores.
@@ -90,6 +92,16 @@ continuous throttling. Reconnect preserves the RAM pending deadline and issued
 sequence while the process lives. Host ticks supply monotonic milliseconds;
 backwards samples cannot postpone an existing group. Packed transport and optional
 compression remain separate increments, with no new wire format selected here.
+
+The shared adapter now caps pending plus issued value payloads at 256 KiB, in
+addition to the 64-field and existing encoded-message limits. Admission checks
+the entire candidate before modifying the overlay; a rejected batch retains the
+previous queue. Replacing an unissued value releases its budget, while issued
+values remain charged until their durable receipt arrives. `DispatchUsage`
+reports pending/issued counts, payload bytes, monotonic ages and deadline delay.
+Payload accounting excludes container capacity, trees, codec scratch and GPU
+resources; it is not a total-allocation metric. Coalescing, replay and RAM restore
+retain the original ages rather than concealing delay by resetting them.
 
 Use a monotonic deadline and a maximum byte/operation count for each dispatch.
 Continuous controls can replace unsent assignments; release requests a final

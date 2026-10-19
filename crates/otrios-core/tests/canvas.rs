@@ -1652,3 +1652,181 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
     pump(&mut c, &mut authority, &mut next);
     assert_eq!(authority.value(1).unwrap(), 870);
 }
+
+// Deliberately do not advance a host clock while delivering messages. These
+// exercise dispatch semantics, rather than accidentally flushing via pump().
+fn drain_sync(
+    c: &mut Client,
+    authority: &mut Document,
+    session: &mut Session,
+) -> Vec<StateRequest> {
+    let mut requests = Vec::new();
+    while let Some(bytes) = c.outgoing().unwrap() {
+        if let ClientMessage::Sync { bytes, .. } = decode_client(&bytes).unwrap() {
+            requests.push(decode_state_request(&bytes).unwrap());
+            authority.receive(session, &bytes).unwrap();
+        }
+    }
+    requests
+}
+fn deliver_state(c: &mut Client, authority: &Document, session: &mut Session) {
+    let bytes = authority.generate(session).unwrap().unwrap();
+    c.receive(
+        &encode_server(&ServerMessage::Sync {
+            epoch: c.epoch(),
+            bytes,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn continuous_feedback_survives_delayed_confirmation_and_final_release_bypasses_deadline() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    for phase in [PointerPhase::Up, PointerPhase::Cancel] {
+        let code = code();
+        let ui = playground::ui(&code);
+        let mut c = Client::default();
+        activate(&mut c, ui.clone(), "dispatch:gesture", code);
+        let mut authority = Document::new(ui.state_schema, "dispatch:gesture").unwrap();
+        let mut session = Session::default();
+        pump(&mut c, &mut authority, &mut session);
+        c.set_dispatch_policy(DispatchPolicy::new(1000, MAX_FIELDS).unwrap());
+        c.tick(2000, 0).unwrap();
+        let scene = c.scene().unwrap();
+        let controls = scene.controls();
+        let slider = controls
+            .iter()
+            .find(|n| n.node.id == node(&c, "Linear slider"))
+            .unwrap();
+        let position = |x| {
+            [
+                slider.origin[0] + slider.node.frame.width * x,
+                slider.origin[1] + 40.,
+            ]
+        };
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 91,
+                phase: PointerPhase::Down,
+                position: position(0.2),
+            },
+        )
+        .unwrap();
+        assert!(
+            drain_sync(&mut c, &mut authority, &mut session)
+                .iter()
+                .any(|r| matches!(r, StateRequest::Write { .. }))
+        );
+        let issued_value = authority.value(1).unwrap();
+        c.tick(2001, 0).unwrap();
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 91,
+                phase: PointerPhase::Move,
+                position: position(0.8),
+            },
+        )
+        .unwrap();
+        assert_ne!(c.value(1).unwrap(), issued_value);
+        assert!(text_contains(c.scene().unwrap().root(), "80%"));
+        assert!(
+            drain_sync(&mut c, &mut authority, &mut session).is_empty(),
+            "one immutable issued write"
+        );
+        assert_eq!(c.dispatch_usage().pending_fields, 1);
+        assert_eq!(c.dispatch_usage().issued_fields, 1);
+        deliver_state(&mut c, &authority, &mut session);
+        let requests = drain_sync(&mut c, &mut authority, &mut session);
+        assert!(
+            requests
+                .iter()
+                .all(|r| matches!(r, StateRequest::Ack { .. }))
+        );
+        assert_eq!(
+            c.value(1).unwrap(),
+            800,
+            "old confirmation cannot erase local feedback"
+        );
+        assert_eq!(c.dispatch_usage().ready_in_ms, Some(999));
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 91,
+                phase,
+                position: position(1.4),
+            },
+        )
+        .unwrap();
+        let final_value = c.value(1).unwrap();
+        assert_eq!(c.dispatch_usage().ready_in_ms, Some(0));
+        let requests = drain_sync(&mut c, &mut authority, &mut session);
+        assert!(
+            requests
+                .iter()
+                .any(|r| matches!(r, StateRequest::Write { .. }))
+        );
+        assert_eq!(authority.value(1).unwrap(), final_value);
+        deliver_state(&mut c, &authority, &mut session);
+        drain_sync(&mut c, &mut authority, &mut session);
+        assert!(c.confirmed());
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+    }
+}
+
+#[test]
+fn discrete_assignment_and_text_do_not_wait_for_continuous_dispatch_interval() {
+    let code = code();
+    let ui = playground::ui(&code);
+    let mut c = Client::default();
+    activate(&mut c, ui.clone(), "dispatch:discrete", code);
+    let mut authority = Document::new(ui.state_schema, "dispatch:discrete").unwrap();
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    c.set_dispatch_policy(DispatchPolicy::new(1000, MAX_FIELDS).unwrap());
+    c.tick(2000, 0).unwrap();
+    edit(&mut c, "Linear slider", 100, 0);
+    drain_sync(&mut c, &mut authority, &mut session);
+    deliver_state(&mut c, &authority, &mut session);
+    drain_sync(&mut c, &mut authority, &mut session);
+    c.tick(2001, 0).unwrap();
+    edit(&mut c, "Linear slider", 900, 0);
+    assert_eq!(c.dispatch_usage().ready_in_ms, Some(999));
+    edit(&mut c, "Toggle", 0, 0);
+    assert_eq!(c.dispatch_usage().ready_in_ms, Some(0));
+    let requests = drain_sync(&mut c, &mut authority, &mut session);
+    assert!(
+        requests
+            .iter()
+            .any(|r| matches!(r, StateRequest::Write { values, .. } if values.len() == 2))
+    );
+    assert_eq!(authority.value(1).unwrap(), 900);
+
+    let ui = input_lab::ui();
+    let mut text = Client::default();
+    activate(&mut text, ui.clone(), "dispatch:text", vec![]);
+    let mut doc = Document::new(ui.state_schema, "dispatch:text").unwrap();
+    let mut session = Session::default();
+    pump(&mut text, &mut doc, &mut session);
+    text.set_dispatch_policy(DispatchPolicy::new(1000, MAX_FIELDS).unwrap());
+    text.tick(2000, 0).unwrap();
+    text.activate(text.epoch(), node(&text, "First text field"))
+        .unwrap();
+    text.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit("a".into()))
+        .unwrap();
+    drain_sync(&mut text, &mut doc, &mut session);
+    deliver_state(&mut text, &doc, &mut session);
+    drain_sync(&mut text, &mut doc, &mut session);
+    text.tick(2001, 0).unwrap();
+    text.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit("b".into()))
+        .unwrap();
+    assert_eq!(text.dispatch_usage().ready_in_ms, Some(0));
+    drain_sync(&mut text, &mut doc, &mut session);
+    assert_eq!(
+        doc.typed_value(1).unwrap(),
+        otrios_interfaces::layout::Value::Text("ab".into())
+    );
+}
