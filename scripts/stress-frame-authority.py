@@ -43,6 +43,7 @@ while not stop.exists() and time.monotonic()-started<240:
 '''
 
 def run(a):
+    if not a.client.is_file() or not os.access(a.client,os.X_OK):raise ValueError('Client must be an executable file')
     config=json.loads(a.config.read_text());ssh=config['frame']['ssh']
     if not isinstance(ssh,list) or ssh[0]!='ssh':raise ValueError('Use the existing pinned SSH configuration')
     soft,hard=resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -71,6 +72,7 @@ with tarfile.open(fileobj=sys.stdin.buffer,mode='r|') as t:
 shutil.chown(root,user='otrios',group='otrios')
 '''.replace('REMOTE',repr(remote))
     command(install,input=payload.getvalue())
+    monitor=None;consumer=None;stop=None
     unit=None;proxy='otrios-stress-proxy-'+uuid.uuid4().hex[:10]
     cases=[]
     if a.phase in ('all','sockets'):
@@ -141,6 +143,18 @@ print(json.dumps({'pid':pid,'cgroup':'/sys/fs/cgroup'+cg,'release':health['relea
             print(json.dumps({'completed':name,'connected':result.get('connected'),'cycles':result.get('confirmed_cycles'),'ack_us':result.get('ack_us'),'summary':result['sample_summary'],'errors':result.get('errors',result.get('client_error')),'guard':guard}),flush=True)
             if guard:break
     finally:
+        # Launch/measurement failures must not leave the sampler and its SSH pipe alive.
+        if monitor is not None and monitor.poll() is None:
+            try:
+                command('import pathlib;p=pathlib.Path('+repr(stop)+');p.touch() if p.parent.exists() else None',capture_output=True)
+                monitor.wait(timeout=10)
+            except (subprocess.CalledProcessError,subprocess.TimeoutExpired):pass
+            finally:
+                if monitor.poll() is None:
+                    monitor.terminate()
+                    try:monitor.wait(timeout=5)
+                    except subprocess.TimeoutExpired:monitor.kill();monitor.wait()
+                if consumer is not None:consumer.join(timeout=5)
         if unit:command("import subprocess;subprocess.run(['systemctl','stop',"+repr(unit)+"],check=False)",capture_output=True)
         command("import pathlib,subprocess;subprocess.run(['systemctl','stop',"+repr(proxy+'.socket')+","+repr(proxy+'.service')+"],check=False);[(pathlib.Path('/run/systemd/system')/name).unlink(missing_ok=True) for name in "+repr([proxy+'.socket',proxy+'.service'])+"];subprocess.run(['systemctl','daemon-reload'],check=True)",capture_output=True)
         command('import shutil;shutil.rmtree('+repr(remote)+')',capture_output=True)

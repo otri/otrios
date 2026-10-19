@@ -150,3 +150,15 @@ an 86% reduction. At 4,096 sessions the candidate used 44.1 MiB peak RSS and
 Connection setup took 90 seconds at the largest count; the final hold
 lasted 15 seconds. These short single trials are not a soak test, and CPU/latency
 differences should not be treated as statistically controlled speedups.
+
+## Invalid setup probes
+
+An initial SSH-forwarding probe could not establish the test transport because
+forwarding was disabled; no capacity result was taken from it. The measured runs
+use the scoped Tailscale relay instead. A later continuous-input launch failed
+because a copied generator lacked execute permission; no input load was generated.
+The copy was corrected and that cohort was rerun into a fresh output directory.
+The runner now rejects nonexecutable clients before remote setup and tears down
+its sampler on launch exceptions. A deliberate invalid-executable-format probe
+verified sampler, authority, relay and temporary-file cleanup in 32 seconds.
+Neither setup failure is counted as an authority overload or benchmark result.
