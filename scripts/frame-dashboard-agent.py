@@ -29,7 +29,7 @@ def verify_manifest(raw,sig,release,cache,key,openssl):
         result=subprocess.run([openssl,'pkeyutl','-verify','-pubin','-inkey',str(key),'-rawin','-in',str(tmp/'manifest'),'-sigfile',str(tmp/'sig')],capture_output=True)
         if result.returncode:raise ValueError('Publisher signature rejected')
     manifest=json.loads(raw)
-    if manifest.get('format')!='otrios-release-v1' or manifest.get('state_schema')!='otrios-canvas-apps-v1' or manifest.get('sync_protocol')!='otrios-canvas-sync-v1' or manifest.get('native_target')!='armv7-unknown-linux-gnueabihf':raise ValueError('Incompatible release')
+    if manifest.get('format')!='otrios-release-v1' or manifest.get('state_schema')!='otrios-canvas-merkle-state-v1' or manifest.get('sync_protocol')!='otrios-canvas-sync-v2' or manifest.get('native_target')!='armv7-unknown-linux-gnueabihf':raise ValueError('Incompatible release')
     return manifest
 
 def verify_binary(data,item):

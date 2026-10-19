@@ -31,8 +31,10 @@ and `/layout` global writers return 410. The authorized local monitoring job
 continues to upload a complete FlexBuffers Layout to `/presentation`; the
 server validates and replaces that read-only aggregate without CRDT history.
 
-One file per app holds accepted durable history. Writes replace and flush the
-file before acknowledgement. Clients keep only RAM state, so a live process
+Each app has a `.merkle` checkpoint and a bounded `.merkle.log` append journal.
+Normal writes flush only changed Merkle nodes plus an atomic intent receipt
+before publishing the root or acknowledging. Checkpoints rotate at 4 MiB;
+torn tails recover and complete corrupt records fail closed. Clients keep only RAM state, so a live process
 can reconnect with pending edits; crashing or closing it can lose unacknowledged
 work. Code/fonts/blobs are disposable caches, not document checkpoints.
 `--state FILE` now supplies a legacy filename prefix only: app state lives in
@@ -49,8 +51,8 @@ source fingerprint inputs. `publish-dashboard-module.py` copies verified public
 assets into the independent read-only OrbStack volume before advancing the
 origin's current pointer. A stale or failed build leaves the previous release.
 
-The release manifest binds `otrios-canvas-apps-v1` state and
-`otrios-canvas-sync-v1` transport. Its public `apps/catalog.flex` lists admitted
+The release manifest binds `otrios-canvas-merkle-state-v1` state and
+`otrios-canvas-sync-v2` transport. Its public `apps/catalog.flex` lists admitted
 UI/State pairs and UI hashes; each UI binds its behavior's hash and permissions.
 App UI/code resides under `authority/apps/<id>/` in the signed release's
 `authority` digest table. These payloads are never copied to the public module
@@ -117,3 +119,27 @@ readiness, then inspect an actual native framebuffer and the local presentation
 statistics. Matching references prove scope identity, not pixel equivalence or
 physical panel color/touch acceptance. Record measured results in
 [the migration validation log](experiments/canvas-migration-validation.md).
+
+## Merkle cutover and staged publication
+
+[RFC 0006](rfcs/0006-durable-canvas-merkle-adapter.md) defines server-only writes,
+RAM intent overlays and durable deduplication receipts. Existing per-app
+Automerge current values import once if a Merkle checkpoint is absent; old files
+stay available for coordinated rollback. Do not run two authorities against the
+same state directory. A pending batch resumes for up to 24 hours while its
+receipt is retained; an uncertain expired batch is rejected explicitly.
+
+Before a protocol cutover, pause the source watcher and build an immutable
+candidate without advancing either host's pointer:
+
+```sh
+python3 scripts/watch-dashboard.py --config /ABS/STAGING-CONFIG.json --once --stage-only
+```
+
+The staged pointer is `build/staged-release.json`; the normal source-id marker
+is not advanced. Test a separate authority with a disposable state directory,
+then install the matching authority/supervisor and activate the signed staged
+pointer on both module host and origin. Resume the watcher only after its source
+branch and installed tools match the deployed protocol. The browser's release
+gate can move an acknowledged idle tab to the new entry; visit the root URL if
+an old tab cannot finish its previous protocol session during the cutover.

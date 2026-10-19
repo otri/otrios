@@ -57,7 +57,7 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
             if len(fallback)<52 or fallback[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(fallback[18:20],'little')!=40:raise ValueError('Expected ARM32 SDL recovery executable')
             path='native/armv7/dashboard-sdl';(stage/path).write_bytes(fallback)
             assets[path]={'bytes':len(fallback),'sha256':digest(fallback)}
-        manifest={'format':'otrios-release-v1','state_schema':'otrios-canvas-apps-v1','sync_protocol':'otrios-canvas-sync-v1','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v2','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
         subprocess.run([openssl,'pkeyutl','-sign','-rawin','-inkey',str(key),'-in',str(stage/'manifest.json'),'-out',str(stage/'manifest.sig')],check=True,capture_output=True)
