@@ -32,6 +32,8 @@ pub struct Document {
     tree: Snapshot,
     field_hashes: std::sync::Arc<BTreeMap<u16, merkle::Hash>>,
     wall: i64,
+    /// Authority policy from admitted UI dependencies; not replicated state.
+    signal_fields: u64,
 }
 #[derive(Clone, Default)]
 pub struct Session {
@@ -120,6 +122,7 @@ impl Document {
             tree,
             field_hashes,
             wall: 0,
+            signal_fields: 0,
         })
     }
     fn field_hashes(schema: &StateSchema, scope: &str) -> Result<BTreeMap<u16, merkle::Hash>> {
@@ -165,6 +168,7 @@ impl Document {
             actor,
             tree,
             wall: 0,
+            signal_fields: 0,
         };
         result.validate_tree()?;
         Ok(result)
@@ -311,6 +315,20 @@ impl Document {
     pub fn set_wall_time(&mut self, time: i64) {
         self.wall = time.max(0);
     }
+    /// Only admitted UI signal selectors request retained history. Configuration
+    /// is RAM-only authority policy; loading a checkpoint does not enable it.
+    pub fn set_signal_fields(&mut self, fields: &[u16]) -> Result<()> {
+        let mut mask = 0;
+        for id in fields {
+            let field = self.field(*id)?;
+            if !matches!(field.default, Value::Number(_) | Value::Boolean(_)) {
+                return Err("Signal requires a numeric or Boolean field".into());
+            }
+            mask |= 1_u64 << (id - 1);
+        }
+        self.signal_fields = mask;
+        Ok(())
+    }
     fn field(&self, id: u16) -> Result<&Field> {
         self.schema
             .fields
@@ -383,7 +401,9 @@ impl Document {
                 Value::Boolean(b) => Some(if *b { 100. } else { 0. }),
                 _ => None,
             };
-            if let Some(n) = n.filter(|_| self.wall > 0) {
+            if let Some(n) =
+                n.filter(|_| self.wall > 0 && self.signal_fields & (1_u64 << slot) != 0)
+            {
                 let p = path(3, slot);
                 let mut samples: Vec<(i64, f32)> = payload(&self.tree, &p)
                     .ok()
@@ -1104,6 +1124,7 @@ mod tests {
     #[test]
     fn signals_are_bounded_by_server_time_and_expire_without_writing_state() {
         let mut doc = Document::new(schema(), "test").unwrap();
+        doc.set_signal_fields(&[1]).unwrap();
         for t in 1..=400 {
             doc.set_wall_time(t);
             doc.set(&[(1, if t % 2 == 0 { 1000 } else { 0 })]).unwrap();
@@ -1114,6 +1135,40 @@ mod tests {
         let before = doc.root_hash();
         assert!(doc.signal(1, 701, 300).is_empty());
         assert_eq!(doc.root_hash(), before);
+    }
+    #[test]
+    fn unrequested_history_is_absent_and_retention_changes_do_not_mutate_old_samples() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        doc.set_wall_time(1);
+        doc.set(&[(1, 100)]).unwrap();
+        assert!(doc.tree.subtree(&[3]).is_err());
+        doc.set_signal_fields(&[1, 3]).unwrap();
+        doc.set_wall_time(2);
+        doc.set(&[(1, 200)]).unwrap();
+        doc.set_typed_authority(&[(3, Value::Boolean(true))])
+            .unwrap();
+        assert_eq!(doc.signal(1, 2, 300).len(), 1);
+        assert_eq!(doc.signal(3, 2, 300).len(), 1);
+        // Failed policy updates are atomic; a text field cannot request a signal.
+        assert!(doc.set_signal_fields(&[2]).is_err());
+        doc.set_wall_time(3);
+        doc.set(&[(1, 300)]).unwrap();
+        assert_eq!(doc.signal(1, 3, 300).len(), 2);
+        let old_history = doc.tree.subtree(&[3]).unwrap();
+        let checkpoint = doc.save().unwrap();
+        let mut restored = Document::load(schema(), "test", &checkpoint).unwrap();
+        restored.set_wall_time(4);
+        restored.set(&[(1, 400)]).unwrap();
+        assert!(!old_history.shares_root(&restored.tree.subtree(&[3]).unwrap()));
+        assert_eq!(
+            old_history.hash(),
+            restored.tree.subtree(&[3]).unwrap().hash()
+        );
+        doc.set_signal_fields(&[]).unwrap();
+        doc.set_wall_time(4);
+        doc.set(&[(1, 400)]).unwrap();
+        assert!(old_history.shares_root(&doc.tree.subtree(&[3]).unwrap()));
+        assert_eq!(doc.signal(1, 4, 300).len(), 2);
     }
     #[test]
     fn writer_capacity_and_expired_uncertain_replays_fail_explicitly() {

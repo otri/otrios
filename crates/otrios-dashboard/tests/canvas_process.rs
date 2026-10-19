@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #![cfg(all(feature = "canvas", feature = "server", feature = "host-sync"))]
 //! Real TCP/WebSocket boundary, persistence/restart, app scoping and native guest execution.
+mod common;
 use otrios_core::canvas::*;
 use otrios_interfaces::canvas::*;
 use std::{
@@ -200,6 +201,36 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         "Inactive app must receive zero messages for Playground edits"
     );
     assert_eq!(layout.c.value(1).unwrap(), 500);
+    let read_app = |id: &str| {
+        let state_ref = format!("app:{id}/state");
+        let ui = decode_ui(
+            &std::fs::read(server.root.join(format!("apps/{id}/package/ui.flex"))).unwrap(),
+        )
+        .unwrap();
+        let file = server
+            .root
+            .join("state")
+            .join(format!("{id}-{}.merkle", hex(&hash(state_ref.as_bytes()))));
+        common::stored_file(&file, ui.state_schema, &state_ref)
+    };
+    let wall = otrios_core::dashboard::signal::wall_time_seconds();
+    assert!(
+        read_app("component-playground")
+            .signal(1, wall, 300)
+            .is_empty()
+    );
+    edit(&mut layout.c, "Toggle", 0);
+    layout.settle();
+    let history = read_app("layout-lab");
+    assert!(
+        !history.signal(3, wall + 1, 300).is_empty(),
+        "The admitted Toggle signal must retain samples"
+    );
+    assert!(
+        history.signal(1, wall + 1, 300).is_empty(),
+        "Panel width does not request history"
+    );
+
     // Same durable root, changed executable: no host rebuild or authority restart.
     let source = server
         .root

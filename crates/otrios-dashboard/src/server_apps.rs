@@ -15,6 +15,7 @@ struct Package {
     ui_hash: Vec<u8>,
     code: Vec<u8>,
     private: bool,
+    signal_fields: Vec<u16>,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -177,6 +178,17 @@ impl Hub {
                 return Err("UI reference/format differs from admitted catalog".into());
             }
             canvas::validate_schema(&description.state_schema)?;
+            let signal_fields = description
+                .selectors
+                .iter()
+                .filter_map(|selector| {
+                    matches!(
+                        selector.projection,
+                        otrios_interfaces::canvas::Projection::WindowSignal { .. }
+                    )
+                    .then_some(selector.field)
+                })
+                .collect::<Vec<_>>();
             let code = if let Some(reference) = &description.behavior {
                 let bytes = bounded(&base.join("behavior.wasm"), 65536)?;
                 if let Some(m) = &manifest {
@@ -188,6 +200,7 @@ impl Hub {
                 vec![]
             };
             if let Some(room) = self.rooms.get(&a.state_ref) {
+                room.doc.clone().set_signal_fields(&signal_fields)?;
                 if room.doc.schema() != &description.state_schema {
                     return Err("App schema requires a new State reference".into());
                 }
@@ -202,7 +215,7 @@ impl Hub {
                         canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
                     ))
                 });
-                let doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
+                let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
                     store::load(
                         path,
                         Document::load(
@@ -224,6 +237,7 @@ impl Hub {
                 } else {
                     Document::new(description.state_schema, &a.state_ref)?
                 };
+                doc.set_signal_fields(&signal_fields)?;
                 if let Some(path) = &file
                     && !path.exists()
                 {
@@ -248,6 +262,7 @@ impl Hub {
                         ui_hash: entry.ui_hash,
                         code,
                         private,
+                        signal_fields,
                     },
                 )
                 .is_some()
@@ -263,6 +278,22 @@ impl Hub {
             if let Some(old) = self.order.pop_front() {
                 self.bundles.remove(&old);
             }
+        }
+        // Older admitted bundles can still have live leases. Keep their signal
+        // dependencies until that bundle is retired; unrelated apps retain none.
+        let mut retained = BTreeMap::<String, std::collections::BTreeSet<u16>>::new();
+        for package in self.bundles.values().flat_map(|b| b.packages.values()) {
+            retained
+                .entry(package.app.state_ref.clone())
+                .or_default()
+                .extend(&package.signal_fields);
+        }
+        for (state_ref, room) in &mut self.rooms {
+            let fields = retained
+                .get(state_ref)
+                .map(|ids| ids.iter().copied().collect::<Vec<_>>())
+                .unwrap_or_default();
+            room.doc.set_signal_fields(&fields)?;
         }
         self.active = catalog_hash;
         self.active_release = id.into();

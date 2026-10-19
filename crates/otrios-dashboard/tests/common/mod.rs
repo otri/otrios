@@ -311,7 +311,10 @@ pub fn accept(s: &mut Socket, epoch: u32) {
 
 pub fn stored(room: &Room, schema: StateSchema, scope: &str, id: &str) -> canvas::Document {
     let file = state_file_ref(room, id, scope);
-    let mut doc = canvas::Document::load(schema, scope, &std::fs::read(&file).unwrap()).unwrap();
+    stored_file(&file, schema, scope)
+}
+pub fn stored_file(file: &std::path::Path, schema: StateSchema, scope: &str) -> canvas::Document {
+    let mut doc = canvas::Document::load(schema, scope, &std::fs::read(file).unwrap()).unwrap();
     let path = file.with_extension("merkle.log");
     if let Ok(bytes) = std::fs::read(path) {
         let mut at = 0;
