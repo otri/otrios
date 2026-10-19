@@ -269,7 +269,7 @@ fn private_candidate_expiry_preserves_the_previous_public_activation() {
         ServerMessage::Mounted { epoch: 1, .. }
     ));
     accept(&mut s, 1);
-    assert!(matches!(read(&mut s), ServerMessage::Sync { epoch: 1, .. }));
+    // Mounted already carried this revision; no duplicate Sync is emitted.
     mount(&mut s, &room, "monitoring", 2);
     assert!(matches!(
         read(&mut s),
