@@ -3,17 +3,21 @@
 
 One Rust `dashboard-server` serves signed code, release events, durable Canvas
 state, ephemeral ink and Monitoring sessions. It has two loopback listeners:
-trusted 8876 through Tailscale, public 8877 through the existing Cloudflare Tunnel.
+trusted 8876 for the local display/collector, public 8877 through the existing
+Cloudflare Tunnel. Remote administration uses the existing pinned Tailscale SSH.
 There is one immutable release store and no Caddy, replica container, replica
-publisher daemon or separate release-control server. The Mac must stay awake,
-online and logged in; this is not an always-on cloud deployment.
+publisher daemon or separate release-control server. The authority and tunnel
+run as systemd services on the Rockchip photo frame.
+The Mac builds and signs releases; it is not required for serving. See
+[frame hosting](FRAME_HOSTING.md) for publication, storage and qualification.
 
 ```sh
 dashboard-server --bind 127.0.0.1:8876 --public-bind 127.0.0.1:8877 \
   --app-state /ABS/RUNTIME/state.apps \
   --presentation-file /ABS/RUNTIME/state.presentation.flex \
+  --trusted-peers 4 --public-peers 64 \
   --releases /ABS/RUNTIME/releases --auth-file /ABS/RUNTIME/monitoring-auth.json \
-  --origin https://otrios.otri.ca --origin https://HOST.TAILNET.ts.net
+  --origin https://otrios.otri.ca
 ```
 
 ## One negotiated session
@@ -36,12 +40,13 @@ datagram socket. On cold start without a modern cached host, `session-bootstrap`
 obtains the hash over `/session` and exits before the renderer connects. Install
 it at `/opt/otrios-dashboard/session-bootstrap` alongside the supervisor. No
 permanent release-watch process, separate ink socket, Wayland, SDL or browser is
-needed on the frame. `--url` selects its trusted state service; `--code-url`
-selects the signed resource download origin.
+needed on the frame. `--url` and `--code-url` both use `http://127.0.0.1:8876` on the frame.
+Plain HTTP/WS is accepted only for literal loopback addresses; remote origins
+require HTTPS/WSS. Native signature checks remain mandatory.
 
 ## State, policy and failures
 
-The trusted listener admits private apps for tailnet devices and accepts the
+The trusted loopback listener admits private apps for the local display and accepts the
 monitoring collector's `/presentation` upload. The public listener uses an exact
 route/Origin allowlist and Monitoring's HttpOnly cookie; static paths cannot
 expose `authority/apps/`. Public demos share the frame's per-app data roots.
@@ -52,7 +57,7 @@ Each app has a Merkle checkpoint and bounded append journal. Changed nodes and
 intent receipts are durable before roots are published or edits acknowledged.
 Checkpoints rotate at 4 MiB. Clients keep document state and pending edits in RAM;
 closing one may lose unconfirmed edits. Executable/font/blob caches are bounded
-(about 512 MiB web, 2 GiB frame). Ink expires after five seconds and is never
+(about 512 MiB web, 128 MiB frame disk budget). Ink expires after five seconds and is never
 persisted. Legacy `--state FILE` only derives the app directory/presentation path;
 prefer the explicit arguments above. Never run two authorities on the same state.
 
@@ -81,12 +86,22 @@ requires the pinned Ed25519 signature; browser resources rely on HTTPS and the
 manifest hash closure, without independently verifying the detached signature.
 A signature does not sandbox trusted native publisher code.
 
-Private runtime configuration, keys, state, logs and caches live under
-`~/Library/Application Support/OTriOSDashboard`, outside Git. Keep private keys
-mode 0600. Login LaunchAgents run the one server, optional development watcher,
-scheduled monitoring collector and network tunnel. The collector is a scheduled
-job, not an additional server. Update installed binaries/scripts explicitly for
-protocol cutovers; pin the watcher to the tested source commit.
+Private frame configuration lives in `/etc/otrios-authority`, code and helpers
+in `/opt/otrios-authority`, and the signed release store and durable app roots in
+`/var/lib/otrios-authority`. The native disposable cache remains separate under
+`/var/lib/otrios-dashboard`. systemd runs `otrios-authority`, `otrios-tunnel`,
+`otrios-monitoring.timer` and the existing `otrios-dashboard-direct` service.
+The frame holds the publisher public key, login hash and service credentials;
+the signing private key remains on the Mac.
+
+The Mac build/signing workspace remains under
+`~/Library/Application Support/OTriOSDashboard`. Its watcher can publish over
+pinned SSH using the private config's `frame.ssh` argument list. A complete
+replica is verified on the frame before activation; matching authority binaries
+are installed separately from the signed renderer artifact. Unchanged server
+bytes do not cause a restart. The builder and frame release stores are pruned
+to their active release after publication. The Mac serving/tunnel/collector
+LaunchAgents are retired. No obsolete release history is required.
 
 ```sh
 python3 scripts/watch-dashboard.py --config /ABS/RUNTIME/config.json

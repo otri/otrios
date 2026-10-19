@@ -72,7 +72,10 @@ async fn open(
     } else {
         None
     };
-    ws.max_message_size(otrios_core::canvas::MAX_BYTES + 1)
+    // Most session frames are small. Avoid reserving the library's 128 KiB
+    // read buffer for every idle peer; complete messages retain the same bounds.
+    ws.read_buffer_size(4096)
+        .max_message_size(otrios_core::canvas::MAX_BYTES + 1)
         .max_frame_size(otrios_core::canvas::MAX_BYTES + 1)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
@@ -374,7 +377,7 @@ mod tests {
         let (state_available, _) = watch::channel(true);
         let (release_changed, _) = watch::channel(release('a'));
         let app = Arc::new(App {
-            ink: ink::Room::new().unwrap(),
+            ink: ink::Room::new(8).unwrap(),
             auth: None,
             apps: Mutex::new(None),
             state_config: StateConfig {
@@ -393,6 +396,7 @@ mod tests {
             origins: vec![],
             peers: Arc::new(Semaphore::new(4)),
             public_peers: Arc::new(Semaphore::new(4)),
+            peer_limits: [4, 4],
         });
         let locked = app.apps.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

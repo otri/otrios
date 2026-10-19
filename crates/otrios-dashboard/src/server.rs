@@ -57,6 +57,7 @@ struct App {
     origins: Vec<String>,
     peers: Arc<Semaphore>,
     public_peers: Arc<Semaphore>,
+    peer_limits: [usize; 2],
 }
 fn persist(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let nonce = SystemTime::now()
@@ -361,7 +362,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
     let (catalogs, roots) = hub.counts();
     let presentation = !hub.view().is_empty();
     drop(guard);
-    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":32-app.public_peers.available_permits(),"trusted_sessions":64-app.peers.available_permits(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
+    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":app.peer_limits[1]-app.public_peers.available_permits(),"trusted_sessions":app.peer_limits[0]-app.peers.available_permits(),"peer_limits":app.peer_limits,"ink_subscribers":app.ink.subscribers(),"ink_limit":app.peer_limits.iter().sum::<usize>(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
     match path {
@@ -479,6 +480,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut public_bind = None;
     let mut auth_file = None;
     let mut session_seconds = 8 * 60 * 60;
+    let mut trusted_peers = 64;
+    let mut public_peers = 32;
     let mut state_file: Option<PathBuf> = None;
     let mut app_state = None;
     let mut explicit_presentation = None;
@@ -496,6 +499,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--apps"=>source=PathBuf::from(args.next().ok_or("Missing app source directory")?),
         "--auth-file"=>auth_file=Some(PathBuf::from(args.next().ok_or("Missing auth file")?)),
         "--session-seconds"=>session_seconds=args.next().ok_or("Missing session duration")?.parse::<u64>()?,
+        "--trusted-peers"=>trusted_peers=args.next().ok_or("Missing trusted peer limit")?.parse::<usize>()?,
+        "--public-peers"=>public_peers=args.next().ok_or("Missing public peer limit")?.parse::<usize>()?,
         "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
         "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release directory")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
@@ -505,6 +510,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if !bind.parse::<std::net::SocketAddr>()?.ip().is_loopback() {
         return Err("Development authority must bind loopback".into());
+    }
+    if !(1..=64).contains(&trusted_peers) || !(1..=4096).contains(&public_peers) {
+        return Err("Peer limits must be 1..=64 trusted and 1..=4096 public".into());
     }
     let app_state = app_state.or_else(|| state_file.as_ref().map(|p| p.with_extension("apps")));
     let presentation_file = explicit_presentation.or_else(|| {
@@ -529,7 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (state_available, _) = watch::channel(false);
     let (release_changed, _) = watch::channel(release.clone());
     let app = Arc::new(App {
-        ink: ink::Room::new()?,
+        ink: ink::Room::new(trusted_peers + public_peers)?,
         auth,
         apps: Mutex::new(None),
         state_config: StateConfig {
@@ -546,8 +554,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         release: RwLock::new(release),
         changed,
         origins,
-        peers: Arc::new(Semaphore::new(64)),
-        public_peers: Arc::new(Semaphore::new(32)),
+        peers: Arc::new(Semaphore::new(trusted_peers)),
+        public_peers: Arc::new(Semaphore::new(public_peers)),
+        peer_limits: [trusted_peers, public_peers],
     });
     tokio::spawn(recover_state(app.clone()));
     let observer = app.clone();

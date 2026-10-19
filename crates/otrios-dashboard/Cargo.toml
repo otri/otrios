@@ -76,3 +76,13 @@ required-features = ["canvas", "host-sync"]
 name = "session-bootstrap"
 path = "src/session_bootstrap.rs"
 required-features = ["host-sync"]
+
+[[bin]]
+name = "canvas-session-stress"
+path = "src/canvas_session_stress.rs"
+required-features = ["canvas", "host-sync"]
+
+[[bin]]
+name = "canvas-burst-stress"
+path = "src/canvas_burst_stress.rs"
+required-features = ["canvas", "host-sync"]

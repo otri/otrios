@@ -26,3 +26,10 @@ are documented in [resource ownership](ARCHITECTURE-RESOURCES.md) and the shared
 The old `/demo/ink` endpoint is a retired-route tombstone. New clients subscribe
 through the opening/control messages on `/session`, independently of state codec
 work, while using the same connection.
+
+Ink subscription capacity follows the authority's combined trusted/public peer
+quota (68 on the frame's 4/64 configuration). Viewing the Playground enables
+ink even while idle, so a separate smaller room cap must not evict otherwise
+admitted clients. Each session has at most one ink subscription. This admission
+bound is distinct from a measured interactive capacity or latency guarantee;
+see the [complete-client burst qualification](experiments/frame-burst-capacity-2026-10-20.md).

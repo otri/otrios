@@ -133,6 +133,18 @@ class SignedReleases(unittest.TestCase):
         (self.out/staged['id']/'web/app.js').write_text('tampered')
         with self.assertRaises(ValueError):activation.verify(self.out,self.public,OPENSSL,json.dumps(staged).encode())
 class ArtifactBudget(unittest.TestCase):
+    def test_plain_http_is_limited_to_literal_loopback_and_bootstrap_uses_ws(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        for url in ['https://state.example','http://127.0.0.1:8876','http://[::1]:8876']:
+            agent.validate_origin(url)
+        for url in ['http://localhost:8876','http://127.0.0.1.example:8876','http://192.168.1.2','http://127.1','https://user:secret@state.example','http://127.0.0.1:8876/path','ftp://127.0.0.1']:
+            with self.assertRaises(ValueError):agent.validate_origin(url)
+        release={'id':'a'*64,'web_entry':'/releases/'+('a'*64)+'/web/index.html'}
+        for url,expected in [('http://127.0.0.1:8876','ws://127.0.0.1:8876/session'),('https://state.example','wss://state.example/session')]:
+            with patch.object(agent.subprocess,'run',return_value=SimpleNamespace(stdout=json.dumps({'type':'hello','version':1,'release':release}))) as run:
+                self.assertEqual(agent.bootstrap_release(SimpleNamespace(url=url)),release)
+                self.assertEqual(run.call_args.args[0][1],expected)
     def test_lru_pins_blob_bytes_and_oversized_admission(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=pathlib.Path(tmp)

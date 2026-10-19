@@ -10,7 +10,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 3 {
         return Err("Usage: session-bootstrap WSS_URL CURRENT_HASH_OR_EMPTY".into());
     }
-    if !args[1].starts_with("wss://") && !args[1].starts_with("ws://127.0.0.1:") {
+    if !args[1].starts_with("wss://")
+        && !args[1].starts_with("ws://127.0.0.1:")
+        && !args[1].starts_with("ws://[::1]:")
+    {
         return Err("TLS or loopback required".into());
     }
     let _ = rustls::crypto::ring::default_provider().install_default();

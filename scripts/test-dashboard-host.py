@@ -4,8 +4,9 @@
 import argparse,base64,hashlib,http.client,json,pathlib,secrets,socket,urllib.parse
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--credentials',type=pathlib.Path,required=True);p.add_argument('--connect-ip',help='DNS override retaining TLS hostname verification');p.add_argument('--state-unavailable',action='store_true');a=p.parse_args()
-    fields=dict(line.split(': ',1)for line in a.credentials.read_text().splitlines()if ': 'in line)
+    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--credentials',type=pathlib.Path);p.add_argument('--public-only',action='store_true',help='Skip authenticated login checks');p.add_argument('--connect-ip',help='DNS override retaining TLS hostname verification');p.add_argument('--state-unavailable',action='store_true');a=p.parse_args()
+    if not a.public_only and not a.credentials:p.error('--credentials is required unless --public-only is selected')
+    fields=dict(line.split(': ',1)for line in a.credentials.read_text().splitlines()if ': 'in line) if a.credentials else {'Username':'unused','Password':'unused'}
     username,password=fields['Username'],fields['Password'];url=urllib.parse.urlsplit(a.url)
     if url.scheme not in ('http','https') or url.path not in ('','/'):p.error('Supply the origin URL')
     if a.connect_ip:
@@ -72,6 +73,8 @@ def main():
     assert request('/monitoring/presentation',extra={'Authorization':basic})[0]==401;count+=1
     assert request('/monitoring/presentation',method='HEAD')[0]==401;count+=1
     assert request('/health')[0]==200;count+=1
+    if a.public_only:
+        print(f'PASS {count} checks: public signed code, release/session negotiation, private/admin isolation and anonymous denial (login not tested)');return
     def login(password,origin):return request('/auth/session',method='POST',extra={'Origin':origin,'X-OTriOS-Request':'session','Content-Type':'application/json'},body=json.dumps({'username':username,'password':password}).encode())
     assert login(password,'https://unrelated.example')[0]==403;count+=1
     assert login('wrong-password',a.url.rstrip('/'))[0]==401;count+=1

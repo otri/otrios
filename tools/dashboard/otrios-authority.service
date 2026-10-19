@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=OTriOS local code and state authority
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+User=otrios
+Group=otrios
+StateDirectory=otrios-authority
+StateDirectoryMode=0750
+UMask=0077
+ExecStart=/opt/otrios-authority/dashboard-server --bind 127.0.0.1:8876 --public-bind 127.0.0.1:8877 --trusted-peers 4 --public-peers 64 --app-state /var/lib/otrios-authority/state.apps --presentation-file /var/lib/otrios-authority/state.presentation.flex --releases /var/lib/otrios-authority/releases --auth-file /etc/otrios-authority/monitoring-auth.json --origin https://otrios.otri.ca
+Restart=on-failure
+RestartSec=2
+MemoryHigh=192M
+MemoryMax=256M
+TasksMax=64
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
