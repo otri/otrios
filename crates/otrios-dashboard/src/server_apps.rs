@@ -225,16 +225,6 @@ impl Hub {
                             &bounded(path, canvas::MAX_BYTES)?,
                         )?,
                     )?
-                } else if let Some(old) = file
-                    .as_ref()
-                    .map(|p| p.with_extension("automerge"))
-                    .filter(|p| p.exists())
-                {
-                    Document::import_legacy(
-                        description.state_schema,
-                        &a.state_ref,
-                        &bounded(&old, canvas::MAX_BYTES)?,
-                    )?
                 } else {
                     Document::new(description.state_schema, &a.state_ref)?
                 };

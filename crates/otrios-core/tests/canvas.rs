@@ -486,10 +486,8 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
 }
 
 #[test]
-fn legacy_layout_bytes_are_unchanged_and_resize_rules_require_v2() {
-    use otrios_core::dashboard::layout::{DEFAULT_LAYOUT, Layout};
-    let legacy = Layout::bootstrap().unwrap();
-    assert_eq!(Layout::encode(legacy.blueprint()).unwrap(), DEFAULT_LAYOUT);
+fn resize_rules_require_v2_and_component_root_owns_its_size() {
+    use otrios_core::dashboard::layout::Layout;
     let ui = layout::ui();
     let parsed = Layout::from_bytes(&ui.layout).unwrap();
     assert_eq!(parsed.blueprint().schema, "otrios-layout-v2");
@@ -601,7 +599,7 @@ fn projected_scene_is_reused_until_selected_state_changes() {
     assert!(Arc::ptr_eq(&changed, &c.scene().unwrap()));
 }
 #[test]
-fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
+fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
     use otrios_core::dashboard::layout::Layout;
     use otrios_interfaces::layout::{Binding, Expr, Responder, Shape};
     let ui = home::ui();
@@ -613,17 +611,23 @@ fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
         .find(|n| matches!(n.shape, Shape::Text { .. }))
         .unwrap();
     if let Shape::Text { value, .. } = &mut heading.shape {
-        *value = Expr::State(Binding::Enabled);
+        *value = Expr::State(Binding::Local(65000));
     }
     let bytes = Layout::encode(&blueprint).unwrap();
     let err = Layout::from_bytes(&bytes)
         .unwrap()
         .resolve_slots(&std::collections::BTreeMap::new())
         .unwrap_err();
-    assert!(err.contains("Dashboard bindings are unavailable"));
+    assert!(err.contains("Missing local binding"));
     // Even an unlabeled/hidden old responder is rejected, rather than ignored or
     // interpreted as an event with the same numeric index.
-    for responder in [Responder::ToggleFocus, Responder::AppNavigate(250)] {
+    for responder in [
+        Responder::AppEvent {
+            control: 127,
+            drag: false,
+        },
+        Responder::AppNavigate(250),
+    ] {
         let mut bad = home::ui();
         let mut b = Layout::from_bytes(&bad.layout).unwrap().blueprint().clone();
         let root = &mut b.templates[0].root;

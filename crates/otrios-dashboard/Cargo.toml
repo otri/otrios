@@ -36,10 +36,6 @@ name = "dashboard-server"
 path = "src/server.rs"
 required-features = ["server"]
 
-[[bin]]
-name = "dashboard-layout"
-path = "src/layout_tool.rs"
-
 [dev-dependencies]
 tungstenite = "=0.30.0"
 

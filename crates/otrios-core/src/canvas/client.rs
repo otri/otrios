@@ -884,7 +884,7 @@ impl Client {
             return Ok(false);
         }
         if pad && let Some(g) = &delivery.gesture {
-            m.ink.gesture_normalized(event.id, g, m.now);
+            m.ink.gesture(event.id, g, m.now);
             m.invalidate();
         }
         // Pad moves are transient presentation data. Only the released point is
@@ -1487,7 +1487,7 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
                 n.children
-                    .extend(ink.nodes_normalized([n.frame.width, n.frame.height], 4_000_000_000));
+                    .extend(ink.nodes([n.frame.width, n.frame.height], 4_000_000_000));
             } else {
                 for c in &mut n.children {
                     append(c, control, ink)

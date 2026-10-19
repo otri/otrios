@@ -65,7 +65,7 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
             ui_ref: app.ui_ref.clone(),
             title: id.into(),
             state_schema: fields,
-            layout: Layout::bootstrap().unwrap().bytes().to_vec(),
+            layout: empty_layout().bytes().to_vec(),
             // Tests read/edit this field; declare it as a view dependency so
             // selective replication does not intentionally omit it.
             selectors: vec![Selector {
@@ -319,8 +319,38 @@ pub fn cookie(room: &Room) -> String {
         .unwrap()
         .to_string()
 }
+fn empty_layout() -> Layout {
+    use otrios_interfaces::layout::*;
+    let number = |n| Expr::Literal(Value::Number(n));
+    let blueprint = Blueprint {
+        schema: "otrios-layout-v2".into(),
+        templates: vec![Template {
+            id: 1,
+            name: "Test canvas".into(),
+            parameters: vec![],
+            root: TemplateNode {
+                id: 0,
+                frame: [number(0.), number(0.), Expr::Width, Expr::Height],
+                visible: Expr::Literal(Value::Boolean(true)),
+                shape: Shape::Canvas { clip: true },
+                resize: None,
+                responder: None,
+                semantics: None,
+                children: vec![],
+            },
+        }],
+        root: Instance {
+            id: 0,
+            template: 1,
+            frame: [0., 0., 1280., 800.],
+            properties: vec![],
+            children: vec![],
+        },
+    };
+    Layout::from_bytes(&Layout::encode(&blueprint).unwrap()).unwrap()
+}
 pub fn view(room: &Room) -> Vec<u8> {
-    let mut blueprint = Layout::bootstrap().unwrap().blueprint().clone();
+    let mut blueprint = empty_layout().blueprint().clone();
     blueprint.root.children.clear();
     let bytes = Layout::encode(&blueprint).unwrap();
     assert_eq!(

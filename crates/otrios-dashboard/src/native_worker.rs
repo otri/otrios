@@ -419,7 +419,7 @@ pub(super) fn state_worker(
             ),
             Ordering::Release,
         );
-        dirty |= client.tick(now, otrios_core::dashboard::signal::wall_time_seconds())?;
+        dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
         for bytes in ink_rx.try_iter().take(64) {
             dirty |= client.receive_ink(&bytes, now)?;
         }

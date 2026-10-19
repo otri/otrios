@@ -48,7 +48,7 @@ impl Peer {
     }
     fn pump(&mut self, now: u64) -> Result<()> {
         self.client
-            .tick(now, otrios_core::dashboard::signal::wall_time_seconds())?;
+            .tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
         while let Some(b) = self.client.outgoing()? {
             self.sent += (b.len() + 1) as u64;
             self.sent_ws += wire(b.len() + 1, true);

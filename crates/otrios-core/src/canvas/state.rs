@@ -706,41 +706,6 @@ impl Document {
         };
         encode_state_response(&response).map(Some)
     }
-    /// One-time trusted-file import. The network protocol never accepts Automerge.
-    pub fn import_legacy(schema: StateSchema, scope: &str, data: &[u8]) -> Result<Self> {
-        use automerge::{AutoCommit, ROOT, ReadDoc};
-        if data.len() > MAX_BYTES {
-            return Err("Legacy state size limit".into());
-        }
-        let old = AutoCommit::load(data).map_err(err)?;
-        if old
-            .get(ROOT, "scope")
-            .map_err(err)?
-            .and_then(|v| v.0.as_str().map(str::to_owned))
-            .as_deref()
-            != Some(scope)
-            || old
-                .get(ROOT, "schema")
-                .map_err(err)?
-                .and_then(|v| v.0.as_bytes().map(<[u8]>::to_vec))
-                != Some(encode_schema(&schema)?)
-        {
-            return Err("Legacy schema/scope mismatch".into());
-        }
-        let mut doc = Self::new(schema, scope)?;
-        let mut values = Vec::new();
-        for f in &doc.schema.fields {
-            let raw = old
-                .get(ROOT, format!("f{}", f.id))
-                .map_err(err)?
-                .ok_or("Missing legacy field")?;
-            let value: Value = decode(raw.0.as_bytes().ok_or("Legacy value is not typed binary")?)?;
-            validate_value(f, &value)?;
-            values.push((f.id, value));
-        }
-        doc.set_typed_authority(&values)?;
-        Ok(doc)
-    }
 }
 
 #[derive(Clone)]
@@ -1684,27 +1649,5 @@ mod tests {
         doc.wall = RESUME_SECONDS + 101;
         assert!(doc.open_session(&0_u128.to_le_bytes(), 1).is_err());
         assert!(doc.open_session(&[255; 16], 0).is_ok());
-    }
-    #[test]
-    fn trusted_legacy_import_preserves_values_but_network_rejects_legacy_bytes() {
-        use automerge::{AutoCommit, ROOT, transaction::Transactable};
-        let mut old = AutoCommit::new();
-        old.put(ROOT, "scope", "test").unwrap();
-        old.put(ROOT, "schema", encode_schema(&schema()).unwrap())
-            .unwrap();
-        for f in schema().fields {
-            let value = if f.id == 1 {
-                Value::Number(730.)
-            } else {
-                f.default
-            };
-            old.put(ROOT, format!("f{}", f.id), bytes(&value).unwrap())
-                .unwrap();
-        }
-        let data = old.save();
-        let doc = Document::import_legacy(schema(), "test", &data).unwrap();
-        assert_eq!(doc.value(1).unwrap(), 730);
-        assert!(Document::load(schema(), "test", &data).is_err());
-        assert!(Document::import_legacy(schema(), "wrong", &data).is_err());
     }
 }

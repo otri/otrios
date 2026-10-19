@@ -223,7 +223,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
             .join(format!("{id}-{}.merkle", hex(&hash(state_ref.as_bytes()))));
         common::stored_file(&file, ui.state_schema, &state_ref)
     };
-    let wall = otrios_core::dashboard::signal::wall_time_seconds();
+    let wall = otrios_core::dashboard::clock::wall_time_seconds();
     assert!(
         read_app("component-playground")
             .signal(1, wall, 300)
@@ -231,7 +231,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     );
     edit(&mut layout.c, "Toggle", 0);
     layout.settle();
-    let wall = otrios_core::dashboard::signal::wall_time_seconds();
+    let wall = otrios_core::dashboard::clock::wall_time_seconds();
     let history = read_app("layout-lab");
     assert!(
         !history.signal(3, wall + 1, 300).is_empty(),

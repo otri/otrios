@@ -14,11 +14,7 @@ otrios-interfaces = { path = "../otrios-interfaces" }
 canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex"]
 merkle = ["dep:sha2"]
 default = []
-dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
-
-[dependencies.automerge]
-version = "=0.12.0"
-optional = true
+dashboard = ["otrios-interfaces/layout", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
 
 [dependencies.flexbuffers]
 version = "=25.12.19"
