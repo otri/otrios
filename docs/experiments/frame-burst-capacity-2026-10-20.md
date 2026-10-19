@@ -33,6 +33,8 @@ Prospective acceptance gates, fixed before collecting the new results:
 
 - Every requested client mounts, receives its ink welcome and remains connected.
 - At least 95% of scheduled move samples are offered; missed samples are counted.
+  Drawing must also emit at least 95% of scheduled ink moves, with down/up
+  boundaries verified, so an empty or heavily coalesced stream cannot pass.
 - Ink delivery to other clients: p95 <=250 ms and p99 <=500 ms, measured from
   generator send to receipt, including the frame and Tailnet relay round trip.
 - No missing or duplicate measured ink deliveries after draining; no frames are
