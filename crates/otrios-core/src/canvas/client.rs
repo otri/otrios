@@ -41,9 +41,7 @@ struct Mount {
     stress_workload: Option<StressWorkload>,
     keyboard_pointer: Option<u32>,
     view: Option<Layout>,
-    pending: BTreeMap<u16, Value>,
     pad_preview: BTreeMap<u16, Value>,
-    sent_at: u64,
 }
 struct Request {
     epoch: u32,
@@ -119,8 +117,15 @@ pub struct Client {
     sign_out_requested: bool,
     writer: Option<[u8; 16]>,
     legacy_transport: bool,
+    dispatch: DispatchPolicy,
 }
 impl Client {
+    pub fn set_dispatch_policy(&mut self, policy: DispatchPolicy) {
+        self.dispatch = policy;
+        if let Some(m) = &mut self.active {
+            m.doc.set_dispatch_policy(policy);
+        }
+    }
     /// Select legacy response vectors for interoperability diagnostics.
     /// Configure before mounting; negotiated response encoding belongs to a lease.
     pub fn set_legacy_transport(&mut self, legacy: bool) {
@@ -235,21 +240,12 @@ impl Client {
         if self.requested.is_some() || self.decision.is_some() {
             return false;
         }
-        self.local
-            || self
-                .active
-                .as_mut()
-                .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed())
+        self.local || self.active.as_mut().is_none_or(|m| m.doc.confirmed())
     }
     /// A reconnect/mount handshake must not strand an idle old runtime. Only
     /// unconfirmed user intent and active input prevent code replacement.
     pub fn reload_ready(&self) -> bool {
-        !self.input_busy()
-            && (self.local
-                || self
-                    .active
-                    .as_ref()
-                    .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed()))
+        !self.input_busy() && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
     }
     pub fn presentation(&self) -> Option<Presentation> {
         self.active.as_ref().and_then(|m| m.ui.presentation.clone())
@@ -328,7 +324,9 @@ impl Client {
         if self.confirmed() {
             0
         } else {
-            self.active.as_ref().map_or(0, |m| m.pending.len().max(1))
+            self.active
+                .as_ref()
+                .map_or(0, |m| m.doc.pending_count().max(1))
         }
     }
     pub fn open(&mut self, ui_ref: &str, state_ref: &str) {
@@ -529,15 +527,14 @@ impl Client {
                             writer: self.writer.ok_or("Missing writer nonce")?,
                         },
                     )?;
+                    candidate.doc.set_dispatch_policy(self.dispatch);
                     if let Some(old) = &self.active
                         && old.state_ref == candidate.state_ref
                         && old.ui.state_schema == candidate.ui.state_schema
                     {
                         candidate.doc.restore_pending(&old.doc)?;
-                        candidate.pending = old.pending.clone();
                         candidate.now = old.now;
                         candidate.wall = old.wall;
-                        candidate.sent_at = old.sent_at;
                         candidate.refresh()?;
                     }
                     candidate.session_controls = self.session_controls;
@@ -744,9 +741,7 @@ impl Client {
             return Err("Behavior exceeded event field scope".into());
         }
         if h.kind != GestureKind::Activate {
-            for (id, value) in commands {
-                m.pending.insert(id, Value::Number(f32::from(value)));
-            }
+            m.doc.defer(&commands)?;
             m.refresh()
         } else if m.doc.set(&commands)? {
             m.refresh()
@@ -926,7 +921,7 @@ impl Client {
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {
-            m.flush()?;
+            m.doc.flush_pending();
         }
         Ok(changed)
     }
@@ -1045,6 +1040,7 @@ impl Client {
     pub fn cancel(&mut self) -> Result<bool> {
         if let Some(m) = &mut self.active {
             m.input.cancel_all();
+            m.doc.flush_pending();
             m.keyboard.cancel();
             m.keyboard_pointer = None;
             m.ink.cancel();
@@ -1074,9 +1070,7 @@ impl Client {
         };
         m.now = now;
         m.doc.set_wall_time(wall);
-        if now.saturating_sub(m.sent_at) >= 33 {
-            m.flush()?;
-        }
+        m.doc.advance(now);
         let clock = m.wall != wall
             && m.ui
                 .selectors
@@ -1174,25 +1168,10 @@ impl Mount {
     fn read(&self, id: u16) -> Result<Value> {
         self.pad_preview
             .get(&id)
-            .or_else(|| self.pending.get(&id))
             .or_else(|| self.snapshot.get(&id))
             .cloned()
             .map(Ok)
             .unwrap_or_else(|| self.doc.typed_value(id))
-    }
-    fn flush(&mut self) -> Result<bool> {
-        if self.pending.is_empty() {
-            return Ok(false);
-        }
-        let commands = self
-            .pending
-            .iter()
-            .map(|(k, v)| (*k, v.clone()))
-            .collect::<Vec<_>>();
-        let changed = self.doc.set_typed(&commands)?;
-        self.pending.clear();
-        self.sent_at = self.now;
-        Ok(changed)
     }
     fn invalidate(&mut self) {
         self.scene.take();
@@ -1405,9 +1384,7 @@ fn qualify(
         stress_workload: None,
         keyboard_pointer: None,
         view: None,
-        pending: BTreeMap::new(),
         pad_preview: BTreeMap::new(),
-        sent_at: 0,
     };
     m.visible = selected_values(&m)?;
     resolve_scene(&m)?;

@@ -355,12 +355,14 @@ impl Document {
         if commands.len() > MAX_FIELDS {
             return Err("Canvas command batch limit".into());
         }
-        let mut ids = std::collections::BTreeSet::new();
+        let mut ids = 0_u64;
         for (id, v) in commands {
             let f = self.field(*id)?;
-            if !ids.insert(id) || (!authority && !f.writable) {
+            let bit = 1_u64 << (*id - 1); // Admitted fields are 1..=64.
+            if ids & bit != 0 || (!authority && !f.writable) {
                 return Err("Read-only or duplicated Canvas field".into());
             }
+            ids |= bit;
             validate_value(f, v)?;
         }
         Ok(())
@@ -719,12 +721,42 @@ struct Flight {
     values: Vec<(u16, Value)>,
     sent: bool,
 }
+/// Bounded scheduling of unissued continuous numeric assignments. Transactions
+/// and issued causal writes are never split or replaced by this policy.
+#[derive(Clone, Copy, Debug)]
+pub struct DispatchPolicy {
+    interval_ms: u64,
+    max_fields: usize,
+}
+impl Default for DispatchPolicy {
+    fn default() -> Self {
+        Self {
+            interval_ms: 33,
+            max_fields: MAX_FIELDS,
+        }
+    }
+}
+impl DispatchPolicy {
+    pub fn new(interval_ms: u64, max_fields: usize) -> Result<Self> {
+        if interval_ms > 1000 || !(1..=MAX_FIELDS).contains(&max_fields) {
+            return Err("Dispatch policy outside bounded limits".into());
+        }
+        Ok(Self {
+            interval_ms,
+            max_fields,
+        })
+    }
+}
 /// RAM-only pending intents, separate from authoritative causal metadata.
 pub struct StateAdapter {
     doc: Document,
     writer: [u8; 16],
     replica: Option<merkle::Replica>,
     pending: BTreeMap<u16, Value>,
+    dispatch: DispatchPolicy,
+    clock: u64,
+    last_issue: Option<u64>,
+    deadline: Option<u64>,
     flight: Option<Flight>,
     acknowledged: u64,
     slot: Option<usize>,
@@ -745,6 +777,10 @@ impl StateAdapter {
             writer,
             replica: None,
             pending: BTreeMap::new(),
+            dispatch: DispatchPolicy::default(),
+            clock: 0,
+            last_issue: None,
+            deadline: None,
             flight: None,
             acknowledged: 0,
             slot: None,
@@ -762,6 +798,10 @@ impl StateAdapter {
             return Err("Pending intent scope mismatch".into());
         }
         self.pending = old.pending.clone();
+        self.dispatch = old.dispatch;
+        self.clock = old.clock;
+        self.last_issue = old.last_issue;
+        self.deadline = old.deadline;
         self.flight = old.flight.clone();
         if let Some(f) = &mut self.flight {
             f.sent = false;
@@ -835,7 +875,54 @@ impl StateAdapter {
                 .collect::<Vec<_>>(),
         )
     }
+    pub fn set_dispatch_policy(&mut self, policy: DispatchPolicy) {
+        self.dispatch = policy;
+        if let Some(deadline) = &mut self.deadline {
+            *deadline = (*deadline).min(self.last_issue.map_or(self.clock, |at| {
+                at.saturating_add(policy.interval_ms).max(self.clock)
+            }));
+        }
+    }
+    /// Host monotonic milliseconds; backwards samples cannot postpone a batch.
+    pub fn advance(&mut self, now: u64) {
+        self.clock = self.clock.max(now);
+    }
+    pub fn pending_count(&self) -> usize {
+        self.pending.len() + self.flight.as_ref().map_or(0, |f| f.values.len())
+    }
+    /// Finish a gesture immediately; acknowledgements and replay bypass this timer.
+    pub fn flush_pending(&mut self) {
+        self.deadline = (!self.pending.is_empty()).then_some(self.clock);
+    }
+    pub fn defer(&mut self, values: &[(u16, u16)]) -> Result<bool> {
+        if values.len() > MAX_FIELDS {
+            return Err("Canvas command batch limit".into());
+        }
+        // Bounded numeric staging uses stack storage, not a Vec per touch sample.
+        let mut numeric: [(u16, Value); MAX_FIELDS] =
+            std::array::from_fn(|_| (0, Value::Number(0.)));
+        for ((id, number), slot) in values.iter().zip(&mut numeric) {
+            *slot = (*id, Value::Number(f32::from(*number)));
+        }
+        let changed = self.queue(&numeric[..values.len()])?;
+        if changed && self.deadline.is_none() {
+            self.deadline = Some(self.last_issue.map_or(self.clock, |at| {
+                at.saturating_add(self.dispatch.interval_ms).max(self.clock)
+            }));
+        }
+        if self.pending.len() >= self.dispatch.max_fields {
+            self.flush_pending();
+        }
+        Ok(changed)
+    }
     pub fn set_typed(&mut self, values: &[(u16, Value)]) -> Result<bool> {
+        let changed = self.queue(values)?;
+        if changed {
+            self.flush_pending();
+        }
+        Ok(changed)
+    }
+    fn queue(&mut self, values: &[(u16, Value)]) -> Result<bool> {
         self.doc.validate_commands(values, false)?;
         let mut changed = false;
         for (id, value) in values {
@@ -871,6 +958,11 @@ impl StateAdapter {
             .map(Some);
         }
         if self.flight.is_none() && !self.pending.is_empty() {
+            if self.deadline.is_some_and(|at| self.clock < at) {
+                return Ok(None);
+            }
+            self.deadline = None;
+            self.last_issue = Some(self.clock);
             let values = std::mem::take(&mut self.pending).into_iter().collect();
             self.flight = Some(Flight {
                 sequence: self
@@ -993,6 +1085,95 @@ mod tests {
             }
         }
         panic!("adapter did not settle");
+    }
+    #[test]
+    fn dispatch_deadline_coalesces_without_postponing_and_control_bypasses_it() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        c.advance(100);
+        c.defer(&[(1, 100)]).unwrap();
+        let first = c.generate().unwrap().unwrap();
+        assert!(matches!(
+            decode_state_request(&first).unwrap(),
+            StateRequest::Write { sequence: 1, .. }
+        ));
+        doc.receive(&mut session, &first).unwrap();
+        c.receive(&doc.generate(&mut session).unwrap().unwrap())
+            .unwrap();
+        c.advance(101);
+        c.defer(&[(1, 200)]).unwrap();
+        let ack = c.generate().unwrap().unwrap();
+        assert!(
+            matches!(
+                decode_state_request(&ack).unwrap(),
+                StateRequest::Ack { .. }
+            ),
+            "ACK bypasses a deferred write"
+        );
+        doc.receive(&mut session, &ack).unwrap();
+        assert!(c.generate().unwrap().is_none());
+        c.advance(120);
+        c.defer(&[(1, 700)]).unwrap();
+        c.advance(132);
+        assert!(c.generate().unwrap().is_none());
+        c.advance(133);
+        let next = c.generate().unwrap().unwrap();
+        assert!(
+            matches!(decode_state_request(&next).unwrap(), StateRequest::Write { sequence: 2, values } if values == vec![(1, Value::Number(700.))])
+        );
+        doc.receive(&mut session, &next).unwrap();
+        c.receive(&doc.generate(&mut session).unwrap().unwrap())
+            .unwrap();
+        // Explicit final release must not wait for another 33 ms interval.
+        c.advance(134);
+        c.defer(&[(1, 900)]).unwrap();
+        c.flush_pending();
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(doc.value(1).unwrap(), 900);
+        // A new idle gesture does not inherit an old force-flush flag.
+        c.flush_pending();
+        c.advance(135);
+        c.defer(&[(1, 800)]).unwrap();
+        c.advance(1);
+        assert!(c.generate().unwrap().is_none());
+        c.advance(167);
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(doc.value(1).unwrap(), 800);
+    }
+    #[test]
+    fn dispatch_keeps_issued_replay_atomic_and_rebases_the_latest_unsent_value() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        c.set_dispatch_policy(DispatchPolicy::new(100, 1).unwrap());
+        c.defer(&[(1, 100)]).unwrap();
+        let issued = c.generate().unwrap().unwrap();
+        c.advance(1);
+        c.defer(&[(1, 900)]).unwrap();
+        assert_eq!(c.pending_count(), 2);
+        assert!(c.generate().unwrap().is_none(), "one uncertain write only");
+        c.reconnect();
+        let replay = c.generate().unwrap().unwrap();
+        assert_eq!(replay, issued, "issued values/sequence are immutable");
+        doc.receive(&mut session, &replay).unwrap();
+        c.receive(&doc.generate(&mut session).unwrap().unwrap())
+            .unwrap();
+        let ack = c.generate().unwrap().unwrap();
+        assert!(matches!(
+            decode_state_request(&ack).unwrap(),
+            StateRequest::Ack { .. }
+        ));
+        // The configured field threshold flushes the whole queued assignment.
+        let latest = c.generate().unwrap().unwrap();
+        assert!(
+            matches!(decode_state_request(&latest).unwrap(), StateRequest::Write { sequence: 2, values } if values == vec![(1,Value::Number(900.))])
+        );
+        assert!(DispatchPolicy::new(1001, 1).is_err());
+        assert!(DispatchPolicy::new(1, 0).is_err());
+        assert!(DispatchPolicy::new(1, MAX_FIELDS + 1).is_err());
     }
     #[test]
     fn ram_pending_writes_coalesce_and_receipts_survive_durable_reload() {
