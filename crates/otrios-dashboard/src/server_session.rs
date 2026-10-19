@@ -72,7 +72,10 @@ async fn open(
     } else {
         None
     };
-    ws.max_message_size(otrios_core::canvas::MAX_BYTES + 1)
+    // Most session frames are small. Avoid reserving the library's 128 KiB
+    // read buffer for every idle peer; complete messages retain the same bounds.
+    ws.read_buffer_size(4096)
+        .max_message_size(otrios_core::canvas::MAX_BYTES + 1)
         .max_frame_size(otrios_core::canvas::MAX_BYTES + 1)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
