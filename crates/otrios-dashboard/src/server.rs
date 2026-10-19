@@ -361,7 +361,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
     let (catalogs, roots) = hub.counts();
     let presentation = !hub.view().is_empty();
     drop(guard);
-    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
+    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":32-app.public_peers.available_permits(),"trusted_sessions":64-app.peers.available_permits(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
     match path {

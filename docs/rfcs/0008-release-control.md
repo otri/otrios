@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0008: stable release hello and upgrade events
 
+Deployment/process separation is superseded by [RFC 0009](0009-unified-server-session.md). The stable v1 envelope below remains the compatibility boundary; current operation uses one server/session.
+
+
 Status: implemented; deployment evidence is recorded separately. Scope: code
 bootstrap only. App-state sync, authentication and Merkle transport retain their
 own versions and policy. The present state protocol remains `otrios-canvas-sync-v2`;

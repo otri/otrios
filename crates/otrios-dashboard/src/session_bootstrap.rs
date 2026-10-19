@@ -2,7 +2,7 @@
 //! One-shot cold-start hello. Exits before the renderer opens its host session.
 #[path = "session_client.rs"]
 mod session_client;
-use otrios_interfaces::{release::MAX_BYTES, session::ServerControl};
+use otrios_interfaces::session::{MAX_CONTROL_BYTES, ServerControl};
 use std::time::Duration;
 use tungstenite::{Message, stream::MaybeTlsStream};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,8 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args[1].as_str(),
         Some(
             tungstenite::protocol::WebSocketConfig::default()
-                .max_message_size(Some(MAX_BYTES))
-                .max_frame_size(Some(MAX_BYTES)),
+                .max_message_size(Some(MAX_CONTROL_BYTES))
+                .max_frame_size(Some(MAX_CONTROL_BYTES)),
         ),
         0,
     )?;

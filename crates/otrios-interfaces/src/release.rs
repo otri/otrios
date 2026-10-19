@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Stable bootstrap control. Keep v1 readable when app/state protocols change.
 use serde::{Deserialize, Serialize};
-pub const VERSION: u32 = 1;
-pub const MAX_BYTES: usize = 8192;
-pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v2";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Release {
     pub id: String,
@@ -25,39 +22,4 @@ pub fn valid_hash(id: &str) -> bool {
 }
 pub fn valid_protocol(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.bytes().all(|c| c.is_ascii_graphic())
-}
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum ClientMessage {
-    Hello {
-        version: u32,
-        release: Option<String>,
-        state_protocol: String,
-    },
-}
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum ServerMessage {
-    Hello {
-        version: u32,
-        release: Release,
-        refresh: bool,
-    },
-    Upgrade {
-        version: u32,
-        release: Release,
-        refresh: bool,
-    },
-}
-impl ServerMessage {
-    pub fn release(&self) -> &Release {
-        match self {
-            Self::Hello { release, .. } | Self::Upgrade { release, .. } => release,
-        }
-    }
-    pub fn version(&self) -> u32 {
-        match self {
-            Self::Hello { version, .. } | Self::Upgrade { version, .. } => *version,
-        }
-    }
 }

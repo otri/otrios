@@ -3,8 +3,10 @@
 use super::*;
 use futures_util::stream::SplitSink;
 use otrios_interfaces::{
-    release::{self, MAX_BYTES, STATE_PROTOCOL, VERSION},
-    session::{self as wire, ClientControl, ServerControl},
+    release,
+    session::{
+        self as wire, ClientControl, MAX_CONTROL_BYTES, STATE_PROTOCOL, ServerControl, VERSION,
+    },
 };
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -125,7 +127,7 @@ async fn peer(
     else {
         return;
     };
-    if bytes.len() > MAX_BYTES {
+    if bytes.len() > MAX_CONTROL_BYTES {
         return;
     }
     let Ok(ClientControl::Hello {
@@ -253,7 +255,7 @@ async fn peer(
                         }
                     }
                     Message::Text(text) => {
-                        if text.len() > MAX_BYTES || !state_enabled {
+                        if text.len() > MAX_CONTROL_BYTES || !state_enabled {
                             break;
                         }
                         if window.elapsed() >= Duration::from_secs(1) {

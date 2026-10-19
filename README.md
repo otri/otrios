@@ -65,4 +65,4 @@ fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding
 workspace, with a separately measured interactive-socket change. Their
 [frame measurements](docs/experiments/canvas-replication-pipeline.md) compare each
 increment against its immediate control using fresh disposable authorities.
-These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](docs/rfcs/0008-release-control.md) on the code host, independently of state sync ([deployment acceptance](docs/experiments/release-hello-deployment.md)). Packed envelopes and optional compression are subsequent experiments.
+These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](docs/rfcs/0008-release-control.md) inside the [unified server session](docs/rfcs/0009-unified-server-session.md), independently of state decoding ([deployment acceptance](docs/experiments/release-hello-deployment.md)). Packed envelopes and optional compression are subsequent experiments.

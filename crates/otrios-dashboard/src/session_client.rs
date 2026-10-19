@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Small synchronous bootstrap shared by CLI clients/tests. No CRDT decoding.
-use otrios_interfaces::{
-    release::{MAX_BYTES, STATE_PROTOCOL, VERSION},
-    session::{ClientControl, ServerControl},
+use otrios_interfaces::session::{
+    ClientControl, MAX_CONTROL_BYTES, STATE_PROTOCOL, ServerControl, VERSION,
 };
 use std::{
     io::{Read, Write},
@@ -22,7 +21,7 @@ pub fn hello(release: Option<String>, state: bool) -> Message {
     )
 }
 pub fn decode(text: &str) -> Result<ServerControl, String> {
-    if text.len() > MAX_BYTES {
+    if text.len() > MAX_CONTROL_BYTES {
         return Err("Control size exceeded".into());
     }
     let event: ServerControl = serde_json::from_str(text).map_err(|e| e.to_string())?;

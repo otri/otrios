@@ -57,7 +57,8 @@ test('back-forward cache resumes one owner without reusing connection epochs',()
  r.session.resume();r.peers[1].event();assert.equal(r.session.epoch,epoch+1);assert(!r.session.sendState(new Uint8Array([3]),epoch));r.session.stop();
 });
 test('browser and native/server share the same declared codec version',async()=>{
- const {readFile}=await import('node:fs/promises');const {STATE_PROTOCOL}=await import('../web/shared/session.mjs');
- const source=await readFile(new URL('../crates/otrios-interfaces/src/release.rs',import.meta.url),'utf8');
+ const {readFile}=await import('node:fs/promises');const {STATE_PROTOCOL,CONTROL_VERSION}=await import('../web/shared/session.mjs');
+ const source=await readFile(new URL('../crates/otrios-interfaces/src/session.rs',import.meta.url),'utf8');
+ assert.equal(CONTROL_VERSION,1);assert.match(source,/VERSION: u32 = 1/);
  assert.equal(STATE_PROTOCOL,source.match(/STATE_PROTOCOL: &str = "([^"]+)"/)[1]);
 });
