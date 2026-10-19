@@ -65,7 +65,9 @@ one bounded RAM intent queue and coherent UI-derived Merkle coverage, including
 only the writer's own receipt. The global dashboard replica and Automerge dependency
 are retired; [resource diagnostics](docs/ARCHITECTURE-RESOURCES.md) are shared by both hosts.
 [Browser/frame qualification and measurements](docs/experiments/canvas-foundation.md)
-record lower replication traffic, mixed latency results and the remaining work.
+record lower replication traffic and mixed latency results. The final
+[retirement and browser/frame acceptance](docs/experiments/runtime-retirement.md)
+closes this bounded foundation milestone, including explicit validation costs.
 
 The [bounded replication increments](docs/rfcs/0007-bounded-replication-pipeline.md)
 fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding

@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0010: Practical Canvas runtime foundation
 
-Status: accepted direction, implementation in progress on
+Status: implemented, qualified and deployed on
 `feat/canvas-replication-pipeline`. This is the active dashboard milestone.
 The user approved completing this foundation on 2026-10-19. Main and the
 historical benchmark branch are not deployment targets for this work.
 The [first foundation rollout](../experiments/canvas-foundation.md) is live;
 The [packed transport/resource follow-up](../experiments/canvas-packed-wire.md) is
-also live; dependency and host retirement remain active.
+also live. The [final retirement and acceptance](../experiments/runtime-retirement.md)
+closes this bounded milestone on 2026-10-20. Broader OS research remains separate.
 
 ## Selection rule
 
@@ -29,15 +30,15 @@ Source implementation, automated acceptance and live acceptance are separate
 facts. An item is complete only when its applicable gates have evidence here or
 in a linked experiment. Commit each independently reviewable increment.
 
-| Work | Existing foundation | Remaining gate |
+| Work | Implemented foundation | Completion evidence |
 | --- | --- | --- |
 | One edit pipeline | Deployed: one pending map, one immutable issued batch, deadlines/final flush and bounded intent payloads | Passed runtime/browser/frame qualification; maintain these semantics through subsequent codec changes |
-| Selective Merkle replication | Deployed sync v3: admitted UI coverage and writer-local receipts advance coherently | Passed fixed-field/subtree isolation, resync and policy gates; collection queries remain explicitly outside this milestone |
-| Universal app boundary | All seven apps use `Canvas(uiRef, stateRef)` packages | Audit host/demo branches and dependencies, keep launcher opaque; remove obsolete routes/imports after parity; update stale ownership docs |
-| Presentation ownership | Animation, focus/caret, ink and GPU resources are local | Delayed-state tests retain immediate local feedback and clock progression; no document checkpoints or duplicate writable view state |
+| Selective Merkle replication | Deployed sync v4: admitted UI coverage and writer-local receipts advance coherently | Passed fixed-field/subtree isolation, resync and policy gates; collection queries remain explicitly outside this milestone |
+| Universal app boundary | All seven apps use `Canvas(uiRef, stateRef)` packages | Passed final ownership audit and browser/frame parity; obsolete global paths/imports removed; Monitoring owns its view templates |
+| Presentation ownership | Animation, focus/caret, ink and GPU resources are local | Passed delayed-state/worker tests, staged animation/3D checks and exact signed frame GPU trial with 250 ms worker stalls; no document checkpoints or duplicate writable view state |
 | Resource bounds | Intent payload/field limits, DispatchUsage, message/cache/journal limits and one-flight replication | Shared host diagnostics and [ownership/bounds audit](../ARCHITECTURE-RESOURCES.md) implemented; workspace checks, six native worker tests and 18 Node session/worker tests pass; live browser/frame diagnostics verified; no whole-process allocation claim |
 | Canonical data and transport | Deployed sync v4: one bounded packed codec, canonical bytes unchanged; [RFC 0011](0011-packed-canvas-transport.md) | Passed malformed/oversize/version, 24 frame trials and browser/direct-frame rollout; normal replication stays raw after measured LZ4 costs; control hello remains v1 |
-| Retirement and acceptance | Old renderer/global-room paths and unused Snapshot override removed; first browser/frame rollout passes | Audit remaining legacy dependencies and codecs; retain one direct renderer and rerun relevant acceptance on each cutover |
+| Retirement and acceptance | Old renderer/global-room paths and unused Snapshot override removed; first browser/frame rollout passes | Passed final source/dependency audit, 12 matched frame replication trials, staged/live browser and direct frame; Automerge/SDL app paths retired, one renderer and authority retained |
 
 ## Edit and presentation semantics
 
@@ -147,17 +148,21 @@ Related: [dispatch measurements](../experiments/canvas-dispatch.md),
 [selector semantics](0003-module-roots-and-state-selectors.md), and
 [unified session](0009-unified-server-session.md).
 
-### Next retirement pass
+### Completed retirement pass
 
-The packed/resource follow-up is qualified and live. Remaining source-audit
-candidates are `dashboard::Replica`/`SyncSession`, the old
-`dashboard::presentation::Presentation` intent overlay, Automerge-backed
-`motion::Stress` (the active Canvas load uses `StressWorkload`), and the trusted
-`.automerge` startup import in `canvas::Document`/`server_apps`. These retain the
-Automerge dependency in the default shared dashboard feature even though live
-app roots now use canonical Merkle files. Trace shared geometry/layout/signal
-helpers and meaningful tests before removing them; retain their current Canvas
-behavior rather than restoring an old global-room host. All seven live roots
-were loaded successfully on the v4 cutover. Existing historical benchmark code
-remains available at its fixed benchmark branch. Final audit/retirement and the
-ensuing acceptance are required before closing this goal.
+The [final report](../experiments/runtime-retirement.md) records the deleted global
+replica/intent overlay, old serializers/control branches, Automerge dependency
+and startup import, SDL selection and obsolete frame service. Generic primitives,
+static Monitoring aggregates and stable control compatibility remain deliberate
+boundaries. A safe Flex structural preflight closes a demonstrated malformed
+reader panic. Required checks, Linux CI, staged/live browser and one direct frame
+renderer qualify the signed release `c549b460…`; canonical server state is retained.
+
+Twelve matched frame trials preserve final convergence, delivery counts and
+roughly the same latency/traffic. CPU medians rise modestly; the report investigates
+added validation work without claiming isolated attribution. The authority binary
+shrinks 28.75%, while guarded client binaries grow slightly. Exact signed GPU
+trials maintain ~55 FPS under state-worker stalls, with missed vblanks disclosed.
+This is a bounded ownership/correctness/maintenance milestone, not a universal
+speedup or completed general-purpose OS. All applicable ledger gates above have
+evidence; no required implementation work remains in this milestone.

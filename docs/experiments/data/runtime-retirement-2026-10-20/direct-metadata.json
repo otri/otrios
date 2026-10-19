@@ -1,0 +1,46 @@
+{
+  "reference": {
+    "commit": "157ca5b00fa14c28ecb95f4895a1d061cee8b99d",
+    "source_status": "",
+    "source_archive_sha256": "eba7dd5ada294b257c176c96b262517a5f468d68df3a0bf52c46974b910a8ed0",
+    "binaries": {
+      "dashboard-direct": "f539eb4dd1da1de00ae9fc0aade7da215b2a7285c4fc01a8124bba533c637dff",
+      "canvas-adapter-bench": "15087692269f5f61830b69afc93401ed927b7e2aeb32a4cc146fe4765f0ecacb",
+      "merkle_tree_cost": "7e83ef8ae346a5f2d914713f76e918a45ef2570b4f58937809e2c38e320d4846",
+      "dashboard-server": "92b0b3b273b60fdc44365f32977b990e57435c7d2139874035598786c9f74c95"
+    }
+  },
+  "candidate": {
+    "commit": "42157f5f08753bbf04354283421e2cabbe6c934f",
+    "source_status": " M README.md\n M docs/MONITORING.md\n",
+    "source_archive_sha256": "c5a710fcb0863ccde3a0421b5618e1e3edf1c02c22ee4081a3295ed68900aec0",
+    "binaries": {
+      "dashboard-direct": "3d9f41bc24875d8cbfeafdc24fc6aece38a70a49e928812d905d435bb150622e",
+      "canvas-adapter-bench": "029cd295c90af7931474fecad91eb09ce548d0c26cfa0dca08845c4fdd867d1d",
+      "merkle_tree_cost": "6354a8285e07d14bc72749563ca06e27a1ffb367f33c5bc15a052aa1f06b42ce",
+      "dashboard-server": "b7d2bc43338be16c807dd521171eca190518b17e2cdec816e4b862bb71420813"
+    }
+  },
+  "legacy_reference": false,
+  "mode": "burst",
+  "reference_session": "/session",
+  "candidate_session": "/session",
+  "relay_delay_ms_per_chunk_each_direction": 0,
+  "rates_hz": "10,120",
+  "updates": 120,
+  "warmup": 20,
+  "repetitions": 3,
+  "catalog_sha256": "3944cecef69c77868c4f2a85a269edd744d42ffd149cf6061d2463b26c113dbd",
+  "frame": "RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk",
+  "method": "open-loop numeric assignments and final release; two real clients on frame; fresh durable authority per trial; native live renderer left running; private Tailscale raw TCP; CPU includes mount/warm-up/waits",
+  "releases": {
+    "reference": {
+      "id": "4578253065f32cc7e2fe8f04f022333756854fab6f46f74eced142cd9fcd5030",
+      "sync_protocol": "otrios-canvas-sync-v4"
+    },
+    "candidate": {
+      "id": "c549b460eee88add24a97436221150d06477f057bdc512d60d54b40a022eae42",
+      "sync_protocol": "otrios-canvas-sync-v4"
+    }
+  }
+}
