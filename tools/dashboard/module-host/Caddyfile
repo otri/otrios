@@ -17,6 +17,12 @@
             rewrite * /index.html
             file_server
         }
+        handle /release/events {
+            reverse_proxy {$OTRIOS_RELEASE_UPSTREAM:host.docker.internal:8879} {
+                header_up -Authorization
+                header_up -Cookie
+            }
+        }
         handle /release {
             root * /srv/modules
             rewrite * /current.json

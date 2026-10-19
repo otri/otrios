@@ -16,7 +16,7 @@ server = ["otrios-core/canvas", "dep:axum", "dep:tokio", "dep:serde_json", "dep:
 
 [dependencies]
 otrios-core = { path = "../otrios-core", features = ["dashboard"] }
-otrios-interfaces = { path = "../otrios-interfaces" }
+otrios-interfaces = { path = "../otrios-interfaces", features = ["release"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
@@ -75,3 +75,13 @@ required-features = ["canvas", "host-sync"]
 name = "canvas-adapter-bench"
 path = "src/canvas_adapter_bench.rs"
 required-features = ["canvas", "host-sync"]
+
+[[bin]]
+name = "release-control"
+path = "src/release_control.rs"
+required-features = ["server"]
+
+[[bin]]
+name = "release-watch"
+path = "src/release_watch.rs"
+required-features = ["host-sync"]

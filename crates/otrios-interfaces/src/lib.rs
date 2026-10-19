@@ -65,3 +65,6 @@ pub mod keyboard;
 pub mod canvas;
 
 pub mod merkle;
+
+#[cfg(feature = "release")]
+pub mod release;
