@@ -64,8 +64,11 @@ State roots. The trusted native listener retains unattended private access;
 browser grants come from the existing server session cookie. Authentication is
 never a CRDT field.
 
-The public browser transport is `/apps/stream`; the authority sends a scoped
-Mounted/AcceptMount/Sync stream and release notices. Session revocation invalidates private
+The public browser transport is `/session`; its stable opening hello negotiates
+state compatibility before the channel-1 Mounted/AcceptMount/Sync stream starts.
+Release/upgrade control remains available independently of state recovery, and
+channel 2 carries ephemeral ink on that same socket. The old `/apps/stream` and
+`/demo/ink` routes are retired. Session revocation invalidates private
 mounts. The browser drops their scene, controls and private working state rather
 than retaining a hidden private view. Sign-in reconnects the transport so its
 upgrade carries the new HttpOnly cookie. The browser verifies the catalog against
@@ -151,8 +154,12 @@ than compatibility requirements for app navigation.
 
 Shared authoring lives in `tools/canvas/authoring.rs`; stable builders can move to
 the SDK without copying LGPL runtime implementation into permissive packages.
-General OS loading, arbitrary capability imports, multi-object transactions,
-Merkle state replication and collection selectors are not completed by this work.
+App-scoped Merkle state replication is deployed. The generic library now also
+supports coherent coverage over multiple authorized paths; Canvas integration
+and general collection selectors remain in progress. General OS loading,
+arbitrary capability imports and cross-app transactions remain outside this
+milestone. Follow the [foundation completion ledger](rfcs/0010-runtime-foundation.md)
+for current source, acceptance and deployment gates.
 
 ## Rounded corners
 
