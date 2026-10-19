@@ -156,6 +156,19 @@ fn main() {
                 },
                 300,
             );
+            let owned_encode = cost(
+                || {
+                    let inner = encode_state_response(black_box(&inner_value)).unwrap();
+                    black_box(
+                        encode_server(&ServerMessage::Sync {
+                            epoch: 1,
+                            bytes: inner,
+                        })
+                        .unwrap(),
+                    );
+                },
+                300,
+            );
             let raw_decode = cost(
                 || {
                     black_box(packed_read(black_box(&raw)));
@@ -175,7 +188,7 @@ fn main() {
                 300,
             );
             println!(
-                "{{\"repetition\":{repetition},\"case\":\"{name}\",\"canonical_frame_bytes\":{},\"flex_bytes\":{},\"packed_bytes\":{},\"lz4_bytes\":{},\"compressed\":{compressed},\"flex_encode_us\":{flex_encode:.3},\"flex_access_us\":{flex_access:.3},\"packed_encode_us\":{raw_encode:.3},\"packed_decode_us\":{raw_decode:.3},\"lz4_encode_us\":{lz4_encode:.3},\"lz4_decode_us\":{lz4_decode:.3}}}",
+                "{{\"repetition\":{repetition},\"case\":\"{name}\",\"canonical_frame_bytes\":{},\"flex_bytes\":{},\"packed_bytes\":{},\"lz4_bytes\":{},\"compressed\":{compressed},\"flex_encode_us\":{flex_encode:.3},\"flex_access_us\":{flex_access:.3},\"packed_encode_us\":{raw_encode:.3},\"packed_owned_encode_us\":{owned_encode:.3},\"packed_decode_us\":{raw_decode:.3},\"lz4_encode_us\":{lz4_encode:.3},\"lz4_decode_us\":{lz4_decode:.3}}}",
                 frame.len(),
                 old.len(),
                 raw.len(),
