@@ -6,6 +6,13 @@ Validate whether independent Linux processes can share immutable object revision
 
 The user requested a shared touch dashboard after this initial research plan. [DASHBOARD.md](DASHBOARD.md) defines that bounded product experiment: native GLES2 on the Rockchip frame, WebGL in a browser, a shared Rust compositor, CRDT edits and complete immutable view snapshots. It does not satisfy P1–P5's Linux IPC/shared-memory acceptance gates. The milestones below remain the runtime research backlog.
 
+The active dashboard milestone is the [practical runtime foundation](rfcs/0010-runtime-foundation.md):
+one bounded edit pipeline, selective Merkle replication, shared Canvas app
+ownership, independent presentation and one maintainable versioned transport.
+Its completion ledger distinguishes implementation, automated checks and live
+browser/frame acceptance. Structural cleanup and measured optimization have
+separate acceptance criteria.
+
 ## Active incremental hierarchy experiment
 
 After tagging the verified Canvas baseline, the next bounded runtime increment
