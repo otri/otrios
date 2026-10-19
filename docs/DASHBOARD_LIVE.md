@@ -39,8 +39,9 @@ can reconnect with pending edits; crashing or closing it can lose unacknowledged
 work. Code/fonts/blobs are disposable caches, not document checkpoints.
 `--state FILE` now supplies a legacy filename prefix only: app state lives in
 `FILE` with extension `.apps`, and the feed cache uses `.presentation.flex`.
-The old monolithic document is neither loaded nor written. This cutover starts
-fresh app state, as authorized by the user.
+The old monolithic document is neither loaded nor written. The Merkle cutover imports current values from trusted per-app `.automerge` files
+only when the new checkpoint is absent, retaining those files for recovery.
+Legacy operation history and signal history are not imported. See [acceptance](experiments/canvas-merkle-adapter-validation.md).
 
 ## Signed publication
 

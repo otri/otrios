@@ -1,8 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0006: Durable Canvas Merkle state adapter
 
-Status: implementation and local acceptance; deployed host evidence is recorded
-separately. Extends RFC 0005 without changing primitive rendering or app UI v2.
+Status: deployed on browser and photo frame; [acceptance evidence](../experiments/canvas-merkle-adapter-validation.md) records migration, reconnect and policy checks. Extends RFC 0005 without changing primitive rendering or app UI v2.
 
 ## Ownership and conflict policy
 

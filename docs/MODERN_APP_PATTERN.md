@@ -95,19 +95,19 @@ the presentation clock continues independently.
 Monitoring uses a private, read-only, replaceable FlexBuffers Layout aggregate.
 Its app owns navigation/header composition; the authority supplies the current
 weekly chart projection with gaps preserved. Feed replacement does not append
-metric samples or binary layouts to Automerge history. This is the current
+metric samples or binary layouts to durable CRDT history. This is the current
 aggregate-view contract, not a general query or analytics engine.
 
 A Canvas retains an immutable resolved scene until selected presentation inputs
-change. Unselected state changes and acknowledgements do not rebuild it. Sync is
-still per app document: this is not RFC 0002 Merkle subtree replication, and
-collection/item/cursor selectors from RFC 0003 remain unimplemented.
+change. Unselected state changes and acknowledgements do not rebuild it. Sync now uses app-scoped Merkle subtree leases with server-owned durable state
+and RAM-only pending intents ([RFC 0006](rfcs/0006-durable-canvas-merkle-adapter.md)).
+General collection/item/cursor selectors from RFC 0003 remain unimplemented.
 
 Current bounds include 64 schema fields, 4 KiB text values, 2,016 series points
-and 512 KiB Canvas messages/artifacts. Durable CRDT history has a slightly lower
-byte budget to leave transport headroom. Exhaustion fails explicitly; general
-history compaction, unlimited documents and schema migration are not supplied by
-this cutover. A schema change needs an explicit compatible migration or new
+and 512 KiB Canvas messages/artifacts. The durable adapter bounds writer receipts
+to 1,024 per app with a 24-hour resume window, rotates its journal at 4 MiB
+and fails explicitly on exhaustion. Unlimited documents, general history GC
+and arbitrary schema migration are not supplied by this cutover. A schema change needs an explicit compatible migration or new
 State reference.
 
 ## Fonts and graphics

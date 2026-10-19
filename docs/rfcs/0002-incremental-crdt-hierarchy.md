@@ -2,7 +2,7 @@
 
 Status: design with a first bounded implementation in [RFC 0005](0005-merkle-subtree-prototype.md):
 immutable hierarchy, causal registers and scoped subtree transport/joins. The
-live dashboard still uses Automerge. The original hash-cost experiment below
+live dashboard now uses the durable Canvas adapter in [RFC 0006](0006-durable-canvas-merkle-adapter.md). The original hash-cost experiment below
 remains a hash-only measurement; it is not the new materialized-tree benchmark.
 
 [RFC 0003](0003-module-roots-and-state-selectors.md) develops the module boundary,

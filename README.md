@@ -2,7 +2,7 @@
 
 OTriOS explores an operating environment built on Linux hardware support, immutable shared objects, reactive views, and streamable executable modules. This repository starts with a small Linux userspace proof of concept for the object model.
 
-The repository contains experimental Rust contract types, immutable aggregate manifest validation, and a [shared dashboard experiment](docs/DASHBOARD.md): Automerge state, immutable FlexBuffers view snapshots, and a Rust compositor shared by native OpenGL ES 2 and browser WebGL hosts. Touch updates stream through a persistent central research-room service. A private Tailscale HTTPS deployment supports signed, state-preserving code reloads on both hosts; see [live development](docs/DASHBOARD_LIVE.md). The photo frame target uses native graphics, without a browser. Its [primitive scene tree and responder chain](docs/SCENE_TREE.md) are shared by both hosts. [Binary layout templates and instances](docs/BINARY_LAYOUT.md) can be edited and streamed live without rebuilding their code. A [Prometheus monitoring view](docs/MONITORING.md) recreates the main service overview with seven days of actual history and five-minute refreshes. The [Home Screen and core keyboard](docs/HOME_AND_INPUT.md) provide local demo navigation, consistent Back/Home, and a shared primitive-based input lab.
+The repository contains experimental Rust contract types, immutable aggregate manifest validation, and a [shared dashboard experiment](docs/DASHBOARD.md): server-owned Merkle state with RAM-only client intents, immutable FlexBuffers view snapshots, and a Rust compositor shared by native OpenGL ES 2 and browser WebGL hosts. Touch updates stream through a persistent central research-room service. A private Tailscale HTTPS deployment supports signed, state-preserving code reloads on both hosts; see [live development](docs/DASHBOARD_LIVE.md). The photo frame target uses native graphics, without a browser. Its [primitive scene tree and responder chain](docs/SCENE_TREE.md) are shared by both hosts. [Binary layout templates and instances](docs/BINARY_LAYOUT.md) can be edited and streamed live without rebuilding their code. A [Prometheus monitoring view](docs/MONITORING.md) recreates the main service overview with seven days of actual history and five-minute refreshes. The [Home Screen and core keyboard](docs/HOME_AND_INPUT.md) provide local demo navigation, consistent Back/Home, and a shared primitive-based input lab.
 
 The general content store, Linux shared-memory IPC, live Canvas subtree subscriptions, OS module loader, and capability enforcement remain unimplemented. The Canvas app runtime executes bounded Wasm behavior; it does not complete the planned Linux runtime.
 
@@ -52,7 +52,8 @@ The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines 
 
 The [bounded Merkle hierarchy and subtree transport](docs/rfcs/0005-merkle-subtree-prototype.md)
 now provide immutable incremental hashing, causal multi-value registers, scoped
-replication/resync and partial-subtree joins as an opt-in research library. The
-live apps continue to use Automerge. The pre-Merkle baseline is tagged
+replication/resync and partial-subtree joins. The live [Canvas state adapter](docs/rfcs/0006-durable-canvas-merkle-adapter.md) uses app-scoped Merkle replication,
+server-side field policy and durable intent receipts; pending edits stay in RAM.
+Browser/frame [deployment acceptance](docs/experiments/canvas-merkle-adapter-validation.md) records the cutover. The pre-Merkle baseline is tagged
 `2026-10-19-canvas-apps-milestone`; performance results distinguish actual tree
 updates from network, durable storage and display latency.
