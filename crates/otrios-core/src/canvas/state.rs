@@ -969,8 +969,8 @@ impl StateAdapter {
     }
     fn queue(&mut self, values: &[(u16, Value)]) -> Result<bool> {
         self.doc.validate_commands(values, false)?;
-        // Check the whole candidate before cloning any payload or changing the
-        // overlay. Replacement frees its previous pending payload in this budget;
+        // Check the whole candidate before copying payloads into the queue or
+        // changing the overlay. Replacement frees its previous pending payload in this budget;
         // immutable issued values remain charged until durably confirmed.
         let usage = self.dispatch_usage();
         let mut retained = usage.pending_payload_bytes + usage.issued_payload_bytes;

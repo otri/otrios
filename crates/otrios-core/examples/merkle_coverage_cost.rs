@@ -9,9 +9,16 @@ fn path(kind: u64, slot: u64) -> Path {
 fn edit(path: Path, number: u64, size: usize) -> Edit {
     let mut bytes = vec![0; size];
     bytes[..8].copy_from_slice(&number.to_le_bytes());
+    // Real Canvas leaf schema hashes bind the stable field/receipt slot. Keep
+    // synthetic leaves distinct too, rather than deduplicating equal defaults
+    // across every slot and understating initial materialization costs.
+    let mut schema = [7; 32];
+    for (key, lane) in path.iter().zip(schema.chunks_exact_mut(8)) {
+        lane.copy_from_slice(&key.to_le_bytes());
+    }
     Edit {
         path,
-        schema: [7; 32],
+        schema,
         value: Some(bytes),
     }
 }
