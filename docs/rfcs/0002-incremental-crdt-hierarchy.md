@@ -92,6 +92,11 @@ This establishes hash-work cost only, not implementation of the proposed runtime
 
 ## Acceptance experiments
 
+[RFC 0007](0007-bounded-replication-pipeline.md) defines the incremental allocation,
+semantic consolidation, packed transport and optional compression experiment.
+It preserves causal metadata and durable acknowledgment while keeping local
+presentation independent of dispatch cadence.
+
 - Measure leaf edit, canonicalization, ancestor copying/hashing, merge, view
   invalidation, allocation and wire size separately on this Cortex-A7 and Wasm.
 - Vary leaf size, path depth, fanout and populated-tree size. Unrelated branches
