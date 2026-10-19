@@ -101,6 +101,8 @@ impl StressWorkload {
 }
 #[derive(Default)]
 pub struct Client {
+    wire_clock: u64,
+    decode_budget: DecodeBudget,
     generation: u32,
     requested: Option<Request>,
     decision: Option<MountDecision>,
@@ -115,7 +117,6 @@ pub struct Client {
     session_controls: bool,
     sign_out_requested: bool,
     writer: Option<[u8; 16]>,
-    legacy_transport: bool,
     dispatch: DispatchPolicy,
 }
 impl Client {
@@ -124,11 +125,6 @@ impl Client {
         if let Some(m) = &mut self.active {
             m.doc.set_dispatch_policy(policy);
         }
-    }
-    /// Select legacy response vectors for interoperability diagnostics.
-    /// Configure before mounting; negotiated response encoding belongs to a lease.
-    pub fn set_legacy_transport(&mut self, legacy: bool) {
-        self.legacy_transport = legacy;
     }
     pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
         self.font = Some(font);
@@ -375,6 +371,9 @@ impl Client {
         self.open("app:home/ui", "app:home/state");
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.catalog.is_none() {
+            return Ok(None);
+        }
         let writer = match self.writer {
             Some(w) => w,
             None => {
@@ -418,7 +417,6 @@ impl Client {
                 catalog_hash: self.catalog_hash.clone(),
                 known_code: self.cache.iter().map(|v| v.0.clone()).collect(),
                 writer: writer.to_vec(),
-                binary: !self.legacy_transport,
                 resume: self
                     .active
                     .as_ref()
@@ -471,6 +469,7 @@ impl Client {
         Ok(changed)
     }
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
+        self.decode_budget.admit(bytes, self.wire_clock)?;
         match decode_server(bytes)? {
             ServerMessage::View { epoch, bytes } => {
                 let Some(m) = &mut self.active else {
@@ -1054,6 +1053,7 @@ impl Client {
         Ok(true)
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        self.wire_clock = self.wire_clock.max(now);
         let Some(m) = &mut self.active else {
             return Ok(false);
         };

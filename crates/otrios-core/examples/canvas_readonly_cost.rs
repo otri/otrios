@@ -33,7 +33,7 @@ fn main() -> Result<()> {
             let before = doc.clone();
             let started = Instant::now();
             let (mut session, changed) = doc.open_session(&writer, 0)?;
-            session.set_binary_transport(true);
+
             let frame = doc.generate(&mut session)?.ok_or("No reader mount")?;
             let mut client = StateAdapter::new(schema.clone(), "reader-cost", &frame, writer)?;
             assert!(client.confirmed());

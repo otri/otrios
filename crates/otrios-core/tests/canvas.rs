@@ -976,7 +976,32 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
 fn code_reload_waits_for_intents_but_not_an_idle_mount_handshake() {
     let mut fresh = Client::default();
     fresh.open("app:component-playground/ui", "fresh");
-    fresh.outgoing().unwrap();
+    assert!(
+        fresh.outgoing().unwrap().is_none(),
+        "catalog must be admitted before mounting"
+    );
+    let ui = playground::ui(&code());
+    fresh
+        .admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![CatalogEntry {
+                    app: App {
+                        id: "component-playground".into(),
+                        title: ui.title.clone(),
+                        ui_ref: ui.ui_ref.clone(),
+                        state_ref: "fresh".into(),
+                        status: "canvas-app".into(),
+                        dependencies: vec![],
+                    },
+                    ui_hash: hash(&encode_ui(&ui).unwrap()),
+                    private: false,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(fresh.outgoing().unwrap().is_some());
     assert!(!fresh.confirmed());
     assert!(
         fresh.reload_ready(),

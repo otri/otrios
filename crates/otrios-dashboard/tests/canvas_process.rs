@@ -309,7 +309,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
                 known_code: vec![],
                 writer: vec![9; 16],
                 resume: 0,
-                binary: false,
+
                 catalog_hash: hash(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap()),
             })
             .unwrap(),

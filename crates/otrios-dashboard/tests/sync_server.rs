@@ -29,7 +29,6 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
-            binary: false,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -45,7 +44,6 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
-            binary: false,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -167,7 +165,6 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
-            binary: false,
         },
     );
     assert!(matches!(
@@ -221,7 +218,6 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
-            binary: false,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 2) else {
@@ -255,7 +251,6 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
-            binary: false,
         },
     );
     assert!(matches!(
@@ -339,7 +334,6 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: client.resume_sequence(),
-            binary: false,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
@@ -354,9 +348,9 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
 }
 
 #[test]
-fn negotiated_blob_and_legacy_mounts_both_confirm_durable_edits() {
+fn packed_mounts_confirm_durable_edits_for_independent_writers() {
     let room = room(false, 28800);
-    for binary in [false, true] {
+    for writer_id in [11, 12] {
         let mut socket = socket(&room.public, None);
         send(
             &mut socket,
@@ -366,9 +360,8 @@ fn negotiated_blob_and_legacy_mounts_both_confirm_durable_edits() {
                 state_ref: "app:demo/state".into(),
                 catalog_hash: canvas::hash(&room.catalog),
                 known_code: vec![],
-                writer: vec![if binary { 12 } else { 11 }; 16],
+                writer: vec![writer_id; 16],
                 resume: 0,
-                binary,
             },
         );
         let ServerMessage::Mounted { state, .. } = read(&mut socket) else {
@@ -378,7 +371,7 @@ fn negotiated_blob_and_legacy_mounts_both_confirm_durable_edits() {
             room.schema.clone(),
             "app:demo/state",
             &state,
-            [if binary { 12 } else { 11 }; 16],
+            [writer_id; 16],
         )
         .unwrap();
         accept(&mut socket, 1);
@@ -387,7 +380,7 @@ fn negotiated_blob_and_legacy_mounts_both_confirm_durable_edits() {
             &mut socket,
             &mut client,
             1,
-            if binary { 882 } else { 881 },
+            if writer_id == 12 { 882 } else { 881 },
         );
         assert!(client.confirmed());
     }
@@ -412,7 +405,6 @@ fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
                 known_code: vec![],
                 writer: vec![id; 16],
                 resume: 0,
-                binary: true,
             },
         );
         let ServerMessage::Mounted { ui, state, .. } = read(&mut socket) else {

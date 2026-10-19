@@ -27,13 +27,13 @@ impl Drop for Rig {
 }
 fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     let content = format!("<p>signed-store fixture {nonce}</p>");
-    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v3","assets":{"web/index.html":{"bytes":content.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(content.as_bytes()))}}})).unwrap();
+    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v4","assets":{"web/index.html":{"bytes":content.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(content.as_bytes()))}}})).unwrap();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let folder = root.join(&id);
     fs::create_dir_all(folder.join("web")).unwrap();
     fs::write(folder.join("manifest.json"), raw).unwrap();
     fs::write(folder.join("web/index.html"), content).unwrap();
-    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v3"});
+    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v4"});
     let mut f = fs::File::create(root.join("pending.json")).unwrap();
     f.write_all(r.to_string().as_bytes()).unwrap();
     drop(f);
@@ -64,7 +64,7 @@ fn complete_release(root: &Path) -> Vec<u8> {
             assets.insert(name.clone(), item);
         }
     }
-    let raw=serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v3","assets":assets,"authority":authority}).to_string().into_bytes();
+    let raw=serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v4","assets":assets,"authority":authority}).to_string().into_bytes();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let folder = root.join(&id);
     fs::create_dir_all(&folder).unwrap();
@@ -74,7 +74,7 @@ fn complete_release(root: &Path) -> Vec<u8> {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, bytes).unwrap();
     }
-    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v3"});
+    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v4"});
     fs::write(root.join("pending.json"), r.to_string()).unwrap();
     fs::rename(root.join("pending.json"), root.join("current.json")).unwrap();
     catalog
@@ -192,7 +192,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     // Opening control v1 still supplies the new release to the previous live
     // state codec. Its state stream remains blocked until the client upgrades.
     let mut previous_state = socket(&rig.public, "/session");
-    hello(&mut previous_state, 1, "otrios-canvas-sync-v2", true);
+    hello(&mut previous_state, 1, "otrios-canvas-sync-v3", true);
     assert!(matches!(
         event(&mut previous_state),
         ServerControl::Hello {
@@ -239,7 +239,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     }
     // Stable alias is metadata only even when a caller asks for state.
     let mut alias = socket(&rig.public, "/release/events");
-    hello(&mut alias, 1, "otrios-canvas-sync-v3", true);
+    hello(&mut alias, 1, "otrios-canvas-sync-v4", true);
     assert!(matches!(
         event(&mut alias),
         ServerControl::Hello {
@@ -254,7 +254,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     assert!(!matches!(early.read(), Ok(Message::Binary(_))));
     // A later complete publication recovers state without replacing the process/socket.
     let mut waiting = socket(&rig.public, "/session");
-    hello(&mut waiting, 1, "otrios-canvas-sync-v3", true);
+    hello(&mut waiting, 1, "otrios-canvas-sync-v4", true);
     assert!(matches!(
         event(&mut waiting),
         ServerControl::Hello {
@@ -288,7 +288,6 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
             writer: vec![7; 16],
             resume: 0,
             known_code: vec![],
-            binary: true,
         },
     );
     assert!(matches!(

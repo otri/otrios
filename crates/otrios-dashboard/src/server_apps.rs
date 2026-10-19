@@ -43,7 +43,6 @@ struct Lease {
     private: bool,
     sync: Session,
     view_id: Vec<u8>,
-    binary: bool,
 }
 #[derive(Default)]
 struct Leases {
@@ -118,7 +117,7 @@ impl Hub {
                 let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
                 if manifest["format"] != "otrios-release-v1"
                     || manifest["state_schema"] != "otrios-canvas-merkle-state-v1"
-                    || manifest["sync_protocol"] != "otrios-canvas-sync-v3"
+                    || manifest["sync_protocol"] != "otrios-canvas-sync-v4"
                 {
                     return Err("Installed release app protocol mismatch".into());
                 }
@@ -347,7 +346,6 @@ impl Hub {
                 known_code,
                 writer,
                 resume,
-                binary,
             } => {
                 if epoch == 0
                     || epoch <= leases.last_epoch
@@ -382,7 +380,6 @@ impl Hub {
                 );
                 let (mut sync, changed) = candidate.open_session(&writer, resume)?;
                 sync.set_selection(p.selection.clone())?;
-                sync.set_binary_transport(binary);
                 if changed
                     && let Some(file) = &room.file
                     && let Err(e) = store::append(file, &room.doc, &candidate)
@@ -412,7 +409,6 @@ impl Hub {
                     private: p.private,
                     sync,
                     view_id: vec![],
-                    binary,
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.
@@ -548,15 +544,9 @@ pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String
 async fn emit(
     output: &tokio::sync::mpsc::Sender<Packet>,
     message: ServerMessage,
-    binary: bool,
     private: bool,
 ) -> bool {
-    let encode = if binary {
-        canvas::encode_server_binary
-    } else {
-        canvas::encode_server
-    };
-    let Ok(bytes) = encode(&message) else {
+    let Ok(bytes) = canvas::encode_server(&message) else {
         return false;
     };
     matches!(
@@ -588,7 +578,7 @@ pub(super) async fn worker(
         };
         let allowed = private_allowed(&app, public, &key).await;
         for revoked in leases.revoke_private(allowed) {
-            if !emit(&output, revoked, false, false).await {
+            if !emit(&output, revoked, false).await {
                 return;
             }
         }
@@ -648,17 +638,13 @@ pub(super) async fn worker(
                     let private = private_epochs.contains(&epoch);
                     if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
-                            if !emit(&output, revoked, false, false).await {
+                            if !emit(&output, revoked, false).await {
                                 return;
                             }
                         }
                         continue;
                     }
-                    let binary = [leases.active.as_ref(), leases.staged.as_ref()]
-                        .into_iter()
-                        .flatten()
-                        .any(|l| l.epoch == epoch && l.binary);
-                    if !emit(&output, message, binary, private).await {
+                    if !emit(&output, message, private).await {
                         return;
                     }
                 }
@@ -666,14 +652,7 @@ pub(super) async fn worker(
             Err(message) => {
                 let epoch = recoverable_epoch
                     .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
-                if !emit(
-                    &output,
-                    ServerMessage::Error { epoch, message },
-                    false,
-                    false,
-                )
-                .await
-                {
+                if !emit(&output, ServerMessage::Error { epoch, message }, false).await {
                     return;
                 }
                 if recoverable_epoch.is_none() {

@@ -45,7 +45,6 @@ pub struct Session {
     subscription: Option<Subscription>,
     initial: bool,
     last_sent: Option<Cursor>,
-    binary: bool,
     selection: Option<StateSelection>,
 }
 impl Session {
@@ -57,10 +56,6 @@ impl Session {
         }
         self.selection = Some(selection);
         Ok(())
-    }
-    /// Opt in only when the admitted mount explicitly advertises Blob support.
-    pub fn set_binary_transport(&mut self, enabled: bool) {
-        self.binary = enabled;
     }
 }
 fn random<const N: usize>() -> Result<[u8; N]> {
@@ -576,7 +571,6 @@ impl Document {
                 subscription: None,
                 initial: true,
                 last_sent: None,
-                binary: false,
                 selection: None,
             },
             changed,
@@ -710,12 +704,7 @@ impl Document {
                 frame: offer.bytes().to_vec(),
             }
         };
-        if session.binary {
-            encode_state_response_binary(&response)
-        } else {
-            encode_state_response(&response)
-        }
-        .map(Some)
+        encode_state_response(&response).map(Some)
     }
     /// One-time trusted-file import. The network protocol never accepts Automerge.
     pub fn import_legacy(schema: StateSchema, scope: &str, data: &[u8]) -> Result<Self> {
@@ -1355,7 +1344,7 @@ mod tests {
         let mut c = StateAdapter::new(schema, "budget", &[], [1; 16]).unwrap();
         let mut session = Session::default();
         pump(&mut doc, &mut session, &mut c);
-        session.set_binary_transport(true);
+
         let large = Value::TimedSeries(vec![[0., 1.]; MAX_SERIES_POINTS]);
         let assignments: Vec<_> = (1..=17).map(|id| (id, large.clone())).collect();
         assert!(c.set_typed(&assignments).is_err());
@@ -1519,12 +1508,16 @@ mod tests {
             vec![(1, Value::Number(1.)), (1, Value::Number(2.))],
             vec![],
         ] {
-            let data = encode_state_request(&StateRequest::Write {
+            let encoded = encode_state_request(&StateRequest::Write {
                 sequence: 1,
                 values,
-            })
-            .unwrap();
-            assert!(doc.receive(&mut s, &data).is_err());
+            });
+            if let Ok(data) = encoded {
+                assert!(doc.receive(&mut s, &data).is_err());
+            } else {
+                // The packed encoder rejects oversized values before a packet
+                // can enter the authority; its state must still be untouched.
+            }
             assert_eq!(doc.save().unwrap(), old);
         }
         assert!(

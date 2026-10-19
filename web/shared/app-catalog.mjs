@@ -13,7 +13,7 @@ export async function loadAppCatalog(moduleUrl){
   const manifestBytes=await read(`/releases/${release}/manifest.json`,65536);
   if(await hash(manifestBytes)!==release)throw Error('Release manifest digest rejected');
   const manifest=JSON.parse(new TextDecoder().decode(manifestBytes)),item=manifest.assets?.['apps/catalog.flex'];
-  if(manifest.state_schema!=='otrios-canvas-merkle-state-v1'||manifest.sync_protocol!=='otrios-canvas-sync-v3'||!item||!Number.isSafeInteger(item.bytes)||item.bytes<1||item.bytes>512*1024||!/^[a-f0-9]{64}$/.test(item.sha256))throw Error('App catalog admission rejected');
+  if(manifest.state_schema!=='otrios-canvas-merkle-state-v1'||manifest.sync_protocol!=='otrios-canvas-sync-v4'||!item||!Number.isSafeInteger(item.bytes)||item.bytes<1||item.bytes>512*1024||!/^[a-f0-9]{64}$/.test(item.sha256))throw Error('App catalog admission rejected');
   const bytes=await read(`/releases/${release}/apps/catalog.flex`,item.bytes);
   if(bytes.length!==item.bytes||await hash(bytes)!==item.sha256)throw Error('App catalog digest rejected');
   return bytes;

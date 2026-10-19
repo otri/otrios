@@ -11,7 +11,7 @@ license = "LGPL-3.0-only"
 otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
-canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde"]
+canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex"]
 merkle = ["dep:sha2"]
 default = []
 dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
@@ -80,3 +80,9 @@ required-features = ["merkle"]
 [[example]]
 name = "canvas_readonly_cost"
 required-features = ["canvas"]
+
+[dependencies.lz4_flex]
+version = "=0.14.0"
+default-features = false
+features = ["std", "safe-encode", "safe-decode", "checked-decode"]
+optional = true

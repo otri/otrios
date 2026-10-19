@@ -183,6 +183,8 @@ async fn peer(
     let mut heard = Instant::now();
     let mut window = Instant::now();
     let mut commands = 0_u16;
+    let mut decode_budget = otrios_core::canvas::DecodeBudget::default();
+    let decode_started = Instant::now();
     loop {
         let event = tokio::select! {biased;
             result=releases.changed()=>{if result.is_err(){break;}Event::Release},
@@ -241,7 +243,11 @@ async fn peer(
                         }
                         match bytes.split_first() {
                             Some((&wire::STATE, payload)) if !payload.is_empty() => {
-                                if state_tx.try_send(payload.to_vec()).is_err() {
+                                if decode_budget
+                                    .admit(payload, decode_started.elapsed().as_millis() as u64)
+                                    .is_err()
+                                    || state_tx.try_send(payload.to_vec()).is_err()
+                                {
                                     break;
                                 }
                             }
@@ -407,8 +413,17 @@ mod tests {
             // A browser can send four credited state frames without waiting.
             // Keep that ordinary burst bounded without closing before a Ping/upgrade.
             for _ in 0..4 {
-                s.send(tungstenite::Message::Binary(vec![wire::STATE, 0].into()))
-                    .unwrap();
+                s.send(tungstenite::Message::Binary(
+                    wire::frame(
+                        wire::STATE,
+                        otrios_core::canvas::encode_client(
+                            &otrios_interfaces::canvas::ClientMessage::Leave { epoch: 0 },
+                        )
+                        .unwrap(),
+                    )
+                    .into(),
+                ))
+                .unwrap();
             }
             s.send(tungstenite::Message::Ping(vec![17].into())).unwrap();
             assert!(matches!(s.read().unwrap(), tungstenite::Message::Pong(_)));
