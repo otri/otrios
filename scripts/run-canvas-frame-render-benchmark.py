@@ -72,7 +72,7 @@ try:
             acknowledge()
             writer = ROOT / label / 'canvas-adapter-bench'
             direct_port = 18901 if label == 'baseline' else 18902
-            process = subprocess.Popen([str(writer),f'ws://127.0.0.1:{direct_port}/apps/stream',str(ROOT/label/'app-catalog.flex'),'600','30','20','writer'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            process = subprocess.Popen([str(writer),f'ws://127.0.0.1:{direct_port}/apps/stream',str(ROOT/label/'app-catalog.flex'),'150','5','10','writer'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             output, errors = process.stdout.read(), process.stderr.read()
             _, status, usage = os.wait4(process.pid, 0)
             process.returncode = os.waitstatus_to_exitcode(status)
@@ -81,6 +81,8 @@ try:
             writer_report = json.loads(output)
             time.sleep(2)
             final = json.loads(ready.read_text())
+            if final['motion']['count'] != 59 or not final['state_confirmed'] or final['pending_commands']:
+                raise RuntimeError('Native renderer did not converge to the final synthetic value')
             stopping.set()
             sampler.join()
             (folder/'stop').touch()
