@@ -87,6 +87,10 @@ struct Peer {
     ws: WebSocket<MaybeTlsStream<std::net::TcpStream>>,
     id: u32,
     controls: [Rect; 3],
+    variation: f32,
+    goal: [f32; 2],
+    start_values: [u16; 4],
+    changed: bool,
     kind: usize,
     phase_ms: u64,
     begun: bool,
@@ -105,7 +109,13 @@ fn blocked(e: &tungstenite::Error) -> bool {
     matches!(e, tungstenite::Error::Io(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut))
 }
 impl Peer {
-    fn new(endpoint: &str, catalog: &[u8], kind: usize, phase_ms: u64) -> Result<Self> {
+    fn new(
+        endpoint: &str,
+        catalog: &[u8],
+        kind: usize,
+        phase_ms: u64,
+        index: usize,
+    ) -> Result<Self> {
         let mut request = endpoint.into_client_request().map_err(|e| e.to_string())?;
         request
             .headers_mut()
@@ -142,6 +152,13 @@ impl Peer {
             id: 0,
             controls: [Rect::new(0., 0., 0., 0.); 3],
             kind,
+            variation: ((index * 137 + 23) % 997) as f32 / 997.,
+            goal: [
+                0.6 + 0.3 * ((index * 137 + 23) % 997) as f32 / 997.,
+                0.3 + 0.6 * ((index * 313 + 71) % 997) as f32 / 997.,
+            ],
+            start_values: [0; 4],
+            changed: false,
             phase_ms,
             begun: false,
             released: false,
@@ -258,15 +275,15 @@ impl Peer {
     fn pointer(&mut self, phase: PointerPhase, fraction: f32) -> Result<()> {
         let rect = self.controls[self.kind];
         let [x, y] = if self.kind == 1 {
-            let a = fraction * std::f32::consts::TAU;
+            let a = fraction * std::f32::consts::TAU * (0.55 + 0.35 * self.variation);
             [0.5 + 0.35 * a.sin(), 0.5 - 0.35 * a.cos()]
         } else {
             [
-                0.15 + 0.7 * fraction,
+                0.1 + (self.goal[0] - 0.1) * fraction,
                 if self.kind == 0 {
                     0.5
                 } else {
-                    0.2 + 0.6 * fraction
+                    0.15 + (self.goal[1] - 0.15) * fraction
                 },
             ]
         };
@@ -385,7 +402,7 @@ fn main() -> Result<()> {
         } else {
             1000
         };
-        peers.push(Peer::new(&args[1], &catalog, kind, phase)?);
+        peers.push(Peer::new(&args[1], &catalog, kind, phase, i)?);
         for (j, peer) in peers.iter_mut().enumerate() {
             peer.pump(origin.elapsed().as_millis() as u64, j, &mut ledger)?;
         }
@@ -431,6 +448,18 @@ fn main() -> Result<()> {
                     return Ok(());
                 }
                 if !p.begun && elapsed_ms >= p.phase_ms {
+                    p.start_values = p.values()?;
+                    if p.kind == 0 && (p.goal[0] * 1000.).round() as u16 == p.start_values[0] {
+                        p.goal[0] = 0.35;
+                    }
+                    if p.kind == 2
+                        && [
+                            (p.goal[0] * 1000.).round() as u16,
+                            (p.goal[1] * 1000.).round() as u16,
+                        ] == p.start_values[2..]
+                    {
+                        p.goal[0] = 0.95;
+                    }
                     p.pointer(PointerPhase::Down, 0.)?;
                     p.begun = true;
                 }
@@ -447,6 +476,12 @@ fn main() -> Result<()> {
                     } else {
                         p.skipped += hz.saturating_sub(p.next_sample);
                         p.pointer(PointerPhase::Up, 1.)?;
+                        let values = p.values()?;
+                        p.changed = match p.kind {
+                            0 => values[0] != p.start_values[0],
+                            1 => values[1] != p.start_values[1],
+                            _ => values[2..] != p.start_values[2..],
+                        };
                         p.released = true;
                         p.release = Some(Instant::now());
                         last_release = p.release;
@@ -509,7 +544,9 @@ fn main() -> Result<()> {
     let latency_ok = |q: &serde_json::Value, p: &str, bound: u64| {
         q.is_null() || q[p].as_u64().is_some_and(|v| v <= bound)
     };
-    let passed = ink_schedule_fulfilled
+    let changed_bursts = peers.iter().filter(|p| p.begun && p.changed).count();
+    let passed = changed_bursts == bursts
+        && ink_schedule_fulfilled
         && errors.is_empty()
         && missing == 0
         && ledger.duplicates == 0
@@ -523,7 +560,7 @@ fn main() -> Result<()> {
         && state_settle_us.is_some_and(|n| n <= 2_000_000);
     println!(
         "{}",
-        serde_json::json!({"mode":mode,"requested_clients":count,"connected":peers.len(),"ink_subscribed":peers.iter().filter(|p|p.id!=0).count(),"requested_hz":hz,"requested_seconds":seconds,"measure_start_unix_ms":measure_start_unix_ms,"measure_end_unix_ms":unix_ms(),"setup_seconds":setup_seconds,"measured_seconds":start.elapsed().as_secs_f64(),"seed":"4f5472694f532026","input_duty_per_client":if sparse {Some(0.01)}else{None},"bursts":bursts,"offered_moves":moves,"expected_moves":expected_moves,"skipped_moves":peers.iter().map(|p|p.skipped).sum::<u64>(),"concurrency":quantiles(concurrency),"ink_bursts":ink_bursts,"ink_moves_sent":ink_moves,"ink_downs_sent":ink_downs,"ink_ups_sent":ink_ups,"ink_schedule_fulfilled":ink_schedule_fulfilled,"ink_points_sent":ledger.points.len(),"ink_expected_deliveries":ledger.expected(),"ink_deliveries":ledger.delivered,"ink_missing_deliveries":missing,"ink_duplicate_deliveries":ledger.duplicates,"ink_unknown_deliveries":ledger.unknown,"ink_delivery_us":ink_us,"release_confirmation_us":release_us,"confirmed_bursts":releases.len(),"converged":converged,"state_settle_after_last_release_us":state_settle_us,"generator_loop_us":quantiles(loops),"sent_session_payload_bytes":peers.iter().map(|p|p.sent).sum::<u64>()-before_sent,"received_session_payload_bytes":peers.iter().map(|p|p.received).sum::<u64>()-before_received,"failed_peers":peers.iter().filter(|p|p.failed).count(),"errors":errors,"client_gates_passed":passed})
+        serde_json::json!({"mode":mode,"requested_clients":count,"connected":peers.len(),"ink_subscribed":peers.iter().filter(|p|p.id!=0).count(),"requested_hz":hz,"requested_seconds":seconds,"measure_start_unix_ms":measure_start_unix_ms,"measure_end_unix_ms":unix_ms(),"setup_seconds":setup_seconds,"measured_seconds":start.elapsed().as_secs_f64(),"seed":"4f5472694f532026","input_duty_per_client":if sparse {Some(0.01)}else{None},"endpoint_strategy":"per-client varied; unchanged final values reject the burst","bursts":bursts,"changed_bursts":changed_bursts,"offered_moves":moves,"expected_moves":expected_moves,"skipped_moves":peers.iter().map(|p|p.skipped).sum::<u64>(),"concurrency":quantiles(concurrency),"ink_bursts":ink_bursts,"ink_moves_sent":ink_moves,"ink_downs_sent":ink_downs,"ink_ups_sent":ink_ups,"ink_schedule_fulfilled":ink_schedule_fulfilled,"ink_points_sent":ledger.points.len(),"ink_expected_deliveries":ledger.expected(),"ink_deliveries":ledger.delivered,"ink_missing_deliveries":missing,"ink_duplicate_deliveries":ledger.duplicates,"ink_unknown_deliveries":ledger.unknown,"ink_delivery_us":ink_us,"release_confirmation_us":release_us,"confirmed_bursts":releases.len(),"converged":converged,"state_settle_after_last_release_us":state_settle_us,"generator_loop_us":quantiles(loops),"sent_session_payload_bytes":peers.iter().map(|p|p.sent).sum::<u64>()-before_sent,"received_session_payload_bytes":peers.iter().map(|p|p.received).sum::<u64>()-before_received,"failed_peers":peers.iter().filter(|p|p.failed).count(),"errors":errors,"client_gates_passed":passed})
     );
     Ok(())
 }

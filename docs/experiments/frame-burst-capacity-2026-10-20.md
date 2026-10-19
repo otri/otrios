@@ -65,3 +65,18 @@ aligned mixed/ink cohort must then pass the same three 100-second sparse
 profiles, with the original latency and delivery gates unchanged. This tests
 which smaller cohort meets the chosen service target; it does not redefine a
 failed higher cohort as a pass or claim a maximum hardware connection count.
+
+## Endpoint validation refinement
+
+The initial 64-client profiles used a common final pad coordinate. After the
+first stroke, later pad releases could confirm an unchanged value, making the
+release-confirmation figures artificially cheap. Those runs remain diagnostic
+connection/ink-delivery evidence, and 64 already missed the latency gates even
+with that lighter release workload; they do not qualify a client cohort.
+
+Final qualification uses per-client varied gesture endpoints and verifies that
+each released gesture changes its selected fields from the state at gesture
+start. An unchanged release fails the client gates. The same 30 Hz/duty,
+ink-delivery, confirmation and convergence thresholds remain in force. New runs
+use a distinct generator hash and output directories, retaining the original
+fixed-endpoint measurements locally without overwriting them.
