@@ -367,3 +367,31 @@ fn edited_partial_replicas_join_back_without_replacing_unseen_siblings() {
         Err(Error::Limit)
     ));
 }
+
+#[test]
+fn publishers_racing_the_same_root_have_exactly_one_commit() {
+    use std::sync::{Arc, Barrier, Mutex};
+    let seed = set(&Snapshot::empty(), 1, &[1], b"seed");
+    let expected = seed.hash();
+    let authority = Arc::new(Mutex::new(Authority::new(1, seed.clone())));
+    let barrier = Arc::new(Barrier::new(2));
+    let handles = [2, 3].map(|actor| {
+        let authority = authority.clone();
+        let barrier = barrier.clone();
+        let next = set(&seed, actor, &[1], &[actor]);
+        std::thread::spawn(move || {
+            barrier.wait();
+            authority.lock().unwrap().publish(expected, next)
+        })
+    });
+    let results = handles.map(|h| h.join().unwrap());
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| **r == Err(Error::Conflict))
+            .count(),
+        1
+    );
+    assert_ne!(authority.lock().unwrap().snapshot().hash(), expected);
+}

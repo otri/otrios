@@ -455,3 +455,6 @@ impl CanvasPresentation {
         Ok(&self.rendered_hud.as_ref().ok_or("No HUD")?.1)
     }
 }
+
+#[cfg(feature = "merkle-probe")]
+mod merkle_probe;

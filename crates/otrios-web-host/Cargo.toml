@@ -10,6 +10,9 @@ license = "Apache-2.0"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+merkle-probe = ["otrios-core/merkle"]
+
 [dependencies]
 otrios-core = { path = "../otrios-core", features = ["canvas"] }
 otrios-interfaces = { path = "../otrios-interfaces", features = ["layout"] }
