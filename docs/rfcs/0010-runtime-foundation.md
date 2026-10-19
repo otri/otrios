@@ -146,3 +146,18 @@ Related: [dispatch measurements](../experiments/canvas-dispatch.md),
 [replication pipeline](0007-bounded-replication-pipeline.md),
 [selector semantics](0003-module-roots-and-state-selectors.md), and
 [unified session](0009-unified-server-session.md).
+
+### Next retirement pass
+
+The packed/resource follow-up is qualified and live. Remaining source-audit
+candidates are `dashboard::Replica`/`SyncSession`, the old
+`dashboard::presentation::Presentation` intent overlay, Automerge-backed
+`motion::Stress` (the active Canvas load uses `StressWorkload`), and the trusted
+`.automerge` startup import in `canvas::Document`/`server_apps`. These retain the
+Automerge dependency in the default shared dashboard feature even though live
+app roots now use canonical Merkle files. Trace shared geometry/layout/signal
+helpers and meaningful tests before removing them; retain their current Canvas
+behavior rather than restoring an old global-room host. All seven live roots
+were loaded successfully on the v4 cutover. Existing historical benchmark code
+remains available at its fixed benchmark branch. Final audit/retirement and the
+ensuing acceptance are required before closing this goal.
