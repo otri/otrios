@@ -18,8 +18,8 @@ remain unchanged. This does not introduce a new state or control wire format.
 
 Each sparse trial runs for 100 seconds with a seeded one-second gesture from
 every client: 1% intended input duty per client at 30 Hz. Uniform, reproducible
-start offsets allow overlap; actual move counts, duty and concurrency are
-recorded. Separate control-only, ink-only and mixed trials distinguish the paths.
+start offsets allow overlap; intended duty, actual move counts and sampled
+concurrency are recorded. Separate control-only, ink-only and mixed trials distinguish the paths.
 Mixed clients alternate Linear, Rotary and Touch Pad gestures. Pointer capture,
 normalized input, transient drawing and release use the actual core Client API.
 All clients remain mounted and ink-subscribed while idle.
@@ -87,3 +87,26 @@ before final qualification began. The runner now handles SIGTERM through its
 cleanup path, terminates its client process on interruption, and gives each test
 authority a 360-second systemd lifetime bound. This changes test lifecycle only;
 it does not alter the offered workload or latency gates.
+
+## Varied-endpoint collision measurements
+
+The same three simultaneous one-second gestures are used at each population.
+All emitted points reached every other subscriber, all gestures changed their
+selected fields, and the cases below had no disconnects, swap use or production
+health failures. Passing this collision gate alone does not qualify the full
+sparse-workload target. Latency is measured through the temporary Tailnet TCP
+relay and includes that relay, network and generator cost.
+
+| Clients | Collision | Ink p95 ms | Ink p99 ms | Release p95 ms | Final settle ms | Peak authority RSS MiB | Client gates |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 64 | aligned-mixed | 1245 | 1380 | 1391 | 1532 | 9.4 | Miss |
+| 32 | aligned-mixed | 430 | 496 | 495 | 496 | 7.6 | Miss |
+| 32 | aligned-ink | 512 | 607 | 557 | 941 | 7.6 | Miss |
+| 16 | aligned-mixed | 168 | 240 | 219 | 228 | 6.5 | Pass |
+| 16 | aligned-ink | 157 | 180 | 186 | 203 | 6.5 | Pass |
+
+The 64-client mixed case missed both ink and confirmation gates. The 32-client
+cases missed the ink gate; their state confirmation met the one-second target.
+The 16-client collisions met every gate and proceed to sparse qualification.
+These are measured service-target results, not RAM exhaustion or a hardware
+maximum. The separate 64-connection production admission quota is unchanged.
