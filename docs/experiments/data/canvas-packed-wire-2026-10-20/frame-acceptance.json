@@ -1,0 +1,76 @@
+{
+  "ready": [
+    {
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "epoch": 1,
+      "input_busy": false,
+      "keyboard_visible": false,
+      "layout": "app:home/ui",
+      "motion": {
+        "count": 12,
+        "playing": true,
+        "speed": 1.0
+      },
+      "output": [
+        800,
+        1280
+      ],
+      "pending_commands": 0,
+      "pid": 5158,
+      "release": "4578253065f32cc7e2fe8f04f022333756854fab6f46f74eced142cd9fcd5030",
+      "reload_ready": true,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "runtime_resources": {
+        "behavior_cache_bytes": 0,
+        "behavior_cache_entries": 0,
+        "dispatch": {
+          "issued_age_ms": null,
+          "issued_fields": 0,
+          "issued_payload_bytes": 0,
+          "pending_age_ms": null,
+          "pending_fields": 0,
+          "pending_payload_bytes": 0,
+          "ready_in_ms": null
+        },
+        "sampled_monotonic_ms": 332,
+        "state": {
+          "replica_root_shared": true,
+          "selected_canonical_bytes": 250,
+          "selected_nodes": 1
+        },
+        "wire": {
+          "buffer_grows": 0,
+          "compression_capacity": 0,
+          "decode_capacity": 0,
+          "table_capacity_bound": 0
+        }
+      },
+      "scanout_format": "RGB565",
+      "screen": "home",
+      "snapshot": "app:home/state",
+      "state_confirmed": true,
+      "state_ref": "app:home/state",
+      "stream_ready": true,
+      "stride": 1600,
+      "sync_to_present_ms": 1207.3225750000001,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "ui_ref": "app:home/ui",
+      "video": "DRM"
+    }
+  ],
+  "renderer_pids": [
+    5158
+  ],
+  "weston_pids": [],
+  "capture": {
+    "exists": true,
+    "mtime": 1792426603.718042
+  }
+}

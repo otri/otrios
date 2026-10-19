@@ -6,7 +6,8 @@ Status: accepted direction, implementation in progress on
 The user approved completing this foundation on 2026-10-19. Main and the
 historical benchmark branch are not deployment targets for this work.
 The [first foundation rollout](../experiments/canvas-foundation.md) is live;
-resource-accounting, dependency retirement and transport work remain active.
+The [packed transport/resource follow-up](../experiments/canvas-packed-wire.md) is
+also live; dependency and host retirement remain active.
 
 ## Selection rule
 
@@ -34,8 +35,8 @@ in a linked experiment. Commit each independently reviewable increment.
 | Selective Merkle replication | Deployed sync v3: admitted UI coverage and writer-local receipts advance coherently | Passed fixed-field/subtree isolation, resync and policy gates; collection queries remain explicitly outside this milestone |
 | Universal app boundary | All seven apps use `Canvas(uiRef, stateRef)` packages | Audit host/demo branches and dependencies, keep launcher opaque; remove obsolete routes/imports after parity; update stale ownership docs |
 | Presentation ownership | Animation, focus/caret, ink and GPU resources are local | Delayed-state tests retain immediate local feedback and clock progression; no document checkpoints or duplicate writable view state |
-| Resource bounds | Intent payload/field limits, DispatchUsage, message/cache/journal limits and one-flight replication | Shared host diagnostics and [ownership/bounds audit](../ARCHITECTURE-RESOURCES.md) implemented; workspace checks, six native worker tests and 18 Node session/worker tests pass; live diagnostics pending; no whole-process allocation claim |
-| Canonical data and transport | Canonical Merkle hashing separate from binary Blob envelopes | One versioned bounded packed codec shared by browser/native; optional compression selected from matched costs; independent stable v1 control hello; malformed/oversize/unknown-version checks |
+| Resource bounds | Intent payload/field limits, DispatchUsage, message/cache/journal limits and one-flight replication | Shared host diagnostics and [ownership/bounds audit](../ARCHITECTURE-RESOURCES.md) implemented; workspace checks, six native worker tests and 18 Node session/worker tests pass; live browser/frame diagnostics verified; no whole-process allocation claim |
+| Canonical data and transport | Deployed sync v4: one bounded packed codec, canonical bytes unchanged; [RFC 0011](0011-packed-canvas-transport.md) | Passed malformed/oversize/version, 24 frame trials and browser/direct-frame rollout; normal replication stays raw after measured LZ4 costs; control hello remains v1 |
 | Retirement and acceptance | Old renderer/global-room paths and unused Snapshot override removed; first browser/frame rollout passes | Audit remaining legacy dependencies and codecs; retain one direct renderer and rerun relevant acceptance on each cutover |
 
 ## Edit and presentation semantics

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0011: Bounded packed Canvas transport
 
-Status: implementation under qualification. Not deployed. Builds on RFC 0010;
+Status: deployed and qualified on 2026-10-20. Builds on RFC 0010;
 wire changes require `otrios-canvas-sync-v4`, while release control stays v1.
 
 ## Decision
@@ -91,7 +91,7 @@ compression cost for an 871-byte scalar packet, and ~1.3 ms decode cost for a
 alone does not justify that cost on this path. The optional compressor requires
 a body of at least 512 bytes and saves at least 64 bytes and 12.5%, including its
 integrity field. Reusable scratch does not make packet encoding allocation-free.
-The frame codec experiment will record exact frozen-binary measurements.
+See the [frame codec experiment](../experiments/canvas-packed-wire.md) for frozen-binary measurements.
 
 Dependency: pinned [lz4_flex 0.14.0](https://github.com/PSeitz/lz4_flex), with default
 features disabled and only std, safe-encode, safe-decode and checked-decode enabled.
@@ -116,5 +116,5 @@ Deploy browser/frame together only after qualified; record live separately.
 Source qualification on 2026-10-20: `bash scripts/check.sh` passes (format,
 strict workspace lint, Rust unit/process/server integration suites and release/
 direct-host Python checks). Browser session/catalog Node tests: 12 pass. The
-wire suite includes seven packet/compression/budget tests. Frame and live browser
-qualification remain pending; the deployed release continues to use sync v3.
+wire suite includes seven packet/compression/budget tests. The [frame/browser experiment](../experiments/canvas-packed-wire.md) records 24
+complete-client trials and deployment on sync v4 with raw packets by default.
