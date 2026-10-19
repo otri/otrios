@@ -3,8 +3,6 @@
 use super::*;
 use std::cell::RefCell;
 const DIGEST_BYTES: usize = 32;
-// Kept conservative until frame measurements select the final default.
-const COMPRESSION_THRESHOLD: usize = 4096;
 #[derive(Default)]
 struct Workspace {
     compressed: Vec<u8>,
@@ -322,7 +320,6 @@ fn read<T>(bytes: &[u8], parse: impl FnOnce(&mut Reader<'_>) -> Result<T>) -> Re
 fn write(
     out: &mut Vec<u8>,
     tag: u8,
-    compress: bool,
     encode: impl FnOnce(&mut Writer<'_>) -> Result<()>,
 ) -> Result<()> {
     out.clear();
@@ -332,9 +329,6 @@ fn write(
     encode(&mut writer)?;
     let length = (out.len() - HEADER) as u32;
     out[6..10].copy_from_slice(&length.to_le_bytes());
-    if compress && tag < 32 && out.len() - HEADER >= COMPRESSION_THRESHOLD {
-        compress_in_place(out)?;
-    }
     Ok(())
 }
 macro_rules! owned {
@@ -367,7 +361,7 @@ pub fn encode_client_into(value: &ClientMessage, out: &mut Vec<u8>) -> Result<()
         ClientMessage::Sync { .. } => 4,
         ClientMessage::Leave { .. } => 5,
     };
-    write(out, tag, true, |w| match value {
+    write(out, tag, |w| match value {
         ClientMessage::Mount {
             epoch,
             ui_ref,
@@ -440,13 +434,6 @@ pub fn decode_client(bytes: &[u8]) -> Result<ClientMessage> {
     })
 }
 pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()> {
-    encode_server_policy(value, out, true)
-}
-/// Identical typed packet without optional compression, for measured adapters.
-pub fn encode_server_uncompressed_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()> {
-    encode_server_policy(value, out, false)
-}
-fn encode_server_policy(value: &ServerMessage, out: &mut Vec<u8>, compress: bool) -> Result<()> {
     let tag = match value {
         ServerMessage::View { .. } => 17,
         ServerMessage::Mounted { .. } => 18,
@@ -454,7 +441,7 @@ fn encode_server_policy(value: &ServerMessage, out: &mut Vec<u8>, compress: bool
         ServerMessage::AccessRequired { .. } => 20,
         ServerMessage::Error { .. } => 21,
     };
-    write(out, tag, compress, |w| match value {
+    write(out, tag, |w| match value {
         ServerMessage::View { epoch, bytes } | ServerMessage::Sync { epoch, bytes } => {
             w.u32(*epoch)?;
             w.blob(bytes)
@@ -516,7 +503,7 @@ pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Res
         StateRequest::Ack { .. } => 35,
         StateRequest::Resync => 36,
     };
-    write(out, tag, true, |w| match value {
+    write(out, tag, |w| match value {
         StateRequest::Hello { writer, resume } => {
             w.fixed(writer, 16)?;
             w.u64(*resume)
@@ -586,7 +573,7 @@ pub fn encode_state_response_into(value: &StateResponse, out: &mut Vec<u8>) -> R
         StateResponse::Mount { .. } => 49,
         StateResponse::Update { .. } => 50,
     };
-    write(out, tag, true, |w| match value {
+    write(out, tag, |w| match value {
         StateResponse::Mount {
             authority,
             lease,
@@ -870,6 +857,9 @@ mod tests {
             bytes: vec![0; 32768],
         })
         .unwrap();
+        let mut compressed = Vec::new();
+        assert!(compress_packet_into(&packet, &mut compressed).unwrap());
+        let packet = compressed;
         assert_eq!(packet[4], 1);
         let charged = decoded_packet_bytes(&packet).unwrap() + HEADER;
         let mut budget = DecodeBudget::default();

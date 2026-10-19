@@ -16,9 +16,8 @@ pub use state::{
 pub use transport::{
     DecodeBudget, WireUsage, compress_packet_into, decode_client, decode_server,
     decode_state_request, decode_state_response, decoded_packet_bytes, encode_client,
-    encode_client_into, encode_server, encode_server_into, encode_server_uncompressed_into,
-    encode_state_request, encode_state_request_into, encode_state_response,
-    encode_state_response_into, wire_usage,
+    encode_client_into, encode_server, encode_server_into, encode_state_request,
+    encode_state_request_into, encode_state_response, encode_state_response_into, wire_usage,
 };
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;

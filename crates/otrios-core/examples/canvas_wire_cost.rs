@@ -54,6 +54,15 @@ fn legacy_read(bytes: &[u8]) -> Vec<u8> {
         .0
         .to_vec()
 }
+fn packed_read(bytes: &[u8]) -> Vec<u8> {
+    let ServerMessage::Sync { bytes, .. } = decode_server(bytes).unwrap() else {
+        panic!()
+    };
+    let StateResponse::Update { frame } = decode_state_response(&bytes).unwrap() else {
+        panic!()
+    };
+    frame
+}
 fn cost(mut op: impl FnMut(), count: usize) -> f64 {
     for _ in 0..20 {
         op();
@@ -111,7 +120,7 @@ fn main() {
                 .unwrap(),
             };
             let mut raw = Vec::new();
-            encode_server_uncompressed_into(&value, &mut raw).unwrap();
+            encode_server_into(&value, &mut raw).unwrap();
             let mut packed = Vec::new();
             let compressed = compress_packet_into(&raw, &mut packed).unwrap();
             let old = legacy(&frame);
@@ -130,15 +139,26 @@ fn main() {
                 },
                 300,
             );
+            let inner_value = StateResponse::Update {
+                frame: frame.clone(),
+            };
+            let mut outer_value = ServerMessage::Sync {
+                epoch: 1,
+                bytes: Vec::new(),
+            };
             let raw_encode = cost(
                 || {
-                    encode_server_uncompressed_into(black_box(&value), &mut builder).unwrap();
+                    let ServerMessage::Sync { bytes, .. } = &mut outer_value else {
+                        unreachable!()
+                    };
+                    encode_state_response_into(black_box(&inner_value), bytes).unwrap();
+                    encode_server_into(black_box(&outer_value), &mut builder).unwrap();
                 },
                 300,
             );
             let raw_decode = cost(
                 || {
-                    black_box(decode_server(black_box(&raw)).unwrap());
+                    black_box(packed_read(black_box(&raw)));
                 },
                 300,
             );
@@ -150,7 +170,7 @@ fn main() {
             );
             let lz4_decode = cost(
                 || {
-                    black_box(decode_server(black_box(&packed)).unwrap());
+                    black_box(packed_read(black_box(&packed)));
                 },
                 300,
             );

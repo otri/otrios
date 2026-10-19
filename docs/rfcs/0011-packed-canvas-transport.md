@@ -84,12 +84,14 @@ and four outgoing state packets, with a bounded peer count and send deadlines.
 Budget exhaustion closes/reconnects the session instead of growing a backlog.
 Canonical Merkle limits and one-flight subscription retention still apply.
 
-LZ4 is optional per packet. The trial default attempts compression at 4096 body
-bytes and retains it only when it saves at least 64 bytes and 12.5%, including
-its integrity field. Small continuous edits stay raw. Select the deployed default
-from matched frame codec and complete-client measurements; a smaller payload
-alone is not acceptance. Reusable scratch does not make owned packet encoding
-allocation-free.
+LZ4 is an explicit bulk-transfer option, available via `compress_packet_into`.
+Normal replication encoders stay raw. The frame probe found roughly 0.1 ms extra
+compression cost for an 871-byte scalar packet, and ~1.3 ms decode cost for a
+17 KiB snapshot, versus microseconds for raw packed decode. The smaller packet
+alone does not justify that cost on this path. The optional compressor requires
+a body of at least 512 bytes and saves at least 64 bytes and 12.5%, including its
+integrity field. Reusable scratch does not make packet encoding allocation-free.
+The frame codec experiment will record exact frozen-binary measurements.
 
 Dependency: pinned [lz4_flex 0.14.0](https://github.com/PSeitz/lz4_flex), with default
 features disabled and only std, safe-encode, safe-decode and checked-decode enabled.
