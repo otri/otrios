@@ -27,6 +27,7 @@ struct Receipt {
 #[derive(Clone)]
 pub struct Document {
     schema: std::sync::Arc<StateSchema>,
+    required_fields: u64,
     scope: String,
     actor: Actor,
     tree: Snapshot,
@@ -45,8 +46,18 @@ pub struct Session {
     initial: bool,
     last_sent: Option<Cursor>,
     binary: bool,
+    selection: Option<StateSelection>,
 }
 impl Session {
+    /// Call from trusted admission before generating the first mount. A lease's
+    /// coverage is fixed; replacing UI dependencies requires a new lease.
+    pub fn set_selection(&mut self, selection: StateSelection) -> Result<()> {
+        if self.writer.is_none() || self.subscription.is_some() {
+            return Err("State coverage requires a new admitted lease".into());
+        }
+        self.selection = Some(selection);
+        Ok(())
+    }
     /// Opt in only when the admitted mount explicitly advertises Blob support.
     pub fn set_binary_transport(&mut self, enabled: bool) {
         self.binary = enabled;
@@ -63,7 +74,7 @@ pub(crate) fn writer_nonce() -> Result<[u8; 16]> {
 fn digest(bytes: &[u8]) -> merkle::Hash {
     Sha256::digest(bytes).into()
 }
-fn path(kind: u64, id: usize) -> Vec<u64> {
+pub(super) fn path(kind: u64, id: usize) -> Vec<u64> {
     vec![kind, (id / 32) as u64, (id % 32) as u64]
 }
 fn bytes<T: serde::Serialize>(value: &T) -> Result<Vec<u8>> {
@@ -117,6 +128,7 @@ impl Document {
         }
         let tree = Snapshot::empty().edit([0; 16], &edits).map_err(err)?.0;
         Ok(Self {
+            required_fields: StateSelection::all(&schema).fields,
             schema: schema.into(),
             scope: scope.into(),
             actor,
@@ -154,6 +166,16 @@ impl Document {
     }
     fn from_tree(schema: StateSchema, scope: &str, tree: Snapshot) -> Result<Self> {
         validate_schema(&schema)?;
+        let required = StateSelection::all(&schema).fields;
+        Self::from_tree_with_fields(schema, scope, tree, required)
+    }
+    fn from_tree_with_fields(
+        schema: StateSchema,
+        scope: &str,
+        tree: Snapshot,
+        required_fields: u64,
+    ) -> Result<Self> {
+        validate_schema(&schema)?;
         let root: Root = decode(&payload(&tree, &[])?)?;
         if root.format != "otrios-canvas-merkle-v1"
             || root.scope != scope
@@ -165,6 +187,7 @@ impl Document {
         let actor = root.actor.as_slice().try_into().map_err(err)?;
         let result = Self {
             field_hashes: std::sync::Arc::new(Self::field_hashes(&schema, scope)?),
+            required_fields,
             schema: schema.into(),
             scope: scope.into(),
             actor,
@@ -179,7 +202,9 @@ impl Document {
     fn validate_tree(&self) -> Result<()> {
         self.validate_nodes(None, &self.tree)?;
         for f in &self.schema.fields {
-            self.typed_value(f.id)?;
+            if self.required_fields & (1 << (f.id - 1)) != 0 {
+                self.typed_value(f.id)?;
+            }
         }
         Ok(())
     }
@@ -341,6 +366,9 @@ impl Document {
     }
     pub fn typed_value(&self, id: u16) -> Result<Value> {
         let f = self.field(id)?;
+        if self.required_fields & (1 << (id - 1)) == 0 {
+            return Err("Canvas field is outside the admitted materialization".into());
+        }
         let v = decode(&payload(&self.tree, &path(1, usize::from(id) - 1))?)?;
         validate_value(f, &v)?;
         Ok(v)
@@ -364,16 +392,6 @@ impl Document {
             }
             ids |= bit;
             validate_value(f, v)?;
-        }
-        Ok(())
-    }
-    pub fn validate_snapshot(&self, values: &[(u16, Value)]) -> Result<()> {
-        self.validate_commands(values, true)?;
-        if values
-            .iter()
-            .any(|(id, _)| self.field(*id).is_ok_and(|f| f.writable))
-        {
-            return Err("Snapshot may only replace read-only fields".into());
         }
         Ok(())
     }
@@ -548,6 +566,7 @@ impl Document {
                 initial: true,
                 last_sent: None,
                 binary: false,
+                selection: None,
             },
             changed,
         ))
@@ -646,7 +665,16 @@ impl Document {
                 .map_err(err)?;
         }
         if session.subscription.is_none() {
-            session.subscription = Some(authority.subscribe(&[vec![]], vec![]).map_err(err)?);
+            let selection = session
+                .selection
+                .clone()
+                .unwrap_or_else(|| StateSelection::all(&self.schema));
+            let coverage = selection.coverage(session.slot.ok_or("Missing writer slot")?)?;
+            session.subscription = Some(
+                authority
+                    .subscribe_coverage(&[vec![]], coverage)
+                    .map_err(err)?,
+            );
         }
         let sub = session
             .subscription
@@ -793,12 +821,33 @@ pub struct StateAdapter {
 }
 impl StateAdapter {
     pub fn new(schema: StateSchema, scope: &str, data: &[u8], writer: [u8; 16]) -> Result<Self> {
+        validate_schema(&schema)?;
+        let selection = StateSelection::all(&schema);
+        Self::with_selection(schema, scope, data, writer, selection)
+    }
+    pub fn for_ui(ui: &Ui, scope: &str, data: &[u8], writer: [u8; 16]) -> Result<Self> {
+        Self::with_selection(
+            ui.state_schema.clone(),
+            scope,
+            data,
+            writer,
+            StateSelection::from_ui(ui)?,
+        )
+    }
+    fn with_selection(
+        schema: StateSchema,
+        scope: &str,
+        data: &[u8],
+        writer: [u8; 16],
+        selection: StateSelection,
+    ) -> Result<Self> {
         let transport = !data.is_empty() && decode_state_response(data).is_ok();
-        let doc = if data.is_empty() || transport {
+        let mut doc = if data.is_empty() || transport {
             Document::new(schema, scope)?
         } else {
             Document::load(schema, scope, data)?
         };
+        doc.required_fields = selection.fields;
         let mut result = Self {
             doc,
             writer,
@@ -892,9 +941,6 @@ impl StateAdapter {
     }
     pub fn signal(&self, id: u16, time: i64, seconds: u32) -> Vec<[f32; 2]> {
         self.doc.signal(id, time, seconds)
-    }
-    pub fn validate_snapshot(&self, values: &[(u16, Value)]) -> Result<()> {
-        self.doc.validate_snapshot(values)
     }
     pub fn set(&mut self, values: &[(u16, u16)]) -> Result<bool> {
         self.set_typed(
@@ -1079,7 +1125,12 @@ impl StateAdapter {
         let tree = replica.snapshot().ok_or("Missing Canvas subtree")?.clone();
         let old = self.doc.tree.hash();
         let mut next = if mounting {
-            Document::from_tree(self.doc.schema.as_ref().clone(), &self.doc.scope, tree)?
+            Document::from_tree_with_fields(
+                self.doc.schema.as_ref().clone(),
+                &self.doc.scope,
+                tree,
+                self.doc.required_fields,
+            )?
         } else {
             self.doc.validate_changed(&tree)?;
             let mut next = self.doc.clone();

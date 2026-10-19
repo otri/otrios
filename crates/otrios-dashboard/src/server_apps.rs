@@ -16,6 +16,7 @@ struct Package {
     code: Vec<u8>,
     private: bool,
     signal_fields: Vec<u16>,
+    selection: canvas::StateSelection,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -117,7 +118,7 @@ impl Hub {
                 let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
                 if manifest["format"] != "otrios-release-v1"
                     || manifest["state_schema"] != "otrios-canvas-merkle-state-v1"
-                    || manifest["sync_protocol"] != "otrios-canvas-sync-v2"
+                    || manifest["sync_protocol"] != "otrios-canvas-sync-v3"
                 {
                     return Err("Installed release app protocol mismatch".into());
                 }
@@ -178,6 +179,7 @@ impl Hub {
                 return Err("UI reference/format differs from admitted catalog".into());
             }
             canvas::validate_schema(&description.state_schema)?;
+            let selection = canvas::StateSelection::from_ui(&description)?;
             let signal_fields = description
                 .selectors
                 .iter()
@@ -263,6 +265,7 @@ impl Hub {
                         code,
                         private,
                         signal_fields,
+                        selection,
                     },
                 )
                 .is_some()
@@ -378,6 +381,7 @@ impl Hub {
                         .as_secs() as i64,
                 );
                 let (mut sync, changed) = candidate.open_session(&writer, resume)?;
+                sync.set_selection(p.selection.clone())?;
                 sync.set_binary_transport(binary);
                 if changed
                     && let Some(file) = &room.file
@@ -638,7 +642,6 @@ pub(super) async fn worker(
                         ServerMessage::Mounted { epoch, .. }
                         | ServerMessage::Sync { epoch, .. }
                         | ServerMessage::View { epoch, .. }
-                        | ServerMessage::Snapshot { epoch, .. }
                         | ServerMessage::AccessRequired { epoch }
                         | ServerMessage::Error { epoch, .. } => *epoch,
                     };

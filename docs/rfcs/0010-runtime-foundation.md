@@ -111,8 +111,20 @@ Library tests cover policy, canonical ordering, missing-target creation,
 unrelated-change suppression, partial/corrupt-frame atomicity, slow readers and
 resync. A real child process receives two paths coherently without sibling or
 ancestor private payloads. The existing live Canvas wire protocol still uses
-app-root leases; connecting admitted UI coverage and writer-local receipts is the
-next integration step and needs a coordinated state-protocol bump.
+app-root leases. The feature-branch integration uses `StateSelection::from_ui`: shared selectors, handler/reducer
+fields, editor/motion declarations and requested signal windows. The server
+compiles it from admitted package bytes and fixes it before the first offer.
+Only that lease's writer receipt is included. The client validates every required
+field and returns an explicit error for unmaterialized fields rather than a
+schema default. Authority documents/checkpoints/journals remain complete.
+
+This cutover declares `otrios-canvas-sync-v3`; schema/node canonical bytes remain
+v1 and opening release control remains v1. It is not yet deployed. The previous
+v2 state client still receives release metadata through a v1 hello, with its
+state stream blocked until upgrade. Publisher, browser catalog admission,
+browser/native negotiation and authority manifest admission declare v3 together.
+The unused `ServerMessage::Snapshot` override and its parallel map are removed;
+read-only Monitoring continues using its separate replaceable `View` aggregate.
 
 [Frame coverage measurements](../experiments/merkle-coverage.md) record 81
 matched in-process trials. Covered views suppress unrelated deliveries and

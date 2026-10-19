@@ -2,11 +2,13 @@
 //! Opt-in app-scoped Canvas runtime. No filesystem or network access in guest code.
 mod behavior;
 mod client;
+mod selection;
 mod state;
 mod transport;
 pub use behavior::Behavior;
 pub use client::Client;
 use otrios_interfaces::canvas::*;
+pub use selection::StateSelection;
 use sha2::{Digest, Sha256};
 pub use state::{
     DispatchPolicy, DispatchUsage, Document, MAX_INTENT_PAYLOAD_BYTES, Session, StateAdapter,

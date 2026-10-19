@@ -28,7 +28,6 @@ struct Mount {
     session_controls: bool,
     scene: OnceLock<Arc<Scene>>,
     visible: BTreeMap<u16, Value>,
-    snapshot: BTreeMap<u16, Value>,
     keyboard: Keyboard,
     editors: BTreeMap<u16, TextBuffer>,
     focus: Option<u16>,
@@ -600,21 +599,6 @@ impl Client {
                     Ok(false)
                 }
             }
-            ServerMessage::Snapshot { epoch, values } => {
-                let Some(m) = &mut self.active else {
-                    return Ok(false);
-                };
-                if epoch != m.epoch {
-                    return Ok(false);
-                }
-                m.doc.validate_snapshot(&values)?;
-                let snapshot = values.into_iter().collect();
-                if m.snapshot == snapshot {
-                    return Ok(false);
-                }
-                m.snapshot = snapshot;
-                m.refresh()
-            }
             ServerMessage::AccessRequired { epoch } => {
                 if self
                     .active
@@ -1173,7 +1157,6 @@ impl Mount {
     fn read(&self, id: u16) -> Result<Value> {
         self.pad_preview
             .get(&id)
-            .or_else(|| self.snapshot.get(&id))
             .cloned()
             .map(Ok)
             .unwrap_or_else(|| self.doc.typed_value(id))
@@ -1353,7 +1336,7 @@ fn qualify(
     };
     let layout = Layout::from_bytes(&ui.layout)?;
     validate_responders(&ui, layout.blueprint())?;
-    let doc = StateAdapter::new(ui.state_schema.clone(), state_ref, state, writer)?;
+    let doc = StateAdapter::for_ui(&ui, state_ref, state, writer)?;
     let mut editors = BTreeMap::new();
     if let Some(Presentation::Editor { fields }) = &ui.presentation {
         for id in fields {
@@ -1376,7 +1359,6 @@ fn qualify(
         session_controls: false,
         scene: OnceLock::new(),
         visible: BTreeMap::new(),
-        snapshot: BTreeMap::new(),
         keyboard: Keyboard::default(),
         editors,
         focus: None,

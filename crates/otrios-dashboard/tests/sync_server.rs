@@ -105,7 +105,6 @@ fn read_epoch(socket: &mut Socket, wanted: u32) -> ServerMessage {
             ServerMessage::Mounted { epoch, .. }
             | ServerMessage::Sync { epoch, .. }
             | ServerMessage::View { epoch, .. }
-            | ServerMessage::Snapshot { epoch, .. }
             | ServerMessage::AccessRequired { epoch }
             | ServerMessage::Error { epoch, .. } => *epoch,
         };

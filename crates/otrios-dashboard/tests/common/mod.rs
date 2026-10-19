@@ -66,7 +66,13 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
             title: id.into(),
             state_schema: fields,
             layout: Layout::bootstrap().unwrap().bytes().to_vec(),
-            selectors: vec![],
+            // Tests read/edit this field; declare it as a view dependency so
+            // selective replication does not intentionally omit it.
+            selectors: vec![Selector {
+                local: 1,
+                field: 1,
+                projection: Projection::Identity,
+            }],
             handlers: vec![],
             navigation: vec![],
             behavior: None,

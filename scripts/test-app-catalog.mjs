@@ -6,7 +6,7 @@ import {loadAppCatalog} from '../web/shared/app-catalog.mjs';
 const hash=async bytes=>Buffer.from(await webcrypto.subtle.digest('SHA-256',bytes)).toString('hex');
 globalThis.crypto??=webcrypto;
 async function release(catalog){
-  const manifest=new TextEncoder().encode(JSON.stringify({state_schema:'otrios-canvas-merkle-state-v1',sync_protocol:'otrios-canvas-sync-v2',assets:{'apps/catalog.flex':{bytes:catalog.length,sha256:await hash(catalog)}}}));
+  const manifest=new TextEncoder().encode(JSON.stringify({state_schema:'otrios-canvas-merkle-state-v1',sync_protocol:'otrios-canvas-sync-v3',assets:{'apps/catalog.flex':{bytes:catalog.length,sha256:await hash(catalog)}}}));
   return {manifest,id:await hash(manifest)};
 }
 test('admitted catalog bytes are bound to the immutable release manifest',async()=>{

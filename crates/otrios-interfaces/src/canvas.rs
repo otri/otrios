@@ -225,10 +225,6 @@ pub enum ServerMessage {
         #[serde(deserialize_with = "opaque_bytes")]
         bytes: Vec<u8>,
     },
-    Snapshot {
-        epoch: u32,
-        values: Vec<(u16, Value)>,
-    },
     AccessRequired {
         epoch: u32,
     },

@@ -197,6 +197,10 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         "app:component-playground/ui",
         "app:component-playground/state",
     );
+    assert!(
+        !a.tick(),
+        "another writer's durable admission receipt must not enter this lease"
+    );
     let mut layout = server.peer("app:layout-lab/ui", "app:layout-lab/state");
     edit(&mut a.c, "Linear slider", 810);
     a.settle();

@@ -1830,3 +1830,86 @@ fn discrete_assignment_and_text_do_not_wait_for_continuous_dispatch_interval() {
         otrios_interfaces::layout::Value::Text("ab".into())
     );
 }
+
+#[test]
+fn admitted_ui_coverage_hides_unused_values_and_other_receipts_but_confirms_own_edits() {
+    use otrios_interfaces::layout::Value;
+    let code = code();
+    let mut ui = playground::ui(&code);
+    ui.state_schema.fields.push(Field {
+        id: 6,
+        name: "unused".into(),
+        default: Value::Text("default".into()),
+        writable: true,
+    });
+    let selection = StateSelection::from_ui(&ui).unwrap();
+    let mut authority = Document::new(ui.state_schema.clone(), "selection:ui").unwrap();
+    authority
+        .set_typed(&[(6, Value::Text("not-in-this-view".into()))])
+        .unwrap();
+    let mut c = Client::default();
+    activate(&mut c, ui, "selection:ui", code);
+    assert!(
+        c.typed_value(6).is_err(),
+        "an unrequested value cannot appear as a schema default"
+    );
+    let mut session = Session::default();
+    drain_sync(&mut c, &mut authority, &mut session);
+    session.set_selection(selection.clone()).unwrap();
+    deliver_state(&mut c, &authority, &mut session);
+    drain_sync(&mut c, &mut authority, &mut session);
+    assert!(c.confirmed());
+    let old_scene = c.scene().unwrap();
+    assert!(
+        session.set_selection(selection).is_err(),
+        "coverage is fixed for a lease"
+    );
+    authority
+        .set_typed(&[(6, Value::Text("changed-but-unrequested".into()))])
+        .unwrap();
+    assert!(authority.generate(&mut session).unwrap().is_none());
+    let (_other, _) = authority.open_session(&[99; 16], 0).unwrap();
+    assert!(
+        authority.generate(&mut session).unwrap().is_none(),
+        "other writer admission is outside coverage"
+    );
+    assert!(std::sync::Arc::ptr_eq(&old_scene, &c.scene().unwrap()));
+    edit(&mut c, "Linear slider", 860, 0);
+    c.cancel().unwrap();
+    drain_sync(&mut c, &mut authority, &mut session);
+    deliver_state(&mut c, &authority, &mut session);
+    drain_sync(&mut c, &mut authority, &mut session);
+    assert!(c.confirmed());
+    assert_eq!(authority.value(1).unwrap(), 860);
+    assert_eq!(c.value(1).unwrap(), 860);
+    assert!(c.typed_value(6).is_err());
+    assert_eq!(
+        authority.typed_value(6).unwrap(),
+        Value::Text("changed-but-unrequested".into())
+    );
+}
+
+#[test]
+fn retired_snapshot_override_cannot_create_a_second_source_of_app_state() {
+    #[derive(serde::Serialize)]
+    enum Retired {
+        Snapshot {
+            epoch: u32,
+            values: Vec<(u16, otrios_interfaces::layout::Value)>,
+        },
+    }
+    let code = code();
+    let ui = playground::ui(&code);
+    let mut c = Client::default();
+    activate(&mut c, ui, "retired:snapshot", code);
+    let scene = c.scene().unwrap();
+    let before = c.value(1).unwrap();
+    let bytes = flexbuffers::to_vec(Retired::Snapshot {
+        epoch: c.epoch(),
+        values: vec![(1, otrios_interfaces::layout::Value::Number(999.))],
+    })
+    .unwrap();
+    assert!(c.receive(&bytes).is_err());
+    assert_eq!(c.value(1).unwrap(), before);
+    assert!(std::sync::Arc::ptr_eq(&scene, &c.scene().unwrap()));
+}

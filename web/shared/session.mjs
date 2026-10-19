@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Stable bootstrap/network owner. No dependency on Wasm or the CRDT decoder.
-export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v2',STATE=1,INK=2;
+export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v3',STATE=1,INK=2;
 export function validRelease(r){return r&&/^[0-9a-f]{64}$/.test(r.id)&&r.web_entry===`/releases/${r.id}/web/index.html`;}
 export function connectSession({
   onRelease=()=>{},onState=()=>{},onInk=()=>{},onStatus=()=>{},onError=()=>{},

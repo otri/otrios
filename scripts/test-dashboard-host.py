@@ -30,7 +30,7 @@ def main():
         if name.endswith('.wasm'):assert headers.get('Content-Type')=='application/wasm'
         if name.endswith('artifact-cache-worker.js'):assert headers.get('Service-Worker-Allowed')=='/'
         count+=1
-    assert manifest['state_schema']=='otrios-canvas-merkle-state-v1' and manifest['sync_protocol']=='otrios-canvas-sync-v2';count+=1
+    assert manifest['state_schema']=='otrios-canvas-merkle-state-v1' and manifest['sync_protocol']=='otrios-canvas-sync-v3';count+=1
     assert 'apps/catalog.flex' in manifest['assets'];count+=1
     for name in manifest.get('authority',{}):
         assert name.startswith('authority/apps/') and request(prefix+name)[0]==404;count+=1
@@ -48,7 +48,7 @@ def main():
         assert not header[1]&128 and size<=2*1024*1024
         return header[0]&15,read(size)
     assert request('/release/events',extra=ws_headers('https://unrelated.example'))[0]==403;count+=1
-    def hello(path='/session',protocol='otrios-canvas-sync-v2',cookie=None):
+    def hello(path='/session',protocol='otrios-canvas-sync-v3',cookie=None):
         headers=ws_headers(a.url.rstrip('/'))
         if cookie:headers['Cookie']=cookie
         connection,response=request(path,extra=headers,upgrade=True)
