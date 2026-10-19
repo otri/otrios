@@ -63,3 +63,5 @@ pub mod keyboard;
 
 #[cfg(feature = "layout")]
 pub mod canvas;
+
+pub mod merkle;
