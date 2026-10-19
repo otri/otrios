@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Stable hello and event-driven upgrades — 2026-10-19
 
+Historical deployment record. Current topology and operations follow [RFC 0009](../rfcs/0009-unified-server-session.md).
+
+
 The [v1 release-control contract](../rfcs/0008-release-control.md) supersedes the
 [interim five-second polling rollout](release-discovery-deployment.md).
 Signed app release: `520e5d8f4430fab9d2a75ca41ee1a925d823cdf08c45b4df4559f1a804407af6`,

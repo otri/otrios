@@ -36,7 +36,7 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
         (stage/'apps').mkdir();(stage/'apps/catalog.flex').write_bytes(data)
         assets['apps/catalog.flex']={'bytes':len(data),'sha256':digest(data)}
         # Private app bytes are signed with this immutable release but never
-        # copied into the public module replica or exposed by an HTTP allowlist.
+        # exposed by the public HTTP allowlist.
         for folder in sorted(catalog.parent.iterdir()):
             package=folder/'package'
             if folder.is_symlink() or package.is_symlink():raise ValueError('App package directory symlink rejected')

@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Independent release discovery and replication rollout — 2026-10-19
 
+Historical deployment record. Current topology and operations follow [RFC 0009](../rfcs/0009-unified-server-session.md).
+
+
 Historical interim deployment. The [stable hello/event rollout](release-hello-deployment.md)
 supersedes its five-second polling and disconnected-edit waiting policy.
 
