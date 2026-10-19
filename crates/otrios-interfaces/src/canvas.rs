@@ -178,6 +178,9 @@ pub enum ClientMessage {
         state_ref: String,
         catalog_hash: Vec<u8>,
         known_code: Vec<Vec<u8>>,
+        /// RAM-only nonce for durable deduplication; never an access grant.
+        writer: Vec<u8>,
+        resume: u64,
     },
     /// Activate an already-qualified candidate; no new app Sync precedes this.
     AcceptMount {
@@ -223,5 +226,38 @@ pub enum ServerMessage {
     Error {
         epoch: u32,
         message: String,
+    },
+}
+
+/// Versioned inner state protocol. Client clocks/trees are never accepted as writes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum StateRequest {
+    Hello {
+        writer: Vec<u8>,
+        resume: u64,
+    },
+    Write {
+        sequence: u64,
+        values: Vec<(u16, Value)>,
+    },
+    Ack {
+        authority: u64,
+        lease: u64,
+        sequence: u64,
+        root: Vec<u8>,
+    },
+    Resync,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum StateResponse {
+    Mount {
+        authority: u64,
+        lease: u64,
+        frame: Vec<u8>,
+    },
+    Update {
+        frame: Vec<u8>,
     },
 }

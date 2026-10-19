@@ -20,8 +20,7 @@ struct Mount {
     epoch: u32,
     ui: Ui,
     layout: Layout,
-    doc: Document,
-    session: Session,
+    doc: StateAdapter,
     behavior: Option<Behavior>,
     input: InputRouter,
     state_ref: String,
@@ -58,10 +57,9 @@ enum MountDecision {
 /// Disposable two-peer CRDT workload. It never shares a document, session or
 /// persistence path with the admitted app's authoritative state.
 struct StressWorkload {
-    source: Document,
+    source: StateAdapter,
     sink: Document,
-    source_session: Session,
-    sink_session: Session,
+    session: Session,
     scope: String,
     field: u16,
     operations: u16,
@@ -69,10 +67,9 @@ struct StressWorkload {
 impl StressWorkload {
     fn new(schema: StateSchema, scope: String, field: u16) -> Result<Self> {
         Ok(Self {
-            source: Document::new(schema.clone(), &scope)?,
+            source: StateAdapter::new(schema.clone(), &scope, &[], state::writer_nonce()?)?,
             sink: Document::new(schema, &scope)?,
-            source_session: Session::default(),
-            sink_session: Session::default(),
+            session: Session::default(),
             scope,
             field,
             operations: 0,
@@ -80,25 +77,25 @@ impl StressWorkload {
     }
     fn step(&mut self) -> Result<bool> {
         if self.operations == 256 {
-            *self = Self::new(self.source.schema().clone(), self.scope.clone(), self.field)?;
+            *self = Self::new(self.sink.schema().clone(), self.scope.clone(), self.field)?;
         }
         let next = (self.source.value(self.field)? + 1) % 1001;
         let changed = self.source.set(&[(self.field, next)])?;
         for _ in 0..8 {
-            let a = self.source.generate(&mut self.source_session)?;
-            let b = self.sink.generate(&mut self.sink_session)?;
+            let a = self.source.generate()?;
+            if let Some(bytes) = a.as_ref() {
+                self.sink.receive(&mut self.session, bytes)?;
+            }
+            let b = self.sink.generate(&mut self.session)?;
+            if let Some(bytes) = b.as_ref() {
+                self.source.receive(bytes)?;
+            }
             if a.is_none() && b.is_none() {
                 break;
             }
-            if let Some(bytes) = a {
-                self.sink.receive(&mut self.sink_session, &bytes)?;
-            }
-            if let Some(bytes) = b {
-                self.source.receive(&mut self.source_session, &bytes)?;
-            }
         }
         if self.sink.value(self.field)? != next {
-            return Err("Diagnostic CRDT workload did not converge".into());
+            return Err("Diagnostic Merkle workload did not converge".into());
         }
         self.operations += u16::from(changed);
         Ok(changed)
@@ -119,6 +116,7 @@ pub struct Client {
     auth_required: bool,
     session_controls: bool,
     sign_out_requested: bool,
+    writer: Option<[u8; 16]>,
 }
 impl Client {
     pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
@@ -234,7 +232,7 @@ impl Client {
             || self
                 .active
                 .as_mut()
-                .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed(&m.session))
+                .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed())
     }
     pub fn presentation(&self) -> Option<Presentation> {
         self.active.as_ref().and_then(|m| m.ui.presentation.clone())
@@ -334,7 +332,7 @@ impl Client {
             return;
         }
         if let Some(m) = &mut self.active {
-            m.session = Session::default();
+            m.doc.reconnect();
             self.generation = self.generation.saturating_add(1);
             self.requested = Some(Request {
                 epoch: self.generation,
@@ -357,6 +355,14 @@ impl Client {
         self.open("app:home/ui", "app:home/state");
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        let writer = match self.writer {
+            Some(w) => w,
+            None => {
+                let w = state::writer_nonce()?;
+                self.writer = Some(w);
+                w
+            }
+        };
         if let Some(decision) = self.decision.take() {
             let message = match decision {
                 MountDecision::Accept(epoch) => ClientMessage::AcceptMount { epoch },
@@ -390,6 +396,12 @@ impl Client {
                 state_ref: r.pair.1.clone(),
                 catalog_hash: self.catalog_hash.clone(),
                 known_code: self.cache.iter().map(|v| v.0.clone()).collect(),
+                writer: writer.to_vec(),
+                resume: self
+                    .active
+                    .as_ref()
+                    .filter(|m| m.state_ref == r.pair.1)
+                    .map_or(0, |m| m.doc.resume_sequence()),
             })
             .map(Some);
         }
@@ -397,7 +409,7 @@ impl Client {
             return Ok(None);
         }
         if let Some(m) = &mut self.active
-            && let Some(bytes) = m.doc.generate(&mut m.session)?
+            && let Some(bytes) = m.doc.generate()?
         {
             return encode_client(&ClientMessage::Sync {
                 epoch: m.epoch,
@@ -416,6 +428,9 @@ impl Client {
     ) -> Result<bool> {
         let description = decode_ui(ui)?;
         self.generation = self.generation.checked_add(1).ok_or("Epoch exhausted")?;
+        if self.writer.is_none() {
+            self.writer = Some(state::writer_nonce()?);
+        }
         self.requested = Some(Request {
             epoch: self.generation,
             pair: (description.ui_ref, state_ref.into()),
@@ -486,21 +501,21 @@ impl Client {
                         &code,
                         &self.cache,
                         &state,
-                        epoch,
-                        e.private || e.app.id == "monitoring",
+                        Qualification {
+                            epoch,
+                            private: e.private || e.app.id == "monitoring",
+                            writer: self.writer.ok_or("Missing writer nonce")?,
+                        },
                     )?;
                     if let Some(old) = &self.active
                         && old.state_ref == candidate.state_ref
                         && old.ui.state_schema == candidate.ui.state_schema
                     {
-                        candidate.doc = old.doc.clone();
+                        candidate.doc.restore_pending(&old.doc)?;
                         candidate.pending = old.pending.clone();
                         candidate.now = old.now;
                         candidate.wall = old.wall;
                         candidate.sent_at = old.sent_at;
-                        if !state.is_empty() {
-                            candidate.doc.merge_authority(&state)?;
-                        }
                         candidate.refresh()?;
                     }
                     candidate.session_controls = self.session_controls;
@@ -541,7 +556,7 @@ impl Client {
                 if epoch != m.epoch {
                     return Ok(false);
                 }
-                if m.doc.receive_authority(&mut m.session, &bytes)? {
+                if m.doc.receive(&bytes)? {
                     m.refresh()
                 } else {
                     Ok(false)
@@ -1154,15 +1169,24 @@ impl Mount {
         Ok(true)
     }
 }
+struct Qualification {
+    epoch: u32,
+    private: bool,
+    writer: [u8; 16],
+}
 fn qualify(
     ui: Ui,
     state_ref: &str,
     code: &[u8],
     cache: &VecDeque<(Vec<u8>, Vec<u8>)>,
     state: &[u8],
-    epoch: u32,
-    private: bool,
+    identity: Qualification,
 ) -> Result<Mount> {
+    let Qualification {
+        epoch,
+        private,
+        writer,
+    } = identity;
     if ui.format != "otrios-canvas-v2"
         || ui.title.len() > 96
         || ui.selectors.len() > 128
@@ -1300,11 +1324,7 @@ fn qualify(
     };
     let layout = Layout::from_bytes(&ui.layout)?;
     validate_responders(&ui, layout.blueprint())?;
-    let doc = if state.is_empty() {
-        Document::new(ui.state_schema.clone(), state_ref)?
-    } else {
-        Document::load(ui.state_schema.clone(), state_ref, state)?
-    };
+    let doc = StateAdapter::new(ui.state_schema.clone(), state_ref, state, writer)?;
     let mut editors = BTreeMap::new();
     if let Some(Presentation::Editor { fields }) = &ui.presentation {
         for id in fields {
@@ -1320,7 +1340,6 @@ fn qualify(
         ui,
         layout,
         doc,
-        session: Session::default(),
         behavior,
         input: InputRouter::default(),
         state_ref: state_ref.into(),

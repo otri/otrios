@@ -262,6 +262,8 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
             ui_ref: "app:layout-lab/ui".into(),
             state_ref: "app:component-playground/state".into(),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
             catalog_hash: hash(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap()),
         })
         .unwrap()

@@ -673,8 +673,10 @@ version = "0.1.0"
 dependencies = [
  "automerge",
  "flexbuffers",
+ "getrandom 0.4.3",
  "otrios-interfaces",
  "ruzstd",
+ "serde",
  "sha2",
  "unicode-segmentation",
  "wasmi",
