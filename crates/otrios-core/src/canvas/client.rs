@@ -49,6 +49,7 @@ struct Request {
     epoch: u32,
     pair: (String, String),
     sent: bool,
+    reconnecting: bool,
 }
 enum MountDecision {
     Accept(u32),
@@ -338,6 +339,7 @@ impl Client {
                 epoch: self.generation,
                 pair: (m.ui.ui_ref.clone(), m.state_ref.clone()),
                 sent: false,
+                reconnecting: true,
             });
         }
     }
@@ -383,6 +385,7 @@ impl Client {
                 epoch: self.generation,
                 pair,
                 sent: false,
+                reconnecting: false,
             });
         }
         if let Some(r) = &mut self.requested {
@@ -435,6 +438,7 @@ impl Client {
             epoch: self.generation,
             pair: (description.ui_ref, state_ref.into()),
             sent: true,
+            reconnecting: false,
         });
         let changed = self.receive(&encode_server(&ServerMessage::Mounted {
             epoch: self.generation,
@@ -478,6 +482,7 @@ impl Client {
                 if r.epoch != epoch {
                     return Ok(false);
                 }
+                let reconnecting = r.reconnecting;
                 let candidate = (|| -> Result<Mount> {
                     let e = self
                         .catalog
@@ -524,7 +529,21 @@ impl Client {
                     Ok(candidate)
                 })();
                 match candidate {
-                    Ok(candidate) => {
+                    Ok(mut candidate) => {
+                        if reconnecting
+                            && self.active.as_ref().is_some_and(|old| {
+                                old.ui == candidate.ui && old.state_ref == candidate.state_ref
+                            })
+                        {
+                            let mut current =
+                                self.active.take().ok_or("Missing reconnect activation")?;
+                            current.doc = candidate.doc;
+                            current.epoch = candidate.epoch;
+                            current.session_controls = candidate.session_controls;
+                            current.refresh()?;
+                            current.invalidate();
+                            candidate = current;
+                        }
                         if let Some(reference) = &candidate.ui.behavior
                             && !code.is_empty()
                             && !self.cache.iter().any(|v| v.0 == reference.sha256)
@@ -595,6 +614,7 @@ impl Client {
                             epoch: self.generation,
                             pair: (old.ui.ui_ref, old.state_ref),
                             sent: false,
+                            reconnecting: false,
                         });
                         self.auth_required = true;
                     }
@@ -629,7 +649,9 @@ impl Client {
             .and_then(|m| m.ui.handlers.iter().find(|h| h.control == control))
             .cloned()
             .ok_or("Unknown app event")?;
-        if self.requested.is_some() && !matches!(h.operation, Operation::Back) {
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting)
+            && !matches!(h.operation, Operation::Back)
+        {
             return Ok(false);
         }
         match h.operation {
@@ -671,14 +693,14 @@ impl Client {
             }
             _ => {}
         }
-        if self.requested.is_some() {
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let current = h
             .fields
             .first()
-            .map(|id| m.doc.value(*id))
+            .map(|id| m.number(*id))
             .transpose()?
             .unwrap_or(0);
         let commands = if let Some(guest) = &mut m.behavior {
@@ -751,7 +773,7 @@ impl Client {
             });
         let owned = m.keyboard_pointer == Some(event.id);
         if m.keyboard.visible && (key.is_some() || owned) {
-            if self.requested.is_some() {
+            if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 return Ok(false);
             }
             let edit = match event.phase {
@@ -834,7 +856,7 @@ impl Client {
             None
         };
         let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
-        if pad && self.requested.is_some() {
+        if pad && self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
         }
         if pad && let Some(g) = &delivery.gesture {
@@ -963,7 +985,7 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
-        if self.requested.is_some() || self.active.is_none() {
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting) || self.active.is_none() {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
@@ -1099,9 +1121,9 @@ impl Client {
         let shift = |value: u16, delta: i16| {
             (i32::from(value) + i32::from(delta) * 10).clamp(0, 1000) as u16
         };
-        let a = shift(m.doc.value(h.fields[0])?, dx);
+        let a = shift(m.number(h.fields[0])?, dx);
         let b = if h.fields.len() > 1 {
-            shift(m.doc.value(h.fields[1])?, dy)
+            shift(m.number(h.fields[1])?, dy)
         } else {
             0
         };
@@ -1122,10 +1144,16 @@ impl Client {
         if h.kind == GestureKind::Activate {
             return Ok(None);
         }
-        Ok(Some(f64::from(m.doc.value(h.fields[0])?) / 10.))
+        Ok(Some(f64::from(m.number(h.fields[0])?) / 10.))
     }
 }
 impl Mount {
+    fn number(&self, id: u16) -> Result<u16> {
+        match self.read(id)? {
+            Value::Number(n) => Ok(n as u16),
+            _ => Err("Not a normalized field".into()),
+        }
+    }
     fn read(&self, id: u16) -> Result<Value> {
         self.pad_preview
             .get(&id)
