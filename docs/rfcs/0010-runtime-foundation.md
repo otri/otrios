@@ -5,6 +5,8 @@ Status: accepted direction, implementation in progress on
 `feat/canvas-replication-pipeline`. This is the active dashboard milestone.
 The user approved completing this foundation on 2026-10-19. Main and the
 historical benchmark branch are not deployment targets for this work.
+The [first foundation rollout](../experiments/canvas-foundation.md) is live;
+resource-accounting, dependency retirement and transport work remain active.
 
 ## Selection rule
 
@@ -28,13 +30,13 @@ in a linked experiment. Commit each independently reviewable increment.
 
 | Work | Existing foundation | Remaining gate |
 | --- | --- | --- |
-| One edit pipeline | Adapter owns one pending map and one immutable issued batch on the feature branch | App-level deadline/final-release/discrete-action/reconnect tests; explicit queue accounting; browser and frame qualification; remove prototype-only disposition after promotion |
-| Selective Merkle replication | Generic authorized subtree leases; Canvas scopes by app | Derive bounded coverage from admitted selectors, handler reads and presentation; send only that writer's receipt; coherent publication of coverage; no unrelated-field traffic; gap/resync/revocation tests |
+| One edit pipeline | Deployed: one pending map, one immutable issued batch, deadlines/final flush and bounded intent payloads | Passed runtime/browser/frame qualification; maintain these semantics through subsequent codec changes |
+| Selective Merkle replication | Deployed sync v3: admitted UI coverage and writer-local receipts advance coherently | Passed fixed-field/subtree isolation, resync and policy gates; collection queries remain explicitly outside this milestone |
 | Universal app boundary | All seven apps use `Canvas(uiRef, stateRef)` packages | Audit host/demo branches and dependencies, keep launcher opaque; remove obsolete routes/imports after parity; update stale ownership docs |
 | Presentation ownership | Animation, focus/caret, ink and GPU resources are local | Delayed-state tests retain immediate local feedback and clock progression; no document checkpoints or duplicate writable view state |
-| Resource bounds | Field/message/cache/journal limits and one-flight replication | Expose pending/flight bytes and age; enforce byte/count limits before admission; test slow peers, snapshot retention and overflow recovery; distinguish scratch counters from whole-process allocation claims |
+| Resource bounds | Intent payload/field limits, DispatchUsage, message/cache/journal limits and one-flight replication | Surface diagnostics to hosts; account for packet/snapshot retention; validate total resource and overload behavior; distinguish scratch counters from whole-process allocation claims |
 | Canonical data and transport | Canonical Merkle hashing separate from binary Blob envelopes | One versioned bounded packed codec shared by browser/native; optional compression selected from matched costs; independent stable v1 control hello; malformed/oversize/unknown-version checks |
-| Retirement and acceptance | Old renderer and most global-room paths removed | Explicit browser/frame matrix, one direct renderer, server persistence/policy/recovery tests; delete each redundant production path once replacements pass |
+| Retirement and acceptance | Old renderer/global-room paths and unused Snapshot override removed; first browser/frame rollout passes | Audit remaining legacy dependencies and codecs; retain one direct renderer and rerun relevant acceptance on each cutover |
 
 ## Edit and presentation semantics
 
@@ -84,7 +86,7 @@ not a prerequisite for narrowing today's fixed-field replication.
    navigation, input, final release, remote changes, reconnect/upgrade, private
    Monitoring and authority recovery. Record automated versus physical evidence.
 
-### Source qualification so far
+### Implemented and qualified increments
 
 The adapter exposes `DispatchUsage` and a 256 KiB combined pending/issued value
 payload limit. Core tests cover all-or-nothing rejection, immutable-flight
@@ -110,8 +112,8 @@ to change. No unbounded per-publication queue is introduced.
 Library tests cover policy, canonical ordering, missing-target creation,
 unrelated-change suppression, partial/corrupt-frame atomicity, slow readers and
 resync. A real child process receives two paths coherently without sibling or
-ancestor private payloads. The existing live Canvas wire protocol still uses
-app-root leases. The feature-branch integration uses `StateSelection::from_ui`: shared selectors, handler/reducer
+ancestor private payloads. The deployed Canvas integration uses
+`StateSelection::from_ui`: shared selectors, handler/reducer
 fields, editor/motion declarations and requested signal windows. The server
 compiles it from admitted package bytes and fixes it before the first offer.
 Only that lease's writer receipt is included. The client validates every required
@@ -119,7 +121,8 @@ field and returns an explicit error for unmaterialized fields rather than a
 schema default. Authority documents/checkpoints/journals remain complete.
 
 This cutover declares `otrios-canvas-sync-v3`; schema/node canonical bytes remain
-v1 and opening release control remains v1. It is not yet deployed. The previous
+v1 and opening release control remains v1. It is deployed with signed release
+`ac0bbd21aa32155029f10df1fcdc56245ed4b9da6628a315124fd571b7ab062c`. The previous
 v2 state client still receives release metadata through a v1 hello, with its
 state stream blocked until upgrade. Publisher, browser catalog admission,
 browser/native negotiation and authority manifest admission declare v3 together.
@@ -129,7 +132,9 @@ read-only Monitoring continues using its separate replaceable `View` aggregate.
 [Frame coverage measurements](../experiments/merkle-coverage.md) record 81
 matched in-process trials. Covered views suppress unrelated deliveries and
 reduce retained canonical bytes; projection adds authority work, especially with
-few receipts. These source/library results do not complete Canvas rollout.
+few receipts. The subsequent [complete-client comparison and live qualification](../experiments/canvas-foundation.md)
+record browser behavior, final convergence, retained server state and one direct
+frame renderer. Neither report substitutes for physical touch/color acceptance.
 
 Use fresh matched authorities for performance experiments. Report delivered
 value age, final settlement, useful bytes, CPU, queue age and retained memory;

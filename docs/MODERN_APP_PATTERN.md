@@ -102,8 +102,10 @@ metric samples or binary layouts to durable CRDT history. This is the current
 aggregate-view contract, not a general query or analytics engine.
 
 A Canvas retains an immutable resolved scene until selected presentation inputs
-change. Unselected state changes and acknowledgements do not rebuild it. Sync now uses app-scoped Merkle subtree leases with server-owned durable state
-and RAM-only pending intents ([RFC 0006](rfcs/0006-durable-canvas-merkle-adapter.md)).
+change. Unselected state changes and acknowledgements do not rebuild it. Sync
+uses coherent Merkle coverage compiled from the admitted UI and that writer's
+receipt, within the app State scope. Durable state stays on the authority and
+pending intents stay in one RAM queue ([foundation rollout](experiments/canvas-foundation.md)).
 General collection/item/cursor selectors from RFC 0003 remain unimplemented.
 
 Current bounds include 64 schema fields, 4 KiB text values, 2,016 series points
@@ -154,9 +156,9 @@ than compatibility requirements for app navigation.
 
 Shared authoring lives in `tools/canvas/authoring.rs`; stable builders can move to
 the SDK without copying LGPL runtime implementation into permissive packages.
-App-scoped Merkle state replication is deployed. The generic library now also
-supports coherent coverage over multiple authorized paths; Canvas integration
-and general collection selectors remain in progress. General OS loading,
+Coherent covered Merkle replication is deployed on both hosts. The generic
+library supports multiple authorized paths, and Canvas derives its coverage from
+admitted UI dependencies. General collection selectors remain in progress. General OS loading,
 arbitrary capability imports and cross-app transactions remain outside this
 milestone. Follow the [foundation completion ledger](rfcs/0010-runtime-foundation.md)
 for current source, acceptance and deployment gates.

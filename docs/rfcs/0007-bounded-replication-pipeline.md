@@ -5,10 +5,12 @@ Status: initial increments implemented on `feat/canvas-replication-pipeline` and
 [deployed on browser and frame](../experiments/release-discovery-deployment.md);
 see [frame measurements](../experiments/canvas-replication-pipeline.md).
 A [measured dispatch prototype](../experiments/canvas-dispatch.md) consolidates
-continuous numeric edits in the adapter's single RAM queue; it is not promoted
-to the live client release. Measurements show no reliable overall speed win;
-[RFC 0010](0010-runtime-foundation.md) now qualifies its ownership simplification
-separately from optimization claims. Packed envelopes and compression remain planned.
+continuous numeric edits in the adapter's single RAM queue. It was subsequently
+[qualified and deployed](../experiments/canvas-foundation.md) as part of the
+practical foundation, together with intent bounds and coherent covered views.
+Its ownership simplification qualifies separately from speed claims; the combined
+foundation lowers traffic without establishing a uniform CPU/latency win.
+Packed envelopes and compression remain planned.
 Extends RFCs 0002, 0005 and 0006. Main remains at the dashboard milestone;
 performance experiments use disposable authorities; the subsequent authorized
 rollout retains the live room and its durable stores.

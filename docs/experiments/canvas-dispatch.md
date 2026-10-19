@@ -1,6 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Single-queue dispatch prototype — 2026-10-19
 
+Historical isolated comparison. The queue was later qualified and deployed with
+the [2026-10-20 Canvas foundation](canvas-foundation.md), selected for simpler
+ownership and bounded behavior. The measurements and original hold decision
+below remain unchanged; they do not establish a dispatch-only speedup.
+
 The prototype removes the UI's second pending map and flush clock. Continuous
 numeric assignments go directly into the adapter's bounded RAM overlay, retaining
 one immutable issued write. The default remains 33 ms; later samples cannot push

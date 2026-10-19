@@ -6,8 +6,8 @@ Status: deployed on browser and photo frame; [acceptance evidence](../experiment
 The [RFC 0010 foundation cutover](0010-runtime-foundation.md) on the feature
 branch narrows Canvas replication to admitted UI dependencies and writer-local
 receipts, declaring state sync v3 while preserving canonical stored nodes and
-control hello v1. That cutover is not yet deployed; the v2 descriptions below
-record this adapter's original deployment.
+control hello v1. That cutover is [deployed on both hosts](../experiments/canvas-foundation.md);
+the v2 descriptions below record this adapter's original deployment.
 
 The [RFC 0007 follow-up](0007-bounded-replication-pipeline.md) adds negotiated
 binary responses, opt-in signal retention, reusable encoding workspace and

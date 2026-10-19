@@ -60,6 +60,11 @@ updates from network, durable storage and display latency.
 
 The [photo-frame Canvas adapter comparison](docs/experiments/canvas-adapter-frame-benchmark.md) measures durable latency, native presentation, application/device CPU and actual replication traffic against the dated pre-Merkle milestone. It also isolates a binary-envelope encoding cost; measured results distinguish application CPU savings from total system cost.
 
+The [practical Canvas foundation](docs/rfcs/0010-runtime-foundation.md) now deploys
+one bounded RAM intent queue and coherent UI-derived Merkle coverage, including
+only the writer's own receipt. [Browser/frame qualification and measurements](docs/experiments/canvas-foundation.md)
+record lower replication traffic, mixed latency results and the remaining work.
+
 The [bounded replication increments](docs/rfcs/0007-bounded-replication-pipeline.md)
 fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding
 workspace, with a separately measured interactive-socket change. Their
