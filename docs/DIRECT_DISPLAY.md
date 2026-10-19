@@ -38,7 +38,8 @@ executable. The older OTriOS Wayland service/trial runners are removed. Conflict
 with their historical unit name remain a guard against accidental double ownership.
 
 For isolated renderer work, `scripts/benchmark-dashboard-gles.py` accepts an
-explicitly hashed development executable and restores prior service ownership.
+explicitly hashed development executable plus an explicit admitted `--apps` folder,
+and restores prior service ownership.
 Native reports count kernel page-flip completions separately from compose/present
 call timings. `scripts/drm-flip-events.py` only parses captured DRM timestamps and
 opens no device. Earlier SDL/Weston measurements remain historical evidence in

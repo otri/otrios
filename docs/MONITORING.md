@@ -24,11 +24,19 @@ This is deliberately a subset: no Grafana embedding, dashboard editor, arbitrary
 
 `dashboard-monitoring` consumes the window on stdin and authors typed component/instance data directly into FlexBuffers. It reuses Screen, Text and Panel templates and adds Path/Circle templates for plots. It formats units, normalizes plotted values against labelled axes and resolves data into a complete presentation; raw metric values are not a general client-queryable telemetry schema in this PoC. The same existing primitive interpreter expands and validates the result on both hosts. There is no JSON scene representation or JavaScript chart renderer.
 
-The collector posts the complete binary view to `/presentation`. This is a **replaceable presentation**, separate from the editable `/layout` register and Automerge history. The server persists only the latest presentation beside its state file, validates it before activation, and pushes it to trusted native peers and separately authorized browser Monitoring subscriptions as `OTML1` followed by FlexBuffers bytes. A five-byte `OTML1` message clears the presentation. Peers must upgrade to this protocol before enabling a feed. The server coalesces announcements; native delivery coalesces a paired document/presentation so a newer CRDT message cannot drop a pending metrics view.
+The collector posts the complete binary view to trusted `/presentation`. The
+server persists only the latest complete aggregate, validates it before replacing
+the current view and sends it as a replaceable Canvas `View` on an authorized
+Monitoring lease. It uses channel 1 of the same negotiated `/session` connection;
+there is no OTML1 side stream or global editable layout register.
 
-`Replica::set_presentation` creates a complete immutable view while retaining old pinned snapshots. Normal CRDT edits/merges preserve the presentation; clearing it reveals the saved collaborative layout and state. Refreshing the feed does not append telemetry blobs or hashes to Automerge. The server also validates the underlying layout, so the overlay cannot conceal a malformed collaborative layout. The native host caches the latest binary presentation beside its state; authorized browsers retain it only in memory while the Monitoring subscription is open. Neither cache makes the feed fresh while disconnected.
+Clients retain the private aggregate only in RAM for that activation. Refreshes
+do not append metrics or binary layouts to durable Merkle documents. Revocation
+drops the private activation/view. Clearing the aggregate reveals the Monitoring
+app's empty-feed presentation, rather than an old global dashboard. A disconnected
+view's AS OF label is unchanged and must not be treated as fresh data.
 
-Each presentation remains limited to 128 KiB, 128 instances and 512 expanded nodes. Literal series allow at most 256 points (the demo state binding remains at its previous 32 samples). Extremely fragmented history that exceeds the scene limits is rejected and leaves the previous view intact. A general content-addressed raw telemetry store, independent data-binding schema and per-chart delta protocol are future work.
+Each presentation remains limited to 128 KiB, 128 instances and 512 expanded nodes. Literal series allow at most 256 points. Extremely fragmented history that exceeds the scene limits is rejected and leaves the previous view intact. A general content-addressed raw telemetry store, independent data-binding schema and per-chart delta protocol are future work.
 
 ## Build and collect
 
