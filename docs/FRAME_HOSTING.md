@@ -16,7 +16,9 @@ complete local Monitoring view. The Mac is only a builder and signing publisher.
 | `otrios-monitoring.timer` | Five-minute HTTPS collector and native chart projection | One-shot 240 seconds, 96 MiB hard |
 | `otrios-dashboard-direct` | Existing KMS/GLES2 display and touch | Separate process; 128 MiB artifact disk cache |
 
-These are configured limits, not measured working sets or capacity guarantees.
+Each WebSocket starts with a 4 KiB read buffer; the existing maximum message and
+frame bounds still apply. These are configured limits, not measured working sets
+or capacity guarantees.
 Both HTTP listeners remain loopback-only. The tunnel exposes only the public
 listener. Native state and code use `http://127.0.0.1:8876`, including the stable
 v1 hello on `/session`; remote code still requires HTTPS and signed native bytes.
@@ -168,4 +170,5 @@ soak behavior. The target and relay each have a 256 MiB cgroup cap. Tests stop
 when available system RAM drops below 256 MiB or a production health probe fails.
 The runner removes temporary units, relay and test state on exit. A cgroup cap,
 client deadline or generator bottleneck must be identified separately from a
-hardware capacity limit. See the dated experiment report for measured results.
+hardware capacity limit. See the [dated experiment report](experiments/frame-authority-2026-10-20.md)
+for measured results.

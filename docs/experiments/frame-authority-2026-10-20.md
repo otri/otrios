@@ -128,3 +128,25 @@ the achieved rate was 44.3 cycles/second in aggregate, far below the requested
 Raw telemetry stays locally in the ignored `target/frame-stress-*` directories.
 This report publishes aggregate synthetic benchmark results only; connection
 addresses, private paths, process identifiers and raw service samples are omitted.
+
+## Smaller-buffer idle comparison
+
+The same baseline client and 15-second idle hold were used against the 4 KiB
+server candidate. All requested sessions connected, with no client errors,
+production-health failures, memory-high events or swap use. This is a successful
+4,096-session test under the stated limits, not a physical maximum or a claim
+about 4,096 browsers through Cloudflare.
+
+| Idle sockets | Baseline peak RSS MiB | Candidate peak RSS MiB | Candidate input CPU (% of one core) |
+| ---: | ---: | ---: | ---: |
+| 64 | 14.0 | 5.9 | 1.0 |
+| 512 | 74.1 | 10.2 | 7.7 |
+| 2,048 | 190.0 | 25.0 | 39.5 |
+| 4,096 | 190.6 (partial admission) | 44.1 | 63.4 |
+
+At 512 idle sessions, peak process RSS fell from 74.1 to 10.2 MiB, approximately
+an 86% reduction. At 4,096 sessions the candidate used 44.1 MiB peak RSS and
+57.2 MiB peak cgroup memory, with at least 734 MiB system memory available.
+Connection setup took 90 seconds at the largest count; the final hold
+lasted 15 seconds. These short single trials are not a soak test, and CPU/latency
+differences should not be treated as statistically controlled speedups.
