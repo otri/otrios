@@ -1,64 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {awaitRelease,validRelease} from '../web/shared/release-gate.mjs';
-const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`});
-test('lagging code host does not switch a running runtime/state session',async()=>{
-  let reads=0,liveEdits=0,switched=false;
-  const ready=awaitRelease(release('b'),{read:async()=>++reads<3?release('a'):release('b'),wait:async()=>{assert.equal(switched,false);liveEdits++;}}).then(v=>{switched=v;return v;});
-  assert.equal(await ready,true);assert.equal(liveEdits,2);assert.equal(reads,3);
+import {watchReleases,validRelease} from '../web/shared/release-gate.mjs';
+const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'future-crdt-v99'});
+function rig(){
+  const peers=[],timers=new Map(),seen=[];let serial=0;
+  class Peer {constructor(url){this.url=String(url);this.sent=[];peers.push(this);}send(text){this.sent.push(JSON.parse(text));}close(){this.closed=true;this.onclose?.();}event(type,r,version=1){this.onmessage({data:JSON.stringify({type,version,release:r,refresh:true})});}}
+  const stop=watchReleases(r=>seen.push(r),{open:url=>new Peer(url),base:'https://otrios.example/releases/'+ 'a'.repeat(64)+'/web/index.html',schedule:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},cancel:id=>timers.delete(id)});
+  return {peers,timers,seen,stop};
+}
+test('connect negotiates stable hello and accepts a hash for an unknown CRDT protocol',()=>{
+  const r=rig(),p=r.peers[0];p.onopen();assert.equal(p.url,'wss://otrios.example/release/events');
+  assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v2'}]);
+  p.event('hello',release('a'));p.event('upgrade',release('b'));p.event('upgrade',release('b'));
+  assert.deepEqual(r.seen,[release('a'),release('b')]);assert.equal(r.timers.size,0,'healthy connections perform no polling');r.stop();
 });
-test('superseded release never switches after a late network response',async()=>{
-  let current=true;
-  assert.equal(await awaitRelease(release('a'),{isCurrent:()=>current,read:async()=>{current=false;return release('a');},wait:async()=>assert.fail('obsolete release must not retry')}),false);
+test('reconnect hello recovers a missed upgrade and late old-socket events are ignored',()=>{
+  const r=rig(),old=r.peers[0];old.onopen();old.event('hello',release('a'));old.close();
+  const [id,t]=[...r.timers][0];assert.equal(t.ms,250);r.timers.delete(id);t.fn();const next=r.peers[1];next.onopen();
+  old.event('upgrade',release('c'));next.event('hello',release('b'));assert.deepEqual(r.seen,[release('a'),release('b')]);r.stop();assert.equal(r.timers.size,0);
 });
-test('temporary host failure preserves the session and retries',async()=>{
-  let attempts=0;
-  assert.equal(await awaitRelease(release('b'),{read:async()=>{if(++attempts===1)throw Error('offline');return release('b');},wait:async()=>{}}),true);
-  assert.equal(attempts,2);
+test('invalid or oversized envelopes and upgrade-before-hello cannot navigate',()=>{
+  for(const send of [p=>p.event('upgrade',release('a')),p=>p.event('hello',{...release('a'),web_entry:'https://other.example/code'}),p=>p.event('hello',release('a'),2),p=>p.onmessage({data:' '.repeat(8193)})]){
+    const r=rig();send(r.peers[0]);assert(r.peers[0].closed);assert.equal(r.seen.length,0);r.stop();
+  }
+  assert(!validRelease({id:'a'.repeat(64),web_entry:'/bad'}));
 });
-test('untrusted entry URLs and aborted requests cannot trigger navigation',async()=>{
-  const invalid={...release('a'),web_entry:'https://unrelated.example/code'};
-  assert.equal(validRelease(invalid),false);await assert.rejects(awaitRelease(invalid));
-  const controller=new AbortController();controller.abort();
-  assert.equal(await awaitRelease(release('a'),{signal:controller.signal,read:async()=>assert.fail('aborted request')}),false);
+test('missing hello times out and stop prevents reconnect or late upgrade',()=>{
+  const r=rig(),p=r.peers[0];const [id,t]=[...r.timers][0];assert.equal(t.ms,5000);r.timers.delete(id);t.fn();assert(p.closed);
+  r.stop();assert.equal(r.timers.size,0);p.event('hello',release('b'));assert.equal(r.seen.length,0);
 });
 
-test('release discovery survives an absent state protocol, retries host errors and deduplicates',async()=>{
-  const {watchReleases}=await import('../web/shared/release-gate.mjs');
-  const timers=new Map(),seen=[];let serial=0,reads=0;
-  const stop=watchReleases(r=>seen.push(r.id),{
-    read:async()=>{reads++;if(reads===1)throw Error('host unavailable');return release(reads<4?'a':'b');},
-    schedule:(fn,ms)=>{const id=++serial;timers.set(id,{fn,ms});return id;},cancel:id=>timers.delete(id),
-  });
-  const settle=async()=>{for(let i=0;i<5;i++)await Promise.resolve();};
-  await settle();
-  for(let i=0;i<3;i++){const [id,t]=[...timers].find(([,t])=>t.ms===5000);timers.delete(id);await t.fn();await settle();}
-  assert.deepEqual(seen,['a'.repeat(64),'b'.repeat(64)]);assert.equal(reads,4);
-  stop();assert.equal(timers.size,0);
-});
-test('stopped, timed-out and invalid discovery responses cannot offer upgrades',async()=>{
-  const {watchReleases}=await import('../web/shared/release-gate.mjs');
-  let resolveRead,abort;
-  const timers=new Map();let serial=0;
-  const stop=watchReleases(()=>assert.fail('late discovery'),{
-    read:({signal})=>{abort=signal;return new Promise(resolve=>resolveRead=resolve);},
-    schedule:fn=>{timers.set(++serial,fn);return serial;},cancel:id=>timers.delete(id),
-  });
-  stop();assert(abort.aborted);resolveRead(release('b'));await Promise.resolve();await Promise.resolve();assert.equal(timers.size,0);
-  let deadline;
-  const stopTimeout=watchReleases(()=>assert.fail('expired response'),{read:async()=>{deadline();return release('b');},schedule:fn=>(deadline=fn),cancel(){}});
-  await Promise.resolve();await Promise.resolve();stopTimeout();
-  const stopInvalid=watchReleases(()=>assert.fail('invalid entry'),{read:async()=>({...release('b'),web_entry:'https://other.example/code'}),schedule:()=>0,cancel(){}});
-  await Promise.resolve();await Promise.resolve();stopInvalid();
-});
-test('descriptor reads are independent, uncached, same-origin and bounded',async()=>{
-  const {readRelease}=await import('../web/shared/release-gate.mjs');
-  const original=globalThis.fetch;
-  try {
-    globalThis.fetch=async(url,options)=>{assert.equal(url,'/release');assert.equal(options.cache,'no-store');assert.equal(options.redirect,'error');assert.equal(options.credentials,'omit');return new Response(JSON.stringify(release('c')));};
-    assert.deepEqual(await readRelease(),release('c'));
-    globalThis.fetch=async()=>new Response(' '.repeat(8193));await assert.rejects(readRelease(),/Oversized/);
-    globalThis.fetch=async()=>new Response(JSON.stringify({...release('c'),web_entry:'/bad'}));await assert.rejects(readRelease(),/Invalid/);
-  }finally{globalThis.fetch=original;}
+test('WebSocket construction failure retries without preventing app bootstrap',()=>{
+  const timers=new Map();let attempts=0,serial=0;
+  const stop=watchReleases(()=>{}, {base:'https://otrios.example',open:()=>{attempts++;throw Error('offline');},schedule:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},cancel:id=>timers.delete(id)});
+  assert.equal(attempts,1);const [id,t]=[...timers][0];assert.equal(t.ms,250);timers.delete(id);t.fn();assert.equal(attempts,2);stop();assert.equal(timers.size,0);
 });

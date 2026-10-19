@@ -148,28 +148,45 @@ an old tab cannot finish its previous protocol session during the cutover.
 
 ## Protocol-independent release discovery
 
-Browser shells poll the code host's uncached `/release` pointer immediately and
-then every five seconds, independently of app-state WebSockets. Discovery starts
-before Wasm initialization, uses one bounded request at a time with a five-second
-request timeout and an 8 KiB descriptor limit, and resumes after back/forward
-cache restoration. Entry paths must exactly match their 64-digit release ID.
-Unavailable or malformed pointers preserve the running release. State-stream
-release hints no longer select browser code. The frame supervisor also discovers
-code exclusively through its HTTP pointer, every five seconds; stale state-stream
-notice files cannot roll it back or suppress a release. A failed candidate keeps
-the previous verified host and can retry after 30 seconds. A native client with
-no initial mount still presents clean reload readiness; startup blank frames do
-not consume the diagnostic app capture.
+The [stable release-control v1 envelope](rfcs/0008-release-control.md) is a small
+JSON hello/upgrade protocol on the code host's `/release/events` WebSocket.
+Browser discovery starts before Wasm initialization; the frame uses a separate
+`release-watch` bootstrap companion. Each connection sends the client's current
+release hash and app-state protocol. The server immediately replies with the
+active hash, canonical entry path and current app-state protocol. An obsolete
+CRDT protocol never prevents that reply. After a complete signed replica becomes
+active, the publisher sends a loopback notification and connected clients receive
+an upgrade event. Reconnecting rereads the pointer, recovering missed events.
+Healthy clients perform no periodic release HTTP requests. WebSocket heartbeats
+and bounded reconnect backoff detect lost connections; they do not poll releases.
+The HTTP `/release` pointer remains for root bootstrap and older polling clients.
 
-A clean reconnect or first-mount handshake does not block replacement. The
-runtime's `reload_ready` reports whether user edits are confirmed and input is
-idle, separately from mount/stream readiness. RAM overlays, in-flight writes,
-captured gestures and queued browser input still block automatic replacement.
-A permanently incompatible authority cannot confirm those pending edits: a user
-may still close/reload the client and lose them, as with other RAM-only state.
-Candidate frame acceptance continues to require rendered output and a live
-stream; an unqualified candidate rolls back to a signature-verified cached build.
+A finished gesture is always required. While connected, replacement also waits
+for confirmed user edits. Disconnected clients may discard unconfirmed RAM edits
+for this PoC; no durable client-state migration is required. Candidate frame
+acceptance requires rendered output and, when replacing a connected host, a live
+state stream. Replacing an explicitly offline host may accept rendered offline
+output. Invalid signatures, targets or assets still reject a candidate; cached
+rollback and a 30-second failed-candidate retry remain in place.
 
-Clients predating this change cannot acquire it through a retired state
-protocol. Visit the launcher root once for those clients; hard-refreshing an
-immutable `/releases/<id>/...` URL deliberately reloads that same old release.
+The code-control service runs independently of the authority, bound to loopback
+`127.0.0.1:8879`. Start `release-control --releases <runtime>/releases` with an
+`--origin` for each permitted browser code-host Origin. Caddy proxies only
+`/release/events`; `/publish` is a local administrative hook. The module publisher
+verifies/transfers the replica, atomically activates the origin pointer, then
+POSTs `/publish` and requires acknowledgement. A notification failure is reported
+and retried; reconnects also reread the last valid pointer. Future CRDT protocol
+names in trusted signed manifests are accepted by the frame bootstrap, while
+signature, target and asset validation remain mandatory.
+
+The signed ARM build also produces `build/release-watch`. Install that companion
+at `/opt/otrios-dashboard/release-watch` before installing the new supervisor.
+Set the frame's `--code-url https://otrios.otri.ca` separately from its private
+state `--url`; this keeps code discovery independent of authority availability.
+The bootstrap companion and release-control v1 must remain available as app/CRDT
+implementations evolve. Updating this companion requires an explicit host update.
+
+Clients predating independent discovery need one launcher-root visit if their
+state protocol is already retired. Hard-refreshing an immutable release URL
+still loads that old release. Existing HTTP-polling clients can discover this
+upgrade through the retained `/release` pointer and then switch to events.

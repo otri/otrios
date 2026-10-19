@@ -51,8 +51,9 @@ def rebuild(config,wanted,activate=True):
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
     feature,binary='direct','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--target','armv7-unknown-linux-gnueabihf'])
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','release-watch','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
+    run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/release-watch',build/'release-watch'])
     fallback=None
     # New releases use the direct Slug renderer. The supervisor retains the
     # previous signed release for rollback; no incomplete SDL UI is published.

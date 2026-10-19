@@ -1,53 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
-// The state authority can announce code before this code host has replicated it.
-// Keep the running runtime/state session until the host's atomic pointer is ready.
+// Stable v1 bootstrap. App/CRDT protocol changes must not retire this envelope.
+export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v2';
 export function validRelease(r) {
   return r && /^[0-9a-f]{64}$/.test(r.id) && r.web_entry===`/releases/${r.id}/web/index.html`;
 }
-// The code host is independent of the state protocol, including during cutovers.
-export async function readRelease({signal}={}) {
-  const response=await fetch('/release',{cache:'no-store',credentials:'omit',redirect:'error',signal});
-  if(!response.ok)throw Error('Code host not ready');
-  const reader=response.body.getReader(),parts=[];let size=0;
-  try {
-    for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>8192)throw Error('Oversized release descriptor');parts.push(value);}
-  } catch(e){await reader.cancel().catch(()=>{});throw e;}
-  const bytes=new Uint8Array(size);let at=0;for(const part of parts){bytes.set(part,at);at+=part.length;}
-  const release=JSON.parse(new TextDecoder().decode(bytes));
-  if(!validRelease(release))throw Error('Invalid release descriptor');
-  return release;
-}
 export function watchReleases(onRelease,{
-  read=readRelease,intervalMs=5000,timeoutMs=5000,schedule=setTimeout,cancel=clearTimeout,
+  open=url=>new WebSocket(url),schedule=setTimeout,cancel=clearTimeout,
+  base=location.href,current=base.match(/\/releases\/([0-9a-f]{64})\//)?.[1]||null,
+  stateProtocol=STATE_PROTOCOL,
 }={}) {
-  let stopped=false,timer,controller,last;
-  async function poll(){
-    const request=new AbortController();controller=request;
-    const deadline=schedule(()=>request.abort(),timeoutMs);
-    try{
-      const release=await read({signal:request.signal});
-      if(!stopped&&!request.signal.aborted&&validRelease(release)&&release.id!==last){last=release.id;onRelease(release);}
-    }catch{/* A missing code host preserves the current runtime and retries. */}
-    finally{cancel(deadline);if(!stopped)timer=schedule(poll,intervalMs);}
+  let stopped=false,peer,timer,deadline,last,delay=250;
+  const url=new URL('/release/events',base);url.protocol=url.protocol==='https:'?'wss:':'ws:';
+  function connect(){
+    if(stopped)return;
+    let socket;try{socket=open(url);}catch{timer=schedule(connect,delay);delay=Math.min(10000,delay*2);return;}
+    peer=socket;let greeted=false;
+    deadline=schedule(()=>{if(peer===socket)socket.close();},5000);
+    socket.onopen=()=>{if(peer===socket&&!stopped)socket.send(JSON.stringify({type:'hello',version:CONTROL_VERSION,release:current,state_protocol:stateProtocol}));};
+    socket.onmessage=({data})=>{
+      if(stopped||peer!==socket)return;
+      try{
+        if(typeof data!=='string'||data.length>8192)throw Error('Oversized control event');
+        const event=JSON.parse(data);
+        if(event.version!==CONTROL_VERSION||!['hello','upgrade'].includes(event.type)||(!greeted&&event.type!=='hello')||!validRelease(event.release))throw Error('Invalid control hello');
+        greeted=true;delay=250;cancel(deadline);
+        if(event.release.id!==last){last=event.release.id;onRelease(event.release);}
+      }catch{socket.close();}
+    };
+    socket.onclose=()=>{if(stopped||peer!==socket)return;cancel(deadline);peer=null;timer=schedule(connect,delay);delay=Math.min(10000,delay*2);};
+    socket.onerror=()=>socket.close();
   }
-  void poll();
-  return ()=>{stopped=true;cancel(timer);controller?.abort();};
-}
-export async function awaitRelease(target, {
-  isCurrent=()=>true, signal,
-  read=async()=>{
-    const response=await fetch('/release',{cache:'no-store',credentials:'same-origin',signal});
-    if(!response.ok)throw Error('Code host not ready');return response.json();
-  },
-  wait=()=>new Promise(resolve=>setTimeout(resolve,500)),
-}={}) {
-  if(!validRelease(target))throw Error('Invalid release descriptor');
-  while(isCurrent()&&!signal?.aborted) {
-    try {
-      const ready=await read();
-      if(isCurrent()&&!signal?.aborted&&validRelease(ready)&&ready.id===target.id)return true;
-    } catch { /* Unavailable/unauthorized host: preserve the existing runtime. */ }
-    if(isCurrent()&&!signal?.aborted)await wait();
-  }
-  return false;
+  connect();
+  return ()=>{stopped=true;cancel(timer);cancel(deadline);peer?.close();peer=null;};
 }

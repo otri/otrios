@@ -68,17 +68,16 @@ test('a Canvas sign-out action clears private pixels and revokes the browser ses
   assert(messages.some(m=>m.type==='clear-private'));assert(messages.some(m=>m.type==='command-ack'));assert(!messages.some(m=>m.type==='error'));
 });
 
-test('HTTP release discovery upgrades with no working state stream, preserving edits and supersession',async()=>{
+test('release control waits for connected edits/gestures and handles supersession',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
-  const {awaitRelease,validRelease}=await import('../web/shared/release-gate.mjs');
+  const {validRelease}=await import('../web/shared/release-gate.mjs');
   const descriptor=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`});
   const messages=[],timers=[],peers=[];let edits=true,gesture=false;
   class Peer {constructor(){peers.push(this);}close(){this.closed=true;}}
-  const fake={reload_ready:()=>!edits&&!gesture,reset_connection(){}};
+  const fake={reload_ready:()=>!edits&&!gesture,input_busy:()=>gesture,reset_connection(){}};
   const context=vm.createContext({URL,WebSocket:Peer,AbortController,location:{href:'https://otrios.example/'},
-    postMessage:m=>messages.push(m),setTimeout:fn=>timers.push(fn),clearTimeout(){},fake,validRelease,
-    awaitRelease:(r,options)=>awaitRelease(r,{...options,read:async()=>r})});
-  vm.runInContext(source,context);vm.runInContext(`app=fake;started=true;activeRelease='${'a'.repeat(64)}';connect()`,context);
+    postMessage:m=>messages.push(m),setTimeout:fn=>timers.push(fn),clearTimeout(){},fake,validRelease});
+  vm.runInContext(source,context);vm.runInContext(`app=fake;started=true;activeRelease='${'a'.repeat(64)}';connect();stateOnline=true`,context);
   // The old state protocol never connects or mounts. Its release hints are ignored.
   peers[0].onmessage({data:JSON.stringify({type:'release',release:descriptor('c')})});
   await context.onmessage({data:{type:'release-discovered',release:descriptor('b')}});
@@ -94,4 +93,19 @@ test('HTTP release discovery upgrades with no working state stream, preserving e
   edits=false;await context.onmessage({data:{type:'release-discovered',release:descriptor('b')}});await settle();
   await context.onmessage({data:{type:'release-commit',entry:descriptor('b').web_entry}});
   assert.equal(messages.filter(m=>m.type==='release').length,1);assert(peers[0].closed);
+});
+
+
+test('disconnected RAM edits do not strand a release upgrade',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const {validRelease}=await import('../web/shared/release-gate.mjs');const messages=[];
+  const fake={reload_ready:()=>false,input_busy:()=>false};
+  const context=vm.createContext({postMessage:m=>messages.push(m),setTimeout,clearTimeout,fake,validRelease});
+  vm.runInContext(source,context);vm.runInContext(`app=fake;started=true;activeRelease='${'a'.repeat(64)}';stateOnline=false`,context);
+  const entry=`/releases/${'b'.repeat(64)}/web/index.html`;
+  await context.onmessage({data:{type:'release-discovered',release:{id:'b'.repeat(64),web_entry:entry}}});
+  for(let i=0;i<6;i++)await Promise.resolve();
+  assert(messages.some(m=>m.type==='release-candidate'));
+  await context.onmessage({data:{type:'release-commit',entry}});
+  assert(messages.some(m=>m.type==='release'&&m.entry===entry));
 });

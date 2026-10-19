@@ -58,6 +58,32 @@ class SignedReleases(unittest.TestCase):
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
     def test_resource_budget_rejects_oversized_font_before_download(self):
         with self.assertRaises(ValueError):list(agent.resource_items({'assets':{'web/fonts/Roboto-Regular.otq.zst':{'bytes':1024*1024+1}}}))
+    def test_bootstrap_accepts_signed_future_crdt_protocol_but_not_invalid_metadata(self):
+        raw=(self.out/self.id/'manifest.json').read_bytes();value=json.loads(raw)
+        value.update(state_schema='future-app-state-v99',sync_protocol='future-crdt-v99')
+        path=self.root/'future.json';sig=self.root/'future.sig'
+        for protocol,valid in [('future-crdt-v99',True),('invalid\nprotocol',False)]:
+            value['sync_protocol']=protocol;data=json.dumps(value).encode();path.write_bytes(data)
+            subprocess.run([OPENSSL,'pkeyutl','-sign','-rawin','-inkey',str(self.key),'-in',str(path),'-out',str(sig)],check=True,capture_output=True)
+            args=(data,sig.read_bytes(),hashlib.sha256(data).hexdigest(),self.cache,self.public,OPENSSL)
+            if valid:self.assertEqual(agent.verify_manifest(*args)['sync_protocol'],protocol)
+            else:
+                with self.assertRaises(ValueError):agent.verify_manifest(*args)
+    def test_module_activation_notifies_only_after_complete_replica_and_origin_pointer(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        (self.web/'app.js').write_text('new staged code')
+        staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False,catalog=self.root/'apps/catalog.flex')
+        pointer=self.root/'staged.json';pointer.write_text(json.dumps(staged));order=[];real_run=subprocess.run
+        def transfer(*args,**kwargs):
+            if args[0][0]!='docker':return real_run(*args,**kwargs)
+            self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id);order.append('replica')
+        def notify(url):
+            self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],staged['id']);order.append('notify')
+        args=SimpleNamespace(releases=self.out,key=self.public,openssl=OPENSSL,pointer=pointer,volume='test-only',activate_origin=True)
+        with patch.object(module_publisher.subprocess,'run',side_effect=transfer),patch.object(module_publisher,'notify',side_effect=notify):
+            module_publisher.publish(args)
+        self.assertEqual(order,['replica','notify'])
     def test_signed_native_artifact_is_accepted(self):
         id,path=agent.cached(self.cache,self.id,self.public,OPENSSL);self.assertEqual(id,self.id);self.assertEqual(path.read_bytes(),self.native.read_bytes())
     def test_download_reserves_budget_and_never_evicts_active_release(self):
@@ -131,12 +157,12 @@ class ArtifactBudget(unittest.TestCase):
         good={'stream_ready':True,'state_confirmed':True,'pending_commands':0,'input_busy':False}
         self.assertTrue(agent.hot_reload_ready(good))
         for update in [{'state_confirmed':False},{'pending_commands':1},{'input_busy':True}]:self.assertFalse(agent.hot_reload_ready(dict(good,**update)))
-    def test_clean_offline_host_can_upgrade_but_pending_input_cannot(self):
+    def test_disconnected_ram_edits_can_be_discarded_but_gestures_still_block(self):
         clean={'stream_ready':False,'state_confirmed':False,'pending_commands':1,'reload_ready':True,'input_busy':False}
         self.assertTrue(agent.hot_reload_ready(clean))
-        self.assertFalse(agent.hot_reload_ready(dict(clean,reload_ready=False)))
+        self.assertTrue(agent.hot_reload_ready(dict(clean,reload_ready=False)))
         self.assertFalse(agent.hot_reload_ready(dict(clean,input_busy=True)))
-        self.assertFalse(agent.hot_reload_ready(dict(clean,reload_ready='true')))
+        self.assertFalse(agent.hot_reload_ready(dict(clean,stream_ready=True,reload_ready=False)))
         self.assertFalse(agent.hot_reload_ready({}))
     def test_unavailable_state_does_not_blacklist_the_current_code_pointer_forever(self):
         from types import SimpleNamespace
@@ -151,7 +177,13 @@ class ArtifactBudget(unittest.TestCase):
                     attempts.append(clock[0])
                     if len(attempts)==1:raise RuntimeError('state authority unavailable')
                     agent.running=False
-            def info(self):return {'reload_ready':True,'screen':'home'}
+            def info(self):return {'reload_ready':True,'input_busy':False,'screen':'home'}
+            def close(self):pass
+        class Feed:
+            def __init__(self,args,current):self.sent=False;self.process=SimpleNamespace(poll=lambda:None)
+            def take(self):
+                sleep(.1)
+                if not self.sent:self.sent=True;return {'id':new}
             def close(self):pass
         with tempfile.TemporaryDirectory() as tmp:
             root=pathlib.Path(tmp);cache=root/'cache';cache.mkdir()
@@ -162,12 +194,12 @@ class ArtifactBudget(unittest.TestCase):
                 clock[0]+=seconds
                 if clock[0]>1100:raise AssertionError('Candidate was stranded')
             try:
-                with patch.object(agent,'Host',Host), patch.object(agent,'cached',return_value=(old,root/'old')), patch.object(agent,'qualify',return_value=(new,root/'new')), patch.object(agent,'fetch',return_value=json.dumps({'id':new}).encode()), patch.object(agent.time,'monotonic',side_effect=lambda:clock[0]), patch.object(agent.time,'sleep',side_effect=sleep):
+                with patch.object(agent,'Host',Host), patch.object(agent,'cached',return_value=(old,root/'old')), patch.object(agent,'qualify',return_value=(new,root/'new')), patch.object(agent,'ReleaseFeed',Feed), patch.object(agent,'fetch',side_effect=AssertionError('Release pointer must not be polled')), patch.object(agent.time,'monotonic',side_effect=lambda:clock[0]), patch.object(agent.time,'sleep',side_effect=sleep):
                     agent.main(args)
             finally:agent.running=previous
             self.assertEqual(json.loads((cache/'last-good.json').read_text())['id'],new)
         self.assertEqual(len(attempts),2)
-        self.assertGreaterEqual(attempts[1]-attempts[0],30)
+        self.assertGreaterEqual(attempts[1]-attempts[0],29.999)
     def test_blob_hash_is_verified_and_cache_can_survive_offline(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:

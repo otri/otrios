@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Unprivileged native update supervisor. Only a pinned publisher may supply code."""
-import argparse, fcntl, hashlib, json, math, os, pathlib, re, signal, subprocess, tempfile, time, urllib.request, urllib.parse, uuid, shutil
+import argparse, fcntl, hashlib, json, math, os, pathlib, re, signal, subprocess, tempfile, time, urllib.request, urllib.parse, uuid, shutil, threading
 MAX_BINARY=32*1024*1024
 CACHE_BYTES=2*1024*1024*1024
 running=True
@@ -29,7 +29,11 @@ def verify_manifest(raw,sig,release,cache,key,openssl):
         result=subprocess.run([openssl,'pkeyutl','-verify','-pubin','-inkey',str(key),'-rawin','-in',str(tmp/'manifest'),'-sigfile',str(tmp/'sig')],capture_output=True)
         if result.returncode:raise ValueError('Publisher signature rejected')
     manifest=json.loads(raw)
-    if manifest.get('format')!='otrios-release-v1' or manifest.get('state_schema')!='otrios-canvas-merkle-state-v1' or manifest.get('sync_protocol')!='otrios-canvas-sync-v2' or manifest.get('native_target')!='armv7-unknown-linux-gnueabihf':raise ValueError('Incompatible release')
+    if manifest.get('format')!='otrios-release-v1' or manifest.get('native_target')!='armv7-unknown-linux-gnueabihf':raise ValueError('Incompatible bootstrap release')
+    # Data protocol compatibility belongs to the signed executable, not this loader.
+    for field in ['state_schema','sync_protocol']:
+        value=manifest.get(field)
+        if not isinstance(value,str) or not 0<len(value)<=128 or any(not 33<=ord(c)<=126 for c in value):raise ValueError('Invalid protocol metadata')
     return manifest
 
 def verify_binary(data,item):
@@ -83,11 +87,11 @@ def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):
     if total>limit:raise ValueError('Cache budget cannot fit pinned artifacts')
 
 def hot_reload_ready(info):
-    if 'reload_ready' in info:
-        return info['reload_ready'] is True and not info.get('input_busy',False)
-    # Older readiness records retain their strict online confirmation gate.
-    # New records distinguish clean reconnect handshakes from pending edits.
-    return bool(info.get('stream_ready')) and info.get('state_confirmed',True) and info.get('pending_commands',0)==0 and not info.get('input_busy',False)
+    if info.get('input_busy',True):return False
+    # Current PoC policy: disconnected RAM edits may be dropped for an upgrade.
+    if info.get('stream_ready') is False:return True
+    if 'reload_ready' in info:return info['reload_ready'] is True
+    return bool(info.get('stream_ready')) and info.get('state_confirmed',True) and info.get('pending_commands',0)==0
 
 def qualify(base,cache,key,openssl,release=None,sdl=False,limit=CACHE_BYTES,pins=()):
     if release is None:release=json.loads(fetch(base,'/release',8192))['id']
@@ -201,14 +205,49 @@ class Host:
             except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
         self.stop.unlink(missing_ok=True);self.ready.unlink(missing_ok=True)
 
+class ReleaseFeed:
+    """Bounded event feed from the stable, TLS-verifying bootstrap companion."""
+    def __init__(self,a,current):
+        base=getattr(a,'code_url',None) or a.url
+        url=urllib.parse.urlsplit(urllib.parse.urljoin(base,'/release/events'))
+        endpoint=urllib.parse.urlunsplit(('wss' if url.scheme=='https' else 'ws',url.netloc,url.path,'',''))
+        protocol=''
+        if current:
+            try:protocol=json.loads((a.cache/current/'manifest.json').read_text()).get('sync_protocol','')
+            except (OSError,ValueError):pass
+        self.condition=threading.Condition();self.latest=None
+        self.process=subprocess.Popen([getattr(a,'release_watch','/opt/otrios-dashboard/release-watch'),endpoint,current or '',protocol],stdout=subprocess.PIPE)
+        self.reader=threading.Thread(target=self.read,daemon=True);self.reader.start()
+    def read(self):
+        try:
+            while True:
+                line=self.process.stdout.readline(8193)
+                if not line:return
+                if len(line)>8192:raise ValueError('Oversized control event')
+                event=json.loads(line)
+                if event.get('version')!=1 or event.get('type') not in ('hello','upgrade'):raise ValueError('Invalid control envelope')
+                release=event['release'];valid_release(release['id'])
+                if release.get('web_entry')!=f"/releases/{release['id']}/web/index.html":raise ValueError('Invalid control release')
+                with self.condition:self.latest=release;self.condition.notify()
+        except (OSError,ValueError,KeyError,TypeError):self.process.terminate()
+    def take(self):
+        with self.condition:
+            if self.latest is None:self.condition.wait(.1)
+            value=self.latest;self.latest=None;return value
+    def close(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
+        self.reader.join(timeout=1);self.process.stdout.close()
+
 def main(a):
     global running
-    a.cache.mkdir(mode=0o700,parents=True,exist_ok=True)
-    a.runtime_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
+    a.cache.mkdir(mode=0o700,parents=True,exist_ok=True);a.runtime_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
     lock=open(a.runtime_dir/'agent.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     for p in a.cache.iterdir():
         if p.name.startswith(('.download-','.verify-')) and p.is_dir() and not p.is_symlink():shutil.rmtree(p)
-    host=None;current=None;bad=None;bad_until=0;last_good=None
+    host=None;current=None;last_good=None;pending=None;retry_at=0
     good_file=a.cache/'last-good.json'
     if good_file.exists():
         try:
@@ -218,53 +257,51 @@ def main(a):
         except Exception as e:
             if host:host.close();host=None
             print('Cached app unavailable: '+str(e),flush=True)
-    last_probe=0
+    feed=None
     try:
+        feed=ReleaseFeed(a,current)
         while running:
             try:
-                # Always discover code through the stable HTTP pointer. A retired
-                # state stream (or stale notice file) cannot suppress an upgrade.
-                if host is not None and host.process.poll() is None and time.monotonic()-last_probe<5:
-                    time.sleep(.1);continue
-                release=json.loads(fetch(a.url,'/release',8192))['id'];last_probe=time.monotonic()
-                if host is not None and host.process.poll() is None and (release==current or (release==bad and time.monotonic()<bad_until)):
-                    continue
-                if release==bad:bad=None
-                release,exe=qualify(a.url,a.cache,a.key,a.openssl,release,sdl=a.video_driver=='wayland',limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
-                if (host is None or host.process.poll() is not None or release!=current) and release!=bad:
-                    old=host
-                    info=old.info() if old and old.process.poll() is None else {}
-                    if old and old.process.poll() is None and not hot_reload_ready(info):
-                        time.sleep(.1);continue
-                    host=None
-                    if old:old.close()
-                    candidate=Host(a,release,exe,screen=info.get('screen'))
-                    try:candidate.wait_ready()
-                    except Exception:
-                        candidate.close();bad=release;bad_until=time.monotonic()+30
-                        if last_good and last_good[0]!=release:
-                            # Previous accepted release was signature-qualified this session.
-                            last_good=cached(a.cache,last_good[0],a.key,a.openssl,sdl=a.video_driver=='wayland');host=Host(a,*last_good);host.wait_ready(require_stream=False)
-                        raise
-                    host=candidate;current=release;last_good=(release,exe);bad=None
-                    atomic(good_file,json.dumps({'id':release}).encode())
-                    print('ACTIVE signed_release='+release,flush=True)
+                if feed.process.poll() is not None:
+                    feed.close();feed=ReleaseFeed(a,current);time.sleep(.25)
+                event=feed.take()
+                if event is not None:
+                    if pending is None or event['id']!=pending['id']:retry_at=0
+                    pending=event
+                if pending is None or time.monotonic()<retry_at:continue
+                release=pending['id']
+                if host is not None and host.process.poll() is None and release==current:continue
+                old=host;info=old.info() if old and old.process.poll() is None else {}
+                if old and old.process.poll() is None and not hot_reload_ready(info):continue
+                code_url=getattr(a,'code_url',None) or a.url
+                release,exe=qualify(code_url,a.cache,a.key,a.openssl,release,sdl=a.video_driver=='wayland',limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
+                host=None
+                if old:old.close()
+                candidate=Host(a,release,exe,screen=info.get('screen'))
+                try:candidate.wait_ready(require_stream=info.get('stream_ready') is not False)
+                except Exception:
+                    candidate.close();retry_at=time.monotonic()+30
+                    if last_good and last_good[0]!=release:
+                        last_good=cached(a.cache,last_good[0],a.key,a.openssl,sdl=a.video_driver=='wayland');host=Host(a,*last_good);host.wait_ready(require_stream=False)
+                    raise
+                host=candidate;current=release;last_good=(release,exe)
+                atomic(good_file,json.dumps({'id':release}).encode());print('ACTIVE signed_release='+release,flush=True)
+                feed.close();feed=ReleaseFeed(a,current)
             except Exception as e:
                 print('Update kept previous app: '+str(e),flush=True)
                 if host is None:raise SystemExit(1)
-            for _ in range(10):
-                if not running:break
-                time.sleep(.1)
+                retry_at=max(retry_at,time.monotonic()+5)
     finally:
+        if feed:feed.close()
         if host:host.close()
-    lock.close()
+        lock.close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--runtime-dir',type=pathlib.Path,default=pathlib.Path(os.environ.get('XDG_RUNTIME_DIR','/run/otrios-direct-console'))/'otrios');p.add_argument('--cache-bytes',type=int,default=CACHE_BYTES);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');p.add_argument('--video-driver',choices=['wayland','KMSDRM'],default='wayland');p.add_argument('--rotation',type=int,choices=[0,90,180,270],default=90);p.add_argument('--touch-calibration',type=pathlib.Path);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--code-url');p.add_argument('--release-watch',default='/opt/otrios-dashboard/release-watch');p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--runtime-dir',type=pathlib.Path,default=pathlib.Path(os.environ.get('XDG_RUNTIME_DIR','/run/otrios-direct-console'))/'otrios');p.add_argument('--cache-bytes',type=int,default=CACHE_BYTES);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');p.add_argument('--video-driver',choices=['wayland','KMSDRM'],default='wayland');p.add_argument('--rotation',type=int,choices=[0,90,180,270],default=90);p.add_argument('--touch-calibration',type=pathlib.Path);a=p.parse_args()
     if a.cache_bytes<2*MAX_BINARY+65536:p.error('Cache budget must fit one signed release')
     if a.video_driver=='KMSDRM':
         if a.touch_calibration is None:p.error('Direct mode requires the accepted touch calibration rule')
         a.touch_matrix=touch_calibration(a.touch_calibration)
-    if not a.url.startswith('https://'):p.error('HTTPS is required')
+    if not a.url.startswith('https://') or (a.code_url and not a.code_url.startswith('https://')):p.error('HTTPS is required')
     def stop(*_):
         global running
         running=False

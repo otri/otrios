@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sole owner of app replicas, input, admission and network leases. All state is RAM-only.
 import init,{CanvasApp} from './pkg/otrios_dashboard.js';
-import {awaitRelease,validRelease} from './release-gate.mjs';
+import {validRelease} from './release-gate.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
-let app,monitoring,socket,inkSocket,activeRelease,pendingRelease,releaseAbort,discoveredRelease,stopped=false;
+let app,monitoring,socket,inkSocket,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let retry=250,inkRetry=250,inkTimer=null,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
 function error(e){postMessage({type:'error',message:String(e)});}
 function sendFrame(){if(inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer]:[]);}
@@ -17,29 +17,30 @@ function clearPresentation(){syncInk();pendingFrame=null;postMessage({type:'clea
 function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('home');monitoring.logout();}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){if(socket?.readyState===WebSocket.OPEN)for(let i=0;i<8;i++){const bytes=app.outgoing();if(!bytes)break;socket.send(bytes);}}
+function reloadReady(){return !app.input_busy()&&(!stateOnline||app.reload_ready());}
 function release(message){
   const r=message.release;if(!validRelease(r))return;
-  if(activeRelease&&activeRelease!==r.id){if(pendingRelease?.id===r.id)return;releaseAbort?.abort();releaseAbort=new AbortController();pendingRelease=r;const isCurrent=()=>pendingRelease===r&&!stopped;
-    awaitRelease(r,{isCurrent,signal:releaseAbort.signal}).then(async ready=>{if(!ready||!isCurrent())return;while(isCurrent()&&!app.reload_ready())await new Promise(resolve=>setTimeout(resolve,100));if(isCurrent())postMessage({type:'release-candidate',entry:r.web_entry});}).catch(error);return;}
-  pendingRelease=null;releaseAbort?.abort();
+  if(activeRelease&&activeRelease!==r.id){if(pendingRelease?.id===r.id)return;pendingRelease=r;const isCurrent=()=>pendingRelease===r&&!stopped;
+    Promise.resolve().then(async()=>{while(isCurrent()&&!reloadReady())await new Promise(resolve=>setTimeout(resolve,100));if(isCurrent())postMessage({type:'release-candidate',entry:r.web_entry});}).catch(error);return;}
+  pendingRelease=null;
   activeRelease=r.id;postMessage({type:'release-id',id:r.id});
 }
 function connect(){
-  if(stopped)return;app.reset_connection();const url=new URL('/apps/stream',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';const peer=new WebSocket(url);socket=peer;peer.binaryType='arraybuffer';
+  if(stopped)return;stateOnline=false;app.reset_connection();const url=new URL('/apps/stream',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';const peer=new WebSocket(url);socket=peer;peer.binaryType='arraybuffer';
   peer.onopen=()=>{retry=250;outgoing();};
   peer.onmessage=event=>{if(socket!==peer)return;try{
     // Code activation follows the code host pointer, never a state-stream hint.
     if(typeof event.data==='string')return;
     const changed=app.receive(new Uint8Array(event.data));if(changed&&!app.ui_ref())clearPresentation();
     if(app.auth_required()){dropPrivate();monitoring.refresh().catch(()=>{});publish(false);}else if(changed)publish();
-    outgoing();postMessage({type:'online',online:true});
+    stateOnline=true;outgoing();postMessage({type:'online',online:true});
   }catch(e){
     if(app.rejected_mount_pending()){
       try{outgoing();publish();postMessage({type:'warning',message:'The app update was rejected. The current app is still available.'});}
       catch(recoveryError){error(recoveryError);peer.close();}
     }else{error(e);peer.close();}
   }};
-  peer.onclose=()=>{if(socket!==peer)return;postMessage({type:'online',online:false});if(!stopped){setTimeout(connect,retry);retry=Math.min(5000,retry*2);}};peer.onerror=()=>peer.close();
+  peer.onclose=()=>{if(socket!==peer)return;stateOnline=false;postMessage({type:'online',online:false});if(!stopped){setTimeout(connect,retry);retry=Math.min(5000,retry*2);}};peer.onerror=()=>peer.close();
 }
 function wantsInk(){return !stopped&&app?.ui_ref()&&app.presentation_kind()==='touch-pad';}
 function syncInk(){
@@ -69,7 +70,7 @@ onmessage=async({data:m})=>{try{
   }
   if(m.type==='frame-ack'){inFlight=false;sendFrame();return;}
   if(!app)return;
-  if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry',entry:m.entry});return;}while(pendingRelease===r&&!app.reload_ready())await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry',entry:m.entry});return;}stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});return;}
+  if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry',entry:m.entry});return;}while(pendingRelease===r&&!reloadReady())await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry',entry:m.entry});return;}stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});return;}
   app.tick(performance.now(),Date.now()/1000);let changed=false;
   switch(m.type){
     case 'login':monitoring.login(m.username,m.password);break;
