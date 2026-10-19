@@ -138,19 +138,7 @@ impl Peer {
             self.client.value(4)?,
         ])
     }
-    fn assign(&mut self, index: usize) -> Result<()> {
-        let n = self.cycles as usize + index * 137;
-        let value = |mul: usize| ((n * mul + 19) % 997 + 1) as u16;
-        self.pending = Some(Instant::now());
-        for (node, a, b) in [
-            (self.controls[0], value(37), 0),
-            (self.controls[1], value(53), 0),
-            (self.controls[2], value(71), value(97)),
-        ] {
-            self.client
-                .event_for_node(self.client.epoch(), node, a, b)?;
-        }
-        // Flush the final batch through the same release path as real gestures.
+    fn release(&mut self) -> Result<()> {
         self.client.pointer(
             self.client.epoch(),
             otrios_interfaces::scene::PointerEvent {
@@ -159,6 +147,23 @@ impl Peer {
                 position: [-1., -1.],
             },
         )?;
+        Ok(())
+    }
+    fn assign(&mut self, index: usize, release: bool) -> Result<()> {
+        let n = self.cycles as usize + index * 137;
+        let value = |mul: usize| ((n * mul + 19) % 997 + 1) as u16;
+        self.pending.get_or_insert_with(Instant::now);
+        for (node, a, b) in [
+            (self.controls[0], value(37), 0),
+            (self.controls[1], value(53), 0),
+            (self.controls[2], value(71), value(97)),
+        ] {
+            self.client
+                .event_for_node(self.client.epoch(), node, a, b)?;
+        }
+        if release {
+            self.release()?;
+        }
         self.cycles += 1;
         Ok(())
     }
@@ -174,13 +179,14 @@ fn quantiles(mut samples: Vec<u64>) -> serde_json::Value {
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() != 8 {
-        return Err("Usage: canvas-session-stress LOOPBACK_OR_TAILNET_WS CATALOG CLIENTS ACTIVE HZ SECONDS socket|mounted".into());
+        return Err("Usage: canvas-session-stress LOOPBACK_OR_TAILNET_WS CATALOG CLIENTS ACTIVE HZ SECONDS socket|mounted|drag".into());
     }
     let count = args[3].parse::<usize>().map_err(|e| e.to_string())?;
     let active = args[4].parse::<usize>().map_err(|e| e.to_string())?;
     let hz = args[5].parse::<u32>().map_err(|e| e.to_string())?;
     let seconds = args[6].parse::<u64>().map_err(|e| e.to_string())?;
-    let mounted = args[7] == "mounted";
+    let mounted = args[7] != "socket";
+    let open_loop = args[7] == "drag";
     let controlled_endpoint = args[1]
         .parse::<tungstenite::http::Uri>()
         .ok()
@@ -200,7 +206,7 @@ fn main() -> Result<()> {
         || hz > 120
         || !(1..=120).contains(&seconds)
         || (active > 0 && (!mounted || hz == 0))
-        || !["socket", "mounted"].contains(&args[7].as_str())
+        || !["socket", "mounted", "drag"].contains(&args[7].as_str())
     {
         return Err(
             "Bounds: loopback/Tailnet IPv4, 1..4096 clients, <=256 active, <=120 Hz, 1..120 seconds".into(),
@@ -301,9 +307,18 @@ fn main() -> Result<()> {
     let mut loops = vec![];
     let mut converged = !mounted;
     let mut convergence_us = None;
+    let mut released = false;
     loop {
         let turn = Instant::now();
         let issuing = start.elapsed() < Duration::from_secs(seconds);
+        if !issuing && open_loop && !released {
+            for peer in peers.iter_mut().take(active) {
+                if !peer.failed {
+                    peer.release()?;
+                }
+            }
+            released = true;
+        }
         for (index, peer) in peers.iter_mut().enumerate() {
             if peer.failed {
                 continue;
@@ -315,8 +330,12 @@ fn main() -> Result<()> {
                 }
                 continue;
             }
-            if issuing && index < active && peer.pending.is_none() && turn >= peer.next {
-                peer.assign(index)?;
+            if issuing
+                && index < active
+                && (open_loop || peer.pending.is_none())
+                && turn >= peer.next
+            {
+                peer.assign(index, !open_loop)?;
                 peer.next = Instant::now() + Duration::from_secs_f64(1. / f64::from(hz));
             }
         }
@@ -348,7 +367,7 @@ fn main() -> Result<()> {
     let samples = peers.iter().flat_map(|p| p.acks.iter().copied()).collect();
     println!(
         "{}",
-        serde_json::json!({"requested_clients":count,"connected":peers.len(),"mounted":mounted,"active":active,"requested_hz_per_active":hz,"requested_seconds":seconds,"setup_seconds":setup_seconds,"measure_start_unix_ms":measure_start_unix_ms,"measure_end_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_millis(),"measured_seconds":start.elapsed().as_secs_f64(),"errors":errors,"failed_peers":peers.iter().filter(|p|p.failed).count(),"behavior_events":peers.iter().map(|p|p.cycles*3).sum::<u64>(),"confirmed_cycles":peers.iter().map(|p|p.acks.len()).sum::<usize>(),"ack_us":quantiles(samples),"generator_loop_us":quantiles(loops),"max_issued_age_ms":peers.iter().map(|p|p.issued_age).max(),"sent_canvas_payload_bytes":sent-before_sent,"received_canvas_payload_bytes":received-before_received,"receive_packets":peers.iter().map(|p|p.received_packets).sum::<u64>()-before_packets,"converged":converged,"settle_after_stop_us":convergence_us,"final_values":peers.first().and_then(|p|p.values().ok())})
+        serde_json::json!({"mode":args[7],"ack_interpretation":if open_loop {"fully-confirmed spans, not per-event latency"}else{"durable per-cycle confirmation"},"requested_clients":count,"connected":peers.len(),"mounted":mounted,"active":active,"requested_hz_per_active":hz,"requested_seconds":seconds,"setup_seconds":setup_seconds,"measure_start_unix_ms":measure_start_unix_ms,"measure_end_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_millis(),"measured_seconds":start.elapsed().as_secs_f64(),"errors":errors,"failed_peers":peers.iter().filter(|p|p.failed).count(),"behavior_events":peers.iter().map(|p|p.cycles*3).sum::<u64>(),"issued_cycles":peers.iter().map(|p|p.cycles).sum::<u64>(),"confirmed_cycles":if open_loop {None}else{Some(peers.iter().map(|p|p.acks.len()).sum::<usize>())},"confirmed_spans":peers.iter().map(|p|p.acks.len()).sum::<usize>(),"ack_us":quantiles(samples),"generator_loop_us":quantiles(loops),"max_issued_age_ms":peers.iter().map(|p|p.issued_age).max(),"sent_canvas_payload_bytes":sent-before_sent,"received_canvas_payload_bytes":received-before_received,"receive_packets":peers.iter().map(|p|p.received_packets).sum::<u64>()-before_packets,"converged":converged,"settle_after_stop_us":convergence_us,"final_values":peers.first().and_then(|p|p.values().ok())})
     );
     Ok(())
 }

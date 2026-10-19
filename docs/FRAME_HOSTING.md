@@ -127,3 +127,45 @@ systemctl status otrios-authority otrios-tunnel otrios-monitoring.timer otrios-d
 curl -fsS http://127.0.0.1:8876/health
 journalctl -u otrios-authority -u otrios-monitoring -u otrios-tunnel --since today
 ```
+
+## Isolated session stress test
+
+`canvas-session-stress` uses the real Canvas client, signed app catalog, Component
+Playground behavior and state protocol. Run the generator on the build machine;
+`stress-frame-authority.py` stages a disposable ARM authority on the frame with
+fresh app state. It leaves the production authority and display running. The
+configured SSH array must retain the established pinned host key and identity.
+
+```sh
+cargo build --release --locked -p otrios-dashboard \
+  --features canvas,host-sync --bin canvas-session-stress
+python3 scripts/stress-frame-authority.py --config /PRIVATE/config.json \
+  --client target/release/canvas-session-stress --server /PRIVATE/ARM/dashboard-server \
+  --catalog /PRIVATE/app-catalog.flex --output target/frame-stress-RUN
+```
+
+The default ramp opens 64 through 4,096 negotiated idle sockets, then 32 through
+512 mounted readers, then 1 through 64 writers among 64 mounted clients at a
+requested 10 cycles/second. Each write cycle edits Linear, Rotary and both Touch
+Pad coordinates. Mounted mode waits for durable confirmation between cycles;
+report achieved throughput alongside latency, because the requested rate can
+exceed that mode's confirmed throughput. `--phase active --open-loop --hz 30`
+instead offers drag events on the input clock, allows the real client's bounded
+intent coalescing, and releases gestures when input stops. In drag mode ACK
+samples describe fully confirmed spans, not individual event latency. Both modes
+check that every client settles to the same confirmed four values.
+
+Counts are configurable with `--socket-counts`, `--mounted-counts`,
+`--active-counts`, `--clients` and their `--max-*` bounds. The runner records
+binary hashes, per-case setup/input/settle times, ACK quantiles, traffic, generator
+loop timing, one-second CPU/RSS/cgroup/swap samples and production health probes.
+CPU percentages for a service use one core as 100%; system CPU uses all cores.
+
+A temporary Tailscale-only TCP relay exposes the disposable public listener;
+it contributes network/relay cost to the result. This does not measure browser
+rendering, Cloudflare Tunnel capacity, physical touch responsiveness or long-term
+soak behavior. The target and relay each have a 256 MiB cgroup cap. Tests stop
+when available system RAM drops below 256 MiB or a production health probe fails.
+The runner removes temporary units, relay and test state on exit. A cgroup cap,
+client deadline or generator bottleneck must be identified separately from a
+hardware capacity limit. See the dated experiment report for measured results.
