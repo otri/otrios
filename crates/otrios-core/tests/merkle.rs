@@ -453,3 +453,179 @@ fn reusable_workspace_preserves_canonical_bytes_and_pinned_roots_across_failures
         0
     );
 }
+
+#[test]
+fn covered_views_hide_unselected_ancestors_and_ignore_unrelated_registers() {
+    let mut tree = Snapshot::empty()
+        .edit(
+            [1; 16],
+            &[
+                edit(&[], Some(b"private-root")),
+                edit(&[1], Some(b"private-parent")),
+                edit(&[1, 0], Some(b"selected-field")),
+                edit(&[1, 1], Some(b"unselected-field")),
+                edit(&[2, 0], Some(b"my-receipt")),
+                edit(&[2, 1], Some(b"other-receipt")),
+            ],
+        )
+        .unwrap()
+        .0;
+    let coverage = Coverage::new(&[vec![1, 0], vec![2, 0], vec![9]], &[]).unwrap();
+    let (projected, work) = tree.project(&coverage).unwrap();
+    assert!(projected.register().is_none());
+    assert!(projected.subtree(&[1]).unwrap().register().is_none());
+    assert!(projected.subtree(&[1, 1]).is_err());
+    assert!(projected.subtree(&[2, 1]).is_err());
+    assert!(projected.subtree(&[9]).is_err());
+    assert!(
+        projected
+            .subtree(&[1, 0])
+            .unwrap()
+            .shares_root(&tree.subtree(&[1, 0]).unwrap())
+    );
+    assert_eq!(work.hashed_nodes, 3, "selected immutable leaves are shared");
+    let mut authority = Authority::new(88, tree.clone());
+    let mut sub = authority
+        .subscribe_coverage(&[vec![1, 0], vec![2, 0], vec![9]], coverage)
+        .unwrap();
+    let mut replica = Replica::new(&sub);
+    let first = receive(&authority, &mut sub, &mut replica).unwrap();
+    for secret in [
+        b"private-root".as_slice(),
+        b"private-parent",
+        b"unselected-field",
+        b"other-receipt",
+    ] {
+        assert!(
+            !first
+                .bytes()
+                .windows(secret.len())
+                .any(|bytes| bytes == secret)
+        );
+    }
+    let next = tree
+        .edit(
+            [1; 16],
+            &[
+                edit(&[], Some(b"changed-private-root")),
+                edit(&[1, 1], Some(b"changed-unselected-field")),
+                edit(&[2, 1], Some(b"changed-other-receipt")),
+            ],
+        )
+        .unwrap()
+        .0;
+    authority.publish(tree.hash(), next.clone()).unwrap();
+    tree = next;
+    assert!(authority.offer(&mut sub).unwrap().is_none());
+    let next = set(&tree, 1, &[9], b"created-later");
+    authority.publish(tree.hash(), next).unwrap();
+    receive(&authority, &mut sub, &mut replica).unwrap();
+    assert_eq!(
+        value(replica.snapshot().unwrap(), &[9]),
+        vec![Some(b"created-later".to_vec())]
+    );
+}
+
+#[test]
+fn coverage_advances_multiple_paths_atomically_with_bounded_slow_reader_and_resync() {
+    let tree = Snapshot::empty()
+        .edit(
+            [1; 16],
+            &[edit(&[1], Some(b"zero")), edit(&[2], Some(b"receipt-zero"))],
+        )
+        .unwrap()
+        .0;
+    let coverage = Coverage::new(&[vec![1], vec![2]], &[]).unwrap();
+    let mut authority = Authority::new(90, tree.clone());
+    let mut sub = authority.subscribe_coverage(&[vec![]], coverage).unwrap();
+    let mut replica = Replica::new(&sub);
+    let initial = authority.offer(&mut sub).unwrap().unwrap();
+    let next = tree
+        .edit(
+            [1; 16],
+            &[edit(&[1], Some(b"one")), edit(&[2], Some(b"receipt-one"))],
+        )
+        .unwrap()
+        .0;
+    authority.publish(tree.hash(), next.clone()).unwrap();
+    assert_eq!(
+        authority.offer(&mut sub).unwrap().unwrap().bytes(),
+        initial.bytes()
+    );
+    replica.apply(initial.bytes()).unwrap();
+    let pinned = replica.snapshot().unwrap().clone();
+    sub.acknowledge(initial.cursor, initial.root).unwrap();
+    let offer = authority.offer(&mut sub).unwrap().unwrap();
+    assert_ne!(offer.cursor, initial.cursor);
+    assert_eq!(
+        sub.acknowledge(offer.cursor, Some([0; 32])),
+        Err(Error::Stale)
+    );
+    for length in [0, 1, offer.bytes().len() / 2, offer.bytes().len() - 1] {
+        assert!(replica.apply(&offer.bytes()[..length]).is_err());
+        assert_eq!(replica.snapshot().unwrap().hash(), pinned.hash());
+    }
+    replica.apply(offer.bytes()).unwrap();
+    assert_eq!(
+        value(replica.snapshot().unwrap(), &[1]),
+        vec![Some(b"one".to_vec())]
+    );
+    assert_eq!(
+        value(replica.snapshot().unwrap(), &[2]),
+        vec![Some(b"receipt-one".to_vec())]
+    );
+    assert_eq!(value(&pinned, &[1]), vec![Some(b"zero".to_vec())]);
+    sub.acknowledge(offer.cursor, offer.root).unwrap();
+    sub.resync();
+    let full = authority.offer(&mut sub).unwrap().unwrap();
+    let mut fresh = Replica::for_lease(full.cursor.epoch, full.cursor.lease, vec![]).unwrap();
+    fresh.apply(full.bytes()).unwrap();
+    assert_eq!(
+        fresh.snapshot().unwrap().hash(),
+        replica.snapshot().unwrap().hash()
+    );
+    sub.cancel();
+    assert!(matches!(authority.offer(&mut sub), Err(Error::Forbidden)));
+}
+
+#[test]
+fn coverage_is_fixed_bounded_canonical_and_cannot_expand_a_narrow_grant() {
+    let tree = Snapshot::empty()
+        .edit(
+            [1; 16],
+            &[
+                edit(&[1], Some(b"parent")),
+                edit(&[1, 2], Some(b"child")),
+                edit(&[1, 3], Some(b"sibling")),
+            ],
+        )
+        .unwrap()
+        .0;
+    let mut authority = Authority::new(100, tree.clone());
+    for coverage in [
+        Coverage::new(&[], &[vec![1]]).unwrap(),
+        Coverage::new(&[vec![]], &[]).unwrap(),
+        Coverage::new(&[vec![1, 2], vec![1, 3]], &[]).unwrap(),
+    ] {
+        assert!(matches!(
+            authority.subscribe_coverage(&[vec![1, 2]], coverage),
+            Err(Error::Forbidden)
+        ));
+    }
+    let a = Coverage::new(&[vec![1, 2], vec![1, 3], vec![1, 2]], &[]).unwrap();
+    let b = Coverage::new(&[vec![1, 3], vec![1, 2]], &[]).unwrap();
+    assert_eq!(
+        tree.project(&a).unwrap().0.hash(),
+        tree.project(&b).unwrap().0.hash()
+    );
+    let whole = Coverage::new(&[], &[vec![]]).unwrap();
+    let (same, work) = tree.project(&whole).unwrap();
+    assert!(same.shares_root(&tree));
+    assert_eq!(work.hashed_nodes, 0);
+    assert!(Coverage::new(&vec![vec![1]; MAX_COVERAGE_PATHS + 1], &[]).is_err());
+    assert!(Coverage::new(&[vec![1; MAX_DEPTH + 1]], &[]).is_err());
+    // Empty coverage is explicit and discloses no register or child membership.
+    let empty = tree.project(&Coverage::new(&[], &[]).unwrap()).unwrap().0;
+    assert!(empty.register().is_none());
+    assert_eq!(empty.child_keys().count(), 0);
+}

@@ -84,13 +84,16 @@ fn replica_child() {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
-    let mut replica = Replica::for_lease(17, lease, vec![scope]).unwrap();
+    let path = if scope == 0 { vec![] } else { vec![scope] };
+    let mut replica = Replica::for_lease(17, lease, path).unwrap();
     let mut pinned = None;
     for iteration in 0..3 {
         let bytes = read_frame(&mut stream);
-        if scope == 1 {
+        if scope != 2 {
             assert!(!bytes.windows(14).any(|b| b == b"private-canary"));
         }
+        // The covered leaves have identical canonical bytes and share one
+        // transferred record: one root plus one leaf, materialized at two keys.
         assert_eq!(Replica::transferred_nodes(&bytes).unwrap(), 2);
         replica.apply(&bytes).unwrap();
         let snapshot = replica.snapshot().unwrap();
@@ -99,7 +102,18 @@ fn replica_child() {
         } else {
             assert_ne!(snapshot.hash(), pinned.as_ref().unwrap().hash());
         }
-        assert_eq!(snapshot.child_keys().collect::<Vec<_>>(), vec![9]);
+        if scope == 0 {
+            assert!(snapshot.register().is_none());
+            assert_eq!(snapshot.child_keys().collect::<Vec<_>>(), vec![1, 2]);
+            for key in [1, 2] {
+                let node = snapshot.subtree(&[key]).unwrap();
+                let values = node.register().unwrap().values().collect::<Vec<_>>();
+                assert_eq!(values.len(), 1);
+                assert_eq!(values[0].2, Some([iteration as u8].as_slice()));
+            }
+        } else {
+            assert_eq!(snapshot.child_keys().collect::<Vec<_>>(), vec![9]);
+        }
         let cursor = replica.cursor().unwrap();
         let mut ack = cursor.sequence.to_le_bytes().to_vec();
         ack.extend(snapshot.hash());
@@ -194,5 +208,68 @@ fn two_real_processes_receive_only_their_scoped_incremental_revisions() {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+}
+
+#[test]
+fn real_process_receives_one_coherent_covered_view_without_unrelated_payloads() {
+    let edit = |path, value| Edit {
+        path,
+        schema: [7; 32],
+        value: Some(value),
+    };
+    let tree = Snapshot::empty()
+        .edit(
+            [1; 16],
+            &[
+                edit(vec![], b"private-canary".to_vec()),
+                edit(vec![1], vec![0]),
+                edit(vec![2], vec![0]),
+                edit(vec![3], b"private-canary".to_vec()),
+            ],
+        )
+        .unwrap()
+        .0;
+    let mut authority = Authority::new(17, tree);
+    let coverage = Coverage::new(&[vec![1], vec![2]], &[]).unwrap();
+    let mut sub = authority
+        .subscribe_coverage(&[vec![1], vec![2]], coverage)
+        .unwrap();
+    let (mut stream, mut child) = connect(sub.cursor().lease, 0);
+    deliver(&authority, &mut sub, &mut stream);
+    for number in [1, 2] {
+        let next = authority
+            .snapshot()
+            .edit([1; 16], &[edit(vec![3], vec![number; 1024])])
+            .unwrap()
+            .0;
+        authority
+            .publish(authority.snapshot().hash(), next)
+            .unwrap();
+        assert!(authority.offer(&mut sub).unwrap().is_none());
+        let next = authority
+            .snapshot()
+            .edit(
+                [1; 16],
+                &[edit(vec![1], vec![number]), edit(vec![2], vec![number])],
+            )
+            .unwrap()
+            .0;
+        authority
+            .publish(authority.snapshot().hash(), next)
+            .unwrap();
+        deliver(&authority, &mut sub, &mut stream);
+    }
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "covered receiver did not exit"
+        );
+        std::thread::sleep(Duration::from_millis(10));
     }
 }

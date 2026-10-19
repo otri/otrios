@@ -28,6 +28,8 @@ pub struct Subscription {
     epoch: u64,
     lease: u64,
     path: Path,
+    coverage: Option<Coverage>,
+    projected: Option<(Hash, Snapshot)>,
     next_sequence: u64,
     acknowledged: Option<(Cursor, Option<Snapshot>)>,
     flight: Option<(Offer, Option<Snapshot>)>,
@@ -63,6 +65,19 @@ impl Authority {
         {
             return Err(Error::Forbidden);
         }
+        self.register(path, None)
+    }
+    /// One cursor/ACK advances all requested paths together. Coverage is fixed
+    /// for the lease; changing it requires a new authorized subscription.
+    pub fn subscribe_coverage(
+        &mut self,
+        allowed_roots: &[Path],
+        coverage: Coverage,
+    ) -> Result<Subscription> {
+        coverage.authorize(allowed_roots)?;
+        self.register(vec![], Some(coverage))
+    }
+    fn register(&mut self, path: Path, coverage: Option<Coverage>) -> Result<Subscription> {
         self.next_lease = self
             .next_lease
             .checked_add(1)
@@ -71,6 +86,8 @@ impl Authority {
             epoch: self.epoch,
             lease: self.next_lease,
             path,
+            coverage,
+            projected: None,
             next_sequence: 0,
             acknowledged: None,
             flight: None,
@@ -93,10 +110,25 @@ impl Authority {
         if let Some((offer, _)) = &subscription.flight {
             return Ok(Some(offer.clone()));
         }
-        let new = match self.current.subtree(&subscription.path) {
-            Ok(s) => Some(s),
-            Err(Error::Missing) => None,
-            Err(e) => return Err(e),
+        let new = if let Some(coverage) = &subscription.coverage {
+            if subscription
+                .projected
+                .as_ref()
+                .is_none_or(|(root, _)| *root != self.current.hash())
+            {
+                subscription.projected =
+                    Some((self.current.hash(), self.current.project(coverage)?.0));
+            }
+            subscription
+                .projected
+                .as_ref()
+                .map(|(_, view)| view.clone())
+        } else {
+            match self.current.subtree(&subscription.path) {
+                Ok(s) => Some(s),
+                Err(Error::Missing) => None,
+                Err(e) => return Err(e),
+            }
         };
         let old = subscription
             .acknowledged
@@ -172,6 +204,7 @@ impl Subscription {
         self.cancelled = true;
         self.acknowledged = None;
         self.flight = None;
+        self.projected = None;
     }
 }
 /// Read replica of exactly one authorized scope. Never writes durable storage.

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Bounded immutable hierarchy experiment (RFC 0002). Not the live Canvas backend.
+//! Bounded immutable hierarchy and causal registers; Canvas uses app-root leases.
 //!
 //! SHA-256 covers canonical values AND causal metadata. Logical keys are stable
 //! u64 identifiers, never array positions. This first slice provides register
 //! assignment/deletion, not sequence edits, subtree deletion or history pruning.
+mod coverage;
 mod register;
 mod replication;
 mod tree;
 mod wire;
+pub use coverage::{Coverage, MAX_COVERAGE_PATHS};
 pub use otrios_interfaces::merkle::{Actor, Cursor, Hash, Path};
 pub use register::Register;
 pub use replication::{Authority, Offer, Replica, Subscription};

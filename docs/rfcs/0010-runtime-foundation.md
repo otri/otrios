@@ -93,6 +93,27 @@ exercise immediate slider feedback under delayed confirmation, pointer Up and
 Cancel flushes, and discrete controls/text bypassing continuous deadlines.
 These are shared-runtime tests, not live browser or physical touch acceptance.
 
+The generic Merkle library now supplies `Coverage` and
+`Authority::subscribe_coverage`: at most 192 register/subtree paths, each within
+the existing depth bound and authorized by trusted server roots. A register
+selection includes its causal metadata but no unselected descendants. Addressing
+ancestors carry no value unless selected separately. A full subtree shares its
+existing immutable nodes. Missing targets remain watched.
+
+One projected root/cursor publishes the entire covered view atomically, with the
+existing one-flight ACK/resync/revocation rules. Filtered ancestors have new
+view-local hashes; this is an authority-issued materialization, not a proof of
+membership against the unfiltered root. A subscription caches one projection;
+ACK and flight snapshots share those nodes. Fixed coverage requires a new lease
+to change. No unbounded per-publication queue is introduced.
+
+Library tests cover policy, canonical ordering, missing-target creation,
+unrelated-change suppression, partial/corrupt-frame atomicity, slow readers and
+resync. A real child process receives two paths coherently without sibling or
+ancestor private payloads. The existing live Canvas wire protocol still uses
+app-root leases; connecting admitted UI coverage and writer-local receipts is the
+next integration step and needs a coordinated state-protocol bump.
+
 Use fresh matched authorities for performance experiments. Report delivered
 value age, final settlement, useful bytes, CPU, queue age and retained memory;
 keep input rate, toolchain, UI and signed resources matched. A noisy three-run

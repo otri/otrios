@@ -202,6 +202,51 @@ impl Snapshot {
             .materialize(Some(self))?
             .ok_or(Error::Missing)
     }
+    /// Materialize fixed coverage from one immutable publication. Unchanged
+    /// selected subtrees retain their original nodes; filtered ancestors have
+    /// view-local hashes and never expose unselected register payloads.
+    pub fn project(&self, coverage: &Coverage) -> Result<(Self, Work)> {
+        fn select(
+            source: &Arc<Node>,
+            selection: &super::coverage::Selection,
+            build: &mut Build<'_>,
+        ) -> Result<Option<Arc<Node>>> {
+            if selection.subtree {
+                return Ok(Some(source.clone()));
+            }
+            let mut children = BTreeMap::new();
+            for (key, selected) in &selection.children {
+                if let Some(child) = source.children.get(key)
+                    && let Some(child) = select(child, selected, build)?
+                {
+                    children.insert(*key, child);
+                }
+            }
+            if !selection.register && children.is_empty() {
+                return Ok(None);
+            }
+            let register = selection
+                .register
+                .then(|| source.register.clone())
+                .flatten();
+            if register == source.register
+                && children.len() == source.children.len()
+                && children
+                    .iter()
+                    .all(|(k, n)| Arc::ptr_eq(n, &source.children[k]))
+            {
+                return Ok(Some(source.clone()));
+            }
+            Node::build(register, children, build).map(Some)
+        }
+        let mut workspace = Workspace::default();
+        let mut build = Build::new(&mut workspace);
+        let root = match select(&self.0, &coverage.root, &mut build)? {
+            Some(node) => node,
+            None => Node::build(None, BTreeMap::new(), &mut build)?,
+        };
+        Ok((Self(root), build.work))
+    }
     pub fn hash(&self) -> Hash {
         self.0.hash
     }

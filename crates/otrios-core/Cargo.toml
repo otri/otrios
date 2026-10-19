@@ -72,3 +72,7 @@ required-features = ["canvas"]
 [[example]]
 name = "canvas_delta_breakdown"
 required-features = ["canvas"]
+
+[[example]]
+name = "merkle_coverage_cost"
+required-features = ["merkle"]
