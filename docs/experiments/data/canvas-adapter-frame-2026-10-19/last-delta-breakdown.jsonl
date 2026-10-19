@@ -1,0 +1,4 @@
+{"journal_records":736,"last_raw_delta_bytes":4366,"changed_node_bytes":4204,"root_record_bytes":610}
+{"branch":"fields","nodes":6,"canonical_bytes":844,"register_payload_bytes":128,"changed_node_bytes":415}
+{"branch":"receipts","nodes":20,"canonical_bytes":5236,"register_payload_bytes":2430,"changed_node_bytes":1054}
+{"branch":"signals","nodes":3,"canonical_bytes":2125,"register_payload_bytes":1886,"changed_node_bytes":2125}
