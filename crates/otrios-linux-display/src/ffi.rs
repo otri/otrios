@@ -271,6 +271,16 @@ impl Drop for Display {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn mesa_display_owner() -> std::sync::MutexGuard<'static, ()> {
+        // Mesa returns the same surfaceless EGLDisplay for these tests. Each
+        // Display owns initialize/terminate, so its full lifetime must be isolated
+        // from the other tests, including teardown. The production host has one
+        // display owner; keep this synchronization confined to the test harness.
+        static OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        OWNER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
     #[test]
     fn partial_initialization_rejects_missing_device() {
         for _ in 0..32 {
@@ -281,6 +291,7 @@ mod tests {
     #[test]
     #[ignore = "Requires Mesa EGL; includes real font only in the test binary"]
     fn mesa_real_roboto_coverage_survives_fp16_addresses_lines_and_rotation() {
+        let _display_owner = mesa_display_owner();
         use otrios_core::dashboard::{
             display::Surface, font::Font, font_reference::RESOURCE_SHA256,
         };
@@ -439,6 +450,7 @@ mod tests {
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_slug_quadratic_holes_cache_and_selected_color_pipeline() {
+        let _display_owner = mesa_display_owner();
         let mut d = Display::headless([128, 128], false).unwrap();
         // Two oppositely wound quadratic contours. A hole must survive analytic
         // coverage and cached composition; this is not a bitmap/SDF fixture.
@@ -576,6 +588,7 @@ mod tests {
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_color_transfer_matches_selected_pipeline_all_256_bytes() {
+        let _display_owner = mesa_display_owner();
         let mut display = Display::headless([256, 8], false).unwrap();
         let corners = [
             [-1., -1.],
@@ -623,6 +636,7 @@ mod tests {
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_retained_geometry_and_alpha_pixels() {
+        let _display_owner = mesa_display_owner();
         for rgb565 in [false, true] {
             let mut d = Display::headless([64, 64], rgb565).unwrap();
             let mut vertices = Vec::new();
