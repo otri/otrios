@@ -31,6 +31,9 @@ def rebuild(config,wanted,activate=True):
         if old.exists():shutil.rmtree(old)
     env=dict(os.environ,**config['build_env'],CARGO_TARGET_DIR=str(build/'mac-target'))
     run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
+    run(['cargo','test','-p','otrios-dashboard','--features','server,canvas,host-sync','--locked'],cwd=source,env=env)
+    for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py']:
+        run([sys.executable,script],cwd=source)
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):

@@ -11,7 +11,7 @@ complete local Monitoring view. The Mac is only a builder and signing publisher.
 
 | Service | Role | Bound |
 | --- | --- | --- |
-| `otrios-authority` | Code, release hello/upgrades, durable app roots, auth, ink | 4 trusted / 8 public sessions; 192 MiB memory high, 256 MiB hard |
+| `otrios-authority` | Code, release hello/upgrades, durable app roots, auth, ink | 4 trusted / 64 public sessions; 192 MiB memory high, 256 MiB hard |
 | `otrios-tunnel` | Existing hostname to `127.0.0.1:8877` | 96 MiB high, 128 MiB hard |
 | `otrios-monitoring.timer` | Five-minute HTTPS collector and native chart projection | One-shot 240 seconds, 96 MiB hard |
 | `otrios-dashboard-direct` | Existing KMS/GLES2 display and touch | Separate process; 128 MiB artifact disk cache |
@@ -109,6 +109,13 @@ serving LaunchAgents. Keep only the active release; preserve canonical app data.
 
 Run `bash scripts/check.sh`, all-feature Clippy, browser worker/session/cache
 tests, real server-process checks, and the public host conformance checker.
+For a production-origin check without the private login:
+
+```sh
+python3 scripts/test-dashboard-host.py --url https://otrios.otri.ca --public-only
+```
+
+This skips authenticated login; the full checker still requires `--credentials`.
 On hardware verify stable loopback hello, native signed/confirmed readiness,
 direct Prometheus collection, shared browser/native mounts, peer admission limits,
 durable restart, public/private route isolation and release activation.

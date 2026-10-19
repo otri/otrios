@@ -33,7 +33,7 @@ raw replication path unless an explicit compressed packet is processed.
 | Native host | Eight network replies, one send slot plus one pending send, one replaceable presentation slot; independent bounded input/ink queues | Wire order retained; presentation views coalesce; transport backpressure remains bounded |
 | Browser host | Four send credits, bounded receive bridge and one in-flight + one latest presentation view | Transfer buffers on ownership handoff; reconnect on overflow; renderer clock is independent |
 | Behavior | Eight cached binaries, each ≤64 KiB; one admitted active instance, one memory ≤64 KiB, no tables, dispatch fuel 10,000 | Validate hash/imports/ABI and fuel before accepting commands |
-| Authority host | Configurable trusted/public permits (defaults 64/32, frame 4/8); eight catalogs, 128 app roots | Reject admission/refresh beyond budget; no client-created arbitrary room names |
+| Authority host | Configurable trusted/public permits (defaults 64/32, frame 4/64); eight catalogs, 128 app roots | Reject admission/refresh beyond budget; no client-created arbitrary room names |
 | Journal per root | Rotate checkpoint at 4 MiB, maximum journal 16 MiB, record ≤512 KiB | Durable failure leaves prior publication authoritative; corrupt complete records fail closed |
 | Artifact caches | Browser target 512 MiB, native frame target 128 MiB; disposable immutable verified code/font/blob resources | Evict least recently used resources; storage unavailable never makes document state durable on client |
 

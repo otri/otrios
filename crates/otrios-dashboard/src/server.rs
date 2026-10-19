@@ -511,8 +511,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if !bind.parse::<std::net::SocketAddr>()?.ip().is_loopback() {
         return Err("Development authority must bind loopback".into());
     }
-    if !(1..=64).contains(&trusted_peers) || !(1..=32).contains(&public_peers) {
-        return Err("Peer limits must be 1..=64 trusted and 1..=32 public".into());
+    if !(1..=64).contains(&trusted_peers) || !(1..=4096).contains(&public_peers) {
+        return Err("Peer limits must be 1..=64 trusted and 1..=4096 public".into());
     }
     let app_state = app_state.or_else(|| state_file.as_ref().map(|p| p.with_extension("apps")));
     let presentation_file = explicit_presentation.or_else(|| {

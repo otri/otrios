@@ -7,7 +7,8 @@ share the photo frame's per-app Merkle state. Navigation, text entry and animati
 phase remain local. Monitoring alone requires browser sign-in.
 
 One Rust service on the Rockchip photo frame serves code and state. Cloudflare Tunnel reaches its public
-loopback listener on 8877; Tailscale reaches the trusted listener on 8876. Public
+loopback listener on 8877; the local display and collector use trusted 8876.
+Remote administration uses pinned SSH over Tailscale. Public
 requests never forward to the trusted listener. State recovery failure leaves
 signed code and release negotiation available. A whole-process crash affects both.
 
