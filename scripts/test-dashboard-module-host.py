@@ -34,20 +34,10 @@ def main():
     assert 'apps/catalog.flex' in manifest['assets'];count+=1
     for name in manifest.get('authority',{}):
         assert name.startswith('authority/apps/') and request(prefix+name)[0]==404;count+=1
-    for path in ['/layout','/presentation','/sync','/private/stream','/stream','/demo/stream','/monitoring/stream']:
+    for path in ['/layout','/presentation','/sync','/private/stream','/stream','/demo/stream','/monitoring/stream','/publish']:
         for method in ['GET','POST']:
             assert request(path,method=method,body=b''if method=='POST'else None)[0]==404,(path,method);count+=1
-    if a.state_unavailable:
-        assert request('/health')[0]==502;count+=1;print(f'PASS {count} checks: public signed module independent of unavailable state adapter');return
-    for path in ['/auth/session','/monitoring/presentation']:
-        assert request(path)[0]==401,path;count+=1
-        assert request(path,extra={'Cookie':'__Host-otrios_monitoring='+'a'*64})[0]==401;count+=1
-    basic='Basic '+base64.b64encode((username+':'+password).encode()).decode()
-    assert request('/monitoring/presentation',extra={'Authorization':basic})[0]==401;count+=1
-    assert request('/monitoring/presentation',method='HEAD')[0]==401;count+=1
-    assert request('/health')[0]==200;count+=1
     def ws_headers(origin):return{'Connection':'Upgrade','Upgrade':'websocket','Sec-WebSocket-Version':'13','Sec-WebSocket-Key':base64.b64encode(secrets.token_bytes(16)).decode(),'Origin':origin}
-    assert request('/apps/stream',extra=ws_headers('https://unrelated.example'))[0]==403;count+=1
     def frame(response):
         def read(n):
             data=response.fp.read(n)
@@ -57,6 +47,24 @@ def main():
         elif size==127:size=int.from_bytes(read(8),'big')
         assert not header[1]&128 and size<=2*1024*1024
         return header[0]&15,read(size)
+    assert request('/release/events',extra=ws_headers('https://unrelated.example'))[0]==403;count+=1
+    connection,response=request('/release/events',extra=ws_headers(a.url.rstrip('/')),upgrade=True)
+    payload=json.dumps({'type':'hello','version':1,'release':release['id'],'state_protocol':'retired-crdt-v0'}).encode()
+    mask=secrets.token_bytes(4);header=bytes([0x81,0x80|126])+len(payload).to_bytes(2,'big') if len(payload)>=126 else bytes([0x81,0x80|len(payload)])
+    connection.sock.sendall(header+mask+bytes(byte^mask[i%4]for i,byte in enumerate(payload)))
+    opcode,data=frame(response);hello=json.loads(data)
+    assert opcode==1 and len(data)<=8192 and hello['type']=='hello' and hello['version']==1 and hello['refresh'] is True and hello['release']['id']==release['id'];count+=1
+    connection.close()
+    if a.state_unavailable:
+        assert request('/health')[0]==502;count+=1;print(f'PASS {count} checks: public signed module independent of unavailable state adapter');return
+    for path in ['/auth/session','/monitoring/presentation']:
+        assert request(path)[0]==401,path;count+=1
+        assert request(path,extra={'Cookie':'__Host-otrios_monitoring='+'a'*64})[0]==401;count+=1
+    basic='Basic '+base64.b64encode((username+':'+password).encode()).decode()
+    assert request('/monitoring/presentation',extra={'Authorization':basic})[0]==401;count+=1
+    assert request('/monitoring/presentation',method='HEAD')[0]==401;count+=1
+    assert request('/health')[0]==200;count+=1
+    assert request('/apps/stream',extra=ws_headers('https://unrelated.example'))[0]==403;count+=1
     connection,response=request('/apps/stream',extra=ws_headers(a.url.rstrip('/')),upgrade=True)
     opcode,data=frame(response);assert opcode==1 and json.loads(data).get('type')=='release';count+=1
     connection.close()

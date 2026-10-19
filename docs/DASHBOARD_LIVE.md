@@ -182,7 +182,8 @@ signature, target and asset validation remain mandatory.
 The signed ARM build also produces `build/release-watch`. Install that companion
 at `/opt/otrios-dashboard/release-watch` before installing the new supervisor.
 Set the frame's `--code-url https://otrios.otri.ca` separately from its private
-state `--url`; this keeps code discovery independent of authority availability.
+state `--url` (the service templates default `DASHBOARD_CODE_URL` to the public
+code host and permit an environment-file override); this keeps code discovery independent of authority availability.
 The bootstrap companion and release-control v1 must remain available as app/CRDT
 implementations evolve. Updating this companion requires an explicit host update.
 
