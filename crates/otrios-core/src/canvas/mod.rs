@@ -6,12 +6,13 @@ mod selection;
 mod state;
 mod transport;
 pub use behavior::Behavior;
-pub use client::Client;
+pub use client::{Client, ResourceUsage};
 use otrios_interfaces::canvas::*;
 pub use selection::StateSelection;
 use sha2::{Digest, Sha256};
 pub use state::{
     DispatchPolicy, DispatchUsage, Document, MAX_INTENT_PAYLOAD_BYTES, Session, StateAdapter,
+    StateUsage,
 };
 pub use transport::{
     DecodeBudget, WireUsage, compress_packet_into, decode_client, decode_server,

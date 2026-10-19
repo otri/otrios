@@ -13,7 +13,7 @@ struct Workspace {
     grows: u64,
 }
 thread_local! { static WORKSPACE: RefCell<Workspace> = RefCell::new(Workspace::default()); }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct WireUsage {
     pub compression_capacity: usize,
     pub decode_capacity: usize,

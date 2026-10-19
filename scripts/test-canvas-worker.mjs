@@ -25,7 +25,7 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
   const fake={reset_connection(){},receive(){throw Error('candidate rejected');},rejected_mount_pending:()=>rejected,
     outgoing(){if(cancel){cancel=false;rejected=false;return new Uint8Array([42]);}return null;},
     screen:()=> 'layout-lab',epoch:()=>7,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'app:layout-lab/state',
-    keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,
+    keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
     vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
     tick:()=>false,take_sign_out:()=>false,activate:()=>{activations++;return true;}};
   const context=vm.createContext({URL,location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),setTimeout(){},clearTimeout(){},fake});
@@ -44,7 +44,7 @@ test('a Canvas sign-out action clears private pixels and revokes the browser ses
     private:()=>privateMount,clear_private(){calls.push('clear');privateMount=false;},
     set_session_controls(value){calls.push(['session-controls',value]);},navigate:screen=>calls.push(['navigate',screen]),
     activate(){requested=true;return true;},take_sign_out(){const value=requested;requested=false;return value;},
-    screen:()=> 'home',epoch:()=>1,state_ref:()=>'',keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,motion_intent:()=>[],stress_updates:()=>0};
+    screen:()=> 'home',epoch:()=>1,state_ref:()=>'',keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}'};
   const context=vm.createContext({URL,WebSocket:{OPEN:1},location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),clearTimeout(){},fake,monitoringFake:{logout(){calls.push('logout');}}});
   vm.runInContext(source,context);vm.runInContext('app=fake;monitoring=monitoringFake',context);
   await context.onmessage({data:{type:'activate',id:12}});

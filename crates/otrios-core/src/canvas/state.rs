@@ -782,7 +782,7 @@ pub const MAX_INTENT_PAYLOAD_BYTES: usize = MAX_BYTES / 2;
 
 /// Read-only RAM queue diagnostics. Ages use the host's monotonic clock, never
 /// wall time. Payload counts exclude containers, authoritative trees and codecs.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
 pub struct DispatchUsage {
     pub pending_fields: usize,
     pub issued_fields: usize,
@@ -800,6 +800,14 @@ fn value_payload_bytes(value: &Value) -> usize {
         Value::Series(v) => v.len() * 4,
         Value::TimedSeries(v) => v.len() * 8,
     }
+}
+/// Canonical retained view size, not allocator/RSS accounting. The replica and
+/// document normally share one immutable root; do not add their sizes together.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct StateUsage {
+    pub selected_nodes: usize,
+    pub selected_canonical_bytes: usize,
+    pub replica_root_shared: bool,
 }
 /// RAM-only pending intents, separate from authoritative causal metadata.
 pub struct StateAdapter {
@@ -964,6 +972,17 @@ impl StateAdapter {
     }
     pub fn pending_count(&self) -> usize {
         self.pending.len() + self.flight.as_ref().map_or(0, |f| f.values.len())
+    }
+    pub fn state_usage(&self) -> StateUsage {
+        StateUsage {
+            selected_nodes: self.doc.tree.node_count(),
+            selected_canonical_bytes: self.doc.tree.canonical_bytes(),
+            replica_root_shared: self
+                .replica
+                .as_ref()
+                .and_then(|r| r.snapshot())
+                .is_some_and(|tree| tree.shares_root(&self.doc.tree)),
+        }
     }
     pub fn dispatch_usage(&self) -> DispatchUsage {
         DispatchUsage {
@@ -1199,6 +1218,28 @@ mod tests {
             }
         }
         panic!("adapter did not settle");
+    }
+    #[test]
+    fn resource_accounting_tracks_shared_authority_and_separate_ram_intents() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut client = client(1);
+        let mut session = Session::default();
+        assert!(!client.state_usage().replica_root_shared);
+        pump(&mut doc, &mut session, &mut client);
+        let state = client.state_usage();
+        assert!(state.replica_root_shared);
+        assert!(state.selected_nodes > 0 && state.selected_canonical_bytes > 0);
+        client.advance(100);
+        client.defer(&[(1, 500)]).unwrap();
+        assert_eq!(
+            client.state_usage(),
+            state,
+            "RAM intents do not edit the authoritative snapshot"
+        );
+        assert_eq!(client.dispatch_usage().pending_payload_bytes, 4);
+        pump(&mut doc, &mut session, &mut client);
+        assert!(client.state_usage().replica_root_shared);
+        assert_eq!(client.dispatch_usage(), DispatchUsage::default());
     }
     #[test]
     fn dispatch_deadline_coalesces_without_postponing_and_control_bypasses_it() {

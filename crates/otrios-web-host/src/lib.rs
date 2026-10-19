@@ -201,6 +201,10 @@ impl CanvasApp {
     pub fn confirmed(&mut self) -> bool {
         self.inner.confirmed()
     }
+    /// Shared runtime diagnostics, sampled in this worker rather than renderer TLS.
+    pub fn resource_stats(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.resource_usage()).map_err(|e| e.to_string())
+    }
     pub fn reload_ready(&self) -> bool {
         self.inner.reload_ready()
     }

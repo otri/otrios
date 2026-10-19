@@ -99,6 +99,17 @@ impl StressWorkload {
         Ok(changed)
     }
 }
+/// Read-only diagnostics sampled by the app owner. These logical byte/capacity
+/// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct ResourceUsage {
+    pub sampled_monotonic_ms: u64,
+    pub dispatch: DispatchUsage,
+    pub state: StateUsage,
+    pub behavior_cache_entries: usize,
+    pub behavior_cache_bytes: usize,
+    pub wire: WireUsage,
+}
 #[derive(Default)]
 pub struct Client {
     wire_clock: u64,
@@ -314,6 +325,19 @@ impl Client {
     }
     pub fn stress_stall_ms(&self) -> u64 {
         if self.stress_hz() == 31 { 250 } else { 0 }
+    }
+    pub fn resource_usage(&self) -> ResourceUsage {
+        ResourceUsage {
+            sampled_monotonic_ms: self.wire_clock,
+            dispatch: self.dispatch_usage(),
+            state: self
+                .active
+                .as_ref()
+                .map_or_else(StateUsage::default, |m| m.doc.state_usage()),
+            behavior_cache_entries: self.cache.len(),
+            behavior_cache_bytes: self.cache.iter().map(|(_, bytes)| bytes.len()).sum(),
+            wire: wire_usage(),
+        }
     }
     pub fn dispatch_usage(&self) -> DispatchUsage {
         self.active
