@@ -213,7 +213,7 @@ This is a lifecycle check, excluded from the performance measurements.
 With pinned Rust 1.90.0, `bash scripts/check.sh` and
 `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`
 passed. All 40 Node session, Monitoring, artifact-cache, GPU, catalog and worker
-tests passed. The real-process ink-admission regression mounts 24 ink-enabled
+tests passed. The real-process ink-admission regression opens 24 ink-enabled
 public sessions, verifies broadcast delivery and checks permit recovery.
 
 The publisher rebuilt the ARMv7 host artifacts and activated the same signed
