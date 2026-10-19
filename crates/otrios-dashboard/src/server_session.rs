@@ -164,7 +164,9 @@ async fn peer(
     {
         return;
     }
-    let (state_tx, state_input) = mpsc::channel(2);
+    // Cover the browser's four output credits plus a mount/ACK burst.
+    // Overflow still disconnects for resync; release control never awaits space.
+    let (state_tx, state_input) = mpsc::channel(8);
     let (state_output, mut state_rx) = mpsc::channel(4);
     let worker = state_enabled.then(|| {
         tokio::spawn(apps::worker(
@@ -402,8 +404,14 @@ mod tests {
             let (mut s, _) = tungstenite::client(format!("ws://{address}/session"), tcp).unwrap();
             s.send(tungstenite::Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":STATE_PROTOCOL,"state":true}).to_string().into())).unwrap();
             assert!(matches!(s.read().unwrap(), tungstenite::Message::Text(_)));
-            s.send(tungstenite::Message::Binary(vec![wire::STATE, 0].into()))
-                .unwrap();
+            // A browser can send four credited state frames without waiting.
+            // Keep that ordinary burst bounded without closing before a Ping/upgrade.
+            for _ in 0..4 {
+                s.send(tungstenite::Message::Binary(vec![wire::STATE, 0].into()))
+                    .unwrap();
+            }
+            s.send(tungstenite::Message::Ping(vec![17].into())).unwrap();
+            assert!(matches!(s.read().unwrap(), tungstenite::Message::Pong(_)));
             sent.send(()).unwrap();
             loop {
                 match s.read().unwrap() {
