@@ -76,3 +76,7 @@ required-features = ["canvas"]
 [[example]]
 name = "merkle_coverage_cost"
 required-features = ["merkle"]
+
+[[example]]
+name = "canvas_readonly_cost"
+required-features = ["canvas"]

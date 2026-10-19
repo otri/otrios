@@ -91,8 +91,11 @@ impl StateSelection {
         }
         Ok(Self { fields, signals })
     }
-    pub(crate) fn coverage(&self, slot: usize) -> Result<crate::merkle::Coverage> {
-        let mut registers = vec![vec![], state::path(2, slot)];
+    pub(crate) fn coverage(&self, slot: Option<usize>) -> Result<crate::merkle::Coverage> {
+        let mut registers = vec![vec![]];
+        if let Some(slot) = slot {
+            registers.push(state::path(2, slot));
+        }
         for id in 0..MAX_FIELDS {
             if self.fields & (1 << id) != 0 {
                 registers.push(state::path(1, id));

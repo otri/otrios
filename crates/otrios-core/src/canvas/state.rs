@@ -555,12 +555,23 @@ impl Document {
     }
     pub fn open_session(&mut self, writer: &[u8], resume: u64) -> Result<(Session, bool)> {
         let writer: [u8; 16] = writer.try_into().map_err(|_| "Invalid writer nonce")?;
-        let changed = self.admit(&writer, resume)?;
+        let writable = self.schema.fields.iter().any(|field| field.writable);
+        if !writable && resume != 0 {
+            return Err("Read-only scope cannot resume an issued write".into());
+        }
+        // Read-only scopes have no possible client intents to deduplicate. Their
+        // leases/cursors live in RAM; subscribing must not append durable state.
+        let changed = writable && self.admit(&writer, resume)?;
+        let slot = if writable {
+            self.receipt(&writer)?.map(|(slot, _)| slot)
+        } else {
+            None
+        };
         let authority = Authority::new(u64::from_le_bytes(random()?), self.tree.clone());
         Ok((
             Session {
                 writer: Some(writer),
-                slot: self.receipt(&writer)?.map(|(slot, _)| slot),
+                slot,
                 authority: Some(authority),
                 subscription: None,
                 initial: true,
@@ -669,7 +680,7 @@ impl Document {
                 .selection
                 .clone()
                 .unwrap_or_else(|| StateSelection::all(&self.schema));
-            let coverage = selection.coverage(session.slot.ok_or("Missing writer slot")?)?;
+            let coverage = selection.coverage(session.slot)?;
             session.subscription = Some(
                 authority
                     .subscribe_coverage(&[vec![]], coverage)
@@ -686,6 +697,7 @@ impl Document {
         if !session.initial && session.last_sent == Some(offer.cursor) {
             return Ok(None);
         }
+        session.last_sent = Some(offer.cursor);
         let response = if session.initial {
             session.initial = false;
             StateResponse::Mount {
@@ -694,7 +706,6 @@ impl Document {
                 frame: offer.bytes().to_vec(),
             }
         } else {
-            session.last_sent = Some(offer.cursor);
             StateResponse::Update {
                 frame: offer.bytes().to_vec(),
             }
@@ -1366,6 +1377,65 @@ mod tests {
         assert_eq!(c.dispatch_usage(), DispatchUsage::default());
         c.set_typed(&[(17, large)]).unwrap();
         assert_eq!(c.dispatch_usage().pending_fields, 1);
+    }
+    #[test]
+    fn read_only_leases_never_allocate_durable_receipts_and_still_follow_authority_updates() {
+        let schema = StateSchema {
+            id: "read-only".into(),
+            fields: vec![Field {
+                id: 1,
+                name: "status".into(),
+                default: Value::Number(0.),
+                writable: false,
+            }],
+        };
+        let mut doc = Document::new(schema.clone(), "read-only").unwrap();
+        let root = doc.root_hash();
+        let saved = doc.save().unwrap();
+        for id in 0..1030_u64 {
+            let mut writer = [0; 16];
+            writer[..8].copy_from_slice(&id.to_le_bytes());
+            let (mut session, changed) = doc.open_session(&writer, 0).unwrap();
+            assert!(!changed);
+            assert!(session.slot.is_none());
+            let mounted = doc.generate(&mut session).unwrap().unwrap();
+            assert!(
+                doc.generate(&mut session).unwrap().is_none(),
+                "mounted bytes are already in flight"
+            );
+            let mut client =
+                StateAdapter::new(schema.clone(), "read-only", &mounted, writer).unwrap();
+            assert!(client.confirmed());
+            assert_eq!(client.value(1).unwrap(), 0);
+            assert!(client.set(&[(1, 900)]).is_err());
+            doc.receive(&mut session, &client.generate().unwrap().unwrap())
+                .unwrap();
+            assert!(doc.generate(&mut session).unwrap().is_none());
+        }
+        assert_eq!(doc.root_hash(), root);
+        assert_eq!(doc.save().unwrap(), saved);
+        assert!(doc.receipts().unwrap().is_empty());
+        assert!(
+            doc.open_session(&[8; 16], 1).is_err(),
+            "no uncertain write can resume in a read-only scope"
+        );
+        let (mut session, _) = doc.open_session(&[9; 16], 0).unwrap();
+        let mut client = StateAdapter::new(
+            schema,
+            "read-only",
+            &doc.generate(&mut session).unwrap().unwrap(),
+            [9; 16],
+        )
+        .unwrap();
+        doc.receive(&mut session, &client.generate().unwrap().unwrap())
+            .unwrap();
+        doc.set_typed_authority(&[(1, Value::Number(123.))])
+            .unwrap();
+        client
+            .receive(&doc.generate(&mut session).unwrap().unwrap())
+            .unwrap();
+        assert_eq!(client.value(1).unwrap(), 123);
+        assert!(client.confirmed());
     }
     #[test]
     fn ram_pending_writes_coalesce_and_receipts_survive_durable_reload() {

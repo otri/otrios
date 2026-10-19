@@ -227,16 +227,18 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 2) else {
         panic!("no new state candidate")
     };
-    let fresh = StateAdapter::new(ui.state_schema, "app:demo/state-v2", &state, [9; 16]).unwrap();
+    let mut fresh =
+        StateAdapter::new(ui.state_schema, "app:demo/state-v2", &state, [9; 16]).unwrap();
     assert_eq!(fresh.value(1).unwrap(), 0);
     let new_file = state_file_ref(&room, "demo", "app:demo/state-v2");
     assert_ne!(old_file, new_file);
     assert!(new_file.is_file());
     accept(&mut s, 2);
-    assert!(matches!(
-        read_epoch(&mut s, 2),
-        ServerMessage::Sync { epoch: 2, .. }
-    ));
+    // Mounted already carried the offered snapshot; AcceptMount must not
+    // depend on a redundant retransmission. ACK the original staged frame.
+    while let Some(bytes) = fresh.generate().unwrap() {
+        send(&mut s, ClientMessage::Sync { epoch: 2, bytes });
+    }
     // A packet from the previous activation cannot change either root after commit.
     doc.set(&[(1, 900)]).unwrap();
     while let Some(bytes) = doc.generate().unwrap() {
@@ -281,10 +283,6 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
     let mut client =
         StateAdapter::new(room.schema.clone(), "app:demo/state", &state, [9; 16]).unwrap();
     accept(&mut s, 1);
-    let ServerMessage::Sync { bytes, .. } = read_epoch(&mut s, 1) else {
-        panic!("no activation")
-    };
-    client.receive(&bytes).unwrap();
     while let Some(bytes) = client.generate().unwrap() {
         send(&mut s, ClientMessage::Sync { epoch: 1, bytes });
     }
@@ -393,4 +391,43 @@ fn negotiated_blob_and_legacy_mounts_both_confirm_durable_edits() {
         );
         assert!(client.confirmed());
     }
+}
+
+#[test]
+fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
+    let room = room(false, 28800);
+    let checkpoint = state_file(&room, "monitoring");
+    let journal = checkpoint.with_extension("merkle.log");
+    let before = std::fs::read(&checkpoint).unwrap();
+    let before_log = std::fs::read(&journal).unwrap_or_default();
+    for id in 20..28_u8 {
+        let mut socket = socket(&room.private, None);
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: "app:monitoring/ui".into(),
+                state_ref: "app:monitoring/state".into(),
+                catalog_hash: canvas::hash(&room.catalog),
+                known_code: vec![],
+                writer: vec![id; 16],
+                resume: 0,
+                binary: true,
+            },
+        );
+        let ServerMessage::Mounted { ui, state, .. } = read(&mut socket) else {
+            panic!("missing read-only mount")
+        };
+        let ui = canvas::decode_ui(&ui).unwrap();
+        let mut client =
+            StateAdapter::for_ui(&ui, "app:monitoring/state", &state, [id; 16]).unwrap();
+        assert!(client.confirmed());
+        assert!(client.set(&[(1, 123)]).is_err());
+        accept(&mut socket, 1);
+        while let Some(bytes) = client.generate().unwrap() {
+            send(&mut socket, ClientMessage::Sync { epoch: 1, bytes });
+        }
+    }
+    assert_eq!(std::fs::read(checkpoint).unwrap(), before);
+    assert_eq!(std::fs::read(journal).unwrap_or_default(), before_log);
 }
