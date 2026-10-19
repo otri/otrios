@@ -20,7 +20,7 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
     if catalog.is_symlink():raise ValueError('Catalog symlink rejected')
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
-        names=['index.html','style.css','app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
+        names=['index.html','style.css','app.js','state-worker.js','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
         names += ['app-catalog.mjs','gpu-scene.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
         for name in names:
             source=web/name
@@ -57,7 +57,7 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
             if len(fallback)<52 or fallback[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(fallback[18:20],'little')!=40:raise ValueError('Expected ARM32 SDL recovery executable')
             path='native/armv7/dashboard-sdl';(stage/path).write_bytes(fallback)
             assets[path]={'bytes':len(fallback),'sha256':digest(fallback)}
-        manifest={'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v2','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v2','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
         subprocess.run([openssl,'pkeyutl','-sign','-rawin','-inkey',str(key),'-in',str(stage/'manifest.json'),'-out',str(stage/'manifest.sig')],check=True,capture_output=True)

@@ -40,6 +40,45 @@ fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     fs::rename(root.join("pending.json"), root.join("current.json")).unwrap();
     r
 }
+fn complete_release(root: &Path) -> Vec<u8> {
+    let source = root.join("source");
+    let (catalog, _) = common::fixture(&source);
+    let mut files = std::collections::BTreeMap::new();
+    files.insert("web/index.html".to_string(), b"complete fixture".to_vec());
+    files.insert("apps/catalog.flex".to_string(), catalog.clone());
+    for app in ["demo", "monitoring"] {
+        for name in ["ui.flex", "app.flex"] {
+            files.insert(
+                format!("authority/apps/{app}/{name}"),
+                fs::read(source.join(app).join("package").join(name)).unwrap(),
+            );
+        }
+    }
+    let mut assets = serde_json::Map::new();
+    let mut authority = serde_json::Map::new();
+    for (name, bytes) in &files {
+        let item = serde_json::json!({"bytes":bytes.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(bytes))});
+        if name.starts_with("authority/") {
+            authority.insert(name.clone(), item);
+        } else {
+            assets.insert(name.clone(), item);
+        }
+    }
+    let raw=serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v2","assets":assets,"authority":authority}).to_string().into_bytes();
+    let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
+    let folder = root.join(&id);
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("manifest.json"), raw).unwrap();
+    for (name, bytes) in files {
+        let path = folder.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v2"});
+    fs::write(root.join("pending.json"), r.to_string()).unwrap();
+    fs::rename(root.join("pending.json"), root.join("current.json")).unwrap();
+    catalog
+}
 fn socket(address: &str, path: &str) -> common::Socket {
     let mut req = format!("ws://{address}{path}")
         .into_client_request()
@@ -169,6 +208,21 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     );
     old.send(Message::Binary(vec![1, 0].into())).unwrap();
     assert!(!matches!(old.read(), Ok(Message::Binary(_))));
+    #[cfg(feature = "host-sync")]
+    {
+        publish(&rig.root, 3);
+        let result = Command::new(env!("CARGO_BIN_EXE_session-bootstrap"))
+            .args([&format!("ws://{}/session", rig.private), ""])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(value["release"]["id"], c["id"]);
+    }
     // Stable alias is metadata only even when a caller asks for state.
     let mut alias = socket(&rig.public, "/release/events");
     hello(&mut alias, 1, "otrios-canvas-sync-v2", true);
@@ -184,6 +238,49 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     let mut early = socket(&rig.public, "/session");
     early.send(Message::Binary(vec![1, 0].into())).unwrap();
     assert!(!matches!(early.read(), Ok(Message::Binary(_))));
+    // A later complete publication recovers state without replacing the process/socket.
+    let mut waiting = socket(&rig.public, "/session");
+    hello(&mut waiting, 1, "otrios-canvas-sync-v2", true);
+    assert!(matches!(
+        event(&mut waiting),
+        ServerControl::Hello {
+            state_available: false,
+            ..
+        }
+    ));
+    let catalog = complete_release(&rig.root);
+    assert_eq!(
+        request(&rig.private, "POST", "/admin/activate", &[], &[]).0,
+        204
+    );
+    loop {
+        if matches!(
+            event(&mut waiting),
+            ServerControl::StateStatus {
+                available: true,
+                ..
+            }
+        ) {
+            break;
+        }
+    }
+    common::send(
+        &mut waiting,
+        otrios_interfaces::canvas::ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: "app:demo/ui".into(),
+            state_ref: "app:demo/state".into(),
+            catalog_hash: otrios_core::canvas::hash(&catalog),
+            writer: vec![7; 16],
+            resume: 0,
+            known_code: vec![],
+            binary: true,
+        },
+    );
+    assert!(matches!(
+        common::read(&mut waiting),
+        otrios_interfaces::canvas::ServerMessage::Mounted { epoch: 1, .. }
+    ));
     assert_eq!(request(&rig.public, "GET", "/apps/stream", &[], &[]).0, 410);
     assert_eq!(request(&rig.public, "GET", "/demo/ink", &[], &[]).0, 410);
 }

@@ -34,8 +34,8 @@ def rebuild(config,wanted,activate=True):
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs'],cwd=source)
-        for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/release-gate.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
+        run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs'],cwd=source)
+        for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/session.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:
@@ -51,17 +51,17 @@ def rebuild(config,wanted,activate=True):
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
     feature,binary='direct','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','release-watch','--target','armv7-unknown-linux-gnueabihf'])
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
-    run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/release-watch',build/'release-watch'])
+    run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
     fallback=None
     # New releases use the direct Slug renderer. The supervisor retains the
     # previous signed release for rollback; no incomplete SDL UI is published.
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=activate and not bool(config.get('module_volume')),catalog=source/'apps/catalog.flex')
-    if activate and config.get('module_volume'):
-        pointer=build/'module-pointer.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
-        run([sys.executable,source/'scripts/publish-dashboard-module.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--volume',config['module_volume'],'--marker',runtime/'module-host/published-release','--pointer',pointer,'--activate-origin'])
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=False,catalog=source/'apps/catalog.flex')
+    if activate:
+        pointer=build/'activation.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
+        run([sys.executable,source/'scripts/activate-dashboard-release.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--pointer',pointer])
     if activate:publisher.atomic(build/'source-id',wanted.encode())
     else:publisher.atomic(build/'staged-release.json',json.dumps(release,sort_keys=True).encode())
     print(('PUBLISHED 'if activate else'STAGED ')+release['id'],flush=True)
@@ -110,7 +110,7 @@ def main(config,once,activate=True):
                 rebuild(config,wanted,activate);last=wanted
             if once:return
         except Exception as e:
-            print('BUILD KEPT PREVIOUS RELEASE: '+str(e),flush=True)
+            print('BUILD/ACTIVATION FAILED; inspect active pointer: '+str(e),flush=True)
             if once:raise
             retry_at=time.monotonic()+10
         time.sleep(1)

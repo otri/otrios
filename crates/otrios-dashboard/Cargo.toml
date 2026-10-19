@@ -85,3 +85,8 @@ required-features = ["server"]
 name = "release-watch"
 path = "src/release_watch.rs"
 required-features = ["host-sync"]
+
+[[bin]]
+name = "session-bootstrap"
+path = "src/session_bootstrap.rs"
+required-features = ["host-sync"]

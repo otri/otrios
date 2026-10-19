@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Unprivileged native update supervisor. Only a pinned publisher may supply code."""
-import argparse, fcntl, hashlib, json, math, os, pathlib, re, signal, subprocess, tempfile, time, urllib.request, urllib.parse, uuid, shutil, threading
+import argparse, fcntl, hashlib, json, math, os, pathlib, re, signal, subprocess, tempfile, time, urllib.request, urllib.parse, uuid, shutil, socket, select
 MAX_BINARY=32*1024*1024
 CACHE_BYTES=2*1024*1024*1024
 running=True
@@ -179,7 +179,8 @@ class Host:
         self.a=a;self.release=release;self.stop=a.runtime_dir/('stop-'+uuid.uuid4().hex);self.ready=a.runtime_dir/('ready-'+uuid.uuid4().hex+'.json')
         env=dict(os.environ,OTRIOS_RELEASE_ID=release,SDL_RENDER_DRIVER='opengles2',SDL_VIDEODRIVER=a.video_driver)
         if a.video_driver=='KMSDRM':env.update(SDL_KMSDRM_DEVICE_INDEX='0',SDL_KMSDRM_REQUIRE_DRM_MASTER='1')
-        command=[str(exe),'--sync',a.url.rstrip('/')+'/apps/stream','--exit-file',str(self.stop),'--ready-file',str(self.ready),'--release-file',str(a.runtime_dir/'release-notice.json')]
+        env['OTRIOS_RELEASE_SOCKET']=str(a.runtime_dir/'release.sock')
+        command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
         if screen and screen!='locked':command+=['--screen',screen]
         if a.video_driver=='KMSDRM':command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]
         if a.capture_first_frame:command+=['--capture',str(a.runtime_dir/'first-frame.ppm')]
@@ -207,40 +208,42 @@ class Host:
         self.stop.unlink(missing_ok=True);self.ready.unlink(missing_ok=True)
 
 class ReleaseFeed:
-    """Bounded event feed from the stable, TLS-verifying bootstrap companion."""
-    def __init__(self,a,current):
-        base=getattr(a,'code_url',None) or a.url
-        url=urllib.parse.urlsplit(urllib.parse.urljoin(base,'/release/events'))
-        endpoint=urllib.parse.urlunsplit(('wss' if url.scheme=='https' else 'ws',url.netloc,url.path,'',''))
-        protocol=''
-        if current:
-            try:protocol=json.loads((a.cache/current/'manifest.json').read_text()).get('sync_protocol','')
-            except (OSError,ValueError):pass
-        self.condition=threading.Condition();self.latest=None
-        self.process=subprocess.Popen([getattr(a,'release_watch','/opt/otrios-dashboard/release-watch'),endpoint,current or '',protocol],stdout=subprocess.PIPE)
-        self.reader=threading.Thread(target=self.read,daemon=True);self.reader.start()
-    def read(self):
-        try:
-            while True:
-                line=self.process.stdout.readline(8193)
-                if not line:return
-                if len(line)>8192:raise ValueError('Oversized control event')
-                event=json.loads(line)
-                if event.get('version')!=1 or event.get('type') not in ('hello','upgrade'):raise ValueError('Invalid control envelope')
-                release=event['release'];valid_release(release['id'])
-                if release.get('web_entry')!=f"/releases/{release['id']}/web/index.html":raise ValueError('Invalid control release')
-                with self.condition:self.latest=release;self.condition.notify()
-        except (OSError,ValueError,KeyError,TypeError):self.process.terminate()
+    """Local event delivery from the host's single negotiated network connection."""
+    def __init__(self,a,current=None):
+        self.path=a.runtime_dir/'release.sock';self.path.unlink(missing_ok=True)
+        self.socket=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM)
+        try:self.socket.bind(str(self.path));os.chmod(self.path,0o600)
+        except Exception:self.socket.close();raise
     def take(self):
-        with self.condition:
-            if self.latest is None:self.condition.wait(.1)
-            value=self.latest;self.latest=None;return value
-    def close(self):
-        if self.process.poll() is None:
-            self.process.terminate()
-            try:self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
-        self.reader.join(timeout=1);self.process.stdout.close()
+        if not select.select([self.socket],[],[],.1)[0]:return None
+        latest=None
+        for _ in range(64):
+            data=self.socket.recv(8193)
+            try:
+                if len(data)>8192:raise ValueError('Oversized local release notice')
+                event=json.loads(data)
+                if event.get('version')!=1 or event.get('type') not in ('hello','upgrade'):raise ValueError('Invalid local hello')
+                release=event['release'];valid_release(release['id'])
+                if release.get('web_entry')!=f"/releases/{release['id']}/web/index.html":raise ValueError('Invalid local release entry')
+                latest=release
+            except (ValueError,KeyError,TypeError):pass
+            if not select.select([self.socket],[],[],0)[0]:break
+        return latest
+    def close(self):self.socket.close();self.path.unlink(missing_ok=True)
+
+def bootstrap_release(a,current=None):
+    url=urllib.parse.urlsplit(urllib.parse.urljoin(a.url,'/session'))
+    endpoint=urllib.parse.urlunsplit(('wss',url.netloc,url.path,'',''))
+    result=subprocess.run([getattr(a,'session_bootstrap','/opt/otrios-dashboard/session-bootstrap'),endpoint,current or ''],capture_output=True,text=True,timeout=15,check=True)
+    if len(result.stdout)>8192:raise ValueError('Oversized bootstrap hello')
+    event=json.loads(result.stdout)
+    if event.get('version')!=1 or event.get('type')!='hello':raise ValueError('Invalid bootstrap hello')
+    release=event['release'];valid_release(release['id'])
+    if release.get('web_entry')!=f"/releases/{release['id']}/web/index.html":raise ValueError('Invalid bootstrap entry')
+    return release
+
+def session_host(cache,release):
+    return json.loads((cache/release/'manifest.json').read_text()).get('host_session')==1
 
 def main(a):
     global running
@@ -250,22 +253,23 @@ def main(a):
         if p.name.startswith(('.download-','.verify-')) and p.is_dir() and not p.is_symlink():shutil.rmtree(p)
     host=None;current=None;last_good=None;pending=None;retry_at=0
     good_file=a.cache/'last-good.json'
+    feed=ReleaseFeed(a,current)
     if good_file.exists():
         try:
             value=json.loads(good_file.read_text());last_good=cached(a.cache,value['id'],a.key,a.openssl,sdl=a.video_driver=='wayland')
-            host=Host(a,*last_good);host.wait_ready(require_stream=False);current=last_good[0]
-            print('RESUMED signed_release='+current,flush=True)
+            if session_host(a.cache,last_good[0]):
+                host=Host(a,*last_good);host.wait_ready(require_stream=False);current=last_good[0]
+                print('RESUMED signed_release='+current,flush=True)
         except Exception as e:
             if host:host.close();host=None
             print('Cached app unavailable: '+str(e),flush=True)
-    feed=None
     try:
-        feed=ReleaseFeed(a,current)
         while running:
             try:
-                if feed.process.poll() is not None:
-                    feed.close();feed=ReleaseFeed(a,current);time.sleep(.25)
                 event=feed.take()
+                if host is not None and host.process.poll() is not None:
+                    host.close();host=None;pending=None;event=None;retry_at=0
+                if host is None and pending is None and time.monotonic()>=retry_at:event=bootstrap_release(a,current)
                 if event is not None:
                     if pending is None or event['id']!=pending['id']:retry_at=0
                     pending=event
@@ -279,7 +283,7 @@ def main(a):
                 host=None
                 if old:old.close()
                 candidate=Host(a,release,exe,screen=info.get('screen') if info.get('ui_ref') else None)
-                try:candidate.wait_ready(require_stream=info.get('stream_ready') is not False)
+                try:candidate.wait_ready(require_stream=old is not None and info.get('stream_ready') is not False)
                 except Exception:
                     candidate.close();retry_at=time.monotonic()+30
                     if last_good and last_good[0]!=release:
@@ -287,17 +291,15 @@ def main(a):
                     raise
                 host=candidate;current=release;last_good=(release,exe)
                 atomic(good_file,json.dumps({'id':release}).encode());print('ACTIVE signed_release='+release,flush=True)
-                feed.close();feed=ReleaseFeed(a,current)
             except Exception as e:
                 print('Update kept previous app: '+str(e),flush=True)
-                if host is None:raise SystemExit(1)
                 retry_at=max(retry_at,time.monotonic()+5)
     finally:
-        if feed:feed.close()
         if host:host.close()
+        feed.close()
         lock.close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--code-url');p.add_argument('--release-watch',default='/opt/otrios-dashboard/release-watch');p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--runtime-dir',type=pathlib.Path,default=pathlib.Path(os.environ.get('XDG_RUNTIME_DIR','/run/otrios-direct-console'))/'otrios');p.add_argument('--cache-bytes',type=int,default=CACHE_BYTES);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');p.add_argument('--video-driver',choices=['wayland','KMSDRM'],default='wayland');p.add_argument('--rotation',type=int,choices=[0,90,180,270],default=90);p.add_argument('--touch-calibration',type=pathlib.Path);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--code-url');p.add_argument('--session-bootstrap',default='/opt/otrios-dashboard/session-bootstrap');p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--runtime-dir',type=pathlib.Path,default=pathlib.Path(os.environ.get('XDG_RUNTIME_DIR','/run/otrios-direct-console'))/'otrios');p.add_argument('--cache-bytes',type=int,default=CACHE_BYTES);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');p.add_argument('--video-driver',choices=['wayland','KMSDRM'],default='wayland');p.add_argument('--rotation',type=int,choices=[0,90,180,270],default=90);p.add_argument('--touch-calibration',type=pathlib.Path);a=p.parse_args()
     if a.cache_bytes<2*MAX_BINARY+65536:p.error('Cache budget must fit one signed release')
     if a.video_driver=='KMSDRM':
         if a.touch_calibration is None:p.error('Direct mode requires the accepted touch calibration rule')

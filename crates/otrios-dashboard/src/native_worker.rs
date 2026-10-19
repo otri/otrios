@@ -21,6 +21,8 @@ use std::{
 };
 #[path = "bench_telemetry.rs"]
 mod bench_telemetry;
+#[path = "session_client.rs"]
+mod session_client;
 enum NetworkEvent {
     Connected(u64),
     Packet(u64, Instant, Vec<u8>),
@@ -111,7 +113,7 @@ pub(super) struct Options {
     pub(super) seconds: Option<u64>,
     pub(super) exit_file: Option<String>,
     pub(super) ready_file: Option<String>,
-    pub(super) release_file: Option<String>,
+    pub(super) release_socket: Option<String>,
     pub(super) screen: Option<String>,
     pub(super) report: Option<String>,
     pub(super) load: u8,
@@ -153,7 +155,7 @@ pub(super) fn options() -> Result<Options, String> {
             "--seconds" => o.seconds = Some(value.parse::<u64>().map_err(|e| e.to_string())?),
             "--exit-file" => o.exit_file = Some(value),
             "--ready-file" => o.ready_file = Some(value),
-            "--release-file" => o.release_file = Some(value),
+            "--release-socket" => o.release_socket = Some(value),
             "--screen" => o.screen = Some(value),
             "--report" => o.report = Some(value),
             "--objects" => o.objects = value.parse::<u16>().map_err(|e| e.to_string())?,
@@ -195,14 +197,14 @@ fn app_stream(url: &str) -> String {
     let url = url
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
-    if url.ends_with("/apps/stream") {
+    if url.ends_with("/session") {
         return url;
     }
-    let root = ["/demo/stream", "/stream", "/sync"]
+    let root = ["/apps/stream", "/demo/stream", "/stream", "/sync"]
         .iter()
         .find_map(|suffix| url.strip_suffix(suffix))
         .unwrap_or(url.trim_end_matches('/'));
-    format!("{root}/apps/stream")
+    format!("{root}/session")
 }
 fn app_resources(o: &Options) -> Result<(std::path::PathBuf, Vec<u8>), String> {
     let adjacent = std::env::current_exe()
@@ -260,25 +262,38 @@ pub(super) fn state_worker(
     };
     client.set_font(font.clone());
     let (tx, rx) = mpsc::sync_channel::<NetworkSend>(1);
-    let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(2);
+    let (reply_tx, reply_rx) = mpsc::sync_channel::<NetworkEvent>(8);
     let stream_ready = Arc::new(AtomicBool::new(false));
     let connection = Arc::new(AtomicU64::new(0));
     let abort = Arc::new(AtomicU64::new(0));
+    let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
+    let (ink_publish, ink_rx) = mpsc::sync_channel(64);
+    let ink_active = Arc::new(AtomicBool::new(false));
     let network_thread = o.url.as_ref().map(|url| {
         let url = app_stream(url);
         let ready = stream_ready.clone();
         let connected = connection.clone();
         let aborted = abort.clone();
-        let release = o.release_file.clone();
-        thread::spawn(move || network(url, rx, reply_tx, release, ready, connected, aborted))
-    });
-    let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
-    let (ink_publish, ink_rx) = mpsc::sync_channel(64);
-    let ink_active = Arc::new(AtomicBool::new(false));
-    if let Some(url) = o.url.clone() {
+        let release = o
+            .release_socket
+            .clone()
+            .or_else(|| std::env::var("OTRIOS_RELEASE_SOCKET").ok());
         let active = ink_active.clone();
-        thread::spawn(move || ink_network(url, ink_out, ink_publish, active));
-    }
+        thread::spawn(move || {
+            network(
+                url,
+                rx,
+                reply_tx,
+                release,
+                ready,
+                connected,
+                aborted,
+                ink_out,
+                ink_publish,
+                active,
+            )
+        })
+    });
     let started = Instant::now();
     let mut epoch = None;
     let mut outgoing = None;
@@ -545,116 +560,47 @@ pub(super) fn state_worker(
         thread::sleep(Duration::from_millis(2));
     }
 }
-fn ink_network(
-    url: String,
-    outgoing: mpsc::Receiver<(Instant, Vec<u8>)>,
-    incoming: mpsc::SyncSender<Vec<u8>>,
-    active: Arc<AtomicBool>,
-) {
-    use tungstenite::{Error, Message, stream::MaybeTlsStream};
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let mut url = url
-        .replacen("https://", "wss://", 1)
-        .replacen("http://", "ws://", 1);
-    for suffix in ["/apps/stream", "/demo/stream", "/stream", "/sync"] {
-        if let Some(root) = url.strip_suffix(suffix) {
-            url = format!("{root}/demo/ink");
-            break;
+#[cfg(unix)]
+fn notify_release(
+    path: &Option<String>,
+    event: &otrios_interfaces::session::ServerControl,
+) -> bool {
+    if let Some(path) = path
+        && event.release().is_some()
+    {
+        let result = std::os::unix::net::UnixDatagram::unbound().and_then(|socket| {
+            socket.set_nonblocking(true)?;
+            let bytes = serde_json::to_vec(event).map_err(std::io::Error::other)?;
+            socket.send_to(&bytes, path)
+        });
+        if let Err(e) = result {
+            eprintln!("Release supervisor notice: {e}");
+            return false;
         }
     }
-    loop {
-        let initial = match outgoing.try_recv() {
-            Ok(p) => Some(p),
-            Err(mpsc::TryRecvError::Disconnected) => return,
-            Err(_) => None,
-        };
-        if !active.load(Ordering::Acquire) {
-            thread::sleep(Duration::from_millis(20));
-            continue;
-        }
-        let mut socket = match tungstenite::client::connect_with_config(
-            url.as_str(),
-            Some(
-                tungstenite::protocol::WebSocketConfig::default()
-                    .max_message_size(Some(otrios_core::canvas::MAX_BYTES))
-                    .max_frame_size(Some(otrios_core::canvas::MAX_BYTES)),
-            ),
-            0,
-        ) {
-            Ok((s, _)) => s,
-            Err(_) => {
-                thread::sleep(Duration::from_millis(500));
-                continue;
-            }
-        };
-        let tcp = match socket.get_mut() {
-            MaybeTlsStream::Plain(s) => Some(s),
-            MaybeTlsStream::Rustls(s) => Some(&mut s.sock),
-            _ => None,
-        };
-        if let Some(tcp) = tcp {
-            let _ = tcp.set_read_timeout(Some(Duration::from_millis(5)));
-            let _ = tcp.set_write_timeout(Some(Duration::from_secs(1)));
-        }
-        let mut pending = initial;
-        loop {
-            if !active.load(Ordering::Acquire) {
-                break;
-            }
-            let packet = pending.take().or_else(|| outgoing.try_recv().ok());
-            if let Some((at, bytes)) = packet
-                && at.elapsed() < Duration::from_secs(1)
-                && socket.send(Message::Binary(bytes.into())).is_err()
-            {
-                break;
-            }
-            match socket.read() {
-                Ok(Message::Binary(bytes)) => {
-                    if bytes.len() > 1024 * otrios_interfaces::ink::SERVER_BYTES
-                        || incoming.try_send(bytes.to_vec()).is_err()
-                    {
-                        break;
-                    }
-                }
-                Ok(Message::Close(_)) => break,
-                Ok(_) => {
-                    let _ = socket.flush();
-                }
-                Err(Error::Io(e))
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                    ) => {}
-                Err(_) => break,
-            }
-            match outgoing.try_recv() {
-                Ok(packet) => pending = Some(packet),
-                Err(mpsc::TryRecvError::Disconnected) => return,
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-        }
-        thread::sleep(Duration::from_millis(250));
-    }
+    true
 }
+#[cfg(not(unix))]
+fn notify_release(_: &Option<String>, _: &otrios_interfaces::session::ServerControl) -> bool {
+    true
+}
+#[allow(clippy::too_many_arguments)]
 fn network(
     url: String,
     rx: mpsc::Receiver<NetworkSend>,
     reply: mpsc::SyncSender<NetworkEvent>,
-    release_file: Option<String>,
+    release_socket: Option<String>,
     stream_ready: Arc<AtomicBool>,
     connection: Arc<AtomicU64>,
     abort: Arc<AtomicU64>,
+    ink_out: mpsc::Receiver<(Instant, Vec<u8>)>,
+    ink_in: mpsc::SyncSender<Vec<u8>>,
+    ink_active: Arc<AtomicBool>,
 ) {
+    use otrios_interfaces::session::{self as wire, ServerControl};
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
-    let url = url
-        .replacen("https://", "wss://", 1)
-        .replacen("http://", "ws://", 1);
-    let url = if let Some(prefix) = url.strip_suffix("/sync") {
-        format!("{prefix}/stream")
-    } else {
-        url
-    };
-    let mut announced_release = String::new();
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let url = app_stream(&url);
     let mut epoch = 0_u64;
     loop {
         stream_ready.store(false, Ordering::Release);
@@ -663,14 +609,14 @@ fn network(
             url.as_str(),
             Some(
                 tungstenite::protocol::WebSocketConfig::default()
-                    .max_message_size(Some(otrios_core::canvas::MAX_BYTES))
-                    .max_frame_size(Some(otrios_core::canvas::MAX_BYTES)),
+                    .max_message_size(Some(otrios_core::canvas::MAX_BYTES + 1))
+                    .max_frame_size(Some(otrios_core::canvas::MAX_BYTES + 1)),
             ),
             0,
         ) {
             Ok((s, _)) => s,
             Err(e) => {
-                eprintln!("Sync disconnected: {e}");
+                eprintln!("Session disconnected: {e}");
                 thread::sleep(Duration::from_secs(1));
                 continue;
             }
@@ -683,21 +629,34 @@ fn network(
         if let Some(tcp) = tcp {
             let _ = tcp.set_read_timeout(Some(Duration::from_millis(5)));
             let _ = tcp.set_write_timeout(Some(Duration::from_secs(2)));
+            let _ = tcp.set_nodelay(true);
         }
-        epoch = epoch.checked_add(1).expect("Connection epoch exhausted");
-        connection.store(epoch, Ordering::Release);
-        if reply.send(NetworkEvent::Connected(epoch)).is_err() {
-            return;
+        let current = std::env::var("OTRIOS_RELEASE_ID")
+            .ok()
+            .filter(|r| otrios_interfaces::release::valid_hash(r));
+        if socket.send(session_client::hello(current, true)).is_err() {
+            thread::sleep(Duration::from_millis(250));
+            continue;
         }
-        eprintln!("Live state byte transport connected");
+        let mut greeted = false;
+        let mut compatible = false;
+        let mut available = false;
+        let mut subscribed = false;
+        let mut heard = Instant::now();
         loop {
-            if abort.load(Ordering::Acquire) == epoch {
+            if connection.load(Ordering::Acquire) != 0 && abort.load(Ordering::Acquire) == epoch {
                 break;
             }
+            // State backpressure causes bounded reconnect/resync, never blocks control reads.
             loop {
                 match rx.try_recv() {
-                    Ok(packet) if packet.epoch == epoch => {
-                        if socket.send(Message::Binary(packet.bytes.into())).is_err() {
+                    Ok(packet) if greeted && compatible && available && packet.epoch == epoch => {
+                        if socket
+                            .send(Message::Binary(
+                                wire::frame(wire::STATE, packet.bytes).into(),
+                            ))
+                            .is_err()
+                        {
                             connection.store(0, Ordering::Release);
                             break;
                         }
@@ -707,50 +666,132 @@ fn network(
                     Err(mpsc::TryRecvError::Disconnected) => return,
                 }
             }
-            if connection.load(Ordering::Acquire) == 0 {
+            if greeted && compatible && available && connection.load(Ordering::Acquire) == 0 {
                 break;
             }
-            match socket.read() {
-                Ok(Message::Binary(bytes)) => {
-                    if bytes.len() > otrios_core::canvas::MAX_BYTES {
-                        break;
-                    }
-                    if reply
-                        .send(NetworkEvent::Packet(epoch, Instant::now(), bytes.to_vec()))
+            if greeted && compatible && available {
+                let active = ink_active.load(Ordering::Acquire);
+                if active != subscribed {
+                    if socket
+                        .send(Message::Text(
+                            serde_json::to_string(&wire::ClientControl::Ink { enabled: active })
+                                .expect("ink control")
+                                .into(),
+                        ))
                         .is_err()
                     {
-                        return;
+                        break;
+                    }
+                    subscribed = active;
+                }
+                if let Ok((at, bytes)) = ink_out.try_recv()
+                    && active
+                    && at.elapsed() < Duration::from_secs(1)
+                    && socket
+                        .send(Message::Binary(wire::frame(wire::INK, bytes).into()))
+                        .is_err()
+                {
+                    break;
+                }
+            }
+            match socket.read() {
+                Ok(Message::Text(text)) => {
+                    heard = Instant::now();
+                    let Ok(event) = session_client::decode(&text) else {
+                        break;
+                    };
+                    if !greeted && !matches!(event, ServerControl::Hello { .. }) {
+                        break;
+                    }
+                    // The stable hello/upgrade reaches the supervisor before any codec work.
+                    if !notify_release(&release_socket, &event) {
+                        break;
+                    }
+                    let was = compatible && available;
+                    match event {
+                        ServerControl::Hello {
+                            compatible: c,
+                            state_available: a,
+                            ..
+                        } if !greeted => {
+                            greeted = true;
+                            compatible = c;
+                            available = a;
+                            eprintln!("Host session negotiated compatible={c} state_available={a}");
+                        }
+                        ServerControl::Upgrade {
+                            compatible: c,
+                            state_available: a,
+                            ..
+                        } => {
+                            compatible = c;
+                            available = a;
+                        }
+                        ServerControl::StateStatus { available: a, .. } => available = a,
+                        _ => break,
+                    }
+                    if compatible && available && !was {
+                        epoch = epoch.checked_add(1).expect("Session epoch exhausted");
+                        connection.store(epoch, Ordering::Release);
+                        if reply.try_send(NetworkEvent::Connected(epoch)).is_err() {
+                            break;
+                        }
+                    } else if !compatible || !available {
+                        connection.store(0, Ordering::Release);
+                        stream_ready.store(false, Ordering::Release);
                     }
                 }
-                Ok(Message::Text(text)) => {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
-                        && value["type"] == "release"
-                    {
-                        let id = value["release"]["id"].as_str().unwrap_or_default();
-                        if announced_release != id {
-                            if let Some(path) = &release_file {
-                                let tmp = format!("{path}.tmp");
-                                if let Err(e) = fs::write(&tmp, value["release"].to_string())
-                                    .and_then(|_| fs::rename(tmp, path))
-                                {
-                                    eprintln!("Release notice: {e}");
-                                }
+                Ok(Message::Binary(bytes)) => {
+                    heard = Instant::now();
+                    if !greeted || !compatible || !available {
+                        break;
+                    }
+                    match bytes.split_first() {
+                        Some((&wire::STATE, payload))
+                            if !payload.is_empty()
+                                && payload.len() <= otrios_core::canvas::MAX_BYTES =>
+                        {
+                            if reply
+                                .try_send(NetworkEvent::Packet(
+                                    epoch,
+                                    Instant::now(),
+                                    payload.to_vec(),
+                                ))
+                                .is_err()
+                            {
+                                break;
                             }
-                            announced_release = id.to_string();
                         }
+                        Some((&wire::INK, payload))
+                            if payload.len() <= 1025 * otrios_interfaces::ink::SERVER_BYTES =>
+                        {
+                            if ink_active.load(Ordering::Acquire) {
+                                let _ = ink_in.try_send(payload.to_vec());
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+                Ok(Message::Ping(_) | Message::Pong(_)) => {
+                    heard = Instant::now();
+                    if socket.flush().is_err() {
+                        break;
                     }
                 }
                 Ok(Message::Close(_)) => break,
-                Ok(_) => {
-                    let _ = socket.flush();
-                }
+                Ok(_) => break,
                 Err(Error::Io(e))
                     if matches!(
                         e.kind(),
                         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                    ) => {}
+                    ) =>
+                {
+                    if heard.elapsed() > Duration::from_secs(if greeted { 60 } else { 5 }) {
+                        break;
+                    }
+                }
                 Err(e) => {
-                    eprintln!("Sync connection: {e}");
+                    eprintln!("Session connection: {e}");
                     break;
                 }
             }
@@ -1024,6 +1065,22 @@ mod tests {
                 tcp.set_read_timeout(Some(Duration::from_millis(5)))
                     .unwrap();
                 let mut socket = tungstenite::accept(tcp).unwrap();
+                loop {
+                    match socket.read() {
+                        Ok(Message::Text(t)) => {
+                            let h: serde_json::Value = serde_json::from_str(&t).unwrap();
+                            assert_eq!(h["type"], "hello");
+                            break;
+                        }
+                        Err(tungstenite::Error::Io(e))
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                            ) => {}
+                        other => panic!("{other:?}"),
+                    }
+                }
+                socket.send(Message::Text(serde_json::json!({"type":"hello","version":1,"release":null,"refresh":false,"compatible":true,"state_available":true}).to_string().into())).unwrap();
                 let mut sync = Session::default();
                 let mut epoch = None;
                 let mut staged = None;
@@ -1047,53 +1104,60 @@ mod tests {
                         && let Some(bytes) = authority.generate(&mut sync).unwrap()
                         && socket
                             .send(Message::Binary(
-                                encode_server(&ServerMessage::Sync { epoch, bytes })
-                                    .unwrap()
-                                    .into(),
+                                otrios_interfaces::session::frame(
+                                    1,
+                                    encode_server(&ServerMessage::Sync { epoch, bytes }).unwrap(),
+                                )
+                                .into(),
                             ))
                             .is_err()
                     {
                         continue 'accept;
                     }
                     match socket.read() {
-                        Ok(Message::Binary(bytes)) => match decode_client(&bytes).unwrap() {
-                            ClientMessage::Mount {
-                                epoch: id,
-                                writer,
-                                resume,
-                                ..
-                            } => {
-                                staged = Some(id);
-                                let (mut prepared, _) =
-                                    authority.open_session(&writer, resume).unwrap();
-                                let state = authority.generate(&mut prepared).unwrap().unwrap();
-                                staged_sync = Some(prepared);
-                                socket
-                                    .send(Message::Binary(
-                                        encode_server(&ServerMessage::Mounted {
-                                            epoch: id,
-                                            ui: ui.clone(),
-                                            ui_hash: otrios_core::canvas::hash(&ui),
-                                            code: vec![],
-                                            state,
-                                        })
-                                        .unwrap()
-                                        .into(),
-                                    ))
-                                    .unwrap();
+                        Ok(Message::Binary(bytes)) => {
+                            match decode_client(bytes.strip_prefix(&[1]).unwrap()).unwrap() {
+                                ClientMessage::Mount {
+                                    epoch: id,
+                                    writer,
+                                    resume,
+                                    ..
+                                } => {
+                                    staged = Some(id);
+                                    let (mut prepared, _) =
+                                        authority.open_session(&writer, resume).unwrap();
+                                    let state = authority.generate(&mut prepared).unwrap().unwrap();
+                                    staged_sync = Some(prepared);
+                                    socket
+                                        .send(Message::Binary(
+                                            otrios_interfaces::session::frame(
+                                                1,
+                                                encode_server(&ServerMessage::Mounted {
+                                                    epoch: id,
+                                                    ui: ui.clone(),
+                                                    ui_hash: otrios_core::canvas::hash(&ui),
+                                                    code: vec![],
+                                                    state,
+                                                })
+                                                .unwrap(),
+                                            )
+                                            .into(),
+                                        ))
+                                        .unwrap();
+                                }
+                                ClientMessage::AcceptMount { epoch: id } if staged == Some(id) => {
+                                    epoch = staged.take();
+                                    sync = staged_sync.take().unwrap();
+                                }
+                                ClientMessage::CancelMount { epoch: id } if staged == Some(id) => {
+                                    staged = None;
+                                }
+                                ClientMessage::Sync { epoch: id, bytes } if epoch == Some(id) => {
+                                    authority.receive(&mut sync, &bytes).unwrap();
+                                }
+                                _ => {}
                             }
-                            ClientMessage::AcceptMount { epoch: id } if staged == Some(id) => {
-                                epoch = staged.take();
-                                sync = staged_sync.take().unwrap();
-                            }
-                            ClientMessage::CancelMount { epoch: id } if staged == Some(id) => {
-                                staged = None;
-                            }
-                            ClientMessage::Sync { epoch: id, bytes } if epoch == Some(id) => {
-                                authority.receive(&mut sync, &bytes).unwrap();
-                            }
-                            _ => {}
-                        },
+                        }
                         Ok(Message::Close(_)) => continue 'accept,
                         Ok(_) => {
                             let _ = socket.flush();
@@ -1141,6 +1205,52 @@ mod tests {
         stop.store(true, Ordering::Release);
         server.join().unwrap();
     }
+    #[cfg(unix)]
+    #[test]
+    fn incompatible_hello_notifies_supervisor_without_entering_the_state_decoder() {
+        let fixture = fixture();
+        let path = std::path::PathBuf::from(format!(
+            "/tmp/otrios-hello-{}-{}.sock",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        ));
+        let notice = std::os::unix::net::UnixDatagram::bind(&path).unwrap();
+        notice
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (tcp, _) = listener.accept().unwrap();
+            tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut s = tungstenite::accept(tcp).unwrap();
+            assert!(matches!(s.read().unwrap(), tungstenite::Message::Text(_)));
+            let id = "c".repeat(64);
+            s.send(tungstenite::Message::Text(serde_json::json!({"type":"hello","version":1,"release":{"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"future-v99"},"refresh":true,"compatible":false,"state_available":false}).to_string().into())).unwrap();
+            assert!(!matches!(s.read(), Ok(tungstenite::Message::Binary(_))));
+        });
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            url: Some(format!("ws://{address}/session")),
+            release_socket: Some(path.to_string_lossy().into()),
+            ..Options::default()
+        };
+        let (tx, rx) = mpsc::sync_channel(8);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let mut bytes = [0; 8192];
+        let n = notice.recv(&mut bytes).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes[..n]).unwrap();
+        assert_eq!(value["release"]["id"], "c".repeat(64));
+        let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(!frame.online);
+        assert!(frame.ui_ref.is_empty());
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+        server.join().unwrap();
+        drop(notice);
+        fs::remove_file(path).unwrap();
+    }
     #[test]
     fn retired_initial_mount_still_presents_clean_reload_readiness() {
         use std::io::Write;
@@ -1183,7 +1293,7 @@ mod tests {
             "https://host/apps/stream",
             "https://host/",
         ] {
-            assert_eq!(app_stream(input), "wss://host/apps/stream");
+            assert_eq!(app_stream(input), "wss://host/session");
         }
     }
     #[test]

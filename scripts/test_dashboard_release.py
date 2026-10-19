@@ -6,7 +6,7 @@ HERE=pathlib.Path(__file__).parent
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,HERE/file);value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
 publisher=module('publisher','publish-dashboard.py');agent=module('frame_agent','frame-dashboard-agent.py')
-module_publisher=module('module_publisher','publish-dashboard-module.py')
+activation=module('activation','activate-dashboard-release.py')
 OPENSSL=os.environ.get('OTRIOS_TEST_OPENSSL','/opt/homebrew/opt/openssl@3/bin/openssl' if pathlib.Path('/opt/homebrew/opt/openssl@3/bin/openssl').exists() else 'openssl')
 class SignedReleases(unittest.TestCase):
     def setUp(self):
@@ -15,7 +15,7 @@ class SignedReleases(unittest.TestCase):
         subprocess.run([OPENSSL,'genpkey','-algorithm','ED25519','-out',str(self.key)],check=True,capture_output=True)
         subprocess.run([OPENSSL,'pkey','-in',str(self.key),'-pubout','-out',str(self.public)],check=True,capture_output=True)
         self.web=self.root/'web';(self.web/'pkg').mkdir(parents=True)
-        for file in ['index.html','app.js','state-worker.js','release-gate.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
+        for file in ['index.html','app.js','state-worker.js','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
         (self.web/'pkg/otrios_dashboard_bg.wasm').write_bytes(b'\0asm\x01\0\0\0')
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
@@ -46,9 +46,9 @@ class SignedReleases(unittest.TestCase):
         self.assertIn('authority/apps/monitoring/ui.flex',manifest['authority'])
         self.assertFalse(any(name.startswith('authority/') for name in manifest['assets']))
         self.assertEqual((folder/'authority/apps/monitoring/ui.flex').read_bytes(),b'private-ui-canary')
-        _,_,payload=module_publisher.bundle(self.out,self.public,OPENSSL)
-        self.assertFalse(any(name.startswith('authority/') for name in payload))
-        self.assertTrue(all(b'private-ui-canary' not in value and b'private-code-canary' not in value for value in payload.values()))
+        self.assertEqual(activation.verify(self.out,self.public,OPENSSL,(self.out/'current.json').read_bytes()),pointer['id'])
+        (folder/'authority/apps/monitoring/ui.flex').write_bytes(b'tampered private UI')
+        with self.assertRaises(ValueError):activation.verify(self.out,self.public,OPENSSL,(self.out/'current.json').read_bytes())
     def test_cached_app_catalog_tampering_is_rejected(self):
         (self.cache/self.id/'app-catalog.flex').write_bytes(b'tampered')
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
@@ -69,21 +69,22 @@ class SignedReleases(unittest.TestCase):
             if valid:self.assertEqual(agent.verify_manifest(*args)['sync_protocol'],protocol)
             else:
                 with self.assertRaises(ValueError):agent.verify_manifest(*args)
-    def test_module_activation_notifies_only_after_complete_replica_and_origin_pointer(self):
+    def test_single_store_activation_verifies_before_pointer_and_notifies_after(self):
         from types import SimpleNamespace
         from unittest.mock import patch
         (self.web/'app.js').write_text('new staged code')
         staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False,catalog=self.root/'apps/catalog.flex')
-        pointer=self.root/'staged.json';pointer.write_text(json.dumps(staged));order=[];real_run=subprocess.run
-        def transfer(*args,**kwargs):
-            if args[0][0]!='docker':return real_run(*args,**kwargs)
-            self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id);order.append('replica')
+        pointer=self.root/'staged.json';pointer.write_text(json.dumps(staged));notified=[]
         def notify(url):
-            self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],staged['id']);order.append('notify')
-        args=SimpleNamespace(releases=self.out,key=self.public,openssl=OPENSSL,pointer=pointer,volume='test-only',activate_origin=True)
-        with patch.object(module_publisher.subprocess,'run',side_effect=transfer),patch.object(module_publisher,'notify',side_effect=notify):
-            module_publisher.publish(args)
-        self.assertEqual(order,['replica','notify'])
+            self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],staged['id']);notified.append(url)
+        args=SimpleNamespace(releases=self.out,key=self.public,openssl=OPENSSL,pointer=pointer,notify_url='http://127.0.0.1:8876/admin/activate')
+        with patch.object(activation,'notify',side_effect=notify):activation.activate(args)
+        self.assertEqual(notified,[args.notify_url])
+        (self.out/staged['id']/'web/app.js').write_text('corrupt')
+        (self.out/'current.json').write_text(json.dumps(self.pointer))
+        with patch.object(activation,'notify',side_effect=AssertionError('Unverified activation')):
+            with self.assertRaises(ValueError):activation.activate(args)
+        self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id)
     def test_signed_native_artifact_is_accepted(self):
         id,path=agent.cached(self.cache,self.id,self.public,OPENSSL);self.assertEqual(id,self.id);self.assertEqual(path.read_bytes(),self.native.read_bytes())
     def test_download_reserves_budget_and_never_evicts_active_release(self):
@@ -125,19 +126,14 @@ class SignedReleases(unittest.TestCase):
         self.assertEqual(recovery.read_bytes(),fallback.read_bytes())
         recovery.write_bytes(recovery.read_bytes()+b'tampered')
         with self.assertRaises(ValueError):agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
-    def test_module_replica_checks_all_assets_before_transfer(self):
-        release,pointer,payload=module_publisher.bundle(self.out,self.public,OPENSSL)
-        self.assertEqual(release,self.id);self.assertIn('web/pkg/otrios_dashboard_bg.wasm',payload)
-        self.assertEqual(json.loads(pointer)['id'],self.id)
-        (self.out/self.id/'web/app.js').write_text('tampered module')
-        with self.assertRaises(ValueError):module_publisher.bundle(self.out,self.public,OPENSSL)
-    def test_staged_module_does_not_announce_until_replica_is_ready(self):
+    def test_staged_signed_store_remains_inactive_until_verified_activation(self):
         (self.web/'app.js').write_text('staged code')
         staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False,catalog=self.root/'apps/catalog.flex')
         self.assertNotEqual(staged['id'],self.id)
         self.assertEqual(json.loads((self.out/'current.json').read_text())['id'],self.id)
-        release,_,_=module_publisher.bundle(self.out,self.public,OPENSSL,json.dumps(staged).encode())
-        self.assertEqual(release,staged['id'])
+        self.assertEqual(activation.verify(self.out,self.public,OPENSSL,json.dumps(staged).encode()),staged['id'])
+        (self.out/staged['id']/'web/app.js').write_text('tampered')
+        with self.assertRaises(ValueError):activation.verify(self.out,self.public,OPENSSL,json.dumps(staged).encode())
 class ArtifactBudget(unittest.TestCase):
     def test_lru_pins_blob_bytes_and_oversized_admission(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -194,12 +190,25 @@ class ArtifactBudget(unittest.TestCase):
                 clock[0]+=seconds
                 if clock[0]>1100:raise AssertionError('Candidate was stranded')
             try:
-                with patch.object(agent,'Host',Host), patch.object(agent,'cached',return_value=(old,root/'old')), patch.object(agent,'qualify',return_value=(new,root/'new')), patch.object(agent,'ReleaseFeed',Feed), patch.object(agent,'fetch',side_effect=AssertionError('Release pointer must not be polled')), patch.object(agent.time,'monotonic',side_effect=lambda:clock[0]), patch.object(agent.time,'sleep',side_effect=sleep):
+                with patch.object(agent,'Host',Host), patch.object(agent,'cached',return_value=(old,root/'old')), patch.object(agent,'qualify',return_value=(new,root/'new')), patch.object(agent,'ReleaseFeed',Feed), patch.object(agent,'session_host',return_value=True), patch.object(agent,'bootstrap_release',side_effect=AssertionError('Extra network connection')), patch.object(agent,'fetch',side_effect=AssertionError('Release pointer must not be polled')), patch.object(agent.time,'monotonic',side_effect=lambda:clock[0]), patch.object(agent.time,'sleep',side_effect=sleep):
                     agent.main(args)
             finally:agent.running=previous
             self.assertEqual(json.loads((cache/'last-good.json').read_text())['id'],new)
         self.assertEqual(len(attempts),2)
         self.assertGreaterEqual(attempts[1]-attempts[0],29.999)
+    def test_local_notices_coalesce_and_do_not_open_a_remote_connection(self):
+        import socket
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            feed=agent.ReleaseFeed(SimpleNamespace(runtime_dir=pathlib.Path(tmp)))
+            sender=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM)
+            try:
+                sender.sendto(b'invalid',str(feed.path))
+                for c in ['a','b']:
+                    sender.sendto(json.dumps({'type':'upgrade','version':1,'release':{'id':c*64,'web_entry':f'/releases/{c*64}/web/index.html'}}).encode(),str(feed.path))
+                self.assertEqual(feed.take()['id'],'b'*64)
+            finally:sender.close();feed.close()
+            self.assertFalse(feed.path.exists())
     def test_code_download_identifies_client_and_bounds_response(self):
         from unittest.mock import patch
         class Response:
