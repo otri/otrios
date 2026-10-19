@@ -5,7 +5,7 @@ import argparse, asyncio, hashlib, json, os, pathlib, shlex, signal, subprocess,
 p=argparse.ArgumentParser()
 for name in ['reference','candidate','output']:p.add_argument('--'+name,type=pathlib.Path,required=True)
 p.add_argument('--frame',required=True);p.add_argument('--known-hosts',type=pathlib.Path,required=True);p.add_argument('--release',type=pathlib.Path,required=True);p.add_argument('--tailscale',default='tailscale')
-p.add_argument('--mode',choices=['paired','burst'],default='paired');p.add_argument('--legacy-reference',action='store_true');p.add_argument('--rates',default='10,30');p.add_argument('--updates',type=int,default=180);p.add_argument('--repetitions',type=int,default=3)
+p.add_argument('--delay-ms',type=int,choices=range(0,101),default=0);p.add_argument('--mode',choices=['paired','burst'],default='paired');p.add_argument('--legacy-reference',action='store_true');p.add_argument('--rates',default='10,30');p.add_argument('--updates',type=int,default=180);p.add_argument('--repetitions',type=int,default=3)
 a=p.parse_args();repo=pathlib.Path(__file__).resolve().parent.parent;out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
 if (out/'results.jsonl').exists():raise RuntimeError('Choose a fresh output directory')
 tailscale=a.tailscale;frame=a.frame;known=str(a.known_hosts.resolve())
@@ -35,13 +35,13 @@ archive=out/'frame-input.tar'
 with tarfile.open(archive,'w') as t:
  for label,folder in [('reference',a.reference),('candidate',a.candidate)]:t.add(folder/'canvas-adapter-bench',arcname=label+'/canvas-adapter-bench')
  t.add(release/'apps/catalog.flex',arcname='app-catalog.flex');t.add(repo/'scripts/relay-canvas-frame-benchmark.py',arcname='relay.py');t.add(runner,arcname='run-frame.py')
-metadata={'reference':json.loads((a.reference/'build.json').read_text()),'candidate':json.loads((a.candidate/'build.json').read_text()),'legacy_reference':a.legacy_reference,'mode':a.mode,'rates_hz':a.rates,'updates':a.updates,'warmup':20,'repetitions':a.repetitions,'catalog_sha256':hashlib.sha256((release/'apps/catalog.flex').read_bytes()).hexdigest(),'frame':'RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk','method':('open-loop numeric assignments and final release' if a.mode=='burst' else 'paired stop-and-wait')+'; two real clients on frame; fresh durable authority per trial; native live renderer left running; paired stop-and-wait; private Tailscale raw TCP; CPU includes mount/warm-up/waits'}
+metadata={'reference':json.loads((a.reference/'build.json').read_text()),'candidate':json.loads((a.candidate/'build.json').read_text()),'legacy_reference':a.legacy_reference,'mode':a.mode,'relay_delay_ms_per_chunk_each_direction':a.delay_ms,'rates_hz':a.rates,'updates':a.updates,'warmup':20,'repetitions':a.repetitions,'catalog_sha256':hashlib.sha256((release/'apps/catalog.flex').read_bytes()).hexdigest(),'frame':'RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk','method':('open-loop numeric assignments and final release' if a.mode=='burst' else 'paired stop-and-wait')+'; two real clients on frame; fresh durable authority per trial; native live renderer left running; private Tailscale raw TCP; CPU includes mount/warm-up/waits'}
 (out/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
 try:
  with archive.open('rb') as data:subprocess.run(ssh+['mkdir -m 700 '+shlex.quote(remote)+' && tar -xf - -C '+shlex.quote(remote)],stdin=data,check=True)
  for port,target in [(18901,8901),(18902,8902)]:
   subprocess.run([tailscale,'serve','--bg','--tcp='+str(port),'tcp://127.0.0.1:'+str(target)],check=True,stdout=subprocess.DEVNULL);routes.append(port)
- relay=subprocess.Popen(ssh+['exec python3 '+shlex.quote(remote+'/relay.py')+' --upstream '+shlex.quote(upstream)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+ relay=subprocess.Popen(ssh+['exec python3 '+shlex.quote(remote+'/relay.py')+' --upstream '+shlex.quote(upstream)+' --delay-ms '+str(a.delay_ms)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
  if 'ready' not in relay.stdout.readline().lower():raise RuntimeError('Frame relay failed')
  with (out/'results.jsonl').open('w') as output:
   for rep in range(a.repetitions):

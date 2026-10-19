@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Private loopback relay; use a tailnet-only upstream, then remove after testing."""
 import argparse,asyncio
-p=argparse.ArgumentParser();p.add_argument("--upstream",required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument("--upstream",required=True);p.add_argument("--delay-ms",type=int,choices=range(0,101),default=0);a=p.parse_args()
 async def relay(r,w):
  try:
-  while b:=await r.read(65536):w.write(b);await w.drain()
+  while b:=await r.read(65536):
+   if a.delay_ms:await asyncio.sleep(a.delay_ms/1000)
+   w.write(b);await w.drain()
  except ConnectionError:pass
  finally:w.close()
 async def connected(r,w,port):
