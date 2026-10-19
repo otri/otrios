@@ -393,6 +393,7 @@ mod tests {
             origins: vec![],
             peers: Arc::new(Semaphore::new(4)),
             public_peers: Arc::new(Semaphore::new(4)),
+            peer_limits: [4, 4],
         });
         let locked = app.apps.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

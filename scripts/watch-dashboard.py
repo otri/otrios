@@ -10,7 +10,7 @@ def inputs(repo):
     files=[repo/x for x in exact]
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt','.service','.timer'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()
@@ -50,15 +50,25 @@ def rebuild(config,wanted,activate=True):
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
-    feature,binary='direct','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--target','armv7-unknown-linux-gnueabihf'])
+    feature,binary='direct,server','dashboard-direct'
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
+    for program in ['dashboard-server','dashboard-monitoring']:
+        run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+program,build/('frame-'+program)])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
     release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=source/'apps/catalog.flex')
     if activate:
         pointer=build/'activation.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
-        run([sys.executable,source/'scripts/activate-dashboard-release.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--pointer',pointer])
+        if config.get('frame'):
+            # Local builder remains a staging store; the frame owns activation.
+            spec=SourceFileLoader('frame_deploy',str(source/'scripts/deploy-dashboard-frame.py')).load_module()
+            spec.deploy(config,pointer,build/'frame-dashboard-server',build/'frame-dashboard-monitoring',build/'session-bootstrap')
+            publisher.atomic(runtime/'releases/current.json',json.dumps(release,sort_keys=True).encode())
+            pruner=SourceFileLoader('release_pruner',str(source/'scripts/prune-dashboard-releases.py')).load_module()
+            pruner.prune(runtime/'releases',True)
+        else:
+            run([sys.executable,source/'scripts/activate-dashboard-release.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--pointer',pointer])
     if activate:publisher.atomic(build/'source-id',wanted.encode())
     else:publisher.atomic(build/'staged-release.json',json.dumps(release,sort_keys=True).encode())
     print(('PUBLISHED 'if activate else'STAGED ')+release['id'],flush=True)

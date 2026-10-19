@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Refresh OTriOS Monitoring from Prometheus HTTPS
+After=otrios-authority.service network-online.target tailscaled.service
+Wants=network-online.target
+Requires=otrios-authority.service
+
+[Service]
+Type=oneshot
+User=otrios
+Group=otrios
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/otrios-authority/collect-monitoring.py --config /etc/otrios-authority/monitoring-config.json
+TimeoutStartSec=240
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/otrios-authority
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

@@ -6,9 +6,20 @@ MAX_BINARY=32*1024*1024
 CACHE_BYTES=2*1024*1024*1024
 running=True
 
+def validate_origin(base):
+    parsed=urllib.parse.urlsplit(base)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/'):
+        raise ValueError('Expected an origin without credentials, path, query or fragment')
+    if not parsed.hostname or not parsed.port and parsed.netloc.endswith(':'):
+        raise ValueError('Invalid origin')
+    if parsed.scheme!='https' and not (parsed.scheme=='http' and parsed.hostname in ('127.0.0.1','::1')):
+        raise ValueError('HTTPS or literal loopback HTTP is required')
+    return parsed
+
 def fetch(base,path,limit):
+    validate_origin(base)
     url=urllib.parse.urljoin(base,path)
-    if urllib.parse.urlsplit(url).netloc!=urllib.parse.urlsplit(base).netloc:raise ValueError('Cross-origin release URL')
+    if urllib.parse.urlsplit(url)[:2]!=urllib.parse.urlsplit(base)[:2]:raise ValueError('Cross-origin release URL')
     request=urllib.request.Request(url,headers={'User-Agent':'OTriOS-Release/1','Accept':'application/octet-stream'})
     with urllib.request.urlopen(request,timeout=10) as r:
         data=r.read(limit+1)
@@ -222,8 +233,9 @@ class ReleaseFeed:
     def close(self):self.socket.close();self.path.unlink(missing_ok=True)
 
 def bootstrap_release(a,current=None):
+    origin=validate_origin(a.url)
     url=urllib.parse.urlsplit(urllib.parse.urljoin(a.url,'/session'))
-    endpoint=urllib.parse.urlunsplit(('wss',url.netloc,url.path,'',''))
+    endpoint=urllib.parse.urlunsplit(('wss' if origin.scheme=='https' else 'ws',url.netloc,url.path,'',''))
     result=subprocess.run([getattr(a,'session_bootstrap','/opt/otrios-dashboard/session-bootstrap'),endpoint,current or ''],capture_output=True,text=True,timeout=15,check=True)
     if len(result.stdout)>8192:raise ValueError('Oversized bootstrap hello')
     event=json.loads(result.stdout)
@@ -292,7 +304,10 @@ if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--code-url');p.add_argument('--session-bootstrap',default='/opt/otrios-dashboard/session-bootstrap');p.add_argument('--cache',type=pathlib.Path,required=True);p.add_argument('--runtime-dir',type=pathlib.Path,default=pathlib.Path(os.environ.get('XDG_RUNTIME_DIR','/run/otrios-direct-console'))/'otrios');p.add_argument('--cache-bytes',type=int,default=CACHE_BYTES);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='/usr/bin/openssl');p.add_argument('--capture-first-frame',action='store_true');p.add_argument('--rotation',type=int,choices=[0,90,180,270],default=90);p.add_argument('--touch-calibration',type=pathlib.Path,required=True);a=p.parse_args()
     if a.cache_bytes<2*MAX_BINARY+65536:p.error('Cache budget must fit one signed release')
     a.touch_matrix=touch_calibration(a.touch_calibration)
-    if not a.url.startswith('https://') or (a.code_url and not a.code_url.startswith('https://')):p.error('HTTPS is required')
+    try:
+        validate_origin(a.url)
+        if a.code_url:validate_origin(a.code_url)
+    except ValueError as error:p.error(str(error))
     def stop(*_):
         global running
         running=False

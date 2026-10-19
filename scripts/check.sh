@@ -8,5 +8,6 @@ cargo test --workspace --features otrios-dashboard/server,otrios-dashboard/canva
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$PWD/target/python-cache}"
 python3 scripts/test_dashboard_release.py
 python3 scripts/test_dashboard_direct.py
+python3 scripts/test_frame_hosting.py
 
 python3 scripts/test-canvas-benchmark-counter.py

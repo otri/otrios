@@ -6,7 +6,7 @@ Lab, Input Lab, Animation Lab and 3D Lab are public apps. Their durable controls
 share the photo frame's per-app Merkle state. Navigation, text entry and animation
 phase remain local. Monitoring alone requires browser sign-in.
 
-One Rust service serves code and state. Cloudflare Tunnel reaches its public
+One Rust service on the Rockchip photo frame serves code and state. Cloudflare Tunnel reaches its public
 loopback listener on 8877; Tailscale reaches the trusted listener on 8876. Public
 requests never forward to the trusted listener. State recovery failure leaves
 signed code and release negotiation available. A whole-process crash affects both.
@@ -52,7 +52,7 @@ POST/DELETE require the exact Origin and a custom request header; login uses
 JSON. Verification has one worker slot, 20 attempts/minute globally and 128
 sessions. Passwords/tokens do not enter URLs, document state or logs. The browser
 uses standard password fields and reconnects its single session after login to
-acquire the new cookie. The native frame retains trusted tailnet admission.
+acquire the new cookie. The native frame uses the trusted loopback listener.
 Only immutable public artifacts enter disposable caches; documents and private
 Monitoring views remain in RAM. See [client storage](CLIENT_STORAGE.md).
 
@@ -66,6 +66,7 @@ events over the existing session; reconnect hello recovers missed events. Releas
 metadata is independent of state decoding. See [live deployment](DASHBOARD_LIVE.md)
 and [RFC 0009](rfcs/0009-unified-server-session.md).
 
+Build/sign on the Mac and publish to the frame as described in [frame hosting](FRAME_HOSTING.md).
 Run the required Rust/Python/Node checks, then:
 
 ```sh

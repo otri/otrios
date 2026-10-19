@@ -20,7 +20,11 @@ This is deliberately a subset: no Grafana embedding, dashboard editor, arbitrary
 
 ## Data path and bounded replacement
 
-`scripts/collect-monitoring.py` uses an existing SSH alias to run fixed, read-only queries against Prometheus on the server's loopback port. It changes no monitoring configuration, exporters, firewall or authentication. It fetches only allowlisted queries through the [Prometheus HTTP API](https://prometheus.io/docs/prometheus/latest/querying/api/); JSON is confined to that external adapter boundary and the private evidence cache.
+`scripts/collect-monitoring.py` runs on the photo frame and queries the existing
+Prometheus HTTPS API over Tailscale. It uses fixed, read-only queries and a
+private Basic-auth credential; neither browsers nor the native display receive
+that credential. It does not require SSH or the Mac. JSON is confined to this
+external adapter boundary and an optional private evidence cache.
 
 `dashboard-monitoring` consumes the window on stdin and authors typed component/instance data directly into FlexBuffers. It reuses Screen, Text and Panel templates and adds Path/Circle templates for plots. It formats units, normalizes plotted values against labelled axes and resolves data into a complete presentation; raw metric values are not a general client-queryable telemetry schema in this PoC. The same existing primitive interpreter expands and validates the result on both hosts. There is no JSON scene representation or JavaScript chart renderer.
 
@@ -43,23 +47,33 @@ Each presentation remains limited to 128 KiB, 128 instances and 512 expanded nod
 ```sh
 cargo build --release --locked -p otrios-dashboard --features server \
   --bin dashboard-server --bin dashboard-monitoring
-python3 scripts/collect-monitoring.py --config /PRIVATE/PATH/monitoring-config.json
+python3 scripts/collect-monitoring.py --config /etc/otrios-authority/monitoring-config.json
 ```
 
-Private config example, kept outside the repository:
+Private config example (`/etc/otrios-authority/monitoring-config.json`):
 
 ```json
 {
-  "ssh_host": "your-existing-ssh-alias",
-  "renderer": "/ABSOLUTE/PATH/dashboard-monitoring",
-  "output": "/PRIVATE/PATH/monitoring.flex",
-  "evidence": "/PRIVATE/PATH/monitoring-window.json"
+  "prometheus_url": "https://monitoring.steampunk.digital/prometheus",
+  "prometheus_credentials": "/etc/otrios-authority/prometheus-credentials.json",
+  "renderer": "/opt/otrios-authority/dashboard-monitoring",
+  "output": "/var/lib/otrios-authority/monitoring.flex"
 }
 ```
 
-The `evidence` cache is optional. The renderer does not read SSH settings or credentials. The collector accepts only a simple SSH alias and always publishes to `http://127.0.0.1:8876/presentation`; no client-selected Prometheus URL or arbitrary query execution endpoint is exposed. Use `--watch` for a foreground five-minute loop, or schedule the one-shot command through the host's service manager. Failed one-shot collection exits unsuccessfully for service-manager diagnostics.
+The credential file contains `username` and `password`, is owned by the service
+user and has mode 0600. HTTPS is mandatory; redirects are rejected so credentials
+cannot be forwarded to another destination. Each response and the full window
+are bounded at 2 MiB, and collection has a 180-second request budget.
+The optional `evidence` path retains the private query window. Publication remains
+fixed to the trusted local `http://127.0.0.1:8876/presentation` endpoint.
 
-The current Mac installation uses `com.otri.otrios-dashboard-monitoring`, a login LaunchAgent with `StartInterval=300` and `RunAtLoad=true`. Binaries, private config, the latest binary view, a private query cache and logs live under `~/Library/Application Support/OTriOSDashboard/`. Its SSH access uses the already configured alias and login agent; it does not provision keys or copy credentials to browser/frame. It requires the Mac to remain awake, logged in, connected and able to reach the existing server. Publishing a new code release does not stop the collector, and code reloads preserve the current presentation.
+`otrios-monitoring.timer` runs the one-shot service five minutes apart, starting
+30 seconds after boot. A failed collection leaves the prior complete view and
+its AS OF timestamp unchanged; the failed unit remains visible to systemd.
+`--watch` also supports a foreground loop. The frame needs Tailscale and network
+access to refresh; a disconnected view must not be read as a fresh health check.
+The former Mac collector LaunchAgent is retired.
 
 ## Inspect and restore
 

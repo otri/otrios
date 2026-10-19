@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Public OTriOS Cloudflare Tunnel
+After=network-online.target otrios-authority.service
+Wants=network-online.target otrios-authority.service
+StartLimitIntervalSec=0
+
+[Service]
+User=otrios
+Group=otrios
+ExecStart=/opt/otrios-authority/cloudflared --no-autoupdate --config /etc/otrios-authority/tunnel.yml tunnel run
+Restart=on-failure
+RestartSec=5
+MemoryHigh=96M
+MemoryMax=128M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

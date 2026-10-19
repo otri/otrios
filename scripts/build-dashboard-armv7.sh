@@ -13,7 +13,7 @@ docker cp "$build_stage/source.tar" "$build_container:/tmp/source.tar"
 docker exec "$build_container" tar -xf /tmp/source.tar -C /src
 docker exec "$build_container" cargo build --release --locked -p otrios-dashboard --features direct,server,canvas --target armv7-unknown-linux-gnueabihf
 mkdir -p target/dashboard-armv7
-for program in dashboard-direct dashboard-server canvas-pack; do
+for program in dashboard-direct dashboard-server dashboard-monitoring session-bootstrap canvas-pack; do
   docker cp "$build_container:/src/target/armv7-unknown-linux-gnueabihf/release/$program" "target/dashboard-armv7/$program"
 done
 printf 'ARMv7 direct host, authority and app packer: target/dashboard-armv7/\n'
