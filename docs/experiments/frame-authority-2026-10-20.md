@@ -162,3 +162,94 @@ The runner now rejects nonexecutable clients before remote setup and tears down
 its sampler on launch exceptions. A deliberate invalid-executable-format probe
 verified sampler, authority, relay and temporary-file cleanup in 32 seconds.
 Neither setup failure is counted as an authority overload or benchmark result.
+
+## Candidate subscribed-client and writer results
+
+The 512 mounted-reader rerun connected every client and converged, using
+36.7 MiB peak authority RSS versus 101.0 MiB in the baseline.
+It used no swap. The confirmation-limited writer rerun used the same 64-client
+cohort, 10 Hz request and 15-second input interval as the baseline:
+
+| Active writers | Achieved aggregate cycles/s | ACK p50 ms | ACK p95 ms | Peak RSS MiB | Input CPU (% of one core) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 4.4 | 229 | 330 | 9.6 | 64.4 |
+| 2 | 5.4 | 386 | 631 | 9.8 | 63.3 |
+| 4 | 8.5 | 466 | 832 | 9.7 | 62.2 |
+| 8 | 14.1 | 542 | 849 | 9.8 | 61.4 |
+| 16 | 22.3 | 711 | 1084 | 10.0 | 55.3 |
+| 32 | 33.5 | 888 | 1726 | 9.4 | 46.0 |
+| 64 | 45.6 | 1387 | 2484 | 9.8 | 38.2 |
+
+## Continuous 30 Hz input
+
+These cases use the new generator mode: input continues on its clock while
+confirmation is outstanding, and a final release flushes the remaining intents.
+Each cycle offers three normalized control events (four coordinates). The real
+client queue can coalesce pending values. Offered cycles are not durable commits;
+fully confirmed spans are not per-event ACK samples. We therefore report offered
+rate and final convergence delay rather than presenting span timings as input
+latency. Every row uses a ten-second input interval.
+
+| Mounted clients | Active writers | Requested aggregate cycles/s | Offered aggregate cycles/s | Peak RSS MiB | Input CPU (% of one core) | Settle after stop ms | Converged |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 64 | 1 | 30 | 29.1 | 10.0 | 67.5 | 519 | Yes |
+| 64 | 2 | 60 | 58.0 | 9.6 | 51.9 | 991 | Yes |
+| 64 | 4 | 120 | 115.8 | 9.6 | 53.1 | 2420 | Yes |
+| 64 | 8 | 240 | 232.2 | 9.8 | 57.9 | 1335 | Yes |
+| 64 | 16 | 480 | 463.9 | 9.6 | 52.0 | 1336 | Yes |
+| 64 | 32 | 960 | 919.0 | 9.8 | 43.2 | 1813 | Yes |
+| 64 | 64 | 1920 | 1832.4 | 9.7 | 36.2 | 3144 | Yes |
+| 256 | 32 | 960 | 902.6 | 21.9 | 60.5 | 9291 | Yes |
+
+The generator records its own loop durations and actual cycle count, so a late
+input loop cannot silently be counted as maintaining 30 Hz. Raw per-case samples
+and diagnostics remain in ignored local target directories. These trials include
+network/relay cost and background production activity; they do not isolate a
+single causal source of confirmation delay. Authority CPU averages stay below
+one core in the high-writer cases; these data do not establish a CPU-only
+bottleneck. Durable I/O, replication/protocol waits, relay and network scheduling
+need separate profiling. No claim is made about browser FPS,
+physical frame input latency, a maximum sustainable active-user count or long-term
+thermal/soak behavior.
+
+The connection result supports keeping a 64-public-session production limit with
+ample memory headroom. Shared-state churn remains substantially more expensive
+than idle sockets. The buffer change addresses the idle memory reservation; it
+does not make every intermediate control value a durable low-latency update.
+
+## Commands and validation scope
+
+The local checks used the configured Rust 1.90.0 environment:
+
+```sh
+cargo fmt --all -- --check
+bash scripts/check.sh
+cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
+node --test scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs \
+  scripts/test-dashboard-artifact-cache.mjs scripts/test_gpu_scene.mjs \
+  scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs
+```
+
+All passed, including real server process/durability tests, 28 release/supervisor
+checks, three frame-hosting checks and 40 Node tests. The Linux GitHub CI run for
+the tested code also passed. ARMv7 release builds passed for the authority,
+Monitoring renderer, native display and bootstrap helper. No crate dependencies,
+unsafe code, state codec or canonical-state formats were added or changed.
+These checks do not complete the separate shared-memory Linux PoC gates.
+
+The stress generator is built with:
+
+```sh
+cargo build --release --locked -p otrios-dashboard \
+  --features canvas,host-sync --bin canvas-session-stress
+```
+
+For each binary pair, the runner command uses private configuration and catalog
+paths, and a fresh output directory. The baseline uses the default full ramp;
+the candidate uses `--socket-counts 64,512,2048,4096 --mounted-counts 512` with
+otherwise identical 15-second settings. Continuous cases use
+`--phase active --open-loop --clients 64 --seconds 10 --hz 30`; the final fanout
+case adds `--clients 256 --active-counts 32 --max-active 32`. Hardware cases run
+sequentially, with isolated state and a new authority for each count. The
+same preserved baseline client binary is used for the buffer comparison;
+continuous input uses the separately recorded updated generator binary.
