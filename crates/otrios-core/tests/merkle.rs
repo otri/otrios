@@ -395,3 +395,61 @@ fn publishers_racing_the_same_root_have_exactly_one_commit() {
     );
     assert_ne!(authority.lock().unwrap().snapshot().hash(), expected);
 }
+
+#[test]
+fn reusable_workspace_preserves_canonical_bytes_and_pinned_roots_across_failures() {
+    let mut workspace = Workspace::default();
+    let seed = set(&Snapshot::empty(), 1, &[1, 1], &[0; 1024]);
+    let pinned = seed.clone();
+    let mut tree = seed;
+    for n in 1..=10 {
+        let edits = [
+            edit(&[1, 1], Some(&[n; 1024])),
+            edit(&[1, 2], Some(&[n; 1024])),
+        ];
+        let ordinary = tree.edit([1; 16], &edits).unwrap().0;
+        let (next, work) = tree
+            .edit_with_workspace([1; 16], &edits, &mut workspace)
+            .unwrap();
+        assert_eq!(next.to_bytes().unwrap(), ordinary.to_bytes().unwrap());
+        assert_eq!(work.hashed_nodes, 4);
+        assert!(workspace.capacity() <= MAX_NODE_BYTES);
+        if n > 1 {
+            assert_eq!(work.encoding_buffer_grows, 0);
+        }
+        tree = next;
+    }
+    let bytes = tree.to_bytes().unwrap();
+    let capacity = workspace.capacity();
+    assert!(
+        tree.edit_with_workspace(
+            [1; 16],
+            &[
+                edit(&[1, 1], Some(b"first")),
+                edit(&[1, 1], Some(b"duplicate"))
+            ],
+            &mut workspace
+        )
+        .is_err()
+    );
+    assert_eq!(tree.to_bytes().unwrap(), bytes);
+    assert_eq!(workspace.capacity(), capacity);
+    assert_eq!(value(&pinned, &[1, 1]), vec![Some(vec![0; 1024])]);
+    // A large valid leaf may grow the buffer once; later small edits reuse it.
+    let (large, _) = tree
+        .edit_with_workspace(
+            [1; 16],
+            &[edit(&[1, 1], Some(&vec![42; MAX_VALUE_BYTES]))],
+            &mut workspace,
+        )
+        .unwrap();
+    assert!(workspace.capacity() <= MAX_NODE_BYTES);
+    assert_eq!(
+        large
+            .edit_with_workspace([1; 16], &[edit(&[1, 1], Some(b"small"))], &mut workspace)
+            .unwrap()
+            .1
+            .encoding_buffer_grows,
+        0
+    );
+}

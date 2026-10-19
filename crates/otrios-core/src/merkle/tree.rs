@@ -8,6 +8,44 @@ use std::{collections::BTreeMap, sync::Arc};
 pub struct Work {
     pub hashed_nodes: usize,
     pub hashed_bytes: usize,
+    /// Growth requests for the node-hash buffer only, not total allocations.
+    pub encoding_buffer_grows: usize,
+    pub encoding_peak_capacity: usize,
+}
+/// Reusable, exclusively borrowed node-encoding workspace. Published snapshots
+/// never borrow these bytes. At most one size-class buffer is retained per owner.
+#[derive(Debug, Default)]
+pub struct Workspace {
+    node_bytes: Vec<u8>,
+}
+impl Workspace {
+    pub fn capacity(&self) -> usize {
+        self.node_bytes.capacity()
+    }
+    fn prepare(&mut self, size: usize) -> Result<bool> {
+        const CLASSES: [usize; 6] = [512, 2048, 8192, 32768, 131072, MAX_NODE_BYTES];
+        let class = CLASSES
+            .into_iter()
+            .find(|n| *n >= size)
+            .ok_or(Error::Limit)?;
+        if self.node_bytes.capacity() >= size {
+            return Ok(false);
+        }
+        self.node_bytes = Vec::with_capacity(class);
+        Ok(true)
+    }
+}
+struct Build<'a> {
+    work: Work,
+    workspace: &'a mut Workspace,
+}
+impl<'a> Build<'a> {
+    fn new(workspace: &'a mut Workspace) -> Self {
+        Self {
+            work: Work::default(),
+            workspace,
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Node {
@@ -19,10 +57,10 @@ pub(crate) struct Node {
     pub bytes: usize,
 }
 impl Node {
-    pub fn build(
+    fn build(
         register: Option<Register>,
         children: BTreeMap<u64, Arc<Node>>,
-        work: &mut Work,
+        work: &mut Build<'_>,
     ) -> Result<Arc<Self>> {
         if children.len() > MAX_CHILDREN {
             return Err(Error::Limit);
@@ -38,14 +76,19 @@ impl Node {
             count: 1,
             bytes: 0,
         };
-        let encoded = wire::encode_node(&node);
-        if encoded.len() > MAX_NODE_BYTES {
-            return Err(Error::Limit);
-        }
-        let hash = Sha256::digest(&encoded).into();
-        work.hashed_nodes += 1;
-        work.hashed_bytes += encoded.len();
-        Self::verified(node.register, node.children, hash, encoded.len())
+        let size = wire::node_size(&node);
+        work.work.encoding_buffer_grows += usize::from(work.workspace.prepare(size)?);
+        wire::encode_node_into(&node, &mut work.workspace.node_bytes);
+        let encoded = &work.workspace.node_bytes;
+        debug_assert_eq!(size, encoded.len());
+        let hash = Sha256::digest(encoded).into();
+        work.work.hashed_nodes += 1;
+        work.work.hashed_bytes += size;
+        work.work.encoding_peak_capacity = work
+            .work
+            .encoding_peak_capacity
+            .max(work.workspace.capacity());
+        Self::verified(node.register, node.children, hash, size)
     }
     // Canonical parser already validated and hashed these bytes. Do not hash a
     // second time on receipt; still bound the complete materialized DAG by edges.
@@ -86,7 +129,11 @@ pub struct Edit {
 }
 impl Snapshot {
     pub fn empty() -> Self {
-        Self(Node::build(None, BTreeMap::new(), &mut Work::default()).expect("bounded empty node"))
+        let mut workspace = Workspace::default();
+        Self(
+            Node::build(None, BTreeMap::new(), &mut Build::new(&mut workspace))
+                .expect("bounded empty node"),
+        )
     }
     /// Canonical full snapshot for a trusted store, separate from a live lease.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
@@ -181,6 +228,15 @@ impl Snapshot {
     /// Atomic validated batch: sort stable paths, then rebuild each shared
     /// ancestor once. The old root remains usable even if any edit is rejected.
     pub fn edit(&self, actor: Actor, edits: &[Edit]) -> Result<(Self, Work)> {
+        self.edit_with_workspace(actor, edits, &mut Workspace::default())
+    }
+    /// Reuse the caller's bounded hash workspace across atomic publications.
+    pub fn edit_with_workspace(
+        &self,
+        actor: Actor,
+        edits: &[Edit],
+        workspace: &mut Workspace,
+    ) -> Result<(Self, Work)> {
         if edits.len() > MAX_EDITS {
             return Err(Error::Limit);
         }
@@ -199,16 +255,17 @@ impl Snapshot {
                 return Err(Error::Invalid);
             }
         }
-        let mut work = Work::default();
+        let mut work = Build::new(workspace);
         let root = edit_node(Some(&self.0), actor, &ordered, 0, &mut work)?;
-        Ok((Self(root), work))
+        Ok((Self(root), work.work))
     }
     /// Join CRDT state, skipping identical subtrees by digest. A schema conflict,
     /// actor collision or exhausted bound rejects the whole join.
     pub fn merge(&self, other: &Self) -> Result<(Self, Work)> {
-        let mut work = Work::default();
+        let mut workspace = Workspace::default();
+        let mut work = Build::new(&mut workspace);
         let root = merge_node(&self.0, &other.0, &mut work)?;
-        Ok((Self(root), work))
+        Ok((Self(root), work.work))
     }
     /// Join a received/locally edited subtree back at its stable logical path.
     /// The host must validate write policy/schema before this call. Other scopes
@@ -218,9 +275,10 @@ impl Snapshot {
         if path.len() + other.0.height > MAX_DEPTH {
             return Err(Error::Limit);
         }
-        let mut work = Work::default();
+        let mut workspace = Workspace::default();
+        let mut work = Build::new(&mut workspace);
         let root = merge_at(Some(&self.0), path, &other.0, &mut work)?;
-        Ok((Self(root), work))
+        Ok((Self(root), work.work))
     }
     /// Useful to assert actual structural sharing without exposing mutable nodes.
     pub fn shares_root(&self, other: &Self) -> bool {
@@ -237,7 +295,7 @@ fn edit_node(
     actor: Actor,
     edits: &[&Edit],
     depth: usize,
-    work: &mut Work,
+    work: &mut Build<'_>,
 ) -> Result<Arc<Node>> {
     if edits.is_empty() {
         return Ok(old.expect("root exists").clone());
@@ -272,7 +330,7 @@ fn edit_node(
     }
     Node::build(register, children, work)
 }
-fn merge_node(a: &Arc<Node>, b: &Arc<Node>, work: &mut Work) -> Result<Arc<Node>> {
+fn merge_node(a: &Arc<Node>, b: &Arc<Node>, work: &mut Build<'_>) -> Result<Arc<Node>> {
     if a.hash == b.hash {
         return Ok(a.clone());
     }
@@ -304,7 +362,7 @@ fn merge_at(
     old: Option<&Arc<Node>>,
     path: &[u64],
     other: &Arc<Node>,
-    work: &mut Work,
+    work: &mut Build<'_>,
 ) -> Result<Arc<Node>> {
     let Some((&key, rest)) = path.split_first() else {
         return old.map_or_else(|| Ok(other.clone()), |old| merge_node(old, other, work));

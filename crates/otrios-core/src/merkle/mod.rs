@@ -11,7 +11,7 @@ mod wire;
 pub use otrios_interfaces::merkle::{Actor, Cursor, Hash, Path};
 pub use register::Register;
 pub use replication::{Authority, Offer, Replica, Subscription};
-pub use tree::{Edit, Snapshot, Work};
+pub use tree::{Edit, Snapshot, Work, Workspace};
 
 pub type Result<T> = std::result::Result<T, Error>;
 

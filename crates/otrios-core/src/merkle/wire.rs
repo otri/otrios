@@ -9,8 +9,39 @@ const NODE_DOMAIN: &[u8] = b"OTriOS\0merkle-node\0v1\0";
 const TRANSFER_DOMAIN: &[u8] = b"OTriOS\0merkle-transfer\0v1\0";
 const MAX_TRANSFER_BYTES: usize = MAX_TREE_BYTES + MAX_NODES * 4 + 1024;
 
+pub(crate) fn node_size(node: &Node) -> usize {
+    const FLAG: usize = 1;
+    const COUNT: usize = 1;
+    const DOT: usize = std::mem::size_of::<Actor>() + std::mem::size_of::<u64>();
+    const CHILD_REFERENCE: usize = std::mem::size_of::<u64>() + std::mem::size_of::<Hash>();
+    NODE_DOMAIN.len()
+        + FLAG
+        + COUNT
+        + node.children.len() * CHILD_REFERENCE
+        + node.register.as_ref().map_or(0, |reg| {
+            std::mem::size_of::<Hash>()
+                + COUNT * 2
+                + reg.context.len() * DOT
+                + reg
+                    .entries
+                    .values()
+                    .map(|value| {
+                        DOT + FLAG
+                            + value
+                                .as_ref()
+                                .map_or(0, |v| std::mem::size_of::<u32>() + v.len())
+                    })
+                    .sum::<usize>()
+        })
+}
 pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
-    let mut out = NODE_DOMAIN.to_vec();
+    let mut out = Vec::with_capacity(node_size(node));
+    encode_node_into(node, &mut out);
+    out
+}
+pub(crate) fn encode_node_into(node: &Node, out: &mut Vec<u8>) {
+    out.clear();
+    out.extend_from_slice(NODE_DOMAIN);
     out.push(u8::from(node.register.is_some()));
     if let Some(reg) = &node.register {
         out.extend(reg.schema);
@@ -35,7 +66,7 @@ pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
         out.extend(key.to_le_bytes());
         out.extend(child.hash);
     }
-    out
+    debug_assert_eq!(out.len(), node_size(node));
 }
 struct Reader<'a>(&'a [u8]);
 impl<'a> Reader<'a> {

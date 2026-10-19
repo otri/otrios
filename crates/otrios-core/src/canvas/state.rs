@@ -34,6 +34,7 @@ pub struct Document {
     wall: i64,
     /// Authority policy from admitted UI dependencies; not replicated state.
     signal_fields: u64,
+    workspace: std::sync::Arc<std::sync::Mutex<merkle::Workspace>>,
 }
 #[derive(Clone, Default)]
 pub struct Session {
@@ -123,6 +124,7 @@ impl Document {
             field_hashes,
             wall: 0,
             signal_fields: 0,
+            workspace: Default::default(),
         })
     }
     fn field_hashes(schema: &StateSchema, scope: &str) -> Result<BTreeMap<u16, merkle::Hash>> {
@@ -169,6 +171,7 @@ impl Document {
             tree,
             wall: 0,
             signal_fields: 0,
+            workspace: Default::default(),
         };
         result.validate_tree()?;
         Ok(result)
@@ -424,7 +427,15 @@ impl Document {
         if edits.is_empty() {
             return Ok(false);
         }
-        let next = self.tree.edit(self.actor, &edits).map_err(err)?.0;
+        let next = self
+            .tree
+            .edit_with_workspace(
+                self.actor,
+                &edits,
+                &mut *self.workspace.lock().map_err(err)?,
+            )
+            .map_err(err)?
+            .0;
         if next.canonical_bytes() > MAX_BYTES - 8192 {
             return Err("Canvas state byte budget exhausted".into());
         }

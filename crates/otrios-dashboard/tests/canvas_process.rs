@@ -221,6 +221,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     );
     edit(&mut layout.c, "Toggle", 0);
     layout.settle();
+    let wall = otrios_core::dashboard::signal::wall_time_seconds();
     let history = read_app("layout-lab");
     assert!(
         !history.signal(3, wall + 1, 300).is_empty(),

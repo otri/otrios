@@ -29,6 +29,7 @@ fn percentile(samples: &mut [f64]) -> (f64, f64, f64) {
 fn main() -> Result<()> {
     for count in [64, 512, 4096] {
         let mut tree = Snapshot::empty();
+        let mut workspace = Workspace::default();
         for first in (0..count).step_by(MAX_EDITS) {
             let edits = (first..(first + MAX_EDITS as u64).min(count))
                 .map(|i| {
@@ -37,7 +38,7 @@ fn main() -> Result<()> {
                     edit(i, value)
                 })
                 .collect::<Vec<_>>();
-            tree = tree.edit([1; 16], &edits)?.0;
+            tree = tree.edit_with_workspace([1; 16], &edits, &mut workspace)?.0;
         }
         let nodes = tree.node_count();
         let bytes = tree.canonical_bytes();
@@ -54,13 +55,17 @@ fn main() -> Result<()> {
         let mut receives = Vec::new();
         let mut merges = Vec::new();
         let mut last = (0, 0, 0);
+        let mut encoding_buffer_grows = 0;
         for i in 0..1100_u32 {
             let mut payload = vec![0; 1024];
             payload[..4].copy_from_slice(&i.to_le_bytes());
             let command = edit(0, payload);
             let roundtrip_start = Instant::now();
             let start = Instant::now();
-            let (next, work) = authority.snapshot().edit([1; 16], &[command])?;
+            let (next, work) =
+                authority
+                    .snapshot()
+                    .edit_with_workspace([1; 16], &[command], &mut workspace)?;
             let edit_us = start.elapsed().as_secs_f64() * 1e6;
             let start = Instant::now();
             authority.publish(authority.snapshot().hash(), next)?;
@@ -85,6 +90,7 @@ fn main() -> Result<()> {
             std::hint::black_box(merged);
             let merge_us = start.elapsed().as_secs_f64() * 1e6;
             if i >= 100 {
+                encoding_buffer_grows += work.encoding_buffer_grows;
                 roundtrips.push(roundtrip_us);
                 edits.push(edit_us);
                 transfers.push(transfer_us);
@@ -96,6 +102,10 @@ fn main() -> Result<()> {
         println!(
             "leaves={count} nodes={nodes} canonical_bytes={bytes} full_wire_bytes={full_bytes} hashed_nodes={} hashed_bytes={} delta_bytes={}",
             last.0, last.1, last.2
+        );
+        println!(
+            "encoding_buffer_growths_in_1000_edits={encoding_buffer_grows} retained_encoding_capacity={}",
+            workspace.capacity()
         );
         for (name, mut samples) in [
             ("edit_offer_receive_ack", roundtrips),
@@ -109,7 +119,7 @@ fn main() -> Result<()> {
         }
     }
     println!(
-        "100 warmup + 1000 measured edits; real 1 KiB registers, four ancestors, 8-way keys; allocations included but not counted; no network, durable I/O, selector or display latency"
+        "100 warmup + 1000 measured edits; real 1 KiB registers, four ancestors, 8-way keys; allocations included; counts cover only hash-encoding buffer growth; no network, durable I/O, selector or display latency"
     );
     Ok(())
 }
