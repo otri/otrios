@@ -1,0 +1,25 @@
+{
+  "runtime_source": "67d2d586aee1f2642c60139539491bbb15edfd64",
+  "server_compiled_source": "157ca5b00fa14c28ecb95f4895a1d061cee8b99d",
+  "rust_source_identical": true,
+  "release": "4578253065f32cc7e2fe8f04f022333756854fab6f46f74eced142cd9fcd5030",
+  "previous_release": "ac0bbd21aa32155029f10df1fcdc56245ed4b9da6628a315124fd571b7ab062c",
+  "state_protocol": "otrios-canvas-sync-v4",
+  "control_version": 1,
+  "state_retained": true,
+  "single_queue_promoted": true,
+  "covered_replication_promoted": true,
+  "server_sha256": "92b0b3b273b60fdc44365f32977b990e57435c7d2139874035598786c9f74c95",
+  "native_sha256": "eb7c043812a59a507faabee0de0a6c3804c03c8093c4d90f8dbf0840e018d3c8",
+  "fingerprint": "05637d80a8d9ab8917133963224e9cd6d9f6232ff414e19dc5b46326236c1c2e",
+  "health": {
+    "app_roots": 7,
+    "catalogs": 1,
+    "presentation": true,
+    "public_sessions": 0,
+    "release": "4578253065f32cc7e2fe8f04f022333756854fab6f46f74eced142cd9fcd5030",
+    "status": "ok",
+    "trusted_sessions": 1
+  },
+  "rollback_folder": "2026-10-20-packed-transport-retry"
+}

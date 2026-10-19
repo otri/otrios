@@ -16,7 +16,7 @@ server = ["otrios-core/canvas", "dep:axum", "dep:tokio", "dep:serde_json", "dep:
 
 [dependencies]
 otrios-core = { path = "../otrios-core", features = ["dashboard"] }
-otrios-interfaces = { path = "../otrios-interfaces" }
+otrios-interfaces = { path = "../otrios-interfaces", features = ["release"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
@@ -35,10 +35,6 @@ futures-util = { version = "=0.3.34", features = ["sink"], optional = true }
 name = "dashboard-server"
 path = "src/server.rs"
 required-features = ["server"]
-
-[[bin]]
-name = "dashboard-layout"
-path = "src/layout_tool.rs"
 
 [dev-dependencies]
 tungstenite = "=0.30.0"
@@ -70,3 +66,13 @@ required-features = ["canvas", "server"]
 name = "canvas-native"
 path = "src/canvas_native.rs"
 required-features = ["canvas", "host-sync"]
+
+[[bin]]
+name = "canvas-adapter-bench"
+path = "src/canvas_adapter_bench.rs"
+required-features = ["canvas", "host-sync"]
+
+[[bin]]
+name = "session-bootstrap"
+path = "src/session_bootstrap.rs"
+required-features = ["host-sync"]

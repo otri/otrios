@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Headless process proof using exactly the Canvas byte stream/browser runtime.
+#[path = "session_client.rs"]
+mod session_client;
 use otrios_core::{
     canvas::{Client, Result},
     dashboard::render_scene,
@@ -12,7 +14,7 @@ fn main() -> Result<()> {
     let endpoint = args
         .get(1)
         .map(String::as_str)
-        .unwrap_or("ws://127.0.0.1:8894/apps/stream");
+        .unwrap_or("ws://127.0.0.1:8894/session");
     if !endpoint.starts_with("ws://127.0.0.1:") {
         return Err("Prototype native probe requires a loopback endpoint (SSH forward for remote authority)".into());
     }
@@ -21,6 +23,7 @@ fn main() -> Result<()> {
         tcp.set_read_timeout(Some(Duration::from_millis(50)))
             .map_err(|e| e.to_string())?;
     }
+    session_client::negotiate(&mut ws)?;
     let mut client = Client::default();
     let catalog = args
         .get(2)
@@ -36,12 +39,14 @@ fn main() -> Result<()> {
     loop {
         client.tick(start.elapsed().as_millis() as u64, 0)?;
         while let Some(b) = client.outgoing()? {
-            ws.send(tungstenite::Message::Binary(b.into()))
-                .map_err(|e| e.to_string())?;
+            ws.send(tungstenite::Message::Binary(
+                otrios_interfaces::session::frame(1, b).into(),
+            ))
+            .map_err(|e| e.to_string())?;
         }
         match ws.read() {
             Ok(tungstenite::Message::Binary(b)) => {
-                client.receive(&b)?;
+                client.receive(b.strip_prefix(&[1]).ok_or("State channel required")?)?;
             }
             Err(tungstenite::Error::Io(e))
                 if matches!(

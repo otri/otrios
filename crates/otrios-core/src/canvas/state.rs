@@ -1,682 +1,1653 @@
 // SPDX-License-Identifier: LGPL-3.0-only
+//! Server-owned Merkle state, durable receipts and RAM-only optimistic intents.
 use super::*;
-use automerge::{
-    ActorId, AutoCommit, ROOT, ReadDoc, ScalarValue,
-    sync::SyncDoc,
-    transaction::{CommitOptions, Transactable},
-};
+use crate::merkle::{self, Actor, Authority, Cursor, Edit, Snapshot, Subscription};
 use otrios_interfaces::layout::Value;
-const MAX_HISTORY_BYTES: usize = MAX_BYTES - 4096;
-#[derive(Clone, Default)]
-pub struct Session(pub automerge::sync::State);
-type SignalCache =
-    std::cell::RefCell<std::collections::BTreeMap<u16, std::sync::Arc<[(i64, f32)]>>>;
+use std::collections::BTreeMap;
+const ROOT_SCHEMA: &[u8] = b"otrios-canvas-merkle-v1";
+const RECEIPTS: usize = 1024;
+const RESUME_SECONDS: i64 = 86400;
+const SIGNAL_SECONDS: i64 = 300;
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Root {
+    format: String,
+    scope: String,
+    schema: StateSchema,
+    actor: Vec<u8>,
+}
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Receipt {
+    writer: Vec<u8>,
+    sequence: u64,
+    digest: Vec<u8>,
+    time: i64,
+}
 #[derive(Clone)]
 pub struct Document {
-    doc: AutoCommit,
-    schema: StateSchema,
-    seed: automerge::ChangeHash,
-    history_bytes: usize,
-    wall_time: i64,
-    state_ref: String,
-    signal_cache: SignalCache,
+    schema: std::sync::Arc<StateSchema>,
+    required_fields: u64,
+    scope: String,
+    actor: Actor,
+    tree: Snapshot,
+    field_hashes: std::sync::Arc<BTreeMap<u16, merkle::Hash>>,
+    wall: i64,
+    /// Authority policy from admitted UI dependencies; not replicated state.
+    signal_fields: u64,
+    workspace: std::sync::Arc<std::sync::Mutex<merkle::Workspace>>,
+}
+#[derive(Clone, Default)]
+pub struct Session {
+    writer: Option<[u8; 16]>,
+    slot: Option<usize>,
+    authority: Option<Authority>,
+    subscription: Option<Subscription>,
+    initial: bool,
+    last_sent: Option<Cursor>,
+    selection: Option<StateSelection>,
+}
+impl Session {
+    /// Call from trusted admission before generating the first mount. A lease's
+    /// coverage is fixed; replacing UI dependencies requires a new lease.
+    pub fn set_selection(&mut self, selection: StateSelection) -> Result<()> {
+        if self.writer.is_none() || self.subscription.is_some() {
+            return Err("State coverage requires a new admitted lease".into());
+        }
+        self.selection = Some(selection);
+        Ok(())
+    }
+}
+fn random<const N: usize>() -> Result<[u8; N]> {
+    let mut bytes = [0; N];
+    getrandom::fill(&mut bytes).map_err(err)?;
+    Ok(bytes)
+}
+pub(crate) fn writer_nonce() -> Result<[u8; 16]> {
+    random()
+}
+fn digest(bytes: &[u8]) -> merkle::Hash {
+    Sha256::digest(bytes).into()
+}
+pub(super) fn path(kind: u64, id: usize) -> Vec<u64> {
+    vec![kind, (id / 32) as u64, (id % 32) as u64]
+}
+fn bytes<T: serde::Serialize>(value: &T) -> Result<Vec<u8>> {
+    flexbuffers::to_vec(value).map_err(err)
+}
+fn decode<T: serde::de::DeserializeOwned + serde::Serialize>(data: &[u8]) -> Result<T> {
+    check(data)?;
+    let v: T = flexbuffers::from_slice(data).map_err(err)?;
+    if bytes(&v)? != data {
+        return Err("Noncanonical Canvas state payload".into());
+    }
+    Ok(v)
+}
+fn payload(tree: &Snapshot, p: &[u64]) -> Result<Vec<u8>> {
+    let node = tree.subtree(p).map_err(err)?;
+    let register = node.register().ok_or("Missing Canvas register")?;
+    let mut values = register.values();
+    let (_, _, value) = values.next().ok_or("Empty register")?;
+    if values.next().is_some() {
+        return Err("Canvas authority must resolve register conflicts".into());
+    }
+    value
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| "Deleted required Canvas register".into())
 }
 impl Document {
-    pub fn new(schema: StateSchema, state_ref: &str) -> Result<Self> {
+    pub fn new(schema: StateSchema, scope: &str) -> Result<Self> {
         validate_schema(&schema)?;
-        if state_ref.is_empty() || state_ref.len() > 128 {
+        if scope.is_empty() || scope.len() > 128 {
             return Err("Invalid State reference".into());
         }
-        let mut doc =
-            AutoCommit::new().with_actor(ActorId::from(b"otrios-canvas-seed-v2".to_vec()));
-        doc.put(ROOT, "schema", encode_schema(&schema)?)
-            .map_err(err)?;
-        doc.put(ROOT, "scope", state_ref).map_err(err)?;
+        let actor = random()?;
+        let root = Root {
+            format: "otrios-canvas-merkle-v1".into(),
+            scope: scope.into(),
+            schema: schema.clone(),
+            actor: actor.to_vec(),
+        };
+        let field_hashes = std::sync::Arc::new(Self::field_hashes(&schema, scope)?);
+        let mut edits = vec![Edit {
+            path: vec![],
+            schema: digest(ROOT_SCHEMA),
+            value: Some(bytes(&root)?),
+        }];
         for field in &schema.fields {
-            doc.put(
-                ROOT,
-                format!("f{}", field.id),
-                ScalarValue::Bytes(encode_value(&field.default)?),
-            )
-            .map_err(err)?;
+            edits.push(Edit {
+                path: path(1, usize::from(field.id) - 1),
+                schema: field_hashes[&field.id],
+                value: Some(bytes(&field.default)?),
+            });
         }
-        let seed = doc.commit().ok_or("No seed")?;
-        let history_bytes = doc
-            .get_last_local_change()
-            .ok_or("No seed change")?
-            .raw_bytes()
-            .len();
-        if history_bytes > MAX_HISTORY_BYTES {
-            return Err("Canvas seed exceeds history byte budget".into());
-        }
+        let tree = Snapshot::empty().edit([0; 16], &edits).map_err(err)?.0;
         Ok(Self {
-            doc: doc.fork(),
-            schema,
-            seed,
-            history_bytes,
-            wall_time: 0,
-            state_ref: state_ref.into(),
-            signal_cache: Default::default(),
+            required_fields: StateSelection::all(&schema).fields,
+            schema: schema.into(),
+            scope: scope.into(),
+            actor,
+            tree,
+            field_hashes,
+            wall: 0,
+            signal_fields: 0,
+            workspace: Default::default(),
         })
     }
-    pub fn load(schema: StateSchema, state_ref: &str, bytes: &[u8]) -> Result<Self> {
-        if bytes.len() > MAX_BYTES {
-            return Err("Canvas document limit".into());
+    fn field_hashes(schema: &StateSchema, scope: &str) -> Result<BTreeMap<u16, merkle::Hash>> {
+        schema
+            .fields
+            .iter()
+            .map(|f| {
+                Ok((
+                    f.id,
+                    digest(
+                        &[
+                            b"OTriOS\0canvas-field-schema\0v1\0".as_slice(),
+                            &bytes(&(scope, &schema.id, f))?,
+                        ]
+                        .concat(),
+                    ),
+                ))
+            })
+            .collect()
+    }
+    pub fn load(schema: StateSchema, scope: &str, data: &[u8]) -> Result<Self> {
+        if data.len() > MAX_BYTES {
+            return Err("Canvas state size limit".into());
         }
-        let mut result = Self::new(schema, state_ref)?;
-        let mut candidate = AutoCommit::load(bytes).map_err(err)?;
-        let history_bytes = result.validate(&mut candidate, false)?;
-        result.doc = candidate.fork();
-        result.history_bytes = history_bytes;
+        let tree = Snapshot::from_bytes(data).map_err(err)?;
+        Self::from_tree(schema, scope, tree)
+    }
+    fn from_tree(schema: StateSchema, scope: &str, tree: Snapshot) -> Result<Self> {
+        validate_schema(&schema)?;
+        let required = StateSelection::all(&schema).fields;
+        Self::from_tree_with_fields(schema, scope, tree, required)
+    }
+    fn from_tree_with_fields(
+        schema: StateSchema,
+        scope: &str,
+        tree: Snapshot,
+        required_fields: u64,
+    ) -> Result<Self> {
+        validate_schema(&schema)?;
+        let root: Root = decode(&payload(&tree, &[])?)?;
+        if root.format != "otrios-canvas-merkle-v1"
+            || root.scope != scope
+            || root.schema != schema
+            || root.actor.len() != 16
+        {
+            return Err("Wrong Canvas schema/scope".into());
+        }
+        let actor = root.actor.as_slice().try_into().map_err(err)?;
+        let result = Self {
+            field_hashes: std::sync::Arc::new(Self::field_hashes(&schema, scope)?),
+            required_fields,
+            schema: schema.into(),
+            scope: scope.into(),
+            actor,
+            tree,
+            wall: 0,
+            signal_fields: 0,
+            workspace: Default::default(),
+        };
+        result.validate_tree()?;
         Ok(result)
     }
-    /// Merge an authenticated authority snapshot while retaining valid local RAM edits.
-    pub fn merge_authority(&mut self, bytes: &[u8]) -> Result<bool> {
-        let mut remote = Self::load(self.schema.clone(), &self.state_ref, bytes)?;
-        let old = self.doc.get_heads();
-        let mut candidate = self.doc.clone();
-        candidate.merge(&mut remote.doc).map_err(err)?;
-        let history = self.validate(&mut candidate, false)?;
-        let changed = old != candidate.get_heads();
-        self.doc = candidate;
-        self.history_bytes = history;
-        if changed {
-            self.signal_cache.get_mut().clear();
+    fn validate_tree(&self) -> Result<()> {
+        self.validate_nodes(None, &self.tree)?;
+        for f in &self.schema.fields {
+            if self.required_fields & (1 << (f.id - 1)) != 0 {
+                self.typed_value(f.id)?;
+            }
         }
-        Ok(changed)
+        Ok(())
     }
-    /// Lazily index authored field transitions. Wall time only changes this bounded view;
-    /// no history traversal occurs unless a caller asks for a signal after a state edit.
-    pub fn signal(&self, id: u16, now: i64, seconds: u32) -> Vec<[f32; 2]> {
-        if seconds == 0 || seconds > 86400 {
-            return vec![];
+    fn validate_changed(&self, next: &Snapshot) -> Result<()> {
+        if self.tree.register() != next.register() {
+            return Err("Authority changed immutable schema/scope metadata".into());
         }
-        if !self.signal_cache.borrow().contains_key(&id) {
-            use automerge::legacy::{Key, ObjectId, OpType};
-            let Some(field) = self.schema.fields.iter().find(|f| f.id == id) else {
-                return vec![];
-            };
-            let mut doc = self.doc.clone();
-            let key = format!("f{id}");
-            let mut samples = Vec::new();
-            for change in doc.get_changes(&[]) {
-                if change.timestamp() <= 0 || change.hash() == self.seed {
+        self.validate_nodes(Some(&self.tree), next)
+    }
+    fn validate_nodes(&self, old: Option<&Snapshot>, tree: &Snapshot) -> Result<()> {
+        if tree
+            .register()
+            .is_none_or(|r| r.schema() != digest(ROOT_SCHEMA))
+        {
+            return Err("Wrong Canvas root kind".into());
+        }
+        fn retained(old: Option<&Snapshot>, new: &Snapshot) -> Result<()> {
+            if let Some(old) = old
+                && old.child_keys().any(|k| new.subtree(&[k]).is_err())
+            {
+                return Err("Canvas structure was removed".into());
+            }
+            Ok(())
+        }
+        retained(old, tree)?;
+        for kind in tree.child_keys() {
+            if !(1..=3).contains(&kind) {
+                return Err("Unknown Canvas subtree".into());
+            }
+            let branch = tree.subtree(&[kind]).map_err(err)?;
+            let previous = old.and_then(|s| s.subtree(&[kind]).ok());
+            if previous.as_ref().is_some_and(|p| p.hash() == branch.hash()) {
+                continue;
+            }
+            if branch.register().is_some() {
+                return Err("Invalid Canvas branch".into());
+            }
+            retained(previous.as_ref(), &branch)?;
+            for bucket in branch.child_keys() {
+                if bucket >= 32 {
+                    return Err("Canvas bucket bound".into());
+                }
+                let group = branch.subtree(&[bucket]).map_err(err)?;
+                let before = previous.as_ref().and_then(|p| p.subtree(&[bucket]).ok());
+                if before.as_ref().is_some_and(|p| p.hash() == group.hash()) {
                     continue;
                 }
-                let value = change
-                    .decode()
-                    .operations
-                    .into_iter()
-                    .filter_map(|op| match (op.obj, op.key, op.action, op.insert) {
-                        (
-                            ObjectId::Root,
-                            Key::Map(k),
-                            OpType::Put(ScalarValue::Bytes(bytes)),
-                            false,
-                        ) if k == key => decode_value(field, &bytes).ok(),
-                        _ => None,
-                    })
-                    .next_back();
-                let value = match value {
-                    Some(Value::Number(n)) => n / 10.,
-                    Some(Value::Boolean(b)) => {
-                        if b {
-                            100.
-                        } else {
-                            0.
-                        }
+                if group.register().is_some() {
+                    return Err("Invalid Canvas bucket".into());
+                }
+                retained(before.as_ref(), &group)?;
+                for key in group.child_keys() {
+                    if key >= 32 {
+                        return Err("Canvas key bound".into());
                     }
-                    _ => continue,
-                };
-                samples.push((change.timestamp(), change.hash().to_string(), value));
+                    let leaf = group.subtree(&[key]).map_err(err)?;
+                    if before
+                        .as_ref()
+                        .and_then(|p| p.subtree(&[key]).ok())
+                        .is_some_and(|p| p.hash() == leaf.hash())
+                    {
+                        continue;
+                    }
+                    if leaf.child_keys().next().is_some() {
+                        return Err("Unexpected Canvas descendants".into());
+                    }
+                    let slot = (bucket * 32 + key) as usize;
+                    let schema = if kind == 1 {
+                        *self
+                            .field_hashes
+                            .get(&u16::try_from(slot + 1).map_err(err)?)
+                            .ok_or("Unknown field")?
+                    } else {
+                        self.extra_schema(kind, slot)
+                    };
+                    if leaf.register().is_none_or(|r| r.schema() != schema) {
+                        return Err("Wrong Canvas leaf schema".into());
+                    }
+                    let data = payload(tree, &path(kind, slot))?;
+                    match kind {
+                        1 => {
+                            let f = self.field(u16::try_from(slot + 1).map_err(err)?)?;
+                            let value: Value = decode(&data)?;
+                            validate_value(f, &value)?;
+                        }
+                        2 => {
+                            let r: Receipt = decode(&data)?;
+                            if r.writer.len() != 32 || r.digest.len() != 32 || r.time < 0 {
+                                return Err("Invalid receipt".into());
+                            }
+                        }
+                        3 => {
+                            self.field(u16::try_from(slot + 1).map_err(err)?)?;
+                            let signal: Vec<(i64, f32)> = decode(&data)?;
+                            if signal.len() > 301
+                                || signal.windows(2).any(|p| p[0].0 >= p[1].0)
+                                || signal.iter().any(|(t, v)| {
+                                    *t < 0 || !v.is_finite() || !(0. ..=100.).contains(v)
+                                })
+                            {
+                                return Err("Invalid signal window".into());
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
             }
-            samples.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-            self.signal_cache.borrow_mut().insert(
-                id,
-                samples
-                    .into_iter()
-                    .map(|(t, _, v)| (t, v))
-                    .collect::<Vec<_>>()
-                    .into(),
-            );
         }
-        let cache = self.signal_cache.borrow();
-        let samples = &cache[&id];
-        let start = now.saturating_sub(i64::from(seconds));
-        let first = samples.partition_point(|s| s.0 <= start);
-        let last = samples.partition_point(|s| s.0 <= now);
-        let bucket = ((i64::from(seconds) + (MAX_SERIES_POINTS - 2) as i64)
-            / (MAX_SERIES_POINTS - 1) as i64)
-            .max(1);
-        let mut points = std::collections::BTreeMap::new();
-        for &(time, value) in &samples[first..last] {
-            let offset = time.saturating_sub(start);
-            points.insert(offset / bucket, [offset as f32 / seconds as f32, value]);
-        }
-        points.into_values().collect()
+        Ok(())
     }
-    pub fn save(&mut self) -> Vec<u8> {
-        self.doc.save()
+    pub fn save(&self) -> Result<Vec<u8>> {
+        let data = self.tree.to_bytes().map_err(err)?;
+        if data.len() > MAX_BYTES {
+            return Err("Canvas state byte budget exhausted".into());
+        }
+        Ok(data)
+    }
+    pub fn journal_delta(&self, base: &Self) -> Result<Vec<u8>> {
+        self.tree.delta_bytes(&base.tree).map_err(err)
+    }
+    pub fn journal_roots(data: &[u8]) -> Result<(merkle::Hash, merkle::Hash)> {
+        Snapshot::delta_roots(data).map_err(err)
+    }
+    pub fn root_hash(&self) -> merkle::Hash {
+        self.tree.hash()
+    }
+    pub fn replay(&mut self, data: &[u8]) -> Result<()> {
+        let tree = self.tree.apply_delta(data).map_err(err)?;
+        self.validate_changed(&tree)?;
+        self.tree = tree;
+        Ok(())
     }
     pub fn schema(&self) -> &StateSchema {
         &self.schema
     }
-    /// Qualify a replaceable authority snapshot without inserting it into CRDT history.
-    pub fn validate_snapshot(&self, values: &[(u16, Value)]) -> Result<()> {
-        if values.len() > MAX_FIELDS {
-            return Err("Canvas snapshot field limit".into());
-        }
-        let mut ids = std::collections::BTreeSet::new();
-        for (id, value) in values {
-            let field = self
-                .schema
-                .fields
-                .iter()
-                .find(|f| f.id == *id)
-                .ok_or("Snapshot field outside schema")?;
-            if field.writable || !ids.insert(*id) {
-                return Err("Snapshot may only replace distinct read-only fields".into());
+    pub fn set_wall_time(&mut self, time: i64) {
+        self.wall = time.max(0);
+    }
+    /// Only admitted UI signal selectors request retained history. Configuration
+    /// is RAM-only authority policy; loading a checkpoint does not enable it.
+    pub fn set_signal_fields(&mut self, fields: &[u16]) -> Result<()> {
+        let mut mask = 0;
+        for id in fields {
+            let field = self.field(*id)?;
+            if !matches!(field.default, Value::Number(_) | Value::Boolean(_)) {
+                return Err("Signal requires a numeric or Boolean field".into());
             }
-            validate_value(field, value)?;
+            mask |= 1_u64 << (id - 1);
         }
+        self.signal_fields = mask;
         Ok(())
     }
-    pub fn set_wall_time(&mut self, seconds: i64) {
-        self.wall_time = seconds.max(0);
-    }
-    pub fn typed_value(&self, id: u16) -> Result<Value> {
-        let field = self
-            .schema
+    fn field(&self, id: u16) -> Result<&Field> {
+        self.schema
             .fields
             .iter()
             .find(|f| f.id == id)
-            .ok_or("Field outside Canvas schema")?;
-        let value = self
-            .doc
-            .get(ROOT, format!("f{id}"))
-            .map_err(err)?
-            .ok_or("Missing Canvas field")?
-            .0;
-        decode_value(
-            field,
-            value
-                .as_bytes()
-                .ok_or("Canvas field must be typed binary")?,
-        )
+            .ok_or_else(|| "Field outside Canvas schema".into())
     }
-    /// Numeric event ABI convenience; other declared typed fields require typed_value.
+    pub fn typed_value(&self, id: u16) -> Result<Value> {
+        let f = self.field(id)?;
+        if self.required_fields & (1 << (id - 1)) == 0 {
+            return Err("Canvas field is outside the admitted materialization".into());
+        }
+        let v = decode(&payload(&self.tree, &path(1, usize::from(id) - 1))?)?;
+        validate_value(f, &v)?;
+        Ok(v)
+    }
     pub fn value(&self, id: u16) -> Result<u16> {
         match self.typed_value(id)? {
-            Value::Number(value) if value.fract() == 0. => Ok(value as u16),
-            _ => Err("Canvas field is not an integral normalized number".into()),
+            Value::Number(n) if n.fract() == 0. => Ok(n as u16),
+            _ => Err("Canvas field is not a normalized number".into()),
         }
     }
-    pub fn set(&mut self, commands: &[(u16, u16)]) -> Result<bool> {
-        self.set_at(commands, self.wall_time)
-    }
-    pub fn set_at(&mut self, commands: &[(u16, u16)], seconds: i64) -> Result<bool> {
-        let typed = commands
-            .iter()
-            .map(|(id, v)| (*id, Value::Number(f32::from(*v))))
-            .collect::<Vec<_>>();
-        self.apply(&typed, false, seconds)
-    }
-    pub fn set_typed(&mut self, commands: &[(u16, Value)]) -> Result<bool> {
-        self.apply(commands, false, self.wall_time)
-    }
-    pub fn set_typed_at(&mut self, commands: &[(u16, Value)], seconds: i64) -> Result<bool> {
-        self.apply(commands, false, seconds)
-    }
-    /// Trusted authority API; never select this path using a client-supplied flag.
-    pub fn set_typed_authority(&mut self, commands: &[(u16, Value)]) -> Result<bool> {
-        self.apply(commands, true, self.wall_time)
-    }
-    fn apply(&mut self, commands: &[(u16, Value)], authority: bool, seconds: i64) -> Result<bool> {
+    fn validate_commands(&self, commands: &[(u16, Value)], authority: bool) -> Result<()> {
         if commands.len() > MAX_FIELDS {
             return Err("Canvas command batch limit".into());
         }
-        let mut ids = std::collections::BTreeSet::new();
+        let mut ids = 0_u64;
+        for (id, v) in commands {
+            let f = self.field(*id)?;
+            let bit = 1_u64 << (*id - 1); // Admitted fields are 1..=64.
+            if ids & bit != 0 || (!authority && !f.writable) {
+                return Err("Read-only or duplicated Canvas field".into());
+            }
+            ids |= bit;
+            validate_value(f, v)?;
+        }
+        Ok(())
+    }
+    fn extra_schema(&self, kind: u64, slot: usize) -> merkle::Hash {
+        digest(
+            &[
+                b"OTriOS\0canvas-metadata-schema\0v1\0".as_slice(),
+                &(self.scope.len() as u32).to_le_bytes(),
+                self.scope.as_bytes(),
+                &kind.to_le_bytes(),
+                &(slot as u64).to_le_bytes(),
+            ]
+            .concat(),
+        )
+    }
+    fn change(&mut self, commands: &[(u16, Value)], extra: Vec<Edit>) -> Result<bool> {
+        let mut edits = extra;
         for (id, value) in commands {
-            let field = self
-                .schema
-                .fields
+            if self.typed_value(*id)? == *value {
+                continue;
+            }
+            let slot = usize::from(*id) - 1;
+            edits.push(Edit {
+                path: path(1, slot),
+                schema: self.field_hashes[id],
+                value: Some(bytes(value)?),
+            });
+            let n = match value {
+                Value::Number(n) => Some(*n / 10.),
+                Value::Boolean(b) => Some(if *b { 100. } else { 0. }),
+                _ => None,
+            };
+            if let Some(n) =
+                n.filter(|_| self.wall > 0 && self.signal_fields & (1_u64 << slot) != 0)
+            {
+                let p = path(3, slot);
+                let mut samples: Vec<(i64, f32)> = payload(&self.tree, &p)
+                    .ok()
+                    .map(|b| decode(&b))
+                    .transpose()?
+                    .unwrap_or_default();
+                samples.retain(|(t, _)| {
+                    *t > self.wall.saturating_sub(SIGNAL_SECONDS) && *t < self.wall
+                });
+                samples.push((self.wall, n));
+                edits.push(Edit {
+                    path: p,
+                    schema: self.extra_schema(3, slot),
+                    value: Some(bytes(&samples)?),
+                });
+            }
+        }
+        if edits.is_empty() {
+            return Ok(false);
+        }
+        let next = self
+            .tree
+            .edit_with_workspace(
+                self.actor,
+                &edits,
+                &mut *self.workspace.lock().map_err(err)?,
+            )
+            .map_err(err)?
+            .0;
+        if next.canonical_bytes() > MAX_BYTES - 8192 {
+            return Err("Canvas state byte budget exhausted".into());
+        }
+        self.tree = next;
+        Ok(true)
+    }
+    pub fn set_typed(&mut self, commands: &[(u16, Value)]) -> Result<bool> {
+        self.validate_commands(commands, false)?;
+        self.change(commands, vec![])
+    }
+    pub fn set(&mut self, commands: &[(u16, u16)]) -> Result<bool> {
+        self.set_typed(
+            &commands
                 .iter()
-                .find(|f| f.id == *id)
-                .ok_or("State command outside schema")?;
-            if !ids.insert(*id) || (!authority && !field.writable) {
-                return Err("Canvas field is read-only or duplicated".into());
-            }
-            validate_value(field, value)?;
-        }
-        let mut next = self.doc.clone();
-        let mut changed = false;
-        for (id, value) in commands {
-            if self.typed_value(*id)? != *value {
-                next.put(
-                    ROOT,
-                    format!("f{id}"),
-                    ScalarValue::Bytes(encode_value(value)?),
-                )
-                .map_err(err)?;
-                changed = true;
-            }
-        }
-        if changed {
-            next.commit_with(CommitOptions::default().with_time(seconds.max(0)));
-            let bytes = next
-                .get_last_local_change()
-                .ok_or("Missing typed state change")?
-                .raw_bytes()
-                .len();
-            let history = self
-                .history_bytes
-                .checked_add(bytes)
-                .ok_or("Canvas history byte overflow")?;
-            if history > MAX_HISTORY_BYTES {
-                return Err("Canvas history byte budget exhausted".into());
-            }
-            self.doc = next;
-            self.history_bytes = history;
-            self.signal_cache.get_mut().clear();
-        }
-        Ok(changed)
+                .map(|(id, v)| (*id, Value::Number(f32::from(*v))))
+                .collect::<Vec<_>>(),
+        )
     }
-    pub fn confirmed(&mut self, session: &Session) -> bool {
-        self.doc
-            .get_heads()
+    pub fn set_typed_authority(&mut self, commands: &[(u16, Value)]) -> Result<bool> {
+        self.validate_commands(commands, true)?;
+        self.change(commands, vec![])
+    }
+    pub fn signal(&self, id: u16, now: i64, seconds: u32) -> Vec<[f32; 2]> {
+        if id == 0 || seconds == 0 || seconds > 86400 {
+            return vec![];
+        }
+        let samples: Vec<(i64, f32)> = payload(&self.tree, &path(3, usize::from(id) - 1))
+            .ok()
+            .and_then(|b| decode(&b).ok())
+            .unwrap_or_default();
+        let start = now.saturating_sub(i64::from(seconds));
+        samples
+            .into_iter()
+            .filter(|(t, _)| *t > start && *t <= now)
+            .map(|(t, v)| [(t - start) as f32 / seconds as f32, v])
+            .collect()
+    }
+    fn receipts(&self) -> Result<Vec<(usize, Receipt)>> {
+        let Ok(branch) = self.tree.subtree(&[2]) else {
+            return Ok(vec![]);
+        };
+        let mut out = Vec::new();
+        for bucket in branch.child_keys() {
+            let group = branch.subtree(&[bucket]).map_err(err)?;
+            for key in group.child_keys() {
+                let slot = (bucket * 32 + key) as usize;
+                out.push((slot, decode(&payload(&self.tree, &path(2, slot))?)?));
+            }
+        }
+        Ok(out)
+    }
+    fn receipt(&self, writer: &[u8; 16]) -> Result<Option<(usize, Receipt)>> {
+        let hash = hash(writer);
+        Ok(self.receipts()?.into_iter().find(|(_, r)| r.writer == hash))
+    }
+    fn admit(&mut self, writer: &[u8; 16], resume: u64) -> Result<bool> {
+        let records = self.receipts()?;
+        if let Some((_, record)) = records.iter().find(|(_, r)| r.writer == hash(writer)) {
+            if resume > record.sequence.saturating_add(1) {
+                return Err("Writer resume sequence is ahead".into());
+            }
+            if self.wall.saturating_sub(record.time) <= RESUME_SECONDS {
+                return Ok(false);
+            }
+        }
+        if resume > 0 {
+            return Err("Pending writer receipt expired; no uncertain intent replayed".into());
+        }
+        let existing = records
             .iter()
-            .all(|h| session.0.shared_heads.contains(h))
+            .find(|(_, r)| r.writer == hash(writer))
+            .map(|(slot, _)| *slot);
+        let slot = existing
+            .or_else(|| (0..RECEIPTS).find(|i| !records.iter().any(|(slot, _)| slot == i)))
+            .or_else(|| {
+                records
+                    .iter()
+                    .filter(|(_, r)| self.wall.saturating_sub(r.time) > RESUME_SECONDS)
+                    .min_by_key(|(_, r)| r.time)
+                    .map(|(s, _)| *s)
+            })
+            .ok_or("Writer receipt capacity exhausted")?;
+        let receipt = Receipt {
+            writer: hash(writer),
+            sequence: 0,
+            digest: vec![0; 32],
+            time: self.wall,
+        };
+        self.change(
+            &[],
+            vec![Edit {
+                path: path(2, slot),
+                schema: self.extra_schema(2, slot),
+                value: Some(bytes(&receipt)?),
+            }],
+        )
     }
-    pub fn generate(&mut self, session: &mut Session) -> Result<Option<Vec<u8>>> {
-        let bytes = self
-            .doc
-            .sync()
-            .generate_sync_message(&mut session.0)
-            .map(|m| m.encode());
-        if bytes.as_ref().is_some_and(|b| b.len() > MAX_BYTES) {
-            return Err("Sync history budget exceeded".into());
+    pub fn open_session(&mut self, writer: &[u8], resume: u64) -> Result<(Session, bool)> {
+        let writer: [u8; 16] = writer.try_into().map_err(|_| "Invalid writer nonce")?;
+        let writable = self.schema.fields.iter().any(|field| field.writable);
+        if !writable && resume != 0 {
+            return Err("Read-only scope cannot resume an issued write".into());
         }
-        Ok(bytes)
+        // Read-only scopes have no possible client intents to deduplicate. Their
+        // leases/cursors live in RAM; subscribing must not append durable state.
+        let changed = writable && self.admit(&writer, resume)?;
+        let slot = if writable {
+            self.receipt(&writer)?.map(|(slot, _)| slot)
+        } else {
+            None
+        };
+        let authority = Authority::new(u64::from_le_bytes(random()?), self.tree.clone());
+        Ok((
+            Session {
+                writer: Some(writer),
+                slot,
+                authority: Some(authority),
+                subscription: None,
+                initial: true,
+                last_sent: None,
+                selection: None,
+            },
+            changed,
+        ))
     }
-    /// Authority ingress for untrusted client changes. Every historical operation is checked.
-    pub fn receive(&mut self, session: &mut Session, bytes: &[u8]) -> Result<bool> {
-        self.receive_inner(session, bytes, false)
-    }
-    /// Client ingress from its authenticated authority; read-only fields may be updated.
-    pub fn receive_authority(&mut self, session: &mut Session, bytes: &[u8]) -> Result<bool> {
-        self.receive_inner(session, bytes, true)
-    }
-    fn receive_inner(
-        &mut self,
-        session: &mut Session,
-        bytes: &[u8],
-        authority: bool,
-    ) -> Result<bool> {
-        if bytes.len() > MAX_BYTES {
-            return Err("Sync size limit".into());
+    pub fn receive(&mut self, session: &mut Session, data: &[u8]) -> Result<bool> {
+        let request = decode_state_request(data)?;
+        if let StateRequest::Hello { writer, resume } = request {
+            if session.writer.is_some() {
+                return Err("Writer already bound to this lease".into());
+            }
+            let (next, changed) = self.open_session(&writer, resume)?;
+            *session = next;
+            return Ok(changed);
         }
-        let message = automerge::sync::Message::decode(bytes).map_err(err)?;
-        let mut next = self.doc.clone();
-        let old = self.doc.get_heads();
-        let mut sync = session.clone();
-        next.sync()
-            .receive_sync_message(&mut sync.0, message)
-            .map_err(err)?;
-        let history = self.validate(&mut next, !authority)?;
-        let changed = old != next.get_heads();
-        self.doc = next;
-        self.history_bytes = history;
-        if changed {
-            self.signal_cache.get_mut().clear();
+        let writer = session
+            .writer
+            .ok_or("State write without admitted writer")?;
+        match request {
+            StateRequest::Write { sequence, values } => {
+                self.validate_commands(&values, false)?;
+                if values.is_empty() {
+                    return Err("Empty state write".into());
+                }
+                let slot = session.slot.ok_or("Missing writer slot")?;
+                let mut receipt: Receipt = decode(&payload(&self.tree, &path(2, slot))?)?;
+                if receipt.writer != hash(&writer) {
+                    return Err("Writer receipt no longer retained".into());
+                }
+                let d = hash(&bytes(&values)?);
+                if sequence <= receipt.sequence {
+                    if sequence == receipt.sequence && receipt.digest != d {
+                        return Err("Changed replay at same intent sequence".into());
+                    }
+                    return Ok(false);
+                }
+                if sequence
+                    != receipt
+                        .sequence
+                        .checked_add(1)
+                        .ok_or("Writer sequence exhausted")?
+                {
+                    return Err("State intent sequence gap".into());
+                }
+                receipt.sequence = sequence;
+                receipt.digest = d;
+                receipt.time = self.wall;
+                self.change(
+                    &values,
+                    vec![Edit {
+                        path: path(2, slot),
+                        schema: self.extra_schema(2, slot),
+                        value: Some(bytes(&receipt)?),
+                    }],
+                )
+            }
+            StateRequest::Ack {
+                authority,
+                lease,
+                sequence,
+                root,
+            } => {
+                let hash: merkle::Hash = root.try_into().map_err(|_| "Invalid state ACK digest")?;
+                session
+                    .subscription
+                    .as_mut()
+                    .ok_or("ACK before mount")?
+                    .acknowledge(
+                        Cursor {
+                            epoch: authority,
+                            lease,
+                            sequence,
+                        },
+                        Some(hash),
+                    )
+                    .map_err(err)?;
+                Ok(false)
+            }
+            StateRequest::Resync => {
+                session
+                    .subscription
+                    .as_mut()
+                    .ok_or("Resync before mount")?
+                    .resync();
+                Ok(false)
+            }
+            StateRequest::Hello { .. } => unreachable!(),
         }
-        *session = sync;
+    }
+    pub fn generate(&self, session: &mut Session) -> Result<Option<Vec<u8>>> {
+        let Some(authority) = &mut session.authority else {
+            return Ok(None);
+        };
+        if authority.snapshot().hash() != self.tree.hash() {
+            authority
+                .publish(authority.snapshot().hash(), self.tree.clone())
+                .map_err(err)?;
+        }
+        if session.subscription.is_none() {
+            let selection = session
+                .selection
+                .clone()
+                .unwrap_or_else(|| StateSelection::all(&self.schema));
+            let coverage = selection.coverage(session.slot)?;
+            session.subscription = Some(
+                authority
+                    .subscribe_coverage(&[vec![]], coverage)
+                    .map_err(err)?,
+            );
+        }
+        let sub = session
+            .subscription
+            .as_mut()
+            .ok_or("Missing state subscription")?;
+        let Some(offer) = authority.offer(sub).map_err(err)? else {
+            return Ok(None);
+        };
+        if !session.initial && session.last_sent == Some(offer.cursor) {
+            return Ok(None);
+        }
+        session.last_sent = Some(offer.cursor);
+        let response = if session.initial {
+            session.initial = false;
+            StateResponse::Mount {
+                authority: offer.cursor.epoch,
+                lease: offer.cursor.lease,
+                frame: offer.bytes().to_vec(),
+            }
+        } else {
+            StateResponse::Update {
+                frame: offer.bytes().to_vec(),
+            }
+        };
+        encode_state_response(&response).map(Some)
+    }
+}
+
+#[derive(Clone)]
+struct Flight {
+    sequence: u64,
+    values: Vec<(u16, Value)>,
+    sent: bool,
+    issued_at: u64,
+}
+/// Bounded scheduling of unissued continuous numeric assignments. Transactions
+/// and issued causal writes are never split or replaced by this policy.
+#[derive(Clone, Copy, Debug)]
+pub struct DispatchPolicy {
+    interval_ms: u64,
+    max_fields: usize,
+}
+impl Default for DispatchPolicy {
+    fn default() -> Self {
+        Self {
+            interval_ms: 33,
+            max_fields: MAX_FIELDS,
+        }
+    }
+}
+impl DispatchPolicy {
+    pub fn new(interval_ms: u64, max_fields: usize) -> Result<Self> {
+        if interval_ms > 1000 || !(1..=MAX_FIELDS).contains(&max_fields) {
+            return Err("Dispatch policy outside bounded limits".into());
+        }
+        Ok(Self {
+            interval_ms,
+            max_fields,
+        })
+    }
+}
+/// Maximum retained value payload across pending and issued intents. This is
+/// separate from wire size and excludes allocator/container overhead.
+pub const MAX_INTENT_PAYLOAD_BYTES: usize = MAX_BYTES / 2;
+
+/// Read-only RAM queue diagnostics. Ages use the host's monotonic clock, never
+/// wall time. Payload counts exclude containers, authoritative trees and codecs.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct DispatchUsage {
+    pub pending_fields: usize,
+    pub issued_fields: usize,
+    pub pending_payload_bytes: usize,
+    pub issued_payload_bytes: usize,
+    pub pending_age_ms: Option<u64>,
+    pub issued_age_ms: Option<u64>,
+    pub ready_in_ms: Option<u64>,
+}
+fn value_payload_bytes(value: &Value) -> usize {
+    match value {
+        Value::Number(_) | Value::Color(_) => 4,
+        Value::Boolean(_) => 1,
+        Value::Text(s) => s.len(),
+        Value::Series(v) => v.len() * 4,
+        Value::TimedSeries(v) => v.len() * 8,
+    }
+}
+/// Canonical retained view size, not allocator/RSS accounting. The replica and
+/// document normally share one immutable root; do not add their sizes together.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct StateUsage {
+    pub selected_nodes: usize,
+    pub selected_canonical_bytes: usize,
+    pub replica_root_shared: bool,
+}
+/// RAM-only pending intents, separate from authoritative causal metadata.
+pub struct StateAdapter {
+    doc: Document,
+    writer: [u8; 16],
+    replica: Option<merkle::Replica>,
+    pending: BTreeMap<u16, Value>,
+    pending_since: Option<u64>,
+    dispatch: DispatchPolicy,
+    clock: u64,
+    last_issue: Option<u64>,
+    deadline: Option<u64>,
+    flight: Option<Flight>,
+    acknowledged: u64,
+    slot: Option<usize>,
+    ack: Option<(Cursor, merkle::Hash)>,
+    hello_sent: bool,
+    resync: bool,
+}
+impl StateAdapter {
+    pub fn new(schema: StateSchema, scope: &str, data: &[u8], writer: [u8; 16]) -> Result<Self> {
+        validate_schema(&schema)?;
+        let selection = StateSelection::all(&schema);
+        Self::with_selection(schema, scope, data, writer, selection)
+    }
+    pub fn for_ui(ui: &Ui, scope: &str, data: &[u8], writer: [u8; 16]) -> Result<Self> {
+        Self::with_selection(
+            ui.state_schema.clone(),
+            scope,
+            data,
+            writer,
+            StateSelection::from_ui(ui)?,
+        )
+    }
+    fn with_selection(
+        schema: StateSchema,
+        scope: &str,
+        data: &[u8],
+        writer: [u8; 16],
+        selection: StateSelection,
+    ) -> Result<Self> {
+        let transport = !data.is_empty() && decode_state_response(data).is_ok();
+        let mut doc = if data.is_empty() || transport {
+            Document::new(schema, scope)?
+        } else {
+            Document::load(schema, scope, data)?
+        };
+        doc.required_fields = selection.fields;
+        let mut result = Self {
+            doc,
+            writer,
+            replica: None,
+            pending: BTreeMap::new(),
+            pending_since: None,
+            dispatch: DispatchPolicy::default(),
+            clock: 0,
+            last_issue: None,
+            deadline: None,
+            flight: None,
+            acknowledged: 0,
+            slot: None,
+            ack: None,
+            hello_sent: false,
+            resync: false,
+        };
+        if transport {
+            result.receive(data)?;
+        }
+        Ok(result)
+    }
+    pub fn restore_pending(&mut self, old: &Self) -> Result<()> {
+        if self.writer != old.writer || self.doc.scope != old.doc.scope {
+            return Err("Pending intent scope mismatch".into());
+        }
+        self.pending = old.pending.clone();
+        self.pending_since = old.pending_since;
+        self.dispatch = old.dispatch;
+        self.clock = old.clock;
+        self.last_issue = old.last_issue;
+        self.deadline = old.deadline;
+        self.flight = old.flight.clone();
+        if let Some(f) = &mut self.flight {
+            f.sent = false;
+        }
+        self.reconcile()?;
+        Ok(())
+    }
+    fn reconcile(&mut self) -> Result<()> {
+        let sequence = if let Some(slot) = self.slot {
+            let record: Receipt = decode(&payload(&self.doc.tree, &path(2, slot))?)?;
+            if record.writer != hash(&self.writer) {
+                return Err("Writer receipt retired; uncertain intent not replayed".into());
+            }
+            record.sequence
+        } else {
+            0
+        };
+        self.acknowledged = self.acknowledged.max(sequence);
+        if self.flight.as_ref().is_some_and(|f| f.sequence <= sequence) {
+            self.flight = None;
+        }
+        Ok(())
+    }
+    pub fn resume_sequence(&self) -> u64 {
+        self.flight.as_ref().map_or(0, |f| f.sequence)
+    }
+    pub fn reconnect(&mut self) {
+        if let Some(f) = &mut self.flight {
+            f.sent = false;
+        }
+        self.hello_sent = false;
+    }
+    pub fn confirmed(&self) -> bool {
+        self.pending.is_empty() && self.flight.is_none() && self.replica.is_some()
+    }
+    pub fn schema(&self) -> &StateSchema {
+        self.doc.schema()
+    }
+    pub fn value(&self, id: u16) -> Result<u16> {
+        match self.typed_value(id)? {
+            Value::Number(n) => Ok(n as u16),
+            _ => Err("Not a normalized number".into()),
+        }
+    }
+    pub fn typed_value(&self, id: u16) -> Result<Value> {
+        self.pending
+            .get(&id)
+            .or_else(|| {
+                self.flight
+                    .as_ref()
+                    .and_then(|f| f.values.iter().find(|(k, _)| *k == id).map(|(_, v)| v))
+            })
+            .cloned()
+            .map(Ok)
+            .unwrap_or_else(|| self.doc.typed_value(id))
+    }
+    pub fn set_wall_time(&mut self, time: i64) {
+        self.doc.set_wall_time(time);
+    }
+    pub fn signal(&self, id: u16, time: i64, seconds: u32) -> Vec<[f32; 2]> {
+        self.doc.signal(id, time, seconds)
+    }
+    pub fn set(&mut self, values: &[(u16, u16)]) -> Result<bool> {
+        self.set_typed(
+            &values
+                .iter()
+                .map(|(id, v)| (*id, Value::Number(f32::from(*v))))
+                .collect::<Vec<_>>(),
+        )
+    }
+    pub fn set_dispatch_policy(&mut self, policy: DispatchPolicy) {
+        self.dispatch = policy;
+        if let Some(deadline) = &mut self.deadline {
+            *deadline = (*deadline).min(self.last_issue.map_or(self.clock, |at| {
+                at.saturating_add(policy.interval_ms).max(self.clock)
+            }));
+        }
+    }
+    /// Host monotonic milliseconds; backwards samples cannot postpone a batch.
+    pub fn advance(&mut self, now: u64) {
+        self.clock = self.clock.max(now);
+    }
+    pub fn pending_count(&self) -> usize {
+        self.pending.len() + self.flight.as_ref().map_or(0, |f| f.values.len())
+    }
+    pub fn state_usage(&self) -> StateUsage {
+        StateUsage {
+            selected_nodes: self.doc.tree.node_count(),
+            selected_canonical_bytes: self.doc.tree.canonical_bytes(),
+            replica_root_shared: self
+                .replica
+                .as_ref()
+                .and_then(|r| r.snapshot())
+                .is_some_and(|tree| tree.shares_root(&self.doc.tree)),
+        }
+    }
+    pub fn dispatch_usage(&self) -> DispatchUsage {
+        DispatchUsage {
+            pending_fields: self.pending.len(),
+            issued_fields: self.flight.as_ref().map_or(0, |f| f.values.len()),
+            pending_payload_bytes: self.pending.values().map(value_payload_bytes).sum(),
+            issued_payload_bytes: self.flight.as_ref().map_or(0, |f| {
+                f.values.iter().map(|(_, v)| value_payload_bytes(v)).sum()
+            }),
+            pending_age_ms: self.pending_since.map(|at| self.clock.saturating_sub(at)),
+            issued_age_ms: self
+                .flight
+                .as_ref()
+                .map(|f| self.clock.saturating_sub(f.issued_at)),
+            ready_in_ms: self.deadline.map(|at| at.saturating_sub(self.clock)),
+        }
+    }
+    /// Finish a gesture immediately; acknowledgements and replay bypass this timer.
+    pub fn flush_pending(&mut self) {
+        self.deadline = (!self.pending.is_empty()).then_some(self.clock);
+    }
+    pub fn defer(&mut self, values: &[(u16, u16)]) -> Result<bool> {
+        if values.len() > MAX_FIELDS {
+            return Err("Canvas command batch limit".into());
+        }
+        // Bounded numeric staging uses stack storage, not a Vec per touch sample.
+        let mut numeric: [(u16, Value); MAX_FIELDS] =
+            std::array::from_fn(|_| (0, Value::Number(0.)));
+        for ((id, number), slot) in values.iter().zip(&mut numeric) {
+            *slot = (*id, Value::Number(f32::from(*number)));
+        }
+        let changed = self.queue(&numeric[..values.len()])?;
+        if changed && self.deadline.is_none() {
+            self.deadline = Some(self.last_issue.map_or(self.clock, |at| {
+                at.saturating_add(self.dispatch.interval_ms).max(self.clock)
+            }));
+        }
+        if self.pending.len() >= self.dispatch.max_fields {
+            self.flush_pending();
+        }
         Ok(changed)
     }
-    fn validate(&mut self, candidate: &mut AutoCommit, clients_only: bool) -> Result<usize> {
-        use automerge::legacy::{Key, ObjectId, OpType};
-        if candidate.get_change_meta_by_hash(&self.seed).is_none() {
-            return Err("Wrong Canvas history/scope".into());
+    pub fn set_typed(&mut self, values: &[(u16, Value)]) -> Result<bool> {
+        let changed = self.queue(values)?;
+        if changed {
+            self.flush_pending();
         }
-        let mut history = self.history_bytes;
-        // Walk only newly added changes, not the full document history on each update.
-        for change in self.doc.get_changes_added(candidate) {
-            if change.deps().is_empty() || change.len() > MAX_FIELDS {
-                return Err("Canvas change root/operation limit".into());
+        Ok(changed)
+    }
+    fn queue(&mut self, values: &[(u16, Value)]) -> Result<bool> {
+        self.doc.validate_commands(values, false)?;
+        // Check the whole candidate before copying payloads into the queue or
+        // changing the overlay. Replacement frees its previous pending payload in this budget;
+        // immutable issued values remain charged until durably confirmed.
+        let usage = self.dispatch_usage();
+        let mut retained = usage.pending_payload_bytes + usage.issued_payload_bytes;
+        let mut changed = 0_u64;
+        for (index, (id, value)) in values.iter().enumerate() {
+            if self.typed_value(*id)? == *value {
+                continue;
             }
-            history = history
-                .checked_add(change.raw_bytes().len())
-                .ok_or("Canvas history byte overflow")?;
-            if history > MAX_HISTORY_BYTES {
-                return Err("Canvas history byte budget exhausted".into());
+            changed |= 1 << index;
+            retained -= self.pending.get(id).map_or(0, value_payload_bytes);
+            retained += value_payload_bytes(value);
+        }
+        if retained > MAX_INTENT_PAYLOAD_BYTES {
+            return Err("Canvas RAM intent payload limit".into());
+        }
+        for (index, (id, value)) in values.iter().enumerate() {
+            if changed & (1 << index) != 0 {
+                self.pending.insert(*id, value.clone());
+                self.pending_since.get_or_insert(self.clock);
             }
-            for op in change.decode().operations {
-                let (key, bytes) = match (&op.obj, &op.key, &op.action, op.insert) {
-                    (
-                        ObjectId::Root,
-                        Key::Map(key),
-                        OpType::Put(ScalarValue::Bytes(bytes)),
-                        false,
-                    ) => (key, bytes),
-                    _ => return Err("Protected Canvas state operation".into()),
-                };
-                let field = self
-                    .schema
-                    .fields
-                    .iter()
-                    .find(|f| key == &format!("f{}", f.id))
-                    .ok_or("Protected Canvas state field")?;
-                if clients_only && !field.writable {
-                    return Err("Client modified read-only Canvas field".into());
+        }
+        Ok(changed != 0)
+    }
+    pub fn generate(&mut self) -> Result<Option<Vec<u8>>> {
+        if std::mem::take(&mut self.resync) {
+            return encode_state_request(&StateRequest::Resync).map(Some);
+        }
+        if let Some((c, root)) = self.ack.take() {
+            return encode_state_request(&StateRequest::Ack {
+                authority: c.epoch,
+                lease: c.lease,
+                sequence: c.sequence,
+                root: root.to_vec(),
+            })
+            .map(Some);
+        }
+        if self.replica.is_none() {
+            if self.hello_sent {
+                return Ok(None);
+            }
+            self.hello_sent = true;
+            return encode_state_request(&StateRequest::Hello {
+                writer: self.writer.to_vec(),
+                resume: self.resume_sequence(),
+            })
+            .map(Some);
+        }
+        if self.flight.is_none() && !self.pending.is_empty() {
+            if self.deadline.is_some_and(|at| self.clock < at) {
+                return Ok(None);
+            }
+            self.deadline = None;
+            self.last_issue = Some(self.clock);
+            self.pending_since = None;
+            let values = std::mem::take(&mut self.pending).into_iter().collect();
+            self.flight = Some(Flight {
+                sequence: self
+                    .acknowledged
+                    .checked_add(1)
+                    .ok_or("Intent sequence exhausted")?,
+                values,
+                sent: false,
+                issued_at: self.clock,
+            });
+        }
+        if let Some(f) = &mut self.flight
+            && !f.sent
+        {
+            f.sent = true;
+            return encode_state_request(&StateRequest::Write {
+                sequence: f.sequence,
+                values: f.values.clone(),
+            })
+            .map(Some);
+        }
+        Ok(None)
+    }
+    pub fn receive(&mut self, data: &[u8]) -> Result<bool> {
+        let response = decode_state_response(data)?;
+        let mounting = matches!(response, StateResponse::Mount { .. });
+        let (mut replica, frame) = match response {
+            StateResponse::Mount {
+                authority,
+                lease,
+                frame,
+            } => (
+                merkle::Replica::for_lease(authority, lease, vec![]).map_err(err)?,
+                frame,
+            ),
+            StateResponse::Update { frame } => (
+                self.replica.clone().ok_or("State update before mount")?,
+                frame,
+            ),
+        };
+        match replica.apply(&frame) {
+            Ok(_) => {}
+            Err(merkle::Error::ResyncRequired) => {
+                self.resync = true;
+                if let Some(f) = &mut self.flight {
+                    f.sent = false;
                 }
-                decode_value(field, bytes)?;
+                return Ok(false);
             }
+            Err(e) => return Err(err(e)),
         }
-        Ok(history)
+        let tree = replica.snapshot().ok_or("Missing Canvas subtree")?.clone();
+        let old = self.doc.tree.hash();
+        let mut next = if mounting {
+            Document::from_tree_with_fields(
+                self.doc.schema.as_ref().clone(),
+                &self.doc.scope,
+                tree,
+                self.doc.required_fields,
+            )?
+        } else {
+            self.doc.validate_changed(&tree)?;
+            let mut next = self.doc.clone();
+            next.tree = tree;
+            next
+        };
+        if mounting {
+            self.slot = next.receipt(&self.writer)?.map(|(slot, _)| slot);
+        }
+        next.wall = self.doc.wall;
+        let cursor = replica.cursor().ok_or("Missing state cursor")?;
+        self.ack = Some((cursor, next.tree.hash()));
+        self.doc = next;
+        self.replica = Some(replica);
+        self.hello_sent = true;
+        self.reconcile()?;
+        Ok(old != self.doc.tree.hash())
     }
-}
-fn encode_value(value: &Value) -> Result<Vec<u8>> {
-    flexbuffers::to_vec(value).map_err(err)
-}
-fn decode_value(field: &Field, bytes: &[u8]) -> Result<Value> {
-    check(bytes)?;
-    let value: Value = flexbuffers::from_slice(bytes).map_err(err)?;
-    validate_value(field, &value)?;
-    if encode_value(&value)? != bytes {
-        return Err("Noncanonical typed Canvas value".into());
-    }
-    Ok(value)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn field(id: u16, default: Value, writable: bool) -> Field {
-        Field {
-            id,
-            name: format!("field{id}"),
-            default,
-            writable,
-        }
-    }
     fn schema() -> StateSchema {
         StateSchema {
-            id: "typed-state-v2".into(),
+            id: "merkle-adapter-test-v1".into(),
             fields: vec![
-                field(1, Value::Number(50.), true),
-                field(2, Value::Number(70.), true),
-                field(3, Value::Text("hello".into()), true),
-                field(4, Value::Boolean(false), true),
-                field(5, Value::Series(vec![]), false),
-                field(6, Value::TimedSeries(vec![]), false),
+                Field {
+                    id: 1,
+                    name: "one".into(),
+                    default: Value::Number(0.),
+                    writable: true,
+                },
+                Field {
+                    id: 2,
+                    name: "two".into(),
+                    default: Value::Text("seed".into()),
+                    writable: true,
+                },
+                Field {
+                    id: 3,
+                    name: "authority".into(),
+                    default: Value::Boolean(false),
+                    writable: false,
+                },
             ],
         }
     }
-    fn sync(a: &mut Document, b: &mut Document, sa: &mut Session, sb: &mut Session) -> Result<()> {
+    fn client(id: u8) -> StateAdapter {
+        StateAdapter::new(schema(), "test", &[], [id; 16]).unwrap()
+    }
+    fn pump(doc: &mut Document, s: &mut Session, c: &mut StateAdapter) {
         for _ in 0..20 {
-            let x = a.generate(sa)?;
-            let y = b.generate(sb)?;
-            if x.is_none() && y.is_none() {
-                return Ok(());
+            let mut progress = false;
+            while let Some(b) = c.generate().unwrap() {
+                doc.receive(s, &b).unwrap();
+                progress = true;
             }
-            if let Some(x) = x {
-                b.receive_authority(sb, &x)?;
+            if let Some(b) = doc.generate(s).unwrap() {
+                c.receive(&b).unwrap();
+                progress = true;
             }
-            if let Some(y) = y {
-                a.receive(sa, &y)?;
+            if !progress {
+                assert!(c.confirmed());
+                return;
             }
         }
-        Err("sync stuck".into())
+        panic!("adapter did not settle");
     }
     #[test]
-    fn typed_values_roundtrip_atomic_batches_and_numeric_abi_stays_strict() {
-        let mut d = Document::new(schema(), "a").unwrap();
-        assert!(
-            d.set_typed(&[
-                (1, Value::Number(500.)),
-                (3, Value::Text("typed ✓".into())),
-                (4, Value::Boolean(true))
-            ])
-            .unwrap()
+    fn resource_accounting_tracks_shared_authority_and_separate_ram_intents() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut client = client(1);
+        let mut session = Session::default();
+        assert!(!client.state_usage().replica_root_shared);
+        pump(&mut doc, &mut session, &mut client);
+        let state = client.state_usage();
+        assert!(state.replica_root_shared);
+        assert!(state.selected_nodes > 0 && state.selected_canonical_bytes > 0);
+        client.advance(100);
+        client.defer(&[(1, 500)]).unwrap();
+        assert_eq!(
+            client.state_usage(),
+            state,
+            "RAM intents do not edit the authoritative snapshot"
         );
-        assert_eq!(d.value(1).unwrap(), 500);
-        assert_eq!(d.typed_value(1).unwrap(), Value::Number(500.));
-        let before = d.save();
-        for bad in [
-            Value::Text("wrong kind".into()),
-            Value::Number(f32::NAN),
-            Value::Number(0.5),
-            Value::Number(1001.),
-        ] {
-            assert!(d.set_typed(&[(2, Value::Number(200.)), (1, bad)]).is_err());
-            assert_eq!(d.save(), before);
-        }
-        assert!(
-            d.set_typed(&[(1, Value::Number(1.)), (1, Value::Number(2.))])
-                .is_err()
-        );
-        assert_eq!(d.save(), before);
-        let copy = Document::load(schema(), "a", &before).unwrap();
-        assert_eq!(copy.typed_value(3).unwrap(), Value::Text("typed ✓".into()));
-        assert_eq!(copy.typed_value(4).unwrap(), Value::Boolean(true));
+        assert_eq!(client.dispatch_usage().pending_payload_bytes, 4);
+        pump(&mut doc, &mut session, &mut client);
+        assert!(client.state_usage().replica_root_shared);
+        assert_eq!(client.dispatch_usage(), DispatchUsage::default());
     }
     #[test]
-    fn concurrent_fields_merge_and_persisted_scope_schema_are_checked() {
-        let mut a = Document::new(schema(), "a").unwrap();
-        let mut b = Document::new(schema(), "a").unwrap();
-        let old = a.clone();
-        a.set(&[(1, 900)]).unwrap();
-        b.set_typed(&[(3, Value::Text("other".into()))]).unwrap();
-        sync(
-            &mut a,
-            &mut b,
-            &mut Session::default(),
-            &mut Session::default(),
-        )
-        .unwrap();
-        assert_eq!(a.value(1).unwrap(), 900);
-        assert_eq!(b.value(1).unwrap(), 900);
-        assert_eq!(a.typed_value(3).unwrap(), b.typed_value(3).unwrap());
-        assert_eq!(old.value(1).unwrap(), 50);
-        let saved = a.save();
-        assert!(Document::load(schema(), "wrong-scope", &saved).is_err());
-        let mut wrong = schema();
-        wrong.fields[0].writable = false;
-        assert!(Document::load(wrong, "a", &saved).is_err());
-        let mut restored = Document::load(schema(), "a", &saved).unwrap();
-        let mut fresh = Document::new(schema(), "a").unwrap();
-        sync(
-            &mut restored,
-            &mut fresh,
-            &mut Session::default(),
-            &mut Session::default(),
-        )
-        .unwrap();
-        assert_eq!(fresh.value(1).unwrap(), 900);
-    }
-    #[test]
-    fn readonly_authority_updates_reach_clients_but_client_history_is_denied() {
-        let mut authority = Document::new(schema(), "a").unwrap();
-        let mut client = Document::new(schema(), "a").unwrap();
-        let values = vec![
-            (5, Value::Series(vec![1., 2., 3.])),
-            (6, Value::TimedSeries(vec![[0., 20.], [1., 80.]])),
-        ];
-        assert!(client.set_typed(&values).is_err());
-        authority.set_typed_authority(&values).unwrap();
-        sync(
-            &mut authority,
-            &mut client,
-            &mut Session::default(),
-            &mut Session::default(),
-        )
-        .unwrap();
-        assert_eq!(client.typed_value(5).unwrap(), values[0].1);
-        let restored = Document::load(schema(), "a", &authority.save()).unwrap();
-        assert_eq!(restored.typed_value(5).unwrap(), values[0].1);
-        let mut rogue = authority.clone();
-        // Restore the visible value after a forbidden write: both historical operations
-        // still have to be rejected, even though the final projection is unchanged.
-        rogue
-            .doc
-            .put(
-                ROOT,
-                "f5",
-                ScalarValue::Bytes(encode_value(&Value::Series(vec![99.])).unwrap()),
-            )
+    fn dispatch_deadline_coalesces_without_postponing_and_control_bypasses_it() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        c.advance(100);
+        c.defer(&[(1, 100)]).unwrap();
+        let first = c.generate().unwrap().unwrap();
+        assert!(matches!(
+            decode_state_request(&first).unwrap(),
+            StateRequest::Write { sequence: 1, .. }
+        ));
+        doc.receive(&mut session, &first).unwrap();
+        c.receive(&doc.generate(&mut session).unwrap().unwrap())
             .unwrap();
-        rogue.doc.commit();
-        rogue
-            .doc
-            .put(
-                ROOT,
-                "f5",
-                ScalarValue::Bytes(encode_value(&values[0].1).unwrap()),
-            )
+        c.advance(101);
+        c.defer(&[(1, 200)]).unwrap();
+        let ack = c.generate().unwrap().unwrap();
+        assert!(
+            matches!(
+                decode_state_request(&ack).unwrap(),
+                StateRequest::Ack { .. }
+            ),
+            "ACK bypasses a deferred write"
+        );
+        doc.receive(&mut session, &ack).unwrap();
+        assert!(c.generate().unwrap().is_none());
+        c.advance(120);
+        c.defer(&[(1, 700)]).unwrap();
+        c.advance(132);
+        assert!(c.generate().unwrap().is_none());
+        c.advance(133);
+        let next = c.generate().unwrap().unwrap();
+        assert!(
+            matches!(decode_state_request(&next).unwrap(), StateRequest::Write { sequence: 2, values } if values == vec![(1, Value::Number(700.))])
+        );
+        doc.receive(&mut session, &next).unwrap();
+        c.receive(&doc.generate(&mut session).unwrap().unwrap())
             .unwrap();
-        rogue.doc.commit();
-        let before = authority.save();
-        assert!(
-            sync(
-                &mut authority,
-                &mut rogue,
-                &mut Session::default(),
-                &mut Session::default()
-            )
-            .is_err()
-        );
-        assert_eq!(authority.save(), before);
+        // Explicit final release must not wait for another 33 ms interval.
+        c.advance(134);
+        c.defer(&[(1, 900)]).unwrap();
+        c.flush_pending();
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(doc.value(1).unwrap(), 900);
+        // A new idle gesture does not inherit an old force-flush flag.
+        c.flush_pending();
+        c.advance(135);
+        c.defer(&[(1, 800)]).unwrap();
+        c.advance(1);
+        assert!(c.generate().unwrap().is_none());
+        c.advance(167);
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(doc.value(1).unwrap(), 800);
     }
     #[test]
-    fn protected_scope_and_malformed_typed_history_leave_authority_unchanged() {
-        for attack in 0..5 {
-            let mut authority = Document::new(schema(), "a").unwrap();
-            let mut rogue = authority.clone();
-            match attack {
-                0 => {
-                    rogue.doc.put(ROOT, "scope", "tampered").unwrap();
-                    rogue.doc.commit();
-                    rogue.doc.put(ROOT, "scope", "a").unwrap();
-                }
-                1 => {
-                    rogue
-                        .doc
-                        .put(
-                            ROOT,
-                            "f1",
-                            ScalarValue::Bytes(
-                                encode_value(&Value::Text("not a number".into())).unwrap(),
-                            ),
-                        )
-                        .unwrap();
-                }
-                2 => {
-                    rogue
-                        .doc
-                        .put(ROOT, "f1", ScalarValue::Bytes(vec![0, 1, 2, 3]))
-                        .unwrap();
-                }
-                3 => {
-                    rogue.doc.put(ROOT, "f1", ScalarValue::Uint(100)).unwrap();
-                }
-                _ => {
-                    rogue
-                        .doc
-                        .put(
-                            ROOT,
-                            "f1",
-                            ScalarValue::Bytes(encode_value(&Value::Number(0.5)).unwrap()),
-                        )
-                        .unwrap();
-                }
-            }
-            rogue.doc.commit();
-            let before = authority.save();
-            assert!(
-                sync(
-                    &mut authority,
-                    &mut rogue,
-                    &mut Session::default(),
-                    &mut Session::default()
-                )
-                .is_err()
-            );
-            assert_eq!(authority.save(), before);
-        }
+    fn dispatch_keeps_issued_replay_atomic_and_rebases_the_latest_unsent_value() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        c.set_dispatch_policy(DispatchPolicy::new(100, 1).unwrap());
+        c.defer(&[(1, 100)]).unwrap();
+        let issued = c.generate().unwrap().unwrap();
+        c.advance(1);
+        c.defer(&[(1, 900)]).unwrap();
+        assert_eq!(c.pending_count(), 2);
+        assert!(c.generate().unwrap().is_none(), "one uncertain write only");
+        c.reconnect();
+        let replay = c.generate().unwrap().unwrap();
+        assert_eq!(replay, issued, "issued values/sequence are immutable");
+        doc.receive(&mut session, &replay).unwrap();
+        c.receive(&doc.generate(&mut session).unwrap().unwrap())
+            .unwrap();
+        let ack = c.generate().unwrap().unwrap();
+        assert!(matches!(
+            decode_state_request(&ack).unwrap(),
+            StateRequest::Ack { .. }
+        ));
+        // The configured field threshold flushes the whole queued assignment.
+        let latest = c.generate().unwrap().unwrap();
+        assert!(
+            matches!(decode_state_request(&latest).unwrap(), StateRequest::Write { sequence: 2, values } if values == vec![(1,Value::Number(900.))])
+        );
+        assert!(DispatchPolicy::new(1001, 1).is_err());
+        assert!(DispatchPolicy::new(1, 0).is_err());
+        assert!(DispatchPolicy::new(1, MAX_FIELDS + 1).is_err());
     }
     #[test]
-    fn typed_size_bounds_and_replaceable_snapshots_do_not_write_history() {
-        let d = Document::new(schema(), "a").unwrap();
-        let text = schema().fields[2].clone();
-        assert!(validate_value(&text, &Value::Text("a".repeat(MAX_TEXT_BYTES))).is_ok());
-        assert!(validate_value(&text, &Value::Text("a".repeat(MAX_TEXT_BYTES + 1))).is_err());
-        let series = schema().fields[4].clone();
-        assert!(validate_value(&series, &Value::Series(vec![1.; MAX_SERIES_POINTS])).is_ok());
-        assert!(validate_value(&series, &Value::Series(vec![1.; MAX_SERIES_POINTS + 1])).is_err());
-        assert!(validate_value(&series, &Value::Series(vec![f32::INFINITY])).is_err());
-        assert!(
-            d.validate_snapshot(&[(5, Value::Series(vec![1.; MAX_SERIES_POINTS]))])
-                .is_ok()
+    fn dispatch_accounting_keeps_original_age_across_coalescing_replay_and_restore() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+        c.advance(100);
+        c.defer(&[(1, 100)]).unwrap();
+        let issued = c.generate().unwrap().unwrap();
+        c.advance(110);
+        c.defer(&[(1, 200)]).unwrap();
+        c.advance(120);
+        c.defer(&[(1, 300)]).unwrap();
+        let usage = c.dispatch_usage();
+        assert_eq!(usage.pending_fields, 1);
+        assert_eq!(usage.issued_fields, 1);
+        assert_eq!(usage.pending_payload_bytes, 4);
+        assert_eq!(usage.issued_payload_bytes, 4);
+        assert_eq!(usage.pending_age_ms, Some(10));
+        assert_eq!(usage.issued_age_ms, Some(20));
+        assert_eq!(usage.ready_in_ms, Some(13));
+        c.reconnect();
+        assert_eq!(c.generate().unwrap().unwrap(), issued);
+        assert_eq!(
+            c.dispatch_usage(),
+            usage,
+            "replay cannot reset measured age"
         );
-        assert!(d.validate_snapshot(&[(1, Value::Number(1.))]).is_err());
-        assert!(
-            d.validate_snapshot(&[(5, Value::Series(vec![])), (5, Value::Series(vec![]))])
-                .is_err()
-        );
-        assert_eq!(d.typed_value(5).unwrap(), Value::Series(vec![]));
-        assert!(validate_value(&schema().fields[5], &Value::TimedSeries(vec![[2., 50.]])).is_err());
+        let mut restored = client(1);
+        restored.restore_pending(&c).unwrap();
+        assert_eq!(restored.dispatch_usage(), usage);
+        doc.receive(&mut session, &issued).unwrap();
+        c.advance(140);
+        c.flush_pending();
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+        assert_eq!(doc.value(1).unwrap(), 300);
     }
     #[test]
-    fn sixty_four_fields_are_bounded_without_a_small_register_lane_limit() {
-        let mut schema = schema();
-        schema.fields = (1..=64)
-            .map(|id| field(id, Value::Number(0.), true))
-            .collect();
-        let mut d = Document::new(schema.clone(), "a").unwrap();
-        let commands = (1..=64).map(|id| (id, id)).collect::<Vec<_>>();
-        assert!(d.set(&commands).unwrap());
-        assert_eq!(d.value(64).unwrap(), 64);
-        let mut invalid = schema.clone();
-        invalid.fields.push(field(65, Value::Number(0.), true));
-        assert!(Document::new(invalid, "a").is_err());
-        let copy = Document::load(schema, "a", &d.save()).unwrap();
-        assert_eq!(copy.value(64).unwrap(), 64);
-    }
-}
-#[cfg(test)]
-mod lifecycle_tests {
-    use super::*;
-    fn schema() -> StateSchema {
-        StateSchema {
-            id: "lifecycle-v2".into(),
-            fields: (1..=2)
+    fn intent_payload_budget_checks_a_whole_batch_before_mutation_and_counts_flight() {
+        let schema = StateSchema {
+            id: "large-intents".into(),
+            fields: (1..=18)
                 .map(|id| Field {
                     id,
-                    name: format!("field{id}"),
-                    default: Value::Number(0.),
+                    name: format!("series-{id}"),
+                    default: Value::TimedSeries(vec![]),
                     writable: true,
                 })
                 .collect(),
-        }
+        };
+        let mut doc = Document::new(schema.clone(), "budget").unwrap();
+        let mut c = StateAdapter::new(schema, "budget", &[], [1; 16]).unwrap();
+        let mut session = Session::default();
+        pump(&mut doc, &mut session, &mut c);
+
+        let large = Value::TimedSeries(vec![[0., 1.]; MAX_SERIES_POINTS]);
+        let assignments: Vec<_> = (1..=17).map(|id| (id, large.clone())).collect();
+        assert!(c.set_typed(&assignments).is_err());
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+        assert_eq!(c.typed_value(1).unwrap(), Value::TimedSeries(vec![]));
+        c.set_typed(&assignments[..16]).unwrap();
+        assert_eq!(
+            c.dispatch_usage().pending_payload_bytes,
+            16 * MAX_SERIES_POINTS * 8
+        );
+        let issued = c.generate().unwrap().unwrap();
+        assert_eq!(c.dispatch_usage().issued_fields, 16);
+        assert!(c.set_typed(&[(17, large.clone())]).is_err());
+        assert_eq!(c.dispatch_usage().pending_fields, 0);
+        // A no-op against the issued overlay consumes no extra budget.
+        assert!(!c.set_typed(&assignments[..16]).unwrap());
+        doc.receive(&mut session, &issued).unwrap();
+        pump(&mut doc, &mut session, &mut c);
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+        c.set_typed(&[(17, large)]).unwrap();
+        assert_eq!(c.dispatch_usage().pending_fields, 1);
     }
     #[test]
-    fn authoritative_mount_keeps_pending_ram_edits_and_signal_time_is_not_receipt_time() {
-        let mut authority = Document::new(schema(), "state").unwrap();
-        let mut client = Document::new(schema(), "state").unwrap();
-        authority.set_at(&[(2, 500)], 100).unwrap();
-        client.set_at(&[(1, 1000)], 200).unwrap();
-        client.merge_authority(&authority.save()).unwrap();
-        assert_eq!(client.value(1).unwrap(), 1000);
-        assert_eq!(client.value(2).unwrap(), 500);
-        let points = client.signal(1, 300, 300);
-        assert_eq!(points.len(), 1);
-        assert!((points[0][0] - 2. / 3.).abs() < 0.00001);
-        assert_eq!(points[0][1], 100.);
-        assert!(client.signal(1, 501, 300).is_empty());
-        assert_eq!(
-            Document::load(schema(), "state", &client.save())
-                .unwrap()
-                .signal(1, 300, 300),
-            points
+    fn read_only_leases_never_allocate_durable_receipts_and_still_follow_authority_updates() {
+        let schema = StateSchema {
+            id: "read-only".into(),
+            fields: vec![Field {
+                id: 1,
+                name: "status".into(),
+                default: Value::Number(0.),
+                writable: false,
+            }],
+        };
+        let mut doc = Document::new(schema.clone(), "read-only").unwrap();
+        let root = doc.root_hash();
+        let saved = doc.save().unwrap();
+        for id in 0..1030_u64 {
+            let mut writer = [0; 16];
+            writer[..8].copy_from_slice(&id.to_le_bytes());
+            let (mut session, changed) = doc.open_session(&writer, 0).unwrap();
+            assert!(!changed);
+            assert!(session.slot.is_none());
+            let mounted = doc.generate(&mut session).unwrap().unwrap();
+            assert!(
+                doc.generate(&mut session).unwrap().is_none(),
+                "mounted bytes are already in flight"
+            );
+            let mut client =
+                StateAdapter::new(schema.clone(), "read-only", &mounted, writer).unwrap();
+            assert!(client.confirmed());
+            assert_eq!(client.value(1).unwrap(), 0);
+            assert!(client.set(&[(1, 900)]).is_err());
+            doc.receive(&mut session, &client.generate().unwrap().unwrap())
+                .unwrap();
+            assert!(doc.generate(&mut session).unwrap().is_none());
+        }
+        assert_eq!(doc.root_hash(), root);
+        assert_eq!(doc.save().unwrap(), saved);
+        assert!(doc.receipts().unwrap().is_empty());
+        assert!(
+            doc.open_session(&[8; 16], 1).is_err(),
+            "no uncertain write can resume in a read-only scope"
         );
+        let (mut session, _) = doc.open_session(&[9; 16], 0).unwrap();
+        let mut client = StateAdapter::new(
+            schema,
+            "read-only",
+            &doc.generate(&mut session).unwrap().unwrap(),
+            [9; 16],
+        )
+        .unwrap();
+        doc.receive(&mut session, &client.generate().unwrap().unwrap())
+            .unwrap();
+        doc.set_typed_authority(&[(1, Value::Number(123.))])
+            .unwrap();
+        client
+            .receive(&doc.generate(&mut session).unwrap().unwrap())
+            .unwrap();
+        assert_eq!(client.value(1).unwrap(), 123);
+        assert!(client.confirmed());
+    }
+    #[test]
+    fn ram_pending_writes_coalesce_and_receipts_survive_durable_reload() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut s = Session::default();
+        pump(&mut doc, &mut s, &mut c);
+        c.set(&[(1, 100)]).unwrap();
+        c.set(&[(1, 700)]).unwrap();
+        assert_eq!(doc.value(1).unwrap(), 0);
+        assert_eq!(c.value(1).unwrap(), 700);
+        assert!(!c.confirmed());
+        pump(&mut doc, &mut s, &mut c);
+        assert_eq!(doc.value(1).unwrap(), 700);
+        assert_eq!(doc.receipt(&[1; 16]).unwrap().unwrap().1.sequence, 1);
+        let restored = Document::load(schema(), "test", &doc.save().unwrap()).unwrap();
+        assert_eq!(restored.value(1).unwrap(), 700);
+        assert_eq!(restored.receipt(&[1; 16]).unwrap().unwrap().1.sequence, 1);
+    }
+    #[test]
+    fn lost_ack_reconnect_does_not_replay_over_a_newer_peer_write() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut a = client(1);
+        let mut b = client(2);
+        let mut sa = Session::default();
+        let mut sb = Session::default();
+        pump(&mut doc, &mut sa, &mut a);
+        pump(&mut doc, &mut sb, &mut b);
+        a.set(&[(1, 300)]).unwrap();
+        let intent = a.generate().unwrap().unwrap();
+        doc.receive(&mut sa, &intent).unwrap();
+        assert!(!a.confirmed());
+        b.set(&[(1, 900)]).unwrap();
+        pump(&mut doc, &mut sb, &mut b);
+        assert_eq!(doc.value(1).unwrap(), 900);
+        let persisted = doc.save().unwrap();
+        let mut restarted = Document::load(schema(), "test", &persisted).unwrap();
+        let (mut new_session, _) = restarted
+            .open_session(&[1; 16], a.resume_sequence())
+            .unwrap();
+        let mount = restarted.generate(&mut new_session).unwrap().unwrap();
+        let mut resumed = StateAdapter::new(schema(), "test", &mount, [1; 16]).unwrap();
+        resumed.restore_pending(&a).unwrap();
+        assert_eq!(resumed.value(1).unwrap(), 900);
+        assert!(resumed.confirmed());
+        pump(&mut restarted, &mut new_session, &mut resumed);
+        assert_eq!(restarted.value(1).unwrap(), 900);
+        assert!(!doc.receive(&mut sa, &intent).unwrap());
+        assert_eq!(doc.value(1).unwrap(), 900);
+    }
+    #[test]
+    fn unaccepted_flight_and_a_newer_ram_edit_rebase_without_dropping_either() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut s = Session::default();
+        pump(&mut doc, &mut s, &mut c);
+        c.set(&[(1, 200)]).unwrap();
+        let _lost = c.generate().unwrap().unwrap();
+        c.set(&[(1, 800)]).unwrap();
+        let (mut s, _) = doc.open_session(&[1; 16], c.resume_sequence()).unwrap();
+        let mount = doc.generate(&mut s).unwrap().unwrap();
+        let mut next = StateAdapter::new(schema(), "test", &mount, [1; 16]).unwrap();
+        next.restore_pending(&c).unwrap();
+        assert_eq!(next.value(1).unwrap(), 800);
+        pump(&mut doc, &mut s, &mut next);
+        assert_eq!(doc.value(1).unwrap(), 800);
+        assert_eq!(doc.receipt(&[1; 16]).unwrap().unwrap().1.sequence, 2);
+    }
+    #[test]
+    fn all_policy_checks_precede_mutation_including_replayed_or_malformed_batches() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let mut c = client(1);
+        let mut s = Session::default();
+        pump(&mut doc, &mut s, &mut c);
+        let old = doc.save().unwrap();
+        for values in [
+            vec![(1, Value::Number(200.)), (3, Value::Boolean(true))],
+            vec![(1, Value::Text("wrong".into()))],
+            vec![(1, Value::Number(1001.))],
+            vec![(2, Value::Text("x".repeat(MAX_TEXT_BYTES + 1)))],
+            vec![(1, Value::Number(1.)), (1, Value::Number(2.))],
+            vec![],
+        ] {
+            let encoded = encode_state_request(&StateRequest::Write {
+                sequence: 1,
+                values,
+            });
+            if let Ok(data) = encoded {
+                assert!(doc.receive(&mut s, &data).is_err());
+            } else {
+                // The packed encoder rejects oversized values before a packet
+                // can enter the authority; its state must still be untouched.
+            }
+            assert_eq!(doc.save().unwrap(), old);
+        }
+        assert!(
+            doc.receive(
+                &mut s,
+                &encode_state_request(&StateRequest::Hello {
+                    writer: vec![2; 16],
+                    resume: 0
+                })
+                .unwrap()
+            )
+            .is_err()
+        );
+        c.set(&[(1, 500)]).unwrap();
+        let good = c.generate().unwrap().unwrap();
+        doc.receive(&mut s, &good).unwrap();
+        let committed = doc.save().unwrap();
+        let bad = encode_state_request(&StateRequest::Write {
+            sequence: 1,
+            values: vec![(1, Value::Number(1.))],
+        })
+        .unwrap();
+        assert!(doc.receive(&mut s, &bad).is_err());
+        assert_eq!(doc.save().unwrap(), committed);
+    }
+    #[test]
+    fn journal_replay_is_root_chained_and_only_changed_nodes_are_transferred() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        let checkpoint = doc.clone();
+        let mut c = client(1);
+        let mut s = Session::default();
+        pump(&mut doc, &mut s, &mut c);
+        let admission = doc.journal_delta(&checkpoint).unwrap();
+        let before = doc.clone();
+        c.set(&[(1, 600)]).unwrap();
+        pump(&mut doc, &mut s, &mut c);
+        let record = doc.journal_delta(&before).unwrap();
+        assert!(record.len() < doc.save().unwrap().len());
+        let mut restored = checkpoint;
+        restored.replay(&admission).unwrap();
+        restored.replay(&record).unwrap();
+        assert_eq!(restored.root_hash(), doc.root_hash());
+        assert!(restored.replay(&record).is_err());
+        let old = restored.root_hash();
+        let mut corrupt = record;
+        let last = corrupt.len() - 1;
+        corrupt[last] ^= 1;
+        assert!(restored.replay(&corrupt).is_err());
+        assert_eq!(restored.root_hash(), old);
+    }
+    #[test]
+    fn signals_are_bounded_by_server_time_and_expire_without_writing_state() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        doc.set_signal_fields(&[1]).unwrap();
+        for t in 1..=400 {
+            doc.set_wall_time(t);
+            doc.set(&[(1, if t % 2 == 0 { 1000 } else { 0 })]).unwrap();
+        }
+        let signal = doc.signal(1, 400, 300);
+        assert!(signal.len() <= 300);
+        assert!(signal.len() > 290);
+        let before = doc.root_hash();
+        assert!(doc.signal(1, 701, 300).is_empty());
+        assert_eq!(doc.root_hash(), before);
+    }
+    #[test]
+    fn unrequested_history_is_absent_and_retention_changes_do_not_mutate_old_samples() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        doc.set_wall_time(1);
+        doc.set(&[(1, 100)]).unwrap();
+        assert!(doc.tree.subtree(&[3]).is_err());
+        doc.set_signal_fields(&[1, 3]).unwrap();
+        doc.set_wall_time(2);
+        doc.set(&[(1, 200)]).unwrap();
+        doc.set_typed_authority(&[(3, Value::Boolean(true))])
+            .unwrap();
+        assert_eq!(doc.signal(1, 2, 300).len(), 1);
+        assert_eq!(doc.signal(3, 2, 300).len(), 1);
+        // Failed policy updates are atomic; a text field cannot request a signal.
+        assert!(doc.set_signal_fields(&[2]).is_err());
+        doc.set_wall_time(3);
+        doc.set(&[(1, 300)]).unwrap();
+        assert_eq!(doc.signal(1, 3, 300).len(), 2);
+        let old_history = doc.tree.subtree(&[3]).unwrap();
+        let checkpoint = doc.save().unwrap();
+        let mut restored = Document::load(schema(), "test", &checkpoint).unwrap();
+        restored.set_wall_time(4);
+        restored.set(&[(1, 400)]).unwrap();
+        assert!(!old_history.shares_root(&restored.tree.subtree(&[3]).unwrap()));
+        assert_eq!(
+            old_history.hash(),
+            restored.tree.subtree(&[3]).unwrap().hash()
+        );
+        doc.set_signal_fields(&[]).unwrap();
+        doc.set_wall_time(4);
+        doc.set(&[(1, 400)]).unwrap();
+        assert!(old_history.shares_root(&doc.tree.subtree(&[3]).unwrap()));
+        assert_eq!(doc.signal(1, 4, 300).len(), 2);
+    }
+    #[test]
+    fn writer_capacity_and_expired_uncertain_replays_fail_explicitly() {
+        let mut doc = Document::new(schema(), "test").unwrap();
+        doc.wall = 100;
+        let mut edits = Vec::new();
+        for slot in 0..RECEIPTS {
+            let token = (slot as u128).to_le_bytes();
+            let receipt = Receipt {
+                writer: hash(&token),
+                sequence: 1,
+                digest: vec![0; 32],
+                time: 100,
+            };
+            edits.push(Edit {
+                path: path(2, slot),
+                schema: doc.extra_schema(2, slot),
+                value: Some(bytes(&receipt).unwrap()),
+            });
+        }
+        for chunk in edits.chunks(256) {
+            doc.tree = doc.tree.edit(doc.actor, chunk).unwrap().0;
+        }
+        assert!(doc.open_session(&[255; 16], 0).is_err());
+        doc.wall = RESUME_SECONDS + 101;
+        assert!(doc.open_session(&0_u128.to_le_bytes(), 1).is_err());
+        assert!(doc.open_session(&[255; 16], 0).is_ok());
     }
 }

@@ -163,7 +163,7 @@ mod tests {
                 )],
             )],
         );
-        outer.responder = Some(TouchResponder::Activate(Action::ToggleFocus));
+        outer.responder = Some(TouchResponder::Activate(Action::AppEvent(1)));
         outer.children[1].responder = Some(TouchResponder::Bubble);
         Arc::new(Scene::new(canvas(0, Rect::new(0., 0., 1280., 800.), vec![outer])).unwrap())
     }
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn dragging_bubbles_captures_outside_and_cancels_if_the_owner_changes() {
         let mut root = scene().root().clone();
-        root.children[0].responder = Some(TouchResponder::Drag(Action::Control(0)));
+        root.children[0].responder = Some(TouchResponder::Drag(Action::AppEvent(2)));
         let scene = Arc::new(Scene::new(root).unwrap());
         let mut input = InputRouter::default();
         let down = input.dispatch(scene.clone(), event(3, PointerPhase::Down, [170., 280.]));
@@ -223,7 +223,7 @@ mod tests {
             input
                 .dispatch(s.clone(), event(1, PointerPhase::Up, p))
                 .action,
-            Some(Action::ToggleFocus)
+            Some(Action::AppEvent(1))
         );
         assert_eq!(
             input.dispatch(s, event(1, PointerPhase::Up, p)).action,
@@ -315,35 +315,22 @@ mod tests {
                 input
                     .dispatch(s.clone(), event(id, PointerPhase::Up, [170., 280.]))
                     .action,
-                Some(Action::ToggleFocus)
+                Some(Action::AppEvent(1))
             );
         }
         let keyboard = InputRouter::activate(&s, 21);
         assert_eq!(keyboard.responder, Some(10));
-        assert_eq!(keyboard.action, Some(Action::ToggleFocus));
+        assert_eq!(keyboard.action, Some(Action::AppEvent(1)));
     }
     #[test]
-    fn remote_update_between_press_and_release_preserves_gesture_and_current_state() {
-        let mut local = crate::dashboard::Replica::new().unwrap();
-        let mut remote = crate::dashboard::Replica::new().unwrap();
-        let mut input = InputRouter::default();
-        let p = [450., 324.];
-        input.dispatch(
-            local.snapshot().scene().clone(),
-            event(1, PointerPhase::Down, p),
-        );
-        remote.set_enabled(false).unwrap();
-        local.merge(&remote.save()).unwrap();
-        let result = input.dispatch(
-            local.snapshot().scene().clone(),
-            event(1, PointerPhase::Up, p),
-        );
-        assert_eq!(result.action, Some(Action::ToggleFocus));
-        local.apply_action(result.action).unwrap();
-        assert!(local.snapshot().view().nodes.iter().any(|n| n.content
-            == otrios_interfaces::ViewContent::Switch {
-                label: "Toggle".into(),
-                enabled: true
-            }));
+    fn immutable_scene_replacement_between_press_and_release_preserves_capture() {
+        let old = scene();
+        let mut next = old.root().clone();
+        next.children[0].frame.x += 1.;
+        let next = Arc::new(Scene::new(next).unwrap());
+        let mut router = InputRouter::default();
+        router.dispatch(old, event(1, PointerPhase::Down, [170., 280.]));
+        let result = router.dispatch(next, event(1, PointerPhase::Up, [170., 280.]));
+        assert_eq!(result.action, Some(Action::AppEvent(1)));
     }
 }

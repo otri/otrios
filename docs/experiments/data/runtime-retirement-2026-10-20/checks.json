@@ -1,0 +1,39 @@
+{
+  "runtime_source": "5000476012ce09ab33ef8ce786d1f28586ba5a2e",
+  "required_workspace_check": {
+    "command": "bash scripts/check.sh",
+    "result": "pass"
+  },
+  "all_host_lint": {
+    "command": "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+    "result": "pass"
+  },
+  "native_worker_tests": {
+    "command": "cargo test -p otrios-dashboard --features direct --bin dashboard-direct --locked",
+    "tests": 6,
+    "result": "pass"
+  },
+  "signed_build_node_tests": {
+    "tests": 40,
+    "result": "pass"
+  },
+  "public_conformance": {
+    "command": "python3 scripts/test-dashboard-host.py --url https://otrios.otri.ca --credentials <private file>",
+    "staged_checks": 81,
+    "live_checks": 81,
+    "result": "pass"
+  },
+  "ci": {
+    "run": 149,
+    "url": "https://github.com/otri/otrios/actions/runs/39289297573",
+    "conclusion": "success"
+  },
+  "cleaned_arm_builder": {
+    "command": "docker build -f tools/dashboard/Dockerfile.armv7 -t otrios-dashboard-armv7:rust1.90 .",
+    "result": "pass",
+    "sdl_development_package_present": false,
+    "signed_native_sdl_elf_dependency": false
+  },
+  "physical_touch_retested": false,
+  "reboot_retested": false
+}

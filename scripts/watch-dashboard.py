@@ -17,7 +17,7 @@ def fingerprint(repo):
     for p in inputs(repo):h.update(str(p.relative_to(repo)).encode()+b'\0');h.update(p.read_bytes());h.update(b'\0')
     return h.hexdigest()
 def run(args,**kw):subprocess.run([str(x) for x in args],check=True,**kw)
-def rebuild(config,wanted):
+def rebuild(config,wanted,activate=True):
     repo=pathlib.Path(config['repo']);runtime=pathlib.Path(config['runtime']);build=runtime/'build';build.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='input-',dir=build) as tmp:
         temp=pathlib.Path(tmp)
@@ -34,8 +34,8 @@ def rebuild(config,wanted):
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        run([config['node'],'--test','scripts/test-dashboard-release-gate.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs'],cwd=source)
-        for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/release-gate.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
+        run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs'],cwd=source)
+        for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/session.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:
@@ -44,24 +44,24 @@ def rebuild(config,wanted):
     elif probe.stdout.strip()!='true':run(['docker','start',name])
     archive=build/'source.tar'
     with tarfile.open(archive,'w') as t:
-        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools']:t.add(source/item,arcname=item)
+        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools','web/shared/fonts']:t.add(source/item,arcname=item)
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
     feature,binary='direct','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--target','armv7-unknown-linux-gnueabihf'])
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
-    fallback=None
-    # New releases use the direct Slug renderer. The supervisor retains the
-    # previous signed release for rollback; no incomplete SDL UI is published.
+    run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=not bool(config.get('module_volume')),catalog=source/'apps/catalog.flex')
-    if config.get('module_volume'):
-        pointer=build/'module-pointer.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
-        run([sys.executable,source/'scripts/publish-dashboard-module.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--volume',config['module_volume'],'--marker',runtime/'module-host/published-release','--pointer',pointer,'--activate-origin'])
-    publisher.atomic(build/'source-id',wanted.encode());print('PUBLISHED '+release['id'],flush=True)
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=source/'apps/catalog.flex')
+    if activate:
+        pointer=build/'activation.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
+        run([sys.executable,source/'scripts/activate-dashboard-release.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--pointer',pointer])
+    if activate:publisher.atomic(build/'source-id',wanted.encode())
+    else:publisher.atomic(build/'staged-release.json',json.dumps(release,sort_keys=True).encode())
+    print(('PUBLISHED 'if activate else'STAGED ')+release['id'],flush=True)
     return release
 
 def feed_active(runtime):
@@ -92,7 +92,7 @@ def refresh_git(config):
         if old.exists():shutil.rmtree(old)
     publisher.atomic(marker,commit.encode());print('SOURCE '+commit,flush=True)
 
-def main(config,once):
+def main(config,once,activate=True):
     runtime=pathlib.Path(config['runtime']);lock=open(runtime/'watcher.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     repo=pathlib.Path(config['repo']);marker=runtime/'build/source-id';last=marker.read_text() if marker.exists() else None
     retry_at=0;next_git=0
@@ -104,12 +104,14 @@ def main(config,once):
             if once or (wanted!=last and time.monotonic()>=retry_at):
                 time.sleep(.5)
                 if fingerprint(repo)!=wanted:continue
-                rebuild(config,wanted);last=wanted
+                rebuild(config,wanted,activate);last=wanted
             if once:return
         except Exception as e:
-            print('BUILD KEPT PREVIOUS RELEASE: '+str(e),flush=True)
+            print('BUILD/ACTIVATION FAILED; inspect active pointer: '+str(e),flush=True)
             if once:raise
             retry_at=time.monotonic()+10
         time.sleep(1)
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--once',action='store_true');a=p.parse_args();main(json.loads(pathlib.Path(a.config).read_text()),a.once)
+    p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--once',action='store_true');p.add_argument('--stage-only',action='store_true');a=p.parse_args();
+    if a.stage_only and not a.once:p.error('--stage-only requires --once')
+    main(json.loads(pathlib.Path(a.config).read_text()),a.once,not a.stage_only)

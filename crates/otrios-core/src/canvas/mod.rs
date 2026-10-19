@@ -2,12 +2,24 @@
 //! Opt-in app-scoped Canvas runtime. No filesystem or network access in guest code.
 mod behavior;
 mod client;
+mod selection;
 mod state;
+mod transport;
 pub use behavior::Behavior;
-pub use client::Client;
+pub use client::{Client, ResourceUsage};
 use otrios_interfaces::canvas::*;
+pub use selection::StateSelection;
 use sha2::{Digest, Sha256};
-pub use state::{Document, Session};
+pub use state::{
+    DispatchPolicy, DispatchUsage, Document, MAX_INTENT_PAYLOAD_BYTES, Session, StateAdapter,
+    StateUsage,
+};
+pub use transport::{
+    DecodeBudget, WireUsage, compress_packet_into, decode_client, decode_server,
+    decode_state_request, decode_state_response, decoded_packet_bytes, encode_client,
+    encode_client_into, encode_server, encode_server_into, encode_state_request,
+    encode_state_request_into, encode_state_response, encode_state_response_into, wire_usage,
+};
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;
 pub fn hash(bytes: &[u8]) -> Vec<u8> {
@@ -50,6 +62,7 @@ fn check(bytes: &[u8]) -> Result<()> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES {
         return Err("Canvas message size limit".into());
     }
+    crate::flex_guard::validate(bytes, 32, MAX_BYTES * 2, MAX_BYTES)?;
     walk(
         Reader::get_root(bytes).map_err(err)?,
         0,
@@ -69,8 +82,6 @@ macro_rules! codec {
         }
     };
 }
-codec!(encode_client, decode_client, ClientMessage);
-codec!(encode_server, decode_server, ServerMessage);
 codec!(encode_ui, decode_ui, Ui);
 codec!(encode_app, decode_app, App);
 codec!(encode_catalog, decode_catalog, Catalog);

@@ -20,8 +20,7 @@ struct Mount {
     epoch: u32,
     ui: Ui,
     layout: Layout,
-    doc: Document,
-    session: Session,
+    doc: StateAdapter,
     behavior: Option<Behavior>,
     input: InputRouter,
     state_ref: String,
@@ -29,7 +28,6 @@ struct Mount {
     session_controls: bool,
     scene: OnceLock<Arc<Scene>>,
     visible: BTreeMap<u16, Value>,
-    snapshot: BTreeMap<u16, Value>,
     keyboard: Keyboard,
     editors: BTreeMap<u16, TextBuffer>,
     focus: Option<u16>,
@@ -42,14 +40,13 @@ struct Mount {
     stress_workload: Option<StressWorkload>,
     keyboard_pointer: Option<u32>,
     view: Option<Layout>,
-    pending: BTreeMap<u16, Value>,
     pad_preview: BTreeMap<u16, Value>,
-    sent_at: u64,
 }
 struct Request {
     epoch: u32,
     pair: (String, String),
     sent: bool,
+    reconnecting: bool,
 }
 enum MountDecision {
     Accept(u32),
@@ -58,10 +55,9 @@ enum MountDecision {
 /// Disposable two-peer CRDT workload. It never shares a document, session or
 /// persistence path with the admitted app's authoritative state.
 struct StressWorkload {
-    source: Document,
+    source: StateAdapter,
     sink: Document,
-    source_session: Session,
-    sink_session: Session,
+    session: Session,
     scope: String,
     field: u16,
     operations: u16,
@@ -69,10 +65,9 @@ struct StressWorkload {
 impl StressWorkload {
     fn new(schema: StateSchema, scope: String, field: u16) -> Result<Self> {
         Ok(Self {
-            source: Document::new(schema.clone(), &scope)?,
+            source: StateAdapter::new(schema.clone(), &scope, &[], state::writer_nonce()?)?,
             sink: Document::new(schema, &scope)?,
-            source_session: Session::default(),
-            sink_session: Session::default(),
+            session: Session::default(),
             scope,
             field,
             operations: 0,
@@ -80,32 +75,45 @@ impl StressWorkload {
     }
     fn step(&mut self) -> Result<bool> {
         if self.operations == 256 {
-            *self = Self::new(self.source.schema().clone(), self.scope.clone(), self.field)?;
+            *self = Self::new(self.sink.schema().clone(), self.scope.clone(), self.field)?;
         }
         let next = (self.source.value(self.field)? + 1) % 1001;
         let changed = self.source.set(&[(self.field, next)])?;
         for _ in 0..8 {
-            let a = self.source.generate(&mut self.source_session)?;
-            let b = self.sink.generate(&mut self.sink_session)?;
+            let a = self.source.generate()?;
+            if let Some(bytes) = a.as_ref() {
+                self.sink.receive(&mut self.session, bytes)?;
+            }
+            let b = self.sink.generate(&mut self.session)?;
+            if let Some(bytes) = b.as_ref() {
+                self.source.receive(bytes)?;
+            }
             if a.is_none() && b.is_none() {
                 break;
             }
-            if let Some(bytes) = a {
-                self.sink.receive(&mut self.sink_session, &bytes)?;
-            }
-            if let Some(bytes) = b {
-                self.source.receive(&mut self.source_session, &bytes)?;
-            }
         }
         if self.sink.value(self.field)? != next {
-            return Err("Diagnostic CRDT workload did not converge".into());
+            return Err("Diagnostic Merkle workload did not converge".into());
         }
         self.operations += u16::from(changed);
         Ok(changed)
     }
 }
+/// Read-only diagnostics sampled by the app owner. These logical byte/capacity
+/// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+pub struct ResourceUsage {
+    pub sampled_monotonic_ms: u64,
+    pub dispatch: DispatchUsage,
+    pub state: StateUsage,
+    pub behavior_cache_entries: usize,
+    pub behavior_cache_bytes: usize,
+    pub wire: WireUsage,
+}
 #[derive(Default)]
 pub struct Client {
+    wire_clock: u64,
+    decode_budget: DecodeBudget,
     generation: u32,
     requested: Option<Request>,
     decision: Option<MountDecision>,
@@ -119,8 +127,16 @@ pub struct Client {
     auth_required: bool,
     session_controls: bool,
     sign_out_requested: bool,
+    writer: Option<[u8; 16]>,
+    dispatch: DispatchPolicy,
 }
 impl Client {
+    pub fn set_dispatch_policy(&mut self, policy: DispatchPolicy) {
+        self.dispatch = policy;
+        if let Some(m) = &mut self.active {
+            m.doc.set_dispatch_policy(policy);
+        }
+    }
     pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
         self.font = Some(font);
     }
@@ -230,11 +246,12 @@ impl Client {
         if self.requested.is_some() || self.decision.is_some() {
             return false;
         }
-        self.local
-            || self
-                .active
-                .as_mut()
-                .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed(&m.session))
+        self.local || self.active.as_mut().is_none_or(|m| m.doc.confirmed())
+    }
+    /// A reconnect/mount handshake must not strand an idle old runtime. Only
+    /// unconfirmed user intent and active input prevent code replacement.
+    pub fn reload_ready(&self) -> bool {
+        !self.input_busy() && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
     }
     pub fn presentation(&self) -> Option<Presentation> {
         self.active.as_ref().and_then(|m| m.ui.presentation.clone())
@@ -309,11 +326,31 @@ impl Client {
     pub fn stress_stall_ms(&self) -> u64 {
         if self.stress_hz() == 31 { 250 } else { 0 }
     }
+    pub fn resource_usage(&self) -> ResourceUsage {
+        ResourceUsage {
+            sampled_monotonic_ms: self.wire_clock,
+            dispatch: self.dispatch_usage(),
+            state: self
+                .active
+                .as_ref()
+                .map_or_else(StateUsage::default, |m| m.doc.state_usage()),
+            behavior_cache_entries: self.cache.len(),
+            behavior_cache_bytes: self.cache.iter().map(|(_, bytes)| bytes.len()).sum(),
+            wire: wire_usage(),
+        }
+    }
+    pub fn dispatch_usage(&self) -> DispatchUsage {
+        self.active
+            .as_ref()
+            .map_or_else(DispatchUsage::default, |m| m.doc.dispatch_usage())
+    }
     pub fn pending_count(&mut self) -> usize {
         if self.confirmed() {
             0
         } else {
-            self.active.as_ref().map_or(0, |m| m.pending.len().max(1))
+            self.active
+                .as_ref()
+                .map_or(0, |m| m.doc.pending_count().max(1))
         }
     }
     pub fn open(&mut self, ui_ref: &str, state_ref: &str) {
@@ -334,12 +371,13 @@ impl Client {
             return;
         }
         if let Some(m) = &mut self.active {
-            m.session = Session::default();
+            m.doc.reconnect();
             self.generation = self.generation.saturating_add(1);
             self.requested = Some(Request {
                 epoch: self.generation,
                 pair: (m.ui.ui_ref.clone(), m.state_ref.clone()),
                 sent: false,
+                reconnecting: true,
             });
         }
     }
@@ -357,6 +395,17 @@ impl Client {
         self.open("app:home/ui", "app:home/state");
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.catalog.is_none() {
+            return Ok(None);
+        }
+        let writer = match self.writer {
+            Some(w) => w,
+            None => {
+                let w = state::writer_nonce()?;
+                self.writer = Some(w);
+                w
+            }
+        };
         if let Some(decision) = self.decision.take() {
             let message = match decision {
                 MountDecision::Accept(epoch) => ClientMessage::AcceptMount { epoch },
@@ -377,6 +426,7 @@ impl Client {
                 epoch: self.generation,
                 pair,
                 sent: false,
+                reconnecting: false,
             });
         }
         if let Some(r) = &mut self.requested {
@@ -390,6 +440,12 @@ impl Client {
                 state_ref: r.pair.1.clone(),
                 catalog_hash: self.catalog_hash.clone(),
                 known_code: self.cache.iter().map(|v| v.0.clone()).collect(),
+                writer: writer.to_vec(),
+                resume: self
+                    .active
+                    .as_ref()
+                    .filter(|m| m.state_ref == r.pair.1)
+                    .map_or(0, |m| m.doc.resume_sequence()),
             })
             .map(Some);
         }
@@ -397,7 +453,7 @@ impl Client {
             return Ok(None);
         }
         if let Some(m) = &mut self.active
-            && let Some(bytes) = m.doc.generate(&mut m.session)?
+            && let Some(bytes) = m.doc.generate()?
         {
             return encode_client(&ClientMessage::Sync {
                 epoch: m.epoch,
@@ -416,10 +472,14 @@ impl Client {
     ) -> Result<bool> {
         let description = decode_ui(ui)?;
         self.generation = self.generation.checked_add(1).ok_or("Epoch exhausted")?;
+        if self.writer.is_none() {
+            self.writer = Some(state::writer_nonce()?);
+        }
         self.requested = Some(Request {
             epoch: self.generation,
             pair: (description.ui_ref, state_ref.into()),
             sent: true,
+            reconnecting: false,
         });
         let changed = self.receive(&encode_server(&ServerMessage::Mounted {
             epoch: self.generation,
@@ -433,6 +493,7 @@ impl Client {
         Ok(changed)
     }
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
+        self.decode_budget.admit(bytes, self.wire_clock)?;
         match decode_server(bytes)? {
             ServerMessage::View { epoch, bytes } => {
                 let Some(m) = &mut self.active else {
@@ -463,6 +524,7 @@ impl Client {
                 if r.epoch != epoch {
                     return Ok(false);
                 }
+                let reconnecting = r.reconnecting;
                 let candidate = (|| -> Result<Mount> {
                     let e = self
                         .catalog
@@ -486,21 +548,20 @@ impl Client {
                         &code,
                         &self.cache,
                         &state,
-                        epoch,
-                        e.private || e.app.id == "monitoring",
+                        Qualification {
+                            epoch,
+                            private: e.private || e.app.id == "monitoring",
+                            writer: self.writer.ok_or("Missing writer nonce")?,
+                        },
                     )?;
+                    candidate.doc.set_dispatch_policy(self.dispatch);
                     if let Some(old) = &self.active
                         && old.state_ref == candidate.state_ref
                         && old.ui.state_schema == candidate.ui.state_schema
                     {
-                        candidate.doc = old.doc.clone();
-                        candidate.pending = old.pending.clone();
+                        candidate.doc.restore_pending(&old.doc)?;
                         candidate.now = old.now;
                         candidate.wall = old.wall;
-                        candidate.sent_at = old.sent_at;
-                        if !state.is_empty() {
-                            candidate.doc.merge_authority(&state)?;
-                        }
                         candidate.refresh()?;
                     }
                     candidate.session_controls = self.session_controls;
@@ -509,7 +570,21 @@ impl Client {
                     Ok(candidate)
                 })();
                 match candidate {
-                    Ok(candidate) => {
+                    Ok(mut candidate) => {
+                        if reconnecting
+                            && self.active.as_ref().is_some_and(|old| {
+                                old.ui == candidate.ui && old.state_ref == candidate.state_ref
+                            })
+                        {
+                            let mut current =
+                                self.active.take().ok_or("Missing reconnect activation")?;
+                            current.doc = candidate.doc;
+                            current.epoch = candidate.epoch;
+                            current.session_controls = candidate.session_controls;
+                            current.refresh()?;
+                            current.invalidate();
+                            candidate = current;
+                        }
                         if let Some(reference) = &candidate.ui.behavior
                             && !code.is_empty()
                             && !self.cache.iter().any(|v| v.0 == reference.sha256)
@@ -541,26 +616,11 @@ impl Client {
                 if epoch != m.epoch {
                     return Ok(false);
                 }
-                if m.doc.receive_authority(&mut m.session, &bytes)? {
+                if m.doc.receive(&bytes)? {
                     m.refresh()
                 } else {
                     Ok(false)
                 }
-            }
-            ServerMessage::Snapshot { epoch, values } => {
-                let Some(m) = &mut self.active else {
-                    return Ok(false);
-                };
-                if epoch != m.epoch {
-                    return Ok(false);
-                }
-                m.doc.validate_snapshot(&values)?;
-                let snapshot = values.into_iter().collect();
-                if m.snapshot == snapshot {
-                    return Ok(false);
-                }
-                m.snapshot = snapshot;
-                m.refresh()
             }
             ServerMessage::AccessRequired { epoch } => {
                 if self
@@ -580,6 +640,7 @@ impl Client {
                             epoch: self.generation,
                             pair: (old.ui.ui_ref, old.state_ref),
                             sent: false,
+                            reconnecting: false,
                         });
                         self.auth_required = true;
                     }
@@ -614,7 +675,9 @@ impl Client {
             .and_then(|m| m.ui.handlers.iter().find(|h| h.control == control))
             .cloned()
             .ok_or("Unknown app event")?;
-        if self.requested.is_some() && !matches!(h.operation, Operation::Back) {
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting)
+            && !matches!(h.operation, Operation::Back)
+        {
             return Ok(false);
         }
         match h.operation {
@@ -656,14 +719,14 @@ impl Client {
             }
             _ => {}
         }
-        if self.requested.is_some() {
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let current = h
             .fields
             .first()
-            .map(|id| m.doc.value(*id))
+            .map(|id| m.number(*id))
             .transpose()?
             .unwrap_or(0);
         let commands = if let Some(guest) = &mut m.behavior {
@@ -690,9 +753,7 @@ impl Client {
             return Err("Behavior exceeded event field scope".into());
         }
         if h.kind != GestureKind::Activate {
-            for (id, value) in commands {
-                m.pending.insert(id, Value::Number(f32::from(value)));
-            }
+            m.doc.defer(&commands)?;
             m.refresh()
         } else if m.doc.set(&commands)? {
             m.refresh()
@@ -736,7 +797,7 @@ impl Client {
             });
         let owned = m.keyboard_pointer == Some(event.id);
         if m.keyboard.visible && (key.is_some() || owned) {
-            if self.requested.is_some() {
+            if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 return Ok(false);
             }
             let edit = match event.phase {
@@ -819,11 +880,11 @@ impl Client {
             None
         };
         let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
-        if pad && self.requested.is_some() {
+        if pad && self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
         }
         if pad && let Some(g) = &delivery.gesture {
-            m.ink.gesture_normalized(event.id, g, m.now);
+            m.ink.gesture(event.id, g, m.now);
             m.invalidate();
         }
         // Pad moves are transient presentation data. Only the released point is
@@ -872,7 +933,7 @@ impl Client {
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {
-            m.flush()?;
+            m.doc.flush_pending();
         }
         Ok(changed)
     }
@@ -948,7 +1009,7 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
-        if self.requested.is_some() || self.active.is_none() {
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting) || self.active.is_none() {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
@@ -991,6 +1052,7 @@ impl Client {
     pub fn cancel(&mut self) -> Result<bool> {
         if let Some(m) = &mut self.active {
             m.input.cancel_all();
+            m.doc.flush_pending();
             m.keyboard.cancel();
             m.keyboard_pointer = None;
             m.ink.cancel();
@@ -1015,14 +1077,13 @@ impl Client {
         Ok(true)
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        self.wire_clock = self.wire_clock.max(now);
         let Some(m) = &mut self.active else {
             return Ok(false);
         };
         m.now = now;
         m.doc.set_wall_time(wall);
-        if now.saturating_sub(m.sent_at) >= 33 {
-            m.flush()?;
-        }
+        m.doc.advance(now);
         let clock = m.wall != wall
             && m.ui
                 .selectors
@@ -1084,9 +1145,9 @@ impl Client {
         let shift = |value: u16, delta: i16| {
             (i32::from(value) + i32::from(delta) * 10).clamp(0, 1000) as u16
         };
-        let a = shift(m.doc.value(h.fields[0])?, dx);
+        let a = shift(m.number(h.fields[0])?, dx);
         let b = if h.fields.len() > 1 {
-            shift(m.doc.value(h.fields[1])?, dy)
+            shift(m.number(h.fields[1])?, dy)
         } else {
             0
         };
@@ -1107,32 +1168,22 @@ impl Client {
         if h.kind == GestureKind::Activate {
             return Ok(None);
         }
-        Ok(Some(f64::from(m.doc.value(h.fields[0])?) / 10.))
+        Ok(Some(f64::from(m.number(h.fields[0])?) / 10.))
     }
 }
 impl Mount {
+    fn number(&self, id: u16) -> Result<u16> {
+        match self.read(id)? {
+            Value::Number(n) => Ok(n as u16),
+            _ => Err("Not a normalized field".into()),
+        }
+    }
     fn read(&self, id: u16) -> Result<Value> {
         self.pad_preview
             .get(&id)
-            .or_else(|| self.pending.get(&id))
-            .or_else(|| self.snapshot.get(&id))
             .cloned()
             .map(Ok)
             .unwrap_or_else(|| self.doc.typed_value(id))
-    }
-    fn flush(&mut self) -> Result<bool> {
-        if self.pending.is_empty() {
-            return Ok(false);
-        }
-        let commands = self
-            .pending
-            .iter()
-            .map(|(k, v)| (*k, v.clone()))
-            .collect::<Vec<_>>();
-        let changed = self.doc.set_typed(&commands)?;
-        self.pending.clear();
-        self.sent_at = self.now;
-        Ok(changed)
     }
     fn invalidate(&mut self) {
         self.scene.take();
@@ -1154,15 +1205,24 @@ impl Mount {
         Ok(true)
     }
 }
+struct Qualification {
+    epoch: u32,
+    private: bool,
+    writer: [u8; 16],
+}
 fn qualify(
     ui: Ui,
     state_ref: &str,
     code: &[u8],
     cache: &VecDeque<(Vec<u8>, Vec<u8>)>,
     state: &[u8],
-    epoch: u32,
-    private: bool,
+    identity: Qualification,
 ) -> Result<Mount> {
+    let Qualification {
+        epoch,
+        private,
+        writer,
+    } = identity;
     if ui.format != "otrios-canvas-v2"
         || ui.title.len() > 96
         || ui.selectors.len() > 128
@@ -1300,11 +1360,7 @@ fn qualify(
     };
     let layout = Layout::from_bytes(&ui.layout)?;
     validate_responders(&ui, layout.blueprint())?;
-    let doc = if state.is_empty() {
-        Document::new(ui.state_schema.clone(), state_ref)?
-    } else {
-        Document::load(ui.state_schema.clone(), state_ref, state)?
-    };
+    let doc = StateAdapter::for_ui(&ui, state_ref, state, writer)?;
     let mut editors = BTreeMap::new();
     if let Some(Presentation::Editor { fields }) = &ui.presentation {
         for id in fields {
@@ -1320,7 +1376,6 @@ fn qualify(
         ui,
         layout,
         doc,
-        session: Session::default(),
         behavior,
         input: InputRouter::default(),
         state_ref: state_ref.into(),
@@ -1328,7 +1383,6 @@ fn qualify(
         session_controls: false,
         scene: OnceLock::new(),
         visible: BTreeMap::new(),
-        snapshot: BTreeMap::new(),
         keyboard: Keyboard::default(),
         editors,
         focus: None,
@@ -1341,9 +1395,7 @@ fn qualify(
         stress_workload: None,
         keyboard_pointer: None,
         view: None,
-        pending: BTreeMap::new(),
         pad_preview: BTreeMap::new(),
-        sent_at: 0,
     };
     m.visible = selected_values(&m)?;
     resolve_scene(&m)?;
@@ -1435,7 +1487,7 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
                 n.children
-                    .extend(ink.nodes_normalized([n.frame.width, n.frame.height], 4_000_000_000));
+                    .extend(ink.nodes([n.frame.width, n.frame.height], 4_000_000_000));
             } else {
                 for c in &mut n.children {
                     append(c, control, ink)

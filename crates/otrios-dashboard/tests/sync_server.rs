@@ -2,7 +2,7 @@
 #![cfg(feature = "server")]
 mod common;
 use common::*;
-use otrios_core::canvas::{self, Document, Session};
+use otrios_core::canvas::{self, Document, StateAdapter};
 use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
 #[test]
 fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
@@ -27,6 +27,8 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             state_ref: "app:monitoring/state".into(),
             catalog_hash: canvas::hash(&room.catalog),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -40,6 +42,8 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             state_ref: "app:demo/state".into(),
             catalog_hash: vec![0; 32],
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -58,20 +62,19 @@ fn public_app_mount_is_atomic_and_accepted_edits_are_persisted_separately() {
     };
     assert_eq!(canvas::hash(&ui), ui_hash);
     accept(&mut s, 1);
-    let mut doc = Document::load(room.schema.clone(), "app:demo/state", &state).unwrap();
+    let mut doc =
+        StateAdapter::new(room.schema.clone(), "app:demo/state", &state, [9; 16]).unwrap();
     doc.set(&[(1, 731)]).unwrap();
-    let mut session = Session::default();
     for _ in 0..20 {
-        if let Some(bytes) = doc.generate(&mut session).unwrap() {
+        while let Some(bytes) = doc.generate().unwrap() {
             send(&mut s, ClientMessage::Sync { epoch: 1, bytes });
         }
         let ServerMessage::Sync { bytes, .. } = read(&mut s) else {
             panic!("missing sync")
         };
-        doc.receive_authority(&mut session, &bytes).unwrap();
-        let bytes = std::fs::read(state_file(&room, "demo")).unwrap();
-        let saved = Document::load(room.schema.clone(), "app:demo/state", &bytes).unwrap();
-        if saved.value(1).unwrap() == 731 {
+        doc.receive(&bytes).unwrap();
+        let saved = stored(&room, room.schema.clone(), "app:demo/state", "demo");
+        if saved.value(1).unwrap() == 731 && doc.confirmed() {
             return;
         }
     }
@@ -100,7 +103,6 @@ fn read_epoch(socket: &mut Socket, wanted: u32) -> ServerMessage {
             ServerMessage::Mounted { epoch, .. }
             | ServerMessage::Sync { epoch, .. }
             | ServerMessage::View { epoch, .. }
-            | ServerMessage::Snapshot { epoch, .. }
             | ServerMessage::AccessRequired { epoch }
             | ServerMessage::Error { epoch, .. } => *epoch,
         };
@@ -112,26 +114,20 @@ fn read_epoch(socket: &mut Socket, wanted: u32) -> ServerMessage {
 fn persisted_edit(
     room: &Room,
     socket: &mut Socket,
-    doc: &mut Document,
-    session: &mut Session,
+    doc: &mut StateAdapter,
     epoch: u32,
     value: u16,
 ) {
     doc.set(&[(1, value)]).unwrap();
     for _ in 0..20 {
-        if let Some(bytes) = doc.generate(session).unwrap() {
+        while let Some(bytes) = doc.generate().unwrap() {
             send(socket, ClientMessage::Sync { epoch, bytes });
         }
         if let ServerMessage::Sync { bytes, .. } = read_epoch(socket, epoch) {
-            doc.receive_authority(session, &bytes).unwrap();
+            doc.receive(&bytes).unwrap();
         }
-        let saved = Document::load(
-            room.schema.clone(),
-            "app:demo/state",
-            &std::fs::read(state_file(room, "demo")).unwrap(),
-        )
-        .unwrap();
-        if saved.value(1).unwrap() == value {
+        let saved = stored(room, room.schema.clone(), "app:demo/state", "demo");
+        if saved.value(1).unwrap() == value && doc.confirmed() {
             return;
         }
     }
@@ -146,9 +142,9 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
         panic!("no candidate")
     };
     accept(&mut s, 1);
-    let mut doc = Document::load(room.schema.clone(), "app:demo/state", &state).unwrap();
-    let mut session = Session::default();
-    persisted_edit(&room, &mut s, &mut doc, &mut session, 1, 100);
+    let mut doc =
+        StateAdapter::new(room.schema.clone(), "app:demo/state", &state, [9; 16]).unwrap();
+    persisted_edit(&room, &mut s, &mut doc, 1, 100);
     // A valid candidate can be rejected by its host after dependency qualification.
     mount(&mut s, &room, "demo", 2);
     assert!(matches!(
@@ -156,9 +152,9 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
         ServerMessage::Mounted { .. }
     ));
     // The old activation can still complete edits before a decision.
-    persisted_edit(&room, &mut s, &mut doc, &mut session, 1, 200);
+    persisted_edit(&room, &mut s, &mut doc, 1, 200);
     send(&mut s, ClientMessage::CancelMount { epoch: 2 });
-    persisted_edit(&room, &mut s, &mut doc, &mut session, 1, 300);
+    persisted_edit(&room, &mut s, &mut doc, 1, 300);
     send(
         &mut s,
         ClientMessage::Mount {
@@ -167,19 +163,21 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
             state_ref: "wrong-root".into(),
             catalog_hash: canvas::hash(&room.catalog),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
     assert!(matches!(
         read_epoch(&mut s, 3),
         ServerMessage::Error { epoch: 3, .. }
     ));
-    persisted_edit(&room, &mut s, &mut doc, &mut session, 1, 400);
+    persisted_edit(&room, &mut s, &mut doc, 1, 400);
     mount(&mut s, &room, "monitoring", 4);
     assert!(matches!(
         read_epoch(&mut s, 4),
         ServerMessage::AccessRequired { epoch: 4 }
     ));
-    persisted_edit(&room, &mut s, &mut doc, &mut session, 1, 500);
+    persisted_edit(&room, &mut s, &mut doc, 1, 500);
 }
 #[test]
 fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_files() {
@@ -190,9 +188,9 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
         panic!("no first candidate")
     };
     accept(&mut s, 1);
-    let mut doc = Document::load(room.schema.clone(), "app:demo/state", &state).unwrap();
-    let mut session = Session::default();
-    persisted_edit(&room, &mut s, &mut doc, &mut session, 1, 731);
+    let mut doc =
+        StateAdapter::new(room.schema.clone(), "app:demo/state", &state, [9; 16]).unwrap();
+    persisted_edit(&room, &mut s, &mut doc, 1, 731);
     let old_file = state_file(&room, "demo");
     let before = std::fs::read(&old_file).unwrap();
     let mut catalog = canvas::decode_catalog(&room.catalog).unwrap();
@@ -218,24 +216,28 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             state_ref: "app:demo/state-v2".into(),
             catalog_hash: canvas::hash(&room.catalog),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 2) else {
         panic!("no new state candidate")
     };
-    let fresh = Document::load(ui.state_schema, "app:demo/state-v2", &state).unwrap();
+    let mut fresh =
+        StateAdapter::new(ui.state_schema, "app:demo/state-v2", &state, [9; 16]).unwrap();
     assert_eq!(fresh.value(1).unwrap(), 0);
     let new_file = state_file_ref(&room, "demo", "app:demo/state-v2");
     assert_ne!(old_file, new_file);
     assert!(new_file.is_file());
     accept(&mut s, 2);
-    assert!(matches!(
-        read_epoch(&mut s, 2),
-        ServerMessage::Sync { epoch: 2, .. }
-    ));
+    // Mounted already carried the offered snapshot; AcceptMount must not
+    // depend on a redundant retransmission. ACK the original staged frame.
+    while let Some(bytes) = fresh.generate().unwrap() {
+        send(&mut s, ClientMessage::Sync { epoch: 2, bytes });
+    }
     // A packet from the previous activation cannot change either root after commit.
     doc.set(&[(1, 900)]).unwrap();
-    if let Some(bytes) = doc.generate(&mut session).unwrap() {
+    while let Some(bytes) = doc.generate().unwrap() {
         send(&mut s, ClientMessage::Sync { epoch: 1, bytes });
     }
     // A fresh mount is an ordered response barrier after the ignored packet.
@@ -247,6 +249,8 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             state_ref: "app:demo/state-v2".into(),
             catalog_hash: canvas::hash(&room.catalog),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
     assert!(matches!(
@@ -261,4 +265,161 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
     )
     .unwrap();
     assert_eq!(saved.value(1).unwrap(), 0);
+}
+
+#[test]
+fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
+    let mut room = room(false, 28800);
+    let mut s = socket(&room.public, None);
+    mount(&mut s, &room, "demo", 1);
+    let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
+        panic!("no mount")
+    };
+    let mut client =
+        StateAdapter::new(room.schema.clone(), "app:demo/state", &state, [9; 16]).unwrap();
+    accept(&mut s, 1);
+    while let Some(bytes) = client.generate().unwrap() {
+        send(&mut s, ClientMessage::Sync { epoch: 1, bytes });
+    }
+    let file = state_file(&room, "demo");
+    let log = file.with_extension("merkle.log");
+    let backup = log.with_extension("backup");
+    std::fs::rename(&log, &backup).unwrap();
+    std::fs::create_dir(&log).unwrap();
+    client.set(&[(1, 731)]).unwrap();
+    let bytes = client.generate().unwrap().unwrap();
+    send(&mut s, ClientMessage::Sync { epoch: 1, bytes });
+    assert!(matches!(read_epoch(&mut s, 1), ServerMessage::Error { .. }));
+    assert!(!client.confirmed());
+    assert_eq!(client.value(1).unwrap(), 731);
+    room.child.kill().unwrap();
+    room.child.wait().unwrap();
+    std::fs::remove_dir(&log).unwrap();
+    std::fs::rename(&backup, &log).unwrap();
+    room.child = std::process::Command::new(env!("CARGO_BIN_EXE_dashboard-server"))
+        .args([
+            "--bind",
+            &room.private,
+            "--public-bind",
+            &room.public,
+            "--app-state",
+            room.root.join("state.apps").to_str().unwrap(),
+            "--apps",
+            room.root.join("apps").to_str().unwrap(),
+            "--origin",
+            ORIGIN,
+        ])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::net::TcpStream::connect(&room.public).is_err() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(
+        stored(&room, room.schema.clone(), "app:demo/state", "demo")
+            .value(1)
+            .unwrap(),
+        0
+    );
+    let mut s = socket(&room.public, None);
+    send(
+        &mut s,
+        ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: "app:demo/ui".into(),
+            state_ref: "app:demo/state".into(),
+            catalog_hash: canvas::hash(&room.catalog),
+            known_code: vec![],
+            writer: vec![9; 16],
+            resume: client.resume_sequence(),
+        },
+    );
+    let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
+        panic!("no resumed mount")
+    };
+    let mut resumed =
+        StateAdapter::new(room.schema.clone(), "app:demo/state", &state, [9; 16]).unwrap();
+    resumed.restore_pending(&client).unwrap();
+    accept(&mut s, 1);
+    persisted_edit(&room, &mut s, &mut resumed, 1, 731);
+    assert!(resumed.confirmed());
+}
+
+#[test]
+fn packed_mounts_confirm_durable_edits_for_independent_writers() {
+    let room = room(false, 28800);
+    for writer_id in [11, 12] {
+        let mut socket = socket(&room.public, None);
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: "app:demo/ui".into(),
+                state_ref: "app:demo/state".into(),
+                catalog_hash: canvas::hash(&room.catalog),
+                known_code: vec![],
+                writer: vec![writer_id; 16],
+                resume: 0,
+            },
+        );
+        let ServerMessage::Mounted { state, .. } = read(&mut socket) else {
+            panic!("no mount")
+        };
+        let mut client = StateAdapter::new(
+            room.schema.clone(),
+            "app:demo/state",
+            &state,
+            [writer_id; 16],
+        )
+        .unwrap();
+        accept(&mut socket, 1);
+        persisted_edit(
+            &room,
+            &mut socket,
+            &mut client,
+            1,
+            if writer_id == 12 { 882 } else { 881 },
+        );
+        assert!(client.confirmed());
+    }
+}
+
+#[test]
+fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
+    let room = room(false, 28800);
+    let checkpoint = state_file(&room, "monitoring");
+    let journal = checkpoint.with_extension("merkle.log");
+    let before = std::fs::read(&checkpoint).unwrap();
+    let before_log = std::fs::read(&journal).unwrap_or_default();
+    for id in 20..28_u8 {
+        let mut socket = socket(&room.private, None);
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: "app:monitoring/ui".into(),
+                state_ref: "app:monitoring/state".into(),
+                catalog_hash: canvas::hash(&room.catalog),
+                known_code: vec![],
+                writer: vec![id; 16],
+                resume: 0,
+            },
+        );
+        let ServerMessage::Mounted { ui, state, .. } = read(&mut socket) else {
+            panic!("missing read-only mount")
+        };
+        let ui = canvas::decode_ui(&ui).unwrap();
+        let mut client =
+            StateAdapter::for_ui(&ui, "app:monitoring/state", &state, [id; 16]).unwrap();
+        assert!(client.confirmed());
+        assert!(client.set(&[(1, 123)]).is_err());
+        accept(&mut socket, 1);
+        while let Some(bytes) = client.generate().unwrap() {
+            send(&mut socket, ClientMessage::Sync { epoch: 1, bytes });
+        }
+    }
+    assert_eq!(std::fs::read(checkpoint).unwrap(), before);
+    assert_eq!(std::fs::read(journal).unwrap_or_default(), before_log);
 }

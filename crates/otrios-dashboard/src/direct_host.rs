@@ -178,6 +178,7 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     display.draw(surface.projection(), animated)?;
                     if drawn >= capture_after
+                        && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()
                     {
                         let info = display.info();

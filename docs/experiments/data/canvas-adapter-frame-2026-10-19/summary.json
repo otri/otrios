@@ -1,0 +1,306 @@
+{
+  "baseline": {
+    "paired_10hz": {
+      "trials": 3,
+      "ack_p50_ms": {
+        "median": 49.399,
+        "min": 44.017,
+        "max": 54.399
+      },
+      "ack_p95_ms": {
+        "median": 123.14,
+        "min": 122.312,
+        "max": 123.359
+      },
+      "observe_p50_ms": {
+        "median": 48.46,
+        "min": 42.941,
+        "max": 52.469
+      },
+      "observe_p95_ms": {
+        "median": 122.174,
+        "min": 121.281,
+        "max": 123.145
+      },
+      "cpu_percent_one_core": {
+        "median": 40.31214772245033,
+        "min": 35.54256599235139,
+        "max": 44.35054059087683
+      },
+      "cpu_ms_per_operation_including_mount": {
+        "median": 43.40479499999999,
+        "min": 37.698875,
+        "max": 48.356915
+      },
+      "observer_payload_down_bytes_per_update": {
+        "median": 271.7944444444444,
+        "min": 266.43333333333334,
+        "max": 275.73333333333335
+      },
+      "observer_ws_bidir_bytes_per_update": {
+        "median": 393.4166666666667,
+        "min": 387.97777777777776,
+        "max": 397.4222222222222
+      },
+      "actual_hz": {
+        "median": 9.55949476421477,
+        "min": 9.554987611680671,
+        "max": 9.559627354504842
+      }
+    },
+    "paired_30hz": {
+      "trials": 3,
+      "ack_p50_ms": {
+        "median": 51.228,
+        "min": 46.46,
+        "max": 57.3
+      },
+      "ack_p95_ms": {
+        "median": 129.48,
+        "min": 125.211,
+        "max": 129.991
+      },
+      "observe_p50_ms": {
+        "median": 49.704,
+        "min": 45.043,
+        "max": 55.203
+      },
+      "observe_p95_ms": {
+        "median": 127.401,
+        "min": 122.219,
+        "max": 128.848
+      },
+      "cpu_percent_one_core": {
+        "median": 57.01539734338925,
+        "min": 51.51628836253544,
+        "max": 60.76263985294149
+      },
+      "cpu_ms_per_operation_including_mount": {
+        "median": 35.81631875,
+        "min": 29.679228125,
+        "max": 42.12103125
+      },
+      "observer_payload_down_bytes_per_update": {
+        "median": 335.8833333333333,
+        "min": 332.3433333333333,
+        "max": 336.27666666666664
+      },
+      "observer_ws_bidir_bytes_per_update": {
+        "median": 459.24333333333334,
+        "min": 455.6433333333333,
+        "max": 459.6433333333333
+      },
+      "actual_hz": {
+        "median": 16.558070172485984,
+        "min": 15.080778107539697,
+        "max": 17.742547475271675
+      }
+    },
+    "native_5hz": {
+      "trials": 3,
+      "feedback_p50_ms": {
+        "median": 51.801,
+        "min": 50.844,
+        "max": 55.917
+      },
+      "feedback_p95_ms": {
+        "median": 68.119,
+        "min": 66.585,
+        "max": 70.302
+      },
+      "feedback_p99_ms": {
+        "median": 78.534,
+        "min": 76.887,
+        "max": 78.653
+      },
+      "cpu_percent_one_core": {
+        "median": 51.42078405514898,
+        "min": 51.3989199075102,
+        "max": 52.29161511265944
+      },
+      "system_cpu_percent_one_core": {
+        "median": 121.34086629001884,
+        "min": 119.30940481599275,
+        "max": 122.00120554550935
+      },
+      "kernel_flips_per_second": {
+        "median": 54.99616464307755,
+        "min": 54.969536229077036,
+        "max": 55.212509736549485
+      },
+      "payload_down_bytes_per_update": {
+        "median": 255.3375,
+        "min": 255.3375,
+        "max": 255.3375
+      },
+      "ws_bidir_bytes_per_update": {
+        "median": 377.3875,
+        "min": 377.3875,
+        "max": 377.3875
+      },
+      "actual_hz": {
+        "median": 5.006114613566334,
+        "min": 5.005424434520443,
+        "max": 5.006495128893767
+      },
+      "presentation_samples": 447
+    }
+  },
+  "merkle": {
+    "paired_10hz": {
+      "trials": 3,
+      "ack_p50_ms": {
+        "median": 63.2,
+        "min": 53.177,
+        "max": 70.171
+      },
+      "ack_p95_ms": {
+        "median": 124.786,
+        "min": 122.147,
+        "max": 134.547
+      },
+      "observe_p50_ms": {
+        "median": 63.786,
+        "min": 56.659,
+        "max": 70.548
+      },
+      "observe_p95_ms": {
+        "median": 125.139,
+        "min": 123.114,
+        "max": 146.338
+      },
+      "cpu_percent_one_core": {
+        "median": 28.86872565135481,
+        "min": 24.626527283866572,
+        "max": 32.99219436574181
+      },
+      "cpu_ms_per_operation_including_mount": {
+        "median": 30.905565000000003,
+        "min": 27.11176,
+        "max": 35.41361500000001
+      },
+      "observer_payload_down_bytes_per_update": {
+        "median": 12437.044444444444,
+        "min": 8431.777777777777,
+        "max": 16739.066666666666
+      },
+      "observer_ws_bidir_bytes_per_update": {
+        "median": 12629.044444444444,
+        "min": 8622.733333333334,
+        "max": 16932.11111111111
+      },
+      "actual_hz": {
+        "median": 9.528677105830962,
+        "min": 9.20816029266643,
+        "max": 9.548731885301066
+      }
+    },
+    "paired_30hz": {
+      "trials": 3,
+      "ack_p50_ms": {
+        "median": 65.022,
+        "min": 55.122,
+        "max": 73.867
+      },
+      "ack_p95_ms": {
+        "median": 135.943,
+        "min": 132.603,
+        "max": 156.741
+      },
+      "observe_p50_ms": {
+        "median": 66.787,
+        "min": 56.09,
+        "max": 74.448
+      },
+      "observe_p95_ms": {
+        "median": 141.619,
+        "min": 134.117,
+        "max": 155.98
+      },
+      "cpu_percent_one_core": {
+        "median": 38.28587637610378,
+        "min": 35.874284428922,
+        "max": 40.329629599023974
+      },
+      "cpu_ms_per_operation_including_mount": {
+        "median": 30.153803125000003,
+        "min": 24.421799999999998,
+        "max": 35.5537125
+      },
+      "observer_payload_down_bytes_per_update": {
+        "median": 14551.92,
+        "min": 10433.306666666667,
+        "max": 18958.773333333334
+      },
+      "observer_ws_bidir_bytes_per_update": {
+        "median": 14743.92,
+        "min": 10625.306666666667,
+        "max": 19150.773333333334
+      },
+      "actual_hz": {
+        "median": 12.826081479747769,
+        "min": 11.562497097981847,
+        "max": 14.983605464824942
+      }
+    },
+    "native_5hz": {
+      "trials": 3,
+      "feedback_p50_ms": {
+        "median": 44.146,
+        "min": 44.061,
+        "max": 45.867
+      },
+      "feedback_p95_ms": {
+        "median": 58.348,
+        "min": 58.23,
+        "max": 65.761
+      },
+      "feedback_p99_ms": {
+        "median": 67.481,
+        "min": 67.321,
+        "max": 70.72
+      },
+      "cpu_percent_one_core": {
+        "median": 36.34494599586893,
+        "min": 36.21308928839507,
+        "max": 36.85840666377697
+      },
+      "system_cpu_percent_one_core": {
+        "median": 133.18032285211538,
+        "min": 132.9453208760913,
+        "max": 134.58974948287752
+      },
+      "kernel_flips_per_second": {
+        "median": 52.608239598636764,
+        "min": 52.586676050521724,
+        "max": 52.763653311293766
+      },
+      "payload_down_bytes_per_update": {
+        "median": 17942.0,
+        "min": 16776.05,
+        "max": 18910.25
+      },
+      "ws_bidir_bytes_per_update": {
+        "median": 18134.05,
+        "min": 16968.1,
+        "max": 19102.3
+      },
+      "actual_hz": {
+        "median": 5.0040289799219035,
+        "min": 5.003909482255392,
+        "max": 5.006137818659095
+      },
+      "presentation_samples": 447
+    }
+  },
+  "binaries": {
+    "baseline": {
+      "dashboard-direct": "f1625994ab2946094ec77a593614e7343a4289d8f92264904620d7490fe1c0bf",
+      "canvas-adapter-bench": "cb17015ade648b218a5757ebe31c53804f6a93c4cac126d7da5c3d3947f5c394"
+    },
+    "merkle": {
+      "dashboard-direct": "fa43ae4b2514aa0de0ec5ff9c37cad7ab0d19657a1a073cd29b84c3221cb551a",
+      "canvas-adapter-bench": "6b9aab351a00850ea1964b8df1d6ece0404378136cf30ccdec7ac3a8d10b7013"
+    }
+  }
+}

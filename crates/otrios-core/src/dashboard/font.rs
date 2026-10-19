@@ -532,7 +532,7 @@ impl<'a> Reader<'a> {
 pub(crate) fn test_font() -> Font {
     let bytes = std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+            .join("../../web/shared/fonts/Roboto-Regular.otq.zst"),
     )
     .unwrap();
     Font::from_zstd(&bytes, super::font_reference::RESOURCE_SHA256).unwrap()
@@ -543,7 +543,7 @@ mod tests {
     fn compressed() -> Vec<u8> {
         std::fs::read(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+                .join("../../web/shared/fonts/Roboto-Regular.otq.zst"),
         )
         .unwrap()
     }

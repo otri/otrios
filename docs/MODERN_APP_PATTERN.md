@@ -64,8 +64,11 @@ State roots. The trusted native listener retains unattended private access;
 browser grants come from the existing server session cookie. Authentication is
 never a CRDT field.
 
-The public browser transport is `/apps/stream`; the authority sends a scoped
-Mounted/AcceptMount/Sync stream and release notices. Session revocation invalidates private
+The public browser transport is `/session`; its stable opening hello negotiates
+state compatibility before the channel-1 Mounted/AcceptMount/Sync stream starts.
+Release/upgrade control remains available independently of state recovery, and
+channel 2 carries ephemeral ink on that same socket. The old `/apps/stream` and
+`/demo/ink` routes are retired. Session revocation invalidates private
 mounts. The browser drops their scene, controls and private working state rather
 than retaining a hidden private view. Sign-in reconnects the transport so its
 upgrade carries the new HttpOnly cookie. The browser verifies the catalog against
@@ -95,19 +98,21 @@ the presentation clock continues independently.
 Monitoring uses a private, read-only, replaceable FlexBuffers Layout aggregate.
 Its app owns navigation/header composition; the authority supplies the current
 weekly chart projection with gaps preserved. Feed replacement does not append
-metric samples or binary layouts to Automerge history. This is the current
+metric samples or binary layouts to durable CRDT history. This is the current
 aggregate-view contract, not a general query or analytics engine.
 
 A Canvas retains an immutable resolved scene until selected presentation inputs
-change. Unselected state changes and acknowledgements do not rebuild it. Sync is
-still per app document: this is not RFC 0002 Merkle subtree replication, and
-collection/item/cursor selectors from RFC 0003 remain unimplemented.
+change. Unselected state changes and acknowledgements do not rebuild it. Sync
+uses coherent Merkle coverage compiled from the admitted UI and that writer's
+receipt, within the app State scope. Durable state stays on the authority and
+pending intents stay in one RAM queue ([foundation rollout](experiments/canvas-foundation.md)).
+General collection/item/cursor selectors from RFC 0003 remain unimplemented.
 
 Current bounds include 64 schema fields, 4 KiB text values, 2,016 series points
-and 512 KiB Canvas messages/artifacts. Durable CRDT history has a slightly lower
-byte budget to leave transport headroom. Exhaustion fails explicitly; general
-history compaction, unlimited documents and schema migration are not supplied by
-this cutover. A schema change needs an explicit compatible migration or new
+and 512 KiB Canvas messages/artifacts. The durable adapter bounds writer receipts
+to 1,024 per app with a 24-hour resume window, rotates its journal at 4 MiB
+and fails explicitly on exhaustion. Unlimited documents, general history GC
+and arbitrary schema migration are not supplied by this cutover. A schema change needs an explicit compatible migration or new
 State reference.
 
 ## Fonts and graphics
@@ -136,11 +141,11 @@ See [RFC 0006](rfcs/0006-font-resources-and-text-presentation.md).
 | Mechanism | Cutover disposition |
 | --- | --- |
 | Fixed dashboard Shell/screen branches and compiled demo UI | Replaced in production by the admitted app catalog and Canvas mounts. New app UI belongs in `apps/`, not another host screen branch. |
-| Global demo room and ambient DashboardView bindings | Replaced by app-owned typed roots; app layouts resolve explicit slots. No durable legacy-room bridge is introduced. |
+| Global replica, ambient bindings and duplicate presentation edit overlay | Deleted after browser/frame parity. App-owned Merkle roots and explicit slots are the only mutable app path; no automatic legacy import or compatibility room. |
 | Dashboard/MotionPresenter browser adapters | Replaced by CanvasApp and generic CanvasPresentation. The modern Wasm host excludes the old Dashboard exports. |
 | Separate trusted prototype package loader | Removed; development and production are thin entries into the same authority. Production admits packages from signed releases. |
 | Per-frame scene reconstruction | Replaced by selected-value scene caching and retained GPU resources. |
-| SDL/Wayland app path | Removed from the app build and host dependencies; direct GLES is the supported frame path. Old signed recovery artifacts require their compatible service/protocol, not an implied universal rollback. |
+| SDL/Wayland app path | Removed from runtime, publisher/supervisor selection and current service/trial tooling. Rollback selects a verified direct release. |
 | Five-field UI schema | Replaced by typed v2 fields. The bounded Wasm reducer ABI remains separately versioned v1. |
 
 Keep one implementation of scene validation, responder routing, keyboard editing,
@@ -151,8 +156,12 @@ than compatibility requirements for app navigation.
 
 Shared authoring lives in `tools/canvas/authoring.rs`; stable builders can move to
 the SDK without copying LGPL runtime implementation into permissive packages.
-General OS loading, arbitrary capability imports, multi-object transactions,
-Merkle state replication and collection selectors are not completed by this work.
+Coherent covered Merkle replication is deployed on both hosts. The generic
+library supports multiple authorized paths, and Canvas derives its coverage from
+admitted UI dependencies. General collection selectors remain in progress. General OS loading,
+arbitrary capability imports and cross-app transactions remain outside this
+milestone. Follow the [foundation completion ledger](rfcs/0010-runtime-foundation.md)
+for current source, acceptance and deployment gates.
 
 ## Rounded corners
 
@@ -163,3 +172,9 @@ expression for y, currently sampled at twelve segments per quarter. Hit testing
 uses the corresponding equation. This is not one global Lamé oval or a claim of
 exact equivalence to Apple's continuous corners. Radius is bounded by half the
 shorter side; zero produces a rectangle.
+
+The remaining layout v1 reader handles bounded static Monitoring aggregates, not
+a global-room runtime. Stable control v1 and its metadata-only alias, explicit
+retired-route tombstones, dated benchmark references and unrelated OS snapshot
+scaffolds are intentional retained boundaries. Deleting these would weaken
+upgrade compatibility, operational diagnosis or the separately scoped OS work.

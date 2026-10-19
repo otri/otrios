@@ -22,12 +22,6 @@ pub enum ValueType {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Binding {
-    Enabled,
-    Title,
-    TouchLabel,
-    Samples,
-    HasSamples,
-    LastSample,
     Local(u16),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -100,19 +94,8 @@ pub enum Responder {
         drag: bool,
     },
     AppNavigate(u8),
-    DragControl(u8),
     Bubble,
     Consume,
-    ToggleFocus,
-    ResetControls,
-    Motion(u8),
-    Stress,
-    Open(crate::scene::Screen),
-    Back,
-    Home,
-    FocusField(u8),
-    KeyboardKey(u16),
-    KeyParameter(u16),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

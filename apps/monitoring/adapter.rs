@@ -4,8 +4,8 @@ use otrios_core::dashboard::layout::Layout;
 use otrios_interfaces::layout::*;
 use serde_json::Value as Json;
 use std::{fs, io::Read};
-#[path = "../../crates/otrios-dashboard/src/layout_seed.rs"]
-mod layout_seed;
+#[path = "view_templates.rs"]
+mod view_templates;
 const WHITE: [u8; 4] = [239, 244, 236, 255];
 const MUTED: [u8; 4] = [150, 171, 185, 255];
 const GREEN: [u8; 4] = [185, 238, 143, 255];
@@ -26,8 +26,7 @@ struct View {
 }
 impl View {
     fn new() -> Self {
-        let mut blueprint = layout_seed::blueprint();
-        blueprint.templates.retain(|t| [1, 2, 3].contains(&t.id));
+        let mut blueprint = view_templates::blueprint();
         blueprint.templates.push(Template {
             id: 6,
             name: "Trend line".into(),

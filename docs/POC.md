@@ -6,6 +6,23 @@ Validate whether independent Linux processes can share immutable object revision
 
 The user requested a shared touch dashboard after this initial research plan. [DASHBOARD.md](DASHBOARD.md) defines that bounded product experiment: native GLES2 on the Rockchip frame, WebGL in a browser, a shared Rust compositor, CRDT edits and complete immutable view snapshots. It does not satisfy P1–P5's Linux IPC/shared-memory acceptance gates. The milestones below remain the runtime research backlog.
 
+The active dashboard milestone is the [practical runtime foundation](rfcs/0010-runtime-foundation.md):
+one bounded edit pipeline, selective Merkle replication, shared Canvas app
+ownership, independent presentation and one maintainable versioned transport.
+Its completion ledger distinguishes implementation, automated checks and live
+browser/frame acceptance. Structural cleanup and measured optimization have
+separate acceptance criteria.
+
+## Active incremental hierarchy experiment
+
+After tagging the verified Canvas baseline, the next bounded runtime increment
+is [RFC 0005](rfcs/0005-merkle-subtree-prototype.md): immutable stable-key nodes,
+metadata-inclusive SHA-256, causal register joins, scoped subtree transfer,
+resync/backpressure and partial-replica joins. This library is tested separately
+from the live dashboard; it adds no durable acknowledgment, host migration or
+Linux shared-memory acceptance claim. The next Canvas adapter must preserve
+schema/policy validation, pending RAM intents and server durability before ACK.
+
 ## Scope
 
 Rust 1.90.0, Linux x86_64 first, aarch64 as a follow-up; one local authority, one named aggregate, one writer, and two readers. Each update replaces two related counter objects in one manifest. Readers must always observe equal counters within a pinned snapshot, even during rapid publication. The same mechanism supports more objects, but this demo is deliberately small.

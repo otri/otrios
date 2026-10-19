@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Declarative intent crosses the publication boundary. Phase, interpolation and
 //! frame statistics belong exclusively to the presentation owner.
-use super::{Mesh, Replica, Result, SyncSession, components::*, render_scene, scene::Scene};
+use super::{Mesh, Result, components::*, render_scene, scene::Scene};
 use otrios_interfaces::scene::*;
 use std::collections::VecDeque;
 
@@ -40,36 +40,6 @@ impl Intent {
             return Err("Invalid motion intent".into());
         }
         Ok(())
-    }
-    pub fn encode(self) -> Vec<u8> {
-        let mut b = flexbuffers::Builder::default();
-        {
-            let mut m = b.start_map();
-            m.push("schema", 1u32);
-            m.push("playing", self.playing);
-            m.push("speed", self.speed);
-            m.push("count", self.count);
-        }
-        b.take_buffer()
-    }
-    pub fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() > 256 {
-            return Err("Motion intent too large".into());
-        }
-        let root = flexbuffers::Reader::get_root(bytes).map_err(|e| e.to_string())?;
-        let m = root.get_map().map_err(|e| e.to_string())?;
-        let error = |e: flexbuffers::ReaderError| e.to_string();
-        if m.len() != 4 || m.idx("schema").get_u64().map_err(error)? != 1 {
-            return Err("Unknown motion schema".into());
-        }
-        let count = m.idx("count").get_u64().map_err(error)?;
-        let intent = Self {
-            playing: m.idx("playing").get_bool().map_err(error)?,
-            speed: m.idx("speed").get_f64().map_err(error)? as f32,
-            count: u16::try_from(count).map_err(|e| e.to_string())?,
-        };
-        intent.validate()?;
-        Ok(intent)
     }
 }
 /// Presentation clock never resets when a new immutable app view arrives.
@@ -296,65 +266,6 @@ fn render_hud_font(label: &str, font: Option<&super::font::Font>) -> Mesh {
         None => render_scene(&scene),
     }
 }
-/// Isolated CRDT load: exercises real mutation, incremental encoding, merge,
-/// validation and projection. It never touches the user's room or disk history.
-pub struct Stress {
-    source: Replica,
-    sink: Replica,
-    a: SyncSession,
-    b: SyncSession,
-    last: f64,
-    pub updates: u64,
-    epoch: u16,
-}
-impl Stress {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            source: Replica::new()?,
-            sink: Replica::new()?,
-            a: SyncSession::default(),
-            b: SyncSession::default(),
-            last: 0.,
-            updates: 0,
-            epoch: 0,
-        })
-    }
-    pub fn tick(&mut self, now: f64, hz: u8) -> Result<bool> {
-        if hz == 0 || now - self.last < 1000. / f64::from(hz) {
-            return Ok(false);
-        }
-        self.last = now;
-        if self.epoch >= 120 {
-            let total = self.updates;
-            *self = Self::new()?;
-            self.updates = total;
-            self.last = now;
-        }
-        self.epoch += 1;
-        self.source.set_motion(Intent {
-            speed: if self.epoch.is_multiple_of(2) { 1. } else { 2. },
-            ..Intent::default()
-        })?;
-        for _ in 0..8 {
-            let a = self.source.generate_sync(&mut self.a)?;
-            let b = self.sink.generate_sync(&mut self.b)?;
-            if a.is_none() && b.is_none() {
-                break;
-            }
-            if let Some(bytes) = a {
-                self.sink.receive_sync(&mut self.b, &bytes)?;
-            }
-            if let Some(bytes) = b {
-                self.source.receive_sync(&mut self.a, &bytes)?;
-            }
-        }
-        if self.source.snapshot().id() != self.sink.snapshot().id() {
-            return Err("Load replicas did not converge".into());
-        }
-        self.updates += 1;
-        Ok(true)
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,25 +441,22 @@ mod tests {
         }
     }
     #[test]
-    fn ticking_never_changes_crdt_or_resets_on_publication() {
-        let mut r = Replica::new().unwrap();
-        let saved = r.save();
-        let mut p = Presenter::default();
+    fn new_intent_keeps_the_local_presentation_phase() {
+        let mut presenter = Presenter::default();
         for i in 0..600 {
-            p.mesh(false, Intent::default(), f64::from(i) * 16.6667, 0);
+            presenter.mesh(false, Intent::default(), f64::from(i) * 16.6667, 0);
         }
-        assert_eq!(r.save(), saved);
-        assert!(p.phase() > 9.9);
-        let before = p.phase();
-        r.set_motion(Intent {
-            count: 64,
-            ..Intent::default()
-        })
-        .unwrap();
-        p.advance(10000., r.motion().unwrap());
-        assert!(p.phase() > before);
-        assert!(p.phase() - before < 0.1);
-        assert!(p.stats().contains("\"fps\":60.00"));
+        assert!(presenter.phase() > 9.9);
+        let before = presenter.phase();
+        presenter.advance(
+            10000.,
+            Intent {
+                count: 64,
+                ..Intent::default()
+            },
+        );
+        assert!(presenter.phase() > before && presenter.phase() - before < 0.1);
+        assert!(presenter.stats().contains("\"fps\":60.00"));
     }
     #[test]
     fn pause_resume_and_clock_discontinuity_are_bounded() {
@@ -593,10 +501,6 @@ mod tests {
     }
     #[test]
     fn intent_validation_and_both_mesh_limits() {
-        assert_eq!(
-            Intent::decode(&Intent::default().encode()).unwrap(),
-            Intent::default()
-        );
         assert!(
             Intent {
                 speed: f32::NAN,
@@ -605,7 +509,6 @@ mod tests {
             .validate()
             .is_err()
         );
-        assert!(Intent::decode(b"bad").is_err());
         let mut p = Presenter::default();
         for mode in [false, true] {
             let m = p.mesh(
@@ -621,42 +524,5 @@ mod tests {
             assert!(m.vertices.iter().all(|v| v.is_finite()));
             assert!(m.vertices.len() < 100_000);
         }
-    }
-    #[test]
-    fn shared_intent_is_atomic_and_invalid_remote_bytes_retain_the_old_view() {
-        use automerge::{ReadDoc, transaction::Transactable};
-        let mut a = Replica::new().unwrap();
-        let mut b = Replica::new().unwrap();
-        let intent = Intent {
-            playing: false,
-            speed: 2.,
-            count: 64,
-        };
-        a.set_motion(intent).unwrap();
-        b.merge(&a.save()).unwrap();
-        assert_eq!(b.motion().unwrap(), intent);
-        let old = b.snapshot().id();
-        let mut malicious = automerge::AutoCommit::load(&a.save()).unwrap();
-        malicious
-            .put(
-                automerge::ROOT,
-                "motion",
-                automerge::ScalarValue::Bytes(vec![0; 12]),
-            )
-            .unwrap();
-        malicious.commit();
-        assert!(b.merge(&malicious.save()).is_err());
-        assert_eq!(b.snapshot().id(), old);
-        assert!(Replica::load(&malicious.save()).is_err());
-        assert!(malicious.get(automerge::ROOT, "motion").unwrap().is_some());
-    }
-    #[test]
-    fn isolated_stress_converges_and_rolls_bounded_history() {
-        let mut s = Stress::new().unwrap();
-        for i in 1..250 {
-            s.tick(f64::from(i) * 100., 30).unwrap();
-        }
-        assert_eq!(s.updates, 249);
-        assert!(s.source.save().len() < 100_000);
     }
 }

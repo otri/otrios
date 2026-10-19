@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-use super::{ViewSnapshot, font::Font, scene::Scene};
+use super::{font::Font, scene::Scene};
 use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
 /// Ordered geometry and Slug glyph runs, retained by both GPU hosts.
 #[derive(Default)]
@@ -31,16 +31,12 @@ impl Clip {
         self.right <= self.left || self.bottom <= self.top
     }
 }
-pub fn render(snapshot: &ViewSnapshot) -> Mesh {
-    render_scene(snapshot.scene())
-}
+
 /// Geometry-only projection for headless use; text requires an explicit admitted font.
 pub fn render_scene(scene: &Scene) -> Mesh {
     render_optional_font(scene, None)
 }
-pub fn render_with_font(snapshot: &ViewSnapshot, font: &Font) -> Mesh {
-    render_scene_with_font(snapshot.scene(), font)
-}
+
 pub fn render_scene_with_font(scene: &Scene, font: &Font) -> Mesh {
     render_optional_font(scene, Some(font))
 }
@@ -436,17 +432,6 @@ mod tests {
         mesh.text(Rect::new(0., 0., 100., 8.), "Hi", 1., [255; 4], clip, &font);
         mesh.rect(Rect::new(0., 0., 10., 10.), [255; 4], clip);
         assert_eq!(mesh.draws, [0, 0, 6, 1, 0, 8, 0, 6, 6]);
-    }
-    #[test]
-    fn same_snapshot_produces_same_mesh_and_touch_changes_it() {
-        let mut r = crate::dashboard::Replica::new().unwrap();
-        let a = render(r.snapshot());
-        let b = render(&ViewSnapshot::from_bytes(r.snapshot().bytes()).unwrap());
-        assert_eq!(a.vertices.len() % 18, 0);
-        assert!(a.vertices.iter().all(|v| v.is_finite()));
-        assert_eq!(a.vertices, b.vertices);
-        r.touch(200, 300).unwrap();
-        assert_ne!(a.vertices, render(r.snapshot()).vertices);
     }
     #[test]
     fn nested_canvas_clips_actual_triangles() {

@@ -1,0 +1,31 @@
+{
+  "reference": {
+    "commit": "4ce703e889033ed447f8b714404ab4871cae6926",
+    "source_archive_sha256": "d1b92e73d789e600832de3c163399506fd9125859a8c60d4759b348ed969dd73",
+    "binaries": {
+      "dashboard-direct": "6800f6905bd66548b6a2477182b2376099c5d4d1fdbe71b3f94b8858077ed057",
+      "canvas-adapter-bench": "256516822b14631e3bd804cefc7682b69f6472c0bff21938c62ed52e64cd5b7c",
+      "merkle_tree_cost": "a814bf2bf203aec17ad047a60d98176bd9e26bbcaae43f63cd3c7683e0364ed5",
+      "dashboard-server": "c1d5302b322530b3aeebad0207336923b442199ede40606dcbc9735e7aaadfa1"
+    }
+  },
+  "candidate": {
+    "commit": "4db4ead94c677b971f001fac5cc9cd4c7b86fa3f",
+    "source_status": "?? scripts/__pycache__/\n",
+    "source_archive_sha256": "77dc757d3358008c543f1ab6fb253bc10c4cb2a00e79e74af9b199fcb01264de",
+    "binaries": {
+      "dashboard-direct": "ccc8d456d882dba5e2e8e100b0f9cfd1006d697eedfc3bc8fe829db2d86ef872",
+      "canvas-adapter-bench": "cfccf4025204042177ed0b8fe224f2e65b083fe7779b2c863d6c46d6f5a6b7ad",
+      "merkle_tree_cost": "76b3ca7163890dced8a062189809173c76715264d68653d9c3700dfc100059c4",
+      "dashboard-server": "3aebb272d336995c318d07295e5dce99a5da4eba43c22a98d3a6252f3a139783"
+    }
+  },
+  "legacy_reference": false,
+  "rates_hz": "10,30",
+  "updates": 120,
+  "warmup": 20,
+  "repetitions": 3,
+  "catalog_sha256": "3944cecef69c77868c4f2a85a269edd744d42ffd149cf6061d2463b26c113dbd",
+  "frame": "RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk",
+  "method": "two real clients on frame; fresh durable authority per trial; native live renderer left running; paired stop-and-wait; private Tailscale raw TCP; CPU includes mount/warm-up/waits"
+}

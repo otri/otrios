@@ -37,29 +37,15 @@ pub enum SubscriptionEvent {
 pub const DASHBOARD_WIDTH: u32 = 1280;
 pub const DASHBOARD_HEIGHT: u32 = 800;
 
-/// Experimental snapshot contract, independent of the CRDT's storage format.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DashboardView {
-    pub heads: Vec<String>,
-    pub nodes: Vec<ViewNode>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ViewNode {
-    pub id: u32,
-    /// Bounds in logical canvas coordinates: x, y, width, height.
-    pub bounds: [u32; 4],
-    pub content: ViewContent,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ViewContent {
-    Label(String),
-    Switch { label: String, enabled: bool },
-    Graph { label: String, samples: Vec<u32> },
-}
-
 pub mod keyboard;
 
 #[cfg(feature = "layout")]
 pub mod canvas;
+
+pub mod merkle;
+
+#[cfg(feature = "release")]
+pub mod release;
+
+#[cfg(feature = "release")]
+pub mod session;

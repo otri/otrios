@@ -1,7 +1,9 @@
 # RFC 0002: Incremental CRDT hierarchy and immutable presentation
 
-Status: proposed research design. The dashboard still uses Automerge; this RFC
-and the hash-cost experiment do not implement a Merkle CRDT runtime/store.
+Status: design with a first bounded implementation in [RFC 0005](0005-merkle-subtree-prototype.md):
+immutable hierarchy, causal registers and scoped subtree transport/joins. The
+live dashboard now uses the durable Canvas adapter in [RFC 0006](0006-durable-canvas-merkle-adapter.md). The original hash-cost experiment below
+remains a hash-only measurement; it is not the new materialized-tree benchmark.
 
 [RFC 0003](0003-module-roots-and-state-selectors.md) develops the module boundary,
 typed state selectors, stable collection identity and subscription semantics
@@ -89,6 +91,11 @@ rendering, and uses cached sibling digests rather than allocating a full tree.
 This establishes hash-work cost only, not implementation of the proposed runtime.
 
 ## Acceptance experiments
+
+[RFC 0007](0007-bounded-replication-pipeline.md) defines the incremental allocation,
+semantic consolidation, packed transport and optional compression experiment.
+It preserves causal metadata and durable acknowledgment while keeping local
+presentation independent of dispatch cadence.
 
 - Measure leaf edit, canonicalization, ancestor copying/hashing, merge, view
   invalidation, allocation and wire size separately on this Cortex-A7 and Wasm.

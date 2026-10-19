@@ -1,7 +1,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0004: Canvas mounts, executable behavior and app packages
 
+Current implementation: the foundation uses canonical Merkle state and sync v4.
+The global Automerge replica/import and SDL recovery paths described in earlier
+prototype history are retired. See [RFC 0010](0010-runtime-foundation.md) for the
+active completion ledger and [modern pattern](../MODERN_APP_PATTERN.md).
+
+
 Status: app-scoped v2 cutover implemented; deployment/physical acceptance recorded separately. Builds on RFCs 0002/0003.
+
+Subsequent changes: [RFC 0006](0006-durable-canvas-merkle-adapter.md) replaced
+Automerge app state with the durable Merkle adapter, and [RFC 0009](0009-unified-server-session.md)
+replaced `/apps/stream` with one negotiated `/session`. Transport descriptions
+below record the original cutover; use [RFC 0010](0010-runtime-foundation.md) for
+current foundation work.
 
 `Canvas(uiRef, stateRef)` is a mounted UI description and its explicit state
 scope. A UI description includes primitive layout data, typed selectors,

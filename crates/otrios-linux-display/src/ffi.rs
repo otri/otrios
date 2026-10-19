@@ -297,7 +297,7 @@ mod tests {
         };
         let bytes = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../web/dashboard/fonts/Roboto-Regular.otq.zst"
+            "/../../web/shared/fonts/Roboto-Regular.otq.zst"
         ));
         let font = Font::from_zstd(bytes, RESOURCE_SHA256).unwrap();
         let atlas = font.atlas();

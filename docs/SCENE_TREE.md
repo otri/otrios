@@ -8,7 +8,7 @@ The dashboard now expands its immutable application view into a validated, immut
 | --- | --- |
 | Canvas | Parent-local child frames, ordered children, optional rectangular clipping |
 | Viewport | Uniformly scaled child coordinates with rectangular clipping; painting, hit testing and semantic bounds share the transform |
-| Text | Bounded text, bitmap font scale and colour |
+| Text | Bounded text, admitted vector-font metrics and cached glyph coverage |
 | Superellipse | Filled rectangle with superelliptic corners, radius and exponent; radius zero gives a rectangle |
 | Circle | Filled circle within a square frame |
 | Path | Bounded stroked polyline for graph data |
@@ -32,7 +32,10 @@ Canvas (screen)
 └─ Canvas (other labels/panels)
 ```
 
-Component templates and instances now live in versioned FlexBuffers data. [BINARY_LAYOUT.md](BINARY_LAYOUT.md) describes the contract and live authoring tool. The existing v1 application snapshot remains readable; a configured layout is embedded as a bounded binary blob in the complete view snapshot. Primitive trees derive from the typed component data and application bindings at publication. The view hash binds those exact input bytes; its code release still identifies the interpreter and primitive implementation.
+Component templates and instances live in each app's admitted FlexBuffers UI.
+[BINARY_LAYOUT.md](BINARY_LAYOUT.md) describes explicit selector slots, scoped
+responders and the package workflow. Canvas resolves immutable selected values
+into scenes; no global DashboardView or embedded default dashboard participates.
 
 ## Pointer delivery
 

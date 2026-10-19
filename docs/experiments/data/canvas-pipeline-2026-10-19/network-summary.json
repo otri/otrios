@@ -1,0 +1,542 @@
+{
+  "binary": {
+    "10": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 8156.6,
+          "min": 8147.6,
+          "max": 8165.6
+        },
+        "Paired clients / % of one core": {
+          "median": 24.571944172309372,
+          "min": 24.25854575594552,
+          "max": 24.93443440319221
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 26.18880714285714,
+          "min": 25.793950000000002,
+          "max": 26.345135714285714
+        },
+        "Peer observation p50 / ms": {
+          "median": 48.29,
+          "min": 47.262,
+          "max": 49.056
+        },
+        "Peer observation p95 / ms": {
+          "median": 122.312,
+          "min": 121.13,
+          "max": 125.221
+        },
+        "Durable ACK p95 / ms": {
+          "median": 122.341,
+          "min": 121.158,
+          "max": 125.249
+        },
+        "Actual updates / second": {
+          "median": 9.57610461056761,
+          "min": 9.574987178266326,
+          "max": 9.579206460217987
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 2105.75,
+          "min": 2102.75,
+          "max": 2107.25
+        },
+        "Paired clients / % of one core": {
+          "median": 17.305839924834647,
+          "min": 17.23442254892093,
+          "max": 17.395430508862745
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 17.817064285714288,
+          "min": 17.80629285714286,
+          "max": 17.934364285714285
+        },
+        "Peer observation p50 / ms": {
+          "median": 30.019,
+          "min": 29.285,
+          "max": 30.456
+        },
+        "Peer observation p95 / ms": {
+          "median": 112.25,
+          "min": 111.847,
+          "max": 114.078
+        },
+        "Durable ACK p95 / ms": {
+          "median": 111.224,
+          "min": 110.291,
+          "max": 113.486
+        },
+        "Actual updates / second": {
+          "median": 9.831292592423294,
+          "min": 9.80918136226761,
+          "max": 9.843545332082623
+        }
+      }
+    },
+    "30": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 7896.2,
+          "min": 7874.6,
+          "max": 8012.0
+        },
+        "Paired clients / % of one core": {
+          "median": 35.95937792459905,
+          "min": 30.790164972655816,
+          "max": 36.99152483004319
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 20.884142857142855,
+          "min": 20.502299999999998,
+          "max": 22.21215714285714
+        },
+        "Peer observation p50 / ms": {
+          "median": 46.517,
+          "min": 45.885,
+          "max": 46.851
+        },
+        "Peer observation p95 / ms": {
+          "median": 118.739,
+          "min": 118.364,
+          "max": 128.464
+        },
+        "Durable ACK p95 / ms": {
+          "median": 118.717,
+          "min": 118.395,
+          "max": 132.172
+        },
+        "Actual updates / second": {
+          "median": 18.066549345877675,
+          "min": 17.563532068381175,
+          "max": 18.35896681789536
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 2023.7,
+          "min": 2003.0,
+          "max": 2025.2
+        },
+        "Paired clients / % of one core": {
+          "median": 25.331989503986286,
+          "min": 22.79060265966885,
+          "max": 27.366092201340706
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 12.281535714285715,
+          "min": 11.826864285714285,
+          "max": 13.137414285714284
+        },
+        "Peer observation p50 / ms": {
+          "median": 29.133,
+          "min": 28.648,
+          "max": 29.742
+        },
+        "Peer observation p95 / ms": {
+          "median": 111.536,
+          "min": 103.245,
+          "max": 181.665
+        },
+        "Durable ACK p95 / ms": {
+          "median": 111.567,
+          "min": 101.097,
+          "max": 181.699
+        },
+        "Actual updates / second": {
+          "median": 23.026139952577754,
+          "min": 17.227397131573515,
+          "max": 24.091472192843135
+        }
+      }
+    }
+  },
+  "history": {
+    "10": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 2100.2,
+          "min": 2093.45,
+          "max": 2102.6
+        },
+        "Paired clients / % of one core": {
+          "median": 17.55030749666669,
+          "min": 17.31842077978963,
+          "max": 17.58510892192688
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 18.19495,
+          "min": 17.93562142857143,
+          "max": 18.28735
+        },
+        "Peer observation p50 / ms": {
+          "median": 30.254,
+          "min": 29.753,
+          "max": 31.112
+        },
+        "Peer observation p95 / ms": {
+          "median": 110.512,
+          "min": 109.282,
+          "max": 114.695
+        },
+        "Durable ACK p95 / ms": {
+          "median": 112.276,
+          "min": 110.36,
+          "max": 115.143
+        },
+        "Actual updates / second": {
+          "median": 9.770081243141517,
+          "min": 9.769488462196758,
+          "max": 9.837236579060923
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 16.51006442423386,
+          "min": 16.33550741648553,
+          "max": 16.536567958107536
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 17.088057142857142,
+          "min": 16.950692857142858,
+          "max": 17.16265714285714
+        },
+        "Peer observation p50 / ms": {
+          "median": 28.984,
+          "min": 28.977,
+          "max": 29.784
+        },
+        "Peer observation p95 / ms": {
+          "median": 114.024,
+          "min": 107.226,
+          "max": 114.833
+        },
+        "Durable ACK p95 / ms": {
+          "median": 113.704,
+          "min": 108.804,
+          "max": 114.055
+        },
+        "Actual updates / second": {
+          "median": 9.821873083095724,
+          "min": 9.810099660824529,
+          "max": 9.84944618769952
+        }
+      }
+    },
+    "30": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 2016.2,
+          "min": 2012.6,
+          "max": 2037.95
+        },
+        "Paired clients / % of one core": {
+          "median": 26.25644405679468,
+          "min": 23.302332591005978,
+          "max": 27.23191789217804
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 12.469935714285716,
+          "min": 12.20732142857143,
+          "max": 13.70252857142857
+        },
+        "Peer observation p50 / ms": {
+          "median": 29.972,
+          "min": 29.901,
+          "max": 30.797
+        },
+        "Peer observation p95 / ms": {
+          "median": 113.275,
+          "min": 111.737,
+          "max": 179.12
+        },
+        "Durable ACK p95 / ms": {
+          "median": 113.223,
+          "min": 108.895,
+          "max": 179.15
+        },
+        "Actual updates / second": {
+          "median": 22.92031404110133,
+          "min": 18.758933845518175,
+          "max": 23.247863940927772
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 26.00194554139954,
+          "min": 20.98681279748807,
+          "max": 26.370468169509135
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 11.156642857142858,
+          "min": 11.1566,
+          "max": 13.990435714285715
+        },
+        "Peer observation p50 / ms": {
+          "median": 28.93,
+          "min": 28.483,
+          "max": 31.065
+        },
+        "Peer observation p95 / ms": {
+          "median": 101.428,
+          "min": 97.519,
+          "max": 177.533
+        },
+        "Durable ACK p95 / ms": {
+          "median": 105.856,
+          "min": 97.571,
+          "max": 181.337
+        },
+        "Actual updates / second": {
+          "median": 24.222696441658098,
+          "min": 14.354337616420784,
+          "max": 24.69759293202705
+        }
+      }
+    }
+  },
+  "workspace": {
+    "10": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 16.343458362931077,
+          "min": 16.301920832187577,
+          "max": 16.553259325205804
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 16.8974,
+          "min": 16.738085714285713,
+          "max": 16.968249999999998
+        },
+        "Peer observation p50 / ms": {
+          "median": 29.303,
+          "min": 29.122,
+          "max": 29.844
+        },
+        "Peer observation p95 / ms": {
+          "median": 103.743,
+          "min": 97.579,
+          "max": 115.829
+        },
+        "Durable ACK p95 / ms": {
+          "median": 104.119,
+          "min": 97.614,
+          "max": 115.872
+        },
+        "Actual updates / second": {
+          "median": 9.878962922400587,
+          "min": 9.777557478471408,
+          "max": 9.913097325472835
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 16.39503484575064,
+          "min": 16.012570225980628,
+          "max": 16.45945430806311
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 16.98737142857143,
+          "min": 16.88822857142857,
+          "max": 17.915185714285712
+        },
+        "Peer observation p50 / ms": {
+          "median": 29.125,
+          "min": 29.022,
+          "max": 31.144
+        },
+        "Peer observation p95 / ms": {
+          "median": 113.918,
+          "min": 93.121,
+          "max": 147.61
+        },
+        "Durable ACK p95 / ms": {
+          "median": 113.947,
+          "min": 93.151,
+          "max": 147.641
+        },
+        "Actual updates / second": {
+          "median": 9.792288799147913,
+          "min": 8.937258096989957,
+          "max": 9.89375270299076
+        }
+      }
+    }
+  },
+  "socket": {
+    "10": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 17.55620744072822,
+          "min": 16.604681887277152,
+          "max": 19.766928573006982
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 18.05392857142857,
+          "min": 17.147614285714287,
+          "max": 20.659049999999997
+        },
+        "Peer observation p50 / ms": {
+          "median": 31.065,
+          "min": 30.56,
+          "max": 36.422
+        },
+        "Peer observation p95 / ms": {
+          "median": 109.461,
+          "min": 105.598,
+          "max": 110.389
+        },
+        "Durable ACK p95 / ms": {
+          "median": 106.665,
+          "min": 105.635,
+          "max": 110.416
+        },
+        "Actual updates / second": {
+          "median": 9.836807988308607,
+          "min": 9.821257110475054,
+          "max": 9.862741012485776
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 18.606360048005325,
+          "min": 16.611765996921747,
+          "max": 19.559511972381742
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 19.237428571428573,
+          "min": 17.08825714285714,
+          "max": 20.272142857142857
+        },
+        "Peer observation p50 / ms": {
+          "median": 31.507,
+          "min": 30.671,
+          "max": 35.054
+        },
+        "Peer observation p95 / ms": {
+          "median": 107.471,
+          "min": 106.903,
+          "max": 114.866
+        },
+        "Durable ACK p95 / ms": {
+          "median": 108.955,
+          "min": 107.08,
+          "max": 114.908
+        },
+        "Actual updates / second": {
+          "median": 9.83906285635971,
+          "min": 9.784330213989115,
+          "max": 9.855883006968151
+        }
+      }
+    },
+    "30": {
+      "reference": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 26.424832828685126,
+          "min": 26.186230592975807,
+          "max": 26.86385069899745
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 11.273971428571429,
+          "min": 11.09495,
+          "max": 11.450257142857142
+        },
+        "Peer observation p50 / ms": {
+          "median": 28.857,
+          "min": 27.625,
+          "max": 29.234
+        },
+        "Peer observation p95 / ms": {
+          "median": 101.445,
+          "min": 99.23,
+          "max": 106.657
+        },
+        "Durable ACK p95 / ms": {
+          "median": 101.477,
+          "min": 99.258,
+          "max": 107.044
+        },
+        "Actual updates / second": {
+          "median": 24.70493001349332,
+          "min": 23.854658114804334,
+          "max": 24.83467496342329
+        }
+      },
+      "candidate": {
+        "Observer payload / B per update": {
+          "median": 1642.0,
+          "min": 1642.0,
+          "max": 1642.0
+        },
+        "Paired clients / % of one core": {
+          "median": 26.50514454725158,
+          "min": 26.057394486835268,
+          "max": 27.640559349614577
+        },
+        "CPU / ms per operation, including mount": {
+          "median": 11.406235714285714,
+          "min": 11.239828571428571,
+          "max": 12.08805
+        },
+        "Peer observation p50 / ms": {
+          "median": 29.897,
+          "min": 29.457,
+          "max": 30.48
+        },
+        "Peer observation p95 / ms": {
+          "median": 101.261,
+          "min": 98.248,
+          "max": 103.887
+        },
+        "Durable ACK p95 / ms": {
+          "median": 101.294,
+          "min": 100.874,
+          "max": 105.232
+        },
+        "Actual updates / second": {
+          "median": 23.86253148775371,
+          "min": 23.816611826949757,
+          "max": 24.350921440571874
+        }
+      }
+    }
+  }
+}

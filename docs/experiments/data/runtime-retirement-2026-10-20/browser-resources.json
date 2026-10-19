@@ -1,0 +1,25 @@
+{
+  "sampled_monotonic_ms": 61561,
+  "dispatch": {
+    "pending_fields": 0,
+    "issued_fields": 0,
+    "pending_payload_bytes": 0,
+    "issued_payload_bytes": 0,
+    "pending_age_ms": null,
+    "issued_age_ms": null,
+    "ready_in_ms": null
+  },
+  "state": {
+    "selected_nodes": 11,
+    "selected_canonical_bytes": 2143,
+    "replica_root_shared": true
+  },
+  "behavior_cache_entries": 1,
+  "behavior_cache_bytes": 210,
+  "wire": {
+    "compression_capacity": 0,
+    "decode_capacity": 0,
+    "table_capacity_bound": 0,
+    "buffer_grows": 0
+  }
+}

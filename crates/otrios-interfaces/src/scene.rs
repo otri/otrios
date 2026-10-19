@@ -63,27 +63,7 @@ pub enum Primitive {
 pub enum Action {
     AppEvent(u8),
     AppNavigate(u8),
-    ToggleFocus,
-    ResetControls,
-    Control(u8),
-    Motion(u8),
-    Stress,
-    Open(Screen),
-    Back,
-    Home,
-    FocusField(u8),
     KeyboardKey(u16),
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
-pub enum Screen {
-    Home,
-    Monitoring,
-    Controls,
-    Layout,
-    Keyboard,
-    Animation,
-    ThreeD,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TouchResponder {

@@ -201,6 +201,13 @@ impl CanvasApp {
     pub fn confirmed(&mut self) -> bool {
         self.inner.confirmed()
     }
+    /// Shared runtime diagnostics, sampled in this worker rather than renderer TLS.
+    pub fn resource_stats(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.resource_usage()).map_err(|e| e.to_string())
+    }
+    pub fn reload_ready(&self) -> bool {
+        self.inner.reload_ready()
+    }
     pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
         Ok(self.compose()?.vertices.clone())
     }
@@ -455,3 +462,6 @@ impl CanvasPresentation {
         Ok(&self.rendered_hud.as_ref().ok_or("No HUD")?.1)
     }
 }
+
+#[cfg(feature = "merkle-probe")]
+mod merkle_probe;

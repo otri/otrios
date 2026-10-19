@@ -17,6 +17,13 @@ fn ink_socket(address: &str, path: &str, origin: &str) -> Socket {
     if let tungstenite::stream::MaybeTlsStream::Plain(t) = s.get_mut() {
         t.set_read_timeout(Some(Duration::from_millis(30))).unwrap();
     }
+    common::session_client::negotiate(&mut s).unwrap();
+    s.send(Message::Text(
+        serde_json::json!({"type":"ink","enabled":true})
+            .to_string()
+            .into(),
+    ))
+    .unwrap();
     s
 }
 
@@ -48,7 +55,7 @@ fn anonymous_clients_get_public_apps_but_no_private_ui_state_or_view() {
         ServerMessage::Mounted { epoch: 2, .. }
     ));
     for origin in [None, Some("https://unrelated.example")] {
-        let mut r = format!("ws://{}/apps/stream", room.public)
+        let mut r = format!("ws://{}/session", room.public)
             .into_client_request()
             .unwrap();
         if let Some(o) = origin {
@@ -165,7 +172,7 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
     let room = room(false, 28800);
     let private = view(&room);
     let state = std::fs::read(state_file(&room, "demo")).ok();
-    let mut bad = format!("ws://{}/demo/ink", room.public)
+    let mut bad = format!("ws://{}/session", room.public)
         .into_client_request()
         .unwrap();
     bad.headers_mut()
@@ -173,13 +180,13 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
     assert!(
         matches!(tungstenite::connect(bad),Err(tungstenite::Error::Http(r)) if r.status().as_u16()==403)
     );
-    let mut a = ink_socket(&room.public, "/demo/ink", ORIGIN);
-    let mut b = ink_socket(&room.private, "/demo/ink", ORIGIN);
+    let mut a = ink_socket(&room.public, "/session", ORIGIN);
+    let mut b = ink_socket(&room.private, "/session", ORIGIN);
     let read = |s: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>| {
         let until = Instant::now() + Duration::from_secs(2);
         loop {
             match s.read() {
-                Ok(Message::Binary(b)) => return b,
+                Ok(Message::Binary(b)) => return b.slice(1..),
                 Err(tungstenite::Error::Io(e))
                     if matches!(
                         e.kind(),
@@ -215,12 +222,15 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
         },
     ];
     a.send(Message::Binary(
-        points
-            .iter()
-            .copied()
-            .flat_map(Point::encode)
-            .collect::<Vec<_>>()
-            .into(),
+        otrios_interfaces::session::frame(
+            2,
+            points
+                .iter()
+                .copied()
+                .flat_map(Point::encode)
+                .collect::<Vec<_>>(),
+        )
+        .into(),
     ))
     .unwrap();
     let live = read(&mut b);
@@ -230,12 +240,12 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
         assert_eq!(peer, first.0);
         assert_eq!(p, Some(point));
     }
-    let mut c = ink_socket(&room.public, "/demo/ink", ORIGIN);
+    let mut c = ink_socket(&room.public, "/session", ORIGIN);
     read(&mut c);
     let history = read(&mut c);
     assert_eq!(history.len(), live.len());
     std::thread::sleep(Duration::from_millis(5200));
-    let mut late = ink_socket(&room.public, "/demo/ink", ORIGIN);
+    let mut late = ink_socket(&room.public, "/session", ORIGIN);
     read(&mut late);
     assert!(
         matches!(late.read(),Err(tungstenite::Error::Io(e)) if matches!(e.kind(),std::io::ErrorKind::WouldBlock|std::io::ErrorKind::TimedOut))
@@ -259,7 +269,7 @@ fn private_candidate_expiry_preserves_the_previous_public_activation() {
         ServerMessage::Mounted { epoch: 1, .. }
     ));
     accept(&mut s, 1);
-    assert!(matches!(read(&mut s), ServerMessage::Sync { epoch: 1, .. }));
+    // Mounted already carried this revision; no duplicate Sync is emitted.
     mount(&mut s, &room, "monitoring", 2);
     assert!(matches!(
         read(&mut s),

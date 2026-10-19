@@ -20,7 +20,7 @@ from fontTools.varLib.instancer import instantiateVariableFont
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "assets/fonts/roboto/Roboto.ttf"
-OUTPUT = ROOT / "web/dashboard/fonts/Roboto-Regular.otq.zst"
+OUTPUT = ROOT / "web/shared/fonts/Roboto-Regular.otq.zst"
 METADATA = ROOT / "assets/fonts/roboto/resource.json"
 RUST_REF = ROOT / "crates/otrios-core/src/dashboard/font_reference.rs"
 JS_REF = ROOT / "web/shared/font-reference.mjs"

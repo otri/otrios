@@ -46,9 +46,9 @@ Select a concrete IDL and schema evolution rules; measure serialization versus d
 
 ## Incremental CRDT hierarchy experiment
 
-[RFC 0002](rfcs/0002-incremental-crdt-hierarchy.md) proposes immutable typed CRDT leaves and incremental ancestor hashing, with measured hash-path costs on the frame. This is a proposed next runtime representation; the dashboard continues to use Automerge. Hash equality includes merge metadata and never replaces conflict semantics or access policy.
+[RFC 0002](rfcs/0002-incremental-crdt-hierarchy.md) proposes immutable typed CRDT leaves and incremental ancestor hashing, with measured hash-path costs on the frame. The bounded [RFC 0005 library](rfcs/0005-merkle-subtree-prototype.md) now implements immutable incremental nodes, causal register joins and subtree transport; the live Canvas adapter uses app-scoped Merkle state and durable server receipts ([RFC 0006](rfcs/0006-durable-canvas-merkle-adapter.md)). Hash equality includes merge metadata and never replaces conflict semantics or access policy.
 
-[The app package prototype](../apps/README.md) implements an opt-in `Canvas(uiRef, stateRef)` mount with independent app documents, binary UI/selectors and a bounded Wasm behavior interpreter. [RFC 0004](rfcs/0004-canvas-behavior-and-app-packages.md) records its execution and package boundaries; the live dashboard remains on its existing shell pending app-by-app migration.
+[The app package prototype](../apps/README.md) implements the live `Canvas(uiRef, stateRef)` mount with independent app documents, binary UI/selectors and a bounded Wasm behavior interpreter. [RFC 0004](rfcs/0004-canvas-behavior-and-app-packages.md) records its execution and package boundaries; all seven Home/demo apps now use those mounts. The durable adapter is deployed on both hosts; general collection selectors, cross-authority transactions and Linux shared-memory IPC remain future work.
 
 Follow the [modern app pattern and retirement map](MODERN_APP_PATTERN.md) for new
 app work. It separates the production target from current prototype evidence and

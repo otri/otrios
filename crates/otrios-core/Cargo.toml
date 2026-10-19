@@ -11,13 +11,10 @@ license = "LGPL-3.0-only"
 otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
-canvas = ["dashboard", "dep:wasmi"]
+canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex"]
+merkle = ["dep:sha2"]
 default = []
-dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
-
-[dependencies.automerge]
-version = "=0.12.0"
-optional = true
+dashboard = ["otrios-interfaces/layout", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
 
 [dependencies.flexbuffers]
 version = "=25.12.19"
@@ -50,3 +47,38 @@ optional = true
 
 [dev-dependencies]
 wat = "=1.239.0"
+
+[[example]]
+name = "merkle_tree_cost"
+required-features = ["merkle"]
+
+[dependencies.getrandom]
+version = "=0.4.3"
+optional = true
+
+[dependencies.serde]
+version = "=1.0.229"
+features = ["derive"]
+optional = true
+
+[[example]]
+name = "canvas_wire_cost"
+required-features = ["canvas"]
+
+[[example]]
+name = "canvas_delta_breakdown"
+required-features = ["canvas"]
+
+[[example]]
+name = "merkle_coverage_cost"
+required-features = ["merkle"]
+
+[[example]]
+name = "canvas_readonly_cost"
+required-features = ["canvas"]
+
+[dependencies.lz4_flex]
+version = "=0.14.0"
+default-features = false
+features = ["std", "safe-encode", "safe-decode", "checked-decode"]
+optional = true

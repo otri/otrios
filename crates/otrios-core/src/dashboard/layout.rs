@@ -3,14 +3,13 @@
 use super::{Result, scene::Scene};
 pub mod resizing;
 use flexbuffers::{FlexBufferType, Reader};
-use otrios_interfaces::{DashboardView, ViewContent, layout::*, scene::*};
+use otrios_interfaces::{layout::*, scene::*};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 pub const MAX_LAYOUT_BYTES: usize = 128 * 1024;
-pub const DEFAULT_LAYOUT: &[u8] = include_bytes!("default.flex");
 const MAX_ITEMS: usize = 32768;
 #[derive(Clone)]
 pub struct Layout {
@@ -86,6 +85,7 @@ impl Layout {
         if bytes.is_empty() || bytes.len() > MAX_LAYOUT_BYTES {
             return Err("Invalid layout size".into());
         }
+        crate::flex_guard::validate(bytes, 48, MAX_ITEMS, 512)?;
         let mut budget = MAX_ITEMS;
         preflight(Reader::get_root(bytes).map_err(err)?, 0, &mut budget)?;
         let blueprint: Blueprint = flexbuffers::from_slice(bytes).map_err(err)?;
@@ -110,88 +110,23 @@ impl Layout {
         hash.update(&self.bytes);
         hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
     }
-    pub fn bootstrap() -> Result<Self> {
-        static VALUE: OnceLock<Result<Layout>> = OnceLock::new();
-        VALUE
-            .get_or_init(|| Self::from_bytes(DEFAULT_LAYOUT))
-            .clone()
-    }
+
     pub fn blueprint(&self) -> &Blueprint {
         &self.blueprint
     }
-    pub fn resolve(&self, view: &DashboardView) -> Result<Scene> {
-        self.resolve_enabled(view, None)
-    }
-    /// Typed local UI state belongs to a host session, outside the collaborative document.
-    pub fn resolve_local(
-        &self,
-        view: &DashboardView,
-        local: &BTreeMap<u16, Value>,
-    ) -> Result<Scene> {
-        let bindings = Bindings {
-            view: Some(view),
-            enabled: None,
-            local: Some(local),
-        };
-        Scene::new(expand(
-            &self.blueprint,
-            &self.blueprint.root,
-            &bindings,
-            0,
-            &mut 0,
-        )?)
-    }
     /// App layouts can read only their explicitly projected slots. No dashboard scope.
     pub fn resolve_slots(&self, slots: &BTreeMap<u16, Value>) -> Result<Scene> {
-        let bindings = Bindings {
-            view: None,
-            enabled: None,
-            local: Some(slots),
-        };
+        let bindings = Bindings { local: slots };
         Scene::new(expand(
             &self.blueprint,
             &self.blueprint.root,
             &bindings,
             0,
             &mut 0,
-        )?)
-    }
-    /// Validate both switch states so a layout cannot disable the next normal toggle.
-    pub fn qualify(&self, view: &DashboardView) -> Result<()> {
-        for enabled in [false, true] {
-            self.resolve_enabled(view, Some(enabled))?;
-            // Normal actions append 24 or 78; validate those binding values too.
-            for sample in [24, 78] {
-                let mut next = view.clone();
-                for node in &mut next.nodes {
-                    if let ViewContent::Graph { samples, .. } = &mut node.content {
-                        samples.push(sample);
-                        if samples.len() > 32 {
-                            samples.remove(0);
-                        }
-                    }
-                }
-                self.resolve_enabled(&next, Some(enabled))?;
-            }
-        }
-        Ok(())
-    }
-    fn resolve_enabled(&self, view: &DashboardView, enabled: Option<bool>) -> Result<Scene> {
-        let bindings = Bindings {
-            view: Some(view),
-            enabled,
-            local: None,
-        };
-        let mut count = 0;
-        Scene::new(expand(
-            &self.blueprint,
-            &self.blueprint.root,
-            &bindings,
-            0,
-            &mut count,
         )?)
     }
 }
+
 fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
     if depth > 12 {
         return Err("Expression nesting limit".into());
@@ -373,75 +308,14 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
     instance(&b.root, b, 0, &mut BTreeSet::new())
 }
 struct Bindings<'a> {
-    view: Option<&'a DashboardView>,
-    enabled: Option<bool>,
-    local: Option<&'a BTreeMap<u16, Value>>,
+    local: &'a BTreeMap<u16, Value>,
 }
 impl Bindings<'_> {
-    fn dashboard(&self) -> Result<&DashboardView> {
-        self.view
-            .ok_or("Dashboard bindings are unavailable in app scope".into())
-    }
-    fn value(&self, b: Binding) -> Result<Value> {
-        match b {
-            Binding::Local(id) => self
-                .local
-                .and_then(|v| v.get(&id))
-                .cloned()
-                .ok_or("Missing local binding".into()),
-            Binding::Enabled => {
-                let view = self.dashboard()?;
-                Ok(Value::Boolean(self.enabled.unwrap_or_else(|| {
-                    view.nodes
-                        .iter()
-                        .find_map(|n| {
-                            if let ViewContent::Switch { enabled, .. } = n.content {
-                                Some(enabled)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(false)
-                })))
-            }
-            Binding::Title | Binding::TouchLabel => {
-                let id = if b == Binding::Title { 1 } else { 4 };
-                self.dashboard()?
-                    .nodes
-                    .iter()
-                    .find_map(|n| {
-                        if n.id == id {
-                            if let ViewContent::Label(s) = &n.content {
-                                Some(Value::Text(s.clone()))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or("Missing text binding".into())
-            }
-            Binding::Samples | Binding::LastSample | Binding::HasSamples => {
-                let values = self
-                    .dashboard()?
-                    .nodes
-                    .iter()
-                    .find_map(|n| {
-                        if let ViewContent::Graph { samples, .. } = &n.content {
-                            Some(samples)
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or("Missing series binding")?;
-                Ok(match b {
-                    Binding::Samples => Value::Series(values.iter().map(|n| *n as f32).collect()),
-                    Binding::LastSample => Value::Number(*values.last().unwrap_or(&0) as f32),
-                    _ => Value::Boolean(!values.is_empty()),
-                })
-            }
-        }
+    fn value(&self, Binding::Local(id): Binding) -> Result<Value> {
+        self.local
+            .get(&id)
+            .cloned()
+            .ok_or("Missing local binding".into())
     }
 }
 
@@ -694,30 +568,8 @@ fn expand(
                     }
                 }
                 Responder::AppNavigate(id) => TouchResponder::Activate(Action::AppNavigate(id)),
-                Responder::DragControl(id) => {
-                    if id > 2 {
-                        return Err("Unknown drag control".into());
-                    }
-                    TouchResponder::Drag(Action::Control(id))
-                }
                 Responder::Bubble => TouchResponder::Bubble,
                 Responder::Consume => TouchResponder::Consume,
-                Responder::Motion(id) => TouchResponder::Activate(Action::Motion(id)),
-                Responder::ResetControls => TouchResponder::Activate(Action::ResetControls),
-                Responder::Stress => TouchResponder::Activate(Action::Stress),
-                Responder::ToggleFocus => TouchResponder::Activate(Action::ToggleFocus),
-                Responder::Open(screen) => TouchResponder::Activate(Action::Open(screen)),
-                Responder::Back => TouchResponder::Activate(Action::Back),
-                Responder::Home => TouchResponder::Activate(Action::Home),
-                Responder::FocusField(id) => TouchResponder::Activate(Action::FocusField(id)),
-                Responder::KeyboardKey(id) => TouchResponder::Activate(Action::KeyboardKey(id)),
-                Responder::KeyParameter(key) => {
-                    let id = number(c.params.get(&key).cloned().ok_or("Missing key parameter")?)?;
-                    if id.fract() != 0. || !(0. ..=65535.).contains(&id) {
-                        return Err("Invalid key parameter".into());
-                    }
-                    TouchResponder::Activate(Action::KeyboardKey(id as u16))
-                }
             })
         } else {
             None
@@ -764,259 +616,4 @@ fn expand(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::dashboard::{Replica, SyncSession, ViewSnapshot};
-    fn blueprint() -> Blueprint {
-        Layout::bootstrap().unwrap().blueprint().clone()
-    }
-    fn changed() -> Vec<u8> {
-        let mut b = blueprint();
-        let switch = b.root.children.iter_mut().find(|i| i.id == 2).unwrap();
-        switch.frame = [64., 64., 440., 240.];
-        switch.properties.push(Property {
-            key: 1,
-            value: Expr::Literal(Value::Text("Quiet mode".into())),
-        });
-        Layout::encode(&b).unwrap()
-    }
-    #[test]
-    fn replaceable_feed_views_pin_old_roots_without_growing_crdt_history() {
-        let mut replica = Replica::new().unwrap();
-        let before = replica.save();
-        let old = replica.snapshot().clone();
-        let mut b = blueprint();
-        for index in 0..100 {
-            b.root.children[0].frame[0] = 64. + index as f32;
-            let bytes = Layout::encode(&b).unwrap();
-            replica.set_presentation(Some(&bytes)).unwrap();
-        }
-        assert_eq!(replica.save(), before);
-        assert_eq!(old.layout().bytes(), DEFAULT_LAYOUT);
-        let latest = replica.snapshot().id();
-        assert!(replica.set_presentation(Some(b"broken")).is_err());
-        assert_eq!(replica.snapshot().id(), latest);
-        // A feed cannot hide an invalid base layout received through ordinary sync.
-        use automerge::transaction::Transactable;
-        let mut invalid = automerge::AutoCommit::load(&replica.save()).unwrap();
-        invalid
-            .put(
-                automerge::ROOT,
-                "layout",
-                automerge::ScalarValue::Bytes(b"bad".to_vec()),
-            )
-            .unwrap();
-        assert!(replica.merge(&invalid.save()).is_err());
-        assert_eq!(replica.snapshot().id(), latest);
-        let mut peer = Replica::new().unwrap();
-        peer.set_enabled(false).unwrap();
-        replica.merge(&peer.save()).unwrap();
-        assert!(replica.presentation().is_some());
-        replica.set_presentation(None).unwrap();
-        assert_eq!(replica.snapshot().layout().bytes(), DEFAULT_LAYOUT);
-        assert!(
-            replica
-                .snapshot()
-                .view()
-                .nodes
-                .iter()
-                .any(|n| matches!(n.content, ViewContent::Switch { enabled: false, .. }))
-        );
-    }
-    #[test]
-    fn actual_binary_uses_typed_vectors_and_round_trips_without_json() {
-        let r = Reader::get_root(DEFAULT_LAYOUT).unwrap().get_map().unwrap();
-        let frame = r
-            .index("root")
-            .unwrap()
-            .get_map()
-            .unwrap()
-            .index("frame")
-            .unwrap();
-        assert_eq!(frame.flexbuffer_type(), FlexBufferType::VectorFloat4);
-        let b = blueprint();
-        assert_eq!(Layout::encode(&b).unwrap(), DEFAULT_LAYOUT);
-    }
-    #[test]
-    fn binary_layout_moves_and_renames_control_while_state_and_pinned_scene_survive() {
-        let mut r = Replica::new().unwrap();
-        let old = r.snapshot().clone();
-        let bytes = changed();
-        assert!(r.set_layout(&bytes).unwrap());
-        assert_ne!(old.id(), r.snapshot().id());
-        assert_eq!(old.scene().controls()[0].origin, [64., 208.]);
-        let control = r.snapshot().scene().controls()[0];
-        assert_eq!(control.origin, [64., 64.]);
-        assert_eq!(control.node.semantics.as_ref().unwrap().label, "Quiet mode");
-        assert!(!r.touch(200, 400).unwrap());
-        assert!(r.touch(200, 150).unwrap());
-        assert!(
-            !r.snapshot().scene().controls()[0]
-                .node
-                .semantics
-                .as_ref()
-                .unwrap()
-                .checked
-        );
-        assert_eq!(r.snapshot().layout().bytes(), bytes);
-        let copy = ViewSnapshot::from_bytes(r.snapshot().bytes()).unwrap();
-        assert_eq!(copy.scene().root(), r.snapshot().scene().root());
-        let persisted = Replica::load(&r.save()).unwrap();
-        assert_eq!(persisted.snapshot().id(), r.snapshot().id());
-    }
-    #[test]
-    fn changing_template_definition_changes_primitive_geometry() {
-        let mut b = blueprint();
-        let panel = b.templates.iter_mut().find(|t| t.id == 3).unwrap();
-        if let Shape::Superellipse { radius, color, .. } = &mut panel.root.children[0].shape {
-            *radius = Expr::Literal(Value::Number(24.));
-            *color = Expr::Literal(Value::Color([60, 80, 120, 255]));
-        }
-        let mut r = Replica::new().unwrap();
-        r.set_layout(&Layout::encode(&b).unwrap()).unwrap();
-        assert!(matches!(
-            r.snapshot()
-                .scene()
-                .path(4001)
-                .unwrap()
-                .last()
-                .unwrap()
-                .node
-                .primitive,
-            Primitive::Superellipse {
-                radius: 24.,
-                color: [60, 80, 120, 255],
-                ..
-            }
-        ));
-    }
-    #[test]
-    fn slots_accept_nested_instances_and_id_conflicts_are_rejected() {
-        let mut b = blueprint();
-        b.root
-            .children
-            .iter_mut()
-            .find(|i| i.id == 4)
-            .unwrap()
-            .children
-            .push(Instance {
-                id: 42,
-                template: 2,
-                frame: [0., 0., 100., 20.],
-                properties: vec![Property {
-                    key: 1,
-                    value: Expr::Literal(Value::Text("Nested".into())),
-                }],
-                children: vec![],
-            });
-        let mut r = Replica::new().unwrap();
-        r.set_layout(&Layout::encode(&b).unwrap()).unwrap();
-        assert!(r.snapshot().scene().path(42000).is_some());
-        b.root.children[0].id = 42;
-        assert!(Layout::encode(&b).is_err());
-    }
-    #[test]
-    fn malformed_layout_and_wrong_property_type_retain_old_root() {
-        let mut r = Replica::new().unwrap();
-        let old = r.snapshot().id();
-        assert!(r.set_layout(b"bad").is_err());
-        let mut b = blueprint();
-        b.root
-            .children
-            .iter_mut()
-            .find(|i| i.id == 2)
-            .unwrap()
-            .properties
-            .push(Property {
-                key: 2,
-                value: Expr::Literal(Value::Text("wrong colour type".into())),
-            });
-        assert!(r.set_layout(&Layout::encode(&b).unwrap()).is_err());
-        assert_eq!(r.snapshot().id(), old);
-        assert_eq!(r.snapshot().layout().bytes(), DEFAULT_LAYOUT);
-    }
-    #[test]
-    fn conditional_geometry_is_qualified_in_both_checked_states() {
-        let mut b = blueprint();
-        if let Shape::Superellipse { radius, .. } = &mut b
-            .templates
-            .iter_mut()
-            .find(|t| t.id == 4)
-            .unwrap()
-            .root
-            .children[0]
-            .shape
-        {
-            *radius = Expr::Select {
-                condition: Box::new(Expr::State(Binding::Enabled)),
-                yes: Box::new(Expr::Literal(Value::Number(16.))),
-                no: Box::new(Expr::Literal(Value::Number(1000.))),
-            };
-        }
-        let mut r = Replica::new().unwrap();
-        assert!(r.set_layout(&Layout::encode(&b).unwrap()).is_err());
-    }
-    #[test]
-    fn concurrent_binary_layout_revisions_and_app_edits_converge() {
-        let mut a = Replica::new().unwrap();
-        let mut b = Replica::new().unwrap();
-        a.set_layout(&changed()).unwrap();
-        let mut other = blueprint();
-        other
-            .root
-            .children
-            .iter_mut()
-            .find(|i| i.id == 2)
-            .unwrap()
-            .frame[1] = 128.;
-        b.set_layout(&Layout::encode(&other).unwrap()).unwrap();
-        b.set_enabled(false).unwrap();
-        let mut sa = SyncSession::default();
-        let mut sb = SyncSession::default();
-        for _ in 0..50 {
-            let x = a.generate_sync(&mut sa).unwrap();
-            let y = b.generate_sync(&mut sb).unwrap();
-            if x.is_none() && y.is_none() {
-                break;
-            }
-            if let Some(x) = x {
-                b.receive_sync(&mut sb, &x).unwrap();
-            }
-            if let Some(y) = y {
-                a.receive_sync(&mut sa, &y).unwrap();
-            }
-        }
-        assert_eq!(a.snapshot().id(), b.snapshot().id());
-        assert_eq!(a.snapshot().layout().bytes(), b.snapshot().layout().bytes());
-        assert!(
-            !a.snapshot().scene().controls()[0]
-                .node
-                .semantics
-                .as_ref()
-                .unwrap()
-                .checked
-        );
-    }
-    #[test]
-    fn truncated_mutated_and_excessively_nested_buffers_fail_safely() {
-        for n in 0..DEFAULT_LAYOUT.len() {
-            assert!(Layout::from_bytes(&DEFAULT_LAYOUT[..n]).is_err());
-        }
-        for i in (0..DEFAULT_LAYOUT.len()).step_by(11) {
-            let mut bytes = DEFAULT_LAYOUT.to_vec();
-            bytes[i] ^= 0xff;
-            let _ = Layout::from_bytes(&bytes);
-        }
-        let mut b = blueprint();
-        b.schema = "unknown".into();
-        assert!(Layout::encode(&b).is_err());
-        let mut e = Expr::Literal(Value::Number(1.));
-        for _ in 0..14 {
-            e = Expr::Add(Box::new(e), Box::new(Expr::Literal(Value::Number(1.))));
-        }
-        let mut b = blueprint();
-        b.root.properties.push(Property { key: 2, value: e });
-        assert!(Layout::encode(&b).is_err());
-        assert!(Layout::from_bytes(&vec![0; MAX_LAYOUT_BYTES + 1]).is_err());
-    }
-}
+mod tests;

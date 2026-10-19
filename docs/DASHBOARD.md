@@ -15,7 +15,7 @@ to typed FlexBuffers; clients do not parse JSON UI. Playground loads a bounded
 Wasm reducer. Other controls use declared setters rather than an unnecessary
 executable module. See [the app guide](../apps/README.md).
 
-The authority persists one Automerge root per app and acknowledges accepted
+The authority persists one Merkle root per app and acknowledges accepted
 changes after storage succeeds. Public visitors share these roots with the
 frame. Clients hold replicas, previews and pending commands in RAM only. Code,
 fonts and blobs use disposable bounded caches: about 512 MiB web and 2 GiB native.

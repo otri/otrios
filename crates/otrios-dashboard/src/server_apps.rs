@@ -15,6 +15,8 @@ struct Package {
     ui_hash: Vec<u8>,
     code: Vec<u8>,
     private: bool,
+    signal_fields: Vec<u16>,
+    selection: canvas::StateSelection,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -22,6 +24,7 @@ struct Bundle {
 struct Room {
     doc: Document,
     file: Option<PathBuf>,
+    failed: bool,
 }
 pub(super) struct Hub {
     bundles: BTreeMap<Vec<u8>, Bundle>,
@@ -78,6 +81,14 @@ impl Hub {
     pub(super) fn new(source: PathBuf, state: Option<PathBuf>) -> Result<Self> {
         if let Some(path) = &state {
             fs::create_dir_all(path).map_err(|e| e.to_string())?;
+            fs::File::open(path)
+                .and_then(|d| d.sync_all())
+                .map_err(|e| e.to_string())?;
+            if let Some(parent) = path.parent() {
+                fs::File::open(parent)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| e.to_string())?;
+            }
         }
         Ok(Self {
             bundles: BTreeMap::new(),
@@ -105,8 +116,8 @@ impl Hub {
                 }
                 let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
                 if manifest["format"] != "otrios-release-v1"
-                    || manifest["state_schema"] != "otrios-canvas-apps-v1"
-                    || manifest["sync_protocol"] != "otrios-canvas-sync-v1"
+                    || manifest["state_schema"] != "otrios-canvas-merkle-state-v1"
+                    || manifest["sync_protocol"] != "otrios-canvas-sync-v4"
                 {
                     return Err("Installed release app protocol mismatch".into());
                 }
@@ -167,6 +178,18 @@ impl Hub {
                 return Err("UI reference/format differs from admitted catalog".into());
             }
             canvas::validate_schema(&description.state_schema)?;
+            let selection = canvas::StateSelection::from_ui(&description)?;
+            let signal_fields = description
+                .selectors
+                .iter()
+                .filter_map(|selector| {
+                    matches!(
+                        selector.projection,
+                        otrios_interfaces::canvas::Projection::WindowSignal { .. }
+                    )
+                    .then_some(selector.field)
+                })
+                .collect::<Vec<_>>();
             let code = if let Some(reference) = &description.behavior {
                 let bytes = bounded(&base.join("behavior.wasm"), 65536)?;
                 if let Some(m) = &manifest {
@@ -178,6 +201,7 @@ impl Hub {
                 vec![]
             };
             if let Some(room) = self.rooms.get(&a.state_ref) {
+                room.doc.clone().set_signal_fields(&signal_fields)?;
                 if room.doc.schema() != &description.state_schema {
                     return Err("App schema requires a new State reference".into());
                 }
@@ -187,24 +211,37 @@ impl Hub {
                 }
                 let file = self.state.as_ref().map(|p| {
                     p.join(format!(
-                        "{}-{}.automerge",
+                        "{}-{}.merkle",
                         a.id,
                         canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
                     ))
                 });
                 let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
-                    Document::load(
-                        description.state_schema.clone(),
-                        &a.state_ref,
-                        &bounded(path, canvas::MAX_BYTES)?,
+                    store::load(
+                        path,
+                        Document::load(
+                            description.state_schema.clone(),
+                            &a.state_ref,
+                            &bounded(path, canvas::MAX_BYTES)?,
+                        )?,
                     )?
                 } else {
                     Document::new(description.state_schema, &a.state_ref)?
                 };
-                if let Some(path) = &file {
-                    persist(path, &doc.save()).map_err(|e| e.to_string())?;
+                doc.set_signal_fields(&signal_fields)?;
+                if let Some(path) = &file
+                    && !path.exists()
+                {
+                    persist(path, &doc.save()?).map_err(|e| e.to_string())?;
                 }
-                new_rooms.insert(a.state_ref.clone(), Room { doc, file });
+                new_rooms.insert(
+                    a.state_ref.clone(),
+                    Room {
+                        doc,
+                        file,
+                        failed: false,
+                    },
+                );
             }
             let private = entry.private || a.id == "monitoring";
             if packages
@@ -216,6 +253,8 @@ impl Hub {
                         ui_hash: entry.ui_hash,
                         code,
                         private,
+                        signal_fields,
+                        selection,
                     },
                 )
                 .is_some()
@@ -231,6 +270,22 @@ impl Hub {
             if let Some(old) = self.order.pop_front() {
                 self.bundles.remove(&old);
             }
+        }
+        // Older admitted bundles can still have live leases. Keep their signal
+        // dependencies until that bundle is retired; unrelated apps retain none.
+        let mut retained = BTreeMap::<String, std::collections::BTreeSet<u16>>::new();
+        for package in self.bundles.values().flat_map(|b| b.packages.values()) {
+            retained
+                .entry(package.app.state_ref.clone())
+                .or_default()
+                .extend(&package.signal_fields);
+        }
+        for (state_ref, room) in &mut self.rooms {
+            let fields = retained
+                .get(state_ref)
+                .map(|ids| ids.iter().copied().collect::<Vec<_>>())
+                .unwrap_or_default();
+            room.doc.set_signal_fields(&fields)?;
         }
         self.active = catalog_hash;
         self.active_release = id.into();
@@ -279,6 +334,8 @@ impl Hub {
                 state_ref,
                 catalog_hash,
                 known_code,
+                writer,
+                resume,
             } => {
                 if epoch == 0
                     || epoch <= leases.last_epoch
@@ -301,6 +358,30 @@ impl Hub {
                     .rooms
                     .get_mut(&state_ref)
                     .ok_or("Missing app State root")?;
+                if room.failed {
+                    return Err("App persistence outcome uncertain; restart required".into());
+                }
+                let mut candidate = room.doc.clone();
+                candidate.set_wall_time(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
+                );
+                let (mut sync, changed) = candidate.open_session(&writer, resume)?;
+                sync.set_selection(p.selection.clone())?;
+                if changed
+                    && let Some(file) = &room.file
+                    && let Err(e) = store::append(file, &room.doc, &candidate)
+                {
+                    room.failed = true;
+                    return Err(e.to_string());
+                }
+                room.doc = candidate;
+                let state = room
+                    .doc
+                    .generate(&mut sync)?
+                    .ok_or("Missing initial Merkle state")?;
                 messages.push(ServerMessage::Mounted {
                     epoch,
                     ui: p.ui,
@@ -310,13 +391,13 @@ impl Hub {
                     } else {
                         p.code
                     },
-                    state: room.doc.save(),
+                    state,
                 });
                 leases.staged = Some(Lease {
                     epoch,
                     state_ref,
                     private: p.private,
-                    sync: Session::default(),
+                    sync,
                     view_id: vec![],
                 });
                 // The previous activation/session remains authoritative until the client
@@ -358,11 +439,24 @@ impl Hub {
                     .rooms
                     .get_mut(&l.state_ref)
                     .ok_or("Missing app State root")?;
+                if room.failed {
+                    return Err("App persistence outcome uncertain; restart required".into());
+                }
                 let mut candidate = room.doc.clone();
+                candidate.set_wall_time(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
+                );
                 let mut session = l.sync.clone();
                 changed = candidate.receive(&mut session, &bytes)?;
-                if changed && let Some(file) = &room.file {
-                    persist(file, &candidate.save()).map_err(|e| e.to_string())?;
+                if changed
+                    && let Some(file) = &room.file
+                    && let Err(e) = store::append(file, &room.doc, &candidate)
+                {
+                    room.failed = true;
+                    return Err(e.to_string());
                 }
                 room.doc = candidate;
                 l.sync = session;
@@ -389,6 +483,9 @@ impl Hub {
             .rooms
             .get_mut(&l.state_ref)
             .ok_or("Missing app State root")?;
+        if room.failed {
+            return Err("App persistence outcome uncertain; restart required".into());
+        }
         if let Some(bytes) = room.doc.generate(&mut l.sync)? {
             messages.push(ServerMessage::Sync {
                 epoch: l.epoch,
@@ -419,63 +516,13 @@ fn verify_asset(manifest: &Value, path: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn trusted(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    open(app, headers, upgrade, false).await
+/// Bounded state worker. The session/control loop never acquires this worker's
+/// authority lock or decodes a state packet on its behalf.
+pub(super) struct Packet {
+    pub bytes: Vec<u8>,
+    pub private: bool,
 }
-pub(super) async fn public(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    open(app, headers, upgrade, true).await
-}
-async fn open(
-    app: Arc<App>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-    public: bool,
-) -> Response {
-    let allowed = if public {
-        headers
-            .get(header::ORIGIN)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|o| app.origins.iter().any(|a| a == o))
-    } else {
-        origin_ok(&app, &headers)
-    };
-    if !allowed {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    let slots = if public {
-        app.public_peers.clone()
-    } else {
-        app.peers.clone()
-    };
-    let Ok(permit) = slots.try_acquire_owned() else {
-        return failure(StatusCode::SERVICE_UNAVAILABLE, "Too many screens");
-    };
-    let key = if public {
-        match &app.auth {
-            Some(a) => a.key(&headers).await,
-            None => None,
-        }
-    } else {
-        None
-    };
-    upgrade
-        .max_message_size(canvas::MAX_BYTES)
-        .max_frame_size(canvas::MAX_BYTES)
-        .on_upgrade(move |socket| async move {
-            let _permit = permit;
-            peer(app, socket, public, key).await
-        })
-        .into_response()
-}
-async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
+pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
     if !public {
         return true;
     }
@@ -484,9 +531,10 @@ async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool 
         _ => false,
     }
 }
-async fn send(
-    output: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+async fn emit(
+    output: &tokio::sync::mpsc::Sender<Packet>,
     message: ServerMessage,
+    private: bool,
 ) -> bool {
     let Ok(bytes) = canvas::encode_server(&message) else {
         return false;
@@ -494,47 +542,33 @@ async fn send(
     matches!(
         tokio::time::timeout(
             Duration::from_secs(2),
-            output.send(Message::Binary(bytes.into()))
+            output.send(Packet { bytes, private })
         )
         .await,
         Ok(Ok(()))
     )
 }
-async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String>) {
-    let (mut output, mut input) = socket.split();
+pub(super) async fn worker(
+    app: Arc<App>,
+    public: bool,
+    key: Option<String>,
+    mut input: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    output: tokio::sync::mpsc::Sender<Packet>,
+) {
     let mut leases = Leases::default();
     let mut notice = app.changed.subscribe();
     let mut expiry = tokio::time::interval(Duration::from_secs(1));
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     let mut window = std::time::Instant::now();
     let mut count = 0;
-    let mut release_id = String::new();
     loop {
-        let release = app.release.read().await.clone();
-        let id = release["id"].as_str().unwrap_or("development");
-        if release_id != id {
-            let message = Message::Text(
-                json!({"type":"release","release":release})
-                    .to_string()
-                    .into(),
-            );
-            if !matches!(
-                tokio::time::timeout(Duration::from_secs(2), output.send(message)).await,
-                Ok(Ok(()))
-            ) {
-                break;
-            }
-            release_id = id.to_string();
-        }
         let incoming = tokio::select! {
-            m=input.next()=>match m {Some(Ok(Message::Binary(bytes)))=>Some(bytes),Some(Ok(Message::Ping(bytes)))=>{if output.send(Message::Pong(bytes)).await.is_err(){break;}continue;},Some(Ok(Message::Pong(_)))=>continue,_=>break},
-            c=notice.changed()=>{if c.is_err(){break;}None},
+            value=input.recv()=>match value{Some(v)=>Some(v),None=>return},
+            c=notice.changed()=>{if c.is_err(){return;}None},
             _=expiry.tick()=>None,
-            _=heartbeat.tick()=>{if !matches!(tokio::time::timeout(Duration::from_secs(2),output.send(Message::Ping(Bytes::new()))).await,Ok(Ok(()))){break;}continue;},
         };
         let allowed = private_allowed(&app, public, &key).await;
         for revoked in leases.revoke_private(allowed) {
-            if !send(&mut output, revoked).await {
+            if !emit(&output, revoked, false).await {
                 return;
             }
         }
@@ -545,11 +579,14 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                 count = 0;
             }
             count += 1;
-            if count > 64 {
-                break;
+            if count > 192 {
+                return;
             }
             let release = app.release.read().await.clone();
-            let mut hub = app.apps.lock().await;
+            let mut guard = app.apps.lock().await;
+            let Some(hub) = guard.as_mut() else {
+                continue;
+            };
             canvas::decode_client(&bytes).and_then(|message| {
                 recoverable_epoch = match &message {
                     ClientMessage::Mount { epoch, .. }
@@ -563,11 +600,11 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                 hub.process(&mut leases, message, allowed)
             })
         } else {
-            app.apps
-                .lock()
-                .await
-                .updates(&mut leases, allowed)
-                .map(|m| (m, false))
+            let mut guard = app.apps.lock().await;
+            match guard.as_mut() {
+                Some(hub) => hub.updates(&mut leases, allowed).map(|m| (m, false)),
+                None => continue,
+            }
         };
         match result {
             Ok((messages, changed)) => {
@@ -585,20 +622,19 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                         ServerMessage::Mounted { epoch, .. }
                         | ServerMessage::Sync { epoch, .. }
                         | ServerMessage::View { epoch, .. }
-                        | ServerMessage::Snapshot { epoch, .. }
                         | ServerMessage::AccessRequired { epoch }
                         | ServerMessage::Error { epoch, .. } => *epoch,
                     };
-                    if private_epochs.contains(&epoch) && !private_allowed(&app, public, &key).await
-                    {
+                    let private = private_epochs.contains(&epoch);
+                    if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
-                            if !send(&mut output, revoked).await {
+                            if !emit(&output, revoked, false).await {
                                 return;
                             }
                         }
                         continue;
                     }
-                    if !send(&mut output, message).await {
+                    if !emit(&output, message, private).await {
                         return;
                     }
                 }
@@ -606,14 +642,13 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
             Err(message) => {
                 let epoch = recoverable_epoch
                     .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
-                if !send(&mut output, ServerMessage::Error { epoch, message }).await {
+                if !emit(&output, ServerMessage::Error { epoch, message }, false).await {
                     return;
                 }
                 if recoverable_epoch.is_none() {
-                    break;
+                    return;
                 }
             }
         }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(1), output.send(Message::Close(None))).await;
 }

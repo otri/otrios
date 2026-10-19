@@ -141,6 +141,20 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
     pump(&mut a, &mut da, &mut sa);
     pump(&mut b, &mut db, &mut sb);
     edit(&mut a, "Linear slider", 870, 0);
+    let pending_scene = a.scene().unwrap();
+    let slider = pending_scene
+        .controls()
+        .iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Linear slider")
+        })
+        .unwrap()
+        .node
+        .id;
+    assert_eq!(a.control_value(slider).unwrap(), Some(87.));
     pump(&mut a, &mut da, &mut sa);
     assert_eq!(a.value(1).unwrap(), 870);
     assert_eq!(b.value(1).unwrap(), 420);
@@ -472,10 +486,8 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
 }
 
 #[test]
-fn legacy_layout_bytes_are_unchanged_and_resize_rules_require_v2() {
-    use otrios_core::dashboard::layout::{DEFAULT_LAYOUT, Layout};
-    let legacy = Layout::bootstrap().unwrap();
-    assert_eq!(Layout::encode(legacy.blueprint()).unwrap(), DEFAULT_LAYOUT);
+fn resize_rules_require_v2_and_component_root_owns_its_size() {
+    use otrios_core::dashboard::layout::Layout;
     let ui = layout::ui();
     let parsed = Layout::from_bytes(&ui.layout).unwrap();
     assert_eq!(parsed.blueprint().schema, "otrios-layout-v2");
@@ -587,7 +599,7 @@ fn projected_scene_is_reused_until_selected_state_changes() {
     assert!(Arc::ptr_eq(&changed, &c.scene().unwrap()));
 }
 #[test]
-fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
+fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
     use otrios_core::dashboard::layout::Layout;
     use otrios_interfaces::layout::{Binding, Expr, Responder, Shape};
     let ui = home::ui();
@@ -599,17 +611,23 @@ fn app_scope_rejects_dashboard_bindings_and_legacy_responder_domains() {
         .find(|n| matches!(n.shape, Shape::Text { .. }))
         .unwrap();
     if let Shape::Text { value, .. } = &mut heading.shape {
-        *value = Expr::State(Binding::Enabled);
+        *value = Expr::State(Binding::Local(65000));
     }
     let bytes = Layout::encode(&blueprint).unwrap();
     let err = Layout::from_bytes(&bytes)
         .unwrap()
         .resolve_slots(&std::collections::BTreeMap::new())
         .unwrap_err();
-    assert!(err.contains("Dashboard bindings are unavailable"));
-    // Even an unlabeled/hidden old responder is rejected, rather than ignored or
-    // interpreted as an event with the same numeric index.
-    for responder in [Responder::ToggleFocus, Responder::AppNavigate(250)] {
+    assert!(err.contains("Missing local binding"));
+    // Even an unlabeled/hidden unbound responder is rejected, rather than ignored
+    // or interpreted as a valid event with the same numeric index.
+    for responder in [
+        Responder::AppEvent {
+            control: 127,
+            drag: false,
+        },
+        Responder::AppNavigate(250),
+    ] {
         let mut bad = home::ui();
         let mut b = Layout::from_bytes(&bad.layout).unwrap().blueprint().clone();
         let root = &mut b.templates[0].root;
@@ -694,7 +712,7 @@ fn animation_and_three_d_own_independent_intent_and_bounded_private_stress_histo
     assert!(three_d.motion_intent().unwrap().unwrap().1.playing);
     assert_eq!(three_d.value(2).unwrap(), 200);
     let before = animation.scene().unwrap();
-    let authority_before = authority.save();
+    let authority_before = authority.save().unwrap();
     animation.set_stress(30).unwrap();
     for step in 0..600 {
         animation.stress_tick(f64::from(step) * 40.).unwrap();
@@ -707,7 +725,7 @@ fn animation_and_three_d_own_independent_intent_and_bounded_private_stress_histo
     );
     assert!(animation.confirmed());
     assert!(Arc::ptr_eq(&before, &animation.scene().unwrap()));
-    assert_eq!(authority_before, authority.save());
+    assert_eq!(authority_before, authority.save().unwrap());
     assert_ne!(
         animation_lab::manifest().state_ref,
         three_d_lab::manifest().state_ref
@@ -857,7 +875,7 @@ fn all_seven_app_packages_qualify_default_and_scalar_extremes() {
                 "qualify:state",
                 code.clone(),
                 private,
-                authority.save(),
+                authority.save().unwrap(),
             );
             client.scene().unwrap();
             if let Some((_, intent)) = client.motion_intent().unwrap() {
@@ -959,6 +977,62 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
 }
 
 #[test]
+fn code_reload_waits_for_intents_but_not_an_idle_mount_handshake() {
+    let mut fresh = Client::default();
+    fresh.open("app:component-playground/ui", "fresh");
+    assert!(
+        fresh.outgoing().unwrap().is_none(),
+        "catalog must be admitted before mounting"
+    );
+    let ui = playground::ui(&code());
+    fresh
+        .admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![CatalogEntry {
+                    app: App {
+                        id: "component-playground".into(),
+                        title: ui.title.clone(),
+                        ui_ref: ui.ui_ref.clone(),
+                        state_ref: "fresh".into(),
+                        status: "canvas-app".into(),
+                        dependencies: vec![],
+                    },
+                    ui_hash: hash(&encode_ui(&ui).unwrap()),
+                    private: false,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(fresh.outgoing().unwrap().is_some());
+    assert!(!fresh.confirmed());
+    assert!(
+        fresh.reload_ready(),
+        "No user data exists before the first mount"
+    );
+
+    let ui = playground::ui(&code());
+    let mut client = Client::default();
+    activate(&mut client, ui.clone(), "reload-gate", code());
+    let mut authority = Document::new(ui.state_schema, "reload-gate").unwrap();
+    pump(&mut client, &mut authority, &mut Session::default());
+    assert!(client.reload_ready());
+    client.reset_connection();
+    client.outgoing().unwrap();
+    assert!(!client.confirmed());
+    assert!(
+        client.reload_ready(),
+        "A clean offline remount must not strand code"
+    );
+    edit(&mut client, "Linear slider", 870, 0);
+    assert!(
+        !client.reload_ready(),
+        "The RAM overlay must survive an upgrade offer"
+    );
+}
+
+#[test]
 fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation() {
     let code = code();
     let ui = playground::ui(&code);
@@ -977,6 +1051,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
         panic!("Mount")
     };
     assert!(!client.confirmed());
+    assert!(!client.reload_ready());
     let bytes = encode_ui(&playground::ui(&code)).unwrap();
     client
         .receive(
@@ -985,7 +1060,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code,
-                state: authority.save(),
+                state: authority.save().unwrap(),
             })
             .unwrap(),
         )
@@ -1033,7 +1108,7 @@ fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
                     ui: encode_ui(&ui).unwrap(),
                     ui_hash: vec![0; 32],
                     code: vec![],
-                    state: authority.save()
+                    state: authority.save().unwrap()
                 })
                 .unwrap()
             )
@@ -1122,7 +1197,7 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                     ui: bytes.clone(),
                     ui_hash: vec![0; 32],
                     code: code.clone(),
-                    state: authority.save()
+                    state: authority.save().unwrap()
                 })
                 .unwrap()
             )
@@ -1157,7 +1232,7 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code,
-                state: authority.save(),
+                state: authority.save().unwrap(),
             })
             .unwrap(),
         )
@@ -1423,7 +1498,7 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
     assert!(
         matches!((&logout.children[1].primitive, &home.children[1].primitive), (Primitive::Text { scale: a, color: ac, .. }, Primitive::Text { scale: b, color: bc, .. }) if a == b && ac == bc)
     );
-    let before = authority.save();
+    let before = authority.save().unwrap();
     assert!(c.activate(c.epoch(), logout.id).unwrap());
     assert!(c.take_sign_out());
     assert!(!c.take_sign_out(), "host actions are consumed once");
@@ -1431,7 +1506,7 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
         c.outgoing().unwrap().is_none(),
         "sign out never emits CRDT writes"
     );
-    assert_eq!(authority.save(), before);
+    assert_eq!(authority.save().unwrap(), before);
     c.activate(c.epoch(), logout.id).unwrap();
     c.set_session_controls(false);
     assert!(
@@ -1452,7 +1527,7 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
     use std::sync::Arc;
     let font = Arc::new(
         Font::from_zstd(
-            include_bytes!("../../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
             otrios_core::dashboard::font_reference::RESOURCE_SHA256,
         )
         .unwrap(),
@@ -1467,7 +1542,14 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
         .unwrap();
     let mut c = Client::default();
     c.set_font(font.clone());
-    activate_snapshot(&mut c, ui, "tapped-input", vec![], false, authority.save());
+    activate_snapshot(
+        &mut c,
+        ui,
+        "tapped-input",
+        vec![],
+        false,
+        authority.save().unwrap(),
+    );
     let mut session = Session::default();
     pump(&mut c, &mut authority, &mut session);
     fn tap(c: &mut Client, label: &str, x: f32) {
@@ -1531,7 +1613,7 @@ fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
     use otrios_core::dashboard::{font::Font, keyboard::TextBuffer};
     use otrios_interfaces::keyboard::Edit;
     let font = Font::from_zstd(
-        include_bytes!("../../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
     )
     .unwrap();
@@ -1556,4 +1638,307 @@ fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
         text.text(),
         format!("{}!{}", "W".repeat(24), "W".repeat(36))
     );
+}
+
+#[test]
+fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
+    let ui = playground::ui(&code());
+    let mut c = Client::default();
+    activate(&mut c, ui.clone(), "offline-input", code());
+    let mut authority = Document::new(ui.state_schema, "offline-input").unwrap();
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    c.reset_connection();
+    let ClientMessage::Mount {
+        epoch,
+        writer,
+        resume,
+        ..
+    } = decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("missing reconnect")
+    };
+    edit(&mut c, "Linear slider", 870, 0);
+    c.tick(5000, 0).unwrap();
+    assert_eq!(c.value(1).unwrap(), 870);
+    assert!(!c.confirmed());
+    assert_eq!(authority.value(1).unwrap(), 420);
+    let (mut next, _) = authority.open_session(&writer, resume).unwrap();
+    let state = authority.generate(&mut next).unwrap().unwrap();
+    let bytes = encode_ui(&ui_for_cache()).unwrap();
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&bytes),
+            ui: bytes,
+            code: vec![],
+            state,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(c.value(1).unwrap(), 870);
+    pump(&mut c, &mut authority, &mut next);
+    assert_eq!(authority.value(1).unwrap(), 870);
+}
+
+// Deliberately do not advance a host clock while delivering messages. These
+// exercise dispatch semantics, rather than accidentally flushing via pump().
+fn drain_sync(
+    c: &mut Client,
+    authority: &mut Document,
+    session: &mut Session,
+) -> Vec<StateRequest> {
+    let mut requests = Vec::new();
+    while let Some(bytes) = c.outgoing().unwrap() {
+        if let ClientMessage::Sync { bytes, .. } = decode_client(&bytes).unwrap() {
+            requests.push(decode_state_request(&bytes).unwrap());
+            authority.receive(session, &bytes).unwrap();
+        }
+    }
+    requests
+}
+fn deliver_state(c: &mut Client, authority: &Document, session: &mut Session) {
+    let bytes = authority.generate(session).unwrap().unwrap();
+    c.receive(
+        &encode_server(&ServerMessage::Sync {
+            epoch: c.epoch(),
+            bytes,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn continuous_feedback_survives_delayed_confirmation_and_final_release_bypasses_deadline() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    for phase in [PointerPhase::Up, PointerPhase::Cancel] {
+        let code = code();
+        let ui = playground::ui(&code);
+        let mut c = Client::default();
+        activate(&mut c, ui.clone(), "dispatch:gesture", code);
+        let mut authority = Document::new(ui.state_schema, "dispatch:gesture").unwrap();
+        let mut session = Session::default();
+        pump(&mut c, &mut authority, &mut session);
+        c.set_dispatch_policy(DispatchPolicy::new(1000, MAX_FIELDS).unwrap());
+        c.tick(2000, 0).unwrap();
+        let scene = c.scene().unwrap();
+        let controls = scene.controls();
+        let slider = controls
+            .iter()
+            .find(|n| n.node.id == node(&c, "Linear slider"))
+            .unwrap();
+        let position = |x| {
+            [
+                slider.origin[0] + slider.node.frame.width * x,
+                slider.origin[1] + 40.,
+            ]
+        };
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 91,
+                phase: PointerPhase::Down,
+                position: position(0.2),
+            },
+        )
+        .unwrap();
+        assert!(
+            drain_sync(&mut c, &mut authority, &mut session)
+                .iter()
+                .any(|r| matches!(r, StateRequest::Write { .. }))
+        );
+        let issued_value = authority.value(1).unwrap();
+        c.tick(2001, 0).unwrap();
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 91,
+                phase: PointerPhase::Move,
+                position: position(0.8),
+            },
+        )
+        .unwrap();
+        assert_ne!(c.value(1).unwrap(), issued_value);
+        assert!(text_contains(c.scene().unwrap().root(), "80%"));
+        assert!(
+            drain_sync(&mut c, &mut authority, &mut session).is_empty(),
+            "one immutable issued write"
+        );
+        assert_eq!(c.dispatch_usage().pending_fields, 1);
+        assert_eq!(c.dispatch_usage().issued_fields, 1);
+        deliver_state(&mut c, &authority, &mut session);
+        let requests = drain_sync(&mut c, &mut authority, &mut session);
+        assert!(
+            requests
+                .iter()
+                .all(|r| matches!(r, StateRequest::Ack { .. }))
+        );
+        assert_eq!(
+            c.value(1).unwrap(),
+            800,
+            "old confirmation cannot erase local feedback"
+        );
+        assert_eq!(c.dispatch_usage().ready_in_ms, Some(999));
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 91,
+                phase,
+                position: position(1.4),
+            },
+        )
+        .unwrap();
+        let final_value = c.value(1).unwrap();
+        assert_eq!(c.dispatch_usage().ready_in_ms, Some(0));
+        let requests = drain_sync(&mut c, &mut authority, &mut session);
+        assert!(
+            requests
+                .iter()
+                .any(|r| matches!(r, StateRequest::Write { .. }))
+        );
+        assert_eq!(authority.value(1).unwrap(), final_value);
+        deliver_state(&mut c, &authority, &mut session);
+        drain_sync(&mut c, &mut authority, &mut session);
+        assert!(c.confirmed());
+        assert_eq!(c.dispatch_usage(), DispatchUsage::default());
+    }
+}
+
+#[test]
+fn discrete_assignment_and_text_do_not_wait_for_continuous_dispatch_interval() {
+    let code = code();
+    let ui = playground::ui(&code);
+    let mut c = Client::default();
+    activate(&mut c, ui.clone(), "dispatch:discrete", code);
+    let mut authority = Document::new(ui.state_schema, "dispatch:discrete").unwrap();
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    c.set_dispatch_policy(DispatchPolicy::new(1000, MAX_FIELDS).unwrap());
+    c.tick(2000, 0).unwrap();
+    edit(&mut c, "Linear slider", 100, 0);
+    drain_sync(&mut c, &mut authority, &mut session);
+    deliver_state(&mut c, &authority, &mut session);
+    drain_sync(&mut c, &mut authority, &mut session);
+    c.tick(2001, 0).unwrap();
+    edit(&mut c, "Linear slider", 900, 0);
+    assert_eq!(c.dispatch_usage().ready_in_ms, Some(999));
+    edit(&mut c, "Toggle", 0, 0);
+    assert_eq!(c.dispatch_usage().ready_in_ms, Some(0));
+    let requests = drain_sync(&mut c, &mut authority, &mut session);
+    assert!(
+        requests
+            .iter()
+            .any(|r| matches!(r, StateRequest::Write { values, .. } if values.len() == 2))
+    );
+    assert_eq!(authority.value(1).unwrap(), 900);
+
+    let ui = input_lab::ui();
+    let mut text = Client::default();
+    activate(&mut text, ui.clone(), "dispatch:text", vec![]);
+    let mut doc = Document::new(ui.state_schema, "dispatch:text").unwrap();
+    let mut session = Session::default();
+    pump(&mut text, &mut doc, &mut session);
+    text.set_dispatch_policy(DispatchPolicy::new(1000, MAX_FIELDS).unwrap());
+    text.tick(2000, 0).unwrap();
+    text.activate(text.epoch(), node(&text, "First text field"))
+        .unwrap();
+    text.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit("a".into()))
+        .unwrap();
+    drain_sync(&mut text, &mut doc, &mut session);
+    deliver_state(&mut text, &doc, &mut session);
+    drain_sync(&mut text, &mut doc, &mut session);
+    text.tick(2001, 0).unwrap();
+    text.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit("b".into()))
+        .unwrap();
+    assert_eq!(text.dispatch_usage().ready_in_ms, Some(0));
+    drain_sync(&mut text, &mut doc, &mut session);
+    assert_eq!(
+        doc.typed_value(1).unwrap(),
+        otrios_interfaces::layout::Value::Text("ab".into())
+    );
+}
+
+#[test]
+fn admitted_ui_coverage_hides_unused_values_and_other_receipts_but_confirms_own_edits() {
+    use otrios_interfaces::layout::Value;
+    let code = code();
+    let mut ui = playground::ui(&code);
+    ui.state_schema.fields.push(Field {
+        id: 6,
+        name: "unused".into(),
+        default: Value::Text("default".into()),
+        writable: true,
+    });
+    let selection = StateSelection::from_ui(&ui).unwrap();
+    let mut authority = Document::new(ui.state_schema.clone(), "selection:ui").unwrap();
+    authority
+        .set_typed(&[(6, Value::Text("not-in-this-view".into()))])
+        .unwrap();
+    let mut c = Client::default();
+    activate(&mut c, ui, "selection:ui", code);
+    assert!(
+        c.typed_value(6).is_err(),
+        "an unrequested value cannot appear as a schema default"
+    );
+    let mut session = Session::default();
+    drain_sync(&mut c, &mut authority, &mut session);
+    session.set_selection(selection.clone()).unwrap();
+    deliver_state(&mut c, &authority, &mut session);
+    drain_sync(&mut c, &mut authority, &mut session);
+    assert!(c.confirmed());
+    let old_scene = c.scene().unwrap();
+    assert!(
+        session.set_selection(selection).is_err(),
+        "coverage is fixed for a lease"
+    );
+    authority
+        .set_typed(&[(6, Value::Text("changed-but-unrequested".into()))])
+        .unwrap();
+    assert!(authority.generate(&mut session).unwrap().is_none());
+    let (_other, _) = authority.open_session(&[99; 16], 0).unwrap();
+    assert!(
+        authority.generate(&mut session).unwrap().is_none(),
+        "other writer admission is outside coverage"
+    );
+    assert!(std::sync::Arc::ptr_eq(&old_scene, &c.scene().unwrap()));
+    edit(&mut c, "Linear slider", 860, 0);
+    c.cancel().unwrap();
+    drain_sync(&mut c, &mut authority, &mut session);
+    deliver_state(&mut c, &authority, &mut session);
+    drain_sync(&mut c, &mut authority, &mut session);
+    assert!(c.confirmed());
+    assert_eq!(authority.value(1).unwrap(), 860);
+    assert_eq!(c.value(1).unwrap(), 860);
+    assert!(c.typed_value(6).is_err());
+    assert_eq!(
+        authority.typed_value(6).unwrap(),
+        Value::Text("changed-but-unrequested".into())
+    );
+}
+
+#[test]
+fn retired_snapshot_override_cannot_create_a_second_source_of_app_state() {
+    #[derive(serde::Serialize)]
+    enum Retired {
+        Snapshot {
+            epoch: u32,
+            values: Vec<(u16, otrios_interfaces::layout::Value)>,
+        },
+    }
+    let code = code();
+    let ui = playground::ui(&code);
+    let mut c = Client::default();
+    activate(&mut c, ui, "retired:snapshot", code);
+    let scene = c.scene().unwrap();
+    let before = c.value(1).unwrap();
+    let bytes = flexbuffers::to_vec(Retired::Snapshot {
+        epoch: c.epoch(),
+        values: vec![(1, otrios_interfaces::layout::Value::Number(999.))],
+    })
+    .unwrap();
+    assert!(c.receive(&bytes).is_err());
+    assert_eq!(c.value(1).unwrap(), before);
+    assert!(std::sync::Arc::ptr_eq(&scene, &c.scene().unwrap()));
 }

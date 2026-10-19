@@ -3,13 +3,15 @@
 use otrios_core::{canvas, dashboard::layout::Layout};
 use otrios_interfaces::{canvas::*, layout::Value};
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
 use tungstenite::{Message, client::IntoClientRequest};
+#[path = "../../src/session_client.rs"]
+pub mod session_client;
 pub const ORIGIN: &str = "https://otrios.otri.ca";
 pub type Socket = tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>;
 pub struct Room {
@@ -63,8 +65,14 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
             ui_ref: app.ui_ref.clone(),
             title: id.into(),
             state_schema: fields,
-            layout: Layout::bootstrap().unwrap().bytes().to_vec(),
-            selectors: vec![],
+            layout: empty_layout().bytes().to_vec(),
+            // Tests read/edit this field; declare it as a view dependency so
+            // selective replication does not intentionally omit it.
+            selectors: vec![Selector {
+                local: 1,
+                field: 1,
+                projection: Projection::Identity,
+            }],
             handlers: vec![],
             navigation: vec![],
             behavior: None,
@@ -90,25 +98,33 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
     (bytes, schema)
 }
 pub fn room(auth: bool, seconds: u64) -> Room {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "otrios-app-test-{}-{}",
+        "otrios-app-test-{}-{}-{}",
         std::process::id(),
-        port().replace(':', "-")
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
+
     std::fs::create_dir_all(&root).unwrap();
     let (catalog, schema) = fixture(&root.join("apps"));
-    let private = port();
-    let public = port();
+    // Binding port 0 in the child keeps ownership with the actual listener.
+    // A bind/drop/rebind "free port" probe races other parallel fixtures.
+    let private = "127.0.0.1:0";
+    let public = "127.0.0.1:0";
     let mut command = Command::new(env!("CARGO_BIN_EXE_dashboard-server"));
     command.args([
         "--bind",
-        &private,
+        private,
         "--public-bind",
-        &public,
+        public,
         "--apps",
         root.join("apps").to_str().unwrap(),
         "--state",
-        root.join("state.automerge").to_str().unwrap(),
+        root.join("state.merkle").to_str().unwrap(),
         "--origin",
         ORIGIN,
     ]);
@@ -137,7 +153,30 @@ pub fn room(auth: bool, seconds: u64) -> Room {
             &seconds.to_string(),
         ]);
     }
-    let child = command.stdout(Stdio::null()).spawn().unwrap();
+    let mut child = command.stdout(Stdio::piped()).spawn().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut addresses = Vec::new();
+    for label in [
+        "OTriOS public listener: http://",
+        "OTriOS app authority: http://",
+    ] {
+        let mut line = String::new();
+        assert!(
+            output.read_line(&mut line).unwrap() > 0,
+            "authority exited before binding"
+        );
+        addresses.push(
+            line.trim()
+                .strip_prefix(label)
+                .expect("listener announcement")
+                .trim_end_matches('/')
+                .to_owned(),
+        );
+    }
+    child.stdout = Some(output.into_inner());
+    let public = addresses.remove(0);
+    let private = addresses.remove(0);
+    assert_ne!(public, private);
     let mut room = Room {
         child,
         private,
@@ -197,7 +236,7 @@ pub fn request(
     (s, b)
 }
 pub fn socket(address: &str, cookie: Option<&str>) -> Socket {
-    let mut request = format!("ws://{address}/apps/stream")
+    let mut request = format!("ws://{address}/session")
         .into_client_request()
         .unwrap();
     request
@@ -212,16 +251,22 @@ pub fn socket(address: &str, cookie: Option<&str>) -> Socket {
     if let tungstenite::stream::MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
     }
+    session_client::negotiate(&mut socket).unwrap();
     socket
 }
 pub fn send(s: &mut Socket, m: ClientMessage) {
-    s.send(Message::Binary(canvas::encode_client(&m).unwrap().into()))
-        .unwrap();
+    s.send(Message::Binary(
+        otrios_interfaces::session::frame(1, canvas::encode_client(&m).unwrap()).into(),
+    ))
+    .unwrap();
 }
 pub fn read(s: &mut Socket) -> ServerMessage {
     loop {
         match s.read().unwrap() {
-            Message::Binary(b) => return canvas::decode_server(&b).unwrap(),
+            Message::Binary(b) => {
+                return canvas::decode_server(b.strip_prefix(&[1]).expect("state channel"))
+                    .unwrap();
+            }
             Message::Text(_) | Message::Pong(_) => {}
             Message::Ping(_) => s.flush().unwrap(),
             other => panic!("unexpected {other:?}"),
@@ -237,6 +282,8 @@ pub fn mount(s: &mut Socket, room: &Room, id: &str, epoch: u32) {
             state_ref: format!("app:{id}/state"),
             catalog_hash: canvas::hash(&room.catalog),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
 }
@@ -272,8 +319,38 @@ pub fn cookie(room: &Room) -> String {
         .unwrap()
         .to_string()
 }
+fn empty_layout() -> Layout {
+    use otrios_interfaces::layout::*;
+    let number = |n| Expr::Literal(Value::Number(n));
+    let blueprint = Blueprint {
+        schema: "otrios-layout-v2".into(),
+        templates: vec![Template {
+            id: 1,
+            name: "Test canvas".into(),
+            parameters: vec![],
+            root: TemplateNode {
+                id: 0,
+                frame: [number(0.), number(0.), Expr::Width, Expr::Height],
+                visible: Expr::Literal(Value::Boolean(true)),
+                shape: Shape::Canvas { clip: true },
+                resize: None,
+                responder: None,
+                semantics: None,
+                children: vec![],
+            },
+        }],
+        root: Instance {
+            id: 0,
+            template: 1,
+            frame: [0., 0., 1280., 800.],
+            properties: vec![],
+            children: vec![],
+        },
+    };
+    Layout::from_bytes(&Layout::encode(&blueprint).unwrap()).unwrap()
+}
 pub fn view(room: &Room) -> Vec<u8> {
-    let mut blueprint = Layout::bootstrap().unwrap().blueprint().clone();
+    let mut blueprint = empty_layout().blueprint().clone();
     blueprint.root.children.clear();
     let bytes = Layout::encode(&blueprint).unwrap();
     assert_eq!(
@@ -298,10 +375,34 @@ pub fn state_file(room: &Room, id: &str) -> PathBuf {
 }
 pub fn state_file_ref(room: &Room, id: &str, state_ref: &str) -> PathBuf {
     room.root.join("state.apps").join(format!(
-        "{id}-{}.automerge",
+        "{id}-{}.merkle",
         canvas::hex(&canvas::hash(state_ref.as_bytes()))
     ))
 }
 pub fn accept(s: &mut Socket, epoch: u32) {
     send(s, ClientMessage::AcceptMount { epoch });
+}
+
+pub fn stored(room: &Room, schema: StateSchema, scope: &str, id: &str) -> canvas::Document {
+    let file = state_file_ref(room, id, scope);
+    stored_file(&file, schema, scope)
+}
+pub fn stored_file(file: &std::path::Path, schema: StateSchema, scope: &str) -> canvas::Document {
+    let mut doc = canvas::Document::load(schema, scope, &std::fs::read(file).unwrap()).unwrap();
+    let path = file.with_extension("merkle.log");
+    if let Ok(bytes) = std::fs::read(path) {
+        let mut at = 0;
+        while at < bytes.len() {
+            if bytes.len() - at < 36 {
+                break;
+            }
+            let len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            if at + 36 + len > bytes.len() {
+                break;
+            }
+            doc.replay(&bytes[at + 36..at + 36 + len]).unwrap();
+            at += 36 + len;
+        }
+    }
+    doc
 }

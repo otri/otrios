@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-19",
+  "baseline_commit": "8dd9bc9b188e8de0fd4d617b42fe0fff1d0a8481",
+  "baseline_tag": "2026-10-19-canvas-apps-milestone",
+  "merkle_commit": "3f6026031f72336c9942f0bc9666d766e3040e9e",
+  "catalog_sha256": "3944cecef69c77868c4f2a85a269edd744d42ffd149cf6061d2463b26c113dbd",
+  "kernel": "6.18.57-spd-kiosk armv7l",
+  "cpu": "RK3126 Cortex-A7",
+  "rust": "1.90.0 release armv7-unknown-linux-gnueabihf",
+  "display": "800x1280 physical / 1280x800 logical, rotation 90, RGB565, direct DRM/GBM/EGL/GLES2",
+  "core_changed_by_instrumentation": false,
+  "native_binary_sha256": {
+    "baseline": {
+      "dashboard-direct": "f1625994ab2946094ec77a593614e7343a4289d8f92264904620d7490fe1c0bf",
+      "canvas-adapter-bench": "cb17015ade648b218a5757ebe31c53804f6a93c4cac126d7da5c3d3947f5c394"
+    },
+    "merkle": {
+      "dashboard-direct": "fa43ae4b2514aa0de0ec5ff9c37cad7ab0d19657a1a073cd29b84c3221cb551a",
+      "canvas-adapter-bench": "6b9aab351a00850ea1964b8df1d6ece0404378136cf30ccdec7ac3a8d10b7013"
+    }
+  },
+  "input": "normalized count ((index * 37 + 19) % 997) + 1",
+  "headless": {
+    "repetitions": 3,
+    "rates_hz": [
+      10,
+      30
+    ],
+    "updates": [
+      180,
+      300
+    ],
+    "warmup": 20
+  },
+  "native": {
+    "repetitions": 3,
+    "rate_hz": 5,
+    "updates": 150,
+    "warmup": 10,
+    "presentation_samples_discarded": 12
+  },
+  "network": "same tailnet-only TCP routes and loopback relays; Mac M2 Max durable authorities; no public route changes"
+}

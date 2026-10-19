@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Install after the bounded direct-display trial. No default boot enablement.
+# Direct native host; enable this service for boot after deployment acceptance.
 [Unit]
 Description=OTriOS direct KMS/GBM GLES2 dashboard
 After=otrios-dashboard.service spd-weston.service spd-browser.service tailscaled.service
@@ -12,6 +12,7 @@ Type=simple
 User=kiosk
 Group=kiosk
 SupplementaryGroups=video render input
+Environment=DASHBOARD_CODE_URL=https://otrios.otri.ca
 EnvironmentFile=/etc/otrios-dashboard.conf
 Environment=HOME=/home/kiosk
 Environment=OTRIOS_SCANOUT_FORMAT=rgb565
@@ -25,10 +26,9 @@ RuntimeDirectoryMode=0700
 UMask=0077
 ExecStartPre=+/usr/bin/python3 /opt/otrios-dashboard/frame-console-mode.py enter
 # The accepted rule path is configured during installation, without changing its bytes.
-ExecStart=/usr/bin/python3 -u /opt/otrios-dashboard/frame-dashboard-agent.py --url ${DASHBOARD_URL} --cache /var/lib/otrios-dashboard --runtime-dir /run/otrios-direct-console/otrios --cache-bytes 2147483648 --key /opt/otrios-dashboard/publisher.pem --video-driver KMSDRM --rotation 90 --touch-calibration ${DASHBOARD_TOUCH_RULE} --capture-first-frame
+ExecStart=/usr/bin/python3 -u /opt/otrios-dashboard/frame-dashboard-agent.py --url ${DASHBOARD_URL} --code-url ${DASHBOARD_CODE_URL} --cache /var/lib/otrios-dashboard --runtime-dir /run/otrios-direct-console/otrios --cache-bytes 2147483648 --key /opt/otrios-dashboard/publisher.pem --rotation 90 --touch-calibration ${DASHBOARD_TOUCH_RULE} --capture-first-frame
 ExecStopPost=+/usr/bin/python3 /opt/otrios-dashboard/frame-console-mode.py restore
-# Native update failures roll back in the agent; complete direct-host failure returns to Weston.
-ExecStopPost=+/bin/sh -c 'test "$$SERVICE_RESULT" = success || exec /usr/bin/systemctl --no-block start otrios-dashboard.service'
+# Native update failures roll back to a verified direct release in the agent.
 Restart=no
 TimeoutStopSec=15
 KillMode=mixed
