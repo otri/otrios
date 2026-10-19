@@ -1,6 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Frame authority cutover and load test — 2026-10-20
 
+The later [complete-client burst qualification](frame-burst-capacity-2026-10-20.md)
+corrects the interactive capacity scope: these original state-only clients did
+not enable the Playground ink subscription. Their connection/memory results do
+not qualify complete drawing clients or remote drawing latency.
+
 The 1 GB RK3126 frame now owns the OTriOS authority and the public site's
 Cloudflare Tunnel. Monitoring is collected directly from the existing Linode
 Prometheus HTTPS API over Tailscale. Grafana and Prometheus remain on Linode.

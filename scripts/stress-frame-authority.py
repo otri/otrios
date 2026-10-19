@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Ramp real sessions and Component Playground writes on a disposable frame authority."""
-import argparse, hashlib, io, json, math, os, pathlib, resource, shlex, shutil, subprocess, tarfile, threading, time, uuid
+import argparse, hashlib, io, json, math, os, pathlib, resource, shlex, shutil, signal, subprocess, tarfile, threading, time, uuid
 
 SAMPLER = r'''
 import json,pathlib,sys,time,urllib.request,os
@@ -72,7 +72,7 @@ with tarfile.open(fileobj=sys.stdin.buffer,mode='r|') as t:
 shutil.chown(root,user='otrios',group='otrios')
 '''.replace('REMOTE',repr(remote))
     command(install,input=payload.getvalue())
-    monitor=None;consumer=None;stop=None
+    monitor=None;consumer=None;stop=None;client=None
     unit=None;proxy='otrios-stress-proxy-'+uuid.uuid4().hex[:10]
     cases=[]
     if a.phase in ('all','sockets'):
@@ -101,7 +101,7 @@ print(json.dumps({'ip':ip}))
             name=f'{index:02}-{mode}-{clients}-{active}-{hz}';unit='otrios-stress-'+uuid.uuid4().hex[:10]
             setup=r'''import pathlib,subprocess,json,time,urllib.request,shutil
 root=pathlib.Path(REMOTE);state=root/NAME;state.mkdir();shutil.chown(state,user='otrios',group='otrios')
-args=['systemd-run','--quiet','--unit='+UNIT,'--uid=otrios','--property=MemoryMax=256M','--property=MemoryHigh=192M','--property=CPUWeight=50','--property=TasksMax=64','--property=LimitNOFILE=16384','--property=NoNewPrivileges=yes',str(root/'server'),'--bind','127.0.0.1:18876','--public-bind','127.0.0.1:18877','--trusted-peers','4','--public-peers',str(PUBLIC_LIMIT),'--app-state',str(state/'state.apps'),'--releases','/var/lib/otrios-authority/releases','--origin','https://otrios.otri.ca']
+args=['systemd-run','--quiet','--unit='+UNIT,'--uid=otrios','--property=MemoryMax=256M','--property=MemoryHigh=192M','--property=CPUWeight=50','--property=TasksMax=64','--property=RuntimeMaxSec=360','--property=LimitNOFILE=16384','--property=NoNewPrivileges=yes',str(root/'server'),'--bind','127.0.0.1:18876','--public-bind','127.0.0.1:18877','--trusted-peers','4','--public-peers',str(PUBLIC_LIMIT),'--app-state',str(state/'state.apps'),'--releases','/var/lib/otrios-authority/releases','--origin','https://otrios.otri.ca']
 subprocess.run(args,check=True)
 for i in range(100):
  try:
@@ -151,6 +151,10 @@ print(json.dumps({'pid':pid,'cgroup':'/sys/fs/cgroup'+cg,'release':health['relea
             print(json.dumps({'completed':name,'connected':result.get('connected'),'cycles':result.get('issued_cycles',result.get('confirmed_cycles')),'client_gates_passed':result.get('client_gates_passed'),'ink_delivery_us':result.get('ink_delivery_us'),'release_confirmation_us':result.get('release_confirmation_us'),'ack_us':result.get('ack_us'),'summary':result['sample_summary'],'errors':result.get('errors',result.get('client_error')),'guard':guard}),flush=True)
             if guard:break
     finally:
+        if client is not None and client.poll() is None:
+            client.terminate()
+            try:client.wait(timeout=5)
+            except subprocess.TimeoutExpired:client.kill();client.wait()
         # Launch/measurement failures must not leave the sampler and its SSH pipe alive.
         if monitor is not None and monitor.poll() is None:
             try:
@@ -168,7 +172,11 @@ print(json.dumps({'pid':pid,'cgroup':'/sys/fs/cgroup'+cg,'release':health['relea
         command('import shutil;shutil.rmtree('+repr(remote)+')',capture_output=True)
         print('Removed disposable authority and Tailscale relay; production state was not used',flush=True)
 
+def terminate(signum, _frame):
+    raise SystemExit(128+signum)
+
 if __name__=='__main__':
+    signal.signal(signal.SIGTERM,terminate)
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['config','client','server','catalog','output']:p.add_argument('--'+name,type=pathlib.Path,required=True)
     p.add_argument('--phase',choices=['all','sockets','mounted','active','burst'],default='all');p.add_argument('--seconds',type=int,default=15);p.add_argument('--hz',type=int,default=10);p.add_argument('--clients',type=int,default=64);p.add_argument('--max-active',type=int,default=64);p.add_argument('--max-sockets',type=int,default=4096);p.add_argument('--max-mounted',type=int,default=512)

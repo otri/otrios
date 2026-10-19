@@ -80,3 +80,10 @@ start. An unchanged release fails the client gates. The same 30 Hz/duty,
 ink-delivery, confirmation and convergence thresholds remain in force. New runs
 use a distinct generator hash and output directories, retaining the original
 fixed-endpoint measurements locally without overwriting them.
+
+The interrupted fixed-endpoint diagnostic scheduler left one disposable test
+service active; its exact authority, relay and sampler were inspected and removed
+before final qualification began. The runner now handles SIGTERM through its
+cleanup path, terminates its client process on interruption, and gives each test
+authority a 360-second systemd lifetime bound. This changes test lifecycle only;
+it does not alter the offered workload or latency gates.
