@@ -114,15 +114,17 @@ pub(super) fn append(file: &Path, old: &Document, next: &Document) -> Result<(),
 mod tests {
     use super::*;
     fn fixture() -> (PathBuf, Document) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let p = std::env::temp_dir().join(format!(
-            "otrios-merkle-journal-{}-{}",
+            "otrios-merkle-journal-{}-{unique}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
-        fs::create_dir_all(&p).unwrap();
+        fs::create_dir(&p).unwrap();
         let file = p.join("test.merkle");
         let doc = Document::new(
             otrios_interfaces::canvas::StateSchema {
@@ -157,7 +159,7 @@ mod tests {
         let length = fs::metadata(log_path(&file)).unwrap().len();
         assert!(length > 36);
         // Crash after checkpoint rename, before journal truncation: old records
-        // remain, but the checkpoint is an validated root-chain anchor.
+        // remain, but the checkpoint is a validated root-chain anchor.
         persist(&file, &next.save().unwrap()).unwrap();
         let recovered = load(&file, next.clone()).unwrap();
         assert_eq!(recovered.root_hash(), next.root_hash());
