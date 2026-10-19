@@ -202,3 +202,27 @@ The generator includes the changed-endpoint validation from commit `da371ab`;
 the runner includes bounded lifetime/SIGTERM cleanup from `5cda01f`. Raw result,
 metadata and one-second sample files remain in ignored local `target/frame-varied-*`
 directories. No private addresses, credentials or raw telemetry are published.
+
+## Final checks and live verification
+
+After the search completed and removed its disposable services, a four-client
+idle probe was interrupted with SIGTERM during sampling. The runner exited 143,
+removed its authority, relay units and state, and production remained healthy.
+This is a lifecycle check, excluded from the performance measurements.
+
+With pinned Rust 1.90.0, `bash scripts/check.sh` and
+`cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`
+passed. All 40 Node session, Monitoring, artifact-cache, GPU, catalog and worker
+tests passed. The real-process ink-admission regression mounts 24 ink-enabled
+public sessions, verifies broadcast delivery and checks permit recovery.
+
+The publisher rebuilt the ARMv7 host artifacts and activated the same signed
+renderer release. Live authority bytes matched the benchmarked server digest;
+health reported `[4,64]` peer limits and ink capacity 68. The deployed binary
+passed 81 host checks with a disposable login, and
+`python3 scripts/test-dashboard-host.py --url https://otrios.otri.ca --public-only`
+passed 68 production checks. Direct Prometheus refresh succeeded and native
+readiness showed confirmed state with no pending commands. The build-only Mac
+watcher was restored; the retired Mac authority, tunnel and collector remained
+unloaded. Frame authority, native cache and Mac staging each retained only their
+active signed release. No stress state or relay unit files remained.
