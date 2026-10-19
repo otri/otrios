@@ -138,6 +138,36 @@ class ArtifactBudget(unittest.TestCase):
         self.assertFalse(agent.hot_reload_ready(dict(clean,input_busy=True)))
         self.assertFalse(agent.hot_reload_ready(dict(clean,reload_ready='true')))
         self.assertFalse(agent.hot_reload_ready({}))
+    def test_unavailable_state_does_not_blacklist_the_current_code_pointer_forever(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        old,new='a'*64,'b'*64
+        clock=[1000.];attempts=[]
+        class Host:
+            def __init__(self,args,release,exe,screen=None):
+                self.release=release;self.process=SimpleNamespace(poll=lambda:None)
+            def wait_ready(self,require_stream=True):
+                if self.release==new and require_stream:
+                    attempts.append(clock[0])
+                    if len(attempts)==1:raise RuntimeError('state authority unavailable')
+                    agent.running=False
+            def info(self):return {'reload_ready':True,'screen':'home'}
+            def close(self):pass
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);cache=root/'cache';cache.mkdir()
+            (cache/'last-good.json').write_text(json.dumps({'id':old}))
+            args=SimpleNamespace(cache=cache,runtime_dir=root/'run',key=root/'key',openssl=OPENSSL,video_driver='KMSDRM',url='https://example.test',cache_bytes=agent.CACHE_BYTES)
+            previous=agent.running;agent.running=True
+            def sleep(seconds):
+                clock[0]+=seconds
+                if clock[0]>1100:raise AssertionError('Candidate was stranded')
+            try:
+                with patch.object(agent,'Host',Host), patch.object(agent,'cached',return_value=(old,root/'old')), patch.object(agent,'qualify',return_value=(new,root/'new')), patch.object(agent,'fetch',return_value=json.dumps({'id':new}).encode()), patch.object(agent.time,'monotonic',side_effect=lambda:clock[0]), patch.object(agent.time,'sleep',side_effect=sleep):
+                    agent.main(args)
+            finally:agent.running=previous
+            self.assertEqual(json.loads((cache/'last-good.json').read_text())['id'],new)
+        self.assertEqual(len(attempts),2)
+        self.assertGreaterEqual(attempts[1]-attempts[0],30)
     def test_blob_hash_is_verified_and_cache_can_survive_offline(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:

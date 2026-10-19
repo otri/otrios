@@ -208,7 +208,7 @@ def main(a):
     lock=open(a.runtime_dir/'agent.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     for p in a.cache.iterdir():
         if p.name.startswith(('.download-','.verify-')) and p.is_dir() and not p.is_symlink():shutil.rmtree(p)
-    host=None;current=None;bad=None;last_good=None
+    host=None;current=None;bad=None;bad_until=0;last_good=None
     good_file=a.cache/'last-good.json'
     if good_file.exists():
         try:
@@ -227,8 +227,9 @@ def main(a):
                 if host is not None and host.process.poll() is None and time.monotonic()-last_probe<5:
                     time.sleep(.1);continue
                 release=json.loads(fetch(a.url,'/release',8192))['id'];last_probe=time.monotonic()
-                if host is not None and host.process.poll() is None and release in (current,bad):
+                if host is not None and host.process.poll() is None and (release==current or (release==bad and time.monotonic()<bad_until)):
                     continue
+                if release==bad:bad=None
                 release,exe=qualify(a.url,a.cache,a.key,a.openssl,release,sdl=a.video_driver=='wayland',limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
                 if (host is None or host.process.poll() is not None or release!=current) and release!=bad:
                     old=host
@@ -240,7 +241,7 @@ def main(a):
                     candidate=Host(a,release,exe,screen=info.get('screen'))
                     try:candidate.wait_ready()
                     except Exception:
-                        candidate.close();bad=release
+                        candidate.close();bad=release;bad_until=time.monotonic()+30
                         if last_good and last_good[0]!=release:
                             # Previous accepted release was signature-qualified this session.
                             last_good=cached(a.cache,last_good[0],a.key,a.openssl,sdl=a.video_driver=='wayland');host=Host(a,*last_good);host.wait_ready(require_stream=False)
