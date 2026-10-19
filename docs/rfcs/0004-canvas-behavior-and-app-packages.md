@@ -1,6 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0004: Canvas mounts, executable behavior and app packages
 
+Current implementation: the foundation uses canonical Merkle state and sync v4.
+The global Automerge replica/import and SDL recovery paths described in earlier
+prototype history are retired. See [RFC 0010](0010-runtime-foundation.md) for the
+active completion ledger and [modern pattern](../MODERN_APP_PATTERN.md).
+
+
 Status: app-scoped v2 cutover implemented; deployment/physical acceptance recorded separately. Builds on RFCs 0002/0003.
 
 Subsequent changes: [RFC 0006](0006-durable-canvas-merkle-adapter.md) replaced

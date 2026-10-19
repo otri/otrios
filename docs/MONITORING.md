@@ -55,17 +55,19 @@ The current Mac installation uses `com.otri.otrios-dashboard-monitoring`, a logi
 
 ## Inspect and restore
 
-- Trusted `GET /presentation`: exact current binary presentation, or an empty body when disabled. Public browsers use session-protected `GET /monitoring/presentation` or `/monitoring/stream`; anonymous `/demo/stream` never carries it.
-- `POST /presentation`, `Content-Type: application/octet-stream`: replace the view; an empty body clears it. The same origin checks and trusted-tailnet editing boundary as `/layout` apply. This is one collector with latest-writer replacement, not optimistic collaborative publication.
-- `GET /layout`: the underlying editable layout with its own ETag, even while a monitoring presentation is displayed. Its existing conditional publication API is unchanged.
-- `/health`: active displayed layout ID plus a `presentation` boolean.
+Trusted `GET /presentation` returns the current binary aggregate. Trusted
+`POST /presentation` with `application/octet-stream` replaces it atomically; an
+empty body clears it. Public clients receive it only after Monitoring admission,
+through the Canvas lease on `/session`; authenticated HTTP inspection is also
+available at `/monitoring/presentation`. There is no separate Monitoring socket.
+`/layout` and the old global dashboard editor are retired. `/health` reports app
+roots, release and presentation availability, without returning metric values.
 
-To restore the previous dashboard on the configured Mac, stop the collector before clearing, otherwise its next run will restore the monitoring view:
+The collector owns its view templates locally in `apps/monitoring/`; it no longer
+borrows the global dashboard seed. New aggregates use layout v2. Existing static
+v1 views remain readable within the bounded layout contract.
 
-```sh
-launchctl bootout gui/$(id -u)/com.otri.otrios-dashboard-monitoring
-curl --fail -X POST -H 'Content-Type: application/octet-stream' \
-  --data-binary '' http://127.0.0.1:8876/presentation
-```
-
-Re-enable with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.otri.otrios-dashboard-monitoring.plist`. The underlying saved layout, touch counter and CRDT history are retained. These commands affect only OTriOS presentation; Grafana and Prometheus keep running independently.
+Stop the OTriOS collector before clearing its presentation, otherwise the next
+scheduled collection restores the view. This affects only OTriOS; Grafana and
+Prometheus keep running. Confirmed Canvas app state is independent of the
+replaceable Monitoring aggregate. See [live operations](DASHBOARD_LIVE.md).

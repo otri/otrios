@@ -30,7 +30,7 @@ Rust 1.90.0 is pinned for reproducibility. Linux CI is configured for Ubuntu 24.
 | `crates/otrios-interfaces` | Experimental shared contract types | Apache-2.0 |
 | `crates/otrios-sdk` | Client-facing SDK, currently contract reexports | Apache-2.0 |
 | `crates/otrios-dashboard` | Thin native/browser hosts and demo sync server | Apache-2.0 |
-| `web/dashboard` | Browser host for the shared compositor | Apache-2.0 |
+| `web/canvas` | Browser host for the shared compositor | Apache-2.0 |
 | `interfaces` | IDL requirements before choosing a generator | Apache-2.0 |
 | `docs` | Architecture, PoC milestones, and collaboration setup | Apache-2.0 |
 
@@ -62,7 +62,9 @@ The [photo-frame Canvas adapter comparison](docs/experiments/canvas-adapter-fram
 
 The [practical Canvas foundation](docs/rfcs/0010-runtime-foundation.md) now deploys
 one bounded RAM intent queue and coherent UI-derived Merkle coverage, including
-only the writer's own receipt. [Browser/frame qualification and measurements](docs/experiments/canvas-foundation.md)
+only the writer's own receipt. The global dashboard replica and Automerge dependency
+are retired; [resource diagnostics](docs/ARCHITECTURE-RESOURCES.md) are shared by both hosts.
+[Browser/frame qualification and measurements](docs/experiments/canvas-foundation.md)
 record lower replication traffic, mixed latency results and the remaining work.
 
 The [bounded replication increments](docs/rfcs/0007-bounded-replication-pipeline.md)
@@ -70,4 +72,4 @@ fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding
 workspace, with a separately measured interactive-socket change. Their
 [frame measurements](docs/experiments/canvas-replication-pipeline.md) compare each
 increment against its immediate control using fresh disposable authorities.
-These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](docs/rfcs/0008-release-control.md) inside the [unified server session](docs/rfcs/0009-unified-server-session.md), independently of state decoding ([deployment acceptance](docs/experiments/release-hello-deployment.md)). Packed envelopes and optional compression are subsequent experiments.
+These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](docs/rfcs/0008-release-control.md) inside the [unified server session](docs/rfcs/0009-unified-server-session.md), independently of state decoding ([deployment acceptance](docs/experiments/release-hello-deployment.md)). [Sync v4 packed envelopes and measured optional compression](docs/rfcs/0011-packed-canvas-transport.md) are deployed. Normal state traffic stays raw after frame measurements; the optional bulk compressor is bounded.

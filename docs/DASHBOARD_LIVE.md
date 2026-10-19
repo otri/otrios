@@ -116,3 +116,18 @@ configuration/credentials, signing/auth material, durable state, immutable cache
 releases, the benchmark branch and the rollback snapshot. Other infrastructure
 and Supabase resources are outside scope. Historical experiment reports retain
 their original topology and measurements; current operation follows RFC 0009.
+
+## Qualified cutover order
+
+Push the tested source commit and verify that the configured remote can fetch
+that exact SHA **before** stopping or activating anything. Freeze and qualify
+matching authority/native/browser builds, verify the signed local replica, then
+pin the watcher to that tested commit. Do not activate an unpushed source pin.
+Retain a rollback copy before replacing installed binaries/helpers.
+
+The frame supervisor and direct service are one deployment unit: install their
+matching versions together, preserving the accepted rotation and touch calibration.
+The supervisor runs one direct renderer, verifies first presentation and confirmed
+app readiness, and retains a verified direct last-good release. There is no SDL
+or Wayland fallback. Canonical app state stays on the authority; rollback must
+never replace newly confirmed state with an old backup.

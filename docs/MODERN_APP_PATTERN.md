@@ -141,11 +141,11 @@ See [RFC 0006](rfcs/0006-font-resources-and-text-presentation.md).
 | Mechanism | Cutover disposition |
 | --- | --- |
 | Fixed dashboard Shell/screen branches and compiled demo UI | Replaced in production by the admitted app catalog and Canvas mounts. New app UI belongs in `apps/`, not another host screen branch. |
-| Global demo room and ambient DashboardView bindings | Replaced by app-owned typed roots; app layouts resolve explicit slots. No durable legacy-room bridge is introduced. |
+| Global replica, ambient bindings and duplicate presentation edit overlay | Deleted after browser/frame parity. App-owned Merkle roots and explicit slots are the only mutable app path; no automatic legacy import or compatibility room. |
 | Dashboard/MotionPresenter browser adapters | Replaced by CanvasApp and generic CanvasPresentation. The modern Wasm host excludes the old Dashboard exports. |
 | Separate trusted prototype package loader | Removed; development and production are thin entries into the same authority. Production admits packages from signed releases. |
 | Per-frame scene reconstruction | Replaced by selected-value scene caching and retained GPU resources. |
-| SDL/Wayland app path | Removed from the app build and host dependencies; direct GLES is the supported frame path. Old signed recovery artifacts require their compatible service/protocol, not an implied universal rollback. |
+| SDL/Wayland app path | Removed from runtime, publisher/supervisor selection and current service/trial tooling. Rollback selects a verified direct release. |
 | Five-field UI schema | Replaced by typed v2 fields. The bounded Wasm reducer ABI remains separately versioned v1. |
 
 Keep one implementation of scene validation, responder routing, keyboard editing,
@@ -172,3 +172,9 @@ expression for y, currently sampled at twelve segments per quarter. Hit testing
 uses the corresponding equation. This is not one global Lamé oval or a claim of
 exact equivalence to Apple's continuous corners. Radius is bounded by half the
 shorter side; zero produces a rectangle.
+
+The remaining layout v1 reader handles bounded static Monitoring aggregates, not
+a global-room runtime. Stable control v1 and its metadata-only alias, explicit
+retired-route tombstones, dated benchmark references and unrelated OS snapshot
+scaffolds are intentional retained boundaries. Deleting these would weaken
+upgrade compatibility, operational diagnosis or the separately scoped OS work.

@@ -1,6 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0006: Durable Canvas Merkle state adapter
 
+Current implementation: the foundation uses canonical Merkle state and sync v4.
+The global Automerge replica/import and SDL recovery paths described in earlier
+prototype history are retired. See [RFC 0010](0010-runtime-foundation.md) for the
+active completion ledger and [modern pattern](../MODERN_APP_PATTERN.md).
+
+
 Status: deployed on browser and photo frame; [acceptance evidence](../experiments/canvas-merkle-adapter-validation.md) records migration, reconnect and policy checks. Extends RFC 0005 without changing primitive rendering or app UI v2.
 
 The [RFC 0010 foundation cutover](0010-runtime-foundation.md) on the feature
