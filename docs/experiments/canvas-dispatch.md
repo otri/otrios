@@ -67,6 +67,21 @@ frame experiment directories. Live state was never used/reset. These are headles
 replication measurements, not physical touch-to-photon or GPU benchmarks. Main
 and the pre-Merkle benchmark reference are unchanged.
 
+## Server-only rollout
+
+Only the socket-inbox fix was promoted. The installed authority was built from
+`0732fa14aebb9d8b31fb55f9541c39c28b6789e2`, SHA-256
+`a4391595cc66dfd073fb48e96408c39a1ef1e862b69df450f710a3f0152a43dd`.
+The publisher is pinned to that pre-dispatch source and its verified input
+fingerprint; it cannot accidentally publish the prototype branch tip. The signed
+client release remains `ed105107522f5db8e9f413388ab83724ed6133e76590390314e795b9b3f75219`.
+Stopped state, server binary and configuration were privately snapshotted before
+restart. The live store was retained. Public/Monitoring conformance passed all
+81 checks afterward. The frame retained renderer PID 1154, reconnected at epoch 2,
+and reported admitted/confirmed Home with one trusted session. The builder was
+stopped after experiments. [Deployment identifiers](data/canvas-dispatch-2026-10-19/server-deployment.json)
+contain no credentials or document values. Physical touch was not re-tested.
+
 ## Verification and next work
 
 Required repository checks, workspace all-feature/all-target Clippy and native

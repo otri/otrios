@@ -8,6 +8,9 @@ development tooling; the monitoring collector is scheduled work. Neither is a
 request-serving dependency. [RFC 0009](../rfcs/0009-unified-server-session.md) records
 the contract and fault model; [operations](../DASHBOARD_LIVE.md) describes deployment.
 
+A later [server-only burst fix](canvas-dispatch.md#server-only-rollout) advances the
+runtime pin while retaining this signed client release.
+
 ## Accepted release
 
 - Runtime/tooling commit: `d1d6bd6d37d3827e444f0c3bd75327a5aaa67d9b`.

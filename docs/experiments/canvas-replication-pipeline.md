@@ -240,6 +240,11 @@ python3 scripts/benchmark-merkle-workspace.py \
   --output /ABS/FRESH_TREE_RESULTS --frame USER@FRAME --known-hosts /ABS/KNOWN_HOSTS
 ```
 
+The current runner defaults to negotiated `/session`. When reproducing the
+pre-unified-server builds above, add `--reference-session /apps/stream
+--candidate-session /apps/stream`; their older binaries retain their original
+handshake/encoding. Use the paired mode for those historical executables.
+
 The tools temporarily bind loopback ports 8901/8902 and tailnet ports 18901/18902;
 use an otherwise idle test machine. Frame files use unique bounded experiment
 directories and are removed. Source/build hashes, all per-trial quantiles, bytes,
