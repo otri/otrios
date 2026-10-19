@@ -62,6 +62,7 @@ fn check(bytes: &[u8]) -> Result<()> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES {
         return Err("Canvas message size limit".into());
     }
+    crate::flex_guard::validate(bytes, 32, MAX_BYTES * 2, MAX_BYTES)?;
     walk(
         Reader::get_root(bytes).map_err(err)?,
         0,

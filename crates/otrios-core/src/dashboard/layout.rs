@@ -86,6 +86,7 @@ impl Layout {
         if bytes.is_empty() || bytes.len() > MAX_LAYOUT_BYTES {
             return Err("Invalid layout size".into());
         }
+        crate::flex_guard::validate(bytes, 48, MAX_ITEMS, 512)?;
         let mut budget = MAX_ITEMS;
         preflight(Reader::get_root(bytes).map_err(err)?, 0, &mut budget)?;
         let blueprint: Blueprint = flexbuffers::from_slice(bytes).map_err(err)?;
