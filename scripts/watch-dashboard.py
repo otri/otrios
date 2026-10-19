@@ -17,7 +17,7 @@ def fingerprint(repo):
     for p in inputs(repo):h.update(str(p.relative_to(repo)).encode()+b'\0');h.update(p.read_bytes());h.update(b'\0')
     return h.hexdigest()
 def run(args,**kw):subprocess.run([str(x) for x in args],check=True,**kw)
-def rebuild(config,wanted):
+def rebuild(config,wanted,activate=True):
     repo=pathlib.Path(config['repo']);runtime=pathlib.Path(config['runtime']);build=runtime/'build';build.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='input-',dir=build) as tmp:
         temp=pathlib.Path(tmp)
@@ -57,11 +57,13 @@ def rebuild(config,wanted):
     # New releases use the direct Slug renderer. The supervisor retains the
     # previous signed release for rollback; no incomplete SDL UI is published.
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=not bool(config.get('module_volume')),catalog=source/'apps/catalog.flex')
-    if config.get('module_volume'):
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=activate and not bool(config.get('module_volume')),catalog=source/'apps/catalog.flex')
+    if activate and config.get('module_volume'):
         pointer=build/'module-pointer.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
         run([sys.executable,source/'scripts/publish-dashboard-module.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--volume',config['module_volume'],'--marker',runtime/'module-host/published-release','--pointer',pointer,'--activate-origin'])
-    publisher.atomic(build/'source-id',wanted.encode());print('PUBLISHED '+release['id'],flush=True)
+    if activate:publisher.atomic(build/'source-id',wanted.encode())
+    else:publisher.atomic(build/'staged-release.json',json.dumps(release,sort_keys=True).encode())
+    print(('PUBLISHED 'if activate else'STAGED ')+release['id'],flush=True)
     return release
 
 def feed_active(runtime):
@@ -92,7 +94,7 @@ def refresh_git(config):
         if old.exists():shutil.rmtree(old)
     publisher.atomic(marker,commit.encode());print('SOURCE '+commit,flush=True)
 
-def main(config,once):
+def main(config,once,activate=True):
     runtime=pathlib.Path(config['runtime']);lock=open(runtime/'watcher.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     repo=pathlib.Path(config['repo']);marker=runtime/'build/source-id';last=marker.read_text() if marker.exists() else None
     retry_at=0;next_git=0
@@ -104,7 +106,7 @@ def main(config,once):
             if once or (wanted!=last and time.monotonic()>=retry_at):
                 time.sleep(.5)
                 if fingerprint(repo)!=wanted:continue
-                rebuild(config,wanted);last=wanted
+                rebuild(config,wanted,activate);last=wanted
             if once:return
         except Exception as e:
             print('BUILD KEPT PREVIOUS RELEASE: '+str(e),flush=True)
@@ -112,4 +114,6 @@ def main(config,once):
             retry_at=time.monotonic()+10
         time.sleep(1)
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--once',action='store_true');a=p.parse_args();main(json.loads(pathlib.Path(a.config).read_text()),a.once)
+    p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--once',action='store_true');p.add_argument('--stage-only',action='store_true');a=p.parse_args();
+    if a.stage_only and not a.once:p.error('--stage-only requires --once')
+    main(json.loads(pathlib.Path(a.config).read_text()),a.once,not a.stage_only)
