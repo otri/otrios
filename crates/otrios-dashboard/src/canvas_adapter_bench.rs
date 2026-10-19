@@ -90,11 +90,100 @@ fn quantiles(values: &mut [u64]) -> serde_json::Value {
     };
     serde_json::json!({"p50": at(0.5), "p95": at(0.95), "p99": at(0.99), "max": values[values.len()-1]})
 }
+// Open-loop input: issue on the requested clock rather than waiting for each ACK.
+// Only observations actually delivered have latency samples; skipped assignments
+// are semantic consolidation, not zero-latency observations.
+fn burst(
+    writer: &mut Peer,
+    observer: &mut Peer,
+    node: u32,
+    updates: usize,
+    hz: u32,
+    origin: Instant,
+) -> Result<()> {
+    use std::collections::BTreeSet;
+    let before_writer = writer.counters();
+    let before_observer = observer.counters();
+    let start = Instant::now();
+    let mut issued = Vec::with_capacity(updates);
+    let mut lateness_us: Vec<u64> = Vec::with_capacity(updates);
+    let mut observed = BTreeSet::new();
+    let mut confirmed = BTreeSet::new();
+    let mut observe_us = Vec::new();
+    let mut ack_us = Vec::new();
+    let mut final_ack = None;
+    let mut final_seen = None;
+    let mut released = false;
+    loop {
+        let elapsed = start.elapsed().as_secs_f64();
+        while issued.len() < updates && elapsed >= issued.len() as f64 / f64::from(hz) {
+            let value = (issued.len() + 1) as u16;
+            let at = Instant::now();
+            lateness_us.push(
+                (at.duration_since(start).as_secs_f64() - issued.len() as f64 / f64::from(hz))
+                    .max(0.)
+                    .mul_add(1_000_000., 0.) as u64,
+            );
+            issued.push(at);
+            writer
+                .client
+                .event_for_node(writer.client.epoch(), node, value, 0)?;
+        }
+        if issued.len() == updates && !released {
+            // Real release path flushes the last assignment without another timer.
+            writer.client.pointer(
+                writer.client.epoch(),
+                otrios_interfaces::scene::PointerEvent {
+                    id: 999,
+                    phase: otrios_interfaces::scene::PointerPhase::Up,
+                    position: [-1., -1.],
+                },
+            )?;
+            released = true;
+        }
+        writer.pump(origin.elapsed().as_millis() as u64)?;
+        observer.pump(origin.elapsed().as_millis() as u64)?;
+        let seen = observer.client.value(3)?;
+        if seen > 0 && usize::from(seen) <= issued.len() && observed.insert(seen) {
+            let latency = issued[usize::from(seen) - 1].elapsed().as_micros() as u64;
+            observe_us.push(latency);
+            if usize::from(seen) == updates {
+                final_seen = Some(latency);
+            }
+        }
+        let ack = writer.client.value(3)?;
+        if writer.client.confirmed()
+            && ack > 0
+            && usize::from(ack) <= issued.len()
+            && confirmed.insert(ack)
+        {
+            let latency = issued[usize::from(ack) - 1].elapsed().as_micros() as u64;
+            ack_us.push(latency);
+            if usize::from(ack) == updates {
+                final_ack = Some(latency);
+            }
+        }
+        if final_ack.is_some() && final_seen.is_some() {
+            break;
+        }
+        if start.elapsed().as_secs_f64() > updates as f64 / f64::from(hz) + 15. {
+            return Err("Burst final value did not settle".into());
+        }
+    }
+    let difference = |after: [u64; 4], before: [u64; 4]| {
+        (0..4).map(|i| after[i] - before[i]).collect::<Vec<_>>()
+    };
+    println!(
+        "{}",
+        serde_json::json!({"mode":"burst","input_events":updates,"input_span_seconds":issued.last().unwrap().duration_since(start).as_secs_f64(),"input_lateness_us":quantiles(&mut lateness_us),"requested_hz":hz,"seconds":start.elapsed().as_secs_f64(),"observer_distinct_values":observed.len(),"fully_confirmed_values":confirmed.len(),"observe_delivered_us":quantiles(&mut observe_us),"fully_confirmed_us":quantiles(&mut ack_us),"final_ack_us":final_ack,"final_observe_us":final_seen,"writer_bytes":difference(writer.counters(),before_writer),"observer_bytes":difference(observer.counters(),before_observer),"byte_order":["sent_payload","received_payload","sent_ws","received_ws"],"final_value":updates})
+    );
+    Ok(())
+}
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() != 7 {
         return Err(
-            "Usage: canvas-adapter-bench LOOPBACK_WS CATALOG UPDATES HZ WARMUP paired|writer"
+            "Usage: canvas-adapter-bench LOOPBACK_WS CATALOG UPDATES HZ WARMUP paired|writer|burst"
                 .into(),
         );
     }
@@ -108,14 +197,15 @@ fn main() -> Result<()> {
     if updates == 0
         || updates + warmup > 10000
         || hz == 0
-        || hz > 60
-        || !["paired", "writer"].contains(&args[6].as_str())
+        || hz > 240
+        || (args[6] == "burst" && (updates > 900 || warmup > 100))
+        || !["paired", "writer", "burst"].contains(&args[6].as_str())
     {
-        return Err("Benchmark bounds: 1..10000 updates, 1..60 Hz".into());
+        return Err("Benchmark bounds: 1..10000 updates, 1..240 Hz".into());
     }
     let catalog = std::fs::read(&args[2]).map_err(|e| e.to_string())?;
     let mut writer = Peer::new(endpoint, &catalog)?;
-    let mut observer = if args[6] == "paired" {
+    let mut observer = if args[6] != "writer" {
         Some(Peer::new(endpoint, &catalog)?)
     } else {
         None
@@ -151,6 +241,38 @@ fn main() -> Result<()> {
         })
         .map(|c| c.node.id)
         .ok_or("Missing count control")?;
+    if args[6] == "burst" {
+        // Warm-up values cannot alias measured inputs 1..900.
+        for index in 0..warmup.max(1) {
+            let value = 901 + index as u16;
+            writer
+                .client
+                .event_for_node(writer.client.epoch(), node, value, 0)?;
+            let warm = Instant::now();
+            loop {
+                writer.pump(start.elapsed().as_millis() as u64)?;
+                observer
+                    .as_mut()
+                    .unwrap()
+                    .pump(start.elapsed().as_millis() as u64)?;
+                if writer.client.confirmed() && observer.as_ref().unwrap().client.value(3)? == value
+                {
+                    break;
+                }
+                if warm.elapsed() > Duration::from_secs(10) {
+                    return Err("Burst warm-up timed out".into());
+                }
+            }
+        }
+        return burst(
+            &mut writer,
+            observer.as_mut().unwrap(),
+            node,
+            updates,
+            hz,
+            start,
+        );
+    }
     let initial_bytes = writer.counters();
     let mut before_writer = [0; 4];
     let mut before_observer = [0; 4];

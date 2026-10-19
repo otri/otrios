@@ -5,7 +5,7 @@ import argparse, asyncio, hashlib, json, os, pathlib, shlex, signal, subprocess,
 p=argparse.ArgumentParser()
 for name in ['reference','candidate','output']:p.add_argument('--'+name,type=pathlib.Path,required=True)
 p.add_argument('--frame',required=True);p.add_argument('--known-hosts',type=pathlib.Path,required=True);p.add_argument('--release',type=pathlib.Path,required=True);p.add_argument('--tailscale',default='tailscale')
-p.add_argument('--legacy-reference',action='store_true');p.add_argument('--rates',default='10,30');p.add_argument('--updates',type=int,default=180);p.add_argument('--repetitions',type=int,default=3)
+p.add_argument('--mode',choices=['paired','burst'],default='paired');p.add_argument('--legacy-reference',action='store_true');p.add_argument('--rates',default='10,30');p.add_argument('--updates',type=int,default=180);p.add_argument('--repetitions',type=int,default=3)
 a=p.parse_args();repo=pathlib.Path(__file__).resolve().parent.parent;out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
 if (out/'results.jsonl').exists():raise RuntimeError('Choose a fresh output directory')
 tailscale=a.tailscale;frame=a.frame;known=str(a.known_hosts.resolve())
@@ -18,11 +18,11 @@ for port in [18901,18902]:
 upstream=subprocess.check_output([tailscale,'ip','-4'],text=True).strip()
 # This runner reports child wait4 CPU/RSS, not the relay/SSH or render service.
 remote_runner='''import json,os,pathlib,subprocess,sys,time
-root=pathlib.Path(sys.argv[1]);label=sys.argv[2];hz=sys.argv[3];updates=sys.argv[4];legacy=sys.argv[5]=='yes'
+root=pathlib.Path(sys.argv[1]);label=sys.argv[2];hz=sys.argv[3];updates=sys.argv[4];legacy=sys.argv[5]=='yes';mode=sys.argv[6]
 port=18901 if label=='reference' else 18902
 env=dict(os.environ)
 if legacy:env['OTRIOS_BENCH_LEGACY_TRANSPORT']='1'
-args=[str(root/label/'canvas-adapter-bench'),f'ws://127.0.0.1:{port}/apps/stream',str(root/'app-catalog.flex'),updates,hz,'20','paired']
+args=[str(root/label/'canvas-adapter-bench'),f'ws://127.0.0.1:{port}/session',str(root/'app-catalog.flex'),updates,hz,'20',mode]
 start=time.monotonic();child=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env)
 stdout,stderr=child.stdout.read(),child.stderr.read();_,status,usage=os.wait4(child.pid,0);elapsed=time.monotonic()-start
 child.returncode=os.waitstatus_to_exitcode(status)
@@ -35,7 +35,7 @@ archive=out/'frame-input.tar'
 with tarfile.open(archive,'w') as t:
  for label,folder in [('reference',a.reference),('candidate',a.candidate)]:t.add(folder/'canvas-adapter-bench',arcname=label+'/canvas-adapter-bench')
  t.add(release/'apps/catalog.flex',arcname='app-catalog.flex');t.add(repo/'scripts/relay-canvas-frame-benchmark.py',arcname='relay.py');t.add(runner,arcname='run-frame.py')
-metadata={'reference':json.loads((a.reference/'build.json').read_text()),'candidate':json.loads((a.candidate/'build.json').read_text()),'legacy_reference':a.legacy_reference,'rates_hz':a.rates,'updates':a.updates,'warmup':20,'repetitions':a.repetitions,'catalog_sha256':hashlib.sha256((release/'apps/catalog.flex').read_bytes()).hexdigest(),'frame':'RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk','method':'two real clients on frame; fresh durable authority per trial; native live renderer left running; paired stop-and-wait; private Tailscale raw TCP; CPU includes mount/warm-up/waits'}
+metadata={'reference':json.loads((a.reference/'build.json').read_text()),'candidate':json.loads((a.candidate/'build.json').read_text()),'legacy_reference':a.legacy_reference,'mode':a.mode,'rates_hz':a.rates,'updates':a.updates,'warmup':20,'repetitions':a.repetitions,'catalog_sha256':hashlib.sha256((release/'apps/catalog.flex').read_bytes()).hexdigest(),'frame':'RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk','method':('open-loop numeric assignments and final release' if a.mode=='burst' else 'paired stop-and-wait')+'; two real clients on frame; fresh durable authority per trial; native live renderer left running; paired stop-and-wait; private Tailscale raw TCP; CPU includes mount/warm-up/waits'}
 (out/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
 try:
  with archive.open('rb') as data:subprocess.run(ssh+['mkdir -m 700 '+shlex.quote(remote)+' && tar -xf - -C '+shlex.quote(remote)],stdin=data,check=True)
@@ -49,7 +49,7 @@ try:
     order=['reference','candidate'] if rep%2==0 else ['candidate','reference']
     for label in order:
      folder=(a.reference if label=='reference' else a.candidate).resolve();port=8901 if label=='reference' else 8902
-     base=out/f'case-{rep}-{hz}-{label}';base.mkdir();releases=base/'releases';releases.mkdir();(releases/release.name).symlink_to(release,target_is_directory=True);(releases/'current.json').write_text(json.dumps({'id':release.name,'web_entry':f'/releases/{release.name}/web/index.html'}))
+     base=out/f'case-{rep}-{hz}-{label}';base.mkdir();releases=base/'releases';releases.mkdir();(releases/release.name).symlink_to(release,target_is_directory=True);(releases/'current.json').write_text(json.dumps({'id':release.name,'web_entry':f'/releases/{release.name}/web/index.html','sync_protocol':json.loads((release/'manifest.json').read_text())['sync_protocol']}))
      with (base/'server.log').open('w') as log:
       server=subprocess.Popen([str(folder/'dashboard-server'),'--bind',f'127.0.0.1:{port}','--app-state',str(base/'state'),'--releases',str(releases)],stdout=log,stderr=subprocess.STDOUT)
       for attempt in range(100):
@@ -61,7 +61,7 @@ try:
        time.sleep(.1)
       else:raise RuntimeError('Authority failed readiness')
       time.sleep(1)
-      args=['python3',remote+'/run-frame.py',remote,label,str(hz),str(a.updates),'yes' if label=='reference' and a.legacy_reference else 'no']
+      args=['python3',remote+'/run-frame.py',remote,label,str(hz),str(a.updates),'yes' if label=='reference' and a.legacy_reference else 'no',a.mode]
       r=json.loads(subprocess.check_output(ssh+[' '.join(shlex.quote(x) for x in args)],timeout=150,text=True));r.update(label=label,repetition=rep,fresh_store=True,legacy_transport=label=='reference' and a.legacy_reference)
       output.write(json.dumps(r)+'\n');output.flush();print(json.dumps({'completed':label,'repetition':rep,'hz':hz}),flush=True)
       server.terminate();server.wait(timeout=10);server=None
