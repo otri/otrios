@@ -568,9 +568,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !address.ip().is_loopback() {
             return Err("Public adapter must bind loopback behind the module host".into());
         }
-        let listener = tokio::net::TcpListener::bind(address)
-            .await?
-            .tap_io(interactive_socket);
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        println!("OTriOS public listener: http://{}/", listener.local_addr()?);
+        std::io::stdout().flush()?;
+        let listener = listener.tap_io(interactive_socket);
         let routes = Router::new()
             .route("/session", get(session::public))
             .route("/release/events", get(session::public_control))
@@ -633,10 +634,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .layer(DefaultBodyLimit::max(otrios_core::canvas::MAX_BYTES))
         .layer(axum::middleware::from_fn(response_headers))
         .with_state(app);
-    let listener = tokio::net::TcpListener::bind(&bind)
-        .await?
-        .tap_io(interactive_socket);
-    println!("OTriOS app authority: http://{bind}/");
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    println!("OTriOS app authority: http://{}/", listener.local_addr()?);
+    std::io::stdout().flush()?;
+    let listener = listener.tap_io(interactive_socket);
     axum::serve(listener, routes).await?;
     Ok(())
 }

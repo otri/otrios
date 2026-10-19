@@ -3,7 +3,7 @@
 use otrios_core::{canvas, dashboard::layout::Layout};
 use otrios_interfaces::{canvas::*, layout::Value};
 use std::{
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
@@ -92,21 +92,29 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
     (bytes, schema)
 }
 pub fn room(auth: bool, seconds: u64) -> Room {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "otrios-app-test-{}-{}",
+        "otrios-app-test-{}-{}-{}",
         std::process::id(),
-        port().replace(':', "-")
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
+
     std::fs::create_dir_all(&root).unwrap();
     let (catalog, schema) = fixture(&root.join("apps"));
-    let private = port();
-    let public = port();
+    // Binding port 0 in the child keeps ownership with the actual listener.
+    // A bind/drop/rebind "free port" probe races other parallel fixtures.
+    let private = "127.0.0.1:0";
+    let public = "127.0.0.1:0";
     let mut command = Command::new(env!("CARGO_BIN_EXE_dashboard-server"));
     command.args([
         "--bind",
-        &private,
+        private,
         "--public-bind",
-        &public,
+        public,
         "--apps",
         root.join("apps").to_str().unwrap(),
         "--state",
@@ -139,7 +147,30 @@ pub fn room(auth: bool, seconds: u64) -> Room {
             &seconds.to_string(),
         ]);
     }
-    let child = command.stdout(Stdio::null()).spawn().unwrap();
+    let mut child = command.stdout(Stdio::piped()).spawn().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut addresses = Vec::new();
+    for label in [
+        "OTriOS public listener: http://",
+        "OTriOS app authority: http://",
+    ] {
+        let mut line = String::new();
+        assert!(
+            output.read_line(&mut line).unwrap() > 0,
+            "authority exited before binding"
+        );
+        addresses.push(
+            line.trim()
+                .strip_prefix(label)
+                .expect("listener announcement")
+                .trim_end_matches('/')
+                .to_owned(),
+        );
+    }
+    child.stdout = Some(output.into_inner());
+    let public = addresses.remove(0);
+    let private = addresses.remove(0);
+    assert_ne!(public, private);
     let mut room = Room {
         child,
         private,
