@@ -56,7 +56,7 @@ def run(a):
             if result.returncode!=255 or attempt==3:result.check_returncode();return result
             time.sleep(1)
     def remote_json(code):return json.loads(command(code,capture_output=True,text=True).stdout)
-    metadata={'runner_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'server_sha256':hashlib.sha256(a.server.read_bytes()).hexdigest(),'client_sha256':hashlib.sha256(a.client.read_bytes()).hexdigest(),'transport':'Tailscale TCP via temporary systemd-socket-proxyd public-listener relay; includes relay/network cost','sampler_interval_seconds':1,'target_memory_max_mib':256,'relay_memory_max_mib':256,'socket_limit':4096,'offered_hz_per_active':a.hz,'seconds_per_case':a.seconds,'open_loop':a.open_loop,'burst_profiles':a.profiles if a.phase=='burst' else None,'profile_seconds':{m:100 if m.startswith('sparse-') else a.seconds for m in a.profiles.split(',')} if a.phase=='burst' else None,'active_cycle':'Linear, Rotary and Touch Pad normalized app events; drag mode issues on the input clock and releases once at the end, mounted mode waits for durable confirmation between cycles','captured_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'production_state':'not used by disposable authority; live renderer and production services remain running'}
+    metadata={'runner_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'server_sha256':hashlib.sha256(a.server.read_bytes()).hexdigest(),'client_sha256':hashlib.sha256(a.client.read_bytes()).hexdigest(),'transport':'Tailscale TCP via temporary systemd-socket-proxyd public-listener relay; includes relay/network cost','sampler_interval_seconds':1,'target_memory_max_mib':256,'relay_memory_max_mib':256,'socket_limit':4096,'offered_hz_per_active':a.hz,'seconds_per_case':a.seconds,'open_loop':a.open_loop,'burst_profiles':a.profiles if a.phase=='burst' else None,'burst_overlap_override':a.burst_overlap,'profile_seconds':{m:100 if m.startswith('sparse-') else a.seconds for m in a.profiles.split(',')} if a.phase=='burst' else None,'active_cycle':'Linear, Rotary and Touch Pad normalized app events; drag mode issues on the input clock and releases once at the end, mounted mode waits for durable confirmation between cycles','captured_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'production_state':'not used by disposable authority; live renderer and production services remain running'}
     (out/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
     payload=io.BytesIO()
     with tarfile.open(fileobj=payload,mode='w') as t:
@@ -84,7 +84,7 @@ shutil.chown(root,user='otrios',group='otrios')
     if a.phase=='burst':
         for n in map(int,a.cohorts.split(',')):
             for mode in a.profiles.split(','):
-                overlap=next(k for k in range(n+1) if sum(math.comb(n,j)*.01**j*.99**(n-j) for j in range(k+1))>=.99)
+                overlap=a.burst_overlap or next(k for k in range(n+1) if sum(math.comb(n,j)*.01**j*.99**(n-j) for j in range(k+1))>=.99)
                 cases.append((n,overlap,a.hz,mode))
     proxy_setup=r'''import subprocess,pathlib,json
 ip=subprocess.check_output(['tailscale','ip','-4'],text=True).strip()
@@ -173,6 +173,7 @@ if __name__=='__main__':
     for name in ['config','client','server','catalog','output']:p.add_argument('--'+name,type=pathlib.Path,required=True)
     p.add_argument('--phase',choices=['all','sockets','mounted','active','burst'],default='all');p.add_argument('--seconds',type=int,default=15);p.add_argument('--hz',type=int,default=10);p.add_argument('--clients',type=int,default=64);p.add_argument('--max-active',type=int,default=64);p.add_argument('--max-sockets',type=int,default=4096);p.add_argument('--max-mounted',type=int,default=512)
     p.add_argument('--open-loop',action='store_true');p.add_argument('--socket-counts',default='64,256,512,1024,2048,4096');p.add_argument('--mounted-counts',default='32,64,128,256,512');p.add_argument('--active-counts',default='1,2,4,8,16,32,64,128,256')
+    p.add_argument('--burst-overlap',type=int)
     p.add_argument('--cohorts',default='64,128');p.add_argument('--profiles',default='idle,sparse-control,sparse-ink,sparse-mixed,aligned-mixed')
     a=p.parse_args()
     if not 1<=a.seconds<=120 or not 1<=a.hz<=120:p.error('Use 1..120 seconds and 1..120 Hz')
@@ -180,6 +181,7 @@ if __name__=='__main__':
         counts=[int(n) for value in [a.socket_counts,a.mounted_counts,a.active_counts,a.cohorts] for n in value.split(',')]
         if any(n<1 or n>4096 for n in counts):raise ValueError()
     except ValueError:p.error('Client counts must be comma-separated integers from 1 to 4096')
+    if a.burst_overlap is not None and (a.burst_overlap<1 or any(a.burst_overlap>int(n) for n in a.cohorts.split(','))):p.error('Burst overlap must fit every cohort')
     if any(m not in ['idle','sparse-control','sparse-ink','sparse-mixed','aligned-mixed','aligned-ink'] for m in a.profiles.split(',')):p.error('Invalid burst profile')
     if a.phase=='burst' and (a.seconds<3 or a.hz>30 or any(int(n)>512 or int(n)<2 for n in a.cohorts.split(','))):p.error('Burst probes require 2..512 clients and <=30 Hz')
     run(a)

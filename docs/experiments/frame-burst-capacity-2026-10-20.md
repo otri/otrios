@@ -49,3 +49,19 @@ The generator runs outside the frame. These are protocol/client-core acceptance
 criteria, not browser GPU/FPS, physical touch or Cloudflare Tunnel latency claims.
 Test authorities use fresh disposable state while production services continue.
 Raw telemetry remains local; only sanitized aggregate results are published.
+
+## Downward search after the first miss
+
+The 64-client aligned mixed probe missed the prospective ink and confirmation
+latency gates while retaining every point and every connection. The remaining
+64-client sparse profiles characterize the individual paths; 128 and 256 will
+not be qualified by extrapolating from the connection result.
+
+The downward search probes 32, then 16, then 8 clients as necessary. It keeps the
+same 3-way aligned Linear/Rotary/Touch Pad collision across these cohorts using
+`--burst-overlap 3`, so reduced fanout is the changed variable. This is stricter
+than their independent-activity 99th-percentile count of 1–2 writers. A passing
+aligned mixed/ink cohort must then pass the same three 100-second sparse
+profiles, with the original latency and delivery gates unchanged. This tests
+which smaller cohort meets the chosen service target; it does not redefine a
+failed higher cohort as a pass or claim a maximum hardware connection count.

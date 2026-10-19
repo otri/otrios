@@ -172,3 +172,22 @@ The runner removes temporary units, relay and test state on exit. A cgroup cap,
 client deadline or generator bottleneck must be identified separately from a
 hardware capacity limit. See the [dated experiment report](experiments/frame-authority-2026-10-20.md)
 for measured results.
+
+
+Complete-client burst qualification includes the Playground ink welcome and
+real pointer down/move/up paths, using a separate external generator:
+
+```sh
+cargo build --release --locked -p otrios-dashboard \
+  --features canvas,host-sync --bin canvas-burst-stress
+python3 scripts/stress-frame-authority.py --config /PRIVATE/config.json \
+  --client target/release/canvas-burst-stress --server /PRIVATE/ARM/dashboard-server \
+  --catalog /PRIVATE/app-catalog.flex --output target/frame-burst-RUN \
+  --phase burst --cohorts 64 --seconds 10 --hz 30
+```
+
+The sparse profiles last 100 seconds, with one one-second gesture per client.
+Other profiles use `--seconds`; `--burst-overlap` can fix an aligned writer count
+for comparisons. The [burst report](experiments/frame-burst-capacity-2026-10-20.md)
+defines prospective latency/coverage gates and records which cohorts meet them.
+The older state-only generator does not qualify ink-enabled clients.
