@@ -108,7 +108,7 @@ pub fn room(auth: bool, seconds: u64) -> Room {
         "--apps",
         root.join("apps").to_str().unwrap(),
         "--state",
-        root.join("state.automerge").to_str().unwrap(),
+        root.join("state.merkle").to_str().unwrap(),
         "--origin",
         ORIGIN,
     ]);
@@ -237,6 +237,8 @@ pub fn mount(s: &mut Socket, room: &Room, id: &str, epoch: u32) {
             state_ref: format!("app:{id}/state"),
             catalog_hash: canvas::hash(&room.catalog),
             known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
         },
     );
 }
@@ -298,10 +300,31 @@ pub fn state_file(room: &Room, id: &str) -> PathBuf {
 }
 pub fn state_file_ref(room: &Room, id: &str, state_ref: &str) -> PathBuf {
     room.root.join("state.apps").join(format!(
-        "{id}-{}.automerge",
+        "{id}-{}.merkle",
         canvas::hex(&canvas::hash(state_ref.as_bytes()))
     ))
 }
 pub fn accept(s: &mut Socket, epoch: u32) {
     send(s, ClientMessage::AcceptMount { epoch });
+}
+
+pub fn stored(room: &Room, schema: StateSchema, scope: &str, id: &str) -> canvas::Document {
+    let file = state_file_ref(room, id, scope);
+    let mut doc = canvas::Document::load(schema, scope, &std::fs::read(&file).unwrap()).unwrap();
+    let path = file.with_extension("merkle.log");
+    if let Ok(bytes) = std::fs::read(path) {
+        let mut at = 0;
+        while at < bytes.len() {
+            if bytes.len() - at < 36 {
+                break;
+            }
+            let len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            if at + 36 + len > bytes.len() {
+                break;
+            }
+            doc.replay(&bytes[at + 36..at + 36 + len]).unwrap();
+            at += 36 + len;
+        }
+    }
+    doc
 }

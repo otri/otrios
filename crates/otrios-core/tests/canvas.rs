@@ -694,7 +694,7 @@ fn animation_and_three_d_own_independent_intent_and_bounded_private_stress_histo
     assert!(three_d.motion_intent().unwrap().unwrap().1.playing);
     assert_eq!(three_d.value(2).unwrap(), 200);
     let before = animation.scene().unwrap();
-    let authority_before = authority.save();
+    let authority_before = authority.save().unwrap();
     animation.set_stress(30).unwrap();
     for step in 0..600 {
         animation.stress_tick(f64::from(step) * 40.).unwrap();
@@ -707,7 +707,7 @@ fn animation_and_three_d_own_independent_intent_and_bounded_private_stress_histo
     );
     assert!(animation.confirmed());
     assert!(Arc::ptr_eq(&before, &animation.scene().unwrap()));
-    assert_eq!(authority_before, authority.save());
+    assert_eq!(authority_before, authority.save().unwrap());
     assert_ne!(
         animation_lab::manifest().state_ref,
         three_d_lab::manifest().state_ref
@@ -857,7 +857,7 @@ fn all_seven_app_packages_qualify_default_and_scalar_extremes() {
                 "qualify:state",
                 code.clone(),
                 private,
-                authority.save(),
+                authority.save().unwrap(),
             );
             client.scene().unwrap();
             if let Some((_, intent)) = client.motion_intent().unwrap() {
@@ -985,7 +985,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code,
-                state: authority.save(),
+                state: authority.save().unwrap(),
             })
             .unwrap(),
         )
@@ -1033,7 +1033,7 @@ fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
                     ui: encode_ui(&ui).unwrap(),
                     ui_hash: vec![0; 32],
                     code: vec![],
-                    state: authority.save()
+                    state: authority.save().unwrap()
                 })
                 .unwrap()
             )
@@ -1122,7 +1122,7 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                     ui: bytes.clone(),
                     ui_hash: vec![0; 32],
                     code: code.clone(),
-                    state: authority.save()
+                    state: authority.save().unwrap()
                 })
                 .unwrap()
             )
@@ -1157,7 +1157,7 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code,
-                state: authority.save(),
+                state: authority.save().unwrap(),
             })
             .unwrap(),
         )
@@ -1423,7 +1423,7 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
     assert!(
         matches!((&logout.children[1].primitive, &home.children[1].primitive), (Primitive::Text { scale: a, color: ac, .. }, Primitive::Text { scale: b, color: bc, .. }) if a == b && ac == bc)
     );
-    let before = authority.save();
+    let before = authority.save().unwrap();
     assert!(c.activate(c.epoch(), logout.id).unwrap());
     assert!(c.take_sign_out());
     assert!(!c.take_sign_out(), "host actions are consumed once");
@@ -1431,7 +1431,7 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
         c.outgoing().unwrap().is_none(),
         "sign out never emits CRDT writes"
     );
-    assert_eq!(authority.save(), before);
+    assert_eq!(authority.save().unwrap(), before);
     c.activate(c.epoch(), logout.id).unwrap();
     c.set_session_controls(false);
     assert!(
@@ -1467,7 +1467,14 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
         .unwrap();
     let mut c = Client::default();
     c.set_font(font.clone());
-    activate_snapshot(&mut c, ui, "tapped-input", vec![], false, authority.save());
+    activate_snapshot(
+        &mut c,
+        ui,
+        "tapped-input",
+        vec![],
+        false,
+        authority.save().unwrap(),
+    );
     let mut session = Session::default();
     pump(&mut c, &mut authority, &mut session);
     fn tap(c: &mut Client, label: &str, x: f32) {

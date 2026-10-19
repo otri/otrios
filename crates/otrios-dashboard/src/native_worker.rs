@@ -1010,6 +1010,7 @@ mod tests {
                 let mut sync = Session::default();
                 let mut epoch = None;
                 let mut staged = None;
+                let mut staged_sync = None;
                 loop {
                     if server_stop.load(Ordering::Acquire) {
                         return;
@@ -1039,9 +1040,17 @@ mod tests {
                     }
                     match socket.read() {
                         Ok(Message::Binary(bytes)) => match decode_client(&bytes).unwrap() {
-                            ClientMessage::Mount { epoch: id, .. } => {
+                            ClientMessage::Mount {
+                                epoch: id,
+                                writer,
+                                resume,
+                                ..
+                            } => {
                                 staged = Some(id);
-                                let state = authority.save();
+                                let (mut prepared, _) =
+                                    authority.open_session(&writer, resume).unwrap();
+                                let state = authority.generate(&mut prepared).unwrap().unwrap();
+                                staged_sync = Some(prepared);
                                 socket
                                     .send(Message::Binary(
                                         encode_server(&ServerMessage::Mounted {
@@ -1058,7 +1067,7 @@ mod tests {
                             }
                             ClientMessage::AcceptMount { epoch: id } if staged == Some(id) => {
                                 epoch = staged.take();
-                                sync = Session::default();
+                                sync = staged_sync.take().unwrap();
                             }
                             ClientMessage::CancelMount { epoch: id } if staged == Some(id) => {
                                 staged = None;

@@ -7,7 +7,7 @@ pub use behavior::Behavior;
 pub use client::Client;
 use otrios_interfaces::canvas::*;
 use sha2::{Digest, Sha256};
-pub use state::{Document, Session};
+pub use state::{Document, Session, StateAdapter};
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;
 pub fn hash(bytes: &[u8]) -> Vec<u8> {
@@ -70,6 +70,8 @@ macro_rules! codec {
     };
 }
 codec!(encode_client, decode_client, ClientMessage);
+codec!(encode_state_request, decode_state_request, StateRequest);
+codec!(encode_state_response, decode_state_response, StateResponse);
 codec!(encode_server, decode_server, ServerMessage);
 codec!(encode_ui, decode_ui, Ui);
 codec!(encode_app, decode_app, App);

@@ -88,6 +88,73 @@ impl Snapshot {
     pub fn empty() -> Self {
         Self(Node::build(None, BTreeMap::new(), &mut Work::default()).expect("bounded empty node"))
     }
+    /// Canonical full snapshot for a trusted store, separate from a live lease.
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        wire::encode_transfer(
+            Cursor {
+                epoch: 0,
+                lease: 0,
+                sequence: 1,
+            },
+            &[],
+            true,
+            None,
+            Some(self),
+        )
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let transfer = wire::decode_transfer(bytes)?;
+        if transfer.cursor
+            != (Cursor {
+                epoch: 0,
+                lease: 0,
+                sequence: 1,
+            })
+            || !transfer.path.is_empty()
+            || !transfer.full
+        {
+            return Err(Error::Invalid);
+        }
+        transfer.materialize(None)?.ok_or(Error::Missing)
+    }
+    /// Root-chained store delta; fixed cursor distinguishes it from live leases.
+    pub fn delta_bytes(&self, base: &Self) -> Result<Vec<u8>> {
+        wire::encode_transfer(
+            Cursor {
+                epoch: 0,
+                lease: 0,
+                sequence: 1,
+            },
+            &[],
+            false,
+            Some(base),
+            Some(self),
+        )
+    }
+    pub fn delta_roots(data: &[u8]) -> Result<(Hash, Hash)> {
+        let t = wire::decode_transfer(data)?;
+        if t.full
+            || !t.path.is_empty()
+            || t.cursor
+                != (Cursor {
+                    epoch: 0,
+                    lease: 0,
+                    sequence: 1,
+                })
+        {
+            return Err(Error::Invalid);
+        }
+        Ok((t.base.ok_or(Error::Missing)?, t.root.ok_or(Error::Missing)?))
+    }
+    pub fn apply_delta(&self, data: &[u8]) -> Result<Self> {
+        let (base, _) = Self::delta_roots(data)?;
+        if base != self.hash() {
+            return Err(Error::Conflict);
+        }
+        wire::decode_transfer(data)?
+            .materialize(Some(self))?
+            .ok_or(Error::Missing)
+    }
     pub fn hash(&self) -> Hash {
         self.0.hash
     }

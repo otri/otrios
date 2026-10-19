@@ -29,6 +29,8 @@ mod apps;
 mod auth;
 #[path = "server_ink.rs"]
 mod ink;
+#[path = "server_store.rs"]
+mod store;
 
 struct App {
     ink: ink::Room,
@@ -49,18 +51,20 @@ fn persist(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .unwrap_or_default()
         .as_nanos();
     let tmp = path.with_extension(format!("{}.{nonce}.tmp", std::process::id()));
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut f = options.open(&tmp)?;
     let result = (|| {
         f.write_all(bytes)?;
         f.sync_all()?;
         fs::rename(&tmp, path)?;
-        if let Some(parent) = path.parent()
-            && let Ok(dir) = fs::File::open(parent)
-        {
-            let _ = dir.sync_all();
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)?.sync_all()?;
         }
         Ok(())
     })();

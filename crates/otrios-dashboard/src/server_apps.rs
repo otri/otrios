@@ -22,6 +22,7 @@ struct Bundle {
 struct Room {
     doc: Document,
     file: Option<PathBuf>,
+    failed: bool,
 }
 pub(super) struct Hub {
     bundles: BTreeMap<Vec<u8>, Bundle>,
@@ -78,6 +79,14 @@ impl Hub {
     pub(super) fn new(source: PathBuf, state: Option<PathBuf>) -> Result<Self> {
         if let Some(path) = &state {
             fs::create_dir_all(path).map_err(|e| e.to_string())?;
+            fs::File::open(path)
+                .and_then(|d| d.sync_all())
+                .map_err(|e| e.to_string())?;
+            if let Some(parent) = path.parent() {
+                fs::File::open(parent)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| e.to_string())?;
+            }
         }
         Ok(Self {
             bundles: BTreeMap::new(),
@@ -187,24 +196,46 @@ impl Hub {
                 }
                 let file = self.state.as_ref().map(|p| {
                     p.join(format!(
-                        "{}-{}.automerge",
+                        "{}-{}.merkle",
                         a.id,
                         canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
                     ))
                 });
-                let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
-                    Document::load(
-                        description.state_schema.clone(),
+                let doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
+                    store::load(
+                        path,
+                        Document::load(
+                            description.state_schema.clone(),
+                            &a.state_ref,
+                            &bounded(path, canvas::MAX_BYTES)?,
+                        )?,
+                    )?
+                } else if let Some(old) = file
+                    .as_ref()
+                    .map(|p| p.with_extension("automerge"))
+                    .filter(|p| p.exists())
+                {
+                    Document::import_legacy(
+                        description.state_schema,
                         &a.state_ref,
-                        &bounded(path, canvas::MAX_BYTES)?,
+                        &bounded(&old, canvas::MAX_BYTES)?,
                     )?
                 } else {
                     Document::new(description.state_schema, &a.state_ref)?
                 };
-                if let Some(path) = &file {
-                    persist(path, &doc.save()).map_err(|e| e.to_string())?;
+                if let Some(path) = &file
+                    && !path.exists()
+                {
+                    persist(path, &doc.save()?).map_err(|e| e.to_string())?;
                 }
-                new_rooms.insert(a.state_ref.clone(), Room { doc, file });
+                new_rooms.insert(
+                    a.state_ref.clone(),
+                    Room {
+                        doc,
+                        file,
+                        failed: false,
+                    },
+                );
             }
             let private = entry.private || a.id == "monitoring";
             if packages
@@ -279,6 +310,8 @@ impl Hub {
                 state_ref,
                 catalog_hash,
                 known_code,
+                writer,
+                resume,
             } => {
                 if epoch == 0
                     || epoch <= leases.last_epoch
@@ -301,6 +334,29 @@ impl Hub {
                     .rooms
                     .get_mut(&state_ref)
                     .ok_or("Missing app State root")?;
+                if room.failed {
+                    return Err("App persistence outcome uncertain; restart required".into());
+                }
+                let mut candidate = room.doc.clone();
+                candidate.set_wall_time(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
+                );
+                let (mut sync, changed) = candidate.open_session(&writer, resume)?;
+                if changed
+                    && let Some(file) = &room.file
+                    && let Err(e) = store::append(file, &room.doc, &candidate)
+                {
+                    room.failed = true;
+                    return Err(e.to_string());
+                }
+                room.doc = candidate;
+                let state = room
+                    .doc
+                    .generate(&mut sync)?
+                    .ok_or("Missing initial Merkle state")?;
                 messages.push(ServerMessage::Mounted {
                     epoch,
                     ui: p.ui,
@@ -310,13 +366,13 @@ impl Hub {
                     } else {
                         p.code
                     },
-                    state: room.doc.save(),
+                    state,
                 });
                 leases.staged = Some(Lease {
                     epoch,
                     state_ref,
                     private: p.private,
-                    sync: Session::default(),
+                    sync,
                     view_id: vec![],
                 });
                 // The previous activation/session remains authoritative until the client
@@ -358,11 +414,24 @@ impl Hub {
                     .rooms
                     .get_mut(&l.state_ref)
                     .ok_or("Missing app State root")?;
+                if room.failed {
+                    return Err("App persistence outcome uncertain; restart required".into());
+                }
                 let mut candidate = room.doc.clone();
+                candidate.set_wall_time(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
+                );
                 let mut session = l.sync.clone();
                 changed = candidate.receive(&mut session, &bytes)?;
-                if changed && let Some(file) = &room.file {
-                    persist(file, &candidate.save()).map_err(|e| e.to_string())?;
+                if changed
+                    && let Some(file) = &room.file
+                    && let Err(e) = store::append(file, &room.doc, &candidate)
+                {
+                    room.failed = true;
+                    return Err(e.to_string());
                 }
                 room.doc = candidate;
                 l.sync = session;
@@ -389,6 +458,9 @@ impl Hub {
             .rooms
             .get_mut(&l.state_ref)
             .ok_or("Missing app State root")?;
+        if room.failed {
+            return Err("App persistence outcome uncertain; restart required".into());
+        }
         if let Some(bytes) = room.doc.generate(&mut l.sync)? {
             messages.push(ServerMessage::Sync {
                 epoch: l.epoch,
@@ -545,7 +617,7 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                 count = 0;
             }
             count += 1;
-            if count > 64 {
+            if count > 192 {
                 break;
             }
             let release = app.release.read().await.clone();

@@ -17,11 +17,13 @@ impl Offer {
 /// Single authority owner: subscribe, capture and publication are serialized by
 /// &mut self. A host may put this behind its publication lock, never split them.
 /// Durability is the embedding server's job; publish here is RAM-only.
+#[derive(Clone)]
 pub struct Authority {
     epoch: u64,
     next_lease: u64,
     current: Snapshot,
 }
+#[derive(Clone)]
 pub struct Subscription {
     epoch: u64,
     lease: u64,
@@ -175,6 +177,7 @@ impl Subscription {
 /// Read replica of exactly one authorized scope. Never writes durable storage.
 /// Incoming revisions replace authority state; local pending edits must be kept
 /// separately and merged by the host, not silently overwritten in this replica.
+#[derive(Clone)]
 pub struct Replica {
     epoch: u64,
     lease: u64,
