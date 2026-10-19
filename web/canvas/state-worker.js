@@ -28,7 +28,7 @@ function release(message){
 function connect(){stateOnline=false;transportReady=false;postMessage({type:'transport-ready'});}
 function receiveState(bytes){try{
   const changed=app.receive(bytes);if(changed&&!app.ui_ref())clearPresentation();
-  if(app.auth_required()){dropPrivate();monitoring.refresh().catch(()=>{});publish(false);}else if(changed)publish();
+  if(app.auth_required()){dropPrivate();monitoring.refresh().catch(()=>{});publish(false);}else publish(changed);
   stateOnline=true;outgoing();postMessage({type:'online',online:true});
 }catch(e){
   if(app.rejected_mount_pending()){
