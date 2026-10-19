@@ -1,6 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Frame burst capacity qualification — 2026-10-20
 
+**Result:** 16 complete clients met the declared shared-room responsiveness gates
+in this qualification. The 32- and 64-client collision probes missed the ink
+latency budget. Production admission remains 64 public / 4 trusted sessions;
+admission does not promise this drawing latency at full occupancy.
+
 ## Corrected scope and targets
 
 The earlier 4,096-socket and 512-mounted-reader results do not qualify complete
@@ -139,6 +144,61 @@ relay and includes that relay, network and generator cost.
 
 The 64-client mixed case missed both ink and confirmation gates. The 32-client
 cases missed the ink gate; their state confirmation met the one-second target.
-The 16-client collisions met every gate and proceed to sparse qualification.
+The 16-client collisions met every gate and passed sparse qualification below.
 These are measured service-target results, not RAM exhaustion or a hardware
 maximum. The separate 64-connection production admission quota is unchanged.
+
+## Varied-endpoint sparse measurements
+
+Each profile kept all 16 clients mounted and ink-subscribed for 100 seconds.
+Every client completed one one-second gesture at 30 Hz, with all 480 scheduled
+moves offered and all 16 releases changing their selected fields. The seeded
+schedule sampled active writers every 100 ms: p50 0, p95 1, p99 2 and maximum 2
+in each profile. The separate three-writer collisions test a larger overlap.
+
+| Profile | Ink p95 ms | Ink p99 ms | Release p95 ms | Final settle ms | Remote point deliveries | Peak authority RSS MiB | Gates |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Linear / Rotary | — | — | 281 | 273 | 0 | 6.4 | Pass |
+| Touch Pad | 145 | 185 | 222 | 196 | 7,680 / 7,680 | 6.5 | Pass |
+| Mixed | 141 | 185 | 224 | 195 | 2,400 / 2,400 | 6.5 | Pass |
+
+Touch Pad emitted all 480 scheduled moves plus 16 down/up pairs; mixed emitted
+all 150 drawing moves plus five down/up pairs. There were no missing, duplicate
+or unknown measured deliveries, failed peers, client errors, production health
+failures, OOM events or swap use. Available system memory stayed above 804 MiB
+throughout these three profiles. Authority CPU averaged approximately 5–7% of
+one core over the sampled measurement interval; this average includes idle gaps
+and is not a burst CPU ceiling. Relay CPU averaged approximately 3–4% of one core
+and peak relay RSS was 4.6 MiB, accounted separately from the authority. Generator
+loop maxima were 2–3 ms, and no scheduled move samples were skipped.
+
+The resulting target is **16 complete clients sharing this room**, under the
+declared 1% intended duty and three-writer collision tests. It is not a claim
+that 17 fails, a maximum idle connection count, or qualification of 16 sustained
+writers. 128 and 256 were deferred after the lower cohorts missed their gates;
+8 and 4 were unnecessary after 16 passed. These are short trials with one fixed
+seed, not repeated-run confidence bounds or soak tests. Native rendering stayed
+running but did not subscribe to the disposable test room; browser rendering,
+physical drawing and public Cloudflare latency remain outside this acceptance.
+The measured end-to-end delay does not isolate server, relay, network, persistence
+or generator costs, so low average CPU/RSS alone cannot identify the bottleneck.
+
+## Reproduction and provenance
+
+Build `canvas-burst-stress` with `canvas,host-sync`, then use the private pinned
+SSH configuration and ARM binary with the command in
+[frame operations](../FRAME_HOSTING.md). Final collision probes used
+`--phase burst --cohorts N --profiles idle,aligned-mixed,aligned-ink
+--burst-overlap 3 --seconds 10 --hz 30` at 32 and 16 clients; 64 used only
+`aligned-mixed`. The passing 16-client sparse probe used
+`--profiles sparse-control,sparse-ink,sparse-mixed` with the same options; each
+sparse profile always lasts 100 seconds. Every authority used fresh state.
+
+Final generator SHA-256:
+`8bc51b7c3e997d7f3086e5f16115cf0bae44f7f485042ba0b61d6db49b98e901`.
+ARM authority SHA-256:
+`915f02404b2b44b493b24ffe73f6ca17fdf3e5f553d7e2dd5377fd1447d56b07`.
+The generator includes the changed-endpoint validation from commit `da371ab`;
+the runner includes bounded lifetime/SIGTERM cleanup from `5cda01f`. Raw result,
+metadata and one-second sample files remain in ignored local `target/frame-varied-*`
+directories. No private addresses, credentials or raw telemetry are published.

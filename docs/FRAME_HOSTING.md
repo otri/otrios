@@ -191,3 +191,8 @@ Other profiles use `--seconds`; `--burst-overlap` can fix an aligned writer coun
 for comparisons. The [burst report](experiments/frame-burst-capacity-2026-10-20.md)
 defines prospective latency/coverage gates and records which cohorts meet them.
 The older state-only generator does not qualify ink-enabled clients.
+The revised qualification passed at 16 complete clients sharing one room with
+1% intended input duty and three simultaneous 30 Hz gestures. The 32- and
+64-client collision probes missed the remote ink latency budget. The configured
+64-public-session admission quota is separate from this responsiveness target;
+neither result establishes a physical connection maximum.
