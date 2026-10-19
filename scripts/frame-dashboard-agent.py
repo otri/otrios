@@ -9,7 +9,8 @@ running=True
 def fetch(base,path,limit):
     url=urllib.parse.urljoin(base,path)
     if urllib.parse.urlsplit(url).netloc!=urllib.parse.urlsplit(base).netloc:raise ValueError('Cross-origin release URL')
-    with urllib.request.urlopen(url,timeout=10) as r:
+    request=urllib.request.Request(url,headers={'User-Agent':'OTriOS-Release/1','Accept':'application/octet-stream'})
+    with urllib.request.urlopen(request,timeout=10) as r:
         data=r.read(limit+1)
         if len(data)>limit:raise ValueError('Release exceeds size limit')
         return data

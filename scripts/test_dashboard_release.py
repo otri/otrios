@@ -200,6 +200,20 @@ class ArtifactBudget(unittest.TestCase):
             self.assertEqual(json.loads((cache/'last-good.json').read_text())['id'],new)
         self.assertEqual(len(attempts),2)
         self.assertGreaterEqual(attempts[1]-attempts[0],29.999)
+    def test_code_download_identifies_client_and_bounds_response(self):
+        from unittest.mock import patch
+        class Response:
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def read(self,limit):return b'x'*limit
+        def open_request(request,timeout):
+            self.assertEqual(request.get_header('User-agent'),'OTriOS-Release/1')
+            self.assertEqual(request.full_url,'https://code.example/releases/asset');self.assertEqual(timeout,10)
+            return Response()
+        with patch.object(agent.urllib.request,'urlopen',side_effect=open_request):
+            with self.assertRaises(ValueError):agent.fetch('https://code.example','/releases/asset',4)
+        with patch.object(agent.urllib.request,'urlopen',side_effect=AssertionError('Cross-origin fetch')):
+            with self.assertRaises(ValueError):agent.fetch('https://code.example','https://other.example/asset',4)
     def test_blob_hash_is_verified_and_cache_can_survive_offline(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
