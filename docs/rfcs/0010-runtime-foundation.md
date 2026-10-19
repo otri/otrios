@@ -114,6 +114,11 @@ ancestor private payloads. The existing live Canvas wire protocol still uses
 app-root leases; connecting admitted UI coverage and writer-local receipts is the
 next integration step and needs a coordinated state-protocol bump.
 
+[Frame coverage measurements](../experiments/merkle-coverage.md) record 81
+matched in-process trials. Covered views suppress unrelated deliveries and
+reduce retained canonical bytes; projection adds authority work, especially with
+few receipts. These source/library results do not complete Canvas rollout.
+
 Use fresh matched authorities for performance experiments. Report delivered
 value age, final settlement, useful bytes, CPU, queue age and retained memory;
 keep input rate, toolchain, UI and signed resources matched. A noisy three-run
