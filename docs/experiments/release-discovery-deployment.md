@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Independent release discovery and replication rollout — 2026-10-19
 
+Historical interim deployment. The [stable hello/event rollout](release-hello-deployment.md)
+supersedes its five-second polling and disconnected-edit waiting policy.
+
 Final source commit: `661667ea49260ac489b37bcdfd786c80c556cba7` on
 `feat/canvas-replication-pipeline`. Signed release:
 `b7dd4d99f4d4513f140cc5980767dc87aa29aefe9ce4ed714a2623d5f62d9c71`.
