@@ -1,0 +1,119 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Live app deployment
+
+The Mac runs one authority and a signed release publisher. A separate OrbStack
+module host serves immutable browser resources through `otrios.otri.ca`.
+Tailscale exposes the trusted authority to the frame. The frame runs one native
+DRM/GBM/EGL/GLES2 host with the accepted rotation and calibrated touch; no
+Wayland, SDL or dashboard browser is involved.
+
+## Authority and routes
+
+```sh
+dashboard-server --bind 127.0.0.1:8876 --public-bind 127.0.0.1:8878 \
+  --app-state /ABS/RUNTIME/apps-state --releases /ABS/RUNTIME/releases \
+  --auth-file /ABS/RUNTIME/monitoring-auth.json \
+  --origin https://otrios.otri.ca --origin https://HOST.TAILNET.ts.net
+```
+
+The trusted listener permits private app admission for tailnet devices. The
+public adapter enforces an exact browser Origin, bounded peer/message counts,
+and Monitoring's existing HttpOnly session. Both use `/apps/stream` for binary
+Canvas mount/sync/view messages and JSON release notices. An anonymous mount
+cannot receive Monitoring UI, behavior or state. Private leases are checked on
+input, before delivery and at most one second after expiry/logout. `/demo/ink`
+is the separate ephemeral trail channel. `/auth/session` manages Monitoring
+sign-in. The public proxy has no administrative feed or state mutation routes.
+
+`/health` reports app-root counts and current release, rather than pretending
+unrelated apps have one global snapshot. Old `/stream`, `/demo/stream`, `/sync`
+and `/layout` global writers return 410. The authorized local monitoring job
+continues to upload a complete FlexBuffers Layout to `/presentation`; the
+server validates and replaces that read-only aggregate without CRDT history.
+
+One file per app holds accepted durable history. Writes replace and flush the
+file before acknowledgement. Clients keep only RAM state, so a live process
+can reconnect with pending edits; crashing or closing it can lose unacknowledged
+work. Code/fonts/blobs are disposable caches, not document checkpoints.
+`--state FILE` now supplies a legacy filename prefix only: app state lives in
+`FILE` with extension `.apps`, and the feed cache uses `.presentation.flex`.
+The old monolithic document is neither loaded nor written. This cutover starts
+fresh app state, as authorized by the user.
+
+## Signed publication
+
+`watch-dashboard.py` freezes source inputs, runs Canvas tests, compiles the
+modern browser host and ARMv7 direct host, checks JS/GPU/cache contracts, and
+signs a complete immutable release. Generated packages and catalogs are not
+source fingerprint inputs. `publish-dashboard-module.py` copies verified public
+assets into the independent read-only OrbStack volume before advancing the
+origin's current pointer. A stale or failed build leaves the previous release.
+
+The release manifest binds `otrios-canvas-apps-v1` state and
+`otrios-canvas-sync-v1` transport. Its public `apps/catalog.flex` lists admitted
+UI/State pairs and UI hashes; each UI binds its behavior's hash and permissions.
+App UI/code resides under `authority/apps/<id>/` in the signed release's
+`authority` digest table. These payloads are never copied to the public module
+volume or exposed by a static-download route. They travel through authorized
+mounts. The client checks the catalog's admitted UI hash before activation.
+
+The native supervisor verifies the pinned Ed25519 publisher signature, sizes,
+ARM executable, catalog and compressed font before execution. Browser resources
+use the trusted HTTPS origin and manifest hash closure; the browser does not
+independently verify the detached signature. A signature does not sandbox
+native code: the configured publisher remains trusted.
+
+The Mac runtime is `~/Library/Application Support/OTriOSDashboard`. Credentials,
+keys, logs, state, source inbox and build caches stay outside Git. Its login
+LaunchAgents include the state server, source watcher, monitoring collector and
+public tunnel/module adapter. The watcher follows the configured trusted Git
+branch or `queue-dashboard-source.py` feed; do not push incomplete code while
+its automatic deployment is active. Installed service scripts and server
+binaries must be updated explicitly for a protocol cutover.
+
+```sh
+python3 scripts/watch-dashboard.py --config /ABS/RUNTIME/config.json
+```
+
+The private watcher config supplies absolute repo/runtime/tool paths and the
+pinned Rust build environment. Keep the publisher private key mode 0600; serve
+only its public key. The Mac must remain awake, online and logged in. This is
+not an always-on cloud deployment.
+
+## Activation, readiness and recovery
+
+A candidate mount qualifies its UI, schema, reducer, authoritative state and
+primitive scene before replacing the active scope. Navigation retires capture,
+keyboard repeat and the old subscription. Rejected candidates leave the current
+app usable. Automatic code replacement waits for acknowledgement and no active
+input; browser state does not enter session storage or IndexedDB. Normal
+navigation stays local; the public demos share the frame's data roots.
+
+The frame supervisor keeps exactly one display owner and accepts a release only
+after rendered output and a live acknowledged app stream. Its cache limit is
+about 2 GiB; the browser immutable resource cache is about 512 MiB, subject to quota.
+The font/GPU coverage cache remains independent. New releases have only the
+native direct executable, not an SDL recovery binary. Failed compatible
+candidates can return to a previously verified cached release.
+
+The initial Canvas protocol cutover cannot automatically run an older global-room
+binary against the new authority. Keep the previous server/agent/proxy scripts
+and signed release for coordinated operational rollback. Already-open legacy
+browser tabs need one visit to the root URL after this cutover; there is no
+permanent legacy protocol bridge.
+
+## Validation
+
+Run `bash scripts/check.sh`, all-feature Clippy, the modern Wasm export/GPU/cache
+Node tests, and native worker tests. Real-process tests cover per-app isolation,
+durable restart, new behavior admission, source reload, exact Origins, private
+UI denial, cookie logout/expiry and ephemeral ink. Signing tests include catalog
+tampering and a private-payload canary that must not reach the public volume.
+
+Use `scripts/test-dashboard-module-host.py` against the deployed host for HTTP,
+resource, proxy and auth policy checks. It complements the Rust tests that
+actually encode app mounts. Verify the same signed release in browser and frame
+readiness, then inspect an actual native framebuffer and the local presentation
+statistics. Matching references prove scope identity, not pixel equivalence or
+physical panel color/touch acceptance. Record measured results in
+[the migration validation log](experiments/canvas-migration-validation.md).

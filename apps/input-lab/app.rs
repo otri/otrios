@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+#[path = "state/schema.rs"]
+mod state;
+mod ui;
+pub fn manifest() -> otrios_interfaces::canvas::App {
+    crate::authoring::app(
+        "input-lab",
+        "Input Lab",
+        "canvas-app",
+        &[
+            "ui.rs",
+            "state/schema.rs",
+            "component:keyboard-v1",
+            "sdk:canvas-authoring-v2",
+        ],
+    )
+}
+pub fn ui() -> otrios_interfaces::canvas::Ui {
+    ui::description()
+}

@@ -15,3 +15,33 @@ jobs:
           persist-credentials: false
       - name: Prepare pinned Rust and run checks
         run: bash scripts/cloud-install.sh
+
+  dashboard-hosts:
+    name: Native GLES2 and Wasm hosts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install native display dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dri libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
+      - name: Prepare pinned Rust
+        run: rustup toolchain install 1.90.0 --profile minimal --component clippy --target wasm32-unknown-unknown
+      - name: Check all host adapters
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Check Canvas app runtime and real process boundary
+        run: |
+          cargo test -p otrios-core --features canvas --locked
+          cargo test -p otrios-dashboard --features canvas,server,host-sync --test canvas_process --locked
+          cargo build -p otrios-web-host --lib --release --locked --target wasm32-unknown-unknown
+          node --test scripts/test-canvas-host-exports.mjs scripts/test_gpu_scene.mjs
+      - name: Check distributed module handoff
+        run: node --test scripts/test-dashboard-release-gate.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs
+      - name: Test the native Canvas worker boundary
+        run: cargo test -p otrios-dashboard --features direct --bin dashboard-direct --locked
+      - name: Compile the owned Linux display host
+        run: cargo build -p otrios-dashboard --features direct --bin dashboard-direct --release --locked
+      - name: Check retained GPU geometry and pixel output
+        run: |
+          cargo test -p otrios-linux-display --features platform --locked
+          env EGL_PLATFORM=surfaceless LIBGL_ALWAYS_SOFTWARE=1 cargo test -p otrios-linux-display --features platform --locked -- --ignored

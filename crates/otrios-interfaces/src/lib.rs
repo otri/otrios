@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Experimental contract types. No stable wire format or ABI is promised.
 
+pub mod ink;
+#[cfg(feature = "layout")]
+pub mod layout;
+pub mod scene;
+
 /// SHA-256 digest of a canonical object envelope, once hashing is implemented.
 /// Constructing this type does not authenticate or validate the referenced bytes.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -27,3 +32,34 @@ pub enum SubscriptionEvent {
     SnapshotAvailable(Generation),
     ResyncRequired { latest: Generation },
 }
+
+/// Logical canvas shared by native and browser hosts. Hosts letterbox uniformly.
+pub const DASHBOARD_WIDTH: u32 = 1280;
+pub const DASHBOARD_HEIGHT: u32 = 800;
+
+/// Experimental snapshot contract, independent of the CRDT's storage format.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DashboardView {
+    pub heads: Vec<String>,
+    pub nodes: Vec<ViewNode>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewNode {
+    pub id: u32,
+    /// Bounds in logical canvas coordinates: x, y, width, height.
+    pub bounds: [u32; 4],
+    pub content: ViewContent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ViewContent {
+    Label(String),
+    Switch { label: String, enabled: bool },
+    Graph { label: String, samples: Vec<u32> },
+}
+
+pub mod keyboard;
+
+#[cfg(feature = "layout")]
+pub mod canvas;

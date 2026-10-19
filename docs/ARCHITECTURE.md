@@ -43,3 +43,13 @@ CRDT resolution will use a reference software implementation and a permissively 
 ## Decisions still requiring experiments
 
 Select a concrete IDL and schema evolution rules; measure serialization versus direct mapping; define cursor epochs and reclaiming pinned revisions; compare portable compilation targets; specify distribution and LGPL relinking arrangements; and select CRDT families before designing an accelerator ABI. Keep each decision in a small RFC with testable alternatives.
+
+## Incremental CRDT hierarchy experiment
+
+[RFC 0002](rfcs/0002-incremental-crdt-hierarchy.md) proposes immutable typed CRDT leaves and incremental ancestor hashing, with measured hash-path costs on the frame. This is a proposed next runtime representation; the dashboard continues to use Automerge. Hash equality includes merge metadata and never replaces conflict semantics or access policy.
+
+[The app package prototype](../apps/README.md) implements an opt-in `Canvas(uiRef, stateRef)` mount with independent app documents, binary UI/selectors and a bounded Wasm behavior interpreter. [RFC 0004](rfcs/0004-canvas-behavior-and-app-packages.md) records its execution and package boundaries; the live dashboard remains on its existing shell pending app-by-app migration.
+
+Follow the [modern app pattern and retirement map](MODERN_APP_PATTERN.md) for new
+app work. It separates the production target from current prototype evidence and
+lists which legacy paths should be deleted at each cutover.

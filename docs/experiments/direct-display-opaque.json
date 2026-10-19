@@ -1,0 +1,210 @@
+{
+  "release": "8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa",
+  "measured_at_unix": 1792340725.5782566,
+  "rotation_direct": 90,
+  "physical_extent": [
+    800,
+    1280
+  ],
+  "logical_extent": [
+    1280,
+    800
+  ],
+  "touch_rule_unchanged": true,
+  "scenarios": [
+    {
+      "cadence": {
+        "fps": 49.4,
+        "frames": 983,
+        "over_25ms": 144,
+        "p50_ms": 17.658,
+        "p95_ms": 35.691,
+        "p99_ms": 36.227,
+        "samples": 983
+      },
+      "compose_submit_p50_us": 2977,
+      "compose_submit_p95_us": 3861,
+      "drawn": 984,
+      "load_requested_hz": 0,
+      "load_updates": 0,
+      "measurement": "host frame-start cadence; not display scanout latency",
+      "objects": 12,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 14455,
+      "present_p95_us": 33188,
+      "received_app_updates": 0,
+      "release": "8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa",
+      "renderer": "opengles2",
+      "rotation": 90,
+      "screen": "animation",
+      "seconds": 20.015754483,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "video": "KMSDRM",
+      "worker_stall_ms": 0,
+      "scenario": "kmsdrm-motion-12-idle",
+      "observed_load_hz": 0.0
+    },
+    {
+      "cadence": {
+        "fps": 28.26,
+        "frames": 558,
+        "over_25ms": 555,
+        "p50_ms": 35.303,
+        "p95_ms": 35.927,
+        "p99_ms": 36.797,
+        "samples": 558
+      },
+      "compose_submit_p50_us": 9398,
+      "compose_submit_p95_us": 15464,
+      "drawn": 559,
+      "load_requested_hz": 30,
+      "load_updates": 159,
+      "measurement": "host frame-start cadence; not display scanout latency",
+      "objects": 64,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 25748,
+      "present_p95_us": 27226,
+      "received_app_updates": 0,
+      "release": "8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa",
+      "renderer": "opengles2",
+      "rotation": 90,
+      "screen": "animation",
+      "seconds": 20.047323871,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "video": "KMSDRM",
+      "worker_stall_ms": 250,
+      "scenario": "kmsdrm-motion-64-load-stall",
+      "observed_load_hz": 7.93123316723614
+    },
+    {
+      "cadence": {
+        "fps": 50.81,
+        "frames": 1011,
+        "over_25ms": 116,
+        "p50_ms": 17.659,
+        "p95_ms": 35.532,
+        "p99_ms": 36.046,
+        "samples": 1011
+      },
+      "compose_submit_p50_us": 1813,
+      "compose_submit_p95_us": 2796,
+      "drawn": 1012,
+      "load_requested_hz": 0,
+      "load_updates": 0,
+      "measurement": "host frame-start cadence; not display scanout latency",
+      "objects": 12,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 15655,
+      "present_p95_us": 32955,
+      "received_app_updates": 0,
+      "release": "8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa",
+      "renderer": "opengles2",
+      "rotation": 90,
+      "screen": "3d",
+      "seconds": 20.013847537,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "video": "KMSDRM",
+      "worker_stall_ms": 0,
+      "scenario": "kmsdrm-cubes-12-idle",
+      "observed_load_hz": 0.0
+    },
+    {
+      "cadence": {
+        "fps": 49.41,
+        "frames": 982,
+        "over_25ms": 141,
+        "p50_ms": 17.664,
+        "p95_ms": 35.5,
+        "p99_ms": 36.093,
+        "samples": 982
+      },
+      "compose_submit_p50_us": 3521,
+      "compose_submit_p95_us": 4655,
+      "drawn": 983,
+      "load_requested_hz": 0,
+      "load_updates": 0,
+      "measurement": "host frame-start cadence; not display scanout latency",
+      "objects": 64,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 14072,
+      "present_p95_us": 31576,
+      "received_app_updates": 0,
+      "release": "8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa",
+      "renderer": "opengles2",
+      "rotation": 90,
+      "screen": "3d",
+      "seconds": 20.018816976,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "video": "KMSDRM",
+      "worker_stall_ms": 0,
+      "scenario": "kmsdrm-cubes-64-idle",
+      "observed_load_hz": 0.0
+    },
+    {
+      "cadence": {
+        "fps": 31.58,
+        "frames": 628,
+        "over_25ms": 495,
+        "p50_ms": 35.189,
+        "p95_ms": 36.17,
+        "p99_ms": 36.797,
+        "samples": 628
+      },
+      "compose_submit_p50_us": 3780,
+      "compose_submit_p95_us": 5699,
+      "drawn": 629,
+      "load_requested_hz": 30,
+      "load_updates": 175,
+      "measurement": "host frame-start cadence; not display scanout latency",
+      "objects": 64,
+      "output": [
+        800,
+        1280
+      ],
+      "present_p50_us": 30842,
+      "present_p95_us": 32836,
+      "received_app_updates": 0,
+      "release": "8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa",
+      "renderer": "opengles2",
+      "rotation": 90,
+      "screen": "3d",
+      "seconds": 20.096668097,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "video": "KMSDRM",
+      "worker_stall_ms": 250,
+      "scenario": "kmsdrm-cubes-64-load-stall",
+      "observed_load_hz": 8.707911140062254
+    }
+  ],
+  "page_flips": {
+    "measurement": "kernel DRM_EVENT_FLIP_COMPLETE timestamps from SDL KMS DRM reads",
+    "warmup_seconds": 2.0,
+    "crtc": 37,
+    "events": 277,
+    "seconds": 9.744631999987178,
+    "presented_fps": 28.32328609231864,
+    "p50_ms": 35.30699998373166,
+    "p95_ms": 35.312000021804124,
+    "p99_ms": 35.315000015543774,
+    "max_ms": 35.388999996939674,
+    "missed_vblanks": 276
+  },
+  "note": "Kernel-feedback rows from the optional in-process counter are distinct from ptrace runs. Averages do not establish refresh lock."
+}
