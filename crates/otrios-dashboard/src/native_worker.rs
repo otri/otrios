@@ -19,6 +19,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[path = "bench_telemetry.rs"]
+mod bench_telemetry;
 enum NetworkEvent {
     Connected(u64),
     Packet(u64, Instant, Vec<u8>),
@@ -285,6 +287,7 @@ pub(super) fn state_worker(
     let mut received_updates = 0;
     let mut remote_sample = None;
     let mut measured_sample = 0;
+    let mut bench_present = bench_telemetry::Recorder::from_env()?;
     let mut sync_to_present_ms = None;
     let mut last_status = None;
     let mut scene_cache = None;
@@ -324,6 +327,7 @@ pub(super) fn state_worker(
                         && id > measured_sample
                     {
                         measured_sample = id;
+                        bench_present.presented(id, at, frame.intent.count)?;
                         sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
                     }
                     if let Some(path) = &o.ready_file {
