@@ -165,7 +165,7 @@ compare roots; this is a process-boundary test, not Linux shared-memory evidence
 and concurrent join separately, with actual nodes and allocations. The optional
 `otrios-web-host/merkle-probe` diagnostic executes the same covered runtime as
 Wasm, with no change to the default live app. See the experiment report for
-commands and measurements. Do not equate either with network or screen latency.
+[commands and measurements](../experiments/merkle-subtree-validation.md). Do not equate either with network or screen latency.
 
 Next: introduce a Canvas state adapter for typed field paths behind the existing
 mount/schema/grant contracts; retain optimistic intent overlays, durable server

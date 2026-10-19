@@ -514,3 +514,45 @@ mod tests {
         assert!(matches!(transfer.materialize(None), Err(Error::Limit)));
     }
 }
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+    #[test]
+    fn a_gap_or_wrong_base_demands_resync_and_full_recovery_is_atomic() {
+        let old = Snapshot::empty();
+        let new = old
+            .edit(
+                [1; 16],
+                &[Edit {
+                    path: vec![1],
+                    schema: [7; 32],
+                    value: None,
+                }],
+            )
+            .unwrap()
+            .0;
+        let cursor = |sequence| Cursor {
+            epoch: 1,
+            lease: 1,
+            sequence,
+        };
+        let mut replica = Replica::for_lease(1, 1, vec![]).unwrap();
+        replica
+            .apply(&encode_transfer(cursor(1), &[], true, None, Some(&old)).unwrap())
+            .unwrap();
+        assert_eq!(
+            replica.apply(&encode_transfer(cursor(3), &[], false, Some(&old), Some(&new)).unwrap()),
+            Err(Error::ResyncRequired)
+        );
+        assert_eq!(
+            replica.apply(&encode_transfer(cursor(2), &[], false, Some(&new), Some(&new)).unwrap()),
+            Err(Error::ResyncRequired)
+        );
+        assert_eq!(replica.snapshot().unwrap().hash(), old.hash());
+        replica
+            .apply(&encode_transfer(cursor(4), &[], true, None, Some(&new)).unwrap())
+            .unwrap();
+        assert_eq!(replica.snapshot().unwrap().hash(), new.hash());
+    }
+}

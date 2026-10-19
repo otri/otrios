@@ -31,8 +31,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Check Canvas app runtime and real process boundary
         run: |
-          cargo test -p otrios-core --features canvas --locked
+          cargo test -p otrios-core --features canvas,merkle --locked
           cargo test -p otrios-dashboard --features canvas,server,host-sync --test canvas_process --locked
+          cargo build -p otrios-web-host --lib --features merkle-probe --release --locked --target wasm32-unknown-unknown
           cargo build -p otrios-web-host --lib --release --locked --target wasm32-unknown-unknown
           node --test scripts/test-canvas-host-exports.mjs scripts/test_gpu_scene.mjs
       - name: Check distributed module handoff
