@@ -367,6 +367,12 @@ mod tests {
             ink: ink::Room::new().unwrap(),
             auth: None,
             apps: Mutex::new(None),
+            state_config: StateConfig {
+                source: PathBuf::new(),
+                state: None,
+                presentation: None,
+            },
+            recovery: Mutex::new(()),
             state_available,
             release_changed,
             presentation_file: None,

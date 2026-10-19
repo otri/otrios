@@ -4,7 +4,7 @@ import init,{CanvasApp} from './pkg/otrios_dashboard.js';
 import {validRelease} from './session.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
-let transportReady=false,transportEpoch=0,inkActive=false,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
+let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
 function error(e){postMessage({type:'error',message:String(e)});}
 function sendFrame(){if(inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer]:[]);}
 function publish(geometry=true){
@@ -16,7 +16,7 @@ function publish(geometry=true){
 function clearPresentation(){syncInk();pendingFrame=null;postMessage({type:'clear-private'});}
 function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('home');monitoring.logout();}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
-function outgoing(){if(transportReady)for(let i=0;i<8;i++){const bytes=app.outgoing();if(!bytes)break;postMessage({type:'state-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
+function outgoing(){if(transportReady)while(stateSends<4){const bytes=app.outgoing();if(!bytes)break;stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 function reloadReady(){return !app.input_busy()&&(!stateOnline||app.reload_ready());}
 function release(message){
   const r=message.release;if(!validRelease(r))return;
@@ -52,17 +52,19 @@ onmessage=async({data:m})=>{try{
     }});
     route(m.route||'#/home');connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
     if(discoveredRelease)release({release:discoveredRelease});
-    setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()){const ink=app.ink_outgoing(now);if(ink.length&&transportReady)postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}outgoing();}catch(e){error(e);}},8);return;
+    setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
   if(m.type==='frame-ack'){inFlight=false;sendFrame();return;}
   if(!app)return;
   if(m.type==='transport'){
-    if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;
+    if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;if(changed){stateSends=0;inkSending=false;}
     if(transportReady&&(!was||changed)){app.reset_connection();outgoing();syncInk();}
     if(!transportReady){stateOnline=false;postMessage({type:'online',online:false});}return;
   }
-  if(m.type==='state-frame'){if(!stopped&&transportReady&&m.epoch===transportEpoch)receiveState(m.bytes);return;}
-  if(m.type==='ink-frame'){if(transportReady&&m.epoch===transportEpoch&&wantsInk()&&app.receive_ink(m.bytes,performance.now()))publish();return;}
+  if(m.type==='state-frame'){try{if(!stopped&&transportReady&&m.epoch===transportEpoch)receiveState(m.bytes);}finally{postMessage({type:'state-frame-ack',epoch:m.epoch});}return;}
+  if(m.type==='ink-frame'){try{if(transportReady&&m.epoch===transportEpoch&&wantsInk()&&app.receive_ink(m.bytes,performance.now()))publish();}finally{postMessage({type:'ink-frame-ack',epoch:m.epoch});}return;}
+  if(m.type==='state-send-ack'){if(m.epoch===transportEpoch){stateSends=Math.max(0,stateSends-1);outgoing();}return;}
+  if(m.type==='ink-send-ack'){if(m.epoch===transportEpoch)inkSending=false;return;}
 
   if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry',entry:m.entry});return;}while(pendingRelease===r&&!reloadReady())await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry',entry:m.entry});return;}stopped=true;transportReady=false;syncInk();postMessage({type:'release',entry:r.web_entry});return;}
   app.tick(performance.now(),Date.now()/1000);let changed=false;

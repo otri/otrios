@@ -90,3 +90,12 @@ test('disconnected RAM edits do not strand a release upgrade',async()=>{
   await context.onmessage({data:{type:'release-commit',entry}});
   assert(messages.some(m=>m.type==='release'&&m.entry===entry));
 });
+
+test('worker state output uses a bounded credit window and ignores stale acknowledgements',async()=>{
+ const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');const messages=[];let packets=10;
+ const fake={outgoing:()=>packets-->0?new Uint8Array([4]):null};
+ const context=vm.createContext({fake,postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=2;outgoing()',context);
+ assert.equal(messages.filter(m=>m.type==='state-send').length,4);
+ await context.onmessage({data:{type:'state-send-ack',epoch:1}});assert.equal(messages.filter(m=>m.type==='state-send').length,4);
+ await context.onmessage({data:{type:'state-send-ack',epoch:2}});assert.equal(messages.filter(m=>m.type==='state-send').length,5);
+});

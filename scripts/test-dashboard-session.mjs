@@ -43,3 +43,21 @@ test('timeout, constructor failure and stop have bounded reconnect lifecycle',()
 test('dev hello may have no release; cookie refresh reconnects the same session owner',()=>{
  const r=rig();r.peers[0].event('hello',null);assert(r.session.ready);r.session.reconnect();assert(r.peers[0].closed);assert.equal(r.peers.length,2);r.peers[1].event();assert.equal(r.session.epoch,2);r.session.stop();
 });
+test('worker mailboxes bound queued data and reject acknowledgements from an old connection',async()=>{
+ const {bridgeWorker}=await import('../web/shared/session.mjs');const messages=[];let resets=0;
+ const session={epoch:1,ready:true,reconnect(){resets++;this.epoch++;},sendState(){},sendInk(){},subscribeInk(){}};
+ const bridge=bridgeWorker(session,m=>messages.push(m));bridge.status(true,1);
+ for(let i=0;i<9;i++)bridge.receive('state',new Uint8Array([i]),1);assert.equal(resets,1);assert.equal(messages.filter(m=>m.type==='state-frame').length,8);
+ bridge.status(true,2);for(let i=0;i<20;i++)bridge.receive('ink',new Uint8Array([i]),2);assert.equal(messages.filter(m=>m.type==='ink-frame').length,8);
+ bridge.handle({type:'ink-frame-ack',epoch:1});bridge.receive('ink',new Uint8Array([0]),2);assert.equal(messages.filter(m=>m.type==='ink-frame').length,8);
+ bridge.handle({type:'ink-frame-ack',epoch:2});bridge.receive('ink',new Uint8Array([0]),2);assert.equal(messages.filter(m=>m.type==='ink-frame').length,9);
+});
+test('back-forward cache resumes one owner without reusing connection epochs',()=>{
+ const r=rig();r.peers[0].event();const epoch=r.session.epoch;r.session.stop();r.session.reconnect();assert.equal(r.peers.length,1);
+ r.session.resume();r.peers[1].event();assert.equal(r.session.epoch,epoch+1);assert(!r.session.sendState(new Uint8Array([3]),epoch));r.session.stop();
+});
+test('browser and native/server share the same declared codec version',async()=>{
+ const {readFile}=await import('node:fs/promises');const {STATE_PROTOCOL}=await import('../web/shared/session.mjs');
+ const source=await readFile(new URL('../crates/otrios-interfaces/src/release.rs',import.meta.url),'utf8');
+ assert.equal(STATE_PROTOCOL,source.match(/STATE_PROTOCOL: &str = "([^"]+)"/)[1]);
+});

@@ -11,7 +11,7 @@ export function connectSession({
   let stopped=false,peer,timer,deadline,last,delay=250,ready=false,wantsInk=false,subscribed=false,generation=0;
   const url=new URL('/session',base);url.protocol=url.protocol==='https:'?'wss:':'ws:';
   function status(value){if(ready!==value){ready=value;onStatus(value,generation);}if(value)syncInk();}
-  function syncInk(){if(ready&&subscribed!==wantsInk){peer.send(JSON.stringify({type:'ink',enabled:wantsInk}));subscribed=wantsInk;}}
+  function syncInk(){if(ready&&subscribed!==wantsInk){try{peer.send(JSON.stringify({type:'ink',enabled:wantsInk}));subscribed=wantsInk;}catch(error){onError(error);status(false);peer.close();}}}
   function retry(){if(stopped)return;timer=schedule(connect,delay);delay=Math.min(10000,delay*2);}
   function connect(){
     if(stopped)return;let socket;
@@ -50,14 +50,44 @@ export function connectSession({
     if(epoch!==generation||!ready||!peer||bytes.length===0)return false;
     if(bytes.length>(channel===STATE?512*1024:32*15))throw Error('Session payload exceeds limit');
     if(peer.bufferedAmount>1024*1024){peer.close();return false;}
-    const frame=new Uint8Array(bytes.length+1);frame[0]=channel;frame.set(bytes,1);peer.send(frame);return true;
+    const frame=new Uint8Array(bytes.length+1);frame[0]=channel;frame.set(bytes,1);try{peer.send(frame);return true;}catch(error){onError(error);status(false);peer.close();return false;}
   }
   connect();
   return {
     get ready(){return ready;},get epoch(){return generation;},
     sendState:(bytes,epoch)=>send(STATE,bytes,epoch),sendInk:(bytes,epoch)=>wantsInk&&send(INK,bytes,epoch),
     subscribeInk(value){wantsInk=!!value;syncInk();},
-    reconnect(){const old=peer;peer=null;cancel(timer);cancel(deadline);subscribed=false;status(false);old?.close();delay=250;connect();},
+    resume(){if(stopped){stopped=false;delay=250;connect();}},
+    reconnect(){if(stopped)return;const old=peer;peer=null;cancel(timer);cancel(deadline);subscribed=false;status(false);old?.close();delay=250;connect();},
     stop(){stopped=true;cancel(timer);cancel(deadline);const old=peer;peer=null;subscribed=false;status(false);old?.close();},
+  };
+}
+
+// Bounded network/app-worker handoff. State overflow reconnects for resync;
+// ephemeral ink overflow drops samples. Epochs reject work from old sessions.
+export function bridgeWorker(session,post){
+  let epoch=0,state=0,ink=0;
+  return {
+    status(ready,nextEpoch){if(epoch!==nextEpoch){epoch=nextEpoch;state=0;ink=0;}post({type:'transport',ready,epoch});},
+    receive(type,bytes,atEpoch){
+      if(atEpoch!==session.epoch)return;
+      if(type==='state'){if(state>=8){session.reconnect();return;}state++;}
+      else{if(ink>=8)return;ink++;}
+      post({type:type+'-frame',bytes,epoch:atEpoch},[bytes.buffer]);
+    },
+    handle(message){
+      const m=message;
+      switch(m.type){
+        case 'transport-ready':this.status(session.ready,session.epoch);break;
+        case 'transport-reconnect':session.reconnect();break;
+        case 'state-send':session.sendState(m.bytes,m.epoch);post({type:'state-send-ack',epoch:m.epoch});break;
+        case 'ink-send':session.sendInk(m.bytes,m.epoch);post({type:'ink-send-ack',epoch:m.epoch});break;
+        case 'ink-subscribe':session.subscribeInk(m.active);break;
+        case 'state-frame-ack':if(m.epoch===epoch)state=Math.max(0,state-1);break;
+        case 'ink-frame-ack':if(m.epoch===epoch)ink=Math.max(0,ink-1);break;
+        default:return false;
+      }
+      return true;
+    },
   };
 }

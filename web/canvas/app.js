@@ -4,7 +4,7 @@ import init,{CanvasPresentation} from './pkg/otrios_dashboard.js';
 import {SceneRenderer} from './gpu-scene.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppCatalog} from './app-catalog.mjs';
-import {connectSession} from './session.mjs';
+import {connectSession,bridgeWorker} from './session.mjs';
 const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls');
 const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),loginError=document.querySelector('#login-error');
 let monitoringAuth={authenticated:false},currentScreen='home',modelAuthRequired=false;
@@ -14,12 +14,12 @@ function fatal(e){error.hidden=false;error.textContent=String(e);connection.text
 const initialRelease=location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null;
 // Start before Wasm initialization. An unopened app has no user edits to lose.
 let offerRelease=r=>{if(initialRelease&&r.id!==initialRelease)location.replace(r.web_entry+location.hash);};
-let session,transportWorker=null,observedRelease;
-function startDiscovery(){session?.stop();session=connectSession({
+let session,transportBridge=null,observedRelease;
+function startDiscovery(){if(session){session.resume();return;}session=connectSession({
   onRelease:r=>{observedRelease=r;offerRelease(r);},
-  onState:(bytes,epoch)=>transportWorker?.postMessage({type:'state-frame',bytes,epoch},[bytes.buffer]),
-  onInk:(bytes,epoch)=>transportWorker?.postMessage({type:'ink-frame',bytes,epoch},[bytes.buffer]),
-  onStatus:(ready,epoch)=>transportWorker?.postMessage({type:'transport',ready,epoch}),
+  onState:(bytes,epoch)=>transportBridge?.receive('state',bytes,epoch),
+  onInk:(bytes,epoch)=>transportBridge?.receive('ink',bytes,epoch),
+  onStatus:(ready,epoch)=>transportBridge?.status(ready,epoch),
   onError:error=>console.warn('Session:',error),
 });}
 startDiscovery();
@@ -34,7 +34,7 @@ try{
   }else revision.dataset.cacheState='unsupported';
   await init();const presenter=new CanvasPresentation();const [fontResource,catalogBytes]=await Promise.all([loadFontResource(import.meta.url),loadAppCatalog(import.meta.url)]);presenter.set_font(fontResource.bytes,fontResource.hash);
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
-  let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false;
+  let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
   function command(m){if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
   function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
   function route(){return `/${model.screen}${model.keyboard?'/input':''}`;}
@@ -60,10 +60,10 @@ try{
     else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
     pump();worker.postMessage({type:'frame-ack'});
   }
-  worker.onmessage=event=>{try{const m=event.data;switch(m.type){case 'transport-ready':worker.postMessage({type:'transport',ready:session.ready,epoch:session.epoch});break;case 'transport-reconnect':session.reconnect();break;case 'state-send':session.sendState(m.bytes,m.epoch);break;case 'ink-send':session.sendInk(m.bytes,m.epoch);break;case 'ink-subscribe':session.subscribeInk(m.active);break;case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
-  worker.onerror=e=>fatal(e.message);
-  transportWorker=worker;
-  offerRelease=r=>worker.postMessage({type:'release-discovered',release:r});
+  transportBridge=bridgeWorker(session,(message,transfer=[])=>worker.postMessage(message,transfer));
+  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
+  worker.onerror=e=>{workerFailed=true;fatal(e.message);session.reconnect();if(observedRelease)offerRelease(observedRelease);};
+  offerRelease=r=>{if(initialRelease&&r.id!==initialRelease&&(workerFailed||!model?.ui)){location.replace(r.web_entry+location.hash);return;}worker.postMessage({type:'release-discovered',release:r});};
   if(observedRelease)offerRelease(observedRelease);
   form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
   function leaveLogin(){command({type:'route',route:'#/home'});}

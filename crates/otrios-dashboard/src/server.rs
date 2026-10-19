@@ -35,10 +35,18 @@ mod session;
 #[path = "server_store.rs"]
 mod store;
 
+#[derive(Clone)]
+struct StateConfig {
+    source: PathBuf,
+    state: Option<PathBuf>,
+    presentation: Option<PathBuf>,
+}
 struct App {
     ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
     apps: Mutex<Option<apps::Hub>>,
+    state_config: StateConfig,
+    recovery: Mutex<()>,
     state_available: watch::Sender<bool>,
     release_changed: watch::Sender<Value>,
     presentation_file: Option<PathBuf>,
@@ -132,17 +140,67 @@ async fn activate(State(app): State<Arc<App>>) -> StatusCode {
     if !refresh_release(&app).await {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
-    // Catalog admission is deliberately outside release-control handling.
+    // Recovery/catalog admission is outside release-control handling.
     let copy = app.clone();
     tokio::spawn(async move {
         let release = copy.release.read().await.clone();
-        if let Some(hub) = copy.apps.lock().await.as_mut()
-            && let Err(e) = hub.refresh(&copy.releases, &release)
-        {
-            eprintln!("Catalog activation: {e}");
+        let mut guard = copy.apps.lock().await;
+        if let Some(hub) = guard.as_mut() {
+            if let Err(e) = hub.refresh(&copy.releases, &release) {
+                eprintln!("Catalog activation: {e}");
+            }
+        } else {
+            drop(guard);
+            recover_state(copy).await;
         }
     });
     StatusCode::NO_CONTENT
+}
+async fn recover_state(app: Arc<App>) {
+    let Ok(_exclusive) = app.recovery.try_lock() else {
+        return;
+    };
+    if app.apps.lock().await.is_some() {
+        return;
+    }
+    // A publication racing failed recovery gets one catch-up attempt. Work stays bounded.
+    for _ in 0..2 {
+        let release = app.release.read().await.clone();
+        let wanted = release.clone();
+        let releases = app.releases.clone();
+        let config = app.state_config.clone();
+        let recovered = tokio::task::spawn_blocking(move || -> Result<apps::Hub, String> {
+            if releases.is_some() && release["id"] == "development" {
+                return Err("No valid active release".into());
+            }
+            let mut hub = apps::Hub::new(config.source, config.state)?;
+            hub.refresh(&releases, &release)?;
+            if let Some(path) = config.presentation.filter(|p| p.exists()) {
+                hub.set_view(fs::read(path).map_err(|e| e.to_string())?)?;
+            }
+            Ok(hub)
+        })
+        .await;
+        match recovered {
+            Ok(Ok(hub)) => {
+                *app.apps.lock().await = Some(hub);
+                app.state_available.send_replace(true);
+                announce(&app).await;
+                return;
+            }
+            other => eprintln!(
+                "State recovery unavailable: {}",
+                match other {
+                    Ok(Err(e)) => e,
+                    Err(e) => e.to_string(),
+                    _ => unreachable!(),
+                }
+            ),
+        }
+        if *app.release.read().await == wanted {
+            return;
+        }
+    }
 }
 fn origin_ok(app: &App, headers: &HeaderMap) -> bool {
     headers.get(header::ORIGIN).is_none_or(|origin| {
@@ -152,6 +210,25 @@ fn origin_ok(app: &App, headers: &HeaderMap) -> bool {
                 .get(header::HOST)
                 .is_some_and(|h| origin == format!("http://{}", h.to_str().unwrap_or("")))
     })
+}
+async fn response_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        header::HeaderValue::from_static("same-origin"),
+    );
+    headers
+        .entry(header::CACHE_CONTROL)
+        .or_insert(header::HeaderValue::from_static("no-store"));
+    response
 }
 fn failure(status: StatusCode, message: &str) -> Response {
     (status, message.to_string()).into_response()
@@ -248,6 +325,7 @@ async fn public_health(State(app): State<Arc<App>>) -> Response {
     (if available{StatusCode::OK}else{StatusCode::SERVICE_UNAVAILABLE},binary("application/json",json!({"status":if available{"ok"}else{"state-unavailable"},"state_available":available,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)).into_response()
 }
 async fn root(State(app): State<Arc<App>>) -> Response {
+    refresh_release(&app).await;
     let release = app.release.read().await;
     if let Some(entry) = release["web_entry"].as_str() {
         return (
@@ -257,6 +335,9 @@ async fn root(State(app): State<Arc<App>>) -> Response {
             .into_response();
     }
     drop(release);
+    if app.releases.is_some() {
+        return failure(StatusCode::SERVICE_UNAVAILABLE, "No valid active release");
+    }
     serve_file(
         app.web.join("index.html"),
         "text/html; charset=utf-8",
@@ -265,6 +346,7 @@ async fn root(State(app): State<Arc<App>>) -> Response {
     .await
 }
 async fn current_release(State(app): State<Arc<App>>) -> Response {
+    refresh_release(&app).await;
     binary(
         "application/json",
         app.release.read().await.to_string().into_bytes(),
@@ -404,6 +486,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut session_seconds = 8 * 60 * 60;
     let mut state_file: Option<PathBuf> = None;
     let mut app_state = None;
+    let mut explicit_presentation = None;
     let mut releases = None;
     let mut origins = vec![];
     let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/canvas");
@@ -413,6 +496,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match arg.as_str() {
         "--bind"=>bind=args.next().ok_or("Missing bind")?,
         "--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
+        "--presentation-file"=>explicit_presentation=Some(PathBuf::from(args.next().ok_or("Missing presentation file")?)),
         "--app-state"=>app_state=Some(PathBuf::from(args.next().ok_or("Missing app state directory")?)),
         "--apps"=>source=PathBuf::from(args.next().ok_or("Missing app source directory")?),
         "--auth-file"=>auth_file=Some(PathBuf::from(args.next().ok_or("Missing auth file")?)),
@@ -428,9 +512,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err("Development authority must bind loopback".into());
     }
     let app_state = app_state.or_else(|| state_file.as_ref().map(|p| p.with_extension("apps")));
-    let presentation_file = state_file
-        .as_ref()
-        .map(|p| p.with_extension("presentation.flex"));
+    let presentation_file = explicit_presentation.or_else(|| {
+        state_file
+            .as_ref()
+            .map(|p| p.with_extension("presentation.flex"))
+    });
     let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
     if !(1..=86400).contains(&session_seconds) {
         return Err("Session duration must be between 1 and 86400 seconds".into());
@@ -451,6 +537,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ink: ink::Room::new()?,
         auth,
         apps: Mutex::new(None),
+        state_config: StateConfig {
+            source,
+            state: app_state,
+            presentation: presentation_file.clone(),
+        },
+        recovery: Mutex::new(()),
         state_available,
         release_changed,
         presentation_file,
@@ -462,36 +554,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         peers: Arc::new(Semaphore::new(64)),
         public_peers: Arc::new(Semaphore::new(32)),
     });
-    let recovering = app.clone();
-    tokio::spawn(async move {
-        let release = recovering.release.read().await.clone();
-        let releases = recovering.releases.clone();
-        let presentation = recovering.presentation_file.clone();
-        let recovered = tokio::task::spawn_blocking(move || -> Result<apps::Hub, String> {
-            let mut hub = apps::Hub::new(source, app_state)?;
-            hub.refresh(&releases, &release)?;
-            if let Some(path) = presentation.filter(|p| p.exists()) {
-                hub.set_view(fs::read(path).map_err(|e| e.to_string())?)?;
-            }
-            Ok(hub)
-        })
-        .await;
-        match recovered {
-            Ok(Ok(hub)) => {
-                *recovering.apps.lock().await = Some(hub);
-                recovering.state_available.send_replace(true);
-                announce(&recovering).await;
-            }
-            other => eprintln!(
-                "State recovery unavailable: {}",
-                match other {
-                    Ok(Err(e)) => e,
-                    Err(e) => e.to_string(),
-                    _ => unreachable!(),
-                }
-            ),
-        }
-    });
+    tokio::spawn(recover_state(app.clone()));
     let observer = app.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
@@ -516,9 +579,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .route("/releases/{id}/{*path}", get(release_asset))
             .route("/demo/ink", get(retired))
             .route("/apps/stream", get(retired))
-            .route("/stream", get(retired))
-            .route("/demo/stream", get(retired))
-            .route("/monitoring/stream", get(retired))
             .route(
                 "/auth/session",
                 get(auth::session)
@@ -529,6 +589,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .route("/monitoring/presentation", get(auth::presentation))
             .route("/health", get(public_health))
             .fallback(|| async { failure(StatusCode::NOT_FOUND, "Not found") })
+            .layer(axum::middleware::from_fn(response_headers))
             .with_state(app.clone());
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, routes).await {
@@ -570,6 +631,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/releases/{id}/{*path}", get(release_asset))
         .route("/{*path}", get(source_asset))
         .layer(DefaultBodyLimit::max(otrios_core::canvas::MAX_BYTES))
+        .layer(axum::middleware::from_fn(response_headers))
         .with_state(app);
     let listener = tokio::net::TcpListener::bind(&bind)
         .await?
