@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Run as root on the frame. Controller acknowledges JSON start/end markers on stdin."""
+import argparse
 import json
 import os
 import pathlib
@@ -9,7 +10,9 @@ import sys
 import threading
 import time
 
-ROOT = pathlib.Path('/var/lib/otrios-dashboard/bench-adapter')
+parser = argparse.ArgumentParser(description='Bounded graphics-service benchmark for the configured RK3126 frame; run as root.')
+parser.add_argument('--root', type=pathlib.Path, default=pathlib.Path('/var/lib/otrios-dashboard/bench-adapter'))
+ROOT = parser.parse_args().root
 UNIT = 'otrios-dashboard-direct.service'
 OVERRIDE = pathlib.Path('/run/systemd/system') / (UNIT + '.d') / 'canvas-benchmark.conf'
 MATRIX = '0.0141800187463,1.57225922787,0.0301964207517,-1.43183371315,0.0108767110266,0.98226433108'
