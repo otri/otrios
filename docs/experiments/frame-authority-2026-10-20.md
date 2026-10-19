@@ -253,3 +253,27 @@ case adds `--clients 256 --active-counts 32 --max-active 32`. Hardware cases run
 sequentially, with isolated state and a new authority for each count. The
 same preserved baseline client binary is used for the buffer comparison;
 continuous input uses the separately recorded updated generator binary.
+
+## Final deployed acceptance
+
+The deployed authority's SHA-256 matches the measured 4 KiB candidate exactly.
+The signed browser/native release is unchanged from the cutover release above.
+The final publisher input fingerprint matches the committed source inputs; later
+report-only commits do not change executable inputs.
+
+The running unit admits four trusted and 64 public sessions. The live admission
+probe reached both limits, received 503 for the additional connections, and
+observed confirmed native readiness at capacity. The final public-origin checker
+passed all 68 anonymous checks; the newly deployed ARM binary also passed the
+full 81-check disposable-login qualification. The native process has an
+established loopback connection, matching signed release, confirmed state and no
+pending commands. Direct Monitoring refreshed successfully after deployment.
+
+The authority, tunnel, timer and native supervisor are enabled for boot; no
+physical reboot was performed. Mac authority, tunnel and collector LaunchAgents
+remain disabled. The build/signing watcher is running, and the sole retired Mac
+Serve handler was removed. Each Mac staging, frame authority and native-cache
+store contains exactly its active immutable release. Disposable test services,
+relay files, state directories and provisioning staging were removed; temporary
+credential copies on the build machine were deleted. Raw synthetic test telemetry
+remains local and outside Git.
