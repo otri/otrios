@@ -526,63 +526,13 @@ fn verify_asset(manifest: &Value, path: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub(super) async fn trusted(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    open(app, headers, upgrade, false).await
+/// Bounded state worker. The session/control loop never acquires this worker's
+/// authority lock or decodes a state packet on its behalf.
+pub(super) struct Packet {
+    pub bytes: Vec<u8>,
+    pub private: bool,
 }
-pub(super) async fn public(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    open(app, headers, upgrade, true).await
-}
-async fn open(
-    app: Arc<App>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-    public: bool,
-) -> Response {
-    let allowed = if public {
-        headers
-            .get(header::ORIGIN)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|o| app.origins.iter().any(|a| a == o))
-    } else {
-        origin_ok(&app, &headers)
-    };
-    if !allowed {
-        return failure(StatusCode::FORBIDDEN, "Origin rejected");
-    }
-    let slots = if public {
-        app.public_peers.clone()
-    } else {
-        app.peers.clone()
-    };
-    let Ok(permit) = slots.try_acquire_owned() else {
-        return failure(StatusCode::SERVICE_UNAVAILABLE, "Too many screens");
-    };
-    let key = if public {
-        match &app.auth {
-            Some(a) => a.key(&headers).await,
-            None => None,
-        }
-    } else {
-        None
-    };
-    upgrade
-        .max_message_size(canvas::MAX_BYTES)
-        .max_frame_size(canvas::MAX_BYTES)
-        .on_upgrade(move |socket| async move {
-            let _permit = permit;
-            peer(app, socket, public, key).await
-        })
-        .into_response()
-}
-async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
+pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
     if !public {
         return true;
     }
@@ -591,10 +541,11 @@ async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool 
         _ => false,
     }
 }
-async fn send(
-    output: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+async fn emit(
+    output: &tokio::sync::mpsc::Sender<Packet>,
     message: ServerMessage,
     binary: bool,
+    private: bool,
 ) -> bool {
     let encode = if binary {
         canvas::encode_server_binary
@@ -607,47 +558,33 @@ async fn send(
     matches!(
         tokio::time::timeout(
             Duration::from_secs(2),
-            output.send(Message::Binary(bytes.into()))
+            output.send(Packet { bytes, private })
         )
         .await,
         Ok(Ok(()))
     )
 }
-async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String>) {
-    let (mut output, mut input) = socket.split();
+pub(super) async fn worker(
+    app: Arc<App>,
+    public: bool,
+    key: Option<String>,
+    mut input: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    output: tokio::sync::mpsc::Sender<Packet>,
+) {
     let mut leases = Leases::default();
     let mut notice = app.changed.subscribe();
     let mut expiry = tokio::time::interval(Duration::from_secs(1));
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     let mut window = std::time::Instant::now();
     let mut count = 0;
-    let mut release_id = String::new();
     loop {
-        let release = app.release.read().await.clone();
-        let id = release["id"].as_str().unwrap_or("development");
-        if release_id != id {
-            let message = Message::Text(
-                json!({"type":"release","release":release})
-                    .to_string()
-                    .into(),
-            );
-            if !matches!(
-                tokio::time::timeout(Duration::from_secs(2), output.send(message)).await,
-                Ok(Ok(()))
-            ) {
-                break;
-            }
-            release_id = id.to_string();
-        }
         let incoming = tokio::select! {
-            m=input.next()=>match m {Some(Ok(Message::Binary(bytes)))=>Some(bytes),Some(Ok(Message::Ping(bytes)))=>{if output.send(Message::Pong(bytes)).await.is_err(){break;}continue;},Some(Ok(Message::Pong(_)))=>continue,_=>break},
-            c=notice.changed()=>{if c.is_err(){break;}None},
+            value=input.recv()=>match value{Some(v)=>Some(v),None=>return},
+            c=notice.changed()=>{if c.is_err(){return;}None},
             _=expiry.tick()=>None,
-            _=heartbeat.tick()=>{if !matches!(tokio::time::timeout(Duration::from_secs(2),output.send(Message::Ping(Bytes::new()))).await,Ok(Ok(()))){break;}continue;},
         };
         let allowed = private_allowed(&app, public, &key).await;
         for revoked in leases.revoke_private(allowed) {
-            if !send(&mut output, revoked, false).await {
+            if !emit(&output, revoked, false, false).await {
                 return;
             }
         }
@@ -659,10 +596,13 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
             }
             count += 1;
             if count > 192 {
-                break;
+                return;
             }
             let release = app.release.read().await.clone();
-            let mut hub = app.apps.lock().await;
+            let mut guard = app.apps.lock().await;
+            let Some(hub) = guard.as_mut() else {
+                continue;
+            };
             canvas::decode_client(&bytes).and_then(|message| {
                 recoverable_epoch = match &message {
                     ClientMessage::Mount { epoch, .. }
@@ -676,11 +616,11 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                 hub.process(&mut leases, message, allowed)
             })
         } else {
-            app.apps
-                .lock()
-                .await
-                .updates(&mut leases, allowed)
-                .map(|m| (m, false))
+            let mut guard = app.apps.lock().await;
+            match guard.as_mut() {
+                Some(hub) => hub.updates(&mut leases, allowed).map(|m| (m, false)),
+                None => continue,
+            }
         };
         match result {
             Ok((messages, changed)) => {
@@ -702,25 +642,20 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
                         | ServerMessage::AccessRequired { epoch }
                         | ServerMessage::Error { epoch, .. } => *epoch,
                     };
-                    if private_epochs.contains(&epoch) && !private_allowed(&app, public, &key).await
-                    {
+                    let private = private_epochs.contains(&epoch);
+                    if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
-                            if !send(&mut output, revoked, false).await {
+                            if !emit(&output, revoked, false, false).await {
                                 return;
                             }
                         }
                         continue;
                     }
-                    if !send(
-                        &mut output,
-                        message,
-                        [leases.active.as_ref(), leases.staged.as_ref()]
-                            .into_iter()
-                            .flatten()
-                            .any(|l| l.epoch == epoch && l.binary),
-                    )
-                    .await
-                    {
+                    let binary = [leases.active.as_ref(), leases.staged.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|l| l.epoch == epoch && l.binary);
+                    if !emit(&output, message, binary, private).await {
                         return;
                     }
                 }
@@ -728,14 +663,20 @@ async fn peer(app: Arc<App>, socket: WebSocket, public: bool, key: Option<String
             Err(message) => {
                 let epoch = recoverable_epoch
                     .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
-                if !send(&mut output, ServerMessage::Error { epoch, message }, false).await {
+                if !emit(
+                    &output,
+                    ServerMessage::Error { epoch, message },
+                    false,
+                    false,
+                )
+                .await
+                {
                     return;
                 }
                 if recoverable_epoch.is_none() {
-                    break;
+                    return;
                 }
             }
         }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(1), output.send(Message::Close(None))).await;
 }

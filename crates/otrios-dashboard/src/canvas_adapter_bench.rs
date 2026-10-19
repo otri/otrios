@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Bounded, headless benchmark of the real Canvas app protocol; no durable client files.
+#[path = "session_client.rs"]
+mod session_client;
 use otrios_core::canvas::{Client, Result};
 use std::time::{Duration, Instant};
 use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
@@ -31,6 +33,7 @@ impl Peer {
         } else {
             return Err("Use a loopback endpoint/SSH forward for controlled transport".into());
         }
+        session_client::negotiate(&mut ws)?;
         let mut client = Client::default();
         client.set_legacy_transport(std::env::var_os("OTRIOS_BENCH_LEGACY_TRANSPORT").is_some());
         client.admit_catalog(catalog)?;
@@ -48,17 +51,20 @@ impl Peer {
         self.client
             .tick(now, otrios_core::dashboard::signal::wall_time_seconds())?;
         while let Some(b) = self.client.outgoing()? {
-            self.sent += b.len() as u64;
-            self.sent_ws += wire(b.len(), true);
+            self.sent += (b.len() + 1) as u64;
+            self.sent_ws += wire(b.len() + 1, true);
             self.ws
-                .send(Message::Binary(b.into()))
+                .send(Message::Binary(
+                    otrios_interfaces::session::frame(1, b).into(),
+                ))
                 .map_err(|e| e.to_string())?;
         }
         match self.ws.read() {
             Ok(Message::Binary(b)) => {
                 self.received += b.len() as u64;
                 self.received_ws += wire(b.len(), false);
-                self.client.receive(&b)?;
+                self.client
+                    .receive(b.strip_prefix(&[1]).ok_or("State channel required")?)?;
             }
             Err(tungstenite::Error::Io(e))
                 if matches!(

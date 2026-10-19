@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// App authority. Bind loopback and put the admitted module host in front of it.
+// Unified code, bootstrap and app authority. Trusted/public listeners stay loopback.
 use axum::serve::ListenerExt;
 use axum::{
     Router,
@@ -30,13 +30,17 @@ mod apps;
 mod auth;
 #[path = "server_ink.rs"]
 mod ink;
+#[path = "server_session.rs"]
+mod session;
 #[path = "server_store.rs"]
 mod store;
 
 struct App {
     ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
-    apps: Mutex<apps::Hub>,
+    apps: Mutex<Option<apps::Hub>>,
+    state_available: watch::Sender<bool>,
+    release_changed: watch::Sender<Value>,
     presentation_file: Option<PathBuf>,
     web: PathBuf,
     releases: Option<PathBuf>,
@@ -80,15 +84,65 @@ fn valid_id(s: &str) -> bool {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 fn read_release(root: &Option<PathBuf>) -> Option<Value> {
-    let bytes = fs::read(root.as_ref()?.join("current.json")).ok()?;
+    use std::io::Read;
+    let root = root.as_ref()?;
+    let mut bytes = Vec::new();
+    fs::File::open(root.join("current.json"))
+        .ok()?
+        .take(8193)
+        .read_to_end(&mut bytes)
+        .ok()?;
     if bytes.len() > 8192 {
         return None;
     }
     let value: Value = serde_json::from_slice(&bytes).ok()?;
-    if !valid_id(value.get("id")?.as_str()?) {
+    let descriptor: otrios_interfaces::release::Release =
+        serde_json::from_value(value.clone()).ok()?;
+    if !descriptor.valid() {
         return None;
     }
-    Some(value)
+    let mut raw = Vec::new();
+    fs::File::open(root.join(&descriptor.id).join("manifest.json"))
+        .ok()?
+        .take(65537)
+        .read_to_end(&mut raw)
+        .ok()?;
+    if raw.len() > 65536
+        || otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw)) != descriptor.id
+    {
+        return None;
+    }
+    let manifest: Value = serde_json::from_slice(&raw).ok()?;
+    (manifest["sync_protocol"] == descriptor.sync_protocol).then_some(value)
+}
+async fn refresh_release(app: &App) -> bool {
+    // Serialize read/capture with other hello/activation calls. No state lock.
+    let mut current = app.release.write().await;
+    let Some(next) = read_release(&app.releases) else {
+        return false;
+    };
+    if *current != next {
+        *current = next.clone();
+        app.release_changed.send_replace(next);
+        announce(app).await;
+    }
+    true
+}
+async fn activate(State(app): State<Arc<App>>) -> StatusCode {
+    if !refresh_release(&app).await {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+    // Catalog admission is deliberately outside release-control handling.
+    let copy = app.clone();
+    tokio::spawn(async move {
+        let release = copy.release.read().await.clone();
+        if let Some(hub) = copy.apps.lock().await.as_mut()
+            && let Err(e) = hub.refresh(&copy.releases, &release)
+        {
+            eprintln!("Catalog activation: {e}");
+        }
+    });
+    StatusCode::NO_CONTENT
 }
 fn origin_ok(app: &App, headers: &HeaderMap) -> bool {
     headers.get(header::ORIGIN).is_none_or(|origin| {
@@ -131,11 +185,11 @@ async fn retired() -> Response {
     failure(StatusCode::GONE, "Use the app-scoped /apps/stream protocol")
 }
 async fn get_presentation(State(app): State<Arc<App>>) -> Response {
-    binary(
-        "application/octet-stream",
-        app.apps.lock().await.view().to_vec(),
-        false,
-    )
+    let guard = app.apps.lock().await;
+    match guard.as_ref() {
+        Some(hub) => binary("application/octet-stream", hub.view().to_vec(), false),
+        None => failure(StatusCode::SERVICE_UNAVAILABLE, "State unavailable"),
+    }
 }
 async fn put_presentation(
     State(app): State<Arc<App>>,
@@ -155,7 +209,10 @@ async fn put_presentation(
             "Expected binary FlexBuffers",
         );
     }
-    let mut hub = app.apps.lock().await;
+    let mut guard = app.apps.lock().await;
+    let Some(hub) = guard.as_mut() else {
+        return failure(StatusCode::SERVICE_UNAVAILABLE, "State unavailable");
+    };
     // Validate before persisting, then publish this replaceable aggregate atomically.
     if !bytes.is_empty() {
         let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes).and_then(|l| {
@@ -176,7 +233,7 @@ async fn put_presentation(
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "Persistence failed");
     }
     let changed = hub.set_view(bytes.to_vec()).expect("validated view");
-    drop(hub);
+    drop(guard);
     if changed {
         announce(&app).await;
     }
@@ -187,13 +244,8 @@ async fn put_presentation(
     )
 }
 async fn public_health(State(app): State<Arc<App>>) -> Response {
-    binary(
-        "application/json",
-        json!({"status":"ok","release":app.release.read().await["id"]})
-            .to_string()
-            .into_bytes(),
-        false,
-    )
+    let available = *app.state_available.borrow();
+    (if available{StatusCode::OK}else{StatusCode::SERVICE_UNAVAILABLE},binary("application/json",json!({"status":if available{"ok"}else{"state-unavailable"},"state_available":available,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)).into_response()
 }
 async fn root(State(app): State<Arc<App>>) -> Response {
     let release = app.release.read().await;
@@ -220,10 +272,13 @@ async fn current_release(State(app): State<Arc<App>>) -> Response {
     )
 }
 async fn health(State(app): State<Arc<App>>) -> Response {
-    let hub = app.apps.lock().await;
+    let guard = app.apps.lock().await;
+    let Some(hub) = guard.as_ref() else {
+        return failure(StatusCode::SERVICE_UNAVAILABLE, "State unavailable");
+    };
     let (catalogs, roots) = hub.counts();
     let presentation = !hub.view().is_empty();
-    drop(hub);
+    drop(guard);
     binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
@@ -241,6 +296,8 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/monitoring-session.mjs"
         | "release-gate.mjs"
         | "web/release-gate.mjs"
+        | "session.mjs"
+        | "web/session.mjs"
         | "gpu-scene.mjs"
         | "web/gpu-scene.mjs"
         | "slug-shaders.mjs"
@@ -280,7 +337,14 @@ async fn serve_file(path: PathBuf, kind: &str, immutable: bool) -> Response {
 }
 async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<String>) -> Response {
     if path == "apps/catalog.flex" {
-        return match app.apps.lock().await.catalog_bytes() {
+        return match app
+            .apps
+            .lock()
+            .await
+            .as_ref()
+            .ok_or_else(|| "State unavailable".to_string())
+            .and_then(|hub| hub.catalog_bytes())
+        {
             Ok(bytes) => binary("application/octet-stream", bytes, false),
             Err(_) => failure(StatusCode::NOT_FOUND, "Not found"),
         };
@@ -294,6 +358,7 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                     "artifact-cache-worker.js"
                         | "artifact-cache.mjs"
                         | "release-gate.mjs"
+                        | "session.mjs"
                         | "monitoring-session.mjs"
                         | "app-catalog.mjs"
                         | "Slug-LICENSE.txt"
@@ -359,7 +424,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
     }
     }
-    if prototype && !bind.parse::<std::net::SocketAddr>()?.ip().is_loopback() {
+    if !bind.parse::<std::net::SocketAddr>()?.ip().is_loopback() {
         return Err("Development authority must bind loopback".into());
     }
     let app_state = app_state.or_else(|| state_file.as_ref().map(|p| p.with_extension("apps")));
@@ -367,24 +432,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .as_ref()
         .map(|p| p.with_extension("presentation.flex"));
     let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
-    let mut hub = apps::Hub::new(source, app_state)?;
-    hub.refresh(&releases, &release)?;
-    if let Some(path) = &presentation_file
-        && path.exists()
-    {
-        hub.set_view(fs::read(path)?)?;
-    }
     if !(1..=86400).contains(&session_seconds) {
         return Err("Session duration must be between 1 and 86400 seconds".into());
     }
-    let auth = auth_file
-        .map(|p| auth::Sessions::load(&p, Duration::from_secs(session_seconds)).map(Arc::new))
-        .transpose()?;
+    let auth = auth_file.and_then(|p| {
+        match auth::Sessions::load(&p, Duration::from_secs(session_seconds)) {
+            Ok(a) => Some(Arc::new(a)),
+            Err(e) => {
+                eprintln!("Monitoring auth unavailable (closed): {e}");
+                None
+            }
+        }
+    });
     let (changed, _) = watch::channel(0);
+    let (state_available, _) = watch::channel(false);
+    let (release_changed, _) = watch::channel(release.clone());
     let app = Arc::new(App {
         ink: ink::Room::new()?,
         auth,
-        apps: Mutex::new(hub),
+        apps: Mutex::new(None),
+        state_available,
+        release_changed,
         presentation_file,
         web,
         releases,
@@ -394,28 +462,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         peers: Arc::new(Semaphore::new(64)),
         public_peers: Arc::new(Semaphore::new(32)),
     });
+    let recovering = app.clone();
+    tokio::spawn(async move {
+        let release = recovering.release.read().await.clone();
+        let releases = recovering.releases.clone();
+        let presentation = recovering.presentation_file.clone();
+        let recovered = tokio::task::spawn_blocking(move || -> Result<apps::Hub, String> {
+            let mut hub = apps::Hub::new(source, app_state)?;
+            hub.refresh(&releases, &release)?;
+            if let Some(path) = presentation.filter(|p| p.exists()) {
+                hub.set_view(fs::read(path).map_err(|e| e.to_string())?)?;
+            }
+            Ok(hub)
+        })
+        .await;
+        match recovered {
+            Ok(Ok(hub)) => {
+                *recovering.apps.lock().await = Some(hub);
+                recovering.state_available.send_replace(true);
+                announce(&recovering).await;
+            }
+            other => eprintln!(
+                "State recovery unavailable: {}",
+                match other {
+                    Ok(Err(e)) => e,
+                    Err(e) => e.to_string(),
+                    _ => unreachable!(),
+                }
+            ),
+        }
+    });
     let observer = app.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));
         loop {
             tick.tick().await;
             observer.ink.expire().await;
-            if let Some(next) = read_release(&observer.releases)
-                && *observer.release.read().await != next
-            {
-                let admitted = observer
-                    .apps
-                    .lock()
-                    .await
-                    .refresh(&observer.releases, &next);
-                match admitted {
-                    Ok(()) => {
-                        *observer.release.write().await = next;
-                        announce(&observer).await;
-                    }
-                    Err(e) => eprintln!("Rejected release: {e}"),
-                }
-            }
         }
     });
     if let Some(public_bind) = public_bind {
@@ -427,8 +509,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .await?
             .tap_io(interactive_socket);
         let routes = Router::new()
-            .route("/demo/ink", get(ink::public))
-            .route("/apps/stream", get(apps::public))
+            .route("/session", get(session::public))
+            .route("/release/events", get(session::public_control))
+            .route("/", get(root))
+            .route("/release", get(current_release))
+            .route("/releases/{id}/{*path}", get(release_asset))
+            .route("/demo/ink", get(retired))
+            .route("/apps/stream", get(retired))
             .route("/stream", get(retired))
             .route("/demo/stream", get(retired))
             .route("/monitoring/stream", get(retired))
@@ -451,11 +538,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         });
     }
     let routes = Router::new()
-        .route("/demo/ink", get(ink::trusted))
+        .route("/session", get(session::trusted))
+        .route("/release/events", get(session::trusted_control))
+        .route("/admin/activate", axum::routing::post(activate))
+        .route("/demo/ink", get(retired))
         .route("/", get(root))
         .route("/health", get(health))
         .route("/release", get(current_release))
-        .route("/apps/stream", get(apps::trusted))
+        .route("/apps/stream", get(retired))
         .route("/sync", get(retired).post(retired))
         .route("/layout", get(retired).post(retired))
         .route("/stream", get(retired))

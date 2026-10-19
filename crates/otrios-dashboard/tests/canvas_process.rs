@@ -2,6 +2,7 @@
 #![cfg(all(feature = "canvas", feature = "server", feature = "host-sync"))]
 //! Real TCP/WebSocket boundary, persistence/restart, app scoping and native guest execution.
 mod common;
+use common::session_client;
 use otrios_core::canvas::*;
 use otrios_interfaces::canvas::*;
 use std::{
@@ -76,11 +77,12 @@ impl Server {
     }
     fn peer(&self, ui: &str, state: &str) -> Peer {
         let (mut ws, _) =
-            tungstenite::connect(format!("ws://127.0.0.1:{}/apps/stream", self.port)).unwrap();
+            tungstenite::connect(format!("ws://127.0.0.1:{}/session", self.port)).unwrap();
         if let MaybeTlsStream::Plain(tcp) = ws.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_millis(30)))
                 .unwrap();
         }
+        session_client::negotiate(&mut ws).unwrap();
         let mut c = Client::default();
         c.admit_catalog(&std::fs::read(self.root.join("apps/catalog.flex")).unwrap())
             .unwrap();
@@ -143,7 +145,11 @@ impl Peer {
             )
             .unwrap();
         while let Some(b) = self.c.outgoing().unwrap() {
-            self.ws.send(Message::Binary(b.into())).unwrap();
+            self.ws
+                .send(Message::Binary(
+                    otrios_interfaces::session::frame(1, b).into(),
+                ))
+                .unwrap();
         }
         match self.ws.read() {
             Ok(Message::Text(_)) => true,
@@ -152,7 +158,7 @@ impl Peer {
                 true
             }
             Ok(Message::Binary(b)) => {
-                self.c.receive(&b).unwrap();
+                self.c.receive(b.strip_prefix(&[1]).unwrap()).unwrap();
                 true
             }
             Err(tungstenite::Error::Io(e))
@@ -275,7 +281,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     assert_eq!(c.c.value(1).unwrap(), 123);
     drop(c);
     let probe = Command::new(env!("CARGO_BIN_EXE_canvas-native"))
-        .arg(format!("ws://127.0.0.1:{}/apps/stream", server.port))
+        .arg(format!("ws://127.0.0.1:{}/session", server.port))
         .arg(server.root.join("apps/catalog.flex"))
         .output()
         .unwrap();
@@ -287,19 +293,23 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     assert!(String::from_utf8_lossy(&probe.stdout).contains("acknowledged=true"));
     // Unknown pair is denied by server policy before any UI/State data.
     let (mut bad, _) =
-        tungstenite::connect(format!("ws://127.0.0.1:{}/apps/stream", server.port)).unwrap();
+        tungstenite::connect(format!("ws://127.0.0.1:{}/session", server.port)).unwrap();
+    session_client::negotiate(&mut bad).unwrap();
     bad.send(Message::Binary(
-        encode_client(&ClientMessage::Mount {
-            epoch: 1,
-            ui_ref: "app:layout-lab/ui".into(),
-            state_ref: "app:component-playground/state".into(),
-            known_code: vec![],
-            writer: vec![9; 16],
-            resume: 0,
-            binary: false,
-            catalog_hash: hash(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap()),
-        })
-        .unwrap()
+        otrios_interfaces::session::frame(
+            1,
+            encode_client(&ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: "app:layout-lab/ui".into(),
+                state_ref: "app:component-playground/state".into(),
+                known_code: vec![],
+                writer: vec![9; 16],
+                resume: 0,
+                binary: false,
+                catalog_hash: hash(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap()),
+            })
+            .unwrap(),
+        )
         .into(),
     ))
     .unwrap();
@@ -312,12 +322,12 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         }
     };
     assert!(matches!(
-        decode_server(&bytes).unwrap(),
+        decode_server(bytes.strip_prefix(&[1]).unwrap()).unwrap(),
         ServerMessage::Error { .. }
     ));
     // Reject browser origins outside the exact loopback viewer.
     use tungstenite::client::IntoClientRequest;
-    let mut request = format!("ws://127.0.0.1:{}/apps/stream", server.port)
+    let mut request = format!("ws://127.0.0.1:{}/session", server.port)
         .into_client_request()
         .unwrap();
     request

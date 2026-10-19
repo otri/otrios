@@ -68,3 +68,6 @@ pub mod merkle;
 
 #[cfg(feature = "release")]
 pub mod release;
+
+#[cfg(feature = "release")]
+pub mod session;

@@ -10,6 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tungstenite::{Message, client::IntoClientRequest};
+#[path = "../../src/session_client.rs"]
+pub mod session_client;
 pub const ORIGIN: &str = "https://otrios.otri.ca";
 pub type Socket = tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>;
 pub struct Room {
@@ -197,7 +199,7 @@ pub fn request(
     (s, b)
 }
 pub fn socket(address: &str, cookie: Option<&str>) -> Socket {
-    let mut request = format!("ws://{address}/apps/stream")
+    let mut request = format!("ws://{address}/session")
         .into_client_request()
         .unwrap();
     request
@@ -212,16 +214,22 @@ pub fn socket(address: &str, cookie: Option<&str>) -> Socket {
     if let tungstenite::stream::MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
     }
+    session_client::negotiate(&mut socket).unwrap();
     socket
 }
 pub fn send(s: &mut Socket, m: ClientMessage) {
-    s.send(Message::Binary(canvas::encode_client(&m).unwrap().into()))
-        .unwrap();
+    s.send(Message::Binary(
+        otrios_interfaces::session::frame(1, canvas::encode_client(&m).unwrap()).into(),
+    ))
+    .unwrap();
 }
 pub fn read(s: &mut Socket) -> ServerMessage {
     loop {
         match s.read().unwrap() {
-            Message::Binary(b) => return canvas::decode_server(&b).unwrap(),
+            Message::Binary(b) => {
+                return canvas::decode_server(b.strip_prefix(&[1]).expect("state channel"))
+                    .unwrap();
+            }
             Message::Text(_) | Message::Pong(_) => {}
             Message::Ping(_) => s.flush().unwrap(),
             other => panic!("unexpected {other:?}"),
