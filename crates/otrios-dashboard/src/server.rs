@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // App authority. Bind loopback and put the admitted module host in front of it.
+use axum::serve::ListenerExt;
 use axum::{
     Router,
     body::Bytes,
@@ -422,7 +423,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !address.ip().is_loopback() {
             return Err("Public adapter must bind loopback behind the module host".into());
         }
-        let listener = tokio::net::TcpListener::bind(address).await?;
+        let listener = tokio::net::TcpListener::bind(address)
+            .await?
+            .tap_io(interactive_socket);
         let routes = Router::new()
             .route("/demo/ink", get(ink::public))
             .route("/apps/stream", get(apps::public))
@@ -478,8 +481,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/{*path}", get(source_asset))
         .layer(DefaultBodyLimit::max(otrios_core::canvas::MAX_BYTES))
         .with_state(app);
-    let listener = tokio::net::TcpListener::bind(&bind).await?;
+    let listener = tokio::net::TcpListener::bind(&bind)
+        .await?
+        .tap_io(interactive_socket);
     println!("OTriOS app authority: http://{bind}/");
     axum::serve(listener, routes).await?;
     Ok(())
+}
+
+/// Runtime batches and durability define when a packet is ready. Avoid adding
+/// TCP small-packet buffering to interactive mount, write and acknowledgment traffic.
+fn interactive_socket(socket: &mut tokio::net::TcpStream) {
+    if let Err(error) = socket.set_nodelay(true) {
+        eprintln!("Could not disable interactive socket buffering: {error}");
+    }
 }
