@@ -4,13 +4,15 @@
 import argparse, asyncio, hashlib, json, os, pathlib, shlex, signal, subprocess, tarfile, time, urllib.request
 p=argparse.ArgumentParser()
 for name in ['reference','candidate','output']:p.add_argument('--'+name,type=pathlib.Path,required=True)
-p.add_argument('--frame',required=True);p.add_argument('--known-hosts',type=pathlib.Path,required=True);p.add_argument('--release',type=pathlib.Path,required=True);p.add_argument('--tailscale',default='tailscale')
+p.add_argument('--candidate-release',type=pathlib.Path,help='Matching candidate release when state protocols differ; catalog bytes must match the reference release.');p.add_argument('--frame',required=True);p.add_argument('--known-hosts',type=pathlib.Path,required=True);p.add_argument('--release',type=pathlib.Path,required=True);p.add_argument('--tailscale',default='tailscale')
 p.add_argument('--reference-session',choices=['/session','/apps/stream'],default='/session');p.add_argument('--candidate-session',choices=['/session','/apps/stream'],default='/session');p.add_argument('--delay-ms',type=int,choices=range(0,101),default=0);p.add_argument('--mode',choices=['paired','burst'],default='paired');p.add_argument('--legacy-reference',action='store_true');p.add_argument('--rates',default='10,30');p.add_argument('--updates',type=int,default=180);p.add_argument('--repetitions',type=int,default=3)
 a=p.parse_args();repo=pathlib.Path(__file__).resolve().parent.parent;out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
 if (out/'results.jsonl').exists():raise RuntimeError('Choose a fresh output directory')
 tailscale=a.tailscale;frame=a.frame;known=str(a.known_hosts.resolve())
 ssh=['ssh','-oBatchMode=yes','-oConnectTimeout=8','-oStrictHostKeyChecking=yes','-oUserKnownHostsFile='+known,frame]
 release=a.release.resolve()
+release_by_label={'reference':release,'candidate':(a.candidate_release or a.release).resolve()}
+if (release/'apps/catalog.flex').read_bytes()!=(release_by_label['candidate']/'apps/catalog.flex').read_bytes():raise RuntimeError('Matched comparison requires identical admitted catalog/UI hashes')
 remote='/var/lib/otrios-dashboard/bench-pipeline-'+str(os.getpid());routes=[];relay=None;server=None
 before=json.loads(subprocess.check_output([tailscale,'serve','status','--json']))
 for port in [18901,18902]:
@@ -36,6 +38,7 @@ with tarfile.open(archive,'w') as t:
  for label,folder in [('reference',a.reference),('candidate',a.candidate)]:t.add(folder/'canvas-adapter-bench',arcname=label+'/canvas-adapter-bench')
  t.add(release/'apps/catalog.flex',arcname='app-catalog.flex');t.add(repo/'scripts/relay-canvas-frame-benchmark.py',arcname='relay.py');t.add(runner,arcname='run-frame.py')
 metadata={'reference':json.loads((a.reference/'build.json').read_text()),'candidate':json.loads((a.candidate/'build.json').read_text()),'legacy_reference':a.legacy_reference,'mode':a.mode,'reference_session':a.reference_session,'candidate_session':a.candidate_session,'relay_delay_ms_per_chunk_each_direction':a.delay_ms,'rates_hz':a.rates,'updates':a.updates,'warmup':20,'repetitions':a.repetitions,'catalog_sha256':hashlib.sha256((release/'apps/catalog.flex').read_bytes()).hexdigest(),'frame':'RK3126 Cortex-A7 Linux 6.18.57-spd-kiosk','method':('open-loop numeric assignments and final release' if a.mode=='burst' else 'paired stop-and-wait')+'; two real clients on frame; fresh durable authority per trial; native live renderer left running; private Tailscale raw TCP; CPU includes mount/warm-up/waits'}
+metadata['releases']={label:{'id':path.name,'sync_protocol':json.loads((path/'manifest.json').read_text())['sync_protocol']} for label,path in release_by_label.items()}
 (out/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
 try:
  with archive.open('rb') as data:subprocess.run(ssh+['mkdir -m 700 '+shlex.quote(remote)+' && tar -xf - -C '+shlex.quote(remote)],stdin=data,check=True)
@@ -49,6 +52,7 @@ try:
     order=['reference','candidate'] if rep%2==0 else ['candidate','reference']
     for label in order:
      folder=(a.reference if label=='reference' else a.candidate).resolve();port=8901 if label=='reference' else 8902
+     release=release_by_label[label]
      base=out/f'case-{rep}-{hz}-{label}';base.mkdir();releases=base/'releases';releases.mkdir();(releases/release.name).symlink_to(release,target_is_directory=True);(releases/'current.json').write_text(json.dumps({'id':release.name,'web_entry':f'/releases/{release.name}/web/index.html','sync_protocol':json.loads((release/'manifest.json').read_text())['sync_protocol']}))
      with (base/'server.log').open('w') as log:
       server=subprocess.Popen([str(folder/'dashboard-server'),'--bind',f'127.0.0.1:{port}','--app-state',str(base/'state'),'--releases',str(releases)],stdout=log,stderr=subprocess.STDOUT)
