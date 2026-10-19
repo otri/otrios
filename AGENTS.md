@@ -15,6 +15,6 @@ Read README.md, docs/POC.md, docs/ARCHITECTURE.md, and LICENSE.md before changin
 
 ## Release control and client state
 
-- Keep release discovery event driven and independent of app/CRDT state sync. Preserve the small release-control v1 hello/upgrade envelope as the bootstrap compatibility boundary, including when CRDT protocols change. On every reconnect send the current release hash; publish upgrade events only after the complete signed code replica is active.
+- Keep release discovery event driven and independent of CRDT decoding/state recovery. Use one server and a stable opening hello on the shared client WebSocket (RFC 0009); protocol independence does not require separate processes or connections. Preserve the small release-control v1 hello/upgrade envelope as the bootstrap compatibility boundary, including when CRDT protocols change. On every reconnect send the current release hash; publish upgrade events only after the complete signed code replica is active.
 - Breaking app/CRDT protocol changes are acceptable during this PoC. Do not let obsolete state-protocol handshakes prevent a client from discovering or loading the current release.
 - For now, a disconnected client may discard unconfirmed RAM edits when upgrading. Do not require preservation, migration or durable client storage for those edits. While connected, continue to wait for confirmed edits and finished gestures. Revisit preservation of offline edits as an explicit future requirement before adding it.
