@@ -4,7 +4,9 @@
 Status: initial increments implemented on `feat/canvas-replication-pipeline` and
 [deployed on browser and frame](../experiments/release-discovery-deployment.md);
 see [frame measurements](../experiments/canvas-replication-pipeline.md).
-Packed-envelope/dispatch-policy and compression prototypes remain planned.
+A [measured dispatch prototype](../experiments/canvas-dispatch.md) consolidates
+continuous numeric edits in the adapter's single RAM queue; it is not promoted
+to the live client release because measurements show no reliable overall win. Packed envelopes and compression remain planned.
 Extends RFCs 0002, 0005 and 0006. Main remains at the dashboard milestone;
 performance experiments use disposable authorities; the subsequent authorized
 rollout retains the live room and its durable stores.
@@ -20,7 +22,7 @@ Consolidate unissued absolute assignments by field. Counter deltas must add;
 ordered edits/events must preserve their meaning. Never discard issued causal
 operations, transaction boundaries, uncertain intent sequences or receipts.
 The current Canvas adapter supports absolute assignments only. Its one-flight
-write plus bounded pending map already consolidates those assignments. Merkle
+write plus bounded pending map consolidates those assignments. Merkle
 `Snapshot::edit` already rebuilds shared ancestors once per atomic edit batch.
 These are existing mechanisms, not new optimization claims.
 
@@ -67,11 +69,27 @@ version; silently emitting blobs to old Vec-only readers is forbidden.
 
 Interactive authority sockets now explicitly enable TCP_NODELAY, separately
 benchmarked from payload changes. Runtime batching should define when a packet
-is ready rather than inherit TCP small-packet delays. The existing Canvas host
-already coalesces continuous controls on a 33 ms tick and flushes on release;
-the one-flight state adapter retains newer assignments behind its current batch.
-Configurable deadlines, packed transport and open-loop burst measurements remain
-separate work. No new compression or FlatBuffers protocol is selected here.
+is ready rather than inherit TCP small-packet delays. Continuous controls now enqueue directly in the state adapter, removing the UI's
+second pending map and its separate flush clock. A monotonic ready-to-send deadline
+is fixed when a pending group starts: the later of now and last issued write plus
+33 ms by default. New samples replace only unsent absolute assignments and cannot
+postpone that deadline. A ready group waits behind at most one immutable issued
+write; once its receipt arrives it uses the latest pending values. This bounds
+scheduler delay, not network/fsync/confirmation delay.
+
+`DispatchPolicy` permits 0..1000 ms and a 1..64 unique-field flush threshold;
+configure it before gestures. Reaching the threshold makes the whole group ready,
+without splitting a handler's multi-field assignment. Numeric staging uses a
+bounded stack array and field validation uses a 64-bit duplicate mask. The pending
+map, published nodes and issued vectors still allocate; this is not an allocation-
+free transaction claim. Maximum encoded-message limits remain in force.
+
+The first idle edit can issue immediately. Final release/cancel forces pending
+intent ready; discrete actions/text, ACK, resync, mount and uncertain replay bypass
+continuous throttling. Reconnect preserves the RAM pending deadline and issued
+sequence while the process lives. Host ticks supply monotonic milliseconds;
+backwards samples cannot postpone an existing group. Packed transport and optional
+compression remain separate increments, with no new wire format selected here.
 
 Use a monotonic deadline and a maximum byte/operation count for each dispatch.
 Continuous controls can replace unsent assignments; release requests a final
