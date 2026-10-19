@@ -1,7 +1,9 @@
 # RFC 0002: Incremental CRDT hierarchy and immutable presentation
 
-Status: proposed research design. The dashboard still uses Automerge; this RFC
-and the hash-cost experiment do not implement a Merkle CRDT runtime/store.
+Status: design with a first bounded implementation in [RFC 0005](0005-merkle-subtree-prototype.md):
+immutable hierarchy, causal registers and scoped subtree transport/joins. The
+live dashboard still uses Automerge. The original hash-cost experiment below
+remains a hash-only measurement; it is not the new materialized-tree benchmark.
 
 [RFC 0003](0003-module-roots-and-state-selectors.md) develops the module boundary,
 typed state selectors, stable collection identity and subscription semantics

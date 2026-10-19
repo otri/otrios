@@ -1,13 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0003: Module roots, typed selectors and scoped subscriptions
 
-Status: proposed design, extending [RFC 0002](0002-incremental-crdt-hierarchy.md).
-The live dashboard still has one shared Automerge room, enum-based bindings,
-bundled screen layouts and named navigation actions. This RFC defines the next
-contract. An isolated [RFC 0004 prototype](0004-canvas-behavior-and-app-packages.md)
-now mounts Home, Playground and Layout Lab with independent Automerge documents,
-flat typed field selectors and optional Wasm reducers. General collection
-selectors and incremental Merkle replication below remain proposed.
+Status: module isolation is implemented by the live Canvas apps with independent
+Automerge documents, flat typed field selectors and bounded Wasm reducers (RFC
+0004). [RFC 0005](0005-merkle-subtree-prototype.md) adds a bounded research library
+for arbitrary stable-key subtree leases and joins. Wiring those leases into
+Canvas and the general collection selectors below remain future work.
 
 ## Decision proposed
 

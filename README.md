@@ -4,7 +4,7 @@ OTriOS explores an operating environment built on Linux hardware support, immuta
 
 The repository contains experimental Rust contract types, immutable aggregate manifest validation, and a [shared dashboard experiment](docs/DASHBOARD.md): Automerge state, immutable FlexBuffers view snapshots, and a Rust compositor shared by native OpenGL ES 2 and browser WebGL hosts. Touch updates stream through a persistent central research-room service. A private Tailscale HTTPS deployment supports signed, state-preserving code reloads on both hosts; see [live development](docs/DASHBOARD_LIVE.md). The photo frame target uses native graphics, without a browser. Its [primitive scene tree and responder chain](docs/SCENE_TREE.md) are shared by both hosts. [Binary layout templates and instances](docs/BINARY_LAYOUT.md) can be edited and streamed live without rebuilding their code. A [Prometheus monitoring view](docs/MONITORING.md) recreates the main service overview with seven days of actual history and five-minute refreshes. The [Home Screen and core keyboard](docs/HOME_AND_INPUT.md) provide local demo navigation, consistent Back/Home, and a shared primitive-based input lab.
 
-The general content store, Linux shared-memory IPC, subtree subscriptions, OS module loader, and capability enforcement remain unimplemented. The Canvas app runtime executes bounded Wasm behavior; it does not complete the planned Linux runtime.
+The general content store, Linux shared-memory IPC, live Canvas subtree subscriptions, OS module loader, and capability enforcement remain unimplemented. The Canvas app runtime executes bounded Wasm behavior; it does not complete the planned Linux runtime.
 
 ## Build and check
 
@@ -49,3 +49,10 @@ A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a v
 The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home mounts Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and private Monitoring through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
 
 The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines the target ownership model, current implementation limits and concrete gates for deleting the earlier dashboard paths.
+
+The [bounded Merkle hierarchy and subtree transport](docs/rfcs/0005-merkle-subtree-prototype.md)
+now provide immutable incremental hashing, causal multi-value registers, scoped
+replication/resync and partial-subtree joins as an opt-in research library. The
+live apps continue to use Automerge. The pre-Merkle baseline is tagged
+`2026-10-19-canvas-apps-milestone`; performance results distinguish actual tree
+updates from network, durable storage and display latency.

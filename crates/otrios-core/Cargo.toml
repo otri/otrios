@@ -12,6 +12,7 @@ otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
 canvas = ["dashboard", "dep:wasmi"]
+merkle = ["dep:sha2"]
 default = []
 dashboard = ["otrios-interfaces/layout", "dep:automerge", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
 
@@ -50,3 +51,7 @@ optional = true
 
 [dev-dependencies]
 wat = "=1.239.0"
+
+[[example]]
+name = "merkle_tree_cost"
+required-features = ["merkle"]
