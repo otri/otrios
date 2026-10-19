@@ -146,7 +146,7 @@ async fn session(hub: Arc<Hub>, mut ws: WebSocket) {
                 if send(&mut ws,&ServerMessage::Upgrade{version:VERSION,release,refresh}).await.is_err(){return;}
             }
             _=heartbeat.tick()=>{
-                if heard.elapsed()>Duration::from_secs(60) || ws.send(Message::Ping(vec![].into())).await.is_err(){return;}
+                if heard.elapsed()>Duration::from_secs(60) || send_raw(&mut ws,Message::Ping(vec![].into())).await.is_err(){return;}
             }
             event=ws.recv()=>match event{
                 Some(Ok(Message::Pong(_)|Message::Ping(_)))=>heard=Instant::now(),
@@ -157,7 +157,10 @@ async fn session(hub: Arc<Hub>, mut ws: WebSocket) {
 }
 async fn send(ws: &mut WebSocket, event: &ServerMessage) -> Result<(), ()> {
     let text = serde_json::to_string(event).map_err(|_| ())?;
-    tokio::time::timeout(Duration::from_secs(5), ws.send(Message::Text(text.into())))
+    send_raw(ws, Message::Text(text.into())).await
+}
+async fn send_raw(ws: &mut WebSocket, message: Message) -> Result<(), ()> {
+    tokio::time::timeout(Duration::from_secs(5), ws.send(message))
         .await
         .map_err(|_| ())?
         .map_err(|_| ())
