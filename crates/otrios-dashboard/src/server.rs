@@ -390,8 +390,6 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/font-reference.mjs"
         | "pkg/otrios_dashboard.js"
         | "web/pkg/otrios_dashboard.js"
-        | "pkg/host.js"
-        | "web/pkg/host.js"
         | "app-catalog.mjs"
         | "web/app-catalog.mjs" => Some("text/javascript"),
         "style.css" | "web/style.css" => Some("text/css"),
@@ -399,15 +397,12 @@ fn asset_type(path: &str) -> Option<&'static str> {
         "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
             Some("application/octet-stream")
         }
-        "pkg/otrios_dashboard_bg.wasm"
-        | "web/pkg/otrios_dashboard_bg.wasm"
-        | "pkg/host_bg.wasm"
-        | "web/pkg/host_bg.wasm" => Some("application/wasm"),
+        "pkg/otrios_dashboard_bg.wasm" | "web/pkg/otrios_dashboard_bg.wasm" => {
+            Some("application/wasm")
+        }
         "apps/catalog.flex" => Some("application/octet-stream"),
         "manifest.json" => Some("application/json"),
-        "manifest.sig" | "native/armv7/dashboard-native" | "native/armv7/dashboard-sdl" => {
-            Some("application/octet-stream")
-        }
+        "manifest.sig" | "native/armv7/dashboard-native" => Some("application/octet-stream"),
         _ => None,
     }
 }

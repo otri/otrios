@@ -8,7 +8,7 @@ container=a.container;archive=out/'source.tar'
 revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
 status=subprocess.check_output(['git','status','--porcelain'],cwd=repo,text=True)
 with tarfile.open(archive,'w') as tar:
- for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools']:tar.add(repo/item,arcname=item)
+ for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools','web/shared/fonts']:tar.add(repo/item,arcname=item)
 subprocess.run(['docker','cp',str(archive),container+':/tmp/canvas-pipeline-source.tar'],check=True)
 subprocess.run(['docker','exec',container,'rm','-rf','/src/crates','/src/apps','/src/tools'],check=True)
 subprocess.run(['docker','exec',container,'tar','-xf','/tmp/canvas-pipeline-source.tar','-C','/src'],check=True)

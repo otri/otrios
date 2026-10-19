@@ -584,7 +584,7 @@ pub fn button(label: &str) -> Element {
         std::sync::OnceLock::new();
     let font = FONT.get_or_init(|| {
         otrios_core::dashboard::font::Font::from_zstd(
-            include_bytes!("../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+            include_bytes!("../../web/shared/fonts/Roboto-Regular.otq.zst"),
             otrios_core::dashboard::font_reference::RESOURCE_SHA256,
         )
         .expect("valid release font for authored label measurement")

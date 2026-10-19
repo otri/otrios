@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """DRM timestamp parser tests; no device access, input data or root required."""
 import importlib.util,pathlib,struct,unittest
-p=pathlib.Path(__file__).with_name('benchmark-dashboard-direct.py');s=importlib.util.spec_from_file_location('direct',p);direct=importlib.util.module_from_spec(s);s.loader.exec_module(direct)
+p=pathlib.Path(__file__).with_name('drm-flip-events.py');s=importlib.util.spec_from_file_location('direct',p);direct=importlib.util.module_from_spec(s);s.loader.exec_module(direct)
 class PageFlips(unittest.TestCase):
     def test_only_completed_flips_are_counted_and_sequence_gaps_are_visible(self):
         def event(kind,sec,usec,seq):

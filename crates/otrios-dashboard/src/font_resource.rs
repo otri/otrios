@@ -14,7 +14,7 @@ pub(super) fn load() -> Result<Arc<Font>, String> {
             adjacent
         } else {
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../web/dashboard/fonts/Roboto-Regular.otq.zst")
+                .join("../../web/shared/fonts/Roboto-Regular.otq.zst")
         }
     });
     let bytes =

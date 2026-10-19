@@ -11,7 +11,7 @@ def atomic(path, data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
-def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
+def publish(web,native,out,key,openssl,activate=True,catalog=None):
     web,native,out,key=map(pathlib.Path,(web,native,out,key));out.mkdir(parents=True,exist_ok=True)
     elf=native.read_bytes()
     if len(elf)<52 or elf[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(elf[18:20],'little')!=40:raise ValueError('Expected ARM32 little-endian ELF app')
@@ -25,7 +25,7 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
         for name in names:
             source=web/name
             if not source.exists() and (name.endswith('.mjs') or name.endswith('.js') or name=='Slug-LICENSE.txt'):source=web.parent/'shared'/name
-            if not source.exists() and name.startswith('fonts/'):source=web.parent/'dashboard'/name
+            if not source.exists() and name.startswith('fonts/'):source=web.parent/'shared'/name
             data=source.read_bytes()
             if name.endswith('.wasm') and data[:8]!=b'\0asm\x01\0\0\0':raise ValueError('Invalid Wasm artifact')
             if name=='index.html':data=data.replace(b'href="/style.css"',b'href="./style.css"').replace(b'src="/app.js"',b'src="./app.js"')
@@ -52,11 +52,6 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
                 authority[path]={'bytes':len(data),'sha256':digest(data)}
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}
-        if sdl is not None:
-            fallback=pathlib.Path(sdl).read_bytes()
-            if len(fallback)<52 or fallback[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(fallback[18:20],'little')!=40:raise ValueError('Expected ARM32 SDL recovery executable')
-            path='native/armv7/dashboard-sdl';(stage/path).write_bytes(fallback)
-            assets[path]={'bytes':len(fallback),'sha256':digest(fallback)}
         manifest={'host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v4','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
@@ -69,5 +64,5 @@ def publish(web,native,out,key,openssl,sdl=None,activate=True,catalog=None):
         if activate:atomic(out/'current.json',json.dumps(pointer,sort_keys=True).encode())
         return pointer
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--web',required=True);p.add_argument('--native',required=True);p.add_argument('--sdl');p.add_argument('--catalog');p.add_argument('--out',required=True);p.add_argument('--key',required=True);p.add_argument('--openssl',default='openssl');a=p.parse_args()
-    print(json.dumps(publish(a.web,a.native,a.out,a.key,a.openssl,a.sdl,catalog=a.catalog)))
+    p=argparse.ArgumentParser();p.add_argument('--web',required=True);p.add_argument('--native',required=True);p.add_argument('--catalog');p.add_argument('--out',required=True);p.add_argument('--key',required=True);p.add_argument('--openssl',default='openssl');a=p.parse_args()
+    print(json.dumps(publish(a.web,a.native,a.out,a.key,a.openssl,catalog=a.catalog)))

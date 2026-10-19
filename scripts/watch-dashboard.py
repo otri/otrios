@@ -44,7 +44,7 @@ def rebuild(config,wanted,activate=True):
     elif probe.stdout.strip()!='true':run(['docker','start',name])
     archive=build/'source.tar'
     with tarfile.open(archive,'w') as t:
-        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools']:t.add(source/item,arcname=item)
+        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools','web/shared/fonts']:t.add(source/item,arcname=item)
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
@@ -54,11 +54,8 @@ def rebuild(config,wanted,activate=True):
     run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
-    fallback=None
-    # New releases use the direct Slug renderer. The supervisor retains the
-    # previous signed release for rollback; no incomplete SDL UI is published.
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],fallback,activate=False,catalog=source/'apps/catalog.flex')
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=source/'apps/catalog.flex')
     if activate:
         pointer=build/'activation.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
         run([sys.executable,source/'scripts/activate-dashboard-release.py','--releases',runtime/'releases','--key',runtime/'publisher/public.pem','--openssl',config['openssl'],'--pointer',pointer])

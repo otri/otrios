@@ -33,7 +33,7 @@ class SignedReleases(unittest.TestCase):
         for name in ['fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']:
             if (self.out/id/'web'/name).exists():
                 (dest/name).parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/id/'web'/name,dest/name)
-        for name in ['dashboard-native','dashboard-sdl']:
+        for name in ['dashboard-native']:
             source=self.out/id/'native/armv7'/name
             if source.exists():shutil.copyfile(source,dest/name)
     def test_authority_app_payloads_are_signed_but_never_replicated_publicly(self):
@@ -117,15 +117,13 @@ class SignedReleases(unittest.TestCase):
         with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
         self.native.write_bytes(b'not an ARM executable')
         with self.assertRaises(ValueError):self.publish()
-    def test_direct_and_recovery_executables_are_both_signed_and_selected(self):
-        fallback=self.root/'sdl';fallback.write_bytes(self.native.read_bytes()+b'recovery')
-        pointer=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,fallback,catalog=self.root/'apps/catalog.flex');release=pointer['id'];self.copy_cache(release)
-        _,primary=agent.cached(self.cache,release,self.public,OPENSSL)
-        _,recovery=agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
-        self.assertEqual(primary.name,'dashboard-native');self.assertEqual(recovery.name,'dashboard-sdl')
-        self.assertEqual(recovery.read_bytes(),fallback.read_bytes())
-        recovery.write_bytes(recovery.read_bytes()+b'tampered')
-        with self.assertRaises(ValueError):agent.cached(self.cache,release,self.public,OPENSSL,sdl=True)
+    def test_one_direct_executable_is_published_and_verified(self):
+        manifest=json.loads((self.out/self.id/'manifest.json').read_bytes())
+        self.assertEqual({name for name in manifest['assets'] if name.startswith('native/')},{'native/armv7/dashboard-native'})
+        _,primary=agent.cached(self.cache,self.id,self.public,OPENSSL)
+        self.assertEqual(primary.name,'dashboard-native')
+        primary.write_bytes(primary.read_bytes()+b'tampered')
+        with self.assertRaises(ValueError):agent.cached(self.cache,self.id,self.public,OPENSSL)
     def test_staged_signed_store_remains_inactive_until_verified_activation(self):
         (self.web/'app.js').write_text('staged code')
         staged=publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,activate=False,catalog=self.root/'apps/catalog.flex')
@@ -184,7 +182,7 @@ class ArtifactBudget(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=pathlib.Path(tmp);cache=root/'cache';cache.mkdir()
             (cache/'last-good.json').write_text(json.dumps({'id':old}))
-            args=SimpleNamespace(cache=cache,runtime_dir=root/'run',key=root/'key',openssl=OPENSSL,video_driver='KMSDRM',url='https://example.test',cache_bytes=agent.CACHE_BYTES)
+            args=SimpleNamespace(cache=cache,runtime_dir=root/'run',key=root/'key',openssl=OPENSSL,url='https://example.test',cache_bytes=agent.CACHE_BYTES)
             previous=agent.running;agent.running=True
             def sleep(seconds):
                 clock[0]+=seconds
@@ -232,41 +230,43 @@ class ArtifactBudget(unittest.TestCase):
             path.unlink()
             with patch.object(agent,'fetch',return_value=b'wrong'):
                 with self.assertRaises(ValueError):agent.cached_blob('https://example.com',root,digest,len(data),limit=100)
+def direct_ready(**values):
+    return dict({'renderer':'gles2-direct','video':'DRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1,'scanout_format':'RGB565','color_bits':[5,6,5,0],'stride':1600},**values)
 class DirectHostContract(unittest.TestCase):
     def test_bootstrap_never_resumes_the_synthetic_locked_route(self):
         from types import SimpleNamespace
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
-            args=SimpleNamespace(runtime_dir=pathlib.Path(tmp),video_driver='wayland',url='https://state.example',capture_first_frame=False)
+            args=SimpleNamespace(runtime_dir=pathlib.Path(tmp),rotation=90,touch_matrix='0,1,0,-1,0,1',url='https://state.example',capture_first_frame=False)
             with patch.object(agent.subprocess,'Popen')as launch:
                 agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='locked')
                 self.assertNotIn('--screen',launch.call_args.args[0])
                 agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='home')
-                self.assertEqual(launch.call_args.args[0][-2:],['--screen','home'])
+                self.assertIn('--screen',launch.call_args.args[0]);self.assertEqual(launch.call_args.args[0][launch.call_args.args[0].index('--screen')+1],'home')
     def test_connected_candidate_waits_for_an_admitted_confirmed_app(self):
         from types import SimpleNamespace
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
-            host=agent.Host.__new__(agent.Host);host.a=SimpleNamespace(video_driver='wayland',rotation=0)
+            host=agent.Host.__new__(agent.Host);host.a=SimpleNamespace(rotation=90)
             host.ready=pathlib.Path(tmp)/'ready.json';host.process=SimpleNamespace(poll=lambda:None)
-            info={'renderer':'opengles2','stream_ready':True,'ui_ref':'','state_confirmed':False};host.ready.write_text(json.dumps(info))
+            info=direct_ready(stream_ready=True,ui_ref='',state_confirmed=False);host.ready.write_text(json.dumps(info))
             waited=[]
             def tick(seconds):
                 waited.append(seconds);info.update(ui_ref='app:home/ui',state_confirmed=True);host.ready.write_text(json.dumps(info))
             with patch.object(agent.time,'sleep',side_effect=tick):host.wait_ready()
             self.assertEqual(waited,[.1])
     def test_direct_candidate_cannot_claim_wayland_or_uncalibrated_readiness(self):
-        good={'renderer':'opengles2','video':'KMSDRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1}
-        agent.ready_contract(good,'KMSDRM',90)
+        good=direct_ready()
+        agent.ready_contract(good,90)
         for update in [{'video':'wayland'},{'touch_calibrated':False},{'touch_devices':0},{'rotation':0},{'output':[1280,800]}]:
-            with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,**update),'KMSDRM',90)
-        agent.ready_contract({'renderer':'opengles2'},'wayland',0)
+            with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,**update),90)
+        with self.assertRaises(RuntimeError):agent.ready_contract({'renderer':'opengles2'},0)
     def test_owned_gles_backend_requires_verified_scanout_and_direct_service(self):
         good={'renderer':'gles2-direct','video':'DRM','rotation':90,'output':[800,1280],'touch_calibrated':True,'touch_devices':1,'scanout_format':'RGB565','color_bits':[5,6,5,0],'stride':1600}
-        agent.ready_contract(good,'KMSDRM',90)
+        agent.ready_contract(good,90)
         for update in [{'color_bits':[8,8,8,0]},{'stride':800},{'scanout_format':'unknown'},{'touch_devices':0}]:
-            with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,**update),'KMSDRM',90)
-        with self.assertRaises(RuntimeError):agent.ready_contract(good,'wayland',90)
+            with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,**update),90)
+        with self.assertRaises(RuntimeError):agent.ready_contract(dict(good,renderer='opengles2'),90)
     def test_live_rule_is_read_without_rewriting_and_bad_matrices_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             rule=pathlib.Path(tmp)/'accepted.rules';data='ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"'

@@ -619,8 +619,8 @@ fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
         .resolve_slots(&std::collections::BTreeMap::new())
         .unwrap_err();
     assert!(err.contains("Missing local binding"));
-    // Even an unlabeled/hidden old responder is rejected, rather than ignored or
-    // interpreted as an event with the same numeric index.
+    // Even an unlabeled/hidden unbound responder is rejected, rather than ignored
+    // or interpreted as a valid event with the same numeric index.
     for responder in [
         Responder::AppEvent {
             control: 127,
@@ -1527,7 +1527,7 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
     use std::sync::Arc;
     let font = Arc::new(
         Font::from_zstd(
-            include_bytes!("../../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
             otrios_core::dashboard::font_reference::RESOURCE_SHA256,
         )
         .unwrap(),
@@ -1613,7 +1613,7 @@ fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
     use otrios_core::dashboard::{font::Font, keyboard::TextBuffer};
     use otrios_interfaces::keyboard::Edit;
     let font = Font::from_zstd(
-        include_bytes!("../../../web/dashboard/fonts/Roboto-Regular.otq.zst"),
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
     )
     .unwrap();
