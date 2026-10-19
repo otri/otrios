@@ -124,9 +124,41 @@ include all native-peer payloads during the 160-edit interval, including ACKs.
 Merkle receipts are retained per writer, unlike the earlier client-CRDT protocol.
 The app-wide subscription currently carries those metadata changes as well as
 field data. Across the 10 Hz client repetitions, received Merkle bytes per edit
-rise from 8,432 to 16,739 as writer metadata accumulates; baseline bytes stay near
-266–276. This documents the current adapter and its envelopes, not an inherent
-requirement that Merkle replication be larger.
+rise from 8,432 to 16,739 while both writer receipts and eagerly maintained signal
+windows accumulate; baseline bytes stay near 266–276. The measurements alone
+do not attribute that growth to receipts. This documents the current adapter
+and its envelopes, not an inherent requirement that Merkle replication be larger.
+
+Closer inspection identified an additional workload difference: the adapter
+maintains a five-minute signal window for **every changed numeric/boolean field**,
+including 3D count, although that UI never selects its history. Each edit replaces
+the complete signal array leaf. The baseline only computes a signal projection
+when selected; its 3D count changes do not carry that window. Therefore this is
+a comparison of shipped adapters, not an isolated CRDT algorithm comparison.
+
+Replaying the final trusted checkpoint/journal and comparing the last two roots
+produced this exact last-update breakdown (one illustrative update, not an average):
+
+| Part | Canonical changed-node bytes |
+| --- | ---: |
+| Field branch | 415 |
+| Receipt branch | 1,054 |
+| Signal/history branch | 2,125 |
+| Root record, including inline schema/scope metadata | 610 |
+| Transfer framing | 162 |
+| **Total raw delta** | **4,366** |
+
+The history branch accounts for about 49% of that raw delta. The total root record
+is 610 bytes; moving immutable metadata to an unchanged child could avoid resending
+some of it. Changed parent records also contain unchanged sibling hashes. These
+are independent of the outer-envelope amplification below. This does not show
+that SHA-256 is the dominant CPU cost.
+
+[Raw breakdown](data/canvas-adapter-frame-2026-10-19/last-delta-breakdown.jsonl),
+[inspection example](../../crates/otrios-core/examples/canvas_delta_breakdown.rs).
+A follow-up should make signal retention explicitly requested or separately scoped,
+and use bounded/chunked history updates, before treating the adapters as equivalent
+workloads. Receipt scoping must preserve atomic durable acknowledgments.
 
 A separate [wire-size diagnostic](../../crates/otrios-core/examples/canvas_wire_cost.rs)
 confirms that `Vec<u8>` is serialized as an integer vector. FlexBuffers widens a

@@ -68,3 +68,7 @@ optional = true
 [[example]]
 name = "canvas_wire_cost"
 required-features = ["canvas"]
+
+[[example]]
+name = "canvas_delta_breakdown"
+required-features = ["canvas"]
