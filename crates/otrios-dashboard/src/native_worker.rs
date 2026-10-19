@@ -475,9 +475,12 @@ pub(super) fn state_worker(
         if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
             return Ok(());
         }
-        if dirty && client.ui_ref().is_empty() && scene_cache.is_some() {
+        if dirty && client.ui_ref().is_empty() {
             serial += 1;
-            pending = Some(Frame::blank(serial, online));
+            let mut frame = Frame::blank(serial, online);
+            frame.reload_ready = reload_ready;
+            frame.pending_commands = client.pending_count();
+            pending = Some(frame);
             scene_cache = None;
             dirty = false;
         }
@@ -1136,6 +1139,35 @@ mod tests {
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
         stop.store(true, Ordering::Release);
+        server.join().unwrap();
+    }
+    #[test]
+    fn retired_initial_mount_still_presents_clean_reload_readiness() {
+        use std::io::Write;
+        let fixture = fixture();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .write_all(b"HTTP/1.1 410 Gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        });
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            url: Some(format!("ws://{address}/apps/stream")),
+            ..Options::default()
+        };
+        let (tx, rx) = mpsc::sync_channel(8);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(frame.ui_ref.is_empty());
+        assert!(!frame.online && !frame.state_confirmed);
+        assert!(frame.reload_ready);
+        assert_eq!(frame.pending_commands, 0);
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
         server.join().unwrap();
     }
     #[test]
