@@ -241,6 +241,16 @@ impl Client {
                 .as_mut()
                 .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed())
     }
+    /// A reconnect/mount handshake must not strand an idle old runtime. Only
+    /// unconfirmed user intent and active input prevent code replacement.
+    pub fn reload_ready(&self) -> bool {
+        !self.input_busy()
+            && (self.local
+                || self
+                    .active
+                    .as_ref()
+                    .is_none_or(|m| m.pending.is_empty() && m.doc.confirmed()))
+    }
     pub fn presentation(&self) -> Option<Presentation> {
         self.active.as_ref().and_then(|m| m.ui.presentation.clone())
     }

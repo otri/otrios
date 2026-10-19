@@ -3,7 +3,7 @@
 import init,{CanvasApp} from './pkg/otrios_dashboard.js';
 import {awaitRelease,validRelease} from './release-gate.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
-let app,monitoring,socket,inkSocket,activeRelease,pendingRelease,releaseAbort,stopped=false;
+let app,monitoring,socket,inkSocket,activeRelease,pendingRelease,releaseAbort,discoveredRelease,stopped=false;
 let retry=250,inkRetry=250,inkTimer=null,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
 function error(e){postMessage({type:'error',message:String(e)});}
 function sendFrame(){if(inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer]:[]);}
@@ -20,14 +20,16 @@ function outgoing(){if(socket?.readyState===WebSocket.OPEN)for(let i=0;i<8;i++){
 function release(message){
   const r=message.release;if(!validRelease(r))return;
   if(activeRelease&&activeRelease!==r.id){if(pendingRelease?.id===r.id)return;releaseAbort?.abort();releaseAbort=new AbortController();pendingRelease=r;const isCurrent=()=>pendingRelease===r&&!stopped;
-    awaitRelease(r,{isCurrent,signal:releaseAbort.signal}).then(async ready=>{if(!ready||!isCurrent())return;while(isCurrent()&&(!app.confirmed()||app.input_busy()))await new Promise(resolve=>setTimeout(resolve,100));if(isCurrent())postMessage({type:'release-candidate',entry:r.web_entry});}).catch(error);return;}
+    awaitRelease(r,{isCurrent,signal:releaseAbort.signal}).then(async ready=>{if(!ready||!isCurrent())return;while(isCurrent()&&!app.reload_ready())await new Promise(resolve=>setTimeout(resolve,100));if(isCurrent())postMessage({type:'release-candidate',entry:r.web_entry});}).catch(error);return;}
+  pendingRelease=null;releaseAbort?.abort();
   activeRelease=r.id;postMessage({type:'release-id',id:r.id});
 }
 function connect(){
   if(stopped)return;app.reset_connection();const url=new URL('/apps/stream',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';const peer=new WebSocket(url);socket=peer;peer.binaryType='arraybuffer';
   peer.onopen=()=>{retry=250;outgoing();};
   peer.onmessage=event=>{if(socket!==peer)return;try{
-    if(typeof event.data==='string'){const message=JSON.parse(event.data);if(message.type==='release')release(message);return;}
+    // Code activation follows the code host pointer, never a state-stream hint.
+    if(typeof event.data==='string')return;
     const changed=app.receive(new Uint8Array(event.data));if(changed&&!app.ui_ref())clearPresentation();
     if(app.auth_required()){dropPrivate();monitoring.refresh().catch(()=>{});publish(false);}else if(changed)publish();
     outgoing();postMessage({type:'online',online:true});
@@ -50,6 +52,7 @@ function syncInk(){
 }
 function route(hash){const parts=hash.replace(/^#\/?/,'').split('/'),aliases={controls:'component-playground',keyboard:'input-lab',animation:'animation-lab','3d':'three-d-lab',layout:'layout-lab'};if(app.auth_required())app.clear_private();app.navigate(aliases[parts[0]]||parts[0]||'home');}
 onmessage=async({data:m})=>{try{
+  if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
     if(started)throw Error('App host is already initialized');started=true;await init();app=new CanvasApp();app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
@@ -61,11 +64,12 @@ onmessage=async({data:m})=>{try{
       postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
     }});
     route(m.route||'#/home');connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
+    if(discoveredRelease)release({release:discoveredRelease});
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()){const ink=app.ink_outgoing(now);if(ink.length&&inkSocket?.readyState===WebSocket.OPEN)inkSocket.send(ink);}outgoing();}catch(e){error(e);}},8);return;
   }
   if(m.type==='frame-ack'){inFlight=false;sendFrame();return;}
   if(!app)return;
-  if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry'});return;}while(pendingRelease===r&&(!app.confirmed()||app.input_busy()))await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry'});return;}stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});return;}
+  if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry',entry:m.entry});return;}while(pendingRelease===r&&!app.reload_ready())await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry',entry:m.entry});return;}stopped=true;socket?.close();inkSocket?.close();postMessage({type:'release',entry:r.web_entry});return;}
   app.tick(performance.now(),Date.now()/1000);let changed=false;
   switch(m.type){
     case 'login':monitoring.login(m.username,m.password);break;

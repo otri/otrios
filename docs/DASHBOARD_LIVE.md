@@ -88,7 +88,7 @@ not an always-on cloud deployment.
 A candidate mount qualifies its UI, schema, reducer, authoritative state and
 primitive scene before replacing the active scope. Navigation retires capture,
 keyboard repeat and the old subscription. Rejected candidates leave the current
-app usable. Automatic code replacement waits for acknowledgement and no active
+app usable. Automatic code replacement waits for confirmed user edits and no active
 input; browser state does not enter session storage or IndexedDB. Normal
 navigation stays local; the public demos share the frame's data roots.
 
@@ -144,3 +144,29 @@ pointer on both module host and origin. Resume the watcher only after its source
 branch and installed tools match the deployed protocol. The browser's release
 gate can move an acknowledged idle tab to the new entry; visit the root URL if
 an old tab cannot finish its previous protocol session during the cutover.
+
+
+## Protocol-independent release discovery
+
+Browser shells poll the code host's uncached `/release` pointer immediately and
+then every five seconds, independently of app-state WebSockets. Discovery starts
+before Wasm initialization, uses one bounded request at a time with a five-second
+request timeout and an 8 KiB descriptor limit, and resumes after back/forward
+cache restoration. Entry paths must exactly match their 64-digit release ID.
+Unavailable or malformed pointers preserve the running release. State-stream
+release hints no longer select browser code. The frame supervisor also discovers
+code exclusively through its HTTP pointer, every five seconds; stale state-stream
+notice files cannot roll it back or suppress a release.
+
+A clean reconnect or first-mount handshake does not block replacement. The
+runtime's `reload_ready` reports whether user edits are confirmed and input is
+idle, separately from mount/stream readiness. RAM overlays, in-flight writes,
+captured gestures and queued browser input still block automatic replacement.
+A permanently incompatible authority cannot confirm those pending edits: a user
+may still close/reload the client and lose them, as with other RAM-only state.
+Candidate frame acceptance continues to require rendered output and a live
+stream; an unqualified candidate rolls back to a signature-verified cached build.
+
+Clients predating this change cannot acquire it through a retired state
+protocol. Visit the launcher root once for those clients; hard-refreshing an
+immutable `/releases/<id>/...` URL deliberately reloads that same old release.

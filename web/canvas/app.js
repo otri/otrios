@@ -4,12 +4,21 @@ import init,{CanvasPresentation} from './pkg/otrios_dashboard.js';
 import {SceneRenderer} from './gpu-scene.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppCatalog} from './app-catalog.mjs';
+import {watchReleases} from './release-gate.mjs';
 const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls');
 const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),loginError=document.querySelector('#login-error');
 let monitoringAuth={authenticated:false},currentScreen='home',modelAuthRequired=false;
 function showAuth(){const needed=(currentScreen==='monitoring'||modelAuthRequired)&&!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
 const connection=document.querySelector('#connection'),dot=document.querySelector('#connection-dot'),revision=document.querySelector('#revision'),error=document.querySelector('#error');
 function fatal(e){error.hidden=false;error.textContent=String(e);connection.textContent='Unable to open this space';}
+const initialRelease=location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null;
+// Start before Wasm initialization. An unopened app has no user edits to lose.
+let offerRelease=r=>{if(initialRelease&&r.id!==initialRelease)location.replace(r.web_entry+location.hash);};
+let stopDiscovery,observedRelease;
+function startDiscovery(){stopDiscovery?.();stopDiscovery=watchReleases(r=>{observedRelease=r;offerRelease(r);});}
+startDiscovery();
+window.addEventListener('pagehide',()=>stopDiscovery());
+window.addEventListener('pageshow',e=>{if(e.persisted)startDiscovery();});
 try{
   if('serviceWorker' in navigator){
     revision.dataset.cacheState='starting';
@@ -21,7 +30,7 @@ try{
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false;
   function command(m){if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
-  function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}else if(!busy&&model&&releaseCandidate&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
+  function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
   function route(){return `/${model.screen}${model.keyboard?'/input':''}`;}
   window.addEventListener('popstate',()=>{applyingRoute=true;routeTarget=location.hash.replace(/^#/, '')||'/home';command({type:'route',route:location.hash});});
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
@@ -45,13 +54,15 @@ try{
     else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
     pump();worker.postMessage({type:'frame-ack'});
   }
-  worker.onmessage=event=>{try{const m=event.data;switch(m.type){case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':releaseCandidate=null;reloading=false;break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
+  worker.onmessage=event=>{try{const m=event.data;switch(m.type){case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
   worker.onerror=e=>fatal(e.message);
+  offerRelease=r=>worker.postMessage({type:'release-discovered',release:r});
+  if(observedRelease)offerRelease(observedRelease);
   form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
   function leaveLogin(){command({type:'route',route:'#/home'});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes,release:location.pathname.match(/^\/releases\/([0-9a-f]{64})\//)?.[1]||null,route:location.hash});
+  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes,release:initialRelease,route:location.hash});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const r=canvas.getBoundingClientRect();return {type:'pointer',epoch:model?.epoch,args:[phase,e.pointerId,(e.clientX-r.left)*1280/r.width,(e.clientY-r.top)*800/r.height,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});

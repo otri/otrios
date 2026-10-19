@@ -201,6 +201,9 @@ impl CanvasApp {
     pub fn confirmed(&mut self) -> bool {
         self.inner.confirmed()
     }
+    pub fn reload_ready(&self) -> bool {
+        self.inner.reload_ready()
+    }
     pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
         Ok(self.compose()?.vertices.clone())
     }

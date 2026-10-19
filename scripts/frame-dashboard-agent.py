@@ -83,8 +83,10 @@ def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):
     if total>limit:raise ValueError('Cache budget cannot fit pinned artifacts')
 
 def hot_reload_ready(info):
-    # Legacy hosts are accepted only for the one-time migration; new hosts must
-    # have their exact current document confirmed by the durable authority.
+    if 'reload_ready' in info:
+        return info['reload_ready'] is True and not info.get('input_busy',False)
+    # Older readiness records retain their strict online confirmation gate.
+    # New records distinguish clean reconnect handshakes from pending edits.
     return bool(info.get('stream_ready')) and info.get('state_confirmed',True) and info.get('pending_commands',0)==0 and not info.get('input_busy',False)
 
 def qualify(base,cache,key,openssl,release=None,sdl=False,limit=CACHE_BYTES,pins=()):
@@ -220,13 +222,13 @@ def main(a):
     try:
         while running:
             try:
-                release=None
-                notice=a.runtime_dir/'release-notice.json'
-                if notice.exists():release=json.loads(notice.read_text())['id']
-                if host is not None and host.process.poll() is None and release in (None,current,bad) and time.monotonic()-last_probe<30:
+                # Always discover code through the stable HTTP pointer. A retired
+                # state stream (or stale notice file) cannot suppress an upgrade.
+                if host is not None and host.process.poll() is None and time.monotonic()-last_probe<5:
                     time.sleep(.1);continue
-                if time.monotonic()-last_probe>=30 or release is None:
-                    release=json.loads(fetch(a.url,'/release',8192))['id'];last_probe=time.monotonic()
+                release=json.loads(fetch(a.url,'/release',8192))['id'];last_probe=time.monotonic()
+                if host is not None and host.process.poll() is None and release in (current,bad):
+                    continue
                 release,exe=qualify(a.url,a.cache,a.key,a.openssl,release,sdl=a.video_driver=='wayland',limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
                 if (host is None or host.process.poll() is not None or release!=current) and release!=bad:
                     old=host

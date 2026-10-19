@@ -973,6 +973,37 @@ fn touch_pad_moves_are_ephemeral_and_only_release_is_durable_with_matching_coord
 }
 
 #[test]
+fn code_reload_waits_for_intents_but_not_an_idle_mount_handshake() {
+    let mut fresh = Client::default();
+    fresh.open("app:component-playground/ui", "fresh");
+    fresh.outgoing().unwrap();
+    assert!(!fresh.confirmed());
+    assert!(
+        fresh.reload_ready(),
+        "No user data exists before the first mount"
+    );
+
+    let ui = playground::ui(&code());
+    let mut client = Client::default();
+    activate(&mut client, ui.clone(), "reload-gate", code());
+    let mut authority = Document::new(ui.state_schema, "reload-gate").unwrap();
+    pump(&mut client, &mut authority, &mut Session::default());
+    assert!(client.reload_ready());
+    client.reset_connection();
+    client.outgoing().unwrap();
+    assert!(!client.confirmed());
+    assert!(
+        client.reload_ready(),
+        "A clean offline remount must not strand code"
+    );
+    edit(&mut client, "Linear slider", 870, 0);
+    assert!(
+        !client.reload_ready(),
+        "The RAM overlay must survive an upgrade offer"
+    );
+}
+
+#[test]
 fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation() {
     let code = code();
     let ui = playground::ui(&code);
@@ -991,6 +1022,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
         panic!("Mount")
     };
     assert!(!client.confirmed());
+    assert!(!client.reload_ready());
     let bytes = encode_ui(&playground::ui(&code)).unwrap();
     client
         .receive(

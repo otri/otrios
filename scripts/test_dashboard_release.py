@@ -131,6 +131,13 @@ class ArtifactBudget(unittest.TestCase):
         good={'stream_ready':True,'state_confirmed':True,'pending_commands':0,'input_busy':False}
         self.assertTrue(agent.hot_reload_ready(good))
         for update in [{'state_confirmed':False},{'pending_commands':1},{'input_busy':True}]:self.assertFalse(agent.hot_reload_ready(dict(good,**update)))
+    def test_clean_offline_host_can_upgrade_but_pending_input_cannot(self):
+        clean={'stream_ready':False,'state_confirmed':False,'pending_commands':1,'reload_ready':True,'input_busy':False}
+        self.assertTrue(agent.hot_reload_ready(clean))
+        self.assertFalse(agent.hot_reload_ready(dict(clean,reload_ready=False)))
+        self.assertFalse(agent.hot_reload_ready(dict(clean,input_busy=True)))
+        self.assertFalse(agent.hot_reload_ready(dict(clean,reload_ready='true')))
+        self.assertFalse(agent.hot_reload_ready({}))
     def test_blob_hash_is_verified_and_cache_can_survive_offline(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:

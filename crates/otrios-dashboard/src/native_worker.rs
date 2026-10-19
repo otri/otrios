@@ -40,6 +40,7 @@ pub(super) struct Frame {
     pub(super) keyboard: bool,
     pub(super) online: bool,
     pub(super) state_confirmed: bool,
+    pub(super) reload_ready: bool,
     pub(super) pending_commands: usize,
     pub(super) input_busy: bool,
     pub(super) intent: Intent,
@@ -64,6 +65,7 @@ impl Frame {
             keyboard: false,
             online,
             state_confirmed: false,
+            reload_ready: false,
             pending_commands: 1,
             input_busy: false,
             intent: Intent::default(),
@@ -331,7 +333,7 @@ pub(super) fn state_worker(
                         sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
                     }
                     if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"reload_ready":frame.reload_ready,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
                         let tmp = format!("{path}.tmp");
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
@@ -460,7 +462,14 @@ pub(super) fn state_worker(
         }
         dirty |= client.stress_tick(now as f64)?;
         let updates = client.stress_updates();
-        let status = (online, confirmed, updates, client.input_busy());
+        let reload_ready = client.reload_ready();
+        let status = (
+            online,
+            confirmed,
+            updates,
+            client.input_busy(),
+            reload_ready,
+        );
         dirty |= last_status != Some(status);
         last_status = Some(status);
         if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
@@ -508,6 +517,7 @@ pub(super) fn state_worker(
                 keyboard: client.keyboard_visible(),
                 online,
                 state_confirmed: confirmed,
+                reload_ready,
                 pending_commands: client.pending_count(),
                 input_busy: client.input_busy(),
                 intent,
