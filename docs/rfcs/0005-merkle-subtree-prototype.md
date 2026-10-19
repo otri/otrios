@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0005: Bounded incremental Merkle hierarchy and subtree transport
 
-Status: implemented research library behind `otrios-core/merkle`. This is the
-next increment of RFCs 0002/0003, not a replacement of the live Automerge Canvas
-backend. The verified pre-Merkle baseline is tagged
+Status: implemented bounded library behind `otrios-core/merkle`.
+[RFC 0006](0006-durable-canvas-merkle-adapter.md) now integrates it into the live
+Canvas backend with durable server receipts and RAM-only client intents.
+The verified pre-Merkle baseline is tagged
 `2026-10-19-canvas-apps-milestone` at `8dd9bc9`.
 
 ## Representation and semantics
@@ -87,12 +88,10 @@ state. Cancellation drops the server's pins; the host must also cancel the
 client replica and its local presentation scope to reject late frames. Policy
 revocation must call cancellation even when the content digest did not change.
 
-This read replica replaces authority state. Pending optimistic commands must
-remain in a separate RAM overlay and be revalidated/reapplied by a future Canvas
-adapter. Incoming untrusted writes cannot call `publish` directly. That adapter
-must enforce the current admitted schema, field grants, session policy,
-durability-before-ACK, and intent acknowledgments. The current server still does
-all of this through its scoped Automerge documents.
+This read replica replaces authority state. The [Canvas adapter](0006-durable-canvas-merkle-adapter.md)
+keeps optimistic intents in a separate RAM overlay. Incoming untrusted writes
+cannot call `publish` directly: the server enforces the admitted schema, field
+grants, session policy, durability-before-ACK and intent receipts.
 
 ## Canonical binary format v1
 
@@ -167,8 +166,7 @@ and concurrent join separately, with actual nodes and allocations. The optional
 Wasm, with no change to the default live app. See the experiment report for
 [commands and measurements](../experiments/merkle-subtree-validation.md). Do not equate either with network or screen latency.
 
-Next: introduce a Canvas state adapter for typed field paths behind the existing
-mount/schema/grant contracts; retain optimistic intent overlays, durable server
-ACKs and ephemeral ink. Then add selector dependency invalidation and app-scoped
-UI/state subtree leases, including atomic qualification and navigation cleanup.
-Only after browser/frame acceptance should this replace the tagged baseline.
+The Canvas adapter cutover is deployed and covered by [browser/frame acceptance](../experiments/canvas-merkle-adapter-validation.md).
+Next: extend field bindings to general collection/query dependency invalidation
+and arbitrary subtree leases. App-scoped state leases, mount qualification and
+navigation cleanup are implemented; this does not provide a general query engine.
