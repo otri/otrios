@@ -323,6 +323,7 @@ fn empty_layout() -> Layout {
     use otrios_interfaces::layout::*;
     let number = |n| Expr::Literal(Value::Number(n));
     let blueprint = Blueprint {
+        composition: None,
         schema: "otrios-layout-v2".into(),
         templates: vec![Template {
             id: 1,

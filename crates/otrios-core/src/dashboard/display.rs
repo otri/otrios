@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Presentation-only surface rotation and raw touch calibration. App layout,
-//! hit testing and CRDT coordinates remain in the 1280x800 logical canvas.
+//! Presentation-only surface rotation, uniform fitting and raw touch calibration.
+//! Hit testing follows the active scene extent; viewport geometry is never CRDT state.
 use super::Result;
 use otrios_interfaces::scene::Rect;
 /// Conservative, nonoverlapping texture-copy regions after a solid canvas clear.
@@ -85,17 +85,33 @@ pub fn cached_regions(mesh: &[f32], band: Rect, clear: [u8; 4]) -> Vec<Rect> {
     }
     regions
 }
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct Surface {
     turns: u16,
+    size: [u32; 2],
+}
+impl Default for Surface {
+    fn default() -> Self {
+        Self {
+            turns: 0,
+            size: [1280, 800],
+        }
+    }
 }
 impl Surface {
     pub fn new(degrees: u16) -> Result<Self> {
+        Self::with_size(degrees, [1280, 800])
+    }
+    pub fn with_size(degrees: u16, size: [u32; 2]) -> Result<Self> {
+        if size.iter().any(|v| !(1..=8192).contains(v)) {
+            return Err("Invalid surface size".into());
+        }
         if ![0, 90, 180, 270].contains(&degrees) {
             return Err("Surface rotation must be 0, 90, 180 or 270".into());
         }
         Ok(Self {
             turns: degrees / 90,
+            size,
         })
     }
     pub fn degrees(self) -> u16 {
@@ -103,24 +119,26 @@ impl Surface {
     }
     pub fn extent(self) -> [u32; 2] {
         if self.turns.is_multiple_of(2) {
-            [1280, 800]
+            self.size
         } else {
-            [800, 1280]
+            [self.size[1], self.size[0]]
         }
     }
     pub fn project(self, [x, y]: [f32; 2]) -> [f32; 2] {
+        let [w, h] = self.size.map(|n| n as f32);
         match self.turns {
-            1 => [800. - y, x],
-            2 => [1280. - x, 800. - y],
-            3 => [y, 1280. - x],
+            1 => [h - y, x],
+            2 => [w - x, h - y],
+            3 => [y, w - x],
             _ => [x, y],
         }
     }
     pub fn unproject(self, [x, y]: [f32; 2]) -> [f32; 2] {
+        let [w, h] = self.size.map(|n| n as f32);
         match self.turns {
-            1 => [y, 800. - x],
-            2 => [1280. - x, 800. - y],
-            3 => [1280. - y, x],
+            1 => [y, h - x],
+            2 => [w - x, h - y],
+            3 => [w - y, x],
             _ => [x, y],
         }
     }
@@ -143,6 +161,40 @@ impl Surface {
             1. - 2. * a[1] / h,
             1.,
         ]
+    }
+    fn fit(self, content: [f32; 2]) -> (f32, [f32; 2]) {
+        let [w, h] = self.size.map(|n| n as f32);
+        let scale = (w / content[0]).min(h / content[1]);
+        (
+            scale,
+            [(w - content[0] * scale) / 2., (h - content[1] * scale) / 2.],
+        )
+    }
+    /// Fit a legacy or responsive logical scene uniformly into the physical target.
+    pub fn projection_for(self, content: [f32; 2]) -> [f32; 9] {
+        let (scale, offset) = self.fit(content);
+        let p = self.projection();
+        [
+            p[0] * scale,
+            p[1] * scale,
+            0.,
+            p[3] * scale,
+            p[4] * scale,
+            0.,
+            p[0] * offset[0] + p[3] * offset[1] + p[6],
+            p[1] * offset[0] + p[4] * offset[1] + p[7],
+            1.,
+        ]
+    }
+    pub fn touch_for(
+        self,
+        matrix: Calibration,
+        p: [f32; 2],
+        content: [f32; 2],
+    ) -> Option<[f32; 2]> {
+        let p = self.touch(matrix, p)?;
+        let (scale, offset) = self.fit(content);
+        Some([(p[0] - offset[0]) / scale, (p[1] - offset[1]) / scale])
     }
     pub fn rect(self, r: Rect) -> Rect {
         let a = self.project([r.x, r.y]);
@@ -177,6 +229,40 @@ impl Calibration {
             return Err("Invalid touch calibration matrix".into());
         }
         Ok(Self(m))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn portrait_and_legacy_projection_agree_with_calibrated_touch_at_every_rotation() {
+    for degrees in [0, 90, 180, 270] {
+        let surface = Surface::with_size(degrees, [800, 1280]).unwrap();
+        for content in [[800., 1280.], [1280., 800.]] {
+            let (scale, offset) = surface.fit(content);
+            let projection = surface.projection_for(content);
+            let [w, h] = surface.extent().map(|n| n as f32);
+            for point in [[0., 0.], [content[0], content[1]], [217., 311.]] {
+                let physical =
+                    surface.project([point[0] * scale + offset[0], point[1] * scale + offset[1]]);
+                let recovered = surface
+                    .touch_for(
+                        Calibration::new([1., 0., 0., 0., 1., 0.]).unwrap(),
+                        [physical[0] / w, physical[1] / h],
+                        content,
+                    )
+                    .unwrap();
+                assert!(
+                    (recovered[0] - point[0]).abs() < 0.001
+                        && (recovered[1] - point[1]).abs() < 0.001
+                );
+                let ndc = [
+                    projection[0] * point[0] + projection[3] * point[1] + projection[6],
+                    projection[1] * point[0] + projection[4] * point[1] + projection[7],
+                ];
+                assert!(((ndc[0] + 1.) * w / 2. - physical[0]).abs() < 0.001);
+                assert!(((1. - ndc[1]) * h / 2. - physical[1]).abs() < 0.001);
+            }
+        }
     }
 }
 #[cfg(test)]

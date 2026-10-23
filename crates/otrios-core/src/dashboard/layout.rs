@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Bounded FlexBuffers reader and typed component/binding interpreter. No JSON path.
 use super::{Result, scene::Scene};
+mod composition;
 pub mod resizing;
 use flexbuffers::{FlexBufferType, Reader};
 use otrios_interfaces::{layout::*, scene::*};
@@ -116,13 +117,28 @@ impl Layout {
     }
     /// App layouts can read only their explicitly projected slots. No dashboard scope.
     pub fn resolve_slots(&self, slots: &BTreeMap<u16, Value>) -> Result<Scene> {
+        self.resolve_viewport(slots, [1280., 800.])
+    }
+    pub fn resolve_viewport(
+        &self,
+        slots: &BTreeMap<u16, Value>,
+        viewport: [f32; 2],
+    ) -> Result<Scene> {
         let bindings = Bindings { local: slots };
+        let mut root = self.blueprint.root.clone();
+        let frames = if let Some(plan) = &self.blueprint.composition {
+            root.frame[2..].copy_from_slice(&viewport);
+            Some(composition::resolve(plan, viewport)?)
+        } else {
+            None
+        };
         Scene::new(expand(
             &self.blueprint,
-            &self.blueprint.root,
+            &root,
             &bindings,
             0,
             &mut 0,
+            frames.as_ref(),
         )?)
     }
 }
@@ -166,8 +182,10 @@ fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
     Ok(())
 }
 fn validate_blueprint(b: &Blueprint) -> Result<()> {
-    if !matches!(b.schema.as_str(), "otrios-layout-v1" | "otrios-layout-v2")
-        || b.templates.is_empty()
+    if !matches!(
+        b.schema.as_str(),
+        "otrios-layout-v1" | "otrios-layout-v2" | "otrios-layout-v3"
+    ) || b.templates.is_empty()
         || b.templates.len() > 32
     {
         return Err("Unknown/invalid layout schema/templates".into());
@@ -305,6 +323,18 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
     if b.root.id != 0 || b.root.frame != [0., 0., 1280., 800.] {
         return Err("Root layout instance must be the screen".into());
     }
+    if let Some(plan) = &b.composition {
+        if b.schema != "otrios-layout-v3" || b.root.id != 0 || !b.root.children.is_empty() {
+            return Err("Composition requires a v3 app root".into());
+        }
+        let root = &b
+            .templates
+            .iter()
+            .find(|t| t.id == b.root.template)
+            .ok_or("Missing root template")?
+            .root;
+        composition::validate(plan, root)?;
+    }
     instance(&b.root, b, 0, &mut BTreeSet::new())
 }
 struct Bindings<'a> {
@@ -405,6 +435,7 @@ fn expand(
     bindings: &Bindings<'_>,
     depth: usize,
     count: &mut usize,
+    frames: Option<&BTreeMap<u16, [f32; 4]>>,
 ) -> Result<SceneNode> {
     if depth > 8 {
         return Err("Instance expansion limit".into());
@@ -434,6 +465,7 @@ fn expand(
         bindings: &'a Bindings<'v>,
         params: &'a BTreeMap<u16, Value>,
         depth: usize,
+        frames: Option<&'a BTreeMap<u16, [f32; 4]>>,
     }
     fn walk(
         n: &TemplateNode,
@@ -455,8 +487,10 @@ fn expand(
         for (v, e) in f.iter_mut().zip(&n.frame) {
             *v = number(run(e)?)?;
         }
-        if is_root && c.b.schema == "otrios-layout-v2" {
+        if is_root && c.b.schema != "otrios-layout-v1" {
             f = c.i.frame;
+        } else if let Some(frame) = c.frames.and_then(|frames| frames.get(&n.id)) {
+            f = *frame;
         } else if let Some(rule) = n.resize {
             f = resizing::resolve(f, parent_size, rule)?;
         }
@@ -546,7 +580,7 @@ fn expand(
         if matches!(n.shape, Shape::Slot) {
             *slots += 1;
             for child in &c.i.children {
-                children.push(expand(c.b, child, c.bindings, c.depth + 1, count)?);
+                children.push(expand(c.b, child, c.bindings, c.depth + 1, count, None)?);
             }
         } else {
             for child in &n.children {
@@ -597,6 +631,7 @@ fn expand(
         bindings,
         params: &params,
         depth,
+        frames,
     };
     let mut slots = 0;
     let mut root = walk(

@@ -38,6 +38,7 @@ fn instance(
 }
 fn blueprint() -> Blueprint {
     Blueprint {
+        composition: None,
         schema: "otrios-layout-v2".into(),
         templates: vec![
             Template {

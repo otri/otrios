@@ -18,6 +18,7 @@ use std::{
 };
 struct Mount {
     epoch: u32,
+    viewport: [f32; 2],
     ui: Ui,
     layout: Layout,
     doc: StateAdapter,
@@ -112,6 +113,7 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    viewport: Option<[f32; 2]>,
     wire_clock: u64,
     decode_budget: DecodeBudget,
     generation: u32,
@@ -131,6 +133,35 @@ pub struct Client {
     dispatch: DispatchPolicy,
 }
 impl Client {
+    /// Local presentation only. A rejected size retains the old scene and state.
+    pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
+        if viewport
+            .iter()
+            .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
+        {
+            return Err("Invalid viewport size".into());
+        }
+        if self.viewport == Some(viewport) {
+            return Ok(false);
+        }
+        if let Some(m) = &mut self.active
+            && m.layout.blueprint().composition.is_some()
+        {
+            let old = m.viewport;
+            m.viewport = viewport;
+            let candidate = resolve_scene(m);
+            m.viewport = old;
+            candidate?;
+            self.cancel()?;
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            m.viewport = viewport;
+            m.invalidate();
+            self.viewport = Some(viewport);
+            return Ok(true);
+        }
+        self.viewport = Some(viewport);
+        Ok(false)
+    }
     pub fn set_dispatch_policy(&mut self, policy: DispatchPolicy) {
         self.dispatch = policy;
         if let Some(m) = &mut self.active {
@@ -554,6 +585,9 @@ impl Client {
                             writer: self.writer.ok_or("Missing writer nonce")?,
                         },
                     )?;
+                    candidate.viewport = self.viewport.unwrap_or([1280., 800.]);
+                    resolve_scene(&candidate)?;
+                    candidate.invalidate();
                     candidate.doc.set_dispatch_policy(self.dispatch);
                     if let Some(old) = &self.active
                         && old.state_ref == candidate.state_ref
@@ -1373,6 +1407,7 @@ fn qualify(
     }
     let mut m = Mount {
         epoch,
+        viewport: [1280., 800.],
         ui,
         layout,
         doc,
@@ -1481,7 +1516,7 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
         };
         bindings.insert(s.local, value);
     }
-    let scene = m.layout.resolve_slots(&bindings)?;
+    let scene = m.layout.resolve_viewport(&bindings, m.viewport)?;
     let mut root = scene.root().clone();
     if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
