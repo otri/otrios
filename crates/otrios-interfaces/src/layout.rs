@@ -163,6 +163,52 @@ pub struct Instance {
 #[serde(deny_unknown_fields)]
 pub struct Blueprint {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<Composition>,
     pub templates: Vec<Template>,
     pub root: Instance,
+}
+
+/// Device-local arrangement of the same component instances. No replicated state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Composition {
+    pub wide_min_width: f32,
+    pub wide: FlowPlan,
+    pub tall: FlowPlan,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlowPlan {
+    /// Left, top, right, bottom in logical pixels.
+    pub insets: [f32; 4],
+    pub content: Flow,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Alignment {
+    Start,
+    Center,
+    End,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Flow {
+    /// Flexible axes may grow or shrink from preferred size down to minimum size.
+    pub flexible: [bool; 2],
+    pub kind: FlowKind,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum FlowKind {
+    Item {
+        node: u16,
+        preferred: [f32; 2],
+        minimum: [f32; 2],
+    },
+    Group {
+        /// 0 = row, 1 = column. Children retain their compiled tree order/identity.
+        axis: u8,
+        gap: f32,
+        alignment: Alignment,
+        children: Vec<Flow>,
+    },
 }

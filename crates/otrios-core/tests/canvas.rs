@@ -37,6 +37,106 @@ fn code() -> Vec<u8> {
     ))
     .unwrap()
 }
+
+#[test]
+fn portrait_compositions_reuse_controls_and_keep_old_snapshots_immutable() {
+    use std::sync::Arc;
+    let behavior = code();
+    for (ui, code) in [
+        (home::ui(), vec![]),
+        (layout::ui(), vec![]),
+        (playground::ui(&behavior), behavior),
+    ] {
+        let mut client = Client::default();
+        activate(&mut client, ui, "responsive", code);
+        let wide = client.scene().unwrap();
+        let controls = |scene: &otrios_core::dashboard::scene::Scene| {
+            scene
+                .controls()
+                .iter()
+                .map(|c| (c.node.id, c.node.responder))
+                .collect::<Vec<_>>()
+        };
+        let before = controls(&wide);
+        let epoch = client.epoch();
+        assert!(client.set_viewport([800., 1280.]).unwrap());
+        let tall = client.scene().unwrap();
+        assert_eq!(tall.root().frame.width, 800.);
+        assert_eq!(tall.root().frame.height, 1280.);
+        assert_eq!(
+            controls(&tall),
+            before,
+            "placement cannot reassign control behavior"
+        );
+        assert_eq!(client.epoch(), epoch, "resizing is not a new state mount");
+        assert_eq!(wide.root().frame.width, 1280.);
+        for c in tall.controls() {
+            assert!(c.origin[0] >= 0. && c.origin[1] >= 0.);
+            assert!(c.origin[0] + c.node.frame.width * c.scale <= 800.1);
+            assert!(c.origin[1] + c.node.frame.height * c.scale <= 1280.1);
+        }
+        assert!(client.set_viewport([100., 100.]).is_err());
+        assert!(
+            Arc::ptr_eq(&tall, &client.scene().unwrap()),
+            "rejected geometry leaves current scene intact"
+        );
+        client.set_viewport([1280., 800.]).unwrap();
+        assert_eq!(
+            client.scene().unwrap().root(),
+            wide.root(),
+            "layout round trip never accumulates drift"
+        );
+    }
+}
+
+#[test]
+fn different_viewports_share_values_and_rotation_cancels_capture_without_losing_edits() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let behavior = code();
+    let ui = playground::ui(&behavior);
+    let mut a = Client::default();
+    let mut b = Client::default();
+    b.set_viewport([800., 1280.]).unwrap();
+    activate(&mut a, ui.clone(), "orientation:shared", behavior.clone());
+    activate(&mut b, ui.clone(), "orientation:shared", behavior);
+    let mut authority = Document::new(ui.state_schema, "orientation:shared").unwrap();
+    let mut sa = Session::default();
+    let mut sb = Session::default();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    edit(&mut a, "Linear slider", 780, 0);
+    let scene = a.scene().unwrap();
+    let dial = scene
+        .controls()
+        .into_iter()
+        .find(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Rotary dial")
+        })
+        .unwrap();
+    a.pointer(
+        a.epoch(),
+        PointerEvent {
+            id: 1,
+            phase: PointerPhase::Down,
+            position: [dial.origin[0] + 105., dial.origin[1] + 40.],
+        },
+    )
+    .unwrap();
+    assert!(a.input_busy());
+    let value = a.value(1).unwrap();
+    a.set_viewport([800., 1280.]).unwrap();
+    assert!(!a.input_busy());
+    assert_eq!(a.value(1).unwrap(), value);
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    assert_eq!(b.value(1).unwrap(), value);
+    b.set_viewport([1280., 800.]).unwrap();
+    assert_eq!(b.value(1).unwrap(), value);
+    assert!(a.confirmed() && b.confirmed());
+}
 fn activate(c: &mut Client, ui: Ui, state: &str, code: Vec<u8>) {
     activate_access(c, ui, state, code, false);
 }
@@ -443,9 +543,10 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
             body.frame.height / 2.
         );
     }
+    let origin = wide.path(wide_card.id).unwrap().last().unwrap().origin;
     let point = [
-        wide_card.frame.x + wide_card.frame.width - 50.,
-        wide_card.frame.y + wide_card.frame.height - 48.,
+        origin[0] + wide_card.frame.width - 40.,
+        origin[1] + wide_card.frame.height - 48.,
     ];
     let has_button = |s: &otrios_core::dashboard::scene::Scene| {
         s.hit_path(point).iter().any(|n| {
@@ -486,11 +587,11 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
 }
 
 #[test]
-fn resize_rules_require_v2_and_component_root_owns_its_size() {
+fn resize_rules_require_a_versioned_layout_and_component_root_owns_its_size() {
     use otrios_core::dashboard::layout::Layout;
     let ui = layout::ui();
     let parsed = Layout::from_bytes(&ui.layout).unwrap();
-    assert_eq!(parsed.blueprint().schema, "otrios-layout-v2");
+    assert_eq!(parsed.blueprint().schema, "otrios-layout-v3");
     let mut downgraded = parsed.blueprint().clone();
     downgraded.schema = "otrios-layout-v1".into();
     assert!(

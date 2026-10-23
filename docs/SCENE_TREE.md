@@ -1,6 +1,6 @@
 # Primitive scene tree and responder chain
 
-The dashboard now expands its immutable application view into a validated, immutable scene tree. The root is a 1280×800 `Canvas`. Native GLES2 and browser WebGL draw the same primitive geometry; the browser has no separate visual panel/switch implementation. Its invisible semantic buttons provide keyboard and assistive access.
+The dashboard now expands its immutable application view into a validated, immutable scene tree. The root is a clipped `Canvas` with the active logical extent: 1280×800 for landscape/legacy UIs or 800×1280 for the first portrait profile. Native GLES2 and browser WebGL draw the same primitive geometry; the browser has no separate visual panel/switch implementation. Its invisible semantic buttons provide keyboard and assistive access.
 
 ## Primitives and components
 
@@ -51,7 +51,7 @@ The router bounds active pointers to 16 and validates finite input. Pointer capt
 
 ## Validation and limits
 
-Scene construction rejects duplicate identities, nonfinite/oversized geometry, invalid circle/superellipse/path fields, children on primitives other than Canvas/Viewport, more than 512 nodes and depth beyond 16. Only a clipped root at the fixed logical extent is accepted. Component IDs reserve stable descendant ranges across checked/unchecked states and graph sample changes. Clipping trims actual triangles, including text and curves, rather than just skipping wholly outside shapes.
+Scene construction rejects duplicate identities, nonfinite/oversized geometry, invalid circle/superellipse/path fields, children on primitives other than Canvas/Viewport, more than 512 nodes and depth beyond 16. The root must be clipped, at the origin, and have finite positive bounded dimensions. Component IDs reserve stable descendant ranges across checked/unchecked states and graph sample changes. Clipping trims actual triangles, including text and curves, rather than just skipping wholly outside shapes.
 
 Runtime tests cover nested local-coordinate bubbling, consume/stop behavior and overlapping siblings, independent pointer captures, duplicate release, cancellation and responder removal, drag-out release, concurrent state changes during a gesture, geometric hit tests, clipped triangles and malformed trees. Native/browser host builds remain part of CI. The tiny demo font, absolute frames, translation plus uniform Viewport scaling, rectangular Canvas clipping and explicit bounded application/navigation/input actions are intentional first-slice limits. General layout, arbitrary affine transforms, vector fonts, accessibility-tree generalization and gesture recognition are not implemented here.
 

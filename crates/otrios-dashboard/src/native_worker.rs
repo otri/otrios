@@ -33,6 +33,7 @@ struct NetworkSend {
 }
 #[derive(Clone)]
 pub(super) struct Frame {
+    pub(super) viewport: [f32; 2],
     pub(super) vertices: Arc<Vec<f32>>,
     pub(super) glyph_vertices: Arc<Vec<f32>>,
     pub(super) draws: Arc<Vec<u32>>,
@@ -59,6 +60,7 @@ pub(super) struct Frame {
 impl Frame {
     fn blank(serial: u64, online: bool) -> Self {
         Self {
+            viewport: [1280., 800.],
             vertices: Arc::new(vec![]),
             glyph_vertices: Arc::new(vec![]),
             draws: Arc::new(vec![]),
@@ -122,6 +124,7 @@ pub(super) struct Options {
     pub(super) objects: u16,
     pub(super) stall_ms: u64,
     pub(super) rotation: u16,
+    pub(super) portrait: bool,
     pub(super) touch_matrix: Option<Calibration>,
     #[cfg(test)]
     pub(super) state_gate: Option<Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>>,
@@ -132,6 +135,13 @@ pub(super) fn options() -> Result<Options, String> {
     while let Some(arg) = args.next() {
         let value = args.next().ok_or("Missing argument value")?;
         match arg.as_str() {
+            "--layout" => {
+                o.portrait = match value.as_str() {
+                    "portrait" => true,
+                    "landscape" => false,
+                    _ => return Err("Choose portrait or landscape layout".into()),
+                }
+            }
             "--sync" => o.url = Some(value),
             "--state" => o.state = Some(value),
             "--apps" => o.apps = Some(value),
@@ -251,6 +261,11 @@ pub(super) fn state_worker(
     }
     let (resources, catalog) = app_resources(&o)?;
     let mut client = Client::default();
+    client.set_viewport(if o.portrait {
+        [800., 1280.]
+    } else {
+        [1280., 800.]
+    })?;
     client.admit_catalog(&catalog)?;
     let app = entry_app(o.screen.as_deref().unwrap_or("home"))?;
     if o.url.is_some() {
@@ -522,6 +537,10 @@ pub(super) fn state_worker(
             let state_ref = client.state_ref();
             serial += 1;
             pending = Some(Frame {
+                viewport: {
+                    let scene = client.scene()?;
+                    [scene.root().frame.width, scene.root().frame.height]
+                },
                 vertices: mesh_cache.clone(),
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),
@@ -850,6 +869,7 @@ mod tests {
         let mut motion_ui = Vec::new();
         for (id, motion) in [("home", false), ("three-d-lab", true)] {
             let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
+                composition: None,
                 schema: "otrios-layout-v2".into(),
                 templates: vec![Template {
                     id: 1,

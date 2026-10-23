@@ -49,8 +49,8 @@ fn render_optional_font(scene: &Scene, font: Option<&Font>) -> Mesh {
         Clip {
             left: 0.,
             top: 0.,
-            right: 1280.,
-            bottom: 800.,
+            right: scene.root().frame.width,
+            bottom: scene.root().frame.height,
         },
         font,
     );

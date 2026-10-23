@@ -144,8 +144,12 @@ this builder does not claim identity preservation across structural edits.
 The builder is source authoring, not a new host toolkit. Its output is still the
 same FlexBuffers primitives, selectors, responders and navigation data. Renderers
 consume that data and do not execute these Rust builder functions. Frames define component design coordinates; pins and springs handle parent
-resizing. Stack layout and intrinsic sizing can be added independently of these
-identity/binding improvements.
+resizing. Layout v3 adds explicit row/column screen compositions with preferred
+and minimum component sizes. Keys name existing instances and
+`.with_composition(wide, tall)` arranges the same tree for each viewport.
+`.with_touch_pad("key")` resolves a named control without a numeric handler index.
+These identities remain scoped to one compiled UI. See
+[RFC 0012](../docs/rfcs/0012-modular-screen-composition.md).
 
 ## Pins, springs and struts
 

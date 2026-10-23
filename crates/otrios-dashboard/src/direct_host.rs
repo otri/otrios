@@ -29,7 +29,10 @@ pub(super) fn run() -> Result<(), String> {
     let capture_after = o.capture_after;
     let load = o.load;
     let stall = o.stall_ms;
-    let surface = Surface::new(o.rotation)?;
+    let surface = Surface::with_size(
+        o.rotation,
+        if o.portrait { [800, 1280] } else { [1280, 800] },
+    )?;
     let calibration = o
         .touch_matrix
         .ok_or("Direct input requires the accepted touch calibration")?;
@@ -117,7 +120,11 @@ pub(super) fn run() -> Result<(), String> {
                     2 => PointerPhase::Up,
                     _ => return Err("Invalid input phase".into()),
                 };
-                if let Some(position) = surface.touch(calibration, [e.x, e.y]) {
+                if let Some(position) = surface.touch_for(
+                    calibration,
+                    [e.x, e.y],
+                    model.as_ref().map(|f| f.viewport).unwrap_or([1280., 800.]),
+                ) {
                     send(Input::CanvasPointer(
                         model.as_ref().map(|f| f.epoch).unwrap_or(0),
                         PointerEvent {
@@ -176,7 +183,7 @@ pub(super) fn run() -> Result<(), String> {
                             )?;
                         }
                     }
-                    display.draw(surface.projection(), animated)?;
+                    display.draw(surface.projection_for(f.viewport), animated)?;
                     if drawn >= capture_after
                         && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()

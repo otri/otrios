@@ -21,7 +21,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
         names=['index.html','style.css','app.js','state-worker.js','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
-        names += ['app-catalog.mjs','gpu-scene.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
+        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
         for name in names:
             source=web/name
             if not source.exists() and (name.endswith('.mjs') or name.endswith('.js') or name=='Slug-LICENSE.txt'):source=web.parent/'shared'/name

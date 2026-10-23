@@ -321,6 +321,7 @@ enum Paint {
 }
 #[derive(Clone)]
 pub struct Element {
+    key: Option<String>,
     frame: [ValueExpr; 4],
     paint: Paint,
     children: Vec<Element>,
@@ -334,6 +335,7 @@ pub struct Element {
 impl Element {
     fn new(paint: Paint, frame: [f32; 4]) -> Self {
         Self {
+            key: None,
             frame: frame.map(ValueExpr::from),
             paint,
             children: vec![],
@@ -344,6 +346,11 @@ impl Element {
             design_size: None,
             visible: ValueExpr::Literal(yes()),
         }
+    }
+    pub fn key(mut self, key: &str) -> Self {
+        assert!(!key.is_empty() && key.len() <= 64, "bounded component key");
+        self.key = Some(key.into());
+        self
     }
     pub fn visible(mut self, value: ValueExpr) -> Self {
         self.visible = value;
@@ -607,12 +614,88 @@ pub fn component(design_size: [f32; 2], children: Vec<Element>) -> Element {
     n.design_size = Some(design_size);
     n
 }
+
+/// Screen composition names existing nodes; it never rebuilds/reorders their tree.
+pub struct Arrangement {
+    flexible: [bool; 2],
+    kind: ArrangementKind,
+}
+enum ArrangementKind {
+    Item(String, [f32; 2], [f32; 2]),
+    Group(u8, f32, Alignment, Vec<Arrangement>),
+}
+pub fn place(key: &str, preferred: [f32; 2]) -> Arrangement {
+    Arrangement {
+        flexible: [false; 2],
+        kind: ArrangementKind::Item(key.into(), preferred, preferred),
+    }
+}
+pub fn row(gap: f32, children: Vec<Arrangement>) -> Arrangement {
+    Arrangement {
+        flexible: [true, false],
+        kind: ArrangementKind::Group(0, gap, Alignment::Start, children),
+    }
+}
+pub fn column(gap: f32, children: Vec<Arrangement>) -> Arrangement {
+    Arrangement {
+        flexible: [true, false],
+        kind: ArrangementKind::Group(1, gap, Alignment::Start, children),
+    }
+}
+pub fn heading() -> Arrangement {
+    place("$heading", [900., 80.])
+        .minimum([480., 80.])
+        .flex_width()
+}
+impl Arrangement {
+    pub fn minimum(mut self, size: [f32; 2]) -> Self {
+        if let ArrangementKind::Item(_, _, min) = &mut self.kind {
+            *min = size;
+        } else {
+            panic!("minimum applies to component slots");
+        }
+        self
+    }
+    pub fn flex_width(mut self) -> Self {
+        self.flexible[0] = true;
+        self
+    }
+    pub fn centered(mut self) -> Self {
+        if let ArrangementKind::Group(_, _, alignment, _) = &mut self.kind {
+            *alignment = Alignment::Center;
+        }
+        self
+    }
+    fn compile(self, nodes: &std::collections::BTreeMap<String, u16>) -> Flow {
+        let kind = match self.kind {
+            ArrangementKind::Item(key, preferred, minimum) => FlowKind::Item {
+                node: *nodes
+                    .get(&key)
+                    .unwrap_or_else(|| panic!("unknown component slot {key}")),
+                preferred,
+                minimum,
+            },
+            ArrangementKind::Group(axis, gap, alignment, children) => FlowKind::Group {
+                axis,
+                gap,
+                alignment,
+                children: children.into_iter().map(|c| c.compile(nodes)).collect(),
+            },
+        };
+        Flow {
+            flexible: self.flexible,
+            kind,
+        }
+    }
+}
 pub struct AppUi {
     id: String,
     title: String,
     schema: StateSchema,
     behavior: Option<BehaviorRef>,
     presentation: Option<Presentation>,
+    composition: Option<(Arrangement, Arrangement)>,
+    touch_pad: Option<String>,
 }
 impl AppUi {
     pub fn new(id: &str, title: &str, schema: StateSchema) -> Self {
@@ -622,7 +705,17 @@ impl AppUi {
             schema,
             behavior: None,
             presentation: None,
+            composition: None,
+            touch_pad: None,
         }
+    }
+    pub fn with_composition(mut self, wide: Arrangement, tall: Arrangement) -> Self {
+        self.composition = Some((wide, tall));
+        self
+    }
+    pub fn with_touch_pad(mut self, key: &str) -> Self {
+        self.touch_pad = Some(key.into());
+        self
     }
     pub fn with_presentation(mut self, presentation: Presentation) -> Self {
         self.presentation = Some(presentation);
@@ -638,20 +731,52 @@ impl AppUi {
     }
     pub fn build(self, heading: &str, mut children: Vec<Element>) -> Ui {
         let mut body = vec![
-            rounded_rect(BG).frame(SCREEN),
-            text(heading).position([52., 45.]).font_scale(4.),
+            rounded_rect(BG).frame(SCREEN).pin_edges(0.),
+            text(heading)
+                .position([52., 45.])
+                .font_scale(4.)
+                .key("$heading"),
         ];
         body.append(&mut children);
         let mut compiler = Compiler {
             next_node: 0,
+            named_nodes: Default::default(),
+            named_controls: Default::default(),
             selectors: vec![],
             handlers: vec![],
             navigation: vec![],
             has_behavior: self.behavior.is_some(),
         };
         let root = compiler.node(canvas(body), [SCREEN[2], SCREEN[3]]);
+        let composition = self.composition.map(|(wide, tall)| Composition {
+            wide_min_width: 1200.,
+            wide: FlowPlan {
+                insets: [48., 32., 48., 24.],
+                content: wide.compile(&compiler.named_nodes),
+            },
+            tall: FlowPlan {
+                insets: [24., 24., 24., 24.],
+                content: tall.compile(&compiler.named_nodes),
+            },
+        });
+        let presentation = if let Some(key) = self.touch_pad {
+            Some(Presentation::TouchPad {
+                control: *compiler
+                    .named_controls
+                    .get(&key)
+                    .expect("named touch pad responder"),
+            })
+        } else {
+            self.presentation
+        };
         let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
-            schema: "otrios-layout-v2".into(),
+            schema: if composition.is_some() {
+                "otrios-layout-v3"
+            } else {
+                "otrios-layout-v2"
+            }
+            .into(),
+            composition,
             templates: vec![Template {
                 id: 1,
                 name: "App canvas".into(),
@@ -677,12 +802,14 @@ impl AppUi {
             handlers: compiler.handlers,
             navigation: compiler.navigation,
             behavior: self.behavior,
-            presentation: self.presentation,
+            presentation,
         }
     }
 }
 struct Compiler {
     next_node: u16,
+    named_nodes: std::collections::BTreeMap<String, u16>,
+    named_controls: std::collections::BTreeMap<String, u8>,
     selectors: Vec<Selector>,
     handlers: Vec<Handler>,
     navigation: Vec<Navigation>,
@@ -715,6 +842,13 @@ impl Compiler {
     fn node(&mut self, n: Element, parent_reference: [f32; 2]) -> TemplateNode {
         let id = self.next_node;
         self.next_node = self.next_node.checked_add(1).expect("node budget");
+        let key = n.key.clone();
+        if let Some(key) = &key {
+            assert!(
+                self.named_nodes.insert(key.clone(), id).is_none(),
+                "duplicate component key"
+            );
+        }
         let child_reference = n.design_size.unwrap_or(n.frame_size);
         let frame = n.frame.map(|v| self.value(v));
         let shape = match n.paint {
@@ -776,6 +910,9 @@ impl Compiler {
             }
             Interaction::Event(e) => {
                 let control = u8::try_from(self.handlers.len()).expect("control budget");
+                if let Some(key) = &key {
+                    self.named_controls.insert(key.clone(), control);
+                }
                 assert_eq!(
                     e.behavior.is_some(),
                     self.has_behavior,

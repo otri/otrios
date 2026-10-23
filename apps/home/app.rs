@@ -5,7 +5,7 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
         "home",
         "Home",
         "canvas-app",
-        &["ui.rs", "sdk:canvas-authoring-v2"],
+        &["ui.rs", "sdk:canvas-authoring-v3"],
     )
 }
 pub fn ui() -> otrios_interfaces::canvas::Ui {

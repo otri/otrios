@@ -12,7 +12,7 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
             "ui.rs",
             "components.rs",
             "state/schema.rs",
-            "sdk:canvas-authoring-v2",
+            "sdk:canvas-authoring-v3",
         ],
     )
 }

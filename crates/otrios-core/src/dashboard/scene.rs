@@ -20,9 +20,10 @@ pub struct Located<'a> {
 impl Scene {
     pub fn new(root: SceneNode) -> Result<Self> {
         if !matches!(root.primitive, Primitive::Canvas { clip: true })
-            || root.frame != Rect::new(0., 0., 1280., 800.)
+            || root.frame.x != 0.
+            || root.frame.y != 0.
         {
-            return Err("Scene root must be the clipped 1280×800 canvas".into());
+            return Err("Scene root must be a clipped canvas at the origin".into());
         }
         fn validate(n: &SceneNode, depth: usize, ids: &mut BTreeSet<NodeId>) -> Result<()> {
             if depth > MAX_DEPTH || ids.len() >= MAX_NODES || !ids.insert(n.id) {

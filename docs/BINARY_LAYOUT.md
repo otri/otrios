@@ -4,6 +4,10 @@
 Each admitted Canvas UI contains a typed FlexBuffers layout: component templates,
 parameter declarations, instances, child slots, responders and expressions. New
 apps use `otrios-layout-v2`, including parent-local pins and proportional struts.
+Home, Layout Lab and Component Playground use layout v3, adding bounded screen
+compositions over the same named component instances. Wide/tall arrangement is
+local to each viewport and preserves shared state and control bindings; see
+[modular screen composition](rfcs/0012-modular-screen-composition.md).
 The interpreter also reads bounded v1 static aggregate views already produced by
 Monitoring; it supplies no global dashboard state or implicit binding defaults.
 

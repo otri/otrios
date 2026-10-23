@@ -2,6 +2,7 @@
 // Presentation owner: monotonic clock, cached GPU geometry, input forwarding.
 import init,{CanvasPresentation} from './pkg/otrios_dashboard.js';
 import {SceneRenderer} from './gpu-scene.mjs';
+import {layoutViewport,pointerPosition,semanticBounds} from './viewport.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppCatalog} from './app-catalog.mjs';
 import {connectSession,bridgeWorker} from './session.mjs';
@@ -34,6 +35,7 @@ try{
   }else revision.dataset.cacheState='unsupported';
   await init();const presenter=new CanvasPresentation();const [fontResource,catalogBytes]=await Promise.all([loadFontResource(import.meta.url),loadAppCatalog(import.meta.url)]);presenter.set_font(fontResource.bytes,fontResource.hash);
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
+  let desiredViewport=layoutViewport(innerWidth,innerHeight);
   let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
   function command(m){if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
   function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
@@ -45,14 +47,24 @@ try{
   renderer.setFont({curveWidth,curveHeight,curves:presenter.font_curves(),bandWidth,bandHeight,bands:presenter.font_bands()});revision.dataset.fontRenderer='analytic-quadratic-cached';revision.dataset.gamma=renderer.linearLight?'linear-light-srgb':'authored-srgb';revision.dataset.alpha='premultiplied';
   let hudRevision=-1,dirty=true,lastFontCache='',fontProbed=false;const fontProbeRequested=['1','direct'].includes(query.get('font-probe'));const controls=new Map();
   function resize(){try{dirty=renderer.fitCanvas(canvas)||dirty;}catch(error){fatal(error);}}
-  resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',resize);
+  resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',()=>{
+    resize();const next=layoutViewport(innerWidth,innerHeight);
+    if(next.some((n,i)=>n!==desiredViewport[i])){
+      desiredViewport=next;moves.clear();
+      for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();
+      command({type:'viewport',size:next});
+    }
+  });
   function accept(f){
     if(model?.screen!==f.screen)presenter.suspend();
+    if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
     model={...model,...f};currentScreen=f.screen;modelAuthRequired=!!f.authRequired;showAuth();
-    if(f.vertices){staticLayer.setFrame(f);
+    if(f.vertices){
+      renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
+      canvas.dataset.logicalSize=f.extent.join('x');resize();staticLayer.setFrame(f);
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
-      for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',epoch:Number(b.dataset.epoch),id:c.id}));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
-        b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');const [x,y,w,h]=c.bounds;Object.assign(b.style,{left:`${x/12.8}%`,top:`${y/8}%`,width:`${w/12.8}%`,height:`${h/8}%`});}
+      for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id}));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
+        b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');Object.assign(b.style,semanticBounds(c.bounds,f.extent));}
       canvas.setAttribute('aria-label',f.text);revision.textContent=`VIEW ${f.snapshot.slice(0,12)}`;revision.dataset.snapshot=f.snapshot;revision.dataset.layout=f.layout;
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
@@ -70,9 +82,9 @@ try{
   function leaveLogin(){command({type:'route',route:'#/home'});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes,release:initialRelease,route:location.hash});
+  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes,viewport:desiredViewport,release:initialRelease,route:location.hash});
   const pointers=new Set(),moves=new Map();
-  function pointer(e,phase){const r=canvas.getBoundingClientRect();return {type:'pointer',epoch:model?.epoch,args:[phase,e.pointerId,(e.clientX-r.left)*1280/r.width,(e.clientY-r.top)*800/r.height,performance.now()]};}
+  function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
   canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.set(e.pointerId,pointer(e,1));});
   function finish(e,phase){if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.get(e.pointerId));moves.delete(e.pointerId);}command(pointer(e,phase));pointers.delete(e.pointerId);}

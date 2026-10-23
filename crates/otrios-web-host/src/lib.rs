@@ -23,6 +23,15 @@ impl CanvasApp {
     pub fn new() -> Self {
         Self::default()
     }
+    pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<bool, String> {
+        self.inner.set_viewport([width, height])
+    }
+    pub fn viewport_size(&self) -> Vec<f32> {
+        self.inner
+            .scene()
+            .map(|s| vec![s.root().frame.width, s.root().frame.height])
+            .unwrap_or_else(|_| vec![1280., 800.])
+    }
     pub fn open(&mut self, ui: &str, state: &str) {
         self.inner.open(ui, state)
     }

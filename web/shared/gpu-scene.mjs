@@ -142,6 +142,14 @@ export class SceneRenderer {
       gl.bindBuffer(gl.ARRAY_BUFFER,layer.cached);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cached),gl.STATIC_DRAW);layer.preparedDraws=new Uint32Array(runs);layer.preparedGeneration=this.cacheGeneration;
     }}finally{if(bound){gl.disable(gl.SCISSOR_TEST);gl.bindFramebuffer(gl.FRAMEBUFFER,previousFramebuffer);gl.viewport(...previousViewport);gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.ONE,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);}}
   }
+  setLogicalSize(width,height){
+    this.assertReady();
+    if(!Number.isFinite(width)||!Number.isFinite(height)||width<1||height<1||width>8192||height>8192)throw Error('Invalid logical presentation size');
+    if(this.logicalWidth===width&&this.logicalHeight===height)return false;
+    this.logicalWidth=width;this.logicalHeight=height;this.scaleX=this.width/width;this.scaleY=this.height/height;
+    this.transform.set([2/width,0,0,0,-2/height,0,-1,1,1]);
+    this.cache.clear();this.cacheX=0;this.cacheY=0;this.cacheRow=0;this.cacheGeneration++;this.cacheStats.resets++;return true;
+  }
   resize(width,height){
     this.assertReady();const gl=this.gl,limit=gl.getParameter(gl.MAX_TEXTURE_SIZE);
     if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>limit||height>limit)throw Error('Invalid physical presentation size');

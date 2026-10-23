@@ -15,7 +15,7 @@ pub fn manifest() -> App {
             "state/schema.rs",
             "behavior/main.wat",
             "behavior/events.rs",
-            "sdk:canvas-authoring-v2",
+            "sdk:canvas-authoring-v3",
         ],
     )
 }

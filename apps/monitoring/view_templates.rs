@@ -107,6 +107,7 @@ pub fn blueprint() -> Blueprint {
         vec![paint(1, p(2), p(3)), slot()],
     );
     Blueprint {
+        composition: None,
         schema: "otrios-layout-v2".into(),
         templates: vec![root, label, panel],
         root: Instance {

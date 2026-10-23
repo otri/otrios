@@ -23,6 +23,17 @@ function device(){
   return {gl,calls};
 }
 function packet(){return {curveWidth:1,curveHeight:1,curves:new Float32Array(4),bandWidth:1,bandHeight:1,bands:new Uint8Array(4)};}
+test('portrait logical projection changes independently of the physical glyph atlas',()=>{
+  const {gl}=device(),renderer=new SceneRenderer(gl);
+  renderer.cache.set('old',{});
+  assert.equal(renderer.setLogicalSize(800,1280),true);
+  assert.equal(renderer.cache.size,0);
+  assert.equal(renderer.logicalWidth,800);assert.equal(renderer.logicalHeight,1280);
+  assert(Math.abs(renderer.transform[0]-2/800)<1e-8);
+  assert(Math.abs(renderer.transform[4]+2/1280)<1e-8);
+  assert.equal(renderer.setLogicalSize(800,1280),false);
+  assert.throws(()=>renderer.setLogicalSize(0,1280));
+});
 function frame(phase=0,color=[1,1,1,1]){
   const glyphVertices=new Float32Array(64);
   for(const [i,x,y] of [[0,10+phase,10],[1,20+phase,10],[2,10+phase,20],[3,20+phase,20]])glyphVertices.set([x,y,i%2,Math.floor(i/2),...color,8,8,0,0,0,0,7,7],i*16);
