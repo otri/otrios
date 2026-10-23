@@ -1,0 +1,36 @@
+{
+  "date_utc": "2026-10-23",
+  "source_commit": "c9a378198a35a95326781a5528feff2043cd258f",
+  "public_origin": "https://otrios.otri.ca",
+  "release": "57c7965bd941bb10243ab0d97a89e0002a38dffbcaa383fd93a0d2cfe7ed5daa",
+  "authority_status": "ok",
+  "native": {
+    "release": "57c7965bd941bb10243ab0d97a89e0002a38dffbcaa383fd93a0d2cfe7ed5daa",
+    "screen": "monitoring",
+    "renderer": "gles2-direct",
+    "output": [
+      800,
+      1280
+    ],
+    "rotation": 90,
+    "stream_ready": true,
+    "state_confirmed": true,
+    "ui_ref": "app:monitoring/ui",
+    "touch_calibrated": true,
+    "touch_devices": 1
+  },
+  "backup": {
+    "authority_release": "9b27ab25e005a16d12eb3631b0885c830bc8e230b7b2a2f214f7a0d439ef1312",
+    "bytes": 27727333,
+    "durable_state": "excluded; preserve newly confirmed edits during rollback",
+    "native_release": "9b27ab25e005a16d12eb3631b0885c830bc8e230b7b2a2f214f7a0d439ef1312",
+    "rollback_archive": "/var/backups/otrios/2026-10-23-231936-before-portrait.tar.gz",
+    "sha256": "ac70aed8963f47821d19dcb1856ff06a7b48d341e11e6b93fddfcf3049b7b24a"
+  },
+  "physical_touch_and_color_acceptance": "pending",
+  "browser_validation": "Chromium local fixture passed; live public conformance recorded in accompanying report",
+  "public_conformance": {
+    "passed": 69,
+    "login_tested": false
+  }
+}

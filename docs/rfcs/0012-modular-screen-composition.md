@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0012: Modular screen composition and local viewports
 
-Status: implementation; browser acceptance is the first validation target.
-Native ARM compilation and projection/touch tests are separate from physical
-frame acceptance, which remains pending.
+Status: implemented; browser acceptance, native ARM compilation, projection/touch
+tests and live native first presentation pass. Physical touch, panel appearance
+and device GPU performance acceptance remain pending.
 
 ## Ownership and sizing
 
