@@ -72,4 +72,3 @@ retains the already-replaced guest's memory. Public HTTPS conformance passes
 70 checks; Monitoring login and physical touch/color/performance were not tested.
 
 [Machine-readable evidence](app-behavior-updates.json)
-
