@@ -1,38 +1,51 @@
 {
-  "source_commit": "9a9016a0b94639c9879cb620052dfddf610ff810",
-  "release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
+  "source_commit": "7da5889",
+  "release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
   "validation": {
-    "rust_tests": 180,
-    "python_checks": 39,
-    "javascript_and_wasm_tests": 51,
-    "public_https_checks": 76,
+    "rust_tests": 185,
+    "python_checks": 40,
+    "javascript_and_wasm_tests": 49,
     "arm_all_features_clippy": true,
-    "arm_release_build": true
+    "arm_release_build": true,
+    "public_https_checks": 80
   },
   "browser": {
     "passed": true,
     "checks": [
-      "direct screen links and refresh",
+      "direct screen and nested links with refresh",
+      "nested screens share browser/native parent navigation",
+      "portrait child screen and parent Back",
       "Back/Forward without page/session replacement",
       "local keyboard leaves URL/history unchanged",
       "release hello uses the pinned module identity",
-      "legacy hashes and expired release bookmarks normalize",
       "Monitoring URL preserves sign-in boundary",
       "executable modules retain immutable URLs"
     ]
   },
+  "responsive": {
+    "passed": true,
+    "checks": [
+      "landscape and portrait WebGL rendering",
+      "Home three/two-column composition",
+      "same controls and behavior identities",
+      "two clients share edits and ink across orientations",
+      "resize during pointer capture and subsequent input",
+      "Layout Lab in both orientations"
+    ],
+    "native_hardware": "not tested"
+  },
   "full_upgrade": {
     "passed": true,
     "before": {
-      "path": "/layout-lab",
-      "time": 1792809605658.6,
-      "release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
+      "path": "/layout-lab/cards",
+      "time": 1792812951721.1,
+      "release": "317f0e1fb7bca453500f35882d06bdad06779c0394f729ee45dc350fbf055499",
       "length": 2
     },
     "after": {
-      "path": "/layout-lab",
-      "time": 1792809667876.8,
-      "release": "a4bfa41996402d3b1f8c9b7492d2756001f581d3af8b3606cba7fd992642a14a",
+      "path": "/layout-lab/cards",
+      "time": 1792812961534.1,
+      "release": "b59c06f3dda95d4d63b1b2cebfe860c4470f8126ba01de95df3550dd81d8eda6",
       "length": 2,
       "hash": ""
     },
@@ -52,11 +65,40 @@
       "compatible keyboard focus retained",
       "later Home navigation uses updated catalog"
     ],
-    "release": "665cc29420d5bc8dbd7e8917c5f7f0a581f9ecb9a42a51c40b0c249e4698b4f6"
+    "release": "a5c3a5cd9c0724fe8326cdd71d40bb60b46cc0f406cabfce8c90aa3a99e255c1"
+  },
+  "owner_rename": {
+    "passed": true,
+    "before": {
+      "path": "/layout-lab/cards",
+      "time": 1792813013246,
+      "release": "a5c3a5cd9c0724fe8326cdd71d40bb60b46cc0f406cabfce8c90aa3a99e255c1",
+      "length": 2,
+      "epoch": "1",
+      "state": "app:layout-lab/state",
+      "ui": "app:layout-lab/cards/ui"
+    },
+    "after": {
+      "path": "/layouts/cards",
+      "time": 1792813013246,
+      "release": "c0bb9d0d23d38072fbb3ce8436a4b89238334ab0e39388f4598abc7604c7af2c",
+      "length": 2,
+      "epoch": "1",
+      "state": "app:layout-lab/state",
+      "ui": "app:layout-lab/cards/ui"
+    },
+    "checks": [
+      "owner UI hot-swaps and launches its renamed route",
+      "owner rename rebases an active child URL",
+      "same child UI, state, epoch, page and WebSocket",
+      "rename replaces the current history entry",
+      "parent Back and refresh use the new owner path"
+    ]
   },
   "native": {
-    "pid": 12677,
-    "release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
+    "pid": 13083,
+    "release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+    "ui_ref": "app:home/ui",
     "state_ref": "app:home/state-v3",
     "stream_ready": true,
     "state_confirmed": true,
@@ -67,7 +109,8 @@
     "rotation": 90,
     "renderer": "gles2-direct"
   },
-  "observed_previous_release": "74b6226094f719496b24defbd6fbaebb148a0a5923e3d3f83aef82aa88ec5cd8",
+  "authority_app_roots": 7,
+  "observed_previous_release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
   "native_order_before": [
     1,
     4,
@@ -83,6 +126,5 @@
     5,
     3,
     6
-  ],
-  "reused_wasm_native_and_app_packages_from": "c2598ca4a76831f669ebda1fd5a23fc9e384751ddb1ddc1887fef20f13b73dd8"
+  ]
 }

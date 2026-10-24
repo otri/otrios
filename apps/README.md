@@ -34,7 +34,7 @@ an app or permissive SDK.
 
 ## Delivery and policy
 
-`canvas-pack` emits all seven packages and `apps/catalog.flex`. Catalog entries
+`canvas-pack` emits all app/screen packages and `apps/catalog.flex`. Catalog entries
 bind app identities and UI/State references to UI hashes; the UI binds optional
 behavior bytes and permitted field writes. Status/dependency strings do not grant
 capabilities. UI v2 supports typed, bounded fields and declared operations;
