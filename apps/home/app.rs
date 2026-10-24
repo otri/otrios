@@ -3,13 +3,19 @@
 mod state;
 mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
-    crate::authoring::app(
+    let mut app = crate::authoring::app(
         "home",
         "Home",
         "canvas-app",
         &["ui.rs", "state/schema.rs", "sdk:canvas-authoring-v3"],
-    )
+    );
+    app.state_ref = "app:home/state-v3".into();
+    app
 }
 pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
     ui::description()
+}
+
+pub fn screens() -> Vec<crate::authoring::AppScreen> {
+    vec![(manifest(), ui)]
 }

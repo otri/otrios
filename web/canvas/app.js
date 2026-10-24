@@ -5,17 +5,29 @@ import {SceneRenderer} from './gpu-scene.mjs';
 import {layoutViewport,pointerPosition,semanticBounds} from './viewport.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppRelease} from './app-catalog.mjs';
-import {Navigation,navigationUrl,moduleRelease} from './navigation.mjs';
 import {connectSession,bridgeWorker} from './session.mjs';
 const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls');
 const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),loginError=document.querySelector('#login-error');
-let monitoringAuth={authenticated:false},currentScreen='home',modelAuthRequired=false;
-function showAuth(){const needed=(currentScreen==='monitoring'||modelAuthRequired)&&!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
+let monitoringAuth={authenticated:false},modelAuthRequired=false;
+function showAuth(){const needed=modelAuthRequired&&!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
 const connection=document.querySelector('#connection'),dot=document.querySelector('#connection-dot'),revision=document.querySelector('#revision'),error=document.querySelector('#error');
 function fatal(e){error.hidden=false;error.textContent=String(e);connection.textContent='Unable to open this space';}
-const initialRelease=moduleRelease(import.meta.url),navigation=new Navigation(location,history);
+const initialRelease=new URL(import.meta.url).pathname.match(/^\/releases\/([a-f0-9]{64})\/web\//)?.[1]||null;
+const screenFromPath=()=>location.pathname.replace(/\/$/,'')||'/';
+const screenUrl=()=>screenFromPath()+location.search;
+let followingHistory=true,requestedScreen=screenFromPath(),routedScreen=null,routedUi=null;
+function restoreScreen(){followingHistory=true;requestedScreen=screenFromPath();return requestedScreen;}
+function reflectScreen(screen,ready,ui){
+  if(!ready||!screen)return;
+  const url=`${screen}${location.search}`;
+  if(followingHistory){
+    if(requestedScreen&&screen!==requestedScreen)return;
+    routedScreen=screen;followingHistory=false;history.replaceState(null,'',url);
+  }else if(screen!==routedScreen){routedScreen=screen;history[ui===routedUi?'replaceState':'pushState'](null,'',url);}
+  routedUi=ui;
+}
 // Start before Wasm initialization. An unopened app has no user edits to lose.
-let offerRelease=r=>{if(initialRelease&&r.id!==initialRelease)location.replace(navigationUrl(location));};
+let offerRelease=r=>{if(initialRelease&&r.id!==initialRelease)location.replace(screenUrl());};
 let session,transportBridge=null,observedRelease;
 function startDiscovery(){if(session){session.resume();return;}session=connectSession({current:initialRelease,
   onRelease:r=>{observedRelease=r;offerRelease(r);},
@@ -40,8 +52,7 @@ try{
   let model=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
   function command(m){if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}queue.push(m);pump();}
   function pump(){if(!busy&&model&&queue.length){busy=true;worker.postMessage(queue.shift());}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
-  window.addEventListener('popstate',()=>command({type:'route',route:navigation.restore()}));
-  window.addEventListener('hashchange',()=>{if(location.hash)command({type:'route',route:navigation.restore()});});
+  window.addEventListener('popstate',()=>command({type:'navigate',screen:restoreScreen()}));
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
   const query=new URL(location.href).searchParams,renderer=new SceneRenderer(gl,{linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'}),staticLayer=renderer.createLayer(),motionLayer=renderer.createLayer(),hudLayer=renderer.createLayer();
   const [curveWidth,curveHeight,bandWidth,bandHeight]=presenter.font_dimensions();
@@ -60,7 +71,7 @@ try{
     if(model?.screen!==f.screen)presenter.suspend();
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
-    model={...model,...f};revision.dataset.epoch=String(f.epoch);currentScreen=f.screen;modelAuthRequired=!!f.authRequired;showAuth();
+    model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();
     if(f.vertices){
       renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
       canvas.dataset.logicalSize=f.extent.join('x');resize();
@@ -74,19 +85,19 @@ try{
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
     revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!f.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
-    navigation.present(f.routeScreen||f.screen,!!f.ui||f.authRequired);
+    reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui);
     pump();worker.postMessage({type:'frame-ack'});
   }
   transportBridge=bridgeWorker(session,(message,transfer=[])=>worker.postMessage(message,transfer));
-  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':presenter.set_reflow(new Uint8Array(),performance.now());model={...model,reflow:false,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(navigationUrl(location));break;case 'release-id':revision.dataset.release=m.id;session.setRelease(m.id);if(m.uiOnly){revision.dataset.uiUpdates=String(Number(revision.dataset.uiUpdates||0)+1);}break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
+  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':presenter.set_reflow(new Uint8Array(),performance.now());model={...model,reflow:false,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:''};staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening app');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(screenUrl());break;case 'release-id':revision.dataset.release=m.id;session.setRelease(m.id);if(m.uiOnly){revision.dataset.uiUpdates=String(Number(revision.dataset.uiUpdates||0)+1);}break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
   worker.onerror=e=>{workerFailed=true;fatal(e.message);session.reconnect();if(observedRelease)offerRelease(observedRelease);};
-  offerRelease=r=>{if(initialRelease&&r.id!==initialRelease&&(workerFailed||!model?.ui)){location.replace(navigationUrl(location));return;}worker.postMessage({type:'release-discovered',release:r});};
+  offerRelease=r=>{if(initialRelease&&r.id!==initialRelease&&(workerFailed||!model?.ui)){location.replace(screenUrl());return;}worker.postMessage({type:'release-discovered',release:r});};
   if(observedRelease)offerRelease(observedRelease);
   form.addEventListener('submit',event=>{event.preventDefault();const data=new FormData(form);command({type:'login',username:String(data.get('username')),password:String(data.get('password'))});form.elements.password.value='';});
-  function leaveLogin(){command({type:'route',route:'/home'});}
+  function leaveLogin(){command({type:'navigate',screen:null});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,route:navigation.restore()});
+  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,screen:restoreScreen()});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});

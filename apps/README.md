@@ -99,11 +99,29 @@ button("Component Playground")
     .frame([55., 230., 550., 120.])
 ```
 
-The destination owns both UI and State refs. The compiler creates the button's
-Canvas, rounded background, text, semantic label, responder and navigation-table
-entry together. There is no manually paired `button(..., 1)` / `action: 1`.
-A custom State input will need an explicit destination-ref constructor; the
-current convenience constructor uses the app's default UI/State pair.
+Each app's `screens()` factory declares its screen documents and State bindings.
+Screen/package identity is separate from navigation names. Home declares its
+children with `Destination::app("layout-lab").route("layout-lab")`; Layout Lab
+declares `Destination::app("layout-lab/signal").route("signal")`. The second value
+is the relative name owned by that UI. Ordinary links, including Home buttons,
+omit `.route(...)` and target the same stable identity from anywhere.
+
+The packer walks named edges from the first catalog screen (Home at `/`) and
+writes resolved paths into the catalog. Browser and native use those paths.
+Renaming Home's edge to `layouts` yields `/layouts/signal` with no change to the
+child document or package identity. UI-only publication recalculates descendant
+paths, and active child mounts retain their state and local interaction.
+
+Screens may explicitly share the same State within one app and admission policy.
+`Destination::app(...)` resolves the destination's admitted State binding;
+explicit UI/State bindings remain supported by the runtime contract. Home declares
+its versioned State reference in its own manifest. Back opens the parent path,
+then the entry screen at the root.
+
+The compiler creates the button's Canvas, rounded background, text, semantic label,
+responder and navigation-table entry together. There is no manually paired
+`button(..., 1)` / `action: 1`. The shared host handles generic path/history
+plumbing; app-specific names live in the owning app's UI.
 
 Bindings and event declarations follow the same pattern:
 
@@ -197,3 +215,8 @@ Home uses the bounded [reorder presentation](../docs/rfcs/0015-editable-home-ref
 `wrap_cards(...)` reflows those components without changing their structure.
 Its local Edit/Done action controls dragging and wiggle; shared writes contain
 only a moved card's position. The renderer owns interpolation and its clock.
+
+Nested screens follow the same incremental publishing contract:
+`--app layout-lab/cards --kind ui` rebuilds only that UI document and its catalog
+hash, retaining sibling documents and the qualified host runtime. Adding/removing
+screen declarations changes the catalog contract and requires a full build.

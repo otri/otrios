@@ -2,7 +2,7 @@
 use crate::authoring::*;
 use otrios_interfaces::canvas::Ui;
 
-fn launch_card(id: &str, title: &str, detail: &str, caption: &str) -> Element {
+fn launch_card(id: &str, route: &str, title: &str, detail: &str, caption: &str) -> Element {
     let mut children = vec![
         rounded_rect(CARD).pin_edges(0.).corner_radius(20.0.into()),
         rectangle(if id == "monitoring" { MUTED } else { ACCENT }).frame([24., 24., 36., 4.]),
@@ -44,7 +44,7 @@ fn launch_card(id: &str, title: &str, detail: &str, caption: &str) -> Element {
     component([384., 232.], children)
         .key(id)
         .semantic_label(title)
-        .navigate_to(Destination::app(id))
+        .navigate_to(Destination::app(id).route(route))
 }
 
 pub fn description() -> Ui {
@@ -59,11 +59,13 @@ pub fn description() -> Ui {
         [
             (
                 "component-playground",
+                "component-playground",
                 "Component Playground",
                 "Touch + shared state",
                 "Changes follow across devices",
             ),
             (
+                "layout-lab",
                 "layout-lab",
                 "Layout Lab",
                 "Reusable components",
@@ -71,11 +73,13 @@ pub fn description() -> Ui {
             ),
             (
                 "input-lab",
+                "input-lab",
                 "Input Lab",
                 "Reusable keyboard",
                 "Typing, focus and editing",
             ),
             (
+                "animation-lab",
                 "animation-lab",
                 "Animation Lab",
                 "Local animation clock",
@@ -83,11 +87,13 @@ pub fn description() -> Ui {
             ),
             (
                 "three-d-lab",
+                "three-d-lab",
                 "3D Lab",
                 "Tetrahedra + rotation",
                 "Shared intent, local playback",
             ),
             (
+                "monitoring",
                 "monitoring",
                 "Monitoring",
                 "Live service data",
@@ -95,7 +101,7 @@ pub fn description() -> Ui {
             ),
         ]
         .into_iter()
-        .map(|(id, title, detail, caption)| launch_card(id, title, detail, caption)),
+        .map(|(id, route, title, detail, caption)| launch_card(id, route, title, detail, caption)),
     );
     children.push(
         canvas(vec![

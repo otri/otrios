@@ -49,11 +49,12 @@ can use the existing Home UI-only publisher.
 
 ## Shareable screen URLs
 
-Browser navigation uses screen paths such as `/home`, `/component-playground`,
-`/layout-lab`, `/input-lab`, `/animation-lab`, `/three-d-lab` and `/monitoring`.
-Opening or refreshing a path restores that screen; Back/Forward follows screen
-navigation. Keyboard visibility, focus, Edit mode and drag state remain local.
-Monitoring links still require sign-in before private app admission.
+Home opens at `/`. It owns the route names of its app destinations, such as
+`/component-playground`, `/layout-lab`, `/input-lab` and `/monitoring`. Layout Lab
+owns its relative child names `signal` and `cards`, giving `/layout-lab/signal`
+and `/layout-lab/cards`. Opening or refreshing a path restores that screen;
+Back/Forward follows visited paths. Keyboard visibility, focus, Edit mode and drag
+state remain local. Monitoring links still require sign-in before private admission.
 
 The server serves a non-cached entry page at each catalog app path. That page pins
 its script and stylesheet to one immutable signed release. Release discovery and
@@ -61,7 +62,22 @@ compatible app updates retain the screen URL; executable upgrades reload it.
 The opening release-control v1 descriptor still carries its immutable `web_entry`
 for host compatibility. It is an internal code reference.
 
-Old hash links normalize to the screen path. Browser navigation to an old release
-entry redirects to the current entry, including expired release bookmarks; direct
-asset fetches continue returning the exact immutable bytes. Unknown screens and
-private/API asset paths retain their normal HTTP boundaries.
+Each owning UI names a child navigation edge with
+`Destination::app("package-id").route("child-name")`. Ordinary app links omit
+`.route(...)` and refer to a destination's stable identity. The packer derives
+catalog paths by walking named edges from the first catalog screen; there is no
+hand-maintained global route map. Every screen has one route owner; duplicate
+sibling names, missing targets, cycles and unreachable screens fail packing.
+
+Native uses the identical resolved path (`--screen layout-lab/cards`, also
+accepting a leading `/`). The catalog binds each path to its UI document and
+app-owned State reference. Layout Lab's children share its existing State.
+Back first dismisses a local keyboard, then opens the parent path; a top-level
+screen returns to the catalog entry screen.
+
+Changing a route name in Home's UI rebases descendant paths without changing their
+identities, UI documents, behavior or State. A compatible UI publication updates
+the catalog; an open child retains its mount and the browser replaces its current
+history entry with the new path. Previously copied old paths return 404; this
+milestone does not retain aliases. Legacy hash paths and release-entry redirects
+are not supported. Private admission precedes screen payloads.

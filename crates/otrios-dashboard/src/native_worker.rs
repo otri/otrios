@@ -195,18 +195,10 @@ pub(super) fn options() -> Result<Options, String> {
     }
     Ok(o)
 }
-/// Legacy command-line route aliases are an entry-point convenience only.
-/// Rendering and input dispatch use the admitted app graph, never these strings.
-fn entry_app(name: &str) -> Result<&str, String> {
-    let id = match name {
-        "controls" => "component-playground",
-        "keyboard" => "input-lab",
-        "animation" => "animation-lab",
-        "3d" => "three-d-lab",
-        "layout" => "layout-lab",
-        value => value,
-    };
-    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+/// CLI entries name catalog app IDs directly.
+fn entry_app(id: &str) -> Result<&str, String> {
+    let id = id.strip_prefix('/').unwrap_or(id);
+    if !id.is_empty() && !otrios_interfaces::canvas::valid_destination(id) {
         return Err("Invalid app entry point".into());
     }
     Ok(id)
@@ -276,17 +268,18 @@ pub(super) fn state_worker(
         [1280., 800.]
     })?;
     client.admit_catalog(&catalog)?;
-    let app = entry_app(o.screen.as_deref().unwrap_or("home"))?;
     let admitted = otrios_core::canvas::decode_catalog(&catalog)?;
-    let entry = admitted
-        .apps
-        .iter()
-        .find(|e| e.app.id == app)
-        .ok_or("Entry app is not in the catalog")?;
+    let entry = if let Some(id) = &o.screen {
+        let id = entry_app(id)?;
+        admitted.apps.iter().find(|e| e.path == id)
+    } else {
+        admitted.apps.first()
+    }
+    .ok_or("Entry app is not in the catalog")?;
     if o.url.is_some() {
         client.open(&entry.app.ui_ref, &entry.app.state_ref);
     } else {
-        mount_local(&mut client, &resources, app, &entry.app.state_ref)?;
+        mount_local(&mut client, &resources, &entry.app.id, &entry.app.state_ref)?;
     }
     let font = match &o.font {
         Some(font) => font.clone(),
@@ -647,11 +640,7 @@ pub(super) fn state_worker(
                 // dashboard snapshot/layout hashes.
                 snapshot: state_ref.clone(),
                 layout: ui_ref.clone(),
-                screen: ui_ref
-                    .strip_prefix("app:")
-                    .and_then(|v| v.strip_suffix("/ui"))
-                    .unwrap_or("app")
-                    .into(),
+                screen: client.path(),
                 keyboard: client.keyboard_visible(),
                 online,
                 state_confirmed: confirmed,
@@ -969,7 +958,7 @@ mod tests {
         let number = |n| Expr::Literal(Value::Number(n));
         let mut entries = Vec::new();
         let mut motion_ui = Vec::new();
-        for (id, motion) in [("home", false), ("three-d-lab", true)] {
+        for (id, motion) in [("launcher", false), ("three-d-lab", true)] {
             let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
                 composition: None,
                 schema: "otrios-layout-v2".into(),
@@ -1061,6 +1050,7 @@ mod tests {
             fs::create_dir_all(&folder).unwrap();
             fs::write(folder.join("ui.flex"), &ui).unwrap();
             entries.push(CatalogEntry {
+                path: id.into(),
                 app: App {
                     id: id.into(),
                     title: id.into(),
@@ -1092,13 +1082,60 @@ mod tests {
         }
     }
     #[test]
+    fn native_nested_entry_and_back_follow_the_app_owned_path() {
+        use otrios_core::canvas::{decode_catalog, decode_ui, encode_catalog, encode_ui, hash};
+        let fixture = fixture();
+        let mut catalog =
+            decode_catalog(&fs::read(fixture.root.join("catalog.flex")).unwrap()).unwrap();
+        let mut child = catalog.apps[0].clone();
+        let mut ui =
+            decode_ui(&fs::read(fixture.root.join("launcher/package/ui.flex")).unwrap()).unwrap();
+        child.app.id = "launcher/detail".into();
+        child.path = "launcher/details".into();
+        child.app.ui_ref = "app:launcher/detail/ui".into();
+        ui.ui_ref = child.app.ui_ref.clone();
+        let bytes = encode_ui(&ui).unwrap();
+        child.ui_hash = hash(&bytes);
+        catalog.apps.push(child);
+        let folder = fixture.root.join("launcher/detail/package");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("ui.flex"), bytes).unwrap();
+        fs::write(
+            fixture.root.join("catalog.flex"),
+            encode_catalog(&catalog).unwrap(),
+        )
+        .unwrap();
+        let (tx, rx) = mpsc::sync_channel(8);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("launcher/details".into()),
+            ..Options::default()
+        };
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(first.screen, "launcher/details");
+        tx.send(Input::Back).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let frame = fr.recv_timeout(Duration::from_secs(2)).unwrap();
+            if frame.screen == "launcher" {
+                assert_eq!(frame.state_ref, first.state_ref);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+        }
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
+    #[test]
     fn captured_release_stays_local_and_slow_frame_consumer_cannot_block_navigation() {
         use otrios_interfaces::scene::PointerPhase;
         let fixture = fixture();
         let gate = Arc::new((std::sync::Mutex::new(true), std::sync::Condvar::new()));
         let options = Options {
             apps: Some(fixture.root.to_string_lossy().into()),
-            screen: Some("3d".into()),
+            screen: Some("three-d-lab".into()),
             state_gate: Some(gate),
             ..Options::default()
         };
@@ -1140,7 +1177,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let next = fr.recv_timeout(Duration::from_secs(2)).unwrap();
-            if next.ui_ref == "app:home/ui" {
+            if next.ui_ref == "app:launcher/ui" {
                 assert!(next.serial > first.serial);
                 break;
             }
@@ -1301,7 +1338,7 @@ mod tests {
         });
         let options = Options {
             apps: Some(fixture.root.to_string_lossy().into()),
-            screen: Some("3d".into()),
+            screen: Some("three-d-lab".into()),
             url: Some(format!("ws://{address}/stream")),
             ..Options::default()
         };
@@ -1408,9 +1445,9 @@ mod tests {
         server.join().unwrap();
     }
     #[test]
-    fn legacy_entry_aliases_do_not_drive_rendering_and_urls_keep_app_scope() {
-        assert_eq!(entry_app("3d").unwrap(), "three-d-lab");
-        assert_eq!(entry_app("controls").unwrap(), "component-playground");
+    fn entry_ids_remain_catalog_owned_and_urls_keep_app_scope() {
+        assert_eq!(entry_app("three-d-lab").unwrap(), "three-d-lab");
+        assert!(entry_app("3d").is_err());
         assert_eq!(entry_app("input-lab").unwrap(), "input-lab");
         assert!(entry_app("../monitoring").is_err());
         for input in [

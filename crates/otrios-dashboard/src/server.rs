@@ -9,7 +9,7 @@ use axum::{
         ws::{Message, WebSocket},
     },
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -350,10 +350,7 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
     };
     if let Some(path) = route {
         let screen = path.trim_end_matches('/');
-        if screen.is_empty()
-            || screen.len() > 64
-            || !screen.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
-        {
+        if !otrios_interfaces::canvas::valid_destination(screen) {
             return failure(StatusCode::NOT_FOUND, "Not found");
         }
         let bytes = match tokio::fs::read(catalog).await {
@@ -364,7 +361,7 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             Ok(catalog) => catalog,
             Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
         };
-        if !catalog.apps.iter().any(|e| e.app.id == screen) {
+        if !catalog.apps.iter().any(|e| e.path == screen) {
             return failure(StatusCode::NOT_FOUND, "Not found");
         }
     }
@@ -444,8 +441,6 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/ui-update.mjs"
         | "viewport.mjs"
         | "web/viewport.mjs"
-        | "navigation.mjs"
-        | "web/navigation.mjs"
         | "gpu-scene.mjs"
         | "web/gpu-scene.mjs"
         | "slug-shaders.mjs"
@@ -510,7 +505,6 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                         | "Slug-LICENSE.txt"
                         | "ui-update.mjs"
                         | "viewport.mjs"
-                        | "navigation.mjs"
                         | "gpu-scene.mjs"
                         | "slug-shaders.mjs"
                         | "font-resource.mjs"
@@ -530,25 +524,9 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
 async fn release_asset(
     State(app): State<Arc<App>>,
     RoutePath((id, path)): RoutePath<(String, String)>,
-    headers: HeaderMap,
-    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
 ) -> Response {
     if !valid_id(&id) {
         return failure(StatusCode::NOT_FOUND, "Not found");
-    }
-    // Old bookmarks and older clients' upgrade navigation enter the current shell.
-    // Asset fetches still receive the exact immutable, hash-bound HTML bytes.
-    if path == "web/index.html"
-        && headers
-            .get("sec-fetch-dest")
-            .is_some_and(|v| v == "document")
-    {
-        let target = uri.query().map_or_else(|| "/".into(), |q| format!("/?{q}"));
-        return (
-            [(header::CACHE_CONTROL, "no-store")],
-            Redirect::temporary(&target),
-        )
-            .into_response();
     }
     match (&app.releases, asset_type(&path)) {
         (Some(root), Some(kind)) => serve_file(root.join(id).join(path), kind, true).await,

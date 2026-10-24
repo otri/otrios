@@ -162,6 +162,11 @@ fn activate_snapshot(
         &encode_catalog(&Catalog {
             format: "otrios-app-catalog-v1".into(),
             apps: vec![CatalogEntry {
+                path: ui
+                    .ui_ref
+                    .trim_start_matches("app:")
+                    .trim_end_matches("/ui")
+                    .into(),
                 app: App {
                     id: id.into(),
                     title: ui.title.clone(),
@@ -423,14 +428,11 @@ fn declarative_navigation_and_bindings_survive_reordering_without_manual_ids() {
             .build("Apps", children);
         assert_eq!(
             navigation(&ui, "Playground"),
-            (
-                "app:component-playground/ui".into(),
-                "app:component-playground/state".into()
-            )
+            ("app:component-playground/ui".into(), String::new())
         );
         assert_eq!(
             navigation(&ui, "Layout"),
-            ("app:layout-lab/ui".into(), "app:layout-lab/state".into())
+            ("app:layout-lab/ui".into(), String::new())
         );
         let mut c = Client::default();
         activate(&mut c, ui, "launcher", vec![]);
@@ -741,6 +743,7 @@ fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
             &encode_catalog(&Catalog {
                 format: "otrios-app-catalog-v1".into(),
                 apps: vec![CatalogEntry {
+                    path: "home".into(),
                     app: App {
                         id: "home".into(),
                         title: "Home".into(),
@@ -1091,6 +1094,11 @@ fn code_reload_waits_for_intents_but_not_an_idle_mount_handshake() {
             &encode_catalog(&Catalog {
                 format: "otrios-app-catalog-v1".into(),
                 apps: vec![CatalogEntry {
+                    path: ui
+                        .ui_ref
+                        .trim_start_matches("app:")
+                        .trim_end_matches("/ui")
+                        .into(),
                     app: App {
                         id: "component-playground".into(),
                         title: ui.title.clone(),
@@ -1256,6 +1264,11 @@ fn admission_rejects_gesture_arity_and_numeric_operations_on_text() {
                 &encode_catalog(&Catalog {
                     format: "otrios-app-catalog-v1".into(),
                     apps: vec![CatalogEntry {
+                        path: ui
+                            .ui_ref
+                            .trim_start_matches("app:")
+                            .trim_end_matches("/ui")
+                            .into(),
                         app: input_lab::manifest(),
                         ui_hash: hash(&bytes),
                         private: false,
@@ -1362,6 +1375,11 @@ fn old_private_lease_revocation_preserves_newer_public_mount() {
     ]
     .into_iter()
     .map(|(ui, state, private)| CatalogEntry {
+        path: ui
+            .ui_ref
+            .trim_start_matches("app:")
+            .trim_end_matches("/ui")
+            .into(),
         app: App {
             id: ui
                 .ui_ref
@@ -2046,6 +2064,11 @@ fn retired_snapshot_override_cannot_create_a_second_source_of_app_state() {
 
 fn ui_entry(ui: &Ui, state: &str) -> CatalogEntry {
     CatalogEntry {
+        path: ui
+            .ui_ref
+            .trim_start_matches("app:")
+            .trim_end_matches("/ui")
+            .into(),
         app: App {
             id: ui
                 .ui_ref
@@ -2661,4 +2684,217 @@ fn wrap_requires_its_layout_version_and_nonfinite_touch_cancels_order_capture() 
         .unwrap();
     assert!(!client.input_busy());
     assert_eq!(home_values(&client), initial);
+}
+
+#[test]
+fn entry_and_app_links_resolve_app_owned_catalog_state_references() {
+    let ui = authoring::AppUi::new(
+        "launcher",
+        "Launcher",
+        authoring::schema("launcher-v1", &[]),
+    )
+    .build(
+        "Launcher",
+        vec![authoring::button("Open app").navigate_to(authoring::Destination::app("example-app"))],
+    );
+    let target = authoring::AppUi::new(
+        "example-app",
+        "Example",
+        authoring::schema("example-v7", &[]),
+    )
+    .build("Example", vec![]);
+    let bytes = encode_ui(&ui).unwrap();
+    let target_bytes = encode_ui(&target).unwrap();
+    let entry = |id: &str, ui: &Ui, bytes: &[u8], state: &str| CatalogEntry {
+        path: ui
+            .ui_ref
+            .trim_start_matches("app:")
+            .trim_end_matches("/ui")
+            .into(),
+        app: App {
+            id: id.into(),
+            title: ui.title.clone(),
+            ui_ref: ui.ui_ref.clone(),
+            state_ref: state.into(),
+            status: "app".into(),
+            dependencies: vec![],
+        },
+        ui_hash: hash(bytes),
+        private: false,
+    };
+    let mut client = Client::default();
+    client
+        .admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![
+                    entry("launcher", &ui, &bytes, "launcher:owned-v4"),
+                    entry("example-app", &target, &target_bytes, "example:owned-v7"),
+                ],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client.open(&ui.ui_ref, "launcher:owned-v4");
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui: bytes.clone(),
+                ui_hash: hash(&bytes),
+                code: vec![],
+                state: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client.outgoing().unwrap();
+    let mut authority = Document::new(ui.state_schema.clone(), "launcher:owned-v4").unwrap();
+    pump(&mut client, &mut authority, &mut Session::default());
+    let button = client.scene().unwrap().controls()[0].node.id;
+    client.activate(client.epoch(), button).unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::Mount {ui_ref,state_ref,..}if ui_ref=="app:example-app/ui"&&state_ref=="example:owned-v7")
+    );
+    client.back().unwrap();
+    // Cancel the pending mount before the catalog's entry is opened.
+    let mut found = false;
+    while let Some(packet) = client.outgoing().unwrap() {
+        if let ClientMessage::Mount {
+            ui_ref, state_ref, ..
+        } = decode_client(&packet).unwrap()
+        {
+            assert_eq!(ui_ref, "app:launcher/ui");
+            assert_eq!(state_ref, "launcher:owned-v4");
+            found = true;
+            break;
+        }
+    }
+    assert!(found);
+}
+
+#[test]
+fn app_owned_screen_paths_are_canonical_and_parent_back_uses_catalog_bindings() {
+    let sources = [
+        home::screens,
+        playground::screens,
+        layout::screens,
+        input_lab::screens,
+        animation_lab::screens,
+        three_d_lab::screens,
+        monitoring_app::screens,
+    ];
+    let entries: Vec<_> = sources
+        .into_iter()
+        .flat_map(|screens| screens())
+        .map(|(app, factory)| {
+            assert!(valid_destination(&app.id));
+            let code = if app.id == "component-playground" {
+                code()
+            } else {
+                vec![]
+            };
+            let ui = factory(&code);
+            assert_eq!(ui.ui_ref, app.ui_ref);
+            CatalogEntry {
+                path: ui
+                    .ui_ref
+                    .trim_start_matches("app:")
+                    .trim_end_matches("/ui")
+                    .into(),
+                app,
+                ui_hash: hash(&encode_ui(&ui).unwrap()),
+                private: false,
+            }
+        })
+        .collect();
+    let mut client = Client::default();
+    client
+        .admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: entries,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client
+        .mount_local(
+            &encode_ui(&layout::screens()[2].1(&[])).unwrap(),
+            "app:layout-lab/state",
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(client.path(), "layout-lab/cards");
+    client.navigate("layout-lab/cards").unwrap();
+    while let Some(packet) = client.outgoing().unwrap() {
+        assert!(
+            !matches!(decode_client(&packet).unwrap(), ClientMessage::Mount { .. }),
+            "same destination is idempotent"
+        );
+    }
+    client.back().unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::Mount {ui_ref, state_ref,..} if ui_ref == "app:layout-lab/ui" && state_ref == "app:layout-lab/state")
+    );
+    for bad in [
+        "layout-lab//cards",
+        "layout-lab/../cards",
+        "layout-lab/Cards",
+        "layout-lab/cards/",
+        "layout-lab/missing",
+    ] {
+        assert!(client.navigate(bad).is_err());
+    }
+}
+
+#[test]
+fn route_rebase_retains_active_child_state_scene_and_epoch() {
+    let child = layout::screens()[2].1(&[]);
+    let mut root = ui_entry(&home::ui(&[]), "home");
+    root.path = "".into();
+    let mut parent = ui_entry(&layout::ui(&[]), "app:layout-lab/state");
+    parent.path = "layout-lab".into();
+    let entry = ui_entry(&child, "app:layout-lab/state");
+    let mut catalog = Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![root, parent, entry],
+    };
+    let mut client = Client::default();
+    client
+        .admit_catalog(&encode_catalog(&catalog).unwrap())
+        .unwrap();
+    client
+        .mount_local(
+            &encode_ui(&child).unwrap(),
+            "app:layout-lab/state",
+            &[],
+            &[],
+        )
+        .unwrap();
+    let scene = client.scene().unwrap();
+    let epoch = client.epoch();
+    catalog.apps[1].path = "layouts".into();
+    catalog.apps[2].path = "layouts/cards".into();
+    assert!(
+        !client
+            .update_catalog(&encode_catalog(&catalog).unwrap())
+            .unwrap()
+    );
+    assert_eq!(client.path(), "layouts/cards");
+    assert_eq!(client.screen(), "layout-lab/cards");
+    assert_eq!(client.epoch(), epoch);
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    client.back().unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+      ClientMessage::Mount {ui_ref, state_ref,..} if ui_ref=="app:layout-lab/ui" && state_ref=="app:layout-lab/state")
+    );
 }

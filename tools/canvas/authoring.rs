@@ -189,19 +189,24 @@ fn no() -> Expr {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Destination {
+    route: Option<String>,
     ui_ref: String,
     state_ref: String,
 }
 impl Destination {
     pub fn app(id: &str) -> Self {
         Self {
+            route: None,
             ui_ref: format!("app:{id}/ui"),
-            state_ref: if id == "home" {
-                "app:home/state-v3".into()
-            } else {
-                format!("app:{id}/state")
-            },
+            state_ref: String::new(),
         }
+    }
+}
+impl Destination {
+    /// Give this destination a child name in the owning UI's navigation hierarchy.
+    pub fn route(mut self, name: &str) -> Self {
+        self.route = Some(name.into());
+        self
     }
 }
 /// A versioned guest ABI event, not a node ID, action index or state field ID.
@@ -628,10 +633,12 @@ pub fn component(design_size: [f32; 2], children: Vec<Element>) -> Element {
 }
 
 /// Screen composition names existing nodes; it never rebuilds/reorders their tree.
+#[derive(Clone)]
 pub struct Arrangement {
     flexible: [bool; 2],
     kind: ArrangementKind,
 }
+#[derive(Clone)]
 enum ArrangementKind {
     Item(String, [f32; 2], [f32; 2]),
     Group(u8, f32, Alignment, Vec<Arrangement>),
@@ -965,16 +972,15 @@ impl Compiler {
         };
         let responder = n.interaction.map(|i| match i {
             Interaction::Navigate(d) => {
-                let action = if let Some(n) = self
-                    .navigation
-                    .iter()
-                    .find(|n| n.ui_ref == d.ui_ref && n.state_ref == d.state_ref)
-                {
+                let action = if let Some(n) = self.navigation.iter().find(|n| {
+                    n.ui_ref == d.ui_ref && n.state_ref == d.state_ref && n.route == d.route
+                }) {
                     n.action
                 } else {
                     let action = u8::try_from(self.navigation.len()).expect("navigation budget");
                     self.navigation.push(Navigation {
                         action,
+                        route: d.route,
                         ui_ref: d.ui_ref,
                         state_ref: d.state_ref,
                     });
@@ -1038,12 +1044,11 @@ pub fn app(id: &str, title: &str, status: &str, deps: &[&str]) -> App {
         id: id.into(),
         title: title.into(),
         ui_ref: format!("app:{id}/ui"),
-        state_ref: if id == "home" {
-            "app:home/state-v3".into()
-        } else {
-            format!("app:{id}/state")
-        },
+        state_ref: format!("app:{id}/state"),
         status: status.into(),
         dependencies: deps.iter().map(|v| (*v).into()).collect(),
     }
 }
+
+/// Build-time screen declaration; serialized destinations remain ordinary catalog entries.
+pub type AppScreen = (otrios_interfaces::canvas::App, fn(&[u8]) -> Ui);

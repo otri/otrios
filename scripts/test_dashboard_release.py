@@ -20,7 +20,7 @@ class SignedReleases(unittest.TestCase):
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
         (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
-        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','navigation.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
         (self.root/'apps').mkdir();(self.root/'apps/catalog.flex').write_bytes(b'test-catalog')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
@@ -65,6 +65,14 @@ class SignedReleases(unittest.TestCase):
             dest=folder/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/next['id']/name,dest)
         self.assertEqual(activation.complete_ui(stage,self.out,self.public,OPENSSL,json.dumps(next).encode(),base['id']),next['id'])
         self.assertEqual((folder/'authority/apps/home/behavior.wasm').read_bytes(),b'new-guest')
+    def test_nested_screen_packages_are_signed_and_transfer_as_ui_data(self):
+        package=self.root/'apps/layout-lab/cards/package';package.mkdir(parents=True)
+        (package/'app.flex').write_bytes(b'manifest');(package/'ui.flex').write_bytes(b'old-ui')
+        base=self.publish();(package/'ui.flex').write_bytes(b'new-ui');next=self.publish()
+        before=json.loads((self.out/base['id']/'manifest.json').read_bytes());after=json.loads((self.out/next['id']/'manifest.json').read_bytes())
+        self.assertIn('authority/apps/layout-lab/cards/ui.flex',after['authority'])
+        self.assertTrue(agent.ui_only_change(before,after))
+        self.assertEqual(activation.verify(self.out,self.public,OPENSSL,json.dumps(next).encode()),next['id'])
     def test_authority_app_payloads_are_signed_but_never_replicated_publicly(self):
         package=self.root/'apps/monitoring/package';package.mkdir(parents=True)
         (package/'app.flex').write_bytes(b'private-app-manifest')

@@ -30,3 +30,11 @@ test('guest replacement requires an advertised ABI and cannot replace host code 
  const legacy=structuredClone(a);delete legacy.behavior_abi;assert(!appOnlyChange(legacy,b));
  b.assets['web/app.js']=asset(8);assert(!appOnlyChange(a,b));
 });
+
+test('nested screen UI changes retain the executable closure',()=>{
+ const a=baseline();a.authority['authority/apps/layout-lab/cards/ui.flex']=asset(1);
+ const b=structuredClone(a);b.authority['authority/apps/layout-lab/cards/ui.flex']=asset(2);
+ assert(uiOnlyChange(a,b));
+ b.authority['authority/apps/layout-lab/../ui.flex']=asset(3);
+ assert(!uiOnlyChange(a,b));
+});

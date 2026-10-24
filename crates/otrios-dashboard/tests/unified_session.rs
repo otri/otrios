@@ -30,6 +30,13 @@ fn publish(root: &Path, nonce: u8) -> serde_json::Value {
         r#"<link rel="stylesheet" href="./style.css"><script type="module" src="./app.js"></script><p>signed-store fixture {nonce}</p>"#
     );
     let (catalog, _) = common::fixture(&root.join("catalog-source"));
+    let mut decoded = otrios_core::canvas::decode_catalog(&catalog).unwrap();
+    let mut child = decoded.apps[0].clone();
+    child.app.id = "demo/child".into();
+    child.path = "demo/child".into();
+    child.app.ui_ref = "app:demo/child/ui".into();
+    decoded.apps.push(child);
+    let catalog = otrios_core::canvas::encode_catalog(&decoded).unwrap();
     let asset = |bytes: &[u8]| serde_json::json!({"bytes":bytes.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(bytes))});
     let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v4","assets":{"web/index.html":asset(content.as_bytes()),"apps/catalog.flex":asset(&catalog)}})).unwrap();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
@@ -186,7 +193,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
         "href=\"/releases/{}/web/style.css\"",
         a["id"].as_str().unwrap()
     )));
-    for screen in ["demo", "monitoring"] {
+    for screen in ["demo", "demo/child", "monitoring"] {
         assert_eq!(
             request(&rig.public, "GET", &format!("/{screen}"), &[], &[]),
             (200, entry.clone())
@@ -217,24 +224,6 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
             .contains("src=\"./app.js\"")
     );
     assert!(headers.contains("immutable"));
-    let (status, _, headers) = common::response(
-        &rig.public,
-        "GET",
-        &format!("/releases/{}/web/index.html?font-probe=1", "0".repeat(64)),
-        &[("Sec-Fetch-Dest", "document")],
-        &[],
-    );
-    assert_eq!(status, 307);
-    assert!(
-        headers
-            .to_ascii_lowercase()
-            .contains("location: /?font-probe=1")
-    );
-    assert!(
-        headers
-            .to_ascii_lowercase()
-            .contains("cache-control: no-store")
-    );
     assert_eq!(
         request(&rig.public, "GET", "/admin/activate", &[], &[]).0,
         404

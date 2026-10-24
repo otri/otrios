@@ -22,3 +22,7 @@ pub fn manifest() -> App {
 pub fn ui(code: &[u8]) -> Ui {
     ui::description(state::schema(), code)
 }
+
+pub fn screens() -> Vec<crate::authoring::AppScreen> {
+    vec![(manifest(), ui)]
+}

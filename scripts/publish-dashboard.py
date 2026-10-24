@@ -21,7 +21,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
         names=['index.html','style.css','app.js','state-worker.js','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
-        names += ['app-catalog.mjs','gpu-scene.mjs','navigation.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
+        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
         for name in names:
             source=web/name
             if not source.exists() and (name.endswith('.mjs') or name.endswith('.js') or name=='Slug-LICENSE.txt'):source=web.parent/'shared'/name
@@ -37,18 +37,19 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
         assets['apps/catalog.flex']={'bytes':len(data),'sha256':digest(data)}
         # Private app bytes are signed with this immutable release but never
         # exposed by the public HTTP allowlist.
-        for folder in sorted(catalog.parent.iterdir()):
-            package=folder/'package'
+        for package in sorted(catalog.parent.glob('**/package')):
+            folder=package.parent
+            relative=folder.relative_to(catalog.parent)
             if folder.is_symlink() or package.is_symlink():raise ValueError('App package directory symlink rejected')
             if not package.is_dir() or not (package/'ui.flex').is_file():continue
-            if not folder.name or any(c not in 'abcdefghijklmnopqrstuvwxyz-' for c in folder.name):raise ValueError('Invalid app package name')
+            if any(not part or any(c not in 'abcdefghijklmnopqrstuvwxyz-' for c in part) for part in relative.parts):raise ValueError('Invalid app package name')
             for name in ['app.flex','ui.flex','behavior.wasm']:
                 source=package/name
                 if not source.exists():continue
                 if source.is_symlink() or not source.resolve().is_relative_to(catalog.parent.resolve()):raise ValueError('App package symlink rejected')
                 data=source.read_bytes()
                 if not 0<len(data)<=512*1024:raise ValueError('App package asset budget exceeded')
-                path='authority/apps/'+folder.name+'/'+name;dest=stage/path;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
+                path='authority/apps/'+relative.as_posix()+'/'+name;dest=stage/path;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
                 authority[path]={'bytes':len(data),'sha256':digest(data)}
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}

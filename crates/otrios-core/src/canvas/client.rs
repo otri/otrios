@@ -212,18 +212,25 @@ impl Client {
         let mut refs = std::collections::BTreeSet::new();
         for e in &c.apps {
             if e.ui_hash.len() != 32
-                || e.app.id.is_empty()
-                || e.app.id.len() > 64
-                || !e
-                    .app
-                    .id
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b == b'-')
+                || !valid_destination(&e.app.id)
                 || e.app.ui_ref != format!("app:{}/ui", e.app.id)
                 || e.app.state_ref.len() > 128
                 || !refs.insert(e.app.ui_ref.clone())
             {
                 return Err("Invalid or duplicate catalog entry".into());
+            }
+        }
+        let mut paths = std::collections::BTreeSet::new();
+        for entry in &c.apps {
+            if (!entry.path.is_empty() && !valid_destination(&entry.path))
+                || !paths.insert(&entry.path)
+            {
+                return Err("Invalid or duplicate destination path".into());
+            }
+            if let Some((parent, _)) = entry.path.rsplit_once('/')
+                && !c.apps.iter().any(|e| e.path == parent)
+            {
+                return Err("Destination parent is not admitted".into());
             }
         }
         self.catalog_hash = hash(bytes);
@@ -324,6 +331,17 @@ impl Client {
         self.requested
             .as_ref()
             .map_or_else(String::new, |r| r.pair.0.clone())
+    }
+    pub fn pending_path(&self) -> String {
+        self.catalog
+            .as_ref()
+            .and_then(|c| {
+                c.apps
+                    .iter()
+                    .find(|e| e.app.ui_ref == self.pending_ui_ref())
+            })
+            .map(|e| e.path.clone())
+            .unwrap_or_default()
     }
     pub fn pending_state_ref(&self) -> String {
         self.requested
@@ -520,18 +538,56 @@ impl Client {
             r.sent = false
         }
     }
+    /// The same catalog destination is used by browser URLs and native entry points.
+    pub fn screen(&self) -> String {
+        self.catalog
+            .as_ref()
+            .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == self.ui_ref()))
+            .map(|e| e.app.id.clone())
+            .unwrap_or_default()
+    }
+    pub fn path(&self) -> String {
+        self.catalog
+            .as_ref()
+            .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == self.ui_ref()))
+            .map(|e| e.path.clone())
+            .unwrap_or_default()
+    }
+    pub fn navigate(&mut self, path: &str) -> Result<()> {
+        let path = path.strip_prefix('/').unwrap_or(path);
+        let entry = self
+            .catalog
+            .as_ref()
+            .and_then(|c| {
+                if path.is_empty() {
+                    c.apps.first()
+                } else {
+                    c.apps.iter().find(|e| e.path == path)
+                }
+            })
+            .ok_or("Unknown admitted destination")?
+            .app
+            .clone();
+        if self.ui_ref() == entry.ui_ref
+            && self.state_ref() == entry.state_ref
+            && self.navigation.is_none()
+            && self.requested.is_none()
+            && !self.auth_required
+        {
+            return Ok(());
+        }
+        self.open(&entry.ui_ref, &entry.state_ref);
+        Ok(())
+    }
+    fn open_entry(&mut self) -> bool {
+        self.navigate("").is_ok()
+    }
     pub fn clear_private(&mut self) {
         if self.private() {
             self.active = None;
         }
         self.auth_required = false;
-        let state = self
-            .catalog
-            .as_ref()
-            .and_then(|c| c.apps.iter().find(|e| e.app.id == "home"))
-            .map(|e| e.app.state_ref.clone())
-            .unwrap_or_else(|| "app:home/state-v3".into());
-        self.open("app:home/ui", &state);
+        self.open_entry();
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
         if self.catalog.is_none() {
@@ -1178,7 +1234,17 @@ impl Client {
                     .and_then(|m| m.ui.navigation.iter().find(|n| n.action == id))
                     .cloned()
                 {
-                    self.open(&n.ui_ref, &n.state_ref);
+                    if n.state_ref.is_empty() {
+                        let destination = self
+                            .catalog
+                            .as_ref()
+                            .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == n.ui_ref))
+                            .ok_or("App destination is not admitted")?
+                            .clone();
+                        self.navigate(&destination.path)?;
+                    } else {
+                        self.open(&n.ui_ref, &n.state_ref);
+                    }
                     return Ok(true);
                 }
             }
@@ -1271,14 +1337,11 @@ impl Client {
             m.invalidate();
             return Ok(true);
         }
-        let state = self
-            .catalog
-            .as_ref()
-            .and_then(|c| c.apps.iter().find(|e| e.app.id == "home"))
-            .map(|e| e.app.state_ref.clone())
-            .unwrap_or_else(|| "app:home/state-v3".into());
-        self.open("app:home/ui", &state);
-        Ok(true)
+        if let Some((parent, _)) = self.path().rsplit_once('/') {
+            self.navigate(parent)?;
+            return Ok(true);
+        }
+        Ok(self.open_entry())
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
         self.wire_clock = self.wire_clock.max(now);
