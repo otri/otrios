@@ -6,7 +6,8 @@
     local.get $event i32.const 1 i32.eq
     if (result i64)
       ;; linear-value-begin
-      local.get $a
+      ;; Quantize the linear control locally; the host and UI layout are unchanged.
+      local.get $a i32.const 100 i32.div_u i32.const 100 i32.mul
       ;; linear-value-end
       i64.extend_i32_u i64.const 1125899906842624 i64.or
     else

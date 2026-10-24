@@ -254,9 +254,9 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
         .unwrap()
         .node
         .id;
-    assert_eq!(a.control_value(slider).unwrap(), Some(87.));
+    assert_eq!(a.control_value(slider).unwrap(), Some(80.));
     pump(&mut a, &mut da, &mut sa);
-    assert_eq!(a.value(1).unwrap(), 870);
+    assert_eq!(a.value(1).unwrap(), 800);
     assert_eq!(b.value(1).unwrap(), 420);
     let s = a.scene().unwrap();
     let controls = s.controls();
@@ -269,12 +269,12 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
                 .is_some_and(|s| s.label == "Linear slider")
         })
         .unwrap();
-    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,870.*0.281+1.);
+    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,800.*0.281+1.);
     fn has_text(n: &otrios_interfaces::scene::SceneNode, value: &str) -> bool {
         matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value:v,..} if v==value)
             || n.children.iter().any(|c| has_text(c, value))
     }
-    assert!(has_text(s.root(), "87%"));
+    assert!(has_text(s.root(), "80%"));
     let old = a.epoch();
     activate(&mut a, layout::ui(&[]), "layout:state", vec![]);
     assert!(!a.event(old, 1, 0, 0).unwrap());
@@ -284,7 +284,7 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
     activate(&mut a, ui_for_cache(), "room:a", vec![]);
     assert_eq!(a.value(1).unwrap(), 420); // Fresh RAM replica, not a persisted local checkpoint.
     pump(&mut a, &mut da, &mut Session::default());
-    assert_eq!(a.value(1).unwrap(), 870);
+    assert_eq!(a.value(1).unwrap(), 800);
 }
 fn ui_for_cache() -> Ui {
     playground::ui(&code())
@@ -1143,7 +1143,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
     let mut session = Session::default();
     pump(&mut client, &mut authority, &mut session);
     edit(&mut client, "Linear slider", 870, 0);
-    assert_eq!(client.value(1).unwrap(), 870);
+    assert_eq!(client.value(1).unwrap(), 800);
     assert_eq!(authority.value(1).unwrap(), 420);
     client.reset_connection();
     let ClientMessage::Mount { epoch, .. } =
@@ -1168,11 +1168,11 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
         .unwrap();
     assert_eq!(
         client.value(1).unwrap(),
-        870,
+        800,
         "Unsent preview vanished during reconnect activation"
     );
     pump(&mut client, &mut authority, &mut Session::default());
-    assert_eq!(authority.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 800);
 }
 
 #[test]
@@ -1319,7 +1319,7 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
     assert_eq!(epoch, old_epoch);
     authority.receive(&mut session, &sync).unwrap();
     pump(&mut client, &mut authority, &mut session);
-    assert_eq!(authority.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 800);
     client.open(&client.ui_ref(), "decisions");
     let ClientMessage::Mount { epoch: request, .. } =
         decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
@@ -1761,7 +1761,7 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
     };
     edit(&mut c, "Linear slider", 870, 0);
     c.tick(5000, 0).unwrap();
-    assert_eq!(c.value(1).unwrap(), 870);
+    assert_eq!(c.value(1).unwrap(), 800);
     assert!(!c.confirmed());
     assert_eq!(authority.value(1).unwrap(), 420);
     let (mut next, _) = authority.open_session(&writer, resume).unwrap();
@@ -1778,9 +1778,9 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(c.value(1).unwrap(), 870);
+    assert_eq!(c.value(1).unwrap(), 800);
     pump(&mut c, &mut authority, &mut next);
-    assert_eq!(authority.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 800);
 }
 
 // Deliberately do not advance a host clock while delivering messages. These
@@ -2010,8 +2010,8 @@ fn admitted_ui_coverage_hides_unused_values_and_other_receipts_but_confirms_own_
     deliver_state(&mut c, &authority, &mut session);
     drain_sync(&mut c, &mut authority, &mut session);
     assert!(c.confirmed());
-    assert_eq!(authority.value(1).unwrap(), 860);
-    assert_eq!(c.value(1).unwrap(), 860);
+    assert_eq!(authority.value(1).unwrap(), 800);
+    assert_eq!(c.value(1).unwrap(), 800);
     assert!(c.typed_value(6).is_err());
     assert_eq!(
         authority.typed_value(6).unwrap(),

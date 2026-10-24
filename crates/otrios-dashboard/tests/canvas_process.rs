@@ -205,7 +205,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     edit(&mut a.c, "Linear slider", 810);
     a.settle();
     b.settle();
-    assert_eq!(b.c.value(1).unwrap(), 810);
+    assert_eq!(b.c.value(1).unwrap(), 800);
     assert!(
         !layout.tick(),
         "Inactive app must receive zero messages for Playground edits"
