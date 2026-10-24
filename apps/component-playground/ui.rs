@@ -171,7 +171,7 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
                     .key("intro"),
                 instrument(
                     "01 / LINEAR",
-                    "Drag the thumb",
+                    "Drag / 10% steps",
                     [370., 410.],
                     vec![
                         slider,
