@@ -4,7 +4,7 @@
 import argparse,fcntl,hashlib,importlib.util,json,pathlib,re,time,urllib.request,urllib.parse
 spec=importlib.util.spec_from_file_location('frame_agent',pathlib.Path(__file__).with_name('frame-dashboard-agent.py'));agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 WEB={'web/index.html','web/style.css','web/app.js','web/state-worker.js','web/pkg/otrios_dashboard.js','web/pkg/otrios_dashboard_bg.wasm','apps/catalog.flex'}
-OPTIONAL={'web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/viewport.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
+OPTIONAL={'web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/viewport.mjs','web/ui-update.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
 NATIVE={'native/armv7/dashboard-native'}
 def read(path,limit):
     with path.open('rb')as f:data=f.read(limit+1)
@@ -32,6 +32,26 @@ def verify(releases,key,openssl,pointer):
         data=read(path,size)
         if len(data)!=size or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Release asset digest rejected: '+name)
     return release
+
+def complete_ui(releases,installed,key,openssl,pointer,base):
+    """Fill a data-only transfer from the verified installed immutable closure."""
+    import os,shutil
+    previous=(installed/'current.json').read_bytes()
+    if json.loads(previous)['id']!=base:raise ValueError('UI deployment baseline changed')
+    verify(installed,key,openssl,previous)
+    old=json.loads((installed/base/'manifest.json').read_bytes())
+    release=json.loads(pointer)['id'];agent.valid_release(release);folder=releases/release
+    new=agent.verify_manifest(read(folder/'manifest.json',65536),read(folder/'manifest.sig',64),release,releases,key,openssl)
+    if not agent.ui_only_change(old,new):raise ValueError('UI transfer changed executable or policy metadata')
+    for section in ['assets','authority']:
+        for name,item in new[section].items():
+            dest=folder/name
+            if dest.exists():continue
+            if old[section].get(name)!=item:raise ValueError('UI transfer omitted changed artifact')
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            try:os.link(installed/base/name,dest)
+            except OSError:shutil.copyfile(installed/base/name,dest)
+    return verify(releases,key,openssl,pointer)
 
 def notify(url):
     parsed=urllib.parse.urlsplit(url)

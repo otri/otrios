@@ -2,8 +2,10 @@
 // Sole owner of app replicas, input, admission and network leases. All state is RAM-only.
 import init,{CanvasApp} from './pkg/otrios_dashboard.js';
 import {validRelease} from './session.mjs';
+import {prepareUiUpdate} from './ui-update.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
 let viewportRevision=0;
+let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
 function error(e){postMessage({type:'error',message:String(e)});}
@@ -22,7 +24,23 @@ function reloadReady(){return !app.input_busy()&&(!stateOnline||app.reload_ready
 function release(message){
   const r=message.release;if(!validRelease(r))return;
   if(activeRelease&&activeRelease!==r.id){if(pendingRelease?.id===r.id)return;pendingRelease=r;const isCurrent=()=>pendingRelease===r&&!stopped;
-    Promise.resolve().then(async()=>{while(isCurrent()&&!reloadReady())await new Promise(resolve=>setTimeout(resolve,100));if(isCurrent())postMessage({type:'release-candidate',entry:r.web_entry});}).catch(error);return;}
+    Promise.resolve().then(async()=>{
+      updateBusy=true;
+      try{
+        const update=await prepareUiUpdate(hostUrl,activeRelease,r.id,admittedManifest);
+        while(isCurrent()&&(!reloadReady()||(update&&(!stateOnline||!app.can_update_catalog()))))await new Promise(resolve=>setTimeout(resolve,100));
+        if(!isCurrent())return;
+        if(update){
+          const changesView=app.update_catalog(update.bytes);outgoing();
+          while(isCurrent()&&app.catalog_update_pending())await new Promise(resolve=>setTimeout(resolve,25));
+          if(!isCurrent())return;
+          if(app.catalog_hash()!==update.hash)throw Error('UI candidate rejected; retaining current view');
+          activeRelease=r.id;admittedManifest=update.manifest;pendingRelease=null;publish(changesView);postMessage({type:'release-id',id:r.id,uiOnly:true});return;
+        }
+        postMessage({type:'release-candidate',entry:r.web_entry});
+      }catch(e){postMessage({type:'warning',message:String(e)});if(isCurrent())pendingRelease=null;}
+      finally{updateBusy=false;}
+    });return;}
   pendingRelease=null;
   activeRelease=r.id;postMessage({type:'release-id',id:r.id});
 }
@@ -42,7 +60,7 @@ function route(hash){const parts=hash.replace(/^#\/?/,'').split('/'),aliases={co
 onmessage=async({data:m})=>{try{
   if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
-    if(started)throw Error('App host is already initialized');started=true;await init();app=new CanvasApp();app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
+    if(started)throw Error('App host is already initialized');started=true;await init();hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:state=>{
       if(!state.authenticated&&app.private()){dropPrivate();app.navigate('home');outgoing();}
@@ -77,7 +95,7 @@ onmessage=async({data:m})=>{try{
     case 'pointer':if(!app.ui_ref())break;changed=app.pointer(m.epoch??app.epoch(),...m.args.slice(0,4));break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;
-    case 'route':route(m.route);changed=true;break;
+    case 'route':if(updateBusy&&app.catalog_update_pending())break;route(m.route);changed=true;break;
     case 'back':changed=app.back();break;
     case 'key':if(app.editing())changed=app.key(m.key,m.select);break;
     case 'text':if(app.editing())changed=app.type_text(m.text);break;

@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": {
+    "rust": 168,
+    "python_unittest": 36,
+    "javascript": 45,
+    "wasm_export": 1
+  },
+  "release": "5adfd0841e0c76509c3539d87c4791b178e9a4350492a94c1cd5e75ae004fea9",
+  "artifact_idempotence": {
+    "passed": true,
+    "files": 15,
+    "timestamps_preserved": true
+  }
+}

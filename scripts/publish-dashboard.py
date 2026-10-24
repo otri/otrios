@@ -21,7 +21,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
         names=['index.html','style.css','app.js','state-worker.js','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
-        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
+        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
         for name in names:
             source=web/name
             if not source.exists() and (name.endswith('.mjs') or name.endswith('.js') or name=='Slug-LICENSE.txt'):source=web.parent/'shared'/name
@@ -52,7 +52,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
                 authority[path]={'bytes':len(data),'sha256':digest(data)}
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}
-        manifest={'host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v4','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v4','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
         subprocess.run([openssl,'pkeyutl','-sign','-rawin','-inkey',str(key),'-in',str(stage/'manifest.json'),'-out',str(stage/'manifest.sig')],check=True,capture_output=True)

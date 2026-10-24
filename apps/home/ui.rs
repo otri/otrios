@@ -143,7 +143,7 @@ pub fn description() -> Ui {
             ),
         ],
     );
-    AppUi::new("home", "Home", schema("home-state-v2", &[]))
+    AppUi::new("home", "Home", super::state::schema())
         .with_composition(wide, tall)
         .build("OTriOS", children)
 }

@@ -23,7 +23,12 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
     with archive.extractfile(item) as src,dest.open('wb') as out:shutil.copyfileobj(src,out)
  activation=module('activation',stage/'activate-dashboard-release.py')
  pointer=(stage/'current.json').read_bytes();key=pathlib.Path('/etc/otrios-authority/publisher.pem')
- release=activation.verify(stage/'releases',key,'openssl',pointer)
+ if (stage/'ui-base.json').exists():
+  base=json.loads((stage/'ui-base.json').read_bytes())['id'];store=root/'releases'
+  if json.loads((store/'current.json').read_bytes())['id']==json.loads(pointer)['id']:
+   print('UNCHANGED '+activation.verify(store,key,'openssl',pointer));sys.exit(0)
+  release=activation.complete_ui(stage/'releases',store,key,'openssl',pointer,base)
+ else:release=activation.verify(stage/'releases',key,'openssl',pointer)
  checks=json.loads((stage/'transfer.json').read_text())
  for name,digest in checks.items():
   if hashlib.sha256((stage/name).read_bytes()).hexdigest()!=digest:raise ValueError('Transfer digest mismatch')
@@ -31,18 +36,20 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
  import fcntl
  with (store/'.activation.lock').open('a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX)
+  if (stage/'ui-base.json').exists() and json.loads((store/'current.json').read_bytes())['id']!=base:raise ValueError('UI deployment baseline changed during transfer')
   destination=store/release
   if destination.exists():
    activation.verify(store,key,'openssl',pointer)
   else:os.replace(stage/'releases'/release,destination)
   shutil.chown(destination,user='otrios',group='otrios')
   for path in destination.rglob('*'):shutil.chown(path,user='otrios',group='otrios')
-  restart=False
+  restart=False;restart_native=False
   for name in checks:
    dest=(pathlib.Path('/opt/otrios-dashboard') if name in ('frame-dashboard-agent.py','session-bootstrap') else binary)/name
    data=(stage/name).read_bytes();changed=not dest.exists() or dest.read_bytes()!=data
    if changed:activation.agent.atomic(dest,data,0o755)
    if name=='dashboard-server':restart=changed
+   if name=='frame-dashboard-agent.py':restart_native=changed
   activation.agent.atomic(store/'current.json',pointer)
   shutil.chown(store/'current.json',user='otrios',group='otrios')
  if restart:subprocess.run(['systemctl','restart','otrios-authority.service'],check=True)
@@ -54,6 +61,7 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
   time.sleep(.2)
  else:raise RuntimeError('Authority did not recover')
  activation.notify('http://127.0.0.1:8876/admin/activate')
+ if restart_native:subprocess.run(['systemctl','restart','otrios-dashboard-direct.service'],check=True)
  pruner=module('pruner',stage/'prune-dashboard-releases.py');print('FRAME',json.dumps(pruner.prune(store,True)))
  native=pathlib.Path('/var/lib/otrios-dashboard')
  for attempt in range(50):
@@ -65,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
  else:print('Native release still activating; its running cache was retained')
 '''
 
-def deploy(config,pointer,server,monitoring,bootstrap):
+def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None):
     repo=pathlib.Path(__file__).resolve().parent.parent
     runtime=pathlib.Path(config['runtime']);pointer=pathlib.Path(pointer)
     spec=importlib.util.spec_from_file_location('activation',repo/'scripts/activate-dashboard-release.py')
@@ -74,13 +82,23 @@ def deploy(config,pointer,server,monitoring,bootstrap):
     import hashlib
     files={name:repo/'scripts'/name for name in ['frame-dashboard-agent.py','activate-dashboard-release.py','prune-dashboard-releases.py','collect-monitoring.py']}
     files.update({'dashboard-server':pathlib.Path(server),'dashboard-monitoring':pathlib.Path(monitoring),'session-bootstrap':pathlib.Path(bootstrap)})
-    checks={name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()}
+    checks={} if ui_base else {name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()}
+    changed=None
+    if ui_base:
+        old=json.loads((runtime/'releases'/ui_base/'manifest.json').read_bytes());new=json.loads((runtime/'releases'/release/'manifest.json').read_bytes())
+        if not activation.agent.ui_only_change(old,new):raise ValueError('UI transfer changed executable closure')
+        changed=['manifest.json','manifest.sig']+[name for section in ['assets','authority'] for name,item in new[section].items()if old[section].get(name)!=item]
     payload=io.BytesIO()
     with tarfile.open(fileobj=payload,mode='w') as archive:
-        archive.add(runtime/'releases'/release,arcname='releases/'+release)
+        if changed is None:archive.add(runtime/'releases'/release,arcname='releases/'+release)
+        else:
+            for name in changed:archive.add(runtime/'releases'/release/name,arcname='releases/'+release+'/'+name)
+            raw=json.dumps({'id':ui_base}).encode();item=tarfile.TarInfo('ui-base.json');item.size=len(raw);archive.addfile(item,io.BytesIO(raw))
         archive.add(pointer,arcname='current.json')
-        for name,path in files.items():archive.add(path,arcname=name)
+        for name,path in files.items():
+            if not ui_base or name.endswith('.py'):archive.add(path,arcname=name)
         raw=json.dumps(checks).encode();item=tarfile.TarInfo('transfer.json');item.size=len(raw);archive.addfile(item,io.BytesIO(raw))
+    print('TRANSFER bytes='+str(payload.tell())+' mode='+('ui-data' if ui_base else 'full'),flush=True)
     ssh=config['frame']['ssh']
     if not isinstance(ssh,list) or not ssh or ssh[0]!='ssh':raise ValueError('Configure a pinned SSH argument list')
     subprocess.run(ssh+['python3 -c '+shlex.quote(REMOTE)],input=payload.getvalue(),check=True)

@@ -19,8 +19,9 @@ try{
     browser.once('error',error=>{clearTimeout(timer);reject(error);});browser.once('exit',code=>{clearTimeout(timer);reject(Error(`Chromium exited ${code}: ${log.slice(-1200)}`));});
   });
   socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
-  let serial=0;const pending=new Map(),inkReceived=new Map();
+  let serial=0;const pending=new Map(),inkReceived=new Map(),socketCount=new Map();
   socket.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.id){const task=pending.get(m.id);if(task){pending.delete(m.id);clearTimeout(task.timer);if(m.error)task.reject(Error(JSON.stringify(m.error)));else task.resolve(m.result);}}
+    else if(m.method==='Network.webSocketCreated')socketCount.set(m.sessionId,(socketCount.get(m.sessionId)||0)+1);
     else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2&&Buffer.from(m.params.response.payloadData,'base64')[0]===2)inkReceived.set(m.sessionId,(inkReceived.get(m.sessionId)||0)+1);
   });
   const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout: ${method}`));},30000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
@@ -36,6 +37,28 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
+  if(args.includes('--wait-home-update')){
+    const home=await page(800,1280,'home'),other=await page(1280,800,'component-playground');
+    await drag(other,'Linear slider',0.81);
+    await wait(other,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>75");
+    await call('Page.bringToFront',{},home);await evaluate(home,"document.querySelector('#controls button').focus();window.__homeUpdateNonce='retained-worker-test'");
+    const before={home:await evaluate(home,"({path:location.pathname,time:performance.timeOrigin,epoch:document.querySelector('#revision').dataset.epoch,focus:document.activeElement.dataset.sceneNode})"),other:await evaluate(other,"({path:location.pathname,time:performance.timeOrigin,epoch:document.querySelector('#revision').dataset.epoch})"),sockets:[socketCount.get(home),socketCount.get(other)]};
+    await screenshot(home,'home-before-update');await writeFile(join(output,'home-update-ready.json'),JSON.stringify(before));console.log('READY for Home UI activation');
+    let updated=false;for(let i=0;i<1800;i++){if(await evaluate(home,"Number(document.querySelector('#revision')?.dataset.uiUpdates)>0")&&await evaluate(other,"Number(document.querySelector('#revision')?.dataset.uiUpdates)>0")){updated=true;break;}await new Promise(r=>setTimeout(r,100));}
+    assert(updated,'both clients accept the new UI release');
+    assert.equal(await evaluate(home,'window.__homeUpdateNonce'),'retained-worker-test');
+    assert.equal(await evaluate(home,'performance.timeOrigin'),before.home.time);assert.equal(await evaluate(other,'performance.timeOrigin'),before.other.time);
+    assert.equal(await evaluate(home,'location.pathname'),before.home.path);assert.equal(await evaluate(other,'location.pathname'),before.other.path);
+    assert.equal(await evaluate(home,'document.activeElement.dataset.sceneNode'),before.home.focus);
+    assert.equal(await evaluate(other,"document.querySelector('#revision').dataset.epoch"),before.other.epoch);
+    assert.deepEqual([socketCount.get(home),socketCount.get(other)],before.sockets,'same sessions remain connected');
+    assert(Number((await controls(other)).find(c=>c.label==='Linear slider').value)>75,'other app retains its confirmed value');
+    await screenshot(home,'home-after-update');
+    await click(other,'Home','home','1280x800');
+    await wait(other,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
+    const result={passed:true,checks:['Home presentation replaced without page reload','other app retains its mount and confirmed state','same WebSocket sessions','compatible keyboard focus retained','later Home navigation uses updated catalog'],release:await evaluate(home,"document.querySelector('#revision').dataset.release")};
+    await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else{
   const a=await page(1280,800,'home');await screenshot(a,'home-landscape');
   const homeWide=await controls(a);assert.equal(homeWide.length,6);assert(Math.abs(homeWide[0].bounds[1]-homeWide[2].bounds[1])<1);
   await click(a,'Component Playground','component-playground','1280x800');
@@ -70,6 +93,7 @@ try{
   await click(a,'Home','home','1280x800');await click(a,'Layout Lab','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
   const result={passed:true,checks:['landscape and portrait WebGL rendering','Home three/two-column composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layout Lab in both orientations'],screenshots:output,native_hardware:'not tested'};
   await writeFile(join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
+  }
 }finally{
   socket?.close();if(browser.pid&&browser.exitCode===null&&browser.signalCode===null){browser.kill('SIGTERM');await new Promise(resolve=>browser.once('exit',resolve));}await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
 }

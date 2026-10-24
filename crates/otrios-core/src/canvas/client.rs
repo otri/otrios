@@ -125,6 +125,7 @@ pub struct Client {
     navigation: Option<(String, String)>,
     catalog: Option<Catalog>,
     catalog_hash: Vec<u8>,
+    previous_catalog: Option<(Catalog, Vec<u8>)>,
     font: Option<Arc<crate::dashboard::font::Font>>,
     auth_required: bool,
     session_controls: bool,
@@ -214,6 +215,78 @@ impl Client {
         self.catalog_hash = hash(bytes);
         self.catalog = Some(c);
         Ok(())
+    }
+    /// Admit compatible UI document revisions without replacing executable code.
+    /// The staged mount qualifies its new coverage before replacing the old view.
+    pub fn can_update_catalog(&mut self) -> bool {
+        self.requested.is_none()
+            && self.navigation.is_none()
+            && !self.input_busy()
+            && self.confirmed()
+    }
+    pub fn update_catalog(&mut self, bytes: &[u8]) -> Result<bool> {
+        if hash(bytes) == self.catalog_hash {
+            return Ok(false);
+        }
+        if !self.can_update_catalog() {
+            return Err("UI update requires idle confirmed input".into());
+        }
+        let next = decode_catalog(bytes)?;
+        let old = self.catalog.as_ref().ok_or("Missing catalog")?;
+        if next.format != old.format || next.apps.len() != old.apps.len() {
+            return Err("UI update changed the catalog contract".into());
+        }
+        for entry in &old.apps {
+            let replacement = next
+                .apps
+                .iter()
+                .find(|n| n.app.id == entry.app.id)
+                .ok_or("UI update removed an app")?;
+            if entry.app != replacement.app || entry.private != replacement.private {
+                return Err("Only app UI data may change".into());
+            }
+        }
+        let previous = (old.clone(), self.catalog_hash.clone());
+        let remount = self.active.as_ref().is_some_and(|m| {
+            old.apps
+                .iter()
+                .find(|e| e.app.ui_ref == m.ui.ui_ref)
+                .map(|e| &e.ui_hash)
+                != next
+                    .apps
+                    .iter()
+                    .find(|e| e.app.ui_ref == m.ui.ui_ref)
+                    .map(|e| &e.ui_hash)
+        });
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or("Canvas epoch exhausted")?;
+        self.admit_catalog(bytes)?;
+        if remount {
+            let m = self.active.as_ref().ok_or("Missing app")?;
+            self.previous_catalog = Some(previous);
+            self.generation = generation;
+            self.requested = Some(Request {
+                epoch: generation,
+                pair: (m.ui.ui_ref.clone(), m.state_ref.clone()),
+                sent: false,
+                reconnecting: false,
+            });
+        }
+        Ok(remount)
+    }
+    pub fn catalog_update_pending(&self) -> bool {
+        self.previous_catalog.is_some()
+    }
+    pub fn catalog_hash(&self) -> &[u8] {
+        &self.catalog_hash
+    }
+    fn reject_catalog_update(&mut self) {
+        if let Some((catalog, hash)) = self.previous_catalog.take() {
+            self.catalog = Some(catalog);
+            self.catalog_hash = hash;
+        }
     }
     pub fn epoch(&self) -> u32 {
         self.active.as_ref().map_or(0, |m| m.epoch)
@@ -385,6 +458,7 @@ impl Client {
         }
     }
     pub fn open(&mut self, ui_ref: &str, state_ref: &str) {
+        self.reject_catalog_update();
         self.sign_out_requested = false;
         if let Some(request) = self.requested.take()
             && request.sent
@@ -570,6 +644,9 @@ impl Client {
                         return Err("UI differs from admitted catalog".into());
                     }
                     let ui = decode_ui(&ui)?;
+                    if self.previous_catalog.is_some() {
+                        compatible_ui(&self.active.as_ref().ok_or("Missing app")?.ui, &ui)?;
+                    }
                     if ui.ui_ref != r.pair.0 {
                         return Err("Wrong UI reference".into());
                     }
@@ -598,6 +675,16 @@ impl Client {
                         candidate.wall = old.wall;
                         candidate.refresh()?;
                     }
+                    if self.previous_catalog.is_some()
+                        && let Some(old) = &self.active
+                    {
+                        candidate.view = old.view.clone();
+                        candidate.keyboard = old.keyboard.clone();
+                        candidate.editors = old.editors.clone();
+                        candidate.focus = old.focus;
+                        candidate.ink = old.ink.clone();
+                        candidate.pad_preview = old.pad_preview.clone();
+                    }
                     candidate.session_controls = self.session_controls;
                     candidate.invalidate();
                     cached_scene(&candidate)?;
@@ -605,6 +692,16 @@ impl Client {
                 })();
                 match candidate {
                     Ok(mut candidate) => {
+                        if self.previous_catalog.take().is_some() {
+                            let mut current = self.active.take().ok_or("Missing app activation")?;
+                            current.ui = candidate.ui;
+                            current.layout = candidate.layout;
+                            current.doc = candidate.doc;
+                            current.epoch = candidate.epoch;
+                            current.visible = candidate.visible;
+                            current.invalidate();
+                            candidate = current;
+                        }
                         if reconnecting
                             && self.active.as_ref().is_some_and(|old| {
                                 old.ui == candidate.ui && old.state_ref == candidate.state_ref
@@ -636,6 +733,7 @@ impl Client {
                         Ok(true)
                     }
                     Err(e) => {
+                        self.reject_catalog_update();
                         self.decision = Some(MountDecision::Cancel(epoch));
                         self.requested = None;
                         self.auth_required = false;
@@ -681,12 +779,19 @@ impl Client {
                     return Ok(true);
                 }
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    if self.previous_catalog.is_some() {
+                        self.reject_catalog_update();
+                        self.decision = Some(MountDecision::Cancel(epoch));
+                        self.requested = None;
+                        return Err("UI update access rejected".into());
+                    }
                     self.auth_required = true;
                 }
                 Ok(false)
             }
             ServerMessage::Error { epoch, message } => {
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    self.reject_catalog_update();
                     self.decision = Some(MountDecision::Cancel(epoch));
                     self.requested = None;
                     self.auth_required = false;

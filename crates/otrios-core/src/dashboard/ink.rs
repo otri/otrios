@@ -6,13 +6,14 @@ use otrios_interfaces::{
     scene::{PointerPhase, Primitive, Rect, SceneNode},
 };
 use std::collections::{BTreeMap, VecDeque};
+#[derive(Clone)]
 struct Stroke {
     peer: u32,
     id: u32,
     last: i64,
     points: Vec<[u16; 2]>,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Ink {
     strokes: VecDeque<Stroke>,
     active: BTreeMap<u32, u32>,
