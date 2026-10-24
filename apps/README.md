@@ -191,3 +191,9 @@ state and behavior stay mounted; executable/schema changes require a full releas
 The common publisher also supports `--kind behavior` for an existing guest module;
 see [RFC 0014](../docs/rfcs/0014-app-behavior-updates.md). It compiles that app's
 Wasm and updates its hash references while reusing the UI layout and host runtimes.
+
+Home uses the bounded [reorder presentation](../docs/rfcs/0015-editable-home-reflow.md):
+`.with_reorder(...)` maps stable position fields to authored component keys, and
+`wrap_cards(...)` reflows those components without changing their structure.
+Its local Edit/Done action controls dragging and wiggle; shared writes contain
+only a moved card's position. The renderer owns interpolation and its clock.

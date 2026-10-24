@@ -26,7 +26,7 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
     outgoing(){if(cancel){cancel=false;rejected=false;return new Uint8Array([42]);}return null;},
     screen:()=> 'layout-lab',epoch:()=>7,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'app:layout-lab/state',
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
-    vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
+    reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
     tick:()=>false,take_sign_out:()=>false,activate:()=>{activations++;return true;}};
   const context=vm.createContext({prepareUiUpdate:async()=>null,URL,location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),setTimeout(){},clearTimeout(){},fake});
   vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=1',context);

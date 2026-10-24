@@ -47,6 +47,7 @@ impl StateSelection {
                     Projection::KeyboardLabel { .. }
                         | Projection::KeyboardVisible
                         | Projection::SessionControls
+                        | Projection::ReorderLabel
                 )
             {
                 return Err("Shared selector needs a schema field".into());
@@ -80,6 +81,14 @@ impl StateSelection {
             }) => {
                 for id in [playing, speed, count, load] {
                     add(*id)?;
+                }
+            }
+            Some(Presentation::Reorder { items }) => {
+                if items.is_empty() || items.len() > 32 {
+                    return Err("Invalid reorder dependency count".into());
+                }
+                for item in items {
+                    add(item.field)?;
                 }
             }
             Some(Presentation::Editor { fields }) => {

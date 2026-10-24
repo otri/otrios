@@ -124,11 +124,34 @@ impl Layout {
         slots: &BTreeMap<u16, Value>,
         viewport: [f32; 2],
     ) -> Result<Scene> {
+        self.resolve_ordered(slots, viewport, &[])
+    }
+    pub fn resolve_ordered(
+        &self,
+        slots: &BTreeMap<u16, Value>,
+        viewport: [f32; 2],
+        order: &[u16],
+    ) -> Result<Scene> {
         let bindings = Bindings { local: slots };
         let mut root = self.blueprint.root.clone();
         let frames = if let Some(plan) = &self.blueprint.composition {
             root.frame[2..].copy_from_slice(&viewport);
-            Some(composition::resolve(plan, viewport)?)
+            let mut plan = plan.clone();
+            fn reorder(flow: &mut Flow, order: &[u16]) {
+                match &mut flow.kind {
+                    FlowKind::Wrap { nodes, .. } => nodes
+                        .sort_by_key(|n| order.iter().position(|id| id == n).unwrap_or(usize::MAX)),
+                    FlowKind::Group { children, .. } => {
+                        for c in children {
+                            reorder(c, order);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            reorder(&mut plan.wide.content, order);
+            reorder(&mut plan.tall.content, order);
+            Some(composition::resolve(&plan, viewport)?)
         } else {
             None
         };
@@ -184,7 +207,7 @@ fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
 fn validate_blueprint(b: &Blueprint) -> Result<()> {
     if !matches!(
         b.schema.as_str(),
-        "otrios-layout-v1" | "otrios-layout-v2" | "otrios-layout-v3"
+        "otrios-layout-v1" | "otrios-layout-v2" | "otrios-layout-v3" | "otrios-layout-v4"
     ) || b.templates.is_empty()
         || b.templates.len() > 32
     {
@@ -324,7 +347,10 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
         return Err("Root layout instance must be the screen".into());
     }
     if let Some(plan) = &b.composition {
-        if b.schema != "otrios-layout-v3" || b.root.id != 0 || !b.root.children.is_empty() {
+        if !matches!(b.schema.as_str(), "otrios-layout-v3" | "otrios-layout-v4")
+            || b.root.id != 0
+            || !b.root.children.is_empty()
+        {
             return Err("Composition requires a v3 app root".into());
         }
         let root = &b
@@ -333,6 +359,18 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
             .find(|t| t.id == b.root.template)
             .ok_or("Missing root template")?
             .root;
+        fn wraps(flow: &Flow) -> bool {
+            match &flow.kind {
+                FlowKind::Wrap { .. } => true,
+                FlowKind::Group { children, .. } => children.iter().any(wraps),
+                _ => false,
+            }
+        }
+        if b.schema != "otrios-layout-v4"
+            && (wraps(&plan.wide.content) || wraps(&plan.tall.content))
+        {
+            return Err("Wrapping flow requires layout v4".into());
+        }
         composition::validate(plan, root)?;
     }
     instance(&b.root, b, 0, &mut BTreeSet::new())

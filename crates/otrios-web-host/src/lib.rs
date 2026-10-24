@@ -158,6 +158,13 @@ impl CanvasApp {
         }
         .into()
     }
+    pub fn reflow_frame(&self) -> Result<Vec<u8>, String> {
+        self.inner
+            .reflow_frame()?
+            .map(|f| f.encode())
+            .transpose()
+            .map(|f| f.unwrap_or_default())
+    }
     pub fn motion_intent(&self) -> Result<Vec<f32>, String> {
         Ok(match self.inner.motion_intent()? {
             Some((three_d, intent)) => vec![
@@ -185,13 +192,14 @@ impl CanvasApp {
         self.inner.stress_stall_ms() as f64
     }
     pub fn control_draggable(&self, id: u32) -> Result<bool, String> {
-        Ok(self.inner.scene()?.controls().iter().any(|c| {
-            c.node.id == id
-                && matches!(
-                    c.node.responder,
-                    Some(otrios_interfaces::scene::TouchResponder::Drag(_))
-                )
-        }))
+        Ok(self.inner.order_draggable(id)
+            || self.inner.scene()?.controls().iter().any(|c| {
+                c.node.id == id
+                    && matches!(
+                        c.node.responder,
+                        Some(otrios_interfaces::scene::TouchResponder::Drag(_))
+                    )
+            }))
     }
     pub fn control_checked(&self, id: u32) -> Result<bool, String> {
         Ok(self
@@ -380,6 +388,8 @@ impl CanvasApp {
 pub struct CanvasPresentation {
     font: Option<Arc<Font>>,
     rendered_hud: Option<(u64, Mesh)>,
+    reflow: Option<otrios_core::canvas::reflow::Presenter>,
+    reflow_mesh: Mesh,
     updates: u64,
     inner: otrios_core::dashboard::motion::Presenter,
 }
@@ -388,6 +398,33 @@ impl CanvasPresentation {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn set_reflow(&mut self, bytes: &[u8], now: f64) -> Result<(), String> {
+        if bytes.is_empty() {
+            self.reflow = None;
+            self.reflow_mesh = Mesh::default();
+            return Ok(());
+        }
+        let frame = otrios_core::canvas::reflow::Frame::decode(bytes)?;
+        let presenter = self.reflow.get_or_insert_with(Default::default);
+        presenter.update(frame, self.font.as_ref().ok_or("Missing font")?, now)
+    }
+    pub fn reflow_active(&self, now: f64) -> bool {
+        self.reflow.as_ref().is_some_and(|p| p.active(now))
+    }
+    pub fn reflow_vertices(&mut self, now: f64) -> Vec<f32> {
+        self.reflow_mesh = self
+            .reflow
+            .as_mut()
+            .map(|p| p.mesh(now))
+            .unwrap_or_default();
+        self.reflow_mesh.vertices.clone()
+    }
+    pub fn reflow_glyphs(&self) -> Vec<f32> {
+        self.reflow_mesh.glyph_vertices.clone()
+    }
+    pub fn reflow_draws(&self) -> Vec<u32> {
+        self.reflow_mesh.draws.clone()
     }
     pub fn vertices(
         &mut self,

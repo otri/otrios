@@ -196,7 +196,11 @@ impl Destination {
     pub fn app(id: &str) -> Self {
         Self {
             ui_ref: format!("app:{id}/ui"),
-            state_ref: format!("app:{id}/state"),
+            state_ref: if id == "home" {
+                "app:home/state-v3".into()
+            } else {
+                format!("app:{id}/state")
+            },
         }
     }
 }
@@ -272,6 +276,14 @@ impl Event {
             fields: vec![],
             behavior: None,
             operation: Operation::Back,
+        }
+    }
+    pub fn edit_order() -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::EditOrder,
         }
     }
     pub fn sign_out() -> Self {
@@ -623,6 +635,7 @@ pub struct Arrangement {
 enum ArrangementKind {
     Item(String, [f32; 2], [f32; 2]),
     Group(u8, f32, Alignment, Vec<Arrangement>),
+    Wrap(Vec<String>, [f32; 2], [f32; 2], [f32; 2]),
 }
 pub fn place(key: &str, preferred: [f32; 2]) -> Arrangement {
     Arrangement {
@@ -642,12 +655,38 @@ pub fn column(gap: f32, children: Vec<Arrangement>) -> Arrangement {
         kind: ArrangementKind::Group(1, gap, Alignment::Start, children),
     }
 }
+pub fn wrap_cards(
+    keys: &[&str],
+    preferred: [f32; 2],
+    minimum: [f32; 2],
+    gap: [f32; 2],
+) -> Arrangement {
+    Arrangement {
+        flexible: [true, false],
+        kind: ArrangementKind::Wrap(
+            keys.iter().map(|s| (*s).into()).collect(),
+            preferred,
+            minimum,
+            gap,
+        ),
+    }
+}
+pub fn reorder_label() -> ValueExpr {
+    ValueExpr::State(StateField::text(0, "edit-order"), Projection::ReorderLabel)
+}
 pub fn heading() -> Arrangement {
     place("$heading", [900., 80.])
         .minimum([480., 80.])
         .flex_width()
 }
 impl Arrangement {
+    fn wraps(&self) -> bool {
+        match &self.kind {
+            ArrangementKind::Wrap(..) => true,
+            ArrangementKind::Group(_, _, _, children) => children.iter().any(Self::wraps),
+            _ => false,
+        }
+    }
     pub fn minimum(mut self, size: [f32; 2]) -> Self {
         if let ArrangementKind::Item(_, _, min) = &mut self.kind {
             *min = size;
@@ -675,6 +714,15 @@ impl Arrangement {
                 preferred,
                 minimum,
             },
+            ArrangementKind::Wrap(keys, preferred, minimum, gap) => FlowKind::Wrap {
+                nodes: keys
+                    .iter()
+                    .map(|key| *nodes.get(key).expect("known wrap item"))
+                    .collect(),
+                preferred,
+                minimum,
+                gap,
+            },
             ArrangementKind::Group(axis, gap, alignment, children) => FlowKind::Group {
                 axis,
                 gap,
@@ -696,6 +744,7 @@ pub struct AppUi {
     presentation: Option<Presentation>,
     composition: Option<(Arrangement, Arrangement)>,
     touch_pad: Option<String>,
+    reorder: Vec<(String, u16)>,
 }
 impl AppUi {
     pub fn new(id: &str, title: &str, schema: StateSchema) -> Self {
@@ -707,10 +756,18 @@ impl AppUi {
             presentation: None,
             composition: None,
             touch_pad: None,
+            reorder: vec![],
         }
     }
     pub fn with_composition(mut self, wide: Arrangement, tall: Arrangement) -> Self {
         self.composition = Some((wide, tall));
+        self
+    }
+    pub fn with_reorder(mut self, items: &[(&str, u16)]) -> Self {
+        self.reorder = items
+            .iter()
+            .map(|(key, field)| ((*key).into(), *field))
+            .collect();
         self
     }
     pub fn with_touch_pad(mut self, key: &str) -> Self {
@@ -748,6 +805,10 @@ impl AppUi {
             has_behavior: self.behavior.is_some(),
         };
         let root = compiler.node(canvas(body), [SCREEN[2], SCREEN[3]]);
+        let wrapping = self
+            .composition
+            .as_ref()
+            .is_some_and(|(wide, tall)| wide.wraps() || tall.wraps());
         let composition = self.composition.map(|(wide, tall)| Composition {
             wide_min_width: 1200.,
             wide: FlowPlan {
@@ -759,7 +820,18 @@ impl AppUi {
                 content: tall.compile(&compiler.named_nodes),
             },
         });
-        let presentation = if let Some(key) = self.touch_pad {
+        let presentation = if !self.reorder.is_empty() {
+            Some(Presentation::Reorder {
+                items: self
+                    .reorder
+                    .iter()
+                    .map(|(key, field)| OrderItem {
+                        node: *compiler.named_nodes.get(key).expect("known reorder card"),
+                        field: *field,
+                    })
+                    .collect(),
+            })
+        } else if let Some(key) = self.touch_pad {
             Some(Presentation::TouchPad {
                 control: *compiler
                     .named_controls
@@ -770,7 +842,9 @@ impl AppUi {
             self.presentation
         };
         let layout = otrios_core::dashboard::layout::Layout::encode(&Blueprint {
-            schema: if composition.is_some() {
+            schema: if wrapping {
+                "otrios-layout-v4"
+            } else if composition.is_some() {
                 "otrios-layout-v3"
             } else {
                 "otrios-layout-v2"
@@ -964,7 +1038,11 @@ pub fn app(id: &str, title: &str, status: &str, deps: &[&str]) -> App {
         id: id.into(),
         title: title.into(),
         ui_ref: format!("app:{id}/ui"),
-        state_ref: format!("app:{id}/state"),
+        state_ref: if id == "home" {
+            "app:home/state-v3".into()
+        } else {
+            format!("app:{id}/state")
+        },
         status: status.into(),
         dependencies: deps.iter().map(|v| (*v).into()).collect(),
     }

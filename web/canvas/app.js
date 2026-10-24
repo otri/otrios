@@ -62,7 +62,9 @@ try{
     model={...model,...f};revision.dataset.epoch=String(f.epoch);currentScreen=f.screen;modelAuthRequired=!!f.authRequired;showAuth();
     if(f.vertices){
       renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
-      canvas.dataset.logicalSize=f.extent.join('x');resize();staticLayer.setFrame(f);
+      canvas.dataset.logicalSize=f.extent.join('x');resize();
+      presenter.set_reflow(f.reflow||new Uint8Array(),performance.now());
+      model.reflow=!!f.reflow?.length;staticLayer.setFrame(f);
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id}));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
         b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');Object.assign(b.style,semanticBounds(c.bounds,f.extent));}
@@ -70,13 +72,13 @@ try{
       canvas.setAttribute('aria-label',f.text);revision.textContent=`VIEW ${f.snapshot.slice(0,12)}`;revision.dataset.snapshot=f.snapshot;revision.dataset.layout=f.layout;
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
-    revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';dirty=true;
+    revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!f.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
     const next=route();if(applyingRoute&&(!routeTarget||next===routeTarget)){lastRoute=next;routeTarget=null;history.replaceState({otrios:true,previous:history.state?.previous},'',`#${next}`);applyingRoute=false;}
     else if(!applyingRoute&&next!==lastRoute){if(next===history.state?.previous){lastRoute=next;history.back();}else{const previous=lastRoute;lastRoute=next;history.pushState({otrios:true,previous},'',`#${next}`);}}
     pump();worker.postMessage({type:'frame-ack'});
   }
   transportBridge=bridgeWorker(session,(message,transfer=[])=>worker.postMessage(message,transfer));
-  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;session.setRelease(m.id);if(m.uiOnly){history.replaceState(null,'',`/releases/${m.id}/web/index.html${location.search}${location.hash}`);revision.dataset.uiUpdates=String(Number(revision.dataset.uiUpdates||0)+1);}break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
+  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':presenter.set_reflow(new Uint8Array(),performance.now());model={...model,reflow:false,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;session.setRelease(m.id);if(m.uiOnly){history.replaceState(null,'',`/releases/${m.id}/web/index.html${location.search}${location.hash}`);revision.dataset.uiUpdates=String(Number(revision.dataset.uiUpdates||0)+1);}break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
   worker.onerror=e=>{workerFailed=true;fatal(e.message);session.reconnect();if(observedRelease)offerRelease(observedRelease);};
   offerRelease=r=>{if(initialRelease&&r.id!==initialRelease&&(workerFailed||!model?.ui)){location.replace(r.web_entry+location.hash);return;}worker.postMessage({type:'release-discovered',release:r});};
   if(observedRelease)offerRelease(observedRelease);
@@ -100,7 +102,9 @@ try{
       if(!busy)for(const [id,m]of moves){command(m);moves.delete(id);break;}
       if(releaseCandidate)pump();
       const animated=model&&model.presentation==='motion';
-      if(model&&(dirty||animated)){
+      const reflow=model?.reflow&&presenter.reflow_active(now);
+      if(model&&(dirty||animated||reflow)){
+        if(model.reflow)staticLayer.setFrame({vertices:presenter.reflow_vertices(now),glyphVertices:presenter.reflow_glyphs(),draws:presenter.reflow_draws()});
         if(animated){const [playing,speed,count]=model.intent;motionLayer.setFrame({vertices:presenter.vertices(model.intent[3]!==0,playing!==0,speed,count,now,model.updates)});if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();hudLayer.setFrame({vertices:presenter.hud(),glyphVertices:presenter.hud_glyph_vertices(),draws:presenter.hud_draws()});}}
         renderer.prepare(animated?[staticLayer,hudLayer]:[staticLayer]);
         renderer.beginFrame();staticLayer.draw();

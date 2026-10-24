@@ -97,53 +97,36 @@ pub fn description() -> Ui {
         .into_iter()
         .map(|(id, title, detail, caption)| launch_card(id, title, detail, caption)),
     );
-    let card = |key| place(key, [384., 232.]).minimum([336., 232.]).flex_width();
-    let wide = column(
-        24.,
-        vec![
-            heading(),
-            place("intro", [1184., 60.])
-                .minimum([600., 60.])
-                .flex_width(),
-            column(
-                24.,
-                vec![
-                    row(
-                        16.,
-                        vec![
-                            card("component-playground"),
-                            card("layout-lab"),
-                            card("input-lab"),
-                        ],
-                    ),
-                    row(
-                        16.,
-                        vec![
-                            card("animation-lab"),
-                            card("three-d-lab"),
-                            card("monitoring"),
-                        ],
-                    ),
-                ],
-            ),
-        ],
+    children.push(
+        canvas(vec![
+            rounded_rect(CARD).pin_edges(0.),
+            text(reorder_label())
+                .frame([24., 28., 90., 24.])
+                .font_scale(2.),
+        ])
+        .frame([0., 0., 136., 80.])
+        .key("edit-order")
+        .semantic_label("Edit cards")
+        .on_press(Event::edit_order()),
     );
-    let tall = column(
-        24.,
-        vec![
-            heading(),
-            place("intro", [752., 60.]).flex_width(),
-            column(
-                24.,
-                vec![
-                    row(16., vec![card("component-playground"), card("layout-lab")]),
-                    row(16., vec![card("input-lab"), card("animation-lab")]),
-                    row(16., vec![card("three-d-lab"), card("monitoring")]),
-                ],
-            ),
-        ],
-    );
+    let arrangement = || {
+        column(
+            24.,
+            vec![
+                row(16., vec![heading(), place("edit-order", [136., 80.])]),
+                place("intro", [752., 60.]).flex_width(),
+                wrap_cards(&super::state::CARDS, [384., 232.], [336., 232.], [16., 24.]),
+            ],
+        )
+    };
     AppUi::new("home", "Home", super::state::schema())
-        .with_composition(wide, tall)
+        .with_composition(arrangement(), arrangement())
+        .with_reorder(
+            &super::state::CARDS
+                .iter()
+                .enumerate()
+                .map(|(i, key)| (*key, i as u16 + 1))
+                .collect::<Vec<_>>(),
+        )
         .build("OTriOS", children)
 }

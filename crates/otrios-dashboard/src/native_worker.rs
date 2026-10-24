@@ -35,6 +35,7 @@ struct NetworkSend {
 pub(super) struct Frame {
     pub(super) ui_release: String,
     pub(super) viewport: [f32; 2],
+    pub(super) reflow: Option<otrios_core::canvas::reflow::Frame>,
     pub(super) vertices: Arc<Vec<f32>>,
     pub(super) glyph_vertices: Arc<Vec<f32>>,
     pub(super) draws: Arc<Vec<u32>>,
@@ -63,6 +64,7 @@ impl Frame {
         Self {
             ui_release: String::new(),
             viewport: [1280., 800.],
+            reflow: None,
             vertices: Arc::new(vec![]),
             glyph_vertices: Arc::new(vec![]),
             draws: Arc::new(vec![]),
@@ -627,6 +629,7 @@ pub(super) fn state_worker(
                     let scene = client.scene()?;
                     [scene.root().frame.width, scene.root().frame.height]
                 },
+                reflow: client.reflow_frame()?,
                 vertices: mesh_cache.clone(),
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),

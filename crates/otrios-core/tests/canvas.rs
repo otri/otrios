@@ -307,7 +307,7 @@ fn wasm_reducer_and_declarative_app_are_qualified_at_extremes() {
     }
     assert_eq!(playground::manifest().dependencies.len(), 5);
     assert_eq!(layout::manifest().id, "layout-lab");
-    assert_eq!(home::manifest().state_ref, "app:home/state");
+    assert_eq!(home::manifest().state_ref, "app:home/state-v3");
 }
 fn guest(wat: &str, writes: Vec<u16>) -> Result<Behavior> {
     let b = wat::parse_str(wat).unwrap();
@@ -931,7 +931,7 @@ fn access_revocation_drops_private_view_and_back_cancels_rejected_sign_in() {
     };
     assert_eq!(
         (ui_ref.as_str(), state_ref.as_str()),
-        ("app:home/ui", "app:home/state")
+        ("app:home/ui", "private")
     );
 }
 
@@ -2074,18 +2074,18 @@ fn home_ui_replacement_retains_state_and_old_scene_and_rejects_stale_input() {
     use otrios_interfaces::layout::Value;
     let mut old = home::ui(&[]);
     old.state_schema.fields.push(Field {
-        id: 1,
+        id: 7,
         name: "retained".into(),
         default: Value::Number(0.),
         writable: true,
     });
     old.selectors.push(Selector {
         local: 500,
-        field: 1,
+        field: 7,
         projection: Projection::Identity,
     });
     let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
-    authority.set(&[(1, 731)]).unwrap();
+    authority.set(&[(7, 731)]).unwrap();
     let state = authority.save().unwrap();
     let mut client = Client::default();
     activate_snapshot(
@@ -2126,7 +2126,7 @@ fn home_ui_replacement_retains_state_and_old_scene_and_rejects_stale_input() {
         .unwrap();
     assert!(!client.catalog_update_pending());
     assert_eq!(client.title(), "Home updated");
-    assert_eq!(client.value(1).unwrap(), 731);
+    assert_eq!(client.value(7).unwrap(), 731);
     assert!(!client.event(old_epoch, 0, 0, 0).unwrap());
     assert_eq!(scene.root(), client.scene().unwrap().root());
     assert!(
@@ -2427,4 +2427,238 @@ fn invalid_behavior_replacement_retains_active_guest_and_permissions() {
     let mut changed = playground::ui(&revision_guest(2));
     changed.title.push_str(" changed");
     assert!(compatible_app_update(&old, &changed).is_err());
+}
+
+fn home_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
+    let scene = client.scene().unwrap();
+    let mut cards: Vec<_> = scene
+        .controls()
+        .into_iter()
+        .filter(|c| {
+            matches!(
+                c.node.responder,
+                Some(otrios_interfaces::scene::TouchResponder::Activate(
+                    otrios_interfaces::scene::Action::AppNavigate(_)
+                ))
+            )
+        })
+        .map(|c| {
+            (
+                c.node.semantics.as_ref().unwrap().label.clone(),
+                c.node.id,
+                [
+                    c.origin[0] + c.node.frame.width / 2.,
+                    c.origin[1] + c.node.frame.height / 2.,
+                ],
+            )
+        })
+        .collect();
+    cards.sort_by(|a, b| a.2[1].total_cmp(&b.2[1]).then(a.2[0].total_cmp(&b.2[0])));
+    cards
+}
+fn home_values(client: &Client) -> Vec<otrios_interfaces::layout::Value> {
+    (1..=6).map(|id| client.typed_value(id).unwrap()).collect()
+}
+#[test]
+fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let ui = home::ui(&[]);
+    let mut a = Client::default();
+    let mut b = Client::default();
+    activate(&mut a, ui.clone(), "home-edit", vec![]);
+    activate(&mut b, ui.clone(), "home-edit", vec![]);
+    b.set_viewport([800., 1280.]).unwrap();
+    let mut authority = Document::new(ui.state_schema, "home-edit").unwrap();
+    let mut sa = Session::default();
+    let mut sb = Session::default();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    let initial = home_values(&a);
+    let root = authority.root_hash();
+    let cards = home_cards(&a);
+    let before = b.reflow_frame().unwrap().unwrap();
+    edit(&mut a, "Edit cards", 0, 0);
+    assert!(a.reflow_frame().unwrap().unwrap().editing);
+    assert_eq!(a.pending_count(), 0);
+    assert_eq!(home_values(&a), initial);
+    assert!(!b.reflow_frame().unwrap().unwrap().editing);
+    let epoch = a.epoch();
+    for (phase, position) in [
+        (PointerPhase::Down, cards[5].2),
+        (PointerPhase::Move, cards[1].2),
+    ] {
+        a.pointer(
+            epoch,
+            PointerEvent {
+                id: 7,
+                phase,
+                position,
+            },
+        )
+        .unwrap();
+    }
+    assert!(a.input_busy());
+    assert_eq!(a.pending_count(), 1);
+    let moved = home_values(&a);
+    assert_eq!(moved[..5], initial[..5]);
+    assert_ne!(moved[5], initial[5]);
+    for _ in 0..20 {
+        a.pointer(
+            epoch,
+            PointerEvent {
+                id: 7,
+                phase: PointerPhase::Move,
+                position: cards[1].2,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(a.pending_count(), 1);
+    assert_eq!(home_values(&a), moved);
+    a.pointer(
+        epoch,
+        PointerEvent {
+            id: 7,
+            phase: PointerPhase::Cancel,
+            position: cards[1].2,
+        },
+    )
+    .unwrap();
+    assert!(!a.input_busy());
+    assert_eq!(a.epoch(), epoch);
+    assert_eq!(a.ui_ref(), "app:home/ui");
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    assert_ne!(authority.root_hash(), root);
+    assert_eq!(home_values(&b), moved);
+    assert_eq!(
+        home_cards(&a).iter().map(|v| &v.0).collect::<Vec<_>>(),
+        home_cards(&b).iter().map(|v| &v.0).collect::<Vec<_>>()
+    );
+    assert_eq!(home_cards(&b)[1].0, "Monitoring");
+    assert!(!b.reflow_frame().unwrap().unwrap().editing);
+    let font = otrios_core::dashboard::font::Font::from_zstd(
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+    )
+    .unwrap();
+    let mut presenter = reflow::Presenter::default();
+    presenter.update(before, &font, 0.).unwrap();
+    presenter
+        .update(b.reflow_frame().unwrap().unwrap(), &font, 100.)
+        .unwrap();
+    assert!(presenter.active(100.));
+    assert_ne!(presenter.mesh(100.).vertices, presenter.mesh(320.).vertices);
+    assert!(!presenter.active(320.));
+    assert_eq!(b.pending_count(), 0);
+    assert_eq!(home_values(&b), moved);
+    edit(&mut a, "Done editing cards", 0, 0);
+    assert_eq!(a.pending_count(), 0);
+    assert!(!a.reflow_frame().unwrap().unwrap().editing);
+    // Node identities and their app destinations survive moves and orientation changes.
+    let mut ids = home_cards(&a)
+        .iter()
+        .map(|v| (v.0.clone(), v.1))
+        .collect::<Vec<_>>();
+    ids.sort();
+    let mut original = cards.iter().map(|v| (v.0.clone(), v.1)).collect::<Vec<_>>();
+    original.sort();
+    assert_eq!(ids, original);
+}
+#[test]
+fn home_concurrent_different_card_moves_survive_and_resize_cancels_capture() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let ui = home::ui(&[]);
+    let mut a = Client::default();
+    let mut b = Client::default();
+    activate(&mut a, ui.clone(), "concurrent-home", vec![]);
+    activate(&mut b, ui.clone(), "concurrent-home", vec![]);
+    let mut authority = Document::new(ui.state_schema, "concurrent-home").unwrap();
+    let mut sa = Session::default();
+    let mut sb = Session::default();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    let initial = home_values(&a);
+    let cards = home_cards(&a);
+    edit(&mut a, "Edit cards", 0, 0);
+    edit(&mut b, "Edit cards", 0, 0);
+    a.adjust_control(cards[0].1, 50, 0).unwrap();
+    b.adjust_control(cards[5].1, -50, 0).unwrap();
+    let first = a.typed_value(1).unwrap();
+    let last = b.typed_value(6).unwrap();
+    pump(&mut a, &mut authority, &mut sa);
+    pump(&mut b, &mut authority, &mut sb);
+    pump(&mut a, &mut authority, &mut sa);
+    assert_eq!(home_values(&a), home_values(&b));
+    assert_eq!(a.typed_value(1).unwrap(), first);
+    assert_eq!(a.typed_value(6).unwrap(), last);
+    assert_eq!(home_values(&a)[1..5], initial[1..5]);
+    let cards = home_cards(&a);
+    a.pointer(
+        a.epoch(),
+        PointerEvent {
+            id: 1,
+            phase: PointerPhase::Down,
+            position: cards[0].2,
+        },
+    )
+    .unwrap();
+    assert!(a.input_busy());
+    a.set_viewport([800., 1280.]).unwrap();
+    assert!(!a.input_busy());
+    a.pointer(
+        a.epoch(),
+        PointerEvent {
+            id: 1,
+            phase: PointerPhase::Up,
+            position: cards[0].2,
+        },
+    )
+    .unwrap();
+    assert_eq!(a.ui_ref(), "app:home/ui");
+    assert_eq!(a.pending_count(), 0);
+}
+
+#[test]
+fn wrap_requires_its_layout_version_and_nonfinite_touch_cancels_order_capture() {
+    use otrios_interfaces::{
+        layout::Blueprint,
+        scene::{PointerEvent, PointerPhase},
+    };
+    let ui = home::ui(&[]);
+    let mut blueprint: Blueprint = otrios_core::dashboard::layout::Layout::from_bytes(&ui.layout)
+        .unwrap()
+        .blueprint()
+        .clone();
+    assert_eq!(blueprint.schema, "otrios-layout-v4");
+    blueprint.schema = "otrios-layout-v3".into();
+    assert!(otrios_core::dashboard::layout::Layout::encode(&blueprint).is_err());
+    let mut client = Client::default();
+    activate(&mut client, ui, "finite-touch", vec![]);
+    edit(&mut client, "Edit cards", 0, 0);
+    let initial = home_values(&client);
+    let card = home_cards(&client)[0].2;
+    client
+        .pointer(
+            client.epoch(),
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Down,
+                position: card,
+            },
+        )
+        .unwrap();
+    assert!(client.input_busy());
+    client
+        .pointer(
+            client.epoch(),
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Move,
+                position: [f32::NAN, card[1]],
+            },
+        )
+        .unwrap();
+    assert!(!client.input_busy());
+    assert_eq!(home_values(&client), initial);
 }
