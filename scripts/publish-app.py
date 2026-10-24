@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Record a qualified runtime, or publish an app UI or behavior module using that verified runtime."""
-import argparse,hashlib,importlib.util,json,pathlib,shutil,subprocess,tempfile
+import argparse,hashlib,importlib.util,json,pathlib,re,shutil,subprocess,tempfile
 
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,pathlib.Path(__file__).with_name(file));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
@@ -36,7 +36,9 @@ def publish(a):
     for item in receipt['binaries'].values():
         if file_hash(pathlib.Path(item['path']))!=item['sha256']:raise ValueError('Reused authority binary changed')
     source_names=['behavior/main.wat'] if a.kind=='behavior' else ['ui.rs','components.rs']
-    ui_sources={name:file_hash(a.repo/'apps'/a.app/name) for name in source_names if (a.repo/'apps'/a.app/name).exists()}
+    source_root=a.repo/'apps'/a.app
+    if not (source_root/'app.rs').exists():source_root=a.repo/'apps'/a.app.split('/')[0]
+    ui_sources={name:file_hash(source_root/name) for name in source_names if (source_root/name).exists()}
     if a.kind=='behavior' and not ui_sources:raise ValueError('App has no behavior source')
     release=verified(a,a.baseline);base=a.runtime/'releases'/release
     recorded=a.runtime/'releases'/receipt['release']
@@ -46,11 +48,14 @@ def publish(a):
     with tempfile.TemporaryDirectory(prefix='app-ui-',dir=a.runtime/'build') as tmp:
         stage=pathlib.Path(tmp);shutil.copytree(base/'web',stage/'web')
         apps=stage/'apps';apps.mkdir();shutil.copyfile(base/'apps/catalog.flex',apps/'catalog.flex')
-        for folder in (base/'authority/apps').iterdir():shutil.copytree(folder,apps/folder.name/'package')
+        for source in (base/'authority/apps').rglob('app.flex'):
+            folder=source.parent;dest=apps/folder.relative_to(base/'authority/apps')/'package';dest.mkdir(parents=True)
+            for name in ['app.flex','ui.flex','behavior.wasm']:
+                if (folder/name).is_file():shutil.copyfile(folder/name,dest/name)
         command=['cargo','run','-p','otrios-dashboard','--bin','canvas-pack','--features','canvas','--locked','--offline','--',str(apps),('--app-behavior' if a.kind=='behavior' else '--app-ui'),a.app,str(base)]
         if a.kind=='behavior':command.append(str(a.repo/'apps'/a.app/'behavior/main.wat'))
         subprocess.run(command,cwd=a.repo,check=True)
-        if {name:file_hash(a.repo/'apps'/a.app/name) for name in ui_sources}!=ui_sources:raise ValueError('App UI changed during packing; retry')
+        if {name:file_hash(source_root/name) for name in ui_sources}!=ui_sources:raise ValueError('App UI changed during packing; retry')
         if runtime_inputs(a.repo)!=receipt['runtime_inputs']:raise ValueError('Runtime inputs changed during packing')
         result=publisher.publish(stage/'web',base/'native/armv7/dashboard-native',a.runtime/'releases',a.runtime/'publisher/private.pem',a.openssl,activate=False,catalog=apps/'catalog.flex')
         next_manifest=json.loads((a.runtime/'releases'/result['id']/'manifest.json').read_bytes())
@@ -61,7 +66,6 @@ def publish(a):
         if a.kind=='behavior':allowed.add(f'authority/apps/{a.app}/behavior.wasm')
         if not changed<=allowed:raise ValueError('App update changed another package')
         output=a.runtime/'build/app-release.json';publisher.atomic(output,json.dumps(result,sort_keys=True).encode());verified(a,output)
-        if a.kind=='ui':publisher.atomic(a.runtime/'build/app-ui-release.json',output.read_bytes())
         if result['id']==release:
             print('UNCHANGED '+release);return result
         if a.deploy_config:
@@ -81,7 +85,7 @@ def main():
         if not all([a.server,a.monitoring,a.bootstrap]):p.error('Recording requires matching server, monitoring and bootstrap binaries')
         record(a)
     else:
-        if not a.app or a.app not in [p.parent.name for p in (a.repo/'apps').glob('*/app.rs')]:p.error('Select an existing app with --app')
+        if not a.app or not re.fullmatch(r'[a-z-]+(?:/[a-z-]+)*',a.app) or a.app.split('/')[0] not in [p.parent.name for p in (a.repo/'apps').glob('*/app.rs')]:p.error('Select an existing app/screen with --app')
         publish(a)
 
 if __name__=='__main__':main()

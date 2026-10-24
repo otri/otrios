@@ -84,6 +84,7 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
         std::fs::write(folder.join("ui.flex"), &bytes).unwrap();
         std::fs::write(folder.join("app.flex"), canvas::encode_app(&app).unwrap()).unwrap();
         entries.push(CatalogEntry {
+            path: id.into(),
             app,
             ui_hash: canvas::hash(&bytes),
             private: false,

@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Browser adapter; Canvas state/guest memory live only in the worker's RAM.
-use otrios_core::canvas::{Client, decode_catalog};
+use otrios_core::canvas::Client;
 use otrios_core::dashboard::{Mesh, font::Font, render_scene_with_font, scene::Scene};
 use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
-use otrios_interfaces::{
-    canvas::{Catalog, Presentation},
-    keyboard::Edit,
-};
+use otrios_interfaces::{canvas::Presentation, keyboard::Edit};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct CanvasApp {
-    catalog: Option<Catalog>,
     font: Option<Arc<Font>>,
     rendered: Option<(Arc<Scene>, Mesh)>,
     inner: Client,
@@ -36,18 +32,13 @@ impl CanvasApp {
         self.inner.open(ui, state)
     }
     pub fn admit_catalog(&mut self, bytes: &[u8]) -> Result<(), String> {
-        let catalog = decode_catalog(bytes)?;
-        self.inner.admit_catalog(bytes)?;
-        self.catalog = Some(catalog);
-        Ok(())
+        self.inner.admit_catalog(bytes)
     }
     pub fn can_update_catalog(&mut self) -> bool {
         self.inner.can_update_catalog()
     }
     pub fn update_catalog(&mut self, bytes: &[u8]) -> Result<bool, String> {
-        let changed = self.inner.update_catalog(bytes)?;
-        self.catalog = Some(decode_catalog(bytes)?);
-        Ok(changed)
+        self.inner.update_catalog(bytes)
     }
     pub fn catalog_update_pending(&self) -> bool {
         self.inner.catalog_update_pending()
@@ -56,22 +47,16 @@ impl CanvasApp {
         otrios_core::canvas::hex(self.inner.catalog_hash())
     }
     pub fn screen(&self) -> String {
-        self.catalog
-            .as_ref()
-            .and_then(|c| c.apps.iter().find(|a| a.app.ui_ref == self.inner.ui_ref()))
-            .map(|e| e.app.id.clone())
-            .unwrap_or_else(|| "home".into())
+        self.inner.screen()
     }
-    pub fn navigate(&mut self, name: &str) -> Result<(), String> {
-        let app = self
-            .catalog
-            .as_ref()
-            .and_then(|c| c.apps.iter().find(|a| a.app.id == name))
-            .ok_or("Unknown admitted app")?
-            .app
-            .clone();
-        self.inner.open(&app.ui_ref, &app.state_ref);
-        Ok(())
+    pub fn path(&self) -> String {
+        self.inner.path()
+    }
+    pub fn pending_path(&self) -> String {
+        self.inner.pending_path()
+    }
+    pub fn navigate(&mut self, path: &str) -> Result<(), String> {
+        self.inner.navigate(path)
     }
     pub fn set_session_controls(&mut self, enabled: bool) -> bool {
         self.inner.set_session_controls(enabled)

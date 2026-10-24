@@ -9,7 +9,7 @@ use axum::{
         ws::{Message, WebSocket},
     },
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -325,26 +325,82 @@ async fn public_health(State(app): State<Arc<App>>) -> Response {
     let available = *app.state_available.borrow();
     (if available{StatusCode::OK}else{StatusCode::SERVICE_UNAVAILABLE},binary("application/json",json!({"status":if available{"ok"}else{"state-unavailable"},"state_available":available,"release":app.release.read().await["id"]}).to_string().into_bytes(),false)).into_response()
 }
-async fn root(State(app): State<Arc<App>>) -> Response {
-    refresh_release(&app).await;
-    let release = app.release.read().await;
-    if let Some(entry) = release["web_entry"].as_str() {
-        return (
-            [(header::CACHE_CONTROL, "no-store")],
-            Redirect::temporary(entry),
+/// Serve a mutable navigation entry, pinning every executable/style URL to one release.
+/// Reading code metadata here never waits for app-state recovery or admission.
+async fn app_entry(app: &App, route: Option<&str>) -> Response {
+    refresh_release(app).await;
+    let release = app.release.read().await.clone();
+    let (index, catalog, prefix) = if let (Some(root), Some(id)) = (
+        &app.releases,
+        release["id"].as_str().filter(|id| valid_id(id)),
+    ) {
+        (
+            root.join(id).join("web/index.html"),
+            root.join(id).join("apps/catalog.flex"),
+            format!("/releases/{id}/web/"),
         )
-            .into_response();
-    }
-    drop(release);
-    if app.releases.is_some() {
+    } else if app.releases.is_some() {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "No valid active release");
+    } else {
+        (
+            app.web.join("index.html"),
+            app.state_config.source.join("catalog.flex"),
+            "/".into(),
+        )
+    };
+    if let Some(path) = route {
+        let screen = path.trim_end_matches('/');
+        if !otrios_interfaces::canvas::valid_destination(screen) {
+            return failure(StatusCode::NOT_FOUND, "Not found");
+        }
+        let bytes = match tokio::fs::read(catalog).await {
+            Ok(bytes) if bytes.len() <= 512 * 1024 => bytes,
+            _ => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
+        };
+        let catalog = match otrios_core::canvas::decode_catalog(&bytes) {
+            Ok(catalog) => catalog,
+            Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
+        };
+        if !catalog.apps.iter().any(|e| e.path == screen) {
+            return failure(StatusCode::NOT_FOUND, "Not found");
+        }
     }
-    serve_file(
-        app.web.join("index.html"),
-        "text/html; charset=utf-8",
-        false,
-    )
-    .await
+    let bytes = match tokio::fs::read(index).await {
+        Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
+        _ => return failure(StatusCode::SERVICE_UNAVAILABLE, "App entry unavailable"),
+    };
+    let mut html = match String::from_utf8(bytes) {
+        Ok(html) => html,
+        Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App entry unavailable"),
+    };
+    for (attribute, asset) in [("href", "style.css"), ("src", "app.js")] {
+        for source in [format!("/{asset}"), format!("./{asset}")] {
+            html = html.replace(
+                &format!("{attribute}=\"{source}\""),
+                &format!("{attribute}=\"{prefix}{asset}\""),
+            );
+        }
+    }
+    binary("text/html; charset=utf-8", html.into_bytes(), false)
+}
+async fn root(State(app): State<Arc<App>>) -> Response {
+    app_entry(&app, None).await
+}
+async fn navigation_entry(
+    State(app): State<Arc<App>>,
+    request: axum::extract::Request,
+) -> Response {
+    if !matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    ) {
+        return failure(StatusCode::NOT_FOUND, "Not found");
+    }
+    let mut response = app_entry(&app, Some(request.uri().path().trim_start_matches('/'))).await;
+    if request.method() == axum::http::Method::HEAD {
+        *response.body_mut() = axum::body::Body::empty();
+    }
+    response
 }
 async fn current_release(State(app): State<Arc<App>>) -> Response {
     refresh_release(&app).await;
@@ -418,6 +474,9 @@ async fn serve_file(path: PathBuf, kind: &str, immutable: bool) -> Response {
     }
 }
 async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<String>) -> Response {
+    if asset_type(&path).is_none() {
+        return app_entry(&app, Some(&path)).await;
+    }
     if path == "apps/catalog.flex" {
         return match app
             .apps
@@ -599,7 +658,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             )
             .route("/monitoring/presentation", get(auth::presentation))
             .route("/health", get(public_health))
-            .fallback(|| async { failure(StatusCode::NOT_FOUND, "Not found") })
+            .fallback(navigation_entry)
             .layer(axum::middleware::from_fn(response_headers))
             .with_state(app.clone());
         tokio::spawn(async move {

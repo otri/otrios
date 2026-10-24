@@ -24,7 +24,7 @@ def verify(releases,key,openssl,pointer):
     total=0
     for name,item in list(assets.items())+list(authority.items()):
         private=name in authority
-        if private and not re.fullmatch(r'authority/apps/[a-z-]{1,64}/(app.flex|ui.flex|behavior.wasm)',name):raise ValueError('Unexpected private artifact')
+        if private and not re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/(app.flex|ui.flex|behavior.wasm)',name):raise ValueError('Unexpected private artifact')
         size=item['bytes'];total+=size
         if not 0<size<=(512*1024 if private else 32*1024*1024) or total>128*1024*1024:raise ValueError('Release exceeds activation budget')
         path=folder/name

@@ -103,7 +103,7 @@ def ui_only_change(previous,next,behavior=False):
     if {k:v for k,v in previous.items() if k not in ('assets','authority')}!={k:v for k,v in next.items() if k not in ('assets','authority')}:return False
     for section,allowed in [('assets','apps/catalog.flex'),('authority',None)]:
         a,b=previous.get(section,{}),next.get(section,{})
-        if not a or a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if not (k==allowed or (section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+/ui\.flex',k)) or (behavior and section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+/behavior\.wasm',k)))):return False
+        if not a or a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if not (k==allowed or (section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/ui\.flex',k)) or (behavior and section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+(?:/[a-z-]+)*/behavior\.wasm',k)))):return False
     return True
 
 def app_only_change(previous,next):

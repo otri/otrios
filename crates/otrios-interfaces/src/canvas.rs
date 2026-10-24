@@ -107,7 +107,11 @@ pub struct Handler {
 #[serde(deny_unknown_fields)]
 pub struct Navigation {
     pub action: u8,
+    /// A named child edge owned by this UI; ordinary links leave it unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
     pub ui_ref: String,
+    /// Empty resolves the destination app's admitted State reference; nonempty is an explicit binding.
     pub state_ref: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,9 +165,18 @@ pub struct Ui {
     pub behavior: Option<BehaviorRef>,
     pub presentation: Option<Presentation>,
 }
+/// Canonical app/screen path, without a leading slash. Every segment is app-owned.
+pub fn valid_destination(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 64
+        && path.split('/').all(|segment| {
+            !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+        })
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct App {
+    /// Stable package/screen identity, independent of its navigation path.
     pub id: String,
     pub title: String,
     pub ui_ref: String,
@@ -175,6 +188,8 @@ pub struct App {
 #[serde(deny_unknown_fields)]
 pub struct CatalogEntry {
     pub app: App,
+    /// Resolved from app-owned named navigation edges; the entry screen uses "".
+    pub path: String,
     pub ui_hash: Vec<u8>,
     pub private: bool,
 }

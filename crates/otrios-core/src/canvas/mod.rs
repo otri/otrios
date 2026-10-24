@@ -96,7 +96,10 @@ pub fn compatible_ui(old: &Ui, next: &Ui) -> Result<()> {
         || old.state_schema != next.state_schema
         || old.behavior != next.behavior
         || old.handlers != next.handlers
-        || old.navigation != next.navigation
+        || old.navigation.len() != next.navigation.len()
+        || old.navigation.iter().zip(&next.navigation).any(|(a, b)| {
+            a.action != b.action || a.ui_ref != b.ui_ref || a.state_ref != b.state_ref
+        })
         || old.presentation != next.presentation
     {
         return Err("UI update requires matching state, behavior and action contracts".into());

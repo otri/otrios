@@ -18,3 +18,7 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
 pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
     ui::description()
 }
+
+pub fn screens() -> Vec<crate::authoring::AppScreen> {
+    vec![(manifest(), ui)]
+}

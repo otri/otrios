@@ -34,8 +34,7 @@ also removes its active behavior diagnostic.
 
 ## Packaging and delivery
 
-`publish-app.py` is the common publisher for UI and behavior updates;
-`publish-app-ui.py` remains a compatibility entry point. Both use the same
+`publish-app.py` is the common publisher for UI and behavior updates, using one
 qualified runtime receipt, publisher lock, signed closure verification,
 expected-baseline check and partial transfer. No new rollback tooling is added.
 
