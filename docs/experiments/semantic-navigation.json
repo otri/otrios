@@ -1,0 +1,88 @@
+{
+  "source_commit": "9a9016a0b94639c9879cb620052dfddf610ff810",
+  "release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
+  "validation": {
+    "rust_tests": 180,
+    "python_checks": 39,
+    "javascript_and_wasm_tests": 51,
+    "public_https_checks": 76,
+    "arm_all_features_clippy": true,
+    "arm_release_build": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": [
+      "direct screen links and refresh",
+      "Back/Forward without page/session replacement",
+      "local keyboard leaves URL/history unchanged",
+      "release hello uses the pinned module identity",
+      "legacy hashes and expired release bookmarks normalize",
+      "Monitoring URL preserves sign-in boundary",
+      "executable modules retain immutable URLs"
+    ]
+  },
+  "full_upgrade": {
+    "passed": true,
+    "before": {
+      "path": "/layout-lab",
+      "time": 1792809605658.6,
+      "release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
+      "length": 2
+    },
+    "after": {
+      "path": "/layout-lab",
+      "time": 1792809667876.8,
+      "release": "a4bfa41996402d3b1f8c9b7492d2756001f581d3af8b3606cba7fd992642a14a",
+      "length": 2,
+      "hash": ""
+    },
+    "checks": [
+      "full upgrades reload the same screen URL",
+      "history length stays fixed",
+      "hello carries the new module release"
+    ]
+  },
+  "app_data_upgrade": {
+    "passed": true,
+    "checks": [
+      "explicit refresh opens the current release",
+      "Home presentation replaced without page reload",
+      "other app retains its mount and confirmed state",
+      "same WebSocket sessions",
+      "compatible keyboard focus retained",
+      "later Home navigation uses updated catalog"
+    ],
+    "release": "665cc29420d5bc8dbd7e8917c5f7f0a581f9ecb9a42a51c40b0c249e4698b4f6"
+  },
+  "native": {
+    "pid": 12677,
+    "release": "af6e06ae315f012ad06e44b26cddc68470494765c35ac2a3fbd10d4fb825ccfa",
+    "state_ref": "app:home/state-v3",
+    "stream_ready": true,
+    "state_confirmed": true,
+    "output": [
+      800,
+      1280
+    ],
+    "rotation": 90,
+    "renderer": "gles2-direct"
+  },
+  "observed_previous_release": "74b6226094f719496b24defbd6fbaebb148a0a5923e3d3f83aef82aa88ec5cd8",
+  "native_order_before": [
+    1,
+    4,
+    2,
+    5,
+    3,
+    6
+  ],
+  "native_order_after": [
+    1,
+    4,
+    2,
+    5,
+    3,
+    6
+  ],
+  "reused_wasm_native_and_app_packages_from": "c2598ca4a76831f669ebda1fd5a23fc9e384751ddb1ddc1887fef20f13b73dd8"
+}
