@@ -42,7 +42,7 @@ def complete_ui(releases,installed,key,openssl,pointer,base):
     old=json.loads((installed/base/'manifest.json').read_bytes())
     release=json.loads(pointer)['id'];agent.valid_release(release);folder=releases/release
     new=agent.verify_manifest(read(folder/'manifest.json',65536),read(folder/'manifest.sig',64),release,releases,key,openssl)
-    if not agent.ui_only_change(old,new):raise ValueError('UI transfer changed executable or policy metadata')
+    if not agent.app_only_change(old,new):raise ValueError('App transfer changed runtime executable or policy metadata')
     for section in ['assets','authority']:
         for name,item in new[section].items():
             dest=folder/name

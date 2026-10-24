@@ -52,6 +52,19 @@ class SignedReleases(unittest.TestCase):
         self.assertEqual((folder/'web/pkg/otrios_dashboard_bg.wasm').read_bytes(),(self.out/base['id']/'web/pkg/otrios_dashboard_bg.wasm').read_bytes())
         (self.out/'current.json').write_text(json.dumps(next))
         with self.assertRaisesRegex(ValueError,'baseline changed'):activation.complete_ui(stage,self.out,self.public,OPENSSL,raw,base['id'])
+    def test_guest_transfer_reuses_hosts_and_requires_the_advertised_update_abi(self):
+        package=self.root/'apps/home/package';package.mkdir(parents=True)
+        (package/'app.flex').write_bytes(b'manifest');(package/'ui.flex').write_bytes(b'old-ui');(package/'behavior.wasm').write_bytes(b'old-guest')
+        base=self.publish();(package/'ui.flex').write_bytes(b'new-ui-reference');(package/'behavior.wasm').write_bytes(b'new-guest')
+        next=self.publish();(self.out/'current.json').write_text(json.dumps(base))
+        before=json.loads((self.out/base['id']/'manifest.json').read_bytes());after=json.loads((self.out/next['id']/'manifest.json').read_bytes())
+        self.assertFalse(agent.ui_only_change(before,after));self.assertTrue(agent.app_only_change(before,after))
+        legacy=dict(before);legacy.pop('behavior_abi');self.assertFalse(agent.app_only_change(legacy,after))
+        stage=self.root/'guest-partial';folder=stage/next['id'];folder.mkdir(parents=True)
+        for name in ['manifest.json','manifest.sig','authority/apps/home/ui.flex','authority/apps/home/behavior.wasm']:
+            dest=folder/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/next['id']/name,dest)
+        self.assertEqual(activation.complete_ui(stage,self.out,self.public,OPENSSL,json.dumps(next).encode(),base['id']),next['id'])
+        self.assertEqual((folder/'authority/apps/home/behavior.wasm').read_bytes(),b'new-guest')
     def test_authority_app_payloads_are_signed_but_never_replicated_publicly(self):
         package=self.root/'apps/monitoring/package';package.mkdir(parents=True)
         (package/'app.flex').write_bytes(b'private-app-manifest')

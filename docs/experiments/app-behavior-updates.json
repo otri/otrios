@@ -1,0 +1,205 @@
+{
+  "passed": true,
+  "runtime_source": "17b76c7",
+  "behavior_source": "4ff8731",
+  "ui_source": "8949b18",
+  "runtime_release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+  "behavior_release": "d1a3924e234aea4e0e9167c4fd9bc4efd0799a6151543ff3ab585bc041ce9a78",
+  "final_release": "87db0c3d102fd279201f8bad18d6d8af1caa9c5045cadc5e76d44fce9a1288eb",
+  "guest": {
+    "bytes": 218,
+    "sha256": "4999a78c65f4412e1e17b6d85589c3f7bcc50ef6f5bf3fe5aeaa6998d6ed41ad"
+  },
+  "guest_changed_assets": [
+    "apps/catalog.flex",
+    "authority/apps/component-playground/behavior.wasm",
+    "authority/apps/component-playground/ui.flex"
+  ],
+  "ui_changed_assets": [
+    "apps/catalog.flex",
+    "authority/apps/component-playground/ui.flex"
+  ],
+  "transfer_bytes": 112640,
+  "native": {
+    "before": {
+      "authority": {
+        "app_roots": 7,
+        "catalogs": 1,
+        "ink_limit": 68,
+        "ink_subscribers": 0,
+        "peer_limits": [
+          4,
+          64
+        ],
+        "presentation": true,
+        "public_sessions": 1,
+        "release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+        "status": "ok",
+        "trusted_sessions": 1
+      },
+      "authority_pid": 11365,
+      "native": {
+        "pid": 11409,
+        "release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+        "ui_release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+        "runtime_release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+        "ui_updates": true,
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state",
+        "screen": "home",
+        "epoch": 1,
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct"
+      }
+    },
+    "after": {
+      "authority": {
+        "app_roots": 7,
+        "catalogs": 2,
+        "ink_limit": 68,
+        "ink_subscribers": 0,
+        "peer_limits": [
+          4,
+          64
+        ],
+        "presentation": true,
+        "public_sessions": 1,
+        "release": "d1a3924e234aea4e0e9167c4fd9bc4efd0799a6151543ff3ab585bc041ce9a78",
+        "status": "ok",
+        "trusted_sessions": 1
+      },
+      "authority_pid": 11365,
+      "native": {
+        "pid": 11409,
+        "release": "d1a3924e234aea4e0e9167c4fd9bc4efd0799a6151543ff3ab585bc041ce9a78",
+        "ui_release": "d1a3924e234aea4e0e9167c4fd9bc4efd0799a6151543ff3ab585bc041ce9a78",
+        "runtime_release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+        "ui_updates": true,
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state",
+        "screen": "home",
+        "epoch": 1,
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct"
+      }
+    },
+    "final": {
+      "authority": {
+        "app_roots": 7,
+        "catalogs": 3,
+        "ink_limit": 68,
+        "ink_subscribers": 0,
+        "peer_limits": [
+          4,
+          64
+        ],
+        "presentation": true,
+        "public_sessions": 1,
+        "release": "87db0c3d102fd279201f8bad18d6d8af1caa9c5045cadc5e76d44fce9a1288eb",
+        "status": "ok",
+        "trusted_sessions": 1
+      },
+      "authority_pid": 11365,
+      "native": {
+        "pid": 11409,
+        "release": "87db0c3d102fd279201f8bad18d6d8af1caa9c5045cadc5e76d44fce9a1288eb",
+        "ui_release": "87db0c3d102fd279201f8bad18d6d8af1caa9c5045cadc5e76d44fce9a1288eb",
+        "runtime_release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be",
+        "ui_updates": true,
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state",
+        "screen": "home",
+        "epoch": 1,
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct"
+      }
+    }
+  },
+  "native_probe": "Loaded app=app:component-playground/ui state=app:component-playground/state WASM reducer level=700 primitive_vertices=3954 acknowledged=true",
+  "duplicate_publish": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s\n     Running `/workspace/cloud-prep/native-target/debug/canvas-pack /workspace/cloud-prep/runtime/build/app-ui-gwk_smtr/apps --app-behavior component-playground /workspace/cloud-prep/runtime/releases/87db0c3d102fd279201f8bad18d6d8af1caa9c5045cadc5e76d44fce9a1288eb /workspace/otrios/apps/component-playground/behavior/main.wat`\ncomponent-playground: 218 byte behavior module; UI layout and host runtimes reused\nUNCHANGED 87db0c3d102fd279201f8bad18d6d8af1caa9c5045cadc5e76d44fce9a1288eb",
+  "browser": {
+    "passed": true,
+    "before": {
+      "active": {
+        "time": 1792804788617.9,
+        "epoch": "1",
+        "behavior": "8bdbbb88a979d43eee0b01645826ed2f0e8a10d6a6f20cdaedff08626f91a12a",
+        "release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be"
+      },
+      "other": {
+        "time": 1792804790578.3,
+        "epoch": "1",
+        "behavior": null,
+        "release": "ec40972ec5648f7fe9031fe8ea6eae7a19eff039390b9c359fac118cea1a41be"
+      },
+      "value": "81",
+      "controls": [
+        [
+          "3",
+          "Home"
+        ],
+        [
+          "11",
+          "Linear slider"
+        ],
+        [
+          "22",
+          "Rotary dial"
+        ],
+        [
+          "49",
+          "Touch pad"
+        ],
+        [
+          "62",
+          "Toggle"
+        ]
+      ],
+      "focus": "11",
+      "sockets": [
+        1,
+        1
+      ]
+    },
+    "after": {
+      "active": {
+        "time": 1792804788617.9,
+        "epoch": "2",
+        "behavior": "4999a78c65f4412e1e17b6d85589c3f7bcc50ef6f5bf3fe5aeaa6998d6ed41ad",
+        "release": "d1a3924e234aea4e0e9167c4fd9bc4efd0799a6151543ff3ab585bc041ce9a78"
+      },
+      "other": {
+        "time": 1792804790578.3,
+        "epoch": "1",
+        "behavior": null,
+        "release": "d1a3924e234aea4e0e9167c4fd9bc4efd0799a6151543ff3ab585bc041ce9a78"
+      }
+    },
+    "checks": [
+      "actual loaded guest hash changed",
+      "state and UI controls retained across code replacement",
+      "same pages, workers and WebSocket sessions",
+      "inactive Home mount retained",
+      "new slider guest snaps input to 10-percent steps",
+      "other client shares the confirmed result"
+    ]
+  }
+}

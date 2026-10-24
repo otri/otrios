@@ -187,3 +187,7 @@ All apps use the same package factory and update contract. See
 [RFC 0013](../docs/rfcs/0013-app-ui-updates.md) for UI-only publishing, qualified
 runtime reuse and idempotent activation. UI data can change while compatible
 state and behavior stay mounted; executable/schema changes require a full release.
+
+The common publisher also supports `--kind behavior` for an existing guest module;
+see [RFC 0014](../docs/rfcs/0014-app-behavior-updates.md). It compiles that app's
+Wasm and updates its hash references while reusing the UI layout and host runtimes.

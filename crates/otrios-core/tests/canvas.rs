@@ -254,9 +254,9 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
         .unwrap()
         .node
         .id;
-    assert_eq!(a.control_value(slider).unwrap(), Some(87.));
+    assert_eq!(a.control_value(slider).unwrap(), Some(80.));
     pump(&mut a, &mut da, &mut sa);
-    assert_eq!(a.value(1).unwrap(), 870);
+    assert_eq!(a.value(1).unwrap(), 800);
     assert_eq!(b.value(1).unwrap(), 420);
     let s = a.scene().unwrap();
     let controls = s.controls();
@@ -269,12 +269,12 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
                 .is_some_and(|s| s.label == "Linear slider")
         })
         .unwrap();
-    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,870.*0.281+1.);
+    assert_eq!(slider.node.children.iter().find(|n|matches!(n.primitive,otrios_interfaces::scene::Primitive::Superellipse{color,..} if color==authoring::ACCENT)).unwrap().frame.width,800.*0.281+1.);
     fn has_text(n: &otrios_interfaces::scene::SceneNode, value: &str) -> bool {
         matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value:v,..} if v==value)
             || n.children.iter().any(|c| has_text(c, value))
     }
-    assert!(has_text(s.root(), "87%"));
+    assert!(has_text(s.root(), "80%"));
     let old = a.epoch();
     activate(&mut a, layout::ui(&[]), "layout:state", vec![]);
     assert!(!a.event(old, 1, 0, 0).unwrap());
@@ -284,7 +284,7 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
     activate(&mut a, ui_for_cache(), "room:a", vec![]);
     assert_eq!(a.value(1).unwrap(), 420); // Fresh RAM replica, not a persisted local checkpoint.
     pump(&mut a, &mut da, &mut Session::default());
-    assert_eq!(a.value(1).unwrap(), 870);
+    assert_eq!(a.value(1).unwrap(), 800);
 }
 fn ui_for_cache() -> Ui {
     playground::ui(&code())
@@ -1143,7 +1143,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
     let mut session = Session::default();
     pump(&mut client, &mut authority, &mut session);
     edit(&mut client, "Linear slider", 870, 0);
-    assert_eq!(client.value(1).unwrap(), 870);
+    assert_eq!(client.value(1).unwrap(), 800);
     assert_eq!(authority.value(1).unwrap(), 420);
     client.reset_connection();
     let ClientMessage::Mount { epoch, .. } =
@@ -1168,11 +1168,11 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
         .unwrap();
     assert_eq!(
         client.value(1).unwrap(),
-        870,
+        800,
         "Unsent preview vanished during reconnect activation"
     );
     pump(&mut client, &mut authority, &mut Session::default());
-    assert_eq!(authority.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 800);
 }
 
 #[test]
@@ -1319,7 +1319,7 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
     assert_eq!(epoch, old_epoch);
     authority.receive(&mut session, &sync).unwrap();
     pump(&mut client, &mut authority, &mut session);
-    assert_eq!(authority.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 800);
     client.open(&client.ui_ref(), "decisions");
     let ClientMessage::Mount { epoch: request, .. } =
         decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
@@ -1761,7 +1761,7 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
     };
     edit(&mut c, "Linear slider", 870, 0);
     c.tick(5000, 0).unwrap();
-    assert_eq!(c.value(1).unwrap(), 870);
+    assert_eq!(c.value(1).unwrap(), 800);
     assert!(!c.confirmed());
     assert_eq!(authority.value(1).unwrap(), 420);
     let (mut next, _) = authority.open_session(&writer, resume).unwrap();
@@ -1778,9 +1778,9 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(c.value(1).unwrap(), 870);
+    assert_eq!(c.value(1).unwrap(), 800);
     pump(&mut c, &mut authority, &mut next);
-    assert_eq!(authority.value(1).unwrap(), 870);
+    assert_eq!(authority.value(1).unwrap(), 800);
 }
 
 // Deliberately do not advance a host clock while delivering messages. These
@@ -2010,8 +2010,8 @@ fn admitted_ui_coverage_hides_unused_values_and_other_receipts_but_confirms_own_
     deliver_state(&mut c, &authority, &mut session);
     drain_sync(&mut c, &mut authority, &mut session);
     assert!(c.confirmed());
-    assert_eq!(authority.value(1).unwrap(), 860);
-    assert_eq!(c.value(1).unwrap(), 860);
+    assert_eq!(authority.value(1).unwrap(), 800);
+    assert_eq!(c.value(1).unwrap(), 800);
     assert!(c.typed_value(6).is_err());
     assert_eq!(
         authority.typed_value(6).unwrap(),
@@ -2271,4 +2271,160 @@ fn every_app_uses_the_same_idempotent_ui_replacement_contract() {
         assert_eq!(c.epoch(), active_epoch);
         assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
     }
+}
+
+fn revision_guest(revision: u32) -> Vec<u8> {
+    wat::parse_str(format!(
+        r#"(module
+      (global $count (mut i32) (i32.const 0))
+      (func (export "revision") (result i32) i32.const {revision})
+      (func (export "abi_version") (result i32) i32.const 1)
+      (func (export "dispatch") (param i32 i32 i32 i32) (result i64)
+        global.get $count i32.const 1 i32.add global.set $count
+        global.get $count i64.extend_i32_u i64.const 1125899906842624 i64.or))"#
+    ))
+    .unwrap()
+}
+#[test]
+fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_noop() {
+    let before = revision_guest(1);
+    let after = revision_guest(2);
+    let old = playground::ui(&before);
+    let next = playground::ui(&after);
+    compatible_behavior(&old, &next).unwrap();
+    assert!(compatible_ui(&old, &next).is_err());
+    let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+    let mut c = Client::default();
+    activate(&mut c, old.clone(), "scope", before.clone());
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    edit(&mut c, "Linear slider", 100, 0);
+    edit(&mut c, "Linear slider", 100, 0);
+    pump(&mut c, &mut authority, &mut session);
+    assert_eq!(c.value(1).unwrap(), 2);
+    assert_eq!(c.resource_usage().behavior_hash, Some(hex(&hash(&before))));
+    let old_scene = c.scene().unwrap();
+    let old_epoch = c.epoch();
+    let bytes = encode_ui(&next).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    let catalog = home_catalog(entry);
+    c.update_catalog(&catalog).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&bytes),
+            ui: bytes,
+            code: after.clone(),
+            state: authority.save().unwrap(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        c.value(1).unwrap(),
+        2,
+        "mounting code must not execute an app edit"
+    );
+    assert_eq!(old_scene.root(), c.scene().unwrap().root());
+    assert!(!c.event(old_epoch, 1, 100, 0).unwrap());
+    assert_eq!(c.resource_usage().behavior_hash, Some(hex(&hash(&after))));
+    c.outgoing().unwrap();
+    session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    edit(&mut c, "Linear slider", 100, 0);
+    assert_eq!(c.value(1).unwrap(), 1, "replacement has fresh guest memory");
+    assert!(
+        !c.update_catalog(&catalog).unwrap(),
+        "duplicate catalog is a no-op during pending edits too"
+    );
+    edit(&mut c, "Linear slider", 100, 0);
+    assert_eq!(
+        c.value(1).unwrap(),
+        2,
+        "duplicate cannot reset the active guest"
+    );
+    c.cancel().unwrap(); // Finish the synthetic continuous gesture before admission.
+    pump(&mut c, &mut authority, &mut session);
+    let mut ui_only = next.clone();
+    ui_only.title.push_str(" UI-only");
+    let bytes = encode_ui(&ui_only).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    c.update_catalog(&home_catalog(entry)).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&bytes),
+            ui: bytes,
+            code: vec![],
+            state: authority.save().unwrap(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    c.outgoing().unwrap();
+    session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    edit(&mut c, "Linear slider", 100, 0);
+    assert_eq!(
+        c.value(1).unwrap(),
+        3,
+        "a later UI-only update retains the replacement guest's memory"
+    );
+}
+#[test]
+fn invalid_behavior_replacement_retains_active_guest_and_permissions() {
+    use std::sync::Arc;
+    let before = revision_guest(1);
+    let old = playground::ui(&before);
+    let mut c = Client::default();
+    activate(&mut c, old.clone(), "scope", before.clone());
+    let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    let scene = c.scene().unwrap();
+    let catalog_before = c.catalog_hash().to_vec();
+    let bad = wat::parse_str("(module (func $start unreachable) (start $start))").unwrap();
+    let next = playground::ui(&bad);
+    let bytes = encode_ui(&next).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    c.update_catalog(&home_catalog(entry)).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    assert!(
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: bad,
+                state: authority.save().unwrap()
+            })
+            .unwrap()
+        )
+        .is_err()
+    );
+    assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
+    assert_eq!(c.catalog_hash(), catalog_before);
+    assert_eq!(c.resource_usage().behavior_hash, Some(hex(&hash(&before))));
+    let mut permissions = playground::ui(&revision_guest(2));
+    permissions.behavior.as_mut().unwrap().writes = vec![1];
+    assert!(compatible_app_update(&old, &permissions).is_err());
+    let mut changed = playground::ui(&revision_guest(2));
+    changed.title.push_str(" changed");
+    assert!(compatible_app_update(&old, &changed).is_err());
 }

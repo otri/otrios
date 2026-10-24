@@ -102,13 +102,14 @@ impl StressWorkload {
 }
 /// Read-only diagnostics sampled by the app owner. These logical byte/capacity
 /// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
-#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
     pub sampled_monotonic_ms: u64,
     pub dispatch: DispatchUsage,
     pub state: StateUsage,
     pub behavior_cache_entries: usize,
     pub behavior_cache_bytes: usize,
+    pub behavior_hash: Option<String>,
     pub wire: WireUsage,
 }
 #[derive(Default)]
@@ -440,6 +441,11 @@ impl Client {
                 .map_or_else(StateUsage::default, |m| m.doc.state_usage()),
             behavior_cache_entries: self.cache.len(),
             behavior_cache_bytes: self.cache.iter().map(|(_, bytes)| bytes.len()).sum(),
+            behavior_hash: self
+                .active
+                .as_ref()
+                .and_then(|m| m.behavior.as_ref())
+                .map(|b| hex(b.code_hash())),
             wire: wire_usage(),
         }
     }
@@ -645,7 +651,7 @@ impl Client {
                     }
                     let ui = decode_ui(&ui)?;
                     if self.previous_catalog.is_some() {
-                        compatible_ui(&self.active.as_ref().ok_or("Missing app")?.ui, &ui)?;
+                        compatible_app_update(&self.active.as_ref().ok_or("Missing app")?.ui, &ui)?;
                     }
                     if ui.ui_ref != r.pair.0 {
                         return Err("Wrong UI reference".into());
@@ -694,6 +700,9 @@ impl Client {
                     Ok(mut candidate) => {
                         if self.previous_catalog.take().is_some() {
                             let mut current = self.active.take().ok_or("Missing app activation")?;
+                            if current.ui.behavior != candidate.ui.behavior {
+                                current.behavior = candidate.behavior;
+                            }
                             current.ui = candidate.ui;
                             current.layout = candidate.layout;
                             current.doc = candidate.doc;

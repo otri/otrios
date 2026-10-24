@@ -37,7 +37,30 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--wait-home-update')){
+  if(args.includes('--wait-behavior-update')){
+    const active=await page(800,1280,'component-playground'),other=await page(1280,800,'home');
+    await call('Page.bringToFront',{},active);await drag(active,'Linear slider',0.81);
+    await wait(active,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>80");
+    const snapshot=session=>evaluate(session,"({time:performance.timeOrigin,epoch:document.querySelector('#revision').dataset.epoch,behavior:JSON.parse(document.querySelector('#revision').dataset.runtimeResources).behavior_hash,release:document.querySelector('#revision').dataset.release})");
+    await evaluate(active,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').focus();window.__guestUpdateNonce='same-page'");
+    const before={active:await snapshot(active),other:await snapshot(other),value:(await controls(active)).find(c=>c.label==='Linear slider').value,controls:(await controls(active)).map(c=>[c.id,c.label]),focus:await evaluate(active,'document.activeElement.dataset.sceneNode'),sockets:[socketCount.get(active),socketCount.get(other)]};
+    await screenshot(active,'behavior-before');await writeFile(join(output,'behavior-update-ready.json'),JSON.stringify(before));console.log('READY for behavior activation');
+    let updated=false;for(let i=0;i<1800;i++){const a=await snapshot(active),b=await snapshot(other);if(a.behavior!==before.active.behavior&&a.release!==before.active.release&&b.release===a.release){updated=true;break;}await new Promise(r=>setTimeout(r,100));}
+    assert(updated,'new module is admitted on both clients');
+    const after={active:await snapshot(active),other:await snapshot(other)};
+    assert.equal(after.active.time,before.active.time);assert.equal(after.other.time,before.other.time);assert.equal(after.other.epoch,before.other.epoch);
+    assert.equal(await evaluate(active,'window.__guestUpdateNonce'),'same-page');assert.equal(await evaluate(active,'document.activeElement.dataset.sceneNode'),before.focus);
+    assert.deepEqual((await controls(active)).map(c=>[c.id,c.label]),before.controls);
+    assert.equal((await controls(active)).find(c=>c.label==='Linear slider').value,before.value,'replacement retains the confirmed value');
+    assert.deepEqual([socketCount.get(active),socketCount.get(other)],before.sockets);
+    await call('Page.bringToFront',{},active);await drag(active,'Linear slider',0.43);
+    await wait(active,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))===40");
+    await screenshot(active,'behavior-after');await click(other,'Component Playground','component-playground','1280x800');
+    await wait(other,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))===40");
+    assert.equal((await snapshot(other)).behavior,after.active.behavior);
+    const result={passed:true,before,after,checks:['actual loaded guest hash changed','state and UI controls retained across code replacement','same pages, workers and WebSocket sessions','inactive Home mount retained','new slider guest snaps input to 10-percent steps','other client shares the confirmed result']};
+    await writeFile(join(output,'behavior-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else  if(args.includes('--wait-home-update')){
     const home=await page(800,1280,'home'),other=await page(1280,800,'component-playground');
     await drag(other,'Linear slider',0.81);
     await wait(other,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>75");

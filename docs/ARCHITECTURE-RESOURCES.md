@@ -11,7 +11,7 @@ it as `frame.resources`; the DOM stores `data-runtime-resources` on the revision
 indicator for inspection. Native readiness reports expose `runtime_resources`.
 It includes pending/issued field payloads and ages, dispatch deadline, selected
 canonical bytes/nodes, actual replica/document root sharing, eight-entry behavior
-cache bytes, and current-thread codec scratch capacities/growth. The sample has a
+cache bytes, the active instance's behavior hash, and current-thread codec scratch capacities/growth. The sample has a
 monotonic timestamp. It updates with published app views, not a separate poller.
 No private values or credentials appear in these diagnostics.
 

@@ -86,7 +86,7 @@ def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None):
     changed=None
     if ui_base:
         old=json.loads((runtime/'releases'/ui_base/'manifest.json').read_bytes());new=json.loads((runtime/'releases'/release/'manifest.json').read_bytes())
-        if not activation.agent.ui_only_change(old,new):raise ValueError('UI transfer changed executable closure')
+        if not activation.agent.app_only_change(old,new):raise ValueError('App transfer changed runtime executable closure')
         changed=['manifest.json','manifest.sig']+[name for section in ['assets','authority'] for name,item in new[section].items()if old[section].get(name)!=item]
     payload=io.BytesIO()
     with tarfile.open(fileobj=payload,mode='w') as archive:
@@ -98,7 +98,7 @@ def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None):
         for name,path in files.items():
             if not ui_base or name.endswith('.py'):archive.add(path,arcname=name)
         raw=json.dumps(checks).encode();item=tarfile.TarInfo('transfer.json');item.size=len(raw);archive.addfile(item,io.BytesIO(raw))
-    print('TRANSFER bytes='+str(payload.tell())+' mode='+('ui-data' if ui_base else 'full'),flush=True)
+    print('TRANSFER bytes='+str(payload.tell())+' mode='+('app-package' if ui_base else 'full'),flush=True)
     ssh=config['frame']['ssh']
     if not isinstance(ssh,list) or not ssh or ssh[0]!='ssh':raise ValueError('Configure a pinned SSH argument list')
     subprocess.run(ssh+['python3 -c '+shlex.quote(REMOTE)],input=payload.getvalue(),check=True)
