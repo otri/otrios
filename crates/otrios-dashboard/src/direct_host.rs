@@ -87,6 +87,8 @@ pub(super) fn run() -> Result<(), String> {
     let started = Instant::now();
     let mut model: Option<Frame> = None;
     let mut presenter = Presenter::default();
+    let mut reflow = otrios_core::canvas::reflow::Presenter::default();
+    let mut reflow_serial = None;
     let mut retained = None;
     let mut hud = u64::MAX;
     let mut drawn = 0;
@@ -152,9 +154,26 @@ pub(super) fn run() -> Result<(), String> {
             }
             if let Some(f) = &model {
                 let animated = f.motion_kind.is_some();
-                if dirty || animated {
+                let now = started.elapsed().as_secs_f64() * 1000.;
+                if let Some(frame) = &f.reflow
+                    && reflow_serial != Some(f.serial)
+                {
+                    reflow.update(frame.clone(), &font, now)?;
+                    reflow_serial = Some(f.serial);
+                }
+                let flowing = f.reflow.is_some() && reflow.active(now);
+                if dirty || animated || flowing {
                     let before = Instant::now();
-                    if retained
+                    if f.reflow.is_some() {
+                        let mesh = reflow.mesh(now);
+                        display.upload_scene(
+                            0,
+                            &mesh.vertices,
+                            &mesh.glyph_vertices,
+                            &mesh.draws,
+                        )?;
+                        retained = None;
+                    } else if retained
                         .as_ref()
                         .is_none_or(|old| !Arc::ptr_eq(old, &f.vertices))
                     {

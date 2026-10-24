@@ -16,6 +16,15 @@ use std::{
     collections::{BTreeMap, VecDeque},
     sync::{Arc, OnceLock},
 };
+#[derive(Clone)]
+struct OrderDrag {
+    pointer: u32,
+    node: u16,
+    start: [f32; 2],
+    offset: [f32; 2],
+    position: [f32; 2],
+    moving: bool,
+}
 struct Mount {
     epoch: u32,
     viewport: [f32; 2],
@@ -42,6 +51,8 @@ struct Mount {
     keyboard_pointer: Option<u32>,
     view: Option<Layout>,
     pad_preview: BTreeMap<u16, Value>,
+    order_editing: bool,
+    order_drag: Option<OrderDrag>,
 }
 struct Request {
     epoch: u32,
@@ -110,6 +121,8 @@ pub struct ResourceUsage {
     pub behavior_cache_entries: usize,
     pub behavior_cache_bytes: usize,
     pub behavior_hash: Option<String>,
+    pub reflow_order: Vec<u16>,
+    pub reflow_editing: bool,
     pub wire: WireUsage,
 }
 #[derive(Default)]
@@ -328,9 +341,9 @@ impl Client {
         self.active.as_ref().is_some_and(|m| m.private)
     }
     pub fn input_busy(&self) -> bool {
-        self.active
-            .as_ref()
-            .is_some_and(|m| m.input.active() || m.keyboard_pointer.is_some())
+        self.active.as_ref().is_some_and(|m| {
+            m.input.active() || m.keyboard_pointer.is_some() || m.order_drag.is_some()
+        })
     }
     pub fn value(&self, id: u16) -> Result<u16> {
         {
@@ -446,6 +459,15 @@ impl Client {
                 .as_ref()
                 .and_then(|m| m.behavior.as_ref())
                 .map(|b| hex(b.code_hash())),
+            reflow_order: self
+                .active
+                .as_ref()
+                .and_then(|m| ordered_items(m).ok())
+                .unwrap_or_default()
+                .iter()
+                .map(|i| i.field)
+                .collect(),
+            reflow_editing: self.active.as_ref().is_some_and(|m| m.order_editing),
             wire: wire_usage(),
         }
     }
@@ -503,7 +525,13 @@ impl Client {
             self.active = None;
         }
         self.auth_required = false;
-        self.open("app:home/ui", "app:home/state");
+        let state = self
+            .catalog
+            .as_ref()
+            .and_then(|c| c.apps.iter().find(|e| e.app.id == "home"))
+            .map(|e| e.app.state_ref.clone())
+            .unwrap_or_else(|| "app:home/state-v3".into());
+        self.open("app:home/ui", &state);
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
         if self.catalog.is_none() {
@@ -690,6 +718,7 @@ impl Client {
                         candidate.focus = old.focus;
                         candidate.ink = old.ink.clone();
                         candidate.pad_preview = old.pad_preview.clone();
+                        candidate.order_editing = old.order_editing;
                     }
                     candidate.session_controls = self.session_controls;
                     candidate.invalidate();
@@ -829,6 +858,17 @@ impl Client {
             return Ok(false);
         }
         match h.operation {
+            Operation::EditOrder => {
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                if !matches!(m.ui.presentation, Some(Presentation::Reorder { .. })) {
+                    return Err("No reorder presentation".into());
+                }
+                m.input.cancel_all();
+                m.order_drag = None;
+                m.order_editing = !m.order_editing;
+                m.invalidate();
+                return Ok(true);
+            }
             Operation::SignOut => {
                 if !self.session_controls || !self.private() {
                     return Ok(false);
@@ -923,6 +963,12 @@ impl Client {
         }
         let scene = self.scene()?;
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.order_editing
+            && self.requested.as_ref().is_none_or(|r| r.reconnecting)
+            && let Some(changed) = order_pointer(m, &scene, event)?
+        {
+            return Ok(changed);
+        }
         let key = scene
             .hit_path(event.position)
             .iter()
@@ -1089,6 +1135,9 @@ impl Client {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
+        if self.order_draggable(id) {
+            return Ok(false);
+        }
         self.deliver(InputRouter::activate(self.scene()?.as_ref(), id))
     }
     fn deliver(&mut self, d: Delivery) -> Result<bool> {
@@ -1200,6 +1249,7 @@ impl Client {
     pub fn cancel(&mut self) -> Result<bool> {
         if let Some(m) = &mut self.active {
             m.input.cancel_all();
+            m.order_drag = None;
             m.doc.flush_pending();
             m.keyboard.cancel();
             m.keyboard_pointer = None;
@@ -1221,7 +1271,13 @@ impl Client {
             m.invalidate();
             return Ok(true);
         }
-        self.open("app:home/ui", "app:home/state");
+        let state = self
+            .catalog
+            .as_ref()
+            .and_then(|c| c.apps.iter().find(|e| e.app.id == "home"))
+            .map(|e| e.app.state_ref.clone())
+            .unwrap_or_else(|| "app:home/state-v3".into());
+        self.open("app:home/ui", &state);
         Ok(true)
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
@@ -1275,7 +1331,50 @@ impl Client {
         }
         Ok(changed)
     }
+    pub fn order_draggable(&self, id: u32) -> bool {
+        self.active.as_ref().is_some_and(|m| {
+            m.order_editing && order_items(m).iter().any(|i| u32::from(i.node) == id)
+        })
+    }
+    pub fn reflow_frame(&self) -> Result<Option<reflow::Frame>> {
+        let Some(m) = &self.active else {
+            return Ok(None);
+        };
+        let items = order_items(m);
+        if items.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(reflow::Frame {
+            identity: format!("{}:{}", m.ui.ui_ref, m.epoch),
+            root: self.scene()?.root().clone(),
+            nodes: items.iter().map(|i| u32::from(i.node)).collect(),
+            editing: m.order_editing,
+            drag: m
+                .order_drag
+                .as_ref()
+                .filter(|d| d.moving)
+                .map(|d| reflow::DragView {
+                    node: u32::from(d.node),
+                    position: [
+                        (d.position[0] - d.offset[0]).clamp(-8192., 8192.),
+                        (d.position[1] - d.offset[1]).clamp(-8192., 8192.),
+                    ],
+                }),
+        }))
+    }
     pub fn adjust_control(&mut self, id: u32, dx: i16, dy: i16) -> Result<bool> {
+        if self.order_draggable(id) {
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            let order = ordered_items(m)?;
+            let index = order
+                .iter()
+                .position(|i| u32::from(i.node) == id)
+                .ok_or("Unknown order item")?;
+            let delta = if dx != 0 { dx.signum() } else { -dy.signum() };
+            let target =
+                (index as isize + delta as isize).clamp(0, order.len() as isize - 1) as usize;
+            return move_item(m, id as u16, target);
+        }
         let scene = self.scene()?;
         let action = InputRouter::activate(scene.as_ref(), id).action;
         let Some(Action::AppEvent(control)) = action else {
@@ -1388,7 +1487,9 @@ fn qualify(
                 Projection::KeyboardLabel { key } => {
                     s.field != 0 || key >= crate::dashboard::keyboard::KEY_COUNT
                 }
-                Projection::KeyboardVisible | Projection::SessionControls => s.field != 0,
+                Projection::KeyboardVisible
+                | Projection::SessionControls
+                | Projection::ReorderLabel => s.field != 0,
                 _ => field(s.field).is_none(),
             }
         {
@@ -1422,6 +1523,9 @@ fn qualify(
         }
         let valid = match &h.operation {
             Operation::Back | Operation::Stress | Operation::SignOut => h.fields.is_empty(),
+            Operation::EditOrder => {
+                h.fields.is_empty() && matches!(ui.presentation, Some(Presentation::Reorder { .. }))
+            }
             Operation::Key(k) => h.fields.is_empty() && *k < crate::dashboard::keyboard::KEY_COUNT,
             Operation::Focus => {
                 h.fields.len() == 1
@@ -1443,6 +1547,52 @@ fn qualify(
     }
     if let Some(p) = &ui.presentation {
         match p {
+            Presentation::Reorder { items } => {
+                let nodes: std::collections::BTreeSet<_> = items.iter().map(|i| i.node).collect();
+                let fields: std::collections::BTreeSet<_> = items.iter().map(|i| i.field).collect();
+                if items.is_empty()
+                    || items.len() > 32
+                    || nodes.len() != items.len()
+                    || fields.len() != items.len()
+                    || !items.iter().all(|i| {
+                        field(i.field).is_some_and(|f| {
+                            f.writable
+                                && matches!(&f.default, Value::Text(s) if reflow::valid_position(s))
+                        })
+                    })
+                {
+                    return Err("Invalid reorder mapping".into());
+                }
+                // Reorder declarations must cover one identical wrap in both profiles.
+                fn wraps(
+                    flow: &otrios_interfaces::layout::Flow,
+                    nodes: &std::collections::BTreeSet<u16>,
+                ) -> usize {
+                    use otrios_interfaces::layout::FlowKind;
+                    match &flow.kind {
+                        FlowKind::Wrap { nodes: ids, .. } => usize::from(
+                            ids.iter()
+                                .copied()
+                                .collect::<std::collections::BTreeSet<_>>()
+                                == *nodes,
+                        ),
+                        FlowKind::Group { children, .. } => {
+                            children.iter().map(|c| wraps(c, nodes)).sum()
+                        }
+                        _ => 0,
+                    }
+                }
+                if Layout::from_bytes(&ui.layout)?
+                    .blueprint()
+                    .composition
+                    .as_ref()
+                    .is_none_or(|c| {
+                        wraps(&c.wide.content, &nodes) != 1 || wraps(&c.tall.content, &nodes) != 1
+                    })
+                {
+                    return Err("Reorder mapping requires a matching wrap in both profiles".into());
+                }
+            }
             Presentation::View { frame } => {
                 if !frame.iter().all(|n| n.is_finite()) || frame[2] <= 0. || frame[3] <= 0. {
                     return Err("Invalid aggregate frame".into());
@@ -1545,6 +1695,8 @@ fn qualify(
         keyboard_pointer: None,
         view: None,
         pad_preview: BTreeMap::new(),
+        order_editing: false,
+        order_drag: None,
     };
     m.visible = selected_values(&m)?;
     resolve_scene(&m)?;
@@ -1557,6 +1709,9 @@ fn selected_values(m: &Mount) -> Result<BTreeMap<u16, Value>> {
             values.insert(s.field, m.read(s.field)?);
         }
     }
+    for item in order_items(m) {
+        values.insert(item.field, m.read(item.field)?);
+    }
     Ok(values)
 }
 fn resolve_scene(m: &Mount) -> Result<Scene> {
@@ -1564,6 +1719,8 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
     for s in &m.ui.selectors {
         let value = if let Projection::KeyboardLabel { key } = s.projection {
             Value::Text(m.keyboard.label(key))
+        } else if matches!(s.projection, Projection::ReorderLabel) {
+            Value::Text(if m.order_editing { "Done" } else { "Edit" }.into())
         } else if matches!(s.projection, Projection::SessionControls) {
             Value::Boolean(m.private && m.session_controls)
         } else if matches!(s.projection, Projection::KeyboardVisible) {
@@ -1625,12 +1782,14 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
                 }
                 Projection::KeyboardLabel { .. }
                 | Projection::KeyboardVisible
-                | Projection::SessionControls => unreachable!(),
+                | Projection::SessionControls
+                | Projection::ReorderLabel => unreachable!(),
             }
         };
         bindings.insert(s.local, value);
     }
-    let scene = m.layout.resolve_viewport(&bindings, m.viewport)?;
+    let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
+    let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
     let mut root = scene.root().clone();
     if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
@@ -1669,7 +1828,168 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
         // AppUi reserves the first root child for its backdrop.
         root.children.insert(root.children.len().min(1), viewport);
     }
+    if !order.is_empty() {
+        fn local_labels(n: &mut SceneNode, editing: bool, ui: &Ui) {
+            if let Some(TouchResponder::Activate(Action::AppEvent(c))) = n.responder
+                && ui
+                    .handlers
+                    .iter()
+                    .any(|h| h.control == c && h.operation == Operation::EditOrder)
+                && let Some(s) = &mut n.semantics
+            {
+                s.label = if editing {
+                    "Done editing cards"
+                } else {
+                    "Edit cards"
+                }
+                .into();
+            }
+            for c in &mut n.children {
+                local_labels(c, editing, ui);
+            }
+        }
+        local_labels(&mut root, m.order_editing, &m.ui);
+    }
     Scene::new(root)
+}
+fn order_items(m: &Mount) -> &[OrderItem] {
+    if let Some(Presentation::Reorder { items }) = &m.ui.presentation {
+        items
+    } else {
+        &[]
+    }
+}
+fn position(m: &Mount, item: &OrderItem) -> Result<String> {
+    let value = m.read(item.field)?;
+    if let Value::Text(s) = value
+        && reflow::valid_position(&s)
+    {
+        return Ok(s);
+    }
+    if let Some(f) = m.ui.state_schema.fields.iter().find(|f| f.id == item.field)
+        && let Value::Text(s) = &f.default
+    {
+        return Ok(s.clone());
+    }
+    Err("Invalid position field".into())
+}
+fn ordered_items(m: &Mount) -> Result<Vec<OrderItem>> {
+    let mut items: Vec<_> = order_items(m)
+        .iter()
+        .map(|i| Ok((position(m, i)?, i.clone())))
+        .collect::<Result<_>>()?;
+    items.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.field.cmp(&b.1.field)));
+    Ok(items.into_iter().map(|(_, i)| i).collect())
+}
+fn move_item(m: &mut Mount, node: u16, target: usize) -> Result<bool> {
+    let mut order = ordered_items(m)?;
+    let index = order
+        .iter()
+        .position(|i| i.node == node)
+        .ok_or("Unknown order item")?;
+    if target == index {
+        return Ok(false);
+    }
+    let item = order.remove(index);
+    let target = target.min(order.len());
+    let left = target
+        .checked_sub(1)
+        .map(|i| position(m, &order[i]))
+        .transpose()?;
+    let right = order.get(target).map(|i| position(m, i)).transpose()?;
+    // Legacy/malformed equal ranks have deterministic order but no open interval.
+    // Do not rewrite neighbors to repair them implicitly.
+    let Ok(key) = reflow::between(left.as_deref(), right.as_deref(), item.field) else {
+        return Ok(false);
+    };
+    if m.doc.set_typed(&[(item.field, Value::Text(key))])? {
+        m.refresh()
+    } else {
+        Ok(false)
+    }
+}
+fn order_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Option<bool>> {
+    if event.position.iter().any(|v| !v.is_finite()) {
+        m.order_drag = None;
+        m.invalidate();
+        return Ok(Some(true));
+    }
+    if event.phase == PointerPhase::Down && m.order_drag.is_none() {
+        let hit = scene.hit_path(event.position).iter().find_map(|n| {
+            order_items(m)
+                .iter()
+                .find(|i| u32::from(i.node) == n.node.id)
+                .map(|i| (i.node, n.origin))
+        });
+        if let Some((node, origin)) = hit {
+            m.order_drag = Some(OrderDrag {
+                pointer: event.id,
+                node,
+                start: event.position,
+                offset: [event.position[0] - origin[0], event.position[1] - origin[1]],
+                position: event.position,
+                moving: false,
+            });
+            m.input.cancel_all();
+            m.invalidate();
+            return Ok(Some(true));
+        }
+    }
+    let Some(mut drag) = m.order_drag.take() else {
+        return Ok(None);
+    };
+    if drag.pointer != event.id {
+        m.order_drag = Some(drag);
+        return Ok(Some(false));
+    }
+    if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel) {
+        if event.phase == PointerPhase::Up && drag.position != event.position {
+            m.order_drag = Some(drag);
+            order_pointer(
+                m,
+                scene,
+                PointerEvent {
+                    phase: PointerPhase::Move,
+                    ..event
+                },
+            )?;
+            m.order_drag = None;
+        }
+        m.invalidate();
+        return Ok(Some(true));
+    }
+    if event.phase != PointerPhase::Move {
+        m.order_drag = Some(drag);
+        return Ok(Some(false));
+    }
+    drag.position = event.position;
+    drag.moving |=
+        (drag.start[0] - event.position[0]).hypot(drag.start[1] - event.position[1]) >= 8.;
+    if drag.moving {
+        let order = ordered_items(m)?;
+        let target = order
+            .iter()
+            .enumerate()
+            .filter_map(|(index, i)| {
+                scene
+                    .root()
+                    .children
+                    .iter()
+                    .find(|n| n.id == u32::from(i.node))
+                    .map(|n| {
+                        let x = n.frame.x + n.frame.width / 2. - event.position[0];
+                        let y = n.frame.y + n.frame.height / 2. - event.position[1];
+                        (index, x * x + y * y)
+                    })
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|v| v.0)
+            .unwrap_or(0);
+        move_item(m, drag.node, target)?;
+    }
+    m.order_drag = Some(drag);
+    m.invalidate();
+    Ok(Some(true))
 }
 fn cached_scene(m: &Mount) -> Result<Arc<Scene>> {
     if let Some(scene) = m.scene.get() {

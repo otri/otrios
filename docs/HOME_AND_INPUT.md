@@ -28,3 +28,21 @@ not a sequence CRDT or full IME/shaping engine.
 See [app sources](../apps/README.md), [scene routing](SCENE_TREE.md),
 [storage](CLIENT_STORAGE.md) and [current acceptance](experiments/canvas-packed-wire.md).
 The earlier Shell, screen enum and global dashboard navigation actions are retired.
+
+## Editing Home card order
+
+Home's UI document declares the card components and a wrapping flow. The shared
+Home state holds a position register per card; a move changes that one register.
+Portrait and landscape use the same order with two and three columns respectively.
+
+Choose **Edit** at the top right, then drag a card to another slot. Other connected
+clients animate the new order while retaining their own interaction mode.
+**Done** restores card launching. Keyboard arrows move a focused card while editing.
+Editing, wiggle, pointer coordinates and animation frames stay local. Cancelling
+a gesture retains moves already sent; rotating cancels capture before reflow.
+
+The reusable runtime behavior and its limits are described in
+[RFC 0015](rfcs/0015-editable-home-reflow.md). This first release adds the runtime
+support and starts Home's previously empty state at `app:home/state-v3`; the other
+app state roots retain their contents. Later compatible arrangement/style edits
+can use the existing Home UI-only publisher.

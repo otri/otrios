@@ -2,6 +2,7 @@
 //! Opt-in app-scoped Canvas runtime. No filesystem or network access in guest code.
 mod behavior;
 mod client;
+pub mod reflow;
 mod selection;
 mod state;
 mod transport;

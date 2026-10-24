@@ -50,6 +50,8 @@ pub enum Projection {
     KeyboardVisible,
     /// Local browser session controls; never an authorization grant or shared state.
     SessionControls,
+    /// Mount-local reorder label, independent of the document.
+    ReorderLabel,
     KeyboardLabel {
         key: u16,
     },
@@ -89,6 +91,8 @@ pub enum Operation {
     Stress,
     /// Request local cookie-session revocation. Never creates a state mutation.
     SignOut,
+    /// Toggle this mount's reorder interaction; never writes state.
+    EditOrder,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -113,9 +117,19 @@ pub struct BehaviorRef {
     pub abi: u32,
     pub writes: Vec<u16>,
 }
+/// Stable field identity mapped to a node within this UI activation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrderItem {
+    pub node: u16,
+    pub field: u16,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Presentation {
+    Reorder {
+        items: Vec<OrderItem>,
+    },
     View {
         frame: [f32; 4],
     },

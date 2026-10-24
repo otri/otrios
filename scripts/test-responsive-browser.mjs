@@ -19,8 +19,9 @@ try{
     browser.once('error',error=>{clearTimeout(timer);reject(error);});browser.once('exit',code=>{clearTimeout(timer);reject(Error(`Chromium exited ${code}: ${log.slice(-1200)}`));});
   });
   socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
-  let serial=0;const pending=new Map(),inkReceived=new Map(),socketCount=new Map();
+  let serial=0;const pending=new Map(),inkReceived=new Map(),socketCount=new Map(),sentFrames=new Map(),sentBytes=new Map();
   socket.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.id){const task=pending.get(m.id);if(task){pending.delete(m.id);clearTimeout(task.timer);if(m.error)task.reject(Error(JSON.stringify(m.error)));else task.resolve(m.result);}}
+    else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===2){sentFrames.set(m.sessionId,(sentFrames.get(m.sessionId)||0)+1);sentBytes.set(m.sessionId,(sentBytes.get(m.sessionId)||0)+Buffer.from(m.params.response.payloadData,'base64').length);}
     else if(m.method==='Network.webSocketCreated')socketCount.set(m.sessionId,(socketCount.get(m.sessionId)||0)+1);
     else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2&&Buffer.from(m.params.response.payloadData,'base64')[0]===2)inkReceived.set(m.sessionId,(inkReceived.get(m.sessionId)||0)+1);
   });
@@ -37,7 +38,48 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--wait-behavior-update')){
+  if(args.includes('--home-reorder')){
+    const a=await page(800,1280,'home'),b=await page(1280,800,'home');
+    await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
+    const cards=async session=>(await controls(session)).filter(c=>!['Edit cards','Done editing cards'].includes(c.label)).sort((a,b)=>a.bounds[1]-b.bounds[1]||a.bounds[0]-b.bounds[0]);
+    const order=async session=>(await cards(session)).map(c=>c.label);
+    const orderExpression=`[...document.querySelectorAll('#controls button')].filter(b=>!['Edit cards','Done editing cards'].includes(b.getAttribute('aria-label'))).sort((a,b)=>a.getBoundingClientRect().y-b.getBoundingClientRect().y||a.getBoundingClientRect().x-b.getBoundingClientRect().x).map(b=>b.getAttribute('aria-label'))`;
+    await new Promise(r=>setTimeout(r,500)); const baseline=sentFrames.get(a)||0,baselineBytes=sentBytes.get(a)||0;
+    await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Edit cards').click()");
+    await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Done editing cards')");
+    await new Promise(r=>setTimeout(r,350));assert.equal(sentFrames.get(a)||0,baseline,'editing and wiggle send no shared state');
+    assert((await controls(b)).some(c=>c.label==='Edit cards'),'remote client stays outside editing');
+    const initial=await cards(a),start=initial[5].bounds,target=initial[1].bounds,moved=initial[5].label;
+    const center=([x,y,w,h])=>({x:x+w/2,y:y+h/2});
+    await call('Page.bringToFront',{},a);
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...center(start)}]},a);
+    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,...center(target)}]},a);
+    await wait(b,`(${orderExpression})[1]===${JSON.stringify(moved)}`);
+    await new Promise(r=>setTimeout(r,350));const settled=sentFrames.get(a)||0,settledBytes=sentBytes.get(a)||0;
+    for(let i=0;i<12;i++){await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,...center(target)}]},a);await new Promise(r=>setTimeout(r,20));}
+    await new Promise(r=>setTimeout(r,350));assert.equal(sentFrames.get(a)||0,settled,'same-slot pointer samples send no state');
+    assert((await controls(a)).some(c=>c.label==='Done editing cards'));assert((await controls(b)).some(c=>c.label==='Edit cards'));
+    await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);await new Promise(r=>setTimeout(r,300));
+    assert.deepEqual(await order(a),await order(b));assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),'home');
+    const ids=(await cards(a)).map(c=>[c.label,c.id]).sort();assert.deepEqual(ids,initial.map(c=>[c.label,c.id]).sort());
+    await screenshot(a,'home-edit-portrait');await screenshot(b,'home-reordered-landscape');
+    // Arrow movement retains focus and updates the other client's target order.
+    await call('Page.bringToFront',{},a);
+    const focused=(await cards(a))[1];await evaluate(a,`document.querySelector('[data-scene-node="${focused.id}"]').focus()`);
+    await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight'},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight'},a);
+    await wait(b,`(${orderExpression})[2]===${JSON.stringify(moved)}`);assert.equal(await evaluate(a,'document.activeElement.dataset.sceneNode'),focused.id);
+    // Rotation during capture cancels the drag and cannot launch the captured card.
+    console.log('Checking rotation during touch capture');
+    const held=center((await cards(a))[0].bounds);await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:2,...held}]},a);
+    console.log('Rotating held touch');
+    await metrics(a,1280,800);await ready(a,'home','1280x800');console.log('Ending rotated touch');await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
+    await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Done editing cards').click()");
+    await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Edit cards')");
+    await new Promise(r=>setTimeout(r,350));assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),'home');assert.deepEqual(await order(a),await order(b));
+    await click(a,'Component Playground','component-playground','1280x800');
+    const result={passed:true,checks:['touch drag streams card order before release','local Edit/Done and wiggle send no state','same-slot motion sends no state','portrait and landscape agree on order','stable component IDs and keyboard focus','keyboard reorder shares state','rotation cancels touch capture without navigation','Done restores launching'],binaryFramesDuringOneMove:settled-baseline,binaryBytesDuringOneMove:settledBytes-baselineBytes};
+    await writeFile(join(output,'home-reorder-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--wait-behavior-update')){
     const active=await page(800,1280,'component-playground'),other=await page(1280,800,'home');
     await call('Page.bringToFront',{},active);await drag(active,'Linear slider',0.81);
     await wait(active,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>80");
@@ -86,7 +128,7 @@ try{
     await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else{
   const a=await page(1280,800,'home');await screenshot(a,'home-landscape');
-  const homeWide=await controls(a);assert.equal(homeWide.length,6);assert(Math.abs(homeWide[0].bounds[1]-homeWide[2].bounds[1])<1);
+  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.equal(homeWide.length,6);assert(Math.abs(homeWide[0].bounds[1]-homeWide[2].bounds[1])<1);
   await click(a,'Component Playground','component-playground','1280x800');
   const wide=await controls(a);await drag(a,'Linear slider',0.81);
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>75");
@@ -114,7 +156,7 @@ try{
   await metrics(b,800,1280);await ready(b,'component-playground','800x1280');
   await drag(b,'Linear slider',0.43);await wait(b,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
-  await click(b,'Home','home','800x1280');const homeTall=await controls(b);assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert(homeTall[2].bounds[1]>homeTall[1].bounds[1]);await screenshot(b,'home-portrait');
+  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert(homeTall[2].bounds[1]>homeTall[1].bounds[1]);await screenshot(b,'home-portrait');
   await click(b,'Layout Lab','layout-lab','800x1280');await screenshot(b,'layout-lab-portrait');
   await click(a,'Home','home','1280x800');await click(a,'Layout Lab','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
   const result={passed:true,checks:['landscape and portrait WebGL rendering','Home three/two-column composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layout Lab in both orientations'],screenshots:output,native_hardware:'not tested'};

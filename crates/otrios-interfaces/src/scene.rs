@@ -3,6 +3,7 @@
 pub type NodeId = u32;
 pub type Color = [u8; 4];
 
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
     pub x: f32,
@@ -21,6 +22,7 @@ impl Rect {
     }
 }
 
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
     /// Child frames use this canvas's local coordinates. Clip is rectangular.
@@ -59,12 +61,14 @@ pub enum Primitive {
     },
 }
 
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     AppEvent(u8),
     AppNavigate(u8),
     KeyboardKey(u16),
 }
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TouchResponder {
     Bubble,
@@ -74,12 +78,14 @@ pub enum TouchResponder {
     /// Capture and deliver local positions throughout the gesture, including cancel.
     Drag(Action),
 }
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SwitchSemantics {
     pub label: String,
     pub checked: bool,
 }
 
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneNode {
     pub id: NodeId,
@@ -89,6 +95,7 @@ pub struct SceneNode {
     pub responder: Option<TouchResponder>,
     pub semantics: Option<SwitchSemantics>,
 }
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PointerPhase {
     Down,
@@ -96,6 +103,7 @@ pub enum PointerPhase {
     Up,
     Cancel,
 }
+#[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointerEvent {
     pub id: u32,

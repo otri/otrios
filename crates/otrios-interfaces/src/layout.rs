@@ -199,6 +199,13 @@ pub struct Flow {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FlowKind {
+    /// Homogeneous flex rows. Identity is retained while the supplied order changes.
+    Wrap {
+        nodes: Vec<u16>,
+        preferred: [f32; 2],
+        minimum: [f32; 2],
+        gap: [f32; 2],
+    },
     Item {
         node: u16,
         preferred: [f32; 2],

@@ -26,6 +26,27 @@ pub fn validate(composition: &Composition, root: &TemplateNode) -> Result<()> {
             }
             *budget -= 1;
             match &flow.kind {
+                FlowKind::Wrap {
+                    nodes,
+                    preferred,
+                    minimum,
+                    gap,
+                } => {
+                    if nodes.is_empty()
+                        || nodes.len() > 32
+                        || nodes.iter().any(|n| !ids.insert(*n))
+                        || preferred
+                            .iter()
+                            .chain(minimum)
+                            .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
+                        || (0..2).any(|a| minimum[a] > preferred[a])
+                        || gap
+                            .iter()
+                            .any(|v| !v.is_finite() || !(0. ..=512.).contains(v))
+                    {
+                        return Err("Invalid wrapping flow".into());
+                    }
+                }
                 FlowKind::Item {
                     node,
                     preferred,
@@ -89,6 +110,9 @@ pub fn validate(composition: &Composition, root: &TemplateNode) -> Result<()> {
 
 fn measure(flow: &Flow) -> ([f32; 2], [f32; 2]) {
     match &flow.kind {
+        FlowKind::Wrap {
+            preferred, minimum, ..
+        } => (*minimum, *preferred),
         FlowKind::Item {
             preferred, minimum, ..
         } => {
@@ -145,7 +169,7 @@ pub fn resolve(composition: &Composition, size: [f32; 2]) -> Result<BTreeMap<u16
     };
     let [left, top, right, bottom] = plan.insets;
     let frame = [left, top, size[0] - left - right, size[1] - top - bottom];
-    let (minimum, _) = measure(&plan.content);
+    let (minimum, _) = measure_at(&plan.content, frame[2]);
     if (0..2).any(|a| frame[a + 2] + 0.01 < minimum[a]) {
         return Err("Viewport is smaller than the composition's supported minimum".into());
     }
@@ -154,8 +178,71 @@ pub fn resolve(composition: &Composition, size: [f32; 2]) -> Result<BTreeMap<u16
     Ok(frames)
 }
 
+fn measure_at(flow: &Flow, width: f32) -> ([f32; 2], [f32; 2]) {
+    match &flow.kind {
+        FlowKind::Wrap {
+            nodes,
+            preferred,
+            minimum,
+            gap,
+        } => {
+            let columns =
+                (((width + gap[0]) / (minimum[0] + gap[0])).floor() as usize).clamp(1, nodes.len());
+            let rows = nodes.len().div_ceil(columns);
+            let height = preferred[1] * rows as f32 + gap[1] * (rows - 1) as f32;
+            ([minimum[0], height], [width, height])
+        }
+        FlowKind::Group {
+            axis: 1,
+            gap,
+            children,
+            ..
+        } => {
+            let mut lo = [0_f32; 2];
+            let mut hi = [0_f32; 2];
+            for child in children {
+                let (a, b) = measure_at(child, width);
+                lo[0] = lo[0].max(a[0]);
+                hi[0] = hi[0].max(b[0]);
+                lo[1] += a[1];
+                hi[1] += b[1];
+            }
+            lo[1] += gap * (children.len() - 1) as f32;
+            hi[1] += gap * (children.len() - 1) as f32;
+            (lo, hi)
+        }
+        _ => measure(flow),
+    }
+}
 fn place(flow: &Flow, frame: [f32; 4], out: &mut BTreeMap<u16, [f32; 4]>) -> Result<()> {
     match &flow.kind {
+        FlowKind::Wrap {
+            nodes,
+            minimum,
+            preferred,
+            gap,
+        } => {
+            let columns = (((frame[2] + gap[0]) / (minimum[0] + gap[0])).floor() as usize)
+                .clamp(1, nodes.len());
+            let width = (frame[2] - gap[0] * (columns - 1) as f32) / columns as f32;
+            let rows = nodes.len().div_ceil(columns);
+            if width + 0.01 < minimum[0]
+                || rows as f32 * preferred[1] + (rows - 1) as f32 * gap[1] > frame[3] + 0.01
+            {
+                return Err("Wrapping flow does not fit".into());
+            }
+            for (i, node) in nodes.iter().enumerate() {
+                out.insert(
+                    *node,
+                    [
+                        frame[0] + (i % columns) as f32 * (width + gap[0]),
+                        frame[1] + (i / columns) as f32 * (preferred[1] + gap[1]),
+                        width,
+                        preferred[1],
+                    ],
+                );
+            }
+        }
         FlowKind::Item { node, .. } => {
             out.insert(*node, frame);
         }
@@ -167,7 +254,16 @@ fn place(flow: &Flow, frame: [f32; 4], out: &mut BTreeMap<u16, [f32; 4]>) -> Res
         } => {
             let a = usize::from(*axis);
             let b = 1 - a;
-            let measured: Vec<_> = children.iter().map(measure).collect();
+            let measured: Vec<_> = children
+                .iter()
+                .map(|c| {
+                    if a == 1 {
+                        measure_at(c, frame[2])
+                    } else {
+                        measure(c)
+                    }
+                })
+                .collect();
             let available = frame[a + 2] - *gap * (children.len() - 1) as f32;
             let preferred: f32 = measured.iter().map(|(_, hi)| hi[a]).sum();
             let delta = available - preferred;

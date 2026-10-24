@@ -35,6 +35,7 @@ struct NetworkSend {
 pub(super) struct Frame {
     pub(super) ui_release: String,
     pub(super) viewport: [f32; 2],
+    pub(super) reflow: Option<otrios_core::canvas::reflow::Frame>,
     pub(super) vertices: Arc<Vec<f32>>,
     pub(super) glyph_vertices: Arc<Vec<f32>>,
     pub(super) draws: Arc<Vec<u32>>,
@@ -63,6 +64,7 @@ impl Frame {
         Self {
             ui_release: String::new(),
             viewport: [1280., 800.],
+            reflow: None,
             vertices: Arc::new(vec![]),
             glyph_vertices: Arc::new(vec![]),
             draws: Arc::new(vec![]),
@@ -242,7 +244,12 @@ fn app_resources(o: &Options) -> Result<(std::path::PathBuf, Vec<u8>), String> {
         fs::read(&catalog).map_err(|e| format!("App catalog {}: {e}", catalog.display()))?;
     Ok((root, bytes))
 }
-fn mount_local(client: &mut Client, root: &std::path::Path, app: &str) -> Result<(), String> {
+fn mount_local(
+    client: &mut Client,
+    root: &std::path::Path,
+    app: &str,
+    state_ref: &str,
+) -> Result<(), String> {
     let folder = root.join(app).join("package");
     let ui = fs::read(folder.join("ui.flex")).map_err(|e| e.to_string())?;
     let description = otrios_core::canvas::decode_ui(&ui)?;
@@ -251,9 +258,7 @@ fn mount_local(client: &mut Client, root: &std::path::Path, app: &str) -> Result
     } else {
         Vec::new()
     };
-    client
-        .mount_local(&ui, &format!("app:{app}/state"), &code, &[])
-        .map(|_| ())
+    client.mount_local(&ui, state_ref, &code, &[]).map(|_| ())
 }
 pub(super) fn state_worker(
     o: Options,
@@ -272,10 +277,16 @@ pub(super) fn state_worker(
     })?;
     client.admit_catalog(&catalog)?;
     let app = entry_app(o.screen.as_deref().unwrap_or("home"))?;
+    let admitted = otrios_core::canvas::decode_catalog(&catalog)?;
+    let entry = admitted
+        .apps
+        .iter()
+        .find(|e| e.app.id == app)
+        .ok_or("Entry app is not in the catalog")?;
     if o.url.is_some() {
-        client.open(&format!("app:{app}/ui"), &format!("app:{app}/state"));
+        client.open(&entry.app.ui_ref, &entry.app.state_ref);
     } else {
-        mount_local(&mut client, &resources, app)?;
+        mount_local(&mut client, &resources, app, &entry.app.state_ref)?;
     }
     let font = match &o.font {
         Some(font) => font.clone(),
@@ -558,14 +569,15 @@ pub(super) fn state_worker(
             // Local benchmark navigation loads admitted package bytes, with no
             // client persistence and no implicit state-service replacement.
             if let Some(bytes) = client.outgoing()?
-                && let otrios_interfaces::canvas::ClientMessage::Mount { ui_ref, .. } =
-                    otrios_core::canvas::decode_client(&bytes)?
+                && let otrios_interfaces::canvas::ClientMessage::Mount {
+                    ui_ref, state_ref, ..
+                } = otrios_core::canvas::decode_client(&bytes)?
             {
                 let id = ui_ref
                     .strip_prefix("app:")
                     .and_then(|v| v.strip_suffix("/ui"))
                     .ok_or("Invalid local app reference")?;
-                mount_local(&mut client, &resources, entry_app(id)?)?;
+                mount_local(&mut client, &resources, entry_app(id)?, &state_ref)?;
                 dirty = true;
             }
         }
@@ -627,6 +639,7 @@ pub(super) fn state_worker(
                     let scene = client.scene()?;
                     [scene.root().frame.width, scene.root().frame.height]
                 },
+                reflow: client.reflow_frame()?,
                 vertices: mesh_cache.clone(),
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),
@@ -1052,7 +1065,7 @@ mod tests {
                     id: id.into(),
                     title: id.into(),
                     ui_ref: format!("app:{id}/ui"),
-                    state_ref: format!("app:{id}/state"),
+                    state_ref: format!("app:{id}/state-v42"),
                     status: "canvas-prototype".into(),
                     dependencies: vec![],
                 },
@@ -1159,7 +1172,7 @@ mod tests {
         let server_stop = stop.clone();
         let (actions, commands) = mpsc::channel();
         let server = thread::spawn(move || {
-            let mut authority = Document::new(schema, "app:three-d-lab/state").unwrap();
+            let mut authority = Document::new(schema, "app:three-d-lab/state-v42").unwrap();
             authority.set(&[(3, 500)]).unwrap();
             'accept: loop {
                 if server_stop.load(Ordering::Acquire) {
@@ -1233,8 +1246,10 @@ mod tests {
                                     epoch: id,
                                     writer,
                                     resume,
+                                    state_ref,
                                     ..
                                 } => {
+                                    assert_eq!(state_ref, "app:three-d-lab/state-v42");
                                     staged = Some(id);
                                     let (mut prepared, _) =
                                         authority.open_session(&writer, resume).unwrap();
