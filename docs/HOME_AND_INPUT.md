@@ -46,3 +46,22 @@ The reusable runtime behavior and its limits are described in
 support and starts Home's previously empty state at `app:home/state-v3`; the other
 app state roots retain their contents. Later compatible arrangement/style edits
 can use the existing Home UI-only publisher.
+
+## Shareable screen URLs
+
+Browser navigation uses screen paths such as `/home`, `/component-playground`,
+`/layout-lab`, `/input-lab`, `/animation-lab`, `/three-d-lab` and `/monitoring`.
+Opening or refreshing a path restores that screen; Back/Forward follows screen
+navigation. Keyboard visibility, focus, Edit mode and drag state remain local.
+Monitoring links still require sign-in before private app admission.
+
+The server serves a non-cached entry page at each catalog app path. That page pins
+its script and stylesheet to one immutable signed release. Release discovery and
+compatible app updates retain the screen URL; executable upgrades reload it.
+The opening release-control v1 descriptor still carries its immutable `web_entry`
+for host compatibility. It is an internal code reference.
+
+Old hash links normalize to the screen path. Browser navigation to an old release
+entry redirects to the current entry, including expired release bookmarks; direct
+asset fetches continue returning the exact immutable bytes. Unknown screens and
+private/API asset paths retain their normal HTTP boundaries.

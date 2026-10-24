@@ -26,13 +26,19 @@ impl Drop for Rig {
     }
 }
 fn publish(root: &Path, nonce: u8) -> serde_json::Value {
-    let content = format!("<p>signed-store fixture {nonce}</p>");
-    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v4","assets":{"web/index.html":{"bytes":content.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(content.as_bytes()))}}})).unwrap();
+    let content = format!(
+        r#"<link rel="stylesheet" href="./style.css"><script type="module" src="./app.js"></script><p>signed-store fixture {nonce}</p>"#
+    );
+    let (catalog, _) = common::fixture(&root.join("catalog-source"));
+    let asset = |bytes: &[u8]| serde_json::json!({"bytes":bytes.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(bytes))});
+    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v4","assets":{"web/index.html":asset(content.as_bytes()),"apps/catalog.flex":asset(&catalog)}})).unwrap();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let folder = root.join(&id);
     fs::create_dir_all(folder.join("web")).unwrap();
     fs::write(folder.join("manifest.json"), raw).unwrap();
     fs::write(folder.join("web/index.html"), content).unwrap();
+    fs::create_dir_all(folder.join("apps")).unwrap();
+    fs::write(folder.join("apps/catalog.flex"), catalog).unwrap();
     let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v4"});
     let mut f = fs::File::create(root.join("pending.json")).unwrap();
     f.write_all(r.to_string().as_bytes()).unwrap();
@@ -162,6 +168,72 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
         )
         .0,
         200
+    );
+    // Navigation is a no-store shell even while app-state recovery is failing.
+    let (status, entry, headers) = common::response(&rig.public, "GET", "/", &[], &[]);
+    assert_eq!(status, 200);
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store")
+    );
+    let entry_text = String::from_utf8(entry.clone()).unwrap();
+    assert!(entry_text.contains(&format!(
+        "src=\"/releases/{}/web/app.js\"",
+        a["id"].as_str().unwrap()
+    )));
+    assert!(entry_text.contains(&format!(
+        "href=\"/releases/{}/web/style.css\"",
+        a["id"].as_str().unwrap()
+    )));
+    for screen in ["demo", "monitoring"] {
+        assert_eq!(
+            request(&rig.public, "GET", &format!("/{screen}"), &[], &[]),
+            (200, entry.clone())
+        );
+        assert_eq!(
+            request(&rig.private, "GET", &format!("/{screen}"), &[], &[]),
+            (200, entry.clone())
+        );
+        assert_eq!(
+            request(&rig.public, "HEAD", &format!("/{screen}"), &[], &[]),
+            (200, vec![])
+        );
+    }
+    assert_eq!(request(&rig.public, "GET", "/not-an-app", &[], &[]).0, 404);
+    assert_eq!(request(&rig.public, "GET", "/demo/input", &[], &[]).0, 404);
+    assert_eq!(request(&rig.public, "POST", "/demo", &[], &[]).0, 404);
+    let (status, original, headers) = common::response(
+        &rig.public,
+        "GET",
+        a["web_entry"].as_str().unwrap(),
+        &[],
+        &[],
+    );
+    assert_eq!(status, 200);
+    assert!(
+        String::from_utf8(original)
+            .unwrap()
+            .contains("src=\"./app.js\"")
+    );
+    assert!(headers.contains("immutable"));
+    let (status, _, headers) = common::response(
+        &rig.public,
+        "GET",
+        &format!("/releases/{}/web/index.html?font-probe=1", "0".repeat(64)),
+        &[("Sec-Fetch-Dest", "document")],
+        &[],
+    );
+    assert_eq!(status, 307);
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("location: /?font-probe=1")
+    );
+    assert!(
+        headers
+            .to_ascii_lowercase()
+            .contains("cache-control: no-store")
     );
     assert_eq!(
         request(&rig.public, "GET", "/admin/activate", &[], &[]).0,

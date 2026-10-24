@@ -4,7 +4,7 @@
 import argparse,fcntl,hashlib,importlib.util,json,pathlib,re,time,urllib.request,urllib.parse
 spec=importlib.util.spec_from_file_location('frame_agent',pathlib.Path(__file__).with_name('frame-dashboard-agent.py'));agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 WEB={'web/index.html','web/style.css','web/app.js','web/state-worker.js','web/pkg/otrios_dashboard.js','web/pkg/otrios_dashboard_bg.wasm','apps/catalog.flex'}
-OPTIONAL={'web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/viewport.mjs','web/ui-update.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
+OPTIONAL={'web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/navigation.mjs','web/viewport.mjs','web/ui-update.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
 NATIVE={'native/armv7/dashboard-native'}
 def read(path,limit):
     with path.open('rb')as f:data=f.read(limit+1)

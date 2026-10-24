@@ -19,8 +19,9 @@ try{
     browser.once('error',error=>{clearTimeout(timer);reject(error);});browser.once('exit',code=>{clearTimeout(timer);reject(Error(`Chromium exited ${code}: ${log.slice(-1200)}`));});
   });
   socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
-  let serial=0;const pending=new Map(),inkReceived=new Map(),socketCount=new Map(),sentFrames=new Map(),sentBytes=new Map();
+  let serial=0;const pending=new Map(),inkReceived=new Map(),socketCount=new Map(),sentFrames=new Map(),sentBytes=new Map(),hellos=new Map();
   socket.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.id){const task=pending.get(m.id);if(task){pending.delete(m.id);clearTimeout(task.timer);if(m.error)task.reject(Error(JSON.stringify(m.error)));else task.resolve(m.result);}}
+    else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===1){try{const h=JSON.parse(m.params.response.payloadData);if(h.type==='hello')hellos.set(m.sessionId,h);}catch{}}
     else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===2){sentFrames.set(m.sessionId,(sentFrames.get(m.sessionId)||0)+1);sentBytes.set(m.sessionId,(sentBytes.get(m.sessionId)||0)+Buffer.from(m.params.response.payloadData,'base64').length);}
     else if(m.method==='Network.webSocketCreated')socketCount.set(m.sessionId,(socketCount.get(m.sessionId)||0)+1);
     else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2&&Buffer.from(m.params.response.payloadData,'base64')[0]===2)inkReceived.set(m.sessionId,(inkReceived.get(m.sessionId)||0)+1);
@@ -29,7 +30,7 @@ try{
   const evaluate=async(session,expression)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
-  const page=async(width,height,route)=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/#/'+route},sessionId);await ready(sessionId,route,width<height?'800x1280':'1280x800');return sessionId;};
+  const page=async(width,height,route)=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+route},sessionId);await ready(sessionId,route,width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds;
@@ -38,7 +39,35 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--home-reorder')){
+  if(args.includes('--wait-route-update')){
+    const a=await page(1280,800,'layout-lab');
+    const before=await evaluate(a,"({path:location.pathname,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length})");
+    await writeFile(join(output,'route-update-ready.json'),JSON.stringify(before));console.log('READY for runtime update at a screen URL');
+    let updated=false;for(let i=0;i<900;i++){if(await evaluate(a,`document.querySelector('#revision')?.dataset.screen==='layout-lab'&&document.querySelector('#revision').dataset.release!==${JSON.stringify(before.release)}`)){updated=true;break;}await new Promise(r=>setTimeout(r,100));}
+    assert(updated,'screen reopens after an executable release');const after=await evaluate(a,"({path:location.pathname,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length,hash:location.hash})");
+    assert.equal(after.path,before.path);assert.equal(after.hash,'');assert.equal(after.length,before.length);assert.notEqual(after.time,before.time);assert.equal(hellos.get(a).release,after.release);
+    const result={passed:true,before,after,checks:['full upgrades reload the same screen URL','history length stays fixed','hello carries the new module release']};await writeFile(join(output,'route-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--navigation')){
+    const a=await page(1280,800,'input-lab'),snapshot=()=>evaluate(a,"({path:location.pathname,hash:location.hash,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length})");
+    const initial=await snapshot();assert.equal(initial.path,'/input-lab');assert.equal(initial.hash,'');assert.equal(hellos.get(a).release,initial.release,'hello identifies the module release at a clean URL');
+    await click(a,'First text field','input-lab','1280x800');assert.equal((await snapshot()).path,initial.path);assert.equal((await snapshot()).length,initial.length,'local keyboard creates no navigation entry');
+    await click(a,'Home','home','1280x800');assert.equal((await snapshot()).path,'/home');
+    await click(a,'Component Playground','component-playground','1280x800');assert.equal((await snapshot()).path,'/component-playground');
+    const sockets=socketCount.get(a);
+    for(const [action,screen]of [['back','home'],['back','input-lab'],['forward','home'],['forward','component-playground']]){
+      await evaluate(a,`history.${action}()`);await ready(a,screen,'1280x800');await wait(a,`location.pathname===${JSON.stringify('/'+screen)}`);
+    }
+    assert.equal((await snapshot()).time,initial.time);assert.equal(socketCount.get(a),sockets,'screen navigation keeps the same page and session');
+    await call('Page.reload',{},a);await ready(a,'component-playground','1280x800');assert.equal((await snapshot()).path,'/component-playground');assert.equal(hellos.get(a).release,(await snapshot()).release);
+    await call('Page.navigate',{url:origin+'/#/keyboard/input'},a);await ready(a,'input-lab','1280x800');await wait(a,"location.pathname==='/input-lab'&&location.hash===''");
+    await call('Page.navigate',{url:origin+'/releases/'+'0'.repeat(64)+'/web/index.html?view=demo#/layout'},a);await ready(a,'layout-lab','1280x800');await wait(a,"location.pathname==='/layout-lab'&&location.hash===''");assert.equal(await evaluate(a,'location.search'),'?view=demo');
+    await call('Page.navigate',{url:origin+'/monitoring'},a);await wait(a,"document.querySelector('#monitoring-login').open");assert.equal((await snapshot()).path,'/monitoring');assert.equal(await evaluate(a,"(async()=> (await fetch('/monitoring/presentation')).status)()"),401);
+    await evaluate(a,"document.querySelector('#login-back').click()");await ready(a,'home','1280x800');await wait(a,"location.pathname==='/home'");assert.equal(await evaluate(a,"document.querySelector('#monitoring-login').open"),false);
+    const resources=await evaluate(a,"performance.getEntriesByType('resource').filter(r=>r.name.endsWith('/app.js')).map(r=>r.name)");assert(resources.every(u=>/\/releases\/[a-f0-9]{64}\/web\/app.js$/.test(u)));
+    assert.equal(await evaluate(a,"(async()=> (await fetch('/not-an-app')).status)()"),404);assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true);
+    const result={passed:true,checks:['direct screen links and refresh','Back/Forward without page/session replacement','local keyboard leaves URL/history unchanged','release hello uses the pinned module identity','legacy hashes and expired release bookmarks normalize','Monitoring URL preserves sign-in boundary','executable modules retain immutable URLs']};
+    await writeFile(join(output,'navigation-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--home-reorder')){
     const a=await page(800,1280,'home'),b=await page(1280,800,'home');
     await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
     const cards=async session=>(await controls(session)).filter(c=>!['Edit cards','Done editing cards'].includes(c.label)).sort((a,b)=>a.bounds[1]-b.bounds[1]||a.bounds[0]-b.bounds[0]);
@@ -110,19 +139,20 @@ try{
     const before={home:await evaluate(home,"({path:location.pathname,time:performance.timeOrigin,epoch:document.querySelector('#revision').dataset.epoch,focus:document.activeElement.dataset.sceneNode})"),other:await evaluate(other,"({path:location.pathname,time:performance.timeOrigin,epoch:document.querySelector('#revision').dataset.epoch})"),sockets:[socketCount.get(home),socketCount.get(other)]};
     await screenshot(home,'home-before-update');await writeFile(join(output,'home-update-ready.json'),JSON.stringify(before));console.log('READY for Home UI activation');
     let updated=false;for(let i=0;i<1800;i++){if(await evaluate(home,"Number(document.querySelector('#revision')?.dataset.uiUpdates)>0")&&await evaluate(other,"Number(document.querySelector('#revision')?.dataset.uiUpdates)>0")){updated=true;break;}await new Promise(r=>setTimeout(r,100));}
-    assert(updated,'both clients accept the new UI release');
+    assert(updated,'both clients accept the new UI release');console.log('Both clients accepted UI update');
     assert.equal(await evaluate(home,'window.__homeUpdateNonce'),'retained-worker-test');
     assert.equal(await evaluate(home,'performance.timeOrigin'),before.home.time);assert.equal(await evaluate(other,'performance.timeOrigin'),before.other.time);
     const applied=await evaluate(home,"document.querySelector('#revision').dataset.release");
-    assert.equal(await evaluate(home,'location.pathname'),`/releases/${applied}/web/index.html`);assert.equal(await evaluate(other,'location.pathname'),`/releases/${applied}/web/index.html`);
+    assert.equal(await evaluate(home,'location.pathname'),'/home');assert.equal(await evaluate(other,'location.pathname'),'/component-playground');
     assert.equal(await evaluate(home,'document.activeElement.dataset.sceneNode'),before.home.focus);
     assert.equal(await evaluate(other,"document.querySelector('#revision').dataset.epoch"),before.other.epoch);
     assert.deepEqual([socketCount.get(home),socketCount.get(other)],before.sockets,'same sessions remain connected');
     assert(Number((await controls(other)).find(c=>c.label==='Linear slider').value)>75,'other app retains its confirmed value');
-    await screenshot(home,'home-after-update');
+    console.log('Capturing updated Home');await screenshot(home,'home-after-update');
+    console.log('Opening Home on other client');await call('Page.bringToFront',{},other);
     await click(other,'Home','home','1280x800');
     await wait(other,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
-    await call('Page.reload',{},home);await ready(home,'home','800x1280');
+    console.log('Refreshing Home');await call('Page.bringToFront',{},home);await call('Page.reload',{},home);await ready(home,'home','800x1280');
     await wait(home,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
     const result={passed:true,checks:['explicit refresh opens the current release','Home presentation replaced without page reload','other app retains its mount and confirmed state','same WebSocket sessions','compatible keyboard focus retained','later Home navigation uses updated catalog'],release:await evaluate(home,"document.querySelector('#revision').dataset.release")};
     await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

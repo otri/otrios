@@ -20,7 +20,7 @@ class SignedReleases(unittest.TestCase):
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
         (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
-        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','navigation.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
         (self.root/'apps').mkdir();(self.root/'apps/catalog.flex').write_bytes(b'test-catalog')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
