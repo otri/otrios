@@ -2349,6 +2349,39 @@ fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_n
         2,
         "duplicate cannot reset the active guest"
     );
+    c.cancel().unwrap(); // Finish the synthetic continuous gesture before admission.
+    pump(&mut c, &mut authority, &mut session);
+    let mut ui_only = next.clone();
+    ui_only.title.push_str(" UI-only");
+    let bytes = encode_ui(&ui_only).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    c.update_catalog(&home_catalog(entry)).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&bytes),
+            ui: bytes,
+            code: vec![],
+            state: authority.save().unwrap(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    c.outgoing().unwrap();
+    session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    edit(&mut c, "Linear slider", 100, 0);
+    assert_eq!(
+        c.value(1).unwrap(),
+        3,
+        "a later UI-only update retains the replacement guest's memory"
+    );
 }
 #[test]
 fn invalid_behavior_replacement_retains_active_guest_and_permissions() {

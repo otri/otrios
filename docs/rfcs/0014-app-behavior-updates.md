@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0014: Independent Canvas behavior replacement
 
-Status: implementation and qualification. Extends RFC 0013's shared package
+Status: implemented and qualified in browser and native frame process tests. Extends RFC 0013's shared package
 update path for every app with an existing declared Wasm behavior module.
 
 ## Contract
