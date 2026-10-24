@@ -26,7 +26,7 @@ pub enum Shift {
     Once,
     Locked,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Keyboard {
     pub shift: Shift,
     pub page: u8,
@@ -251,7 +251,7 @@ pub fn ascii_key(name: &str, shift: bool, caps: bool) -> Option<String> {
 }
 
 /// Example application-side editor, independent of the keyboard. Bounded UTF-8, grapheme boundaries.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct TextBuffer {
     text: String,
     cursor: usize,

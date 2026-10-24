@@ -4,7 +4,7 @@ import init,{CanvasPresentation} from './pkg/otrios_dashboard.js';
 import {SceneRenderer} from './gpu-scene.mjs';
 import {layoutViewport,pointerPosition,semanticBounds} from './viewport.mjs';
 import {loadFontResource} from './font-resource.mjs';
-import {loadAppCatalog} from './app-catalog.mjs';
+import {loadAppRelease} from './app-catalog.mjs';
 import {connectSession,bridgeWorker} from './session.mjs';
 const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls');
 const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),loginError=document.querySelector('#login-error');
@@ -33,7 +33,7 @@ try{
     navigator.serviceWorker.addEventListener('message',({data})=>{if(data?.type==='artifact-cache-status'){revision.dataset.cacheState=data.enabled?'ready':'unavailable';if(data.enabled){revision.dataset.cacheBytes=String(data.bytes);revision.dataset.cacheLimit=String(data.limit);revision.dataset.cacheEntries=String(data.count);}}});
     navigator.serviceWorker.register(new URL('./artifact-cache-worker.js',import.meta.url),{type:'module',scope:'/'}).then(()=>navigator.serviceWorker.ready).then(reg=>reg.active?.postMessage({type:'artifact-cache-status'})).catch(e=>{revision.dataset.cacheState='unavailable';console.warn('Artifact cache unavailable',e);});
   }else revision.dataset.cacheState='unsupported';
-  await init();const presenter=new CanvasPresentation();const [fontResource,catalogBytes]=await Promise.all([loadFontResource(import.meta.url),loadAppCatalog(import.meta.url)]);presenter.set_font(fontResource.bytes,fontResource.hash);
+  await init();const presenter=new CanvasPresentation();const [fontResource,appRelease]=await Promise.all([loadFontResource(import.meta.url),loadAppRelease(import.meta.url)]);presenter.set_font(fontResource.bytes,fontResource.hash);
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let desiredViewport=layoutViewport(innerWidth,innerHeight);
   let model=null,lastRoute='',applyingRoute=true,routeTarget=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
@@ -57,14 +57,16 @@ try{
   });
   function accept(f){
     if(model?.screen!==f.screen)presenter.suspend();
+    const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
-    model={...model,...f};currentScreen=f.screen;modelAuthRequired=!!f.authRequired;showAuth();
+    model={...model,...f};revision.dataset.epoch=String(f.epoch);currentScreen=f.screen;modelAuthRequired=!!f.authRequired;showAuth();
     if(f.vertices){
       renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
       canvas.dataset.logicalSize=f.extent.join('x');resize();staticLayer.setFrame(f);
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',()=>command({type:'activate',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id}));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
         b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');Object.assign(b.style,semanticBounds(c.bounds,f.extent));}
+      if(focusKey){const b=controls.get(Number(focusKey.id));if(b?.getAttribute('aria-label')===focusKey.label)b.focus({preventScroll:true});}
       canvas.setAttribute('aria-label',f.text);revision.textContent=`VIEW ${f.snapshot.slice(0,12)}`;revision.dataset.snapshot=f.snapshot;revision.dataset.layout=f.layout;
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
@@ -74,7 +76,7 @@ try{
     pump();worker.postMessage({type:'frame-ack'});
   }
   transportBridge=bridgeWorker(session,(message,transfer=[])=>worker.postMessage(message,transfer));
-  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
+  worker.onmessage=event=>{try{const m=event.data;if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':model={...model,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:'home'};currentScreen='home';staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening Home');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(m.entry+location.hash);break;case 'release-id':revision.dataset.release=m.id;session.setRelease(m.id);if(m.uiOnly){history.replaceState(null,'',`/releases/${m.id}/web/index.html${location.search}${location.hash}`);revision.dataset.uiUpdates=String(Number(revision.dataset.uiUpdates||0)+1);}break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
   worker.onerror=e=>{workerFailed=true;fatal(e.message);session.reconnect();if(observedRelease)offerRelease(observedRelease);};
   offerRelease=r=>{if(initialRelease&&r.id!==initialRelease&&(workerFailed||!model?.ui)){location.replace(r.web_entry+location.hash);return;}worker.postMessage({type:'release-discovered',release:r});};
   if(observedRelease)offerRelease(observedRelease);
@@ -82,7 +84,7 @@ try{
   function leaveLogin(){command({type:'route',route:'#/home'});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes,viewport:desiredViewport,release:initialRelease,route:location.hash});
+  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,route:location.hash});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});

@@ -43,8 +43,8 @@ fn portrait_compositions_reuse_controls_and_keep_old_snapshots_immutable() {
     use std::sync::Arc;
     let behavior = code();
     for (ui, code) in [
-        (home::ui(), vec![]),
-        (layout::ui(), vec![]),
+        (home::ui(&[]), vec![]),
+        (layout::ui(&[]), vec![]),
         (playground::ui(&behavior), behavior),
     ] {
         let mut client = Client::default();
@@ -276,10 +276,10 @@ fn two_states_reuse_ui_code_without_shared_mutable_scope_and_selectors_agree() {
     }
     assert!(has_text(s.root(), "87%"));
     let old = a.epoch();
-    activate(&mut a, layout::ui(), "layout:state", vec![]);
+    activate(&mut a, layout::ui(&[]), "layout:state", vec![]);
     assert!(!a.event(old, 1, 0, 0).unwrap());
     assert_eq!(a.value(1).unwrap(), 500);
-    let mut dl = Document::new(layout::ui().state_schema, "layout:state").unwrap();
+    let mut dl = Document::new(layout::ui(&[]).state_schema, "layout:state").unwrap();
     pump(&mut a, &mut dl, &mut Session::default());
     activate(&mut a, ui_for_cache(), "room:a", vec![]);
     assert_eq!(a.value(1).unwrap(), 420); // Fresh RAM replica, not a persisted local checkpoint.
@@ -293,8 +293,8 @@ fn ui_for_cache() -> Ui {
 fn wasm_reducer_and_declarative_app_are_qualified_at_extremes() {
     for (ui, code) in [
         (playground::ui(&code()), code()),
-        (layout::ui(), vec![]),
-        (home::ui(), vec![]),
+        (layout::ui(&[]), vec![]),
+        (home::ui(&[]), vec![]),
     ] {
         for v in [0, 1000] {
             let mut c = Client::default();
@@ -360,8 +360,8 @@ fn guest_instances_never_share_mutable_globals() {
 #[test]
 fn corrupt_candidate_retains_previous_view_without_applying_code() {
     let mut c = Client::default();
-    activate(&mut c, home::ui(), "home", vec![]);
-    let mut d = Document::new(home::ui().state_schema, "home").unwrap();
+    activate(&mut c, home::ui(&[]), "home", vec![]);
+    let mut d = Document::new(home::ui(&[]).state_schema, "home").unwrap();
     pump(&mut c, &mut d, &mut Session::default());
     c.open("app:layout-lab/ui", "layout");
     let ClientMessage::Mount { epoch, .. } =
@@ -369,7 +369,7 @@ fn corrupt_candidate_retains_previous_view_without_applying_code() {
     else {
         panic!("missing mount")
     };
-    let b = encode_ui(&layout::ui()).unwrap();
+    let b = encode_ui(&layout::ui(&[])).unwrap();
     assert!(
         c.receive(
             &encode_server(&ServerMessage::Mounted {
@@ -467,8 +467,8 @@ fn declarative_navigation_and_bindings_survive_reordering_without_manual_ids() {
         "shared field/projection is interned once"
     );
     assert_eq!(
-        encode_ui(&home::ui()).unwrap(),
-        encode_ui(&home::ui()).unwrap(),
+        encode_ui(&home::ui(&[])).unwrap(),
+        encode_ui(&home::ui(&[])).unwrap(),
         "same source compiles deterministically"
     );
 }
@@ -488,7 +488,7 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
         n.children.iter().find_map(|c| card(c, title))
     }
     let mut c = Client::default();
-    let ui = layout::ui();
+    let ui = layout::ui(&[]);
     activate(&mut c, ui, "lab", vec![]);
     let old = c.scene().unwrap();
     let old_card = card(old.root(), "Reusable").unwrap();
@@ -589,7 +589,7 @@ fn reusable_pinned_components_reflow_without_changing_state_or_input_identity() 
 #[test]
 fn resize_rules_require_a_versioned_layout_and_component_root_owns_its_size() {
     use otrios_core::dashboard::layout::Layout;
-    let ui = layout::ui();
+    let ui = layout::ui(&[]);
     let parsed = Layout::from_bytes(&ui.layout).unwrap();
     assert_eq!(parsed.blueprint().schema, "otrios-layout-v3");
     let mut downgraded = parsed.blueprint().clone();
@@ -703,7 +703,7 @@ fn projected_scene_is_reused_until_selected_state_changes() {
 fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
     use otrios_core::dashboard::layout::Layout;
     use otrios_interfaces::layout::{Binding, Expr, Responder, Shape};
-    let ui = home::ui();
+    let ui = home::ui(&[]);
     let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
     let heading = blueprint.templates[0]
         .root
@@ -729,7 +729,7 @@ fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
         },
         Responder::AppNavigate(250),
     ] {
-        let mut bad = home::ui();
+        let mut bad = home::ui(&[]);
         let mut b = Layout::from_bytes(&bad.layout).unwrap().blueprint().clone();
         let root = &mut b.templates[0].root;
         root.children[0].responder = Some(responder);
@@ -797,8 +797,8 @@ fn animation_and_three_d_own_independent_intent_and_bounded_private_stress_histo
     use std::sync::Arc;
     let mut animation = Client::default();
     let mut three_d = Client::default();
-    let aui = animation_lab::ui();
-    let tui = three_d_lab::ui();
+    let aui = animation_lab::ui(&[]);
+    let tui = three_d_lab::ui(&[]);
     activate(&mut animation, aui.clone(), "animation:state", vec![]);
     activate(&mut three_d, tui.clone(), "three-d:state", vec![]);
     let mut authority = Document::new(aui.state_schema, "animation:state").unwrap();
@@ -839,7 +839,7 @@ fn input_shared_text_keeps_focus_and_caret_local_and_keyboard_repeats_cancel() {
         layout::Value,
         scene::{PointerEvent, PointerPhase},
     };
-    let ui = input_lab::ui();
+    let ui = input_lab::ui(&[]);
     let mut a = Client::default();
     let mut b = Client::default();
     activate(&mut a, ui.clone(), "input:shared", vec![]);
@@ -907,7 +907,7 @@ fn input_shared_text_keeps_focus_and_caret_local_and_keyboard_repeats_cancel() {
 }
 #[test]
 fn access_revocation_drops_private_view_and_back_cancels_rejected_sign_in() {
-    let ui = home::ui();
+    let ui = home::ui(&[]);
     let mut c = Client::default();
     activate_access(&mut c, ui, "private", vec![], true);
     let old = c.epoch();
@@ -940,13 +940,13 @@ fn all_seven_app_packages_qualify_default_and_scalar_extremes() {
     use otrios_interfaces::layout::Value;
     let code = code();
     for (ui, code, private) in [
-        (home::ui(), vec![], false),
+        (home::ui(&[]), vec![], false),
         (playground::ui(&code), code, false),
-        (layout::ui(), vec![], false),
-        (input_lab::ui(), vec![], false),
-        (animation_lab::ui(), vec![], false),
-        (three_d_lab::ui(), vec![], false),
-        (monitoring_app::ui(), vec![], true),
+        (layout::ui(&[]), vec![], false),
+        (input_lab::ui(&[]), vec![], false),
+        (animation_lab::ui(&[]), vec![], false),
+        (three_d_lab::ui(&[]), vec![], false),
+        (monitoring_app::ui(&[]), vec![], true),
     ] {
         for high in [false, true] {
             let mut authority = Document::new(ui.state_schema.clone(), "qualify:state").unwrap();
@@ -1178,7 +1178,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
 #[test]
 fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
     use otrios_interfaces::{keyboard::Edit, layout::Value};
-    let ui = input_lab::ui();
+    let ui = input_lab::ui(&[]);
     let mut client = Client::default();
     activate(&mut client, ui.clone(), "editor:reload", vec![]);
     let mut authority = Document::new(ui.state_schema.clone(), "editor:reload").unwrap();
@@ -1232,7 +1232,7 @@ fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
 #[test]
 fn admission_rejects_gesture_arity_and_numeric_operations_on_text() {
     for case in 0..3 {
-        let mut ui = input_lab::ui();
+        let mut ui = input_lab::ui(&[]);
         let h = &mut ui.handlers[0];
         match case {
             0 => {
@@ -1350,8 +1350,8 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
 
 #[test]
 fn old_private_lease_revocation_preserves_newer_public_mount() {
-    let home = home::ui();
-    let public = layout::ui();
+    let home = home::ui(&[]);
+    let public = layout::ui(&[]);
     let mut client = Client::default();
     activate_access(&mut client, home.clone(), "private:home", vec![], true);
     let mut authority = Document::new(home.state_schema.clone(), "private:home").unwrap();
@@ -1430,7 +1430,7 @@ fn aggregate_content_cannot_cover_app_navigation_or_header() {
     let mut c = Client::default();
     activate_access(
         &mut c,
-        monitoring_app::ui(),
+        monitoring_app::ui(&[]),
         "app:monitoring/state",
         vec![],
         true,
@@ -1571,7 +1571,7 @@ fn rotary_pointer_and_indicator_share_clockwise_turns_and_accent_is_only_present
 #[test]
 fn monitoring_session_controls_share_navigation_style_and_only_request_local_logout() {
     use otrios_interfaces::scene::Primitive;
-    let ui = monitoring_app::ui();
+    let ui = monitoring_app::ui(&[]);
     let mut c = Client::default();
     activate_access(&mut c, ui.clone(), "private:monitoring", vec![], true);
     let mut authority = Document::new(ui.state_schema, "private:monitoring").unwrap();
@@ -1633,7 +1633,7 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
         )
         .unwrap(),
     );
-    let ui = input_lab::ui();
+    let ui = input_lab::ui(&[]);
     let mut authority = Document::new(ui.state_schema.clone(), "tapped-input").unwrap();
     authority
         .set_typed(&[
@@ -1935,7 +1935,7 @@ fn discrete_assignment_and_text_do_not_wait_for_continuous_dispatch_interval() {
     );
     assert_eq!(authority.value(1).unwrap(), 900);
 
-    let ui = input_lab::ui();
+    let ui = input_lab::ui(&[]);
     let mut text = Client::default();
     activate(&mut text, ui.clone(), "dispatch:text", vec![]);
     let mut doc = Document::new(ui.state_schema, "dispatch:text").unwrap();
@@ -2042,4 +2042,233 @@ fn retired_snapshot_override_cannot_create_a_second_source_of_app_state() {
     assert!(c.receive(&bytes).is_err());
     assert_eq!(c.value(1).unwrap(), before);
     assert!(std::sync::Arc::ptr_eq(&scene, &c.scene().unwrap()));
+}
+
+fn ui_entry(ui: &Ui, state: &str) -> CatalogEntry {
+    CatalogEntry {
+        app: App {
+            id: ui
+                .ui_ref
+                .trim_start_matches("app:")
+                .trim_end_matches("/ui")
+                .into(),
+            title: ui.title.clone(),
+            ui_ref: ui.ui_ref.clone(),
+            state_ref: state.into(),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        },
+        ui_hash: hash(&encode_ui(ui).unwrap()),
+        private: false,
+    }
+}
+fn home_catalog(entry: CatalogEntry) -> Vec<u8> {
+    encode_catalog(&Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![entry],
+    })
+    .unwrap()
+}
+#[test]
+fn home_ui_replacement_retains_state_and_old_scene_and_rejects_stale_input() {
+    use otrios_interfaces::layout::Value;
+    let mut old = home::ui(&[]);
+    old.state_schema.fields.push(Field {
+        id: 1,
+        name: "retained".into(),
+        default: Value::Number(0.),
+        writable: true,
+    });
+    old.selectors.push(Selector {
+        local: 500,
+        field: 1,
+        projection: Projection::Identity,
+    });
+    let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+    authority.set(&[(1, 731)]).unwrap();
+    let state = authority.save().unwrap();
+    let mut client = Client::default();
+    activate_snapshot(
+        &mut client,
+        old.clone(),
+        "scope",
+        vec![],
+        false,
+        state.clone(),
+    );
+    pump(&mut client, &mut authority, &mut Session::default());
+    let scene = client.scene().unwrap();
+    let old_epoch = client.epoch();
+    let mut next = old.clone();
+    next.title = "Home updated".into();
+    let bytes = encode_ui(&next).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    assert!(client.update_catalog(&home_catalog(entry)).unwrap());
+    assert!(client.catalog_update_pending());
+    assert_eq!(client.title(), old.title);
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui: bytes.clone(),
+                ui_hash: hash(&bytes),
+                code: vec![],
+                state,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!client.catalog_update_pending());
+    assert_eq!(client.title(), "Home updated");
+    assert_eq!(client.value(1).unwrap(), 731);
+    assert!(!client.event(old_epoch, 0, 0, 0).unwrap());
+    assert_eq!(scene.root(), client.scene().unwrap().root());
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:e}if e==epoch)
+    );
+}
+#[test]
+fn rejected_home_update_restores_catalog_and_retains_usable_scene() {
+    use std::sync::Arc;
+    let old = home::ui(&[]);
+    let mut c = Client::default();
+    activate(&mut c, old.clone(), "scope", vec![]);
+    let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    let scene = c.scene().unwrap();
+    let original = c.catalog_hash().to_vec();
+    let mut next = old.clone();
+    next.state_schema.id = "incompatible".into();
+    let bytes = encode_ui(&next).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    c.update_catalog(&home_catalog(entry)).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    assert!(
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![]
+            })
+            .unwrap()
+        )
+        .is_err()
+    );
+    assert_eq!(c.catalog_hash(), original);
+    assert!(!c.catalog_update_pending());
+    assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
+    assert!(
+        matches!(decode_client(&c.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::CancelMount{epoch:e}if e==epoch)
+    );
+}
+#[test]
+fn inactive_ui_update_retains_the_other_app_mount_and_rejects_policy_changes() {
+    use std::sync::Arc;
+    let ui = layout::ui(&[]);
+    let mut c = Client::default();
+    activate(&mut c, ui.clone(), "other", vec![]);
+    let mut authority = Document::new(ui.state_schema.clone(), "other").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    let old_home = ui_entry(&home::ui(&[]), "home");
+    let other = ui_entry(&ui, "other");
+    let catalog = |home, other| {
+        encode_catalog(&Catalog {
+            format: "otrios-app-catalog-v1".into(),
+            apps: vec![home, other],
+        })
+        .unwrap()
+    };
+    c.admit_catalog(&catalog(old_home.clone(), other.clone()))
+        .unwrap();
+    let scene = c.scene().unwrap();
+    let epoch = c.epoch();
+    let mut next = old_home;
+    next.ui_hash = vec![7; 32];
+    assert!(
+        !c.update_catalog(&catalog(next.clone(), other.clone()))
+            .unwrap()
+    );
+    assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
+    assert_eq!(c.epoch(), epoch);
+    assert!(!c.catalog_update_pending());
+    let mut changed = other;
+    changed.private = true;
+    assert!(c.update_catalog(&catalog(next, changed)).is_err());
+}
+
+#[test]
+fn every_app_uses_the_same_idempotent_ui_replacement_contract() {
+    use std::sync::Arc;
+    let behavior = code();
+    for (old, code) in [
+        (home::ui(&[]), vec![]),
+        (layout::ui(&[]), vec![]),
+        (input_lab::ui(&[]), vec![]),
+        (animation_lab::ui(&[]), vec![]),
+        (three_d_lab::ui(&[]), vec![]),
+        (monitoring_app::ui(&[]), vec![]),
+        (playground::ui(&behavior), behavior),
+    ] {
+        let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+        let mut c = Client::default();
+        activate(&mut c, old.clone(), "scope", code.clone());
+        pump(&mut c, &mut authority, &mut Session::default());
+        let values: Vec<_> = old
+            .state_schema
+            .fields
+            .iter()
+            .filter_map(|f| c.typed_value(f.id).ok().map(|v| (f.id, v)))
+            .collect();
+        let mut next = old.clone();
+        next.title.push_str(" revised");
+        let bytes = encode_ui(&next).unwrap();
+        let mut entry = ui_entry(&old, "scope");
+        entry.ui_hash = hash(&bytes);
+        let catalog = home_catalog(entry);
+        let epoch = c.epoch();
+        assert!(c.update_catalog(&catalog).unwrap());
+        let ClientMessage::Mount {
+            epoch: new_epoch, ..
+        } = decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch: new_epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code,
+                state: authority.save().unwrap(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(c.epoch() > epoch);
+        assert_eq!(c.title(), next.title);
+        for (id, value) in values {
+            assert_eq!(c.typed_value(id).unwrap(), value);
+        }
+        let scene = c.scene().unwrap();
+        let active_epoch = c.epoch();
+        assert!(
+            !c.update_catalog(&catalog).unwrap(),
+            "duplicate publication must be a no-op even before ACK"
+        );
+        assert_eq!(c.epoch(), active_epoch);
+        assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
+    }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Safe app/state/network owner for the direct Linux presentation host.
 use otrios_core::{
-    canvas::Client,
+    canvas::{Client, hash, hex},
     dashboard::{
         display::{Calibration, Surface},
         motion::Intent,
@@ -12,7 +12,7 @@ use otrios_interfaces::scene::PointerEvent;
 use std::{
     fs,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
@@ -33,6 +33,7 @@ struct NetworkSend {
 }
 #[derive(Clone)]
 pub(super) struct Frame {
+    pub(super) ui_release: String,
     pub(super) viewport: [f32; 2],
     pub(super) vertices: Arc<Vec<f32>>,
     pub(super) glyph_vertices: Arc<Vec<f32>>,
@@ -60,6 +61,7 @@ pub(super) struct Frame {
 impl Frame {
     fn blank(serial: u64, online: bool) -> Self {
         Self {
+            ui_release: String::new(),
             viewport: [1280., 800.],
             vertices: Arc::new(vec![]),
             glyph_vertices: Arc::new(vec![]),
@@ -118,6 +120,7 @@ pub(super) struct Options {
     pub(super) exit_file: Option<String>,
     pub(super) ready_file: Option<String>,
     pub(super) release_socket: Option<String>,
+    pub(super) catalog_update_socket: Option<String>,
     pub(super) screen: Option<String>,
     pub(super) report: Option<String>,
     pub(super) load: u8,
@@ -167,6 +170,7 @@ pub(super) fn options() -> Result<Options, String> {
             "--seconds" => o.seconds = Some(value.parse::<u64>().map_err(|e| e.to_string())?),
             "--exit-file" => o.exit_file = Some(value),
             "--ready-file" => o.ready_file = Some(value),
+            "--catalog-update-socket" => o.catalog_update_socket = Some(value),
             "--release-socket" => o.release_socket = Some(value),
             "--screen" => o.screen = Some(value),
             "--report" => o.report = Some(value),
@@ -286,6 +290,9 @@ pub(super) fn state_worker(
     let (ink_tx, ink_out) = mpsc::sync_channel::<(Instant, Vec<u8>)>(1);
     let (ink_publish, ink_rx) = mpsc::sync_channel(64);
     let ink_active = Arc::new(AtomicBool::new(false));
+    let active_release = Arc::new(Mutex::new(
+        std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default(),
+    ));
     let network_thread = o.url.as_ref().map(|url| {
         let url = app_stream(url);
         let ready = stream_ready.clone();
@@ -296,6 +303,7 @@ pub(super) fn state_worker(
             .clone()
             .or_else(|| std::env::var("OTRIOS_RELEASE_SOCKET").ok());
         let active = ink_active.clone();
+        let code_release = active_release.clone();
         thread::spawn(move || {
             network(
                 url,
@@ -308,9 +316,20 @@ pub(super) fn state_worker(
                 ink_out,
                 ink_publish,
                 active,
+                code_release,
             )
         })
     });
+    #[cfg(unix)]
+    let catalog_socket = if let Some(path) = &o.catalog_update_socket {
+        let socket = std::os::unix::net::UnixDatagram::bind(path).map_err(|e| e.to_string())?;
+        socket.set_nonblocking(true).map_err(|e| e.to_string())?;
+        Some(socket)
+    } else {
+        None
+    };
+    let mut ui_release = std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default();
+    let mut catalog_candidate: Option<(String, Vec<u8>)> = None;
     let started = Instant::now();
     let mut epoch = None;
     let mut outgoing = None;
@@ -365,7 +384,7 @@ pub(super) fn state_worker(
                         sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
                     }
                     if let Some(path) = &o.ready_file {
-                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"reload_ready":frame.reload_ready,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"runtime_resources":frame.resources,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default()});
+                        let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"reload_ready":frame.reload_ready,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"runtime_resources":frame.resources,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":frame.ui_release,"runtime_release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default(),"ui_updates":true,"ui_release":frame.ui_release});
                         let tmp = format!("{path}.tmp");
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
@@ -412,6 +431,7 @@ pub(super) fn state_worker(
                                 }
                             }
                             Err(e) if client.rejected_mount_pending() => {
+                                catalog_candidate = None;
                                 eprintln!("Rejected app candidate; continuing current app: {e}");
                             }
                             Err(e) => {
@@ -434,6 +454,71 @@ pub(super) fn state_worker(
             ),
             Ordering::Release,
         );
+        #[cfg(unix)]
+        if let Some(socket) = &catalog_socket {
+            let mut notice = [0; 8193];
+            if let Ok(n) = socket.recv(&mut notice) {
+                let candidate = (|| -> Result<(String, Vec<u8>), String> {
+                    if n > 8192 {
+                        return Err("Oversized UI notice".into());
+                    }
+                    let v: serde_json::Value =
+                        serde_json::from_slice(&notice[..n]).map_err(|e| e.to_string())?;
+                    let id = v["release"]
+                        .as_str()
+                        .filter(|id| otrios_interfaces::release::valid_hash(id))
+                        .ok_or("Invalid UI release")?;
+                    let path = v["catalog"].as_str().ok_or("Missing UI catalog")?;
+                    let bytes = {
+                        use std::io::Read;
+                        let mut bytes = Vec::new();
+                        fs::File::open(path)
+                            .map_err(|e| e.to_string())?
+                            .take(512 * 1024 + 1)
+                            .read_to_end(&mut bytes)
+                            .map_err(|e| e.to_string())?;
+                        if bytes.len() > 512 * 1024 {
+                            return Err("UI catalog budget exceeded".into());
+                        }
+                        bytes
+                    };
+                    if v["sha256"].as_str() != Some(&hex(&hash(&bytes))) {
+                        return Err("UI catalog digest rejected".into());
+                    }
+                    Ok((id.into(), bytes))
+                })();
+                match candidate {
+                    Ok(c) => catalog_candidate = Some(c),
+                    Err(e) => eprintln!("UI update notice: {e}"),
+                }
+            }
+        }
+        if let Some((id, bytes)) = &catalog_candidate
+            && !client.catalog_update_pending()
+            && client.catalog_hash() == hash(bytes)
+        {
+            ui_release = id.clone();
+            if let Ok(mut current) = active_release.lock() {
+                *current = ui_release.clone();
+            }
+            catalog_candidate = None;
+            dirty = true;
+        }
+        if catalog_candidate.is_some()
+            && !client.catalog_update_pending()
+            && client.can_update_catalog()
+        {
+            let (_, bytes) = catalog_candidate.as_ref().expect("candidate");
+            if client.catalog_hash() != hash(bytes) {
+                match client.update_catalog(bytes) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("UI update retained current view: {e}");
+                        catalog_candidate = None;
+                    }
+                }
+            }
+        }
         dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
         for bytes in ink_rx.try_iter().take(64) {
             dirty |= client.receive_ink(&bytes, now)?;
@@ -537,6 +622,7 @@ pub(super) fn state_worker(
             let state_ref = client.state_ref();
             serial += 1;
             pending = Some(Frame {
+                ui_release: ui_release.clone(),
                 viewport: {
                     let scene = client.scene()?;
                     [scene.root().frame.width, scene.root().frame.height]
@@ -618,6 +704,7 @@ fn network(
     ink_out: mpsc::Receiver<(Instant, Vec<u8>)>,
     ink_in: mpsc::SyncSender<Vec<u8>>,
     ink_active: Arc<AtomicBool>,
+    active_release: Arc<Mutex<String>>,
 ) {
     use otrios_interfaces::session::{self as wire, ServerControl};
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
@@ -653,8 +740,10 @@ fn network(
             let _ = tcp.set_write_timeout(Some(Duration::from_secs(2)));
             let _ = tcp.set_nodelay(true);
         }
-        let current = std::env::var("OTRIOS_RELEASE_ID")
+        let current = active_release
+            .lock()
             .ok()
+            .map(|id| id.clone())
             .filter(|r| otrios_interfaces::release::valid_hash(r));
         if socket.send(session_client::hello(current, true)).is_err() {
             thread::sleep(Duration::from_millis(250));

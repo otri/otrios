@@ -16,6 +16,6 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
         ],
     )
 }
-pub fn ui() -> otrios_interfaces::canvas::Ui {
+pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
     ui::description(state::schema())
 }

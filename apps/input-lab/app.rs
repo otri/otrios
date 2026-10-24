@@ -11,10 +11,10 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
             "ui.rs",
             "state/schema.rs",
             "component:keyboard-v1",
-            "sdk:canvas-authoring-v2",
+            "sdk:canvas-authoring-v3",
         ],
     )
 }
-pub fn ui() -> otrios_interfaces::canvas::Ui {
+pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
     ui::description()
 }

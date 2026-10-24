@@ -19,38 +19,78 @@ mod playground;
 mod three_d;
 use otrios_core::canvas::*;
 use std::{fs, path::Path};
-fn main() -> Result<()> {
-    let root = std::env::args().nth(1).unwrap_or_else(|| "apps".into());
-    let root = Path::new(&root);
-    let code = wat::parse_file(root.join("component-playground/behavior/main.wat"))
+type Factory = fn(&[u8]) -> otrios_interfaces::canvas::Ui;
+fn sources() -> Vec<(otrios_interfaces::canvas::App, Factory)> {
+    vec![
+        (home::manifest(), home::ui),
+        (playground::manifest(), playground::ui),
+        (layout::manifest(), layout::ui),
+        (input::manifest(), input::ui),
+        (animation::manifest(), animation::ui),
+        (three_d::manifest(), three_d::ui),
+        (monitoring::manifest(), monitoring::ui),
+    ]
+}
+fn write_changed(path: &Path, bytes: &[u8]) -> Result<()> {
+    if fs::read(path).ok().as_deref() == Some(bytes) {
+        return Ok(());
+    }
+    fs::create_dir_all(path.parent().ok_or("Missing artifact parent")?)
         .map_err(|e| e.to_string())?;
-    let mut entries = Vec::new();
-    for (app, ui) in [
-        (home::manifest(), home::ui()),
-        (playground::manifest(), playground::ui(&code)),
-        (layout::manifest(), layout::ui()),
-        (input::manifest(), input::ui()),
-        (animation::manifest(), animation::ui()),
-        (three_d::manifest(), three_d::ui()),
-        (monitoring::manifest(), monitoring::ui()),
-    ] {
-        let folder = root.join(&app.id).join("package");
-        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-        fs::write(folder.join("app.flex"), encode_app(&app)?).map_err(|e| e.to_string())?;
-        {
-            if let Some(reference) = &ui.behavior {
-                Behavior::load(&code, reference)?;
-                fs::write(folder.join("behavior.wasm"), &code).map_err(|e| e.to_string())?;
-            }
-            let bytes = encode_ui(&ui)?;
-            entries.push(otrios_interfaces::canvas::CatalogEntry {
-                private: app.id == "monitoring",
-                app: app.clone(),
-                ui_hash: hash(&bytes),
-            });
-            fs::write(folder.join("ui.flex"), bytes).map_err(|e| e.to_string())?;
+    let temporary = path.with_extension(format!("pending-{}", std::process::id()));
+    fs::write(&temporary, bytes)
+        .and_then(|_| fs::rename(&temporary, path))
+        .map_err(|e| e.to_string())
+}
+fn describe(
+    root: &Path,
+    app: &otrios_interfaces::canvas::App,
+    factory: Factory,
+) -> Result<(otrios_interfaces::canvas::Ui, Vec<u8>)> {
+    let source = root.join(&app.id).join("behavior/main.wat");
+    let code = if source.exists() {
+        wat::parse_file(source).map_err(|e| e.to_string())?
+    } else {
+        vec![]
+    };
+    let ui = factory(&code);
+    if let Some(reference) = &ui.behavior {
+        Behavior::load(&code, reference)?;
+    } else if !code.is_empty() {
+        return Err("Undeclared app behavior".into());
+    }
+    Ok((ui, code))
+}
+fn main() -> Result<()> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let root = std::path::PathBuf::from(args.first().map(String::as_str).unwrap_or("apps"));
+    if args.get(1).is_some_and(|v| v == "--app-ui") {
+        if args.len() != 4 {
+            return Err("Use canvas-pack OUTPUT --app-ui APP BASELINE".into());
         }
-        println!("{}: {}", app.id, app.status);
+        return app_ui(&root, &args[2], Path::new(&args[3]));
+    }
+    if args.len() > 1 {
+        return Err("Unknown pack arguments".into());
+    }
+    let mut entries = Vec::new();
+    for (app, factory) in sources() {
+        let (ui, code) = describe(&root, &app, factory)?;
+        let folder = root.join(&app.id).join("package");
+        write_changed(&folder.join("app.flex"), &encode_app(&app)?)?;
+        if !code.is_empty() {
+            write_changed(&folder.join("behavior.wasm"), &code)?;
+        } else if folder.join("behavior.wasm").exists() {
+            fs::remove_file(folder.join("behavior.wasm")).map_err(|e| e.to_string())?;
+        }
+        let bytes = encode_ui(&ui)?;
+        write_changed(&folder.join("ui.flex"), &bytes)?;
+        entries.push(otrios_interfaces::canvas::CatalogEntry {
+            private: app.id == "monitoring",
+            app: app.clone(),
+            ui_hash: hash(&bytes),
+        });
+        println!("{}: canvas-app", app.id);
     }
     let catalog = encode_catalog(&otrios_interfaces::canvas::Catalog {
         format: "otrios-app-catalog-v1".into(),
@@ -60,21 +100,52 @@ fn main() -> Result<()> {
         let folder = root.join(&entry.app.id).join("package");
         let mut client = Client::default();
         client.admit_catalog(&catalog)?;
-        let code = fs::read(folder.join("behavior.wasm")).unwrap_or_default();
         client.mount_local(
             &fs::read(folder.join("ui.flex")).map_err(|e| e.to_string())?,
             &entry.app.state_ref,
-            &code,
+            &fs::read(folder.join("behavior.wasm")).unwrap_or_default(),
             &[],
         )?;
     }
-    fs::write(
-        root.join("catalog.flex"),
-        encode_catalog(&otrios_interfaces::canvas::Catalog {
-            format: "otrios-app-catalog-v1".into(),
-            apps: entries,
-        })?,
+    write_changed(&root.join("catalog.flex"), &catalog)
+}
+fn app_ui(root: &Path, id: &str, baseline: &Path) -> Result<()> {
+    let mut catalog =
+        decode_catalog(&fs::read(baseline.join("apps/catalog.flex")).map_err(|e| e.to_string())?)?;
+    let (app, factory) = sources()
+        .into_iter()
+        .find(|(app, _)| app.id == id)
+        .ok_or("Unknown app")?;
+    let entry = catalog
+        .apps
+        .iter_mut()
+        .find(|e| e.app.id == id)
+        .ok_or("Baseline has no app")?;
+    if entry.app != app {
+        return Err("App manifest changed; full build required".into());
+    }
+    let old = decode_ui(
+        &fs::read(baseline.join("authority/apps").join(id).join("ui.flex"))
+            .map_err(|e| e.to_string())?,
+    )?;
+    let code = fs::read(
+        baseline
+            .join("authority/apps")
+            .join(id)
+            .join("behavior.wasm"),
     )
-    .map_err(|e| e.to_string())?;
+    .unwrap_or_default();
+    let ui = factory(&code);
+    compatible_ui(&old, &ui)?;
+    let bytes = encode_ui(&ui)?;
+    entry.ui_hash = hash(&bytes);
+    let state_ref = entry.app.state_ref.clone();
+    let encoded = encode_catalog(&catalog)?;
+    let mut client = Client::default();
+    client.admit_catalog(&encoded)?;
+    client.mount_local(&bytes, &state_ref, &code, &[])?;
+    write_changed(&root.join(id).join("package/ui.flex"), &bytes)?;
+    write_changed(&root.join("catalog.flex"), &encoded)?;
+    println!("{id}: UI data only; runtime and behavior reused");
     Ok(())
 }

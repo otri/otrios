@@ -20,7 +20,7 @@ class SignedReleases(unittest.TestCase):
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
         (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
-        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
         (self.root/'apps').mkdir();(self.root/'apps/catalog.flex').write_bytes(b'test-catalog')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
@@ -36,6 +36,22 @@ class SignedReleases(unittest.TestCase):
         for name in ['dashboard-native']:
             source=self.out/id/'native/armv7'/name
             if source.exists():shutil.copyfile(source,dest/name)
+    def test_data_only_transfer_reuses_verified_closure_and_rejects_missing_changes(self):
+        package=self.root/'apps/home/package';package.mkdir(parents=True)
+        (package/'app.flex').write_bytes(b'manifest');(package/'ui.flex').write_bytes(b'old-ui')
+        base=self.publish();(package/'ui.flex').write_bytes(b'new-ui');next=self.publish()
+        (self.out/'current.json').write_text(json.dumps(base))
+        stage=self.root/'partial';folder=stage/next['id'];folder.mkdir(parents=True)
+        for name in ['manifest.json','manifest.sig','apps/catalog.flex','authority/apps/home/ui.flex']:
+            dest=folder/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(self.out/next['id']/name,dest)
+        raw=json.dumps(next).encode()
+        (folder/'authority/apps/home/ui.flex').unlink()
+        with self.assertRaisesRegex(ValueError,'omitted changed'):activation.complete_ui(stage,self.out,self.public,OPENSSL,raw,base['id'])
+        shutil.copyfile(self.out/next['id']/'authority/apps/home/ui.flex',folder/'authority/apps/home/ui.flex')
+        self.assertEqual(activation.complete_ui(stage,self.out,self.public,OPENSSL,raw,base['id']),next['id'])
+        self.assertEqual((folder/'web/pkg/otrios_dashboard_bg.wasm').read_bytes(),(self.out/base['id']/'web/pkg/otrios_dashboard_bg.wasm').read_bytes())
+        (self.out/'current.json').write_text(json.dumps(next))
+        with self.assertRaisesRegex(ValueError,'baseline changed'):activation.complete_ui(stage,self.out,self.public,OPENSSL,raw,base['id'])
     def test_authority_app_payloads_are_signed_but_never_replicated_publicly(self):
         package=self.root/'apps/monitoring/package';package.mkdir(parents=True)
         (package/'app.flex').write_bytes(b'private-app-manifest')
@@ -198,7 +214,8 @@ class ArtifactBudget(unittest.TestCase):
             previous=agent.running;agent.running=True
             def sleep(seconds):
                 clock[0]+=seconds
-                if clock[0]>1100:raise AssertionError('Candidate was stranded')
+                if clock[0]>1100:
+                    agent.running=False;raise AssertionError('Candidate was stranded')
             try:
                 with patch.object(agent,'Host',Host), patch.object(agent,'cached',return_value=(old,root/'old')), patch.object(agent,'qualify',return_value=(new,root/'new')), patch.object(agent,'ReleaseFeed',Feed), patch.object(agent,'session_host',return_value=True), patch.object(agent,'bootstrap_release',side_effect=AssertionError('Extra network connection')), patch.object(agent,'fetch',side_effect=AssertionError('Release pointer must not be polled')), patch.object(agent.time,'monotonic',side_effect=lambda:clock[0]), patch.object(agent.time,'sleep',side_effect=sleep):
                     agent.main(args)

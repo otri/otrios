@@ -88,6 +88,20 @@ codec!(encode_catalog, decode_catalog, Catalog);
 codec!(encode_schema, decode_schema, StateSchema);
 
 pub const MAX_FIELDS: usize = 64;
+/// UI data replacement keeps execution, permissions and state ownership fixed.
+pub fn compatible_ui(old: &Ui, next: &Ui) -> Result<()> {
+    if next.ui_ref != old.ui_ref
+        || old.format != next.format
+        || old.state_schema != next.state_schema
+        || old.behavior != next.behavior
+        || old.handlers != next.handlers
+        || old.navigation != next.navigation
+        || old.presentation != next.presentation
+    {
+        return Err("UI update requires matching state, behavior and action contracts".into());
+    }
+    Ok(())
+}
 pub const MAX_TEXT_BYTES: usize = 4096;
 pub const MAX_SERIES_POINTS: usize = 2016;
 

@@ -49,7 +49,7 @@ fn launch_card(id: &str, title: &str, detail: &str, caption: &str) -> Element {
 
 pub fn description() -> Ui {
     let mut children = vec![
-        text("A shared runtime. A place to explore.")
+        text("A shared runtime. Ready to explore!")
             .position([52., 126.])
             .font_scale(2.)
             .color(MUTED)
@@ -143,7 +143,7 @@ pub fn description() -> Ui {
             ),
         ],
     );
-    AppUi::new("home", "Home", schema("home-state-v2", &[]))
+    AppUi::new("home", "Home", super::state::schema())
         .with_composition(wide, tall)
         .build("OTriOS", children)
 }

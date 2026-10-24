@@ -180,3 +180,10 @@ AxisResize::Springs { leading: true, length: false, trailing: true }, vertical:
 AxisResize::Fixed })`. Named fields preserve the relationship without a numeric
 bitmask in authored UI code. With 20/80 design margins, these two margin springs
 share added width in a 1:4 ratio; `.center_x()` expresses exact centering instead.
+
+## Independent UI updates
+
+All apps use the same package factory and update contract. See
+[RFC 0013](../docs/rfcs/0013-app-ui-updates.md) for UI-only publishing, qualified
+runtime reuse and idempotent activation. UI data can change while compatible
+state and behavior stay mounted; executable/schema changes require a full release.

@@ -98,6 +98,14 @@ def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):
         total-=size
     if total>limit:raise ValueError('Cache budget cannot fit pinned artifacts')
 
+def ui_only_change(previous,next):
+    if previous.get('ui_abi')!='otrios-app-ui-v1' or next.get('ui_abi')!=previous['ui_abi']:return False
+    if {k:v for k,v in previous.items() if k not in ('assets','authority')}!={k:v for k,v in next.items() if k not in ('assets','authority')}:return False
+    for section,allowed in [('assets','apps/catalog.flex'),('authority',None)]:
+        a,b=previous.get(section,{}),next.get(section,{})
+        if not a or a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if not (k==allowed or (section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+/ui\.flex',k)))):return False
+    return True
+
 def hot_reload_ready(info):
     if info.get('input_busy',True):return False
     # Current PoC policy: disconnected RAM edits may be dropped for an upgrade.
@@ -178,11 +186,12 @@ def ready_contract(info,rotation):
 
 class Host:
     def __init__(self,a,release,exe,screen=None):
-        self.a=a;self.release=release;self.stop=a.runtime_dir/('stop-'+uuid.uuid4().hex);self.ready=a.runtime_dir/('ready-'+uuid.uuid4().hex+'.json')
+        self.a=a;self.release=release;self.stop=a.runtime_dir/('stop-'+uuid.uuid4().hex);self.ready=a.runtime_dir/('ready-'+uuid.uuid4().hex+'.json');self.ui_socket=a.runtime_dir/('ui-'+uuid.uuid4().hex+'.sock');self.offered_ui=None
         env=dict(os.environ,OTRIOS_RELEASE_ID=release)
         env['OTRIOS_RELEASE_SOCKET']=str(a.runtime_dir/'release.sock')
         command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
         if screen and screen!='locked':command+=['--screen',screen]
+        command+=['--catalog-update-socket',str(self.ui_socket)]
         command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]
         if a.capture_first_frame:command+=['--capture',str(a.runtime_dir/'first-frame.ppm')]
         self.process=subprocess.Popen(command,env=env)
@@ -199,6 +208,14 @@ class Host:
     def info(self):
         try:return json.loads(self.ready.read_text())
         except (OSError,ValueError):return {}
+    def update_ui(self,release,cache):
+        if self.offered_ui!=release:
+            item=json.loads((cache/release/'manifest.json').read_text())['assets']['apps/catalog.flex']
+            notice={'release':release,'catalog':str(cache/release/'app-catalog.flex'),'sha256':item['sha256']}
+            with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as channel:channel.sendto(json.dumps(notice).encode(),str(self.ui_socket))
+            self.offered_ui=release
+        info=self.info()
+        return info.get('ui_release')==release and hot_reload_ready(info)
     def close(self):
         self.stop.touch()
         try:self.process.wait(timeout=5)
@@ -206,7 +223,7 @@ class Host:
             self.process.terminate()
             try:self.process.wait(timeout=2)
             except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
-        self.stop.unlink(missing_ok=True);self.ready.unlink(missing_ok=True)
+        self.stop.unlink(missing_ok=True);self.ready.unlink(missing_ok=True);self.ui_socket.unlink(missing_ok=True)
 
 class ReleaseFeed:
     """Local event delivery from the host's single negotiated network connection."""
@@ -277,11 +294,21 @@ def main(a):
                     pending=event
                 if pending is None or time.monotonic()<retry_at:continue
                 release=pending['id']
-                if host is not None and host.process.poll() is None and release==current:continue
+                if host is not None and host.process.poll() is None and release==current:pending=None;continue
                 old=host;info=old.info() if old and old.process.poll() is None else {}
                 if old and old.process.poll() is None and not hot_reload_ready(info):continue
+                if old and getattr(old,'offered_ui',None)==release:
+                    if old.info().get('ui_release')==release and hot_reload_ready(old.info()):
+                        current=release;last_good=(release,a.cache/release/'dashboard-native');pending=None
+                        atomic(good_file,json.dumps({'id':release}).encode());print('UI ACTIVE signed_release='+release,flush=True)
+                    continue
                 code_url=getattr(a,'code_url',None) or a.url
                 release,exe=qualify(code_url,a.cache,a.key,a.openssl,release,limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
+                if old and old.process.poll() is None and info.get('ui_updates') is True and ui_only_change(json.loads((a.cache/current/'manifest.json').read_text()),json.loads((a.cache/release/'manifest.json').read_text())):
+                    if old.update_ui(release,a.cache):
+                        current=release;last_good=(release,exe);pending=None
+                        atomic(good_file,json.dumps({'id':release}).encode());print('UI ACTIVE signed_release='+release,flush=True)
+                    continue
                 host=None
                 if old:old.close()
                 candidate=Host(a,release,exe,screen=info.get('screen') if info.get('ui_ref') else None)

@@ -55,6 +55,7 @@ export function connectSession({
   connect();
   return {
     get ready(){return ready;},get epoch(){return generation;},
+    setRelease(id){if(!/^[a-f0-9]{64}$/.test(id))throw Error('Invalid active release');current=id;last=id;},
     sendState:(bytes,epoch)=>send(STATE,bytes,epoch),sendInk:(bytes,epoch)=>wantsInk&&send(INK,bytes,epoch),
     subscribeInk(value){wantsInk=!!value;syncInk();},
     resume(){if(stopped){stopped=false;delay=250;connect();}},

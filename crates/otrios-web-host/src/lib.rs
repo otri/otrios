@@ -41,6 +41,20 @@ impl CanvasApp {
         self.catalog = Some(catalog);
         Ok(())
     }
+    pub fn can_update_catalog(&mut self) -> bool {
+        self.inner.can_update_catalog()
+    }
+    pub fn update_catalog(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        let changed = self.inner.update_catalog(bytes)?;
+        self.catalog = Some(decode_catalog(bytes)?);
+        Ok(changed)
+    }
+    pub fn catalog_update_pending(&self) -> bool {
+        self.inner.catalog_update_pending()
+    }
+    pub fn catalog_hash(&self) -> String {
+        otrios_core::canvas::hex(self.inner.catalog_hash())
+    }
     pub fn screen(&self) -> String {
         self.catalog
             .as_ref()
