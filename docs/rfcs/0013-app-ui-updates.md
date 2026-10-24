@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0013: Independent app UI documents
 
-Status: implementation and qualification. Extends the Canvas mount contract and
+Status: implemented and qualified on browser and native frame. Extends the Canvas mount contract and
 RFC 0012 composition. This increment applies to all seven apps.
 
 ## One package architecture

@@ -47,6 +47,24 @@ own signing identity and does not establish physical device acceptance.
 
 ## Deployment
 
-Live frame qualification is recorded after the initial runtime installation and
-subsequent UI-data-only publication. No new rollback or external backup tooling
-is introduced.
+The initial runtime support and browser address handling were installed, then
+source `ddd64de` changed Home's introduction from “Ready to explore.” to
+“Ready to explore!” through the UI-data-only path. The final signed release is
+`46741ef2a37bf5b582fbc2712bf14a471e13614709d2161bf1e8ea413cffaf98`.
+
+Only `apps/catalog.flex` and `authority/apps/home/ui.flex` changed. The transfer
+was 102,400 bytes (100 KiB), versus 19,650,560 bytes (18.7 MiB) for the initial
+runtime package. No native or browser Wasm build ran for this UI change; the
+native authoring-tool rebuild took 1.45 seconds in the warm environment.
+
+The authority PID remained 10726; the native renderer PID remained
+10995. Home advanced from epoch 1 to 2, rendered the new UI,
+and reported confirmed state with a live stream. Its runtime release remained
+`6c8b8b864dc61e1b31495ac6476a07eed471fa93c6ff8e4a697f5ac7f86cd7a4`. Repeating the same publish reports
+`UNCHANGED` and performs no transfer. All seven apps also passed unchanged
+UI-only packing/publication checks.
+
+Public HTTPS conformance passes 70 checks (signed public asset integrity,
+release/session negotiation, private/admin isolation and anonymous denial).
+Monitoring login and physical touch/color/performance were not exercised.
+No new rollback or external backup tooling is introduced.
