@@ -1,0 +1,77 @@
+{
+  "release": "c2598ca4a76831f669ebda1fd5a23fc9e384751ddb1ddc1887fef20f13b73dd8",
+  "validation": {
+    "rust_tests": 180,
+    "python_checks": 39,
+    "javascript_and_wasm_tests": 47,
+    "arm_all_features_clippy": true,
+    "arm_release_build": true,
+    "public_https_checks": 70
+  },
+  "browser": {
+    "passed": true,
+    "checks": [
+      "touch drag streams card order before release",
+      "local Edit/Done and wiggle send no state",
+      "same-slot motion sends no state",
+      "portrait and landscape agree on order",
+      "stable component IDs and keyboard focus",
+      "keyboard reorder shares state",
+      "rotation cancels touch capture without navigation",
+      "Done restores launching"
+    ],
+    "binaryFramesDuringOneMove": 2,
+    "binaryBytesDuringOneMove": 140,
+    "state_fields_per_move": 1,
+    "tested_release": "897f43ee6f427d3b2f6011517318432843056a2a435994e8a5e867dba8bc5369",
+    "final_web_and_app_bytes_unchanged": true
+  },
+  "responsive": {
+    "passed": true,
+    "checks": [
+      "landscape and portrait WebGL rendering",
+      "Home three/two-column composition",
+      "same controls and behavior identities",
+      "two clients share edits and ink across orientations",
+      "resize during pointer capture and subsequent input",
+      "Layout Lab in both orientations"
+    ],
+    "native_hardware": "not tested"
+  },
+  "feature_commit": "132353521fda923809edb64fd217201f95200d40",
+  "source_commit": "5514324e5c3e33e0a56aefc8fb165899de5a6a49",
+  "native": {
+    "pid": 12071,
+    "release": "c2598ca4a76831f669ebda1fd5a23fc9e384751ddb1ddc1887fef20f13b73dd8",
+    "runtime_release": "c2598ca4a76831f669ebda1fd5a23fc9e384751ddb1ddc1887fef20f13b73dd8",
+    "state_ref": "app:home/state-v3",
+    "ui_ref": "app:home/ui",
+    "screen": "home",
+    "state_confirmed": true,
+    "stream_ready": true,
+    "output": [
+      800,
+      1280
+    ],
+    "rotation": 90,
+    "renderer": "gles2-direct",
+    "order": [
+      1,
+      5,
+      4,
+      2,
+      3,
+      6
+    ],
+    "editing": false,
+    "independent_authority_order": [
+      1,
+      5,
+      4,
+      2,
+      3,
+      6
+    ],
+    "physical_touch_tested": false
+  }
+}
