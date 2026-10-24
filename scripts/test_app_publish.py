@@ -10,6 +10,12 @@ class HomePublish(unittest.TestCase):
    initial=home.runtime_inputs(repo);(repo/'apps/home/ui.rs').write_text('new title');self.assertEqual(initial,home.runtime_inputs(repo))
    (repo/'crates/core/src/lib.rs').write_text('runtime changed');self.assertNotEqual(initial,home.runtime_inputs(repo))
    (repo/'crates/core/src/lib.rs').write_text('baseline');(repo/'apps/home/extra.rs').write_text('new dependency');self.assertNotEqual(initial,home.runtime_inputs(repo))
+ def test_behavior_source_is_not_a_host_build_input_but_abi_and_schema_are(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   repo=pathlib.Path(tmp);subprocess.run(['git','init','-q',str(repo)],check=True)
+   source=repo/'apps/demo/behavior/main.wat';source.parent.mkdir(parents=True);source.write_text('(module)')
+   initial=home.runtime_inputs(repo);source.write_text('(module (func))');self.assertEqual(initial,home.runtime_inputs(repo))
+   contract=source.parent/'events.rs';contract.write_text('pub const ABI: u32=2;');self.assertNotEqual(initial,home.runtime_inputs(repo))
  def test_private_behavior_and_runtime_changes_require_a_full_release(self):
   import copy
   base={'ui_abi':'otrios-app-ui-v1','sync_protocol':'v4','assets':{'apps/catalog.flex':1,'native':2},'authority':{'authority/apps/home/ui.flex':3,'authority/apps/home/behavior.wasm':4,'authority/apps/other/ui.flex':5}}

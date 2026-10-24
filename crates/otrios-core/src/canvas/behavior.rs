@@ -2,6 +2,7 @@
 use super::*;
 use wasmi::{Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
 pub struct Behavior {
+    digest: Vec<u8>,
     store: Store<StoreLimits>,
     dispatch: TypedFunc<(i32, i32, i32, i32), i64>,
     writes: Vec<u16>,
@@ -46,10 +47,14 @@ impl Behavior {
         }
         let dispatch = instance.get_typed_func(&store, "dispatch").map_err(err)?;
         Ok(Self {
+            digest: reference.sha256.clone(),
             store,
             dispatch,
             writes: reference.writes.clone(),
         })
+    }
+    pub fn code_hash(&self) -> &[u8] {
+        &self.digest
     }
     pub fn call(&mut self, event: u16, a: u16, b: u16, current: u16) -> Result<Vec<(u16, u16)>> {
         if a > 1000 || b > 1000 || current > 1000 {

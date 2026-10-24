@@ -2272,3 +2272,126 @@ fn every_app_uses_the_same_idempotent_ui_replacement_contract() {
         assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
     }
 }
+
+fn revision_guest(revision: u32) -> Vec<u8> {
+    wat::parse_str(format!(
+        r#"(module
+      (global $count (mut i32) (i32.const 0))
+      (func (export "revision") (result i32) i32.const {revision})
+      (func (export "abi_version") (result i32) i32.const 1)
+      (func (export "dispatch") (param i32 i32 i32 i32) (result i64)
+        global.get $count i32.const 1 i32.add global.set $count
+        global.get $count i64.extend_i32_u i64.const 1125899906842624 i64.or))"#
+    ))
+    .unwrap()
+}
+#[test]
+fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_noop() {
+    let before = revision_guest(1);
+    let after = revision_guest(2);
+    let old = playground::ui(&before);
+    let next = playground::ui(&after);
+    compatible_behavior(&old, &next).unwrap();
+    assert!(compatible_ui(&old, &next).is_err());
+    let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+    let mut c = Client::default();
+    activate(&mut c, old.clone(), "scope", before.clone());
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    edit(&mut c, "Linear slider", 100, 0);
+    edit(&mut c, "Linear slider", 100, 0);
+    pump(&mut c, &mut authority, &mut session);
+    assert_eq!(c.value(1).unwrap(), 2);
+    assert_eq!(c.resource_usage().behavior_hash, Some(hex(&hash(&before))));
+    let old_scene = c.scene().unwrap();
+    let old_epoch = c.epoch();
+    let bytes = encode_ui(&next).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    let catalog = home_catalog(entry);
+    c.update_catalog(&catalog).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&bytes),
+            ui: bytes,
+            code: after.clone(),
+            state: authority.save().unwrap(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        c.value(1).unwrap(),
+        2,
+        "mounting code must not execute an app edit"
+    );
+    assert_eq!(old_scene.root(), c.scene().unwrap().root());
+    assert!(!c.event(old_epoch, 1, 100, 0).unwrap());
+    assert_eq!(c.resource_usage().behavior_hash, Some(hex(&hash(&after))));
+    c.outgoing().unwrap();
+    session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    edit(&mut c, "Linear slider", 100, 0);
+    assert_eq!(c.value(1).unwrap(), 1, "replacement has fresh guest memory");
+    assert!(
+        !c.update_catalog(&catalog).unwrap(),
+        "duplicate catalog is a no-op during pending edits too"
+    );
+    edit(&mut c, "Linear slider", 100, 0);
+    assert_eq!(
+        c.value(1).unwrap(),
+        2,
+        "duplicate cannot reset the active guest"
+    );
+}
+#[test]
+fn invalid_behavior_replacement_retains_active_guest_and_permissions() {
+    use std::sync::Arc;
+    let before = revision_guest(1);
+    let old = playground::ui(&before);
+    let mut c = Client::default();
+    activate(&mut c, old.clone(), "scope", before.clone());
+    let mut authority = Document::new(old.state_schema.clone(), "scope").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    let scene = c.scene().unwrap();
+    let catalog_before = c.catalog_hash().to_vec();
+    let bad = wat::parse_str("(module (func $start unreachable) (start $start))").unwrap();
+    let next = playground::ui(&bad);
+    let bytes = encode_ui(&next).unwrap();
+    let mut entry = ui_entry(&old, "scope");
+    entry.ui_hash = hash(&bytes);
+    c.update_catalog(&home_catalog(entry)).unwrap();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount")
+    };
+    assert!(
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: bad,
+                state: authority.save().unwrap()
+            })
+            .unwrap()
+        )
+        .is_err()
+    );
+    assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
+    assert_eq!(c.catalog_hash(), catalog_before);
+    assert_eq!(c.resource_usage().behavior_hash, Some(hex(&hash(&before))));
+    let mut permissions = playground::ui(&revision_guest(2));
+    permissions.behavior.as_mut().unwrap().writes = vec![1];
+    assert!(compatible_app_update(&old, &permissions).is_err());
+    let mut changed = playground::ui(&revision_guest(2));
+    changed.title.push_str(" changed");
+    assert!(compatible_app_update(&old, &changed).is_err());
+}

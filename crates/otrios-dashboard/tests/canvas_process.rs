@@ -247,14 +247,11 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         .root
         .join("apps/component-playground/behavior/main.wat");
     let text = std::fs::read_to_string(&source).unwrap();
-    std::fs::write(
-        source,
-        text.replacen(
-            "local.get $a i64.extend_i32_u",
-            "i32.const 123 i64.extend_i32_u",
-            1,
-        ),
-    )
+    std::fs::write(source, {
+        let start = text.find(";; linear-value-begin").unwrap() + ";; linear-value-begin".len();
+        let end = text.find(";; linear-value-end").unwrap();
+        format!("{}\n i32.const 123\n {}", &text[..start], &text[end..])
+    })
     .unwrap();
     assert!(
         Command::new(env!("CARGO_BIN_EXE_canvas-pack"))

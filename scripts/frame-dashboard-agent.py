@@ -98,13 +98,17 @@ def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):
         total-=size
     if total>limit:raise ValueError('Cache budget cannot fit pinned artifacts')
 
-def ui_only_change(previous,next):
+def ui_only_change(previous,next,behavior=False):
     if previous.get('ui_abi')!='otrios-app-ui-v1' or next.get('ui_abi')!=previous['ui_abi']:return False
     if {k:v for k,v in previous.items() if k not in ('assets','authority')}!={k:v for k,v in next.items() if k not in ('assets','authority')}:return False
     for section,allowed in [('assets','apps/catalog.flex'),('authority',None)]:
         a,b=previous.get(section,{}),next.get(section,{})
-        if not a or a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if not (k==allowed or (section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+/ui\.flex',k)))):return False
+        if not a or a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if not (k==allowed or (section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+/ui\.flex',k)) or (behavior and section=='authority' and re.fullmatch(r'authority/apps/[a-z-]+/behavior\.wasm',k)))):return False
     return True
+
+def app_only_change(previous,next):
+    behavior=previous.get('behavior_abi')=='otrios-app-behavior-v1' and next.get('behavior_abi')==previous['behavior_abi']
+    return ui_only_change(previous,next,behavior=behavior)
 
 def hot_reload_ready(info):
     if info.get('input_busy',True):return False
@@ -304,7 +308,7 @@ def main(a):
                     continue
                 code_url=getattr(a,'code_url',None) or a.url
                 release,exe=qualify(code_url,a.cache,a.key,a.openssl,release,limit=a.cache_bytes,pins=tuple(v for v in (current,last_good[0] if last_good else None) if v))
-                if old and old.process.poll() is None and info.get('ui_updates') is True and ui_only_change(json.loads((a.cache/current/'manifest.json').read_text()),json.loads((a.cache/release/'manifest.json').read_text())):
+                if old and old.process.poll() is None and info.get('ui_updates') is True and app_only_change(json.loads((a.cache/current/'manifest.json').read_text()),json.loads((a.cache/release/'manifest.json').read_text())):
                     if old.update_ui(release,a.cache):
                         current=release;last_good=(release,exe);pending=None
                         atomic(good_file,json.dumps({'id':release}).encode());print('UI ACTIVE signed_release='+release,flush=True)

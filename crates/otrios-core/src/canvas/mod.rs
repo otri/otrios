@@ -102,6 +102,25 @@ pub fn compatible_ui(old: &Ui, next: &Ui) -> Result<()> {
     }
     Ok(())
 }
+/// A guest replacement changes only the code digest, keeping its ABI, grants
+/// and the complete UI/state contract fixed. New instances start with fresh RAM.
+pub fn compatible_behavior(old: &Ui, next: &Ui) -> Result<()> {
+    let (Some(before), Some(after)) = (&old.behavior, &next.behavior) else {
+        return Err("Behavior replacement requires an existing declared module".into());
+    };
+    if before.abi != after.abi || before.writes != after.writes {
+        return Err("Behavior replacement changed its ABI or field permissions".into());
+    }
+    let mut expected = old.clone();
+    expected.behavior = next.behavior.clone();
+    if &expected != next {
+        return Err("Behavior replacement changed UI or state data".into());
+    }
+    Ok(())
+}
+pub fn compatible_app_update(old: &Ui, next: &Ui) -> Result<()> {
+    compatible_ui(old, next).or_else(|_| compatible_behavior(old, next))
+}
 pub const MAX_TEXT_BYTES: usize = 4096;
 pub const MAX_SERIES_POINTS: usize = 2016;
 

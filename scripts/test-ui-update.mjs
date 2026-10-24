@@ -22,3 +22,11 @@ test('preparation binds the catalog and both manifests to content hashes before 
  globalThis.fetch=async()=>new Response(bytes);await assert.rejects(()=>prepareUiUpdate('https://demo.example',ai,bi),/release digest/);
  }finally{globalThis.fetch=fetch;}
 });
+
+test('guest replacement requires an advertised ABI and cannot replace host code or policy',async()=>{
+ const {appOnlyChange}=await import('../web/shared/ui-update.mjs');
+ const a=baseline(),b=structuredClone(a);a.behavior_abi=b.behavior_abi='otrios-app-behavior-v1';b.authority['authority/apps/home/behavior.wasm']=asset(7);b.authority['authority/apps/home/ui.flex']=asset(8);b.assets['apps/catalog.flex']=asset(9);
+ assert(!uiOnlyChange(a,b));assert(appOnlyChange(a,b));
+ const legacy=structuredClone(a);delete legacy.behavior_abi;assert(!appOnlyChange(legacy,b));
+ b.assets['web/app.js']=asset(8);assert(!appOnlyChange(a,b));
+});

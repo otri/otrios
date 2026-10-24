@@ -5,7 +5,10 @@
   (func (export "dispatch") (param $event i32) (param $a i32) (param $b i32) (param $current i32) (result i64)
     local.get $event i32.const 1 i32.eq
     if (result i64)
-      local.get $a i64.extend_i32_u i64.const 1125899906842624 i64.or
+      ;; linear-value-begin
+      local.get $a
+      ;; linear-value-end
+      i64.extend_i32_u i64.const 1125899906842624 i64.or
     else
       local.get $event i32.const 2 i32.eq
       if (result i64)

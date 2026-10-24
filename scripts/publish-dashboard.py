@@ -52,7 +52,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
                 authority[path]={'bytes':len(data),'sha256':digest(data)}
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}
-        manifest={'ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v4','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v4','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
         subprocess.run([openssl,'pkeyutl','-sign','-rawin','-inkey',str(key),'-in',str(stage/'manifest.json'),'-out',str(stage/'manifest.sig')],check=True,capture_output=True)

@@ -64,11 +64,24 @@ fn describe(
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let root = std::path::PathBuf::from(args.first().map(String::as_str).unwrap_or("apps"));
-    if args.get(1).is_some_and(|v| v == "--app-ui") {
-        if args.len() != 4 {
-            return Err("Use canvas-pack OUTPUT --app-ui APP BASELINE".into());
+    if args
+        .get(1)
+        .is_some_and(|v| v == "--app-ui" || v == "--app-behavior")
+    {
+        let behavior = args[1] == "--app-behavior";
+        if args.len() != if behavior { 5 } else { 4 } {
+            return Err("Use canvas-pack OUTPUT --app-ui APP BASELINE or --app-behavior APP BASELINE SOURCE".into());
         }
-        return app_ui(&root, &args[2], Path::new(&args[3]));
+        return app_update(
+            &root,
+            &args[2],
+            Path::new(&args[3]),
+            if behavior {
+                Some(Path::new(&args[4]))
+            } else {
+                None
+            },
+        );
     }
     if args.len() > 1 {
         return Err("Unknown pack arguments".into());
@@ -109,7 +122,7 @@ fn main() -> Result<()> {
     }
     write_changed(&root.join("catalog.flex"), &catalog)
 }
-fn app_ui(root: &Path, id: &str, baseline: &Path) -> Result<()> {
+fn app_update(root: &Path, id: &str, baseline: &Path, source: Option<&Path>) -> Result<()> {
     let mut catalog =
         decode_catalog(&fs::read(baseline.join("apps/catalog.flex")).map_err(|e| e.to_string())?)?;
     let (app, factory) = sources()
@@ -128,15 +141,35 @@ fn app_ui(root: &Path, id: &str, baseline: &Path) -> Result<()> {
         &fs::read(baseline.join("authority/apps").join(id).join("ui.flex"))
             .map_err(|e| e.to_string())?,
     )?;
-    let code = fs::read(
-        baseline
-            .join("authority/apps")
-            .join(id)
-            .join("behavior.wasm"),
-    )
-    .unwrap_or_default();
-    let ui = factory(&code);
-    compatible_ui(&old, &ui)?;
+    let (ui, code) = if let Some(source) = source {
+        let raw = fs::read(source).map_err(|e| e.to_string())?;
+        if raw.len() > 512 * 1024 {
+            return Err("Behavior source budget exceeded".into());
+        }
+        let code = wat::parse_bytes(&raw)
+            .map_err(|e| e.to_string())?
+            .into_owned();
+        let mut ui = old.clone();
+        let reference = ui
+            .behavior
+            .as_mut()
+            .ok_or("App has no declared behavior; qualify an initial full build")?;
+        reference.sha256 = hash(&code);
+        Behavior::load(&code, reference)?;
+        compatible_behavior(&old, &ui)?;
+        (ui, code)
+    } else {
+        let code = fs::read(
+            baseline
+                .join("authority/apps")
+                .join(id)
+                .join("behavior.wasm"),
+        )
+        .unwrap_or_default();
+        let ui = factory(&code);
+        compatible_ui(&old, &ui)?;
+        (ui, code)
+    };
     let bytes = encode_ui(&ui)?;
     entry.ui_hash = hash(&bytes);
     let state_ref = entry.app.state_ref.clone();
@@ -146,6 +179,14 @@ fn app_ui(root: &Path, id: &str, baseline: &Path) -> Result<()> {
     client.mount_local(&bytes, &state_ref, &code, &[])?;
     write_changed(&root.join(id).join("package/ui.flex"), &bytes)?;
     write_changed(&root.join("catalog.flex"), &encoded)?;
-    println!("{id}: UI data only; runtime and behavior reused");
+    if source.is_some() {
+        write_changed(&root.join(id).join("package/behavior.wasm"), &code)?;
+        println!(
+            "{id}: {} byte behavior module; UI layout and host runtimes reused",
+            code.len()
+        );
+    } else {
+        println!("{id}: UI data only; runtime and behavior reused");
+    }
     Ok(())
 }
