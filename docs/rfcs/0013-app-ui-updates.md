@@ -50,7 +50,8 @@ is restored when node ID and label still match; no stable cross-build component
 identity is claimed. The page, worker and shared WebSocket remain loaded.
 The browser retains its verified manifest in RAM so it can compare future
 updates after the frame prunes old release folders. Reconnect hello reports the
-latest admitted release, independently of the page's original URL.
+latest admitted release. Browser history advances the address without reloading,
+so a later explicit refresh opens that admitted release.
 
 The native supervisor verifies the signed release closure, then signals the
 same renderer through a private Unix datagram socket. Only the verified local

@@ -28,8 +28,9 @@ its linear slider confirmed above 75 percent. The publisher changes only Home's
 introduction to “A shared runtime. Ready to explore.”
 
 `node scripts/test-responsive-browser.mjs --url http://127.0.0.1:18877 --wait-home-update --output target/app-ui-browser`
-passes. Both pages retain `performance.timeOrigin`, their original paths and
-WebSocket sessions. Home retains compatible semantic keyboard focus. Playground
+passes. Both pages retain `performance.timeOrigin` and their WebSocket sessions. Their
+addresses advance to the new release using browser history without navigation,
+so an explicit refresh loads the current release after old folders are pruned. Home retains compatible semantic keyboard focus. Playground
 retains its mount epoch and confirmed slider value. Later navigation opens the
 new Home document through the updated catalog. A window marker also survives,
 proving the existing page remained loaded.

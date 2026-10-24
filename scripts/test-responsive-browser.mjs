@@ -48,7 +48,8 @@ try{
     assert(updated,'both clients accept the new UI release');
     assert.equal(await evaluate(home,'window.__homeUpdateNonce'),'retained-worker-test');
     assert.equal(await evaluate(home,'performance.timeOrigin'),before.home.time);assert.equal(await evaluate(other,'performance.timeOrigin'),before.other.time);
-    assert.equal(await evaluate(home,'location.pathname'),before.home.path);assert.equal(await evaluate(other,'location.pathname'),before.other.path);
+    const applied=await evaluate(home,"document.querySelector('#revision').dataset.release");
+    assert.equal(await evaluate(home,'location.pathname'),`/releases/${applied}/web/index.html`);assert.equal(await evaluate(other,'location.pathname'),`/releases/${applied}/web/index.html`);
     assert.equal(await evaluate(home,'document.activeElement.dataset.sceneNode'),before.home.focus);
     assert.equal(await evaluate(other,"document.querySelector('#revision').dataset.epoch"),before.other.epoch);
     assert.deepEqual([socketCount.get(home),socketCount.get(other)],before.sockets,'same sessions remain connected');
@@ -56,7 +57,9 @@ try{
     await screenshot(home,'home-after-update');
     await click(other,'Home','home','1280x800');
     await wait(other,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
-    const result={passed:true,checks:['Home presentation replaced without page reload','other app retains its mount and confirmed state','same WebSocket sessions','compatible keyboard focus retained','later Home navigation uses updated catalog'],release:await evaluate(home,"document.querySelector('#revision').dataset.release")};
+    await call('Page.reload',{},home);await ready(home,'home','800x1280');
+    await wait(home,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
+    const result={passed:true,checks:['explicit refresh opens the current release','Home presentation replaced without page reload','other app retains its mount and confirmed state','same WebSocket sessions','compatible keyboard focus retained','later Home navigation uses updated catalog'],release:await evaluate(home,"document.querySelector('#revision').dataset.release")};
     await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else{
   const a=await page(1280,800,'home');await screenshot(a,'home-landscape');
