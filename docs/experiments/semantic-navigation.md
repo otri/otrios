@@ -38,5 +38,12 @@ roots. This release rebuilds the Wasm/native hosts; later compatible UI/route
 edits can reuse this qualified runtime. No attended physical touch acceptance
 was performed for the new child screens; native navigation is covered headlessly.
 
+The follow-up tooling cleanup removes the obsolete `publish-app-ui.py` wrapper
+and duplicate UI result pointer, and avoids copying catalog entries during
+packing. The required checks pass again (185 Rust tests and 40 Python checks).
+One native reconnect fixture timed out initially; its isolated and complete-suite
+reruns passed. Repacking and signing produces the exact same release ID and bytes,
+so this cleanup requires no deployment or client reload.
+
 See [machine-readable evidence](semantic-navigation.json) and
 [screen URL behavior](../HOME_AND_INPUT.md#shareable-screen-urls).

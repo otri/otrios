@@ -126,5 +126,17 @@
     5,
     3,
     6
-  ]
+  ],
+  "tooling_cleanup": {
+    "rust_tests": 185,
+    "python_checks": 40,
+    "release_unchanged": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+    "native_reconnect_initial_timeout": true,
+    "isolated_and_full_reruns_passed": true,
+    "changes": [
+      "one publish-app.py entry point for UI and behavior",
+      "one app-release.json result pointer",
+      "packer borrows catalog entries instead of cloning the complete catalog"
+    ]
+  }
 }

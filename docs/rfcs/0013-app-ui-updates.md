@@ -62,7 +62,7 @@ supervisors are restarted once with the initial runtime deployment.
 
 ## Publishing
 
-A qualified full build is recorded once with `scripts/publish-app-ui.py record`.
+A qualified full build is recorded once with `scripts/publish-app.py record`.
 The record binds its signed release, authority executable hashes and source
 inputs, including the pinned toolchain/lockfile. UI authoring files
 `apps/*/ui.rs` and `apps/*/components.rs` are the permitted data inputs. Changes to
@@ -70,7 +70,7 @@ runtime, schemas, handlers, authoring/compiler tooling or other build inputs
 require a new qualified full build. The record is build provenance, not an
 alternative trust root or permission grant.
 
-`publish-app-ui.py publish --app APP` copies the baseline package closure,
+`publish-app.py publish --app APP` copies the baseline package closure,
 runs `canvas-pack OUTPUT --app-ui APP BASELINE`, qualifies the candidate and
 changes only the selected UI document and catalog. It reuses all runtime and
 behavior artifacts. The native authoring tool may rebuild to incorporate edited
@@ -85,13 +85,13 @@ identical to the baseline skips network activation. The command shares the
 watcher's publisher lock and detects source changes during packing.
 
 ```sh
-python3 scripts/publish-app-ui.py record --runtime RUNTIME \
-  --baseline RUNTIME/build/app-current.json --record RUNTIME/build/ui-runtime.json \
+python3 scripts/publish-app.py record --runtime RUNTIME \
+  --baseline RUNTIME/build/app-current.json --record RUNTIME/build/app-runtime.json \
   --server ARM/dashboard-server --monitoring ARM/dashboard-monitoring \
   --bootstrap ARM/session-bootstrap
 
-python3 scripts/publish-app-ui.py publish --app home --runtime RUNTIME \
-  --baseline RUNTIME/build/app-current.json --record RUNTIME/build/ui-runtime.json \
+python3 scripts/publish-app.py publish --app home --runtime RUNTIME \
+  --baseline RUNTIME/build/app-current.json --record RUNTIME/build/app-runtime.json \
   --deploy-config RUNTIME/deploy-config.json
 ```
 

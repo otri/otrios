@@ -66,7 +66,6 @@ def publish(a):
         if a.kind=='behavior':allowed.add(f'authority/apps/{a.app}/behavior.wasm')
         if not changed<=allowed:raise ValueError('App update changed another package')
         output=a.runtime/'build/app-release.json';publisher.atomic(output,json.dumps(result,sort_keys=True).encode());verified(a,output)
-        if a.kind=='ui':publisher.atomic(a.runtime/'build/app-ui-release.json',output.read_bytes())
         if result['id']==release:
             print('UNCHANGED '+release);return result
         if a.deploy_config:

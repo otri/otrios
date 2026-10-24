@@ -101,25 +101,24 @@ fn main() -> Result<()> {
         }
         let bytes = encode_ui(&ui)?;
         write_changed(&folder.join("ui.flex"), &bytes)?;
+        println!("{}: canvas-app", app.id);
         entries.push(otrios_interfaces::canvas::CatalogEntry {
             path: String::new(),
             private: app.id == "monitoring",
-            app: app.clone(),
+            app,
             ui_hash: hash(&bytes),
         });
-        println!("{}: canvas-app", app.id);
     }
     let mut catalog = otrios_interfaces::canvas::Catalog {
         format: "otrios-app-catalog-v1".into(),
         apps: entries,
     };
     resolve_paths(&root, &mut catalog)?;
-    let entries = catalog.apps.clone();
-    let catalog = encode_catalog(&catalog)?;
-    for entry in &entries {
+    let bytes = encode_catalog(&catalog)?;
+    for entry in &catalog.apps {
         let folder = root.join(&entry.app.id).join("package");
         let mut client = Client::default();
-        client.admit_catalog(&catalog)?;
+        client.admit_catalog(&bytes)?;
         client.mount_local(
             &fs::read(folder.join("ui.flex")).map_err(|e| e.to_string())?,
             &entry.app.state_ref,
@@ -127,7 +126,7 @@ fn main() -> Result<()> {
             &[],
         )?;
     }
-    write_changed(&root.join("catalog.flex"), &catalog)
+    write_changed(&root.join("catalog.flex"), &bytes)
 }
 fn app_update(root: &Path, id: &str, baseline: &Path, source: Option<&Path>) -> Result<()> {
     let mut catalog =
