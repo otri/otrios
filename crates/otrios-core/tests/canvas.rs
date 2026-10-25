@@ -2885,3 +2885,92 @@ fn nested_route_fixture() -> (Ui, Catalog) {
     };
     (child, catalog)
 }
+
+#[test]
+fn cached_ui_mount_still_qualifies_fresh_state_and_rejects_wrong_digest() {
+    use std::sync::Arc;
+    let ui = ui_for_cache();
+    let bytes = encode_ui(&ui).unwrap();
+    let mut c = Client::default();
+    activate(&mut c, ui.clone(), "cached", code());
+    let mut authority = Document::new(ui.state_schema.clone(), "cached").unwrap();
+    pump(&mut c, &mut authority, &mut Session::default());
+    assert_eq!(c.resource_usage().ui_cache_entries, 1);
+    c.open(&ui.ui_ref, "cached");
+    assert_ne!(c.pending_mount_epoch(), 0);
+    let ClientMessage::Mount {
+        epoch, known_ui, ..
+    } = decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    assert_eq!(known_ui, Some(hash(&bytes)));
+    assert_eq!(c.pending_mount_epoch(), 0);
+    authority.set(&[(1, 731)]).unwrap();
+    let mounted = |epoch, ui_hash| {
+        encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui: vec![],
+            ui_hash,
+            code: vec![],
+            state: authority.save().unwrap(),
+        })
+        .unwrap()
+    };
+    c.receive(&mounted(epoch, hash(&bytes))).unwrap();
+    assert_eq!(
+        c.value(1).unwrap(),
+        731,
+        "UI reuse cannot reuse stale State"
+    );
+    assert_eq!(c.resource_usage().ui_cache_hits, 1);
+    c.outgoing().unwrap(); // Accept
+    c.reset_connection();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    let scene = c.scene().unwrap();
+    assert!(c.receive(&mounted(epoch, vec![9; 32])).is_err());
+    assert!(Arc::ptr_eq(&scene, &c.scene().unwrap()));
+    assert_eq!(c.resource_usage().ui_cache_hits, 1);
+}
+
+#[test]
+fn ui_cache_excludes_private_documents_and_is_bounded_across_revisions() {
+    let mut c = Client::default();
+    let mut ui = home::ui(&[]);
+    activate_access(&mut c, ui.clone(), "private", vec![], true);
+    assert_eq!(c.resource_usage().ui_cache_entries, 0);
+    c.reset_connection();
+    let ClientMessage::Mount { known_ui, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    assert_eq!(known_ui, None);
+    c = Client::default();
+    for i in 0..12 {
+        ui.title = format!("Home revision {i}");
+        let scope = format!("public:{i}");
+        activate(&mut c, ui.clone(), &scope, vec![]);
+        let mut authority = Document::new(ui.state_schema.clone(), &scope).unwrap();
+        pump(&mut c, &mut authority, &mut Session::default());
+    }
+    assert_eq!(c.resource_usage().ui_cache_entries, 8);
+    assert!(c.resource_usage().ui_cache_bytes <= 2 * 1024 * 1024);
+    let original = home::ui(&[]);
+    c.admit_catalog(&home_catalog(ui_entry(&original, "public")))
+        .unwrap();
+    c.open(&original.ui_ref, "public");
+    let ClientMessage::Mount { known_ui, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    assert_eq!(
+        known_ui, None,
+        "an admitted new hash cannot reuse a different revision"
+    );
+}

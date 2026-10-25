@@ -282,6 +282,7 @@ pub fn mount(s: &mut Socket, room: &Room, id: &str, epoch: u32) {
             ui_ref: format!("app:{id}/ui"),
             state_ref: format!("app:{id}/state"),
             catalog_hash: canvas::hash(&room.catalog),
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,

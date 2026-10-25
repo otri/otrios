@@ -75,3 +75,5 @@ workspace, with a separately measured interactive-socket change. Their
 [frame measurements](docs/experiments/canvas-replication-pipeline.md) compare each
 increment against its immediate control using fresh disposable authorities.
 These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](docs/rfcs/0008-release-control.md) inside the [unified server session](docs/rfcs/0009-unified-server-session.md), independently of state decoding ([deployment acceptance](docs/experiments/release-hello-deployment.md)). [Sync v4 packed envelopes and measured optional compression](docs/rfcs/0011-packed-canvas-transport.md) are deployed. Normal state traffic stays raw after frame measurements; the optional bulk compressor is bounded.
+
+[Public UI reuse and optional iPad navigation timings](docs/rfcs/0016-ui-cache-and-navigation-timings.md) extend the packed transport with sync v5. Repeat mounts reuse admitted public UI by hash while requesting fresh State. Open `/?timings=1` for local startup and navigation phase reports.

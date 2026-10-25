@@ -120,6 +120,9 @@ pub struct ResourceUsage {
     pub state: StateUsage,
     pub behavior_cache_entries: usize,
     pub behavior_cache_bytes: usize,
+    pub ui_cache_entries: usize,
+    pub ui_cache_bytes: usize,
+    pub ui_cache_hits: u64,
     pub behavior_hash: Option<String>,
     pub reflow_order: Vec<u16>,
     pub reflow_editing: bool,
@@ -135,6 +138,9 @@ pub struct Client {
     decision: Option<MountDecision>,
     active: Option<Mount>,
     cache: VecDeque<(Vec<u8>, Vec<u8>)>,
+    // Public, fully qualified documents only. State and private UI are never cached.
+    ui_cache: VecDeque<(Vec<u8>, Vec<u8>)>,
+    ui_cache_hits: u64,
     local: bool,
     navigation: Option<(String, String)>,
     catalog: Option<Catalog>,
@@ -312,6 +318,17 @@ impl Client {
     pub fn epoch(&self) -> u32 {
         self.active.as_ref().map_or(0, |m| m.epoch)
     }
+    /// Unsent mount generation, for host timing without interpreting wire bytes.
+    pub fn pending_mount_epoch(&self) -> u32 {
+        if self.navigation.is_some() {
+            self.generation.saturating_add(1)
+        } else {
+            self.requested
+                .as_ref()
+                .filter(|r| !r.sent)
+                .map_or(0, |r| r.epoch)
+        }
+    }
     pub fn title(&self) -> String {
         self.active
             .as_ref()
@@ -472,6 +489,9 @@ impl Client {
                 .map_or_else(StateUsage::default, |m| m.doc.state_usage()),
             behavior_cache_entries: self.cache.len(),
             behavior_cache_bytes: self.cache.iter().map(|(_, bytes)| bytes.len()).sum(),
+            ui_cache_entries: self.ui_cache.len(),
+            ui_cache_bytes: self.ui_cache.iter().map(|(_, bytes)| bytes.len()).sum(),
+            ui_cache_hits: self.ui_cache_hits,
             behavior_hash: self
                 .active
                 .as_ref()
@@ -634,6 +654,15 @@ impl Client {
                 ui_ref: r.pair.0.clone(),
                 state_ref: r.pair.1.clone(),
                 catalog_hash: self.catalog_hash.clone(),
+                known_ui: self.catalog.as_ref().and_then(|c| {
+                    c.apps
+                        .iter()
+                        .find(|e| {
+                            e.app.ui_ref == r.pair.0 && e.app.state_ref == r.pair.1 && !e.private
+                        })
+                        .filter(|e| self.ui_cache.iter().any(|v| v.0 == e.ui_hash))
+                        .map(|e| e.ui_hash.clone())
+                }),
                 known_code: self.cache.iter().map(|v| v.0.clone()).collect(),
                 writer: writer.to_vec(),
                 resume: self
@@ -720,6 +749,7 @@ impl Client {
                     return Ok(false);
                 }
                 let reconnecting = r.reconnecting;
+                let cached = ui.is_empty();
                 let candidate = (|| -> Result<Mount> {
                     let e = self
                         .catalog
@@ -730,10 +760,20 @@ impl Client {
                                 .find(|e| e.app.ui_ref == r.pair.0 && e.app.state_ref == r.pair.1)
                         })
                         .ok_or("App pair not admitted")?;
-                    if hash(&ui) != e.ui_hash || ui_hash != e.ui_hash {
+                    let bytes = if cached && !e.private {
+                        &self
+                            .ui_cache
+                            .iter()
+                            .find(|v| v.0 == ui_hash)
+                            .ok_or("Missing cached UI")?
+                            .1
+                    } else {
+                        &ui
+                    };
+                    if hash(bytes) != e.ui_hash || ui_hash != e.ui_hash {
                         return Err("UI differs from admitted catalog".into());
                     }
-                    let ui = decode_ui(&ui)?;
+                    let ui = decode_ui(bytes)?;
                     if self.previous_catalog.is_some() {
                         compatible_app_update(&self.active.as_ref().ok_or("Missing app")?.ui, &ui)?;
                     }
@@ -783,6 +823,29 @@ impl Client {
                 })();
                 match candidate {
                     Ok(mut candidate) => {
+                        if !candidate.private {
+                            // Move the qualified bytes, including on a cache hit.
+                            // Repeated mounts must not clone an entire UI document.
+                            let bytes = if cached {
+                                let index = self
+                                    .ui_cache
+                                    .iter()
+                                    .position(|v| v.0 == ui_hash)
+                                    .ok_or("Missing cached UI")?;
+                                self.ui_cache.remove(index).ok_or("Missing cached UI")?.1
+                            } else {
+                                ui
+                            };
+                            self.ui_cache.retain(|v| v.0 != ui_hash);
+                            self.ui_cache.push_back((ui_hash, bytes));
+                            while self.ui_cache.len() > 8
+                                || self.ui_cache.iter().map(|v| v.1.len()).sum::<usize>()
+                                    > 2 * 1024 * 1024
+                            {
+                                self.ui_cache.pop_front();
+                            }
+                            self.ui_cache_hits += u64::from(cached);
+                        }
                         if self.previous_catalog.take().is_some() {
                             let mut current = self.active.take().ok_or("Missing app activation")?;
                             if current.ui.behavior != candidate.ui.behavior {

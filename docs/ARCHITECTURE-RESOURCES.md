@@ -58,3 +58,5 @@ separate fact from these automated checks.
 The JSON serializer added to the WASM host is the same pinned `serde_json` already
 in the workspace lock; it serializes the shared diagnostics type rather than
 maintaining separate numeric field layouts in JavaScript and native code.
+
+The shared client also reports `ui_cache_entries`, `ui_cache_bytes` and cumulative `ui_cache_hits`. The cache retains only qualified public UI in RAM, at most eight documents and 2 MiB. It excludes app State and private UI; repeat mounts still obtain a fresh authoritative State session. Browser-only `?timings=1` adds a copyable local phase report without collecting app contents or sending telemetry; see [RFC 0016](rfcs/0016-ui-cache-and-navigation-timings.md).

@@ -106,3 +106,23 @@ test('navigation delegates destination paths to the shared runtime',async()=>{
   const context=vm.createContext({fake});vm.runInContext(source,context);vm.runInContext('app=fake;navigate("launcher");navigate("example-app");navigate(null)',context);
   assert.deepEqual(calls,['launcher','example-app','']);
 });
+
+
+test('timing traces follow the mount generation and ignore earlier control packets',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const {timestamp}=await import('../web/canvas/navigation-timings.mjs');
+  const messages=[];let pending=false,epoch=1,packets=0;
+  const fake={viewport_size:()=>[1280,800],tick:()=>false,activate(){pending=true;packets=2;return true;},take_sign_out:()=>false,
+    pending_mount_epoch:()=>pending?2:0,outgoing(){if(!packets)return null;if(--packets===0)pending=false;return new Uint8Array([packets]);},
+    receive(){epoch=2;return true;},rejected_mount_pending:()=>false,
+    path:()=> 'layout-lab',screen:()=> 'layout-lab',epoch:()=>epoch,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'state',
+    keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
+    reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'App',title:()=> 'App',controls:()=>[]};
+  let time=100;const context=vm.createContext({fake,timestamp,performance:{timeOrigin:1700000000000,now:()=>time++},Date,postMessage:m=>messages.push(m)});
+  vm.runInContext(source,context);vm.runInContext('app=fake;timings=true;transportReady=true;transportEpoch=1',context);
+  await context.onmessage({data:{type:'activate',id:12,timing:{id:7}}});
+  const sent=messages.filter(m=>m.type==='state-send');assert.equal(sent.length,2);assert.equal(sent[0].timing,undefined);assert.equal(sent[1].timing.id,7);assert.equal(sent[1].timing.epoch,2);
+  await context.onmessage({data:{type:'frame-ack'}});
+  await context.onmessage({data:{type:'state-frame',epoch:1,bytes:new Uint8Array([1,2,3]),receivedAt:1700000000110}});
+  const frame=messages.filter(m=>m.type==='frame').at(-1);assert.equal(frame.epoch,2);assert.equal(frame.timing.id,7);assert.equal(frame.timing.responseBytes,3);assert(!messages.some(m=>m.type==='error'));
+});

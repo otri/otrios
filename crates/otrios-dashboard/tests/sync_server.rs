@@ -78,6 +78,7 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             ui_ref: "app:demo/ui".into(),
             state_ref: "app:monitoring/state".into(),
             catalog_hash: canvas::hash(&room.catalog),
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
@@ -93,6 +94,7 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             ui_ref: "app:demo/ui".into(),
             state_ref: "app:demo/state".into(),
             catalog_hash: vec![0; 32],
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
@@ -214,6 +216,7 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
             ui_ref: "app:demo/ui".into(),
             state_ref: "wrong-root".into(),
             catalog_hash: canvas::hash(&room.catalog),
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
@@ -267,6 +270,7 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             ui_ref: "app:demo/ui".into(),
             state_ref: "app:demo/state-v2".into(),
             catalog_hash: canvas::hash(&room.catalog),
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
@@ -300,6 +304,7 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             ui_ref: "app:demo/ui".into(),
             state_ref: "app:demo/state-v2".into(),
             catalog_hash: canvas::hash(&room.catalog),
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
@@ -383,6 +388,7 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
             ui_ref: "app:demo/ui".into(),
             state_ref: "app:demo/state".into(),
             catalog_hash: canvas::hash(&room.catalog),
+            known_ui: None,
             known_code: vec![],
             writer: vec![9; 16],
             resume: client.resume_sequence(),
@@ -411,6 +417,7 @@ fn packed_mounts_confirm_durable_edits_for_independent_writers() {
                 ui_ref: "app:demo/ui".into(),
                 state_ref: "app:demo/state".into(),
                 catalog_hash: canvas::hash(&room.catalog),
+                known_ui: None,
                 known_code: vec![],
                 writer: vec![writer_id; 16],
                 resume: 0,
@@ -454,6 +461,7 @@ fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
                 ui_ref: "app:monitoring/ui".into(),
                 state_ref: "app:monitoring/state".into(),
                 catalog_hash: canvas::hash(&room.catalog),
+                known_ui: None,
                 known_code: vec![],
                 writer: vec![id; 16],
                 resume: 0,
@@ -474,4 +482,77 @@ fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
     }
     assert_eq!(std::fs::read(checkpoint).unwrap(), before);
     assert_eq!(std::fs::read(journal).unwrap_or_default(), before_log);
+}
+
+#[test]
+fn ui_cache_hint_omits_only_matching_public_ui_and_never_grants_access() {
+    let room = room(false, 28800);
+    let catalog = canvas::decode_catalog(&room.catalog).unwrap();
+    let mut socket = socket(&room.public, None);
+    for (epoch, id, known, omitted) in [
+        (1, "demo", true, true),
+        (2, "demo", false, false),
+        (3, "monitoring", true, false),
+    ] {
+        let entry = catalog.apps.iter().find(|e| e.app.id == id).unwrap();
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch,
+                ui_ref: entry.app.ui_ref.clone(),
+                state_ref: entry.app.state_ref.clone(),
+                catalog_hash: canvas::hash(&room.catalog),
+                known_ui: Some(if known {
+                    entry.ui_hash.clone()
+                } else {
+                    vec![9; 32]
+                }),
+                known_code: vec![],
+                writer: vec![9; 16],
+                resume: 0,
+            },
+        );
+        match read(&mut socket) {
+            ServerMessage::Mounted {
+                ui, ui_hash, state, ..
+            } if id != "monitoring" => {
+                assert_eq!(ui.is_empty(), omitted);
+                assert_eq!(ui_hash, entry.ui_hash);
+                assert!(!state.is_empty());
+            }
+            ServerMessage::AccessRequired { .. } if id == "monitoring" => {}
+            other => panic!("unexpected {other:?}"),
+        }
+        send(&mut socket, ClientMessage::CancelMount { epoch });
+    }
+}
+
+#[test]
+fn authorized_private_mounts_ignore_even_matching_ui_cache_hints() {
+    let room = room(false, 28800);
+    let catalog = canvas::decode_catalog(&room.catalog).unwrap();
+    let entry = catalog
+        .apps
+        .iter()
+        .find(|e| e.app.id == "monitoring")
+        .unwrap();
+    let mut socket = socket(&room.private, None);
+    send(
+        &mut socket,
+        ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: entry.app.ui_ref.clone(),
+            state_ref: entry.app.state_ref.clone(),
+            catalog_hash: canvas::hash(&room.catalog),
+            known_ui: Some(entry.ui_hash.clone()),
+            known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
+        },
+    );
+    let ServerMessage::Mounted { ui, ui_hash, .. } = read(&mut socket) else {
+        panic!("private mount");
+    };
+    assert!(!ui.is_empty());
+    assert_eq!(ui_hash, entry.ui_hash);
 }

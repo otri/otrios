@@ -55,6 +55,9 @@ impl CanvasApp {
     pub fn pending_path(&self) -> String {
         self.inner.pending_path()
     }
+    pub fn pending_mount_epoch(&self) -> u32 {
+        self.inner.pending_mount_epoch()
+    }
     pub fn navigate(&mut self, path: &str) -> Result<(), String> {
         self.inner.navigate(path)
     }
