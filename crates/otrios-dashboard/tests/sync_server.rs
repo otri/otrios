@@ -5,6 +5,58 @@ use common::*;
 use otrios_core::canvas::{self, Document, StateAdapter};
 use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
 #[test]
+fn large_mounts_compress_and_small_mounts_keep_the_existing_raw_wire() {
+    use otrios_core::dashboard::layout::Layout;
+    use otrios_interfaces::layout::Instance;
+    use tungstenite::Message;
+    let mut room = room(false, 28800);
+    let path = room.root.join("apps/demo/package/ui.flex");
+    let mut ui = canvas::decode_ui(&std::fs::read(&path).unwrap()).unwrap();
+    let mut layout = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
+    layout.root.children = (1..=120)
+        .map(|id| Instance {
+            id,
+            template: 1,
+            frame: [0., 0., 100., 100.],
+            properties: vec![],
+            children: vec![],
+        })
+        .collect();
+    ui.layout = Layout::encode(&layout).unwrap();
+    let bytes = canvas::encode_ui(&ui).unwrap();
+    assert!(bytes.len() >= 8192);
+    std::fs::write(path, &bytes).unwrap();
+    let mut catalog = canvas::decode_catalog(&room.catalog).unwrap();
+    catalog.apps[0].ui_hash = canvas::hash(&bytes);
+    room.catalog = canvas::encode_catalog(&catalog).unwrap();
+    std::fs::write(room.root.join("apps/catalog.flex"), &room.catalog).unwrap();
+    for (address, id, compressed) in [
+        (&room.public, "demo", true),
+        (&room.private, "monitoring", false),
+    ] {
+        let mut socket = socket(address, None);
+        mount(&mut socket, &room, id, 1);
+        let packet = loop {
+            match socket.read().unwrap() {
+                Message::Binary(bytes) => break bytes,
+                Message::Ping(_) => socket.flush().unwrap(),
+                _ => {}
+            }
+        };
+        assert_eq!(packet[0], 1);
+        let raw = &packet[1..];
+        assert_eq!(raw[4] == 1, compressed);
+        let ServerMessage::Mounted { ui, ui_hash, .. } = canvas::decode_server(raw).unwrap() else {
+            panic!("Missing mount")
+        };
+        assert_eq!(canvas::hash(&ui), ui_hash);
+        if compressed {
+            assert_eq!(ui, bytes);
+            assert!(raw.len() < ui.len());
+        }
+    }
+}
+#[test]
 fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
     let room = room(false, 28800);
     for path in [

@@ -85,7 +85,11 @@ Budget exhaustion closes/reconnects the session instead of growing a backlog.
 Canonical Merkle limits and one-flight subscription retention still apply.
 
 LZ4 is an explicit bulk-transfer option, available via `compress_packet_into`.
-Normal replication encoders stay raw. The frame probe found roughly 0.1 ms extra
+Normal replication encoders stay raw. The app authority selectively applies this
+option to `Mounted` responses of at least 8 KiB, outside the authority lock;
+small mounts, state deltas and control frames stay raw. This uses the existing
+v4 compression flag and decoder, with no new negotiation or protocol version.
+The frame probe found roughly 0.1 ms extra
 compression cost for an 871-byte scalar packet, and ~1.3 ms decode cost for a
 17 KiB snapshot, versus microseconds for raw packed decode. The smaller packet
 alone does not justify that cost on this path. The optional compressor requires

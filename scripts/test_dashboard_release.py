@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Conformance checks for the code-signing boundary; never executes test artifacts."""
-import hashlib, importlib.util, json, os, pathlib, shutil, subprocess, tempfile, unittest
+import gzip, hashlib, importlib.util, json, os, pathlib, shutil, subprocess, tempfile, unittest
 HERE=pathlib.Path(__file__).parent
 
 def module(name,file):
@@ -26,6 +26,23 @@ class SignedReleases(unittest.TestCase):
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
     def tearDown(self):self.temp.cleanup()
     def publish(self):return publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,catalog=self.root/'apps/catalog.flex')
+    def test_precompressed_web_assets_are_deterministic_signed_and_bound_to_source(self):
+        source=b'export const message="hello from the signed app";\n'*2048
+        (self.web/'app.js').write_bytes(source)
+        pointer=self.publish();folder=self.out/pointer['id']
+        manifest=json.loads((folder/'manifest.json').read_bytes())
+        packed=(folder/'web/app.js.gz').read_bytes()
+        self.assertEqual(gzip.decompress(packed),source)
+        self.assertLess(len(packed),len(source))
+        self.assertIn('web/app.js.gz',manifest['assets'])
+        self.assertEqual(self.publish(),pointer)
+        self.assertEqual(activation.verify(self.out,self.public,OPENSSL,json.dumps(pointer).encode()),pointer['id'])
+        (folder/'web/app.js.gz').write_bytes(packed[:-1]+bytes([packed[-1]^1]))
+        with self.assertRaisesRegex(ValueError,'asset digest rejected'):activation.verify(self.out,self.public,OPENSSL,json.dumps(pointer).encode())
+        from unittest.mock import patch
+        wrong=gzip.compress(b'wrong representation'*2048,mtime=0)
+        with patch.object(publisher.gzip,'compress',return_value=wrong):other=self.publish()
+        with self.assertRaisesRegex(ValueError,'Encoded source digest rejected'):activation.verify(self.out,self.public,OPENSSL,json.dumps(other).encode())
     def copy_cache(self,id):
         dest=self.cache/id;dest.mkdir()
         for file in ['manifest.json','manifest.sig']:shutil.copyfile(self.out/id/file,dest/file)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Verify a complete local signed release, then activate the single host store."""
-import argparse,fcntl,hashlib,importlib.util,json,pathlib,re,time,urllib.request,urllib.parse
+import argparse,fcntl,gzip,hashlib,importlib.util,io,json,pathlib,re,time,urllib.request,urllib.parse
 spec=importlib.util.spec_from_file_location('frame_agent',pathlib.Path(__file__).with_name('frame-dashboard-agent.py'));agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 WEB={'web/index.html','web/style.css','web/app.js','web/state-worker.js','web/pkg/otrios_dashboard.js','web/pkg/otrios_dashboard_bg.wasm','apps/catalog.flex'}
 OPTIONAL={'web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/viewport.mjs','web/ui-update.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
@@ -19,7 +19,8 @@ def verify(releases,key,openssl,pointer):
     if folder.is_symlink():raise ValueError('Release directory symlink rejected')
     raw=read(folder/'manifest.json',65536);sig=read(folder/'manifest.sig',64)
     manifest=agent.verify_manifest(raw,sig,release,releases,key,openssl);assets=manifest['assets'];authority=manifest.get('authority',{})
-    if not (WEB|{'native/armv7/dashboard-native'}).issubset(assets) or set(assets)-WEB-OPTIONAL-NATIVE:raise ValueError('Unexpected public assets')
+    compressed={name for name in assets if name.endswith('.gz') and name[:-3] in WEB|OPTIONAL and name.startswith('web/')}
+    if not (WEB|{'native/armv7/dashboard-native'}).issubset(assets) or set(assets)-WEB-OPTIONAL-NATIVE-compressed:raise ValueError('Unexpected public assets')
     if not ({'web/session.mjs','web/release-gate.mjs'}&assets.keys()):raise ValueError('Missing bootstrap module')
     total=0
     for name,item in list(assets.items())+list(authority.items()):
@@ -31,6 +32,11 @@ def verify(releases,key,openssl,pointer):
         if path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()):raise ValueError('Release path escaped store')
         data=read(path,size)
         if len(data)!=size or hashlib.sha256(data).hexdigest()!=item['sha256']:raise ValueError('Release asset digest rejected: '+name)
+        if name in compressed:
+            original=assets.get(name[:-3])
+            if not original or not 0<original['bytes']<=32*1024*1024:raise ValueError('Missing/oversized encoded source')
+            with gzip.GzipFile(fileobj=io.BytesIO(data))as stream:decoded=stream.read(original['bytes']+1)
+            if len(decoded)!=original['bytes'] or hashlib.sha256(decoded).hexdigest()!=original['sha256']:raise ValueError('Encoded source digest rejected: '+name)
     return release
 
 def complete_ui(releases,installed,key,openssl,pointer,base):

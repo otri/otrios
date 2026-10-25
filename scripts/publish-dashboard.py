@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Publish a complete, immutable, signed pair of web and native app builds."""
-import argparse, hashlib, json, os, pathlib, shutil, subprocess, tempfile
+import argparse, gzip, hashlib, json, os, pathlib, shutil, subprocess, tempfile
 
 def digest(data): return hashlib.sha256(data).hexdigest()
 def atomic(path, data):
@@ -31,6 +31,14 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
             if name=='index.html':data=data.replace(b'href="/style.css"',b'href="./style.css"').replace(b'src="/app.js"',b'src="./app.js"')
             dest=stage/'web'/name;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
             assets['web/'+name]={'bytes':len(data),'sha256':digest(data)}
+            # Compress once on the build host, not on every slow frame/tunnel read.
+            # Sidecars belong to the signed closure and retain deterministic bytes.
+            if name.endswith(('.html','.css','.js','.mjs','.wasm','.txt')) and len(data)>=512:
+                packed=gzip.compress(data,compresslevel=9,mtime=0)
+                packed=packed[:9]+b'\xff'+packed[10:] # Stable gzip OS byte across build platforms.
+                if len(packed)+64<len(data):
+                    dest.with_name(dest.name+'.gz').write_bytes(packed)
+                    assets['web/'+name+'.gz']={'bytes':len(packed),'sha256':digest(packed)}
         data=catalog.read_bytes()
         if not 0<len(data)<=512*1024:raise ValueError('Invalid app catalog size')
         (stage/'apps').mkdir();(stage/'apps/catalog.flex').write_bytes(data)

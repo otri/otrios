@@ -1,0 +1,10 @@
+{
+  "description": "OTriOS immutable public release assets",
+  "expression": "(http.host eq \"otrios.otri.ca\" and http.request.method in {\"GET\" \"HEAD\"} and starts_with(http.request.uri.path, \"/releases/\") and (http.request.uri.path contains \"/web/\" or ends_with(http.request.uri.path, \"/apps/catalog.flex\")))",
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "cache": true,
+    "origin_cache_control": true
+  },
+  "enabled": true
+}

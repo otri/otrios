@@ -64,7 +64,7 @@ function navigate(screen){
 onmessage=async({data:m})=>{try{
   if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
-    if(started)throw Error('App host is already initialized');started=true;await init();hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
+    if(started)throw Error('App host is already initialized');started=true;await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:state=>{
       if(!state.authenticated&&app.private()){dropPrivate();app.navigate('');outgoing();}

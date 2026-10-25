@@ -656,6 +656,7 @@ async function measure(index) {
             kind: m.method.endsWith("Sent") ? "ws-sent" : "ws-received",
             at: p.timestamp * 1000 + (epochOffset || 0),
             bytes: b.length,
+            compressed: b[0] === 1 && b.subarray(1, 5).toString() === "OTC4" && b[5] === 1,
             prefix: b.subarray(0, 12).toString("hex"),
             tag:
               b[0] === 1 && b.subarray(1, 5).toString() === "OTC4" && b[5] === 0
@@ -780,7 +781,9 @@ async function measure(index) {
         down = points.find((e) => e.kind === "pointerdown"),
         up = points.find((e) => e.kind === "pointerup");
       const sent = points.find((e) => e.kind === "ws-sent" && e.tag === 1),
-        mounted = points.find((e) => e.kind === "ws-received" && e.tag === 18),
+        // The authority selectively compresses Mounted only. The target UI's
+        // successful frame below confirms admission; no payload decoding here.
+        mounted = points.find((e) => e.kind === "ws-received" && (e.tag === 18 || e.compressed)),
         frame = points.find(
           (e) => e.kind === "worker-frame" && e.ui === ui && e.geometry,
         ),

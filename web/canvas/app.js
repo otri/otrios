@@ -46,7 +46,11 @@ try{
     navigator.serviceWorker.addEventListener('message',({data})=>{if(data?.type==='artifact-cache-status'){revision.dataset.cacheState=data.enabled?'ready':'unavailable';if(data.enabled){revision.dataset.cacheBytes=String(data.bytes);revision.dataset.cacheLimit=String(data.limit);revision.dataset.cacheEntries=String(data.count);}}});
     navigator.serviceWorker.register(new URL('./artifact-cache-worker.js',import.meta.url),{type:'module',scope:'/'}).then(()=>navigator.serviceWorker.ready).then(reg=>reg.active?.postMessage({type:'artifact-cache-status'})).catch(e=>{revision.dataset.cacheState='unavailable';console.warn('Artifact cache unavailable',e);});
   }else revision.dataset.cacheState='unsupported';
-  await init();const presenter=new CanvasPresentation();const [fontResource,appRelease]=await Promise.all([loadFontResource(import.meta.url),loadAppRelease(import.meta.url)]);presenter.set_font(fontResource.bytes,fontResource.hash);
+  const [wasmModule,fontResource,appRelease]=await Promise.all([
+    WebAssembly.compileStreaming(fetch(new URL('./pkg/otrios_dashboard_bg.wasm',import.meta.url))),
+    loadFontResource(import.meta.url),loadAppRelease(import.meta.url),
+  ]);
+  await init({module_or_path:wasmModule});const presenter=new CanvasPresentation();presenter.set_font(fontResource.bytes,fontResource.hash);
   const worker=new Worker(new URL('./state-worker.js',import.meta.url),{type:'module'});
   let desiredViewport=layoutViewport(innerWidth,innerHeight);
   let model=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
@@ -97,7 +101,7 @@ try{
   function leaveLogin(){command({type:'navigate',screen:null});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,screen:restoreScreen()});
+  worker.postMessage({type:'start',wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,screen:restoreScreen()});
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
