@@ -9,7 +9,7 @@ export function uiOnlyChange(previous,next,behavior=false){
   if(canonical(metadata(previous))!==canonical(metadata(next)))return false;
   for(const [section,allowed]of [['assets','apps/catalog.flex'],['authority',null]]){
     const a=previous[section],b=next[section];if(!a||!b||canonical(Object.keys(a).sort())!==canonical(Object.keys(b).sort()))return false;
-    for(const name of Object.keys(a))if(!(name===allowed||(section==='authority'&&/^authority\/apps\/[a-z-]+\/ui\.flex$/.test(name))||(behavior&&section==='authority'&&/^authority\/apps\/[a-z-]+\/behavior\.wasm$/.test(name)))&&canonical(a[name])!==canonical(b[name]))return false;
+    for(const name of Object.keys(a))if(!(name===allowed||(section==='authority'&&/^authority\/apps\/[a-z-]+(?:\/[a-z-]+)*\/ui\.flex$/.test(name))||(behavior&&section==='authority'&&/^authority\/apps\/[a-z-]+(?:\/[a-z-]+)*\/behavior\.wasm$/.test(name)))&&canonical(a[name])!==canonical(b[name]))return false;
   }
   return true;
 }

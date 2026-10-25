@@ -12,12 +12,13 @@ function error(e){postMessage({type:'error',message:String(e)});}
 function sendFrame(){if(inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;postMessage({type:'frame',...f},f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer]:[]);}
 function publish(geometry=true){
   syncInk();
-  const frame={extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),epoch:app.epoch(),ui:app.ui_ref(),state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  const frame={extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui:app.ui_ref(),state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  if(frame.authRequired)frame.path="/"+app.pending_path();
   if(geometry&&frame.ui){frame.reflow=app.reflow_frame();frame.vertices=app.vertices();frame.glyphVertices=app.glyph_vertices();frame.draws=app.draws();frame.text=app.text();frame.title=app.title();frame.snapshot=frame.state;frame.layout=frame.ui;frame.controls=Array.from(app.controls(),id=>({id,label:app.label(id),bounds:Array.from(app.bounds(id)),disabled:app.auth_required(),value:app.control_value(id),role:Number.isFinite(app.control_value(id))?'slider':'button',checked:app.control_checked(id),draggable:app.control_draggable(id)}));}
   pendingFrame={...pendingFrame,...frame};sendFrame();
 }
 function clearPresentation(){syncInk();pendingFrame=null;postMessage({type:'clear-private'});}
-function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('home');monitoring.logout();}
+function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('');monitoring.logout();}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){if(transportReady)while(stateSends<4){const bytes=app.outgoing();if(!bytes)break;stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 function reloadReady(){return !app.input_busy()&&(!stateOnline||app.reload_ready());}
@@ -56,20 +57,23 @@ function receiveState(bytes){try{
 }}
 function wantsInk(){return !stopped&&app?.ui_ref()&&app.presentation_kind()==='touch-pad';}
 function syncInk(){const active=!!wantsInk();if(active!==inkActive){inkActive=active;postMessage({type:'ink-subscribe',active});}}
-function route(hash){const parts=hash.replace(/^#\/?/,'').split('/'),aliases={controls:'component-playground',keyboard:'input-lab',animation:'animation-lab','3d':'three-d-lab',layout:'layout-lab'};if(app.auth_required())app.clear_private();app.navigate(aliases[parts[0]]||parts[0]||'home');}
+function navigate(screen){
+  if(app.auth_required())app.clear_private();
+  app.navigate(screen||'');
+}
 onmessage=async({data:m})=>{try{
   if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
     if(started)throw Error('App host is already initialized');started=true;await init();hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:state=>{
-      if(!state.authenticated&&app.private()){dropPrivate();app.navigate('home');outgoing();}
+      if(!state.authenticated&&app.private()){dropPrivate();app.navigate('');outgoing();}
       const signedIn=state.authenticated&&!authenticated;authenticated=state.authenticated;
       if(signedIn&&app.auth_required()){app.retry_mount();postMessage({type:'transport-reconnect'});}
       const chromeChanged=app.set_session_controls(authenticated);
       postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
     }});
-    route(m.route||'#/home');connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
+    navigate(m.screen);connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
     if(discoveredRelease)release({release:discoveredRelease});
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
@@ -95,7 +99,7 @@ onmessage=async({data:m})=>{try{
     case 'pointer':if(!app.ui_ref())break;changed=app.pointer(m.epoch??app.epoch(),...m.args.slice(0,4));break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;
-    case 'route':if(updateBusy&&app.catalog_update_pending())break;route(m.route);changed=true;break;
+    case 'navigate':if(updateBusy&&app.catalog_update_pending())break;navigate(m.screen);changed=true;break;
     case 'back':changed=app.back();break;
     case 'key':if(app.editing())changed=app.key(m.key,m.select);break;
     case 'text':if(app.editing())changed=app.type_text(m.text);break;

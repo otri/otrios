@@ -242,6 +242,19 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
         "Panel width does not request history"
     );
 
+    // Nested screens mount their own UI against the same admitted durable State.
+    let mut cards = server.peer("app:layout-lab/cards/ui", "app:layout-lab/state");
+    assert_eq!(cards.c.path(), "layout-lab/cards");
+    edit(&mut cards.c, "Panel width", 720);
+    cards.settle();
+    layout.settle();
+    assert_eq!(layout.c.value(1).unwrap(), 720);
+    cards.c.back().unwrap();
+    cards.settle();
+    assert_eq!(cards.c.path(), "layout-lab");
+    assert_eq!(cards.c.value(1).unwrap(), 720);
+    drop(cards);
+
     // Same durable root, changed executable: no host rebuild or authority restart.
     let source = server
         .root

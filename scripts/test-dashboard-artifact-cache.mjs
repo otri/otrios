@@ -12,6 +12,8 @@ test('only immutable public code/blob paths can enter the cache',()=>{
   assert(!eligible(new Request(release+'app.js?secret=1'),origin));
   assert(!eligible(new Request(release+'app.js',{method:'POST'}),origin));
   assert(!eligible(new Request(release+'app.js'),'https://other.example'));
+  assert(!eligible({method:'GET',mode:'navigate',url:release+'index.html',headers:new Headers()},origin));
+  for(const screen of ['/home','/component-playground','/monitoring'])assert(!eligible(new Request(origin+screen),origin));
 });
 test('web budget is capped at 512 MiB and shrinks with quota/headroom',()=>{
   assert.equal(budget(),MAX_BYTES);assert.equal(budget({quota:1000,usage:100}),250);

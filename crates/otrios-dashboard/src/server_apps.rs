@@ -144,22 +144,42 @@ impl Hub {
         {
             return Err("App catalog format/count invalid".into());
         }
+        let mut paths = std::collections::BTreeSet::new();
+        for entry in &catalog.apps {
+            if (!entry.path.is_empty()
+                && !otrios_interfaces::canvas::valid_destination(&entry.path))
+                || !paths.insert(&entry.path)
+            {
+                return Err("Invalid or duplicate destination path".into());
+            }
+            if let Some((parent, _)) = entry.path.rsplit_once('/')
+                && !catalog.apps.iter().any(|e| e.path == parent)
+            {
+                return Err("Destination parent is not admitted".into());
+            }
+        }
         let mut packages = BTreeMap::new();
-        let mut state_refs = std::collections::BTreeSet::new();
+        let mut state_refs = BTreeMap::new();
         let mut app_ids = std::collections::BTreeSet::new();
-        let mut new_rooms = BTreeMap::new();
+        let mut new_rooms: BTreeMap<String, Room> = BTreeMap::new();
         for entry in catalog.apps {
             let a = entry.app;
-            if a.id.is_empty()
-                || a.id.len() > 64
-                || !a
-                    .id
-                    .bytes()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            let owner = a.id.split('/').next().unwrap_or_default();
+            let private = entry.private || owner == "monitoring";
+            if !otrios_interfaces::canvas::valid_destination(&a.id)
+                || a.ui_ref != format!("app:{}/ui", a.id)
                 || !app_ids.insert(a.id.clone())
-                || !state_refs.insert(a.state_ref.clone())
             {
-                return Err("Invalid/duplicate app identity or State root".into());
+                return Err("Invalid/duplicate destination identity".into());
+            }
+            if let Some((old_owner, old_private)) = state_refs.get(&a.state_ref) {
+                if old_owner != owner || *old_private != private {
+                    return Err(
+                        "Shared State requires the same app owner and admission policy".into(),
+                    );
+                }
+            } else {
+                state_refs.insert(a.state_ref.clone(), (owner.to_owned(), private));
             }
             let base = if manifest.is_some() {
                 folder.join(&a.id)
@@ -200,7 +220,11 @@ impl Hub {
             } else {
                 vec![]
             };
-            if let Some(room) = self.rooms.get(&a.state_ref) {
+            if let Some(room) = self
+                .rooms
+                .get(&a.state_ref)
+                .or_else(|| new_rooms.get(&a.state_ref))
+            {
                 room.doc.clone().set_signal_fields(&signal_fields)?;
                 if room.doc.schema() != &description.state_schema {
                     return Err("App schema requires a new State reference".into());
@@ -212,7 +236,7 @@ impl Hub {
                 let file = self.state.as_ref().map(|p| {
                     p.join(format!(
                         "{}-{}.merkle",
-                        a.id,
+                        owner,
                         canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
                     ))
                 });
@@ -243,7 +267,6 @@ impl Hub {
                     },
                 );
             }
-            let private = entry.private || a.id == "monitoring";
             if packages
                 .insert(
                     a.ui_ref.clone(),

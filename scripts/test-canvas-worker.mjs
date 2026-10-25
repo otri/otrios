@@ -24,7 +24,7 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
   const messages=[];let rejected=true,cancel=true,activations=0;
   const fake={viewport_size:()=>[1280,800],reset_connection(){},receive(){throw Error('candidate rejected');},rejected_mount_pending:()=>rejected,
     outgoing(){if(cancel){cancel=false;rejected=false;return new Uint8Array([42]);}return null;},
-    screen:()=> 'layout-lab',epoch:()=>7,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'app:layout-lab/state',
+    path:()=> 'layout-lab',screen:()=> 'layout-lab',epoch:()=>7,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'app:layout-lab/state',
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
     reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
     tick:()=>false,take_sign_out:()=>false,activate:()=>{activations++;return true;}};
@@ -44,11 +44,11 @@ test('a Canvas sign-out action clears private pixels and revokes the browser ses
     private:()=>privateMount,clear_private(){calls.push('clear');privateMount=false;},
     set_session_controls(value){calls.push(['session-controls',value]);},navigate:screen=>calls.push(['navigate',screen]),
     activate(){requested=true;return true;},take_sign_out(){const value=requested;requested=false;return value;},
-    screen:()=> 'home',epoch:()=>1,state_ref:()=>'',keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}'};
+    path:()=> '',screen:()=> 'home',epoch:()=>1,state_ref:()=>'',keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}'};
   const context=vm.createContext({prepareUiUpdate:async()=>null,URL,WebSocket:{OPEN:1},location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),clearTimeout(){},fake,monitoringFake:{logout(){calls.push('logout');}}});
   vm.runInContext(source,context);vm.runInContext('app=fake;monitoring=monitoringFake',context);
   await context.onmessage({data:{type:'activate',id:12}});
-  assert.deepEqual(calls,['clear',['session-controls',false],['navigate','home'],'logout']);
+  assert.deepEqual(calls,['clear',['session-controls',false],['navigate',''],'logout']);
   assert(messages.some(m=>m.type==='clear-private'));assert(messages.some(m=>m.type==='command-ack'));assert(!messages.some(m=>m.type==='error'));
 });
 
@@ -98,4 +98,11 @@ test('worker state output uses a bounded credit window and ignores stale acknowl
  assert.equal(messages.filter(m=>m.type==='state-send').length,4);
  await context.onmessage({data:{type:'state-send-ack',epoch:1}});assert.equal(messages.filter(m=>m.type==='state-send').length,4);
  await context.onmessage({data:{type:'state-send-ack',epoch:2}});assert.equal(messages.filter(m=>m.type==='state-send').length,5);
+});
+
+test('navigation delegates destination paths to the shared runtime',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const calls=[],fake={auth_required:()=>false,ui_ref:()=> 'app:launcher/ui',screen:()=> 'launcher',navigate:id=>calls.push(id)};
+  const context=vm.createContext({fake});vm.runInContext(source,context);vm.runInContext('app=fake;navigate("launcher");navigate("example-app");navigate(null)',context);
+  assert.deepEqual(calls,['launcher','example-app','']);
 });

@@ -20,16 +20,19 @@ mod three_d;
 use otrios_core::canvas::*;
 use std::{fs, path::Path};
 type Factory = fn(&[u8]) -> otrios_interfaces::canvas::Ui;
-fn sources() -> Vec<(otrios_interfaces::canvas::App, Factory)> {
-    vec![
-        (home::manifest(), home::ui),
-        (playground::manifest(), playground::ui),
-        (layout::manifest(), layout::ui),
-        (input::manifest(), input::ui),
-        (animation::manifest(), animation::ui),
-        (three_d::manifest(), three_d::ui),
-        (monitoring::manifest(), monitoring::ui),
+fn sources() -> Vec<authoring::AppScreen> {
+    [
+        home::screens,
+        playground::screens,
+        layout::screens,
+        input::screens,
+        animation::screens,
+        three_d::screens,
+        monitoring::screens,
     ]
+    .into_iter()
+    .flat_map(|screens| screens())
+    .collect()
 }
 fn write_changed(path: &Path, bytes: &[u8]) -> Result<()> {
     if fs::read(path).ok().as_deref() == Some(bytes) {
@@ -98,21 +101,24 @@ fn main() -> Result<()> {
         }
         let bytes = encode_ui(&ui)?;
         write_changed(&folder.join("ui.flex"), &bytes)?;
+        println!("{}: canvas-app", app.id);
         entries.push(otrios_interfaces::canvas::CatalogEntry {
+            path: String::new(),
             private: app.id == "monitoring",
-            app: app.clone(),
+            app,
             ui_hash: hash(&bytes),
         });
-        println!("{}: canvas-app", app.id);
     }
-    let catalog = encode_catalog(&otrios_interfaces::canvas::Catalog {
+    let mut catalog = otrios_interfaces::canvas::Catalog {
         format: "otrios-app-catalog-v1".into(),
-        apps: entries.clone(),
-    })?;
-    for entry in &entries {
+        apps: entries,
+    };
+    resolve_paths(&root, &mut catalog)?;
+    let bytes = encode_catalog(&catalog)?;
+    for entry in &catalog.apps {
         let folder = root.join(&entry.app.id).join("package");
         let mut client = Client::default();
-        client.admit_catalog(&catalog)?;
+        client.admit_catalog(&bytes)?;
         client.mount_local(
             &fs::read(folder.join("ui.flex")).map_err(|e| e.to_string())?,
             &entry.app.state_ref,
@@ -120,7 +126,7 @@ fn main() -> Result<()> {
             &[],
         )?;
     }
-    write_changed(&root.join("catalog.flex"), &catalog)
+    write_changed(&root.join("catalog.flex"), &bytes)
 }
 fn app_update(root: &Path, id: &str, baseline: &Path, source: Option<&Path>) -> Result<()> {
     let mut catalog =
@@ -173,11 +179,12 @@ fn app_update(root: &Path, id: &str, baseline: &Path, source: Option<&Path>) -> 
     let bytes = encode_ui(&ui)?;
     entry.ui_hash = hash(&bytes);
     let state_ref = entry.app.state_ref.clone();
+    write_changed(&root.join(id).join("package/ui.flex"), &bytes)?;
+    resolve_paths(root, &mut catalog)?;
     let encoded = encode_catalog(&catalog)?;
     let mut client = Client::default();
     client.admit_catalog(&encoded)?;
     client.mount_local(&bytes, &state_ref, &code, &[])?;
-    write_changed(&root.join(id).join("package/ui.flex"), &bytes)?;
     write_changed(&root.join("catalog.flex"), &encoded)?;
     if source.is_some() {
         write_changed(&root.join(id).join("package/behavior.wasm"), &code)?;
@@ -189,4 +196,145 @@ fn app_update(root: &Path, id: &str, baseline: &Path, source: Option<&Path>) -> 
         println!("{id}: UI data only; runtime and behavior reused");
     }
     Ok(())
+}
+
+/// Derive the navigation tree from the UI documents, never from package IDs.
+fn resolve_paths(root: &Path, catalog: &mut otrios_interfaces::canvas::Catalog) -> Result<()> {
+    let mut resolved = std::collections::BTreeMap::new();
+    let entry = catalog
+        .apps
+        .first()
+        .ok_or("No entry screen")?
+        .app
+        .ui_ref
+        .clone();
+    resolved.insert(entry.clone(), String::new());
+    let mut queue = std::collections::VecDeque::from([entry]);
+    while let Some(ui_ref) = queue.pop_front() {
+        let entry = catalog
+            .apps
+            .iter()
+            .find(|e| e.app.ui_ref == ui_ref)
+            .ok_or("Unknown route owner")?;
+        let ui = decode_ui(
+            &fs::read(root.join(&entry.app.id).join("package/ui.flex"))
+                .map_err(|e| e.to_string())?,
+        )?;
+        let mut names = std::collections::BTreeSet::new();
+        for navigation in ui.navigation {
+            let Some(segment) = navigation.route else {
+                continue;
+            };
+            if !otrios_interfaces::canvas::valid_destination(&segment)
+                || segment.contains('/')
+                || !names.insert(segment.clone())
+            {
+                return Err("Invalid or duplicate child route name".into());
+            }
+            if !catalog
+                .apps
+                .iter()
+                .any(|e| e.app.ui_ref == navigation.ui_ref)
+            {
+                return Err("Named route target is not admitted".into());
+            }
+            let prefix = &resolved[&ui_ref];
+            let path = if prefix.is_empty() {
+                segment
+            } else {
+                format!("{prefix}/{segment}")
+            };
+            if !otrios_interfaces::canvas::valid_destination(&path) {
+                return Err("Resolved route exceeds path budget".into());
+            }
+            if resolved.insert(navigation.ui_ref.clone(), path).is_some() {
+                return Err("Each screen requires one route owner; cycles are not allowed".into());
+            }
+            queue.push_back(navigation.ui_ref);
+        }
+    }
+    for entry in &mut catalog.apps {
+        entry.path = resolved
+            .remove(&entry.app.ui_ref)
+            .ok_or("Screen has no app-owned route")?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn route_names_belong_to_owners_and_parent_renames_rebase_children() {
+        use authoring::*;
+        let root = std::env::temp_dir().join(format!("otrios-route-owners-{}", std::process::id()));
+        let ui = |id, links| AppUi::new(id, id, schema("test", &[])).build(id, links);
+        let parent = ui(
+            "package-b",
+            vec![button("Child").navigate_to(Destination::app("package-c").route("signal"))],
+        );
+        let child = ui("package-c", vec![]);
+        let owner = |name| {
+            ui(
+                "package-a",
+                vec![button("Lab").navigate_to(Destination::app("package-b").route(name))],
+            )
+        };
+        let mut catalog = otrios_interfaces::canvas::Catalog {
+            format: "otrios-app-catalog-v1".into(),
+            apps: vec![],
+        };
+        for document in [owner("layout-lab"), parent, child] {
+            let id = document
+                .ui_ref
+                .strip_prefix("app:")
+                .unwrap()
+                .strip_suffix("/ui")
+                .unwrap();
+            let bytes = encode_ui(&document).unwrap();
+            write_changed(&root.join(id).join("package/ui.flex"), &bytes).unwrap();
+            catalog.apps.push(otrios_interfaces::canvas::CatalogEntry {
+                app: app(id, id, "test", &[]),
+                path: String::new(),
+                ui_hash: hash(&bytes),
+                private: false,
+            });
+        }
+        resolve_paths(&root, &mut catalog).unwrap();
+        assert_eq!(
+            catalog
+                .apps
+                .iter()
+                .map(|e| e.path.as_str())
+                .collect::<Vec<_>>(),
+            ["", "layout-lab", "layout-lab/signal"]
+        );
+        let child_bytes = fs::read(root.join("package-c/package/ui.flex")).unwrap();
+        compatible_ui(&owner("layout-lab"), &owner("layouts")).unwrap();
+        write_changed(
+            &root.join("package-a/package/ui.flex"),
+            &encode_ui(&owner("layouts")).unwrap(),
+        )
+        .unwrap();
+        resolve_paths(&root, &mut catalog).unwrap();
+        assert_eq!(catalog.apps[2].path, "layouts/signal");
+        assert_eq!(
+            fs::read(root.join("package-c/package/ui.flex")).unwrap(),
+            child_bytes
+        );
+        let invalid = ui(
+            "package-a",
+            vec![
+                button("Lab").navigate_to(Destination::app("package-b").route("same")),
+                button("Other").navigate_to(Destination::app("package-c").route("same")),
+            ],
+        );
+        write_changed(
+            &root.join("package-a/package/ui.flex"),
+            &encode_ui(&invalid).unwrap(),
+        )
+        .unwrap();
+        assert!(resolve_paths(&root, &mut catalog).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
