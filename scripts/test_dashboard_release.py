@@ -83,11 +83,11 @@ class SignedReleases(unittest.TestCase):
         self.assertEqual(activation.complete_ui(stage,self.out,self.public,OPENSSL,json.dumps(next).encode(),base['id']),next['id'])
         self.assertEqual((folder/'authority/apps/home/behavior.wasm').read_bytes(),b'new-guest')
     def test_nested_screen_packages_are_signed_and_transfer_as_ui_data(self):
-        package=self.root/'apps/layout-lab/cards/package';package.mkdir(parents=True)
+        package=self.root/'apps/fixture/detail/package';package.mkdir(parents=True)
         (package/'app.flex').write_bytes(b'manifest');(package/'ui.flex').write_bytes(b'old-ui')
         base=self.publish();(package/'ui.flex').write_bytes(b'new-ui');next=self.publish()
         before=json.loads((self.out/base['id']/'manifest.json').read_bytes());after=json.loads((self.out/next['id']/'manifest.json').read_bytes())
-        self.assertIn('authority/apps/layout-lab/cards/ui.flex',after['authority'])
+        self.assertIn('authority/apps/fixture/detail/ui.flex',after['authority'])
         self.assertTrue(agent.ui_only_change(before,after))
         self.assertEqual(activation.verify(self.out,self.public,OPENSSL,json.dumps(next).encode()),next['id'])
     def test_authority_app_payloads_are_signed_but_never_replicated_publicly(self):

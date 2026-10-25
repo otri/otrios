@@ -77,3 +77,9 @@ does not repair or replace that active release or app State.
 See [removal evidence](data/legacy-kiosk-removal-2026-10-25.json) for before/after
 health and process identities. `bash scripts/check.sh` passed (186 Rust tests,
 41 Python checks); no new runtime build or protocol change is required.
+
+The subsequent [full deployment and catalog recovery](layout-lab-cleanup-recovery.md)
+resolved the missing-screen fault after the user disabled the competing Mac
+publisher. Both health endpoints and the physical native mount are healthy on
+release `295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb`;
+the removed legacy services remain absent.

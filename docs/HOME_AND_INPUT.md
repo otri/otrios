@@ -51,8 +51,7 @@ can use the existing Home UI-only publisher.
 
 Home opens at `/`. It owns the route names of its app destinations, such as
 `/component-playground`, `/layout-lab`, `/input-lab` and `/monitoring`. Layout Lab
-owns its relative child names `signal` and `cards`, giving `/layout-lab/signal`
-and `/layout-lab/cards`. Opening or refreshing a path restores that screen;
+currently has one screen. Opening or refreshing a path restores that screen;
 Back/Forward follows visited paths. Keyboard visibility, focus, Edit mode and drag
 state remain local. Monitoring links still require sign-in before private admission.
 
@@ -69,9 +68,10 @@ catalog paths by walking named edges from the first catalog screen; there is no
 hand-maintained global route map. Every screen has one route owner; duplicate
 sibling names, missing targets, cycles and unreachable screens fail packing.
 
-Native uses the identical resolved path (`--screen layout-lab/cards`, also
+Native uses the identical resolved path (`--screen layout-lab`, also
 accepting a leading `/`). The catalog binds each path to its UI document and
-app-owned State reference. Layout Lab's children share its existing State.
+app-owned State reference. Future child screens may explicitly share their
+owning app's State; the routing mechanism does not require demonstration screens.
 Back first dismisses a local keyboard, then opens the parent path; a top-level
 screen returns to the catalog entry screen.
 

@@ -22,8 +22,10 @@ def main():
     status,_,raw=request('/release');assert status==200,('public release',status)
     release=json.loads(raw);prefix='/releases/'+release['id']+'/'
     status,headers,entry=request('/');assert status==200 and headers.get('Cache-Control')=='no-store' and (prefix+'web/app.js').encode() in entry;count+=1
-    for screen in ['component-playground','input-lab','layout-lab/signal','layout-lab/cards','monitoring']:
+    for screen in ['component-playground','input-lab','layout-lab','monitoring']:
         status,headers,data=request('/'+screen);assert status==200 and data==entry and headers.get('Cache-Control')=='no-store';count+=1
+    for retired in ['/layout-lab/signal','/layout-lab/cards']:
+        assert request(retired)[0]==404;count+=1
     assert request('/not-an-app')[0]==404;count+=1
     status,_,raw=request(prefix+'manifest.json');assert status==200 and hashlib.sha256(raw).hexdigest()==release['id'];manifest=json.loads(raw);count+=1
     for name,item in manifest['assets'].items():

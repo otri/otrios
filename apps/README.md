@@ -101,15 +101,15 @@ button("Component Playground")
 
 Each app's `screens()` factory declares its screen documents and State bindings.
 Screen/package identity is separate from navigation names. Home declares its
-children with `Destination::app("layout-lab").route("layout-lab")`; Layout Lab
-declares `Destination::app("layout-lab/signal").route("signal")`. The second value
-is the relative name owned by that UI. Ordinary links, including Home buttons,
+children with `Destination::app("layout-lab").route("layout-lab")`. A future app
+with child screens can declare their relative names the same way. The `.route`
+value is owned by that UI. Ordinary links, including Home buttons,
 omit `.route(...)` and target the same stable identity from anywhere.
 
 The packer walks named edges from the first catalog screen (Home at `/`) and
 writes resolved paths into the catalog. Browser and native use those paths.
-Renaming Home's edge to `layouts` yields `/layouts/signal` with no change to the
-child document or package identity. UI-only publication recalculates descendant
+Renaming Home's edge to `layouts` yields `/layouts` and rebases any future
+descendants without changing their package identities. UI-only publication recalculates descendant
 paths, and active child mounts retain their state and local interaction.
 
 Screens may explicitly share the same State within one app and admission policy.
@@ -216,7 +216,8 @@ Home uses the bounded [reorder presentation](../docs/rfcs/0015-editable-home-ref
 Its local Edit/Done action controls dragging and wiggle; shared writes contain
 only a moved card's position. The renderer owns interpolation and its clock.
 
-Nested screens follow the same incremental publishing contract:
-`--app layout-lab/cards --kind ui` rebuilds only that UI document and its catalog
+Future nested screens follow the same incremental publishing contract: selecting
+their package identity with `--app` rebuilds only that UI document and its catalog
 hash, retaining sibling documents and the qualified host runtime. Adding/removing
-screen declarations changes the catalog contract and requires a full build.
+screen declarations requires repacking the complete catalog. Layout Lab currently
+declares only its main screen; the example Signal/Cards subroutes are not shipped.

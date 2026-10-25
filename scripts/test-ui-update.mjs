@@ -32,8 +32,8 @@ test('guest replacement requires an advertised ABI and cannot replace host code 
 });
 
 test('nested screen UI changes retain the executable closure',()=>{
- const a=baseline();a.authority['authority/apps/layout-lab/cards/ui.flex']=asset(1);
- const b=structuredClone(a);b.authority['authority/apps/layout-lab/cards/ui.flex']=asset(2);
+ const a=baseline();a.authority['authority/apps/fixture/detail/ui.flex']=asset(1);
+ const b=structuredClone(a);b.authority['authority/apps/fixture/detail/ui.flex']=asset(2);
  assert(uiOnlyChange(a,b));
  b.authority['authority/apps/layout-lab/../ui.flex']=asset(3);
  assert(!uiOnlyChange(a,b));

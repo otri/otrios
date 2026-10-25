@@ -2779,8 +2779,8 @@ fn entry_and_app_links_resolve_app_owned_catalog_state_references() {
 }
 
 #[test]
-fn app_owned_screen_paths_are_canonical_and_parent_back_uses_catalog_bindings() {
-    let sources = [
+fn shipped_apps_do_not_include_example_subscreens() {
+    let screens: Vec<_> = [
         home::screens,
         playground::screens,
         layout::screens,
@@ -2788,51 +2788,35 @@ fn app_owned_screen_paths_are_canonical_and_parent_back_uses_catalog_bindings() 
         animation_lab::screens,
         three_d_lab::screens,
         monitoring_app::screens,
-    ];
-    let entries: Vec<_> = sources
-        .into_iter()
-        .flat_map(|screens| screens())
-        .map(|(app, factory)| {
-            assert!(valid_destination(&app.id));
-            let code = if app.id == "component-playground" {
-                code()
-            } else {
-                vec![]
-            };
-            let ui = factory(&code);
-            assert_eq!(ui.ui_ref, app.ui_ref);
-            CatalogEntry {
-                path: ui
-                    .ui_ref
-                    .trim_start_matches("app:")
-                    .trim_end_matches("/ui")
-                    .into(),
-                app,
-                ui_hash: hash(&encode_ui(&ui).unwrap()),
-                private: false,
-            }
-        })
-        .collect();
+    ]
+    .into_iter()
+    .flat_map(|screens| screens())
+    .collect();
+    assert_eq!(screens.len(), 7);
+    for (app, factory) in screens {
+        assert!(valid_destination(&app.id));
+        assert!(!app.id.contains('/'));
+        let code = if app.id == "component-playground" {
+            code()
+        } else {
+            vec![]
+        };
+        assert_eq!(factory(&code).ui_ref, app.ui_ref);
+    }
+}
+
+#[test]
+fn app_owned_screen_paths_are_canonical_and_parent_back_uses_catalog_bindings() {
+    let (child, catalog) = nested_route_fixture();
     let mut client = Client::default();
     client
-        .admit_catalog(
-            &encode_catalog(&Catalog {
-                format: "otrios-app-catalog-v1".into(),
-                apps: entries,
-            })
-            .unwrap(),
-        )
+        .admit_catalog(&encode_catalog(&catalog).unwrap())
         .unwrap();
     client
-        .mount_local(
-            &encode_ui(&layout::screens()[2].1(&[])).unwrap(),
-            "app:layout-lab/state",
-            &[],
-            &[],
-        )
+        .mount_local(&encode_ui(&child).unwrap(), "app:fixture/state", &[], &[])
         .unwrap();
-    assert_eq!(client.path(), "layout-lab/cards");
-    client.navigate("layout-lab/cards").unwrap();
+    assert_eq!(client.path(), "fixture/detail");
+    client.navigate("fixture/detail").unwrap();
     while let Some(packet) = client.outgoing().unwrap() {
         assert!(
             !matches!(decode_client(&packet).unwrap(), ClientMessage::Mount { .. }),
@@ -2842,14 +2826,14 @@ fn app_owned_screen_paths_are_canonical_and_parent_back_uses_catalog_bindings() 
     client.back().unwrap();
     assert!(
         matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
-        ClientMessage::Mount {ui_ref, state_ref,..} if ui_ref == "app:layout-lab/ui" && state_ref == "app:layout-lab/state")
+        ClientMessage::Mount {ui_ref, state_ref,..} if ui_ref == "app:fixture/ui" && state_ref == "app:fixture/state")
     );
     for bad in [
-        "layout-lab//cards",
-        "layout-lab/../cards",
-        "layout-lab/Cards",
-        "layout-lab/cards/",
-        "layout-lab/missing",
+        "fixture//detail",
+        "fixture/../detail",
+        "fixture/Detail",
+        "fixture/detail/",
+        "fixture/missing",
     ] {
         assert!(client.navigate(bad).is_err());
     }
@@ -2857,44 +2841,47 @@ fn app_owned_screen_paths_are_canonical_and_parent_back_uses_catalog_bindings() 
 
 #[test]
 fn route_rebase_retains_active_child_state_scene_and_epoch() {
-    let child = layout::screens()[2].1(&[]);
-    let mut root = ui_entry(&home::ui(&[]), "home");
-    root.path = "".into();
-    let mut parent = ui_entry(&layout::ui(&[]), "app:layout-lab/state");
-    parent.path = "layout-lab".into();
-    let entry = ui_entry(&child, "app:layout-lab/state");
-    let mut catalog = Catalog {
-        format: "otrios-app-catalog-v1".into(),
-        apps: vec![root, parent, entry],
-    };
+    let (child, mut catalog) = nested_route_fixture();
     let mut client = Client::default();
     client
         .admit_catalog(&encode_catalog(&catalog).unwrap())
         .unwrap();
     client
-        .mount_local(
-            &encode_ui(&child).unwrap(),
-            "app:layout-lab/state",
-            &[],
-            &[],
-        )
+        .mount_local(&encode_ui(&child).unwrap(), "app:fixture/state", &[], &[])
         .unwrap();
     let scene = client.scene().unwrap();
     let epoch = client.epoch();
-    catalog.apps[1].path = "layouts".into();
-    catalog.apps[2].path = "layouts/cards".into();
+    catalog.apps[1].path = "renamed".into();
+    catalog.apps[2].path = "renamed/detail".into();
     assert!(
         !client
             .update_catalog(&encode_catalog(&catalog).unwrap())
             .unwrap()
     );
-    assert_eq!(client.path(), "layouts/cards");
-    assert_eq!(client.screen(), "layout-lab/cards");
+    assert_eq!(client.path(), "renamed/detail");
+    assert_eq!(client.screen(), "fixture/detail");
     assert_eq!(client.epoch(), epoch);
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
     client.back().unwrap();
     assert!(
         matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
-      ClientMessage::Mount {ui_ref, state_ref,..} if ui_ref=="app:layout-lab/ui" && state_ref=="app:layout-lab/state")
+      ClientMessage::Mount {ui_ref, state_ref,..} if ui_ref=="app:fixture/ui" && state_ref=="app:fixture/state")
     );
+}
+
+// Nested screens exercise the generic contract without shipping demonstration apps.
+fn nested_route_fixture() -> (Ui, Catalog) {
+    let mut parent_ui = layout::ui(&[]);
+    parent_ui.ui_ref = "app:fixture/ui".into();
+    let mut child = parent_ui.clone();
+    child.ui_ref = "app:fixture/detail/ui".into();
+    let mut root = ui_entry(&home::ui(&[]), "home");
+    root.path = "".into();
+    let parent = ui_entry(&parent_ui, "app:fixture/state");
+    let entry = ui_entry(&child, "app:fixture/state");
+    let catalog = Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: vec![root, parent, entry],
+    };
+    (child, catalog)
 }

@@ -1,0 +1,326 @@
+{
+  "date": "2026-10-25",
+  "source": "c448b1608154c984922790a0be1161cf3115a016",
+  "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+  "deployment": "full",
+  "transfer_bytes": 21032960,
+  "stable_observation_seconds": 122.89128,
+  "samples": [
+    {
+      "sample": 1,
+      "utc": "2026-10-25T06:53:12.951469+00:00",
+      "health": {
+        "8876": {
+          "http_status": 200,
+          "app_roots": 7,
+          "catalogs": 1,
+          "ink_limit": 68,
+          "ink_subscribers": 0,
+          "peer_limits": [
+            4,
+            64
+          ],
+          "presentation": true,
+          "public_sessions": 1,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "status": "ok",
+          "trusted_sessions": 1
+        },
+        "8877": {
+          "http_status": 200,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "state_available": true,
+          "status": "ok"
+        }
+      },
+      "native": {
+        "pid": 20344,
+        "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v3",
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct",
+        "home_order": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "legacy": {
+        "spd-weston.service": "not-found",
+        "spd-browser.service": "not-found",
+        "spd-kiosk-gate.service": "not-found",
+        "seatd.service": "not-found"
+      },
+      "server_sha256": "088bde7a8a6ca3d79b9247c198edc06ebee86e61d5706cdb455f63b61179c64e"
+    },
+    {
+      "sample": 2,
+      "utc": "2026-10-25T06:53:53.952473+00:00",
+      "health": {
+        "8876": {
+          "http_status": 200,
+          "app_roots": 7,
+          "catalogs": 1,
+          "ink_limit": 68,
+          "ink_subscribers": 0,
+          "peer_limits": [
+            4,
+            64
+          ],
+          "presentation": true,
+          "public_sessions": 1,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "status": "ok",
+          "trusted_sessions": 1
+        },
+        "8877": {
+          "http_status": 200,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "state_available": true,
+          "status": "ok"
+        }
+      },
+      "native": {
+        "pid": 20344,
+        "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v3",
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct",
+        "home_order": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "legacy": {
+        "spd-weston.service": "not-found",
+        "spd-browser.service": "not-found",
+        "spd-kiosk-gate.service": "not-found",
+        "seatd.service": "not-found"
+      },
+      "server_sha256": "088bde7a8a6ca3d79b9247c198edc06ebee86e61d5706cdb455f63b61179c64e"
+    },
+    {
+      "sample": 3,
+      "utc": "2026-10-25T06:54:34.899983+00:00",
+      "health": {
+        "8876": {
+          "http_status": 200,
+          "app_roots": 7,
+          "catalogs": 1,
+          "ink_limit": 68,
+          "ink_subscribers": 0,
+          "peer_limits": [
+            4,
+            64
+          ],
+          "presentation": true,
+          "public_sessions": 1,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "status": "ok",
+          "trusted_sessions": 1
+        },
+        "8877": {
+          "http_status": 200,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "state_available": true,
+          "status": "ok"
+        }
+      },
+      "native": {
+        "pid": 20344,
+        "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v3",
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct",
+        "home_order": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "legacy": {
+        "spd-weston.service": "not-found",
+        "spd-browser.service": "not-found",
+        "spd-kiosk-gate.service": "not-found",
+        "seatd.service": "not-found"
+      },
+      "server_sha256": "088bde7a8a6ca3d79b9247c198edc06ebee86e61d5706cdb455f63b61179c64e"
+    },
+    {
+      "sample": 4,
+      "utc": "2026-10-25T06:55:15.842749+00:00",
+      "health": {
+        "8876": {
+          "http_status": 200,
+          "app_roots": 7,
+          "catalogs": 1,
+          "ink_limit": 68,
+          "ink_subscribers": 0,
+          "peer_limits": [
+            4,
+            64
+          ],
+          "presentation": true,
+          "public_sessions": 1,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "status": "ok",
+          "trusted_sessions": 1
+        },
+        "8877": {
+          "http_status": 200,
+          "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+          "state_available": true,
+          "status": "ok"
+        }
+      },
+      "native": {
+        "pid": 20344,
+        "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v3",
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct",
+        "home_order": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "legacy": {
+        "spd-weston.service": "not-found",
+        "spd-browser.service": "not-found",
+        "spd-kiosk-gate.service": "not-found",
+        "seatd.service": "not-found"
+      },
+      "server_sha256": "088bde7a8a6ca3d79b9247c198edc06ebee86e61d5706cdb455f63b61179c64e"
+    }
+  ],
+  "live": {
+    "authority": {
+      "app_roots": 7,
+      "catalogs": 1,
+      "ink_limit": 68,
+      "ink_subscribers": 0,
+      "peer_limits": [
+        4,
+        64
+      ],
+      "presentation": true,
+      "public_sessions": 1,
+      "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+      "status": "ok",
+      "trusted_sessions": 1
+    },
+    "authority_pid": 20335,
+    "native": {
+      "pid": 20344,
+      "release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+      "ui_release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+      "runtime_release": "295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb",
+      "ui_updates": true,
+      "ui_ref": "app:home/ui",
+      "state_ref": "app:home/state-v3",
+      "screen": "",
+      "epoch": 1,
+      "stream_ready": true,
+      "state_confirmed": true,
+      "output": [
+        800,
+        1280
+      ],
+      "rotation": 90,
+      "renderer": "gles2-direct",
+      "runtime_resources": {
+        "behavior_cache_bytes": 0,
+        "behavior_cache_entries": 0,
+        "behavior_hash": null,
+        "dispatch": {
+          "issued_age_ms": null,
+          "issued_fields": 0,
+          "issued_payload_bytes": 0,
+          "pending_age_ms": null,
+          "pending_fields": 0,
+          "pending_payload_bytes": 0,
+          "ready_in_ms": null
+        },
+        "reflow_editing": false,
+        "reflow_order": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "sampled_monotonic_ms": 67,
+        "state": {
+          "replica_root_shared": true,
+          "selected_canonical_bytes": 2394,
+          "selected_nodes": 12
+        },
+        "wire": {
+          "buffer_grows": 1,
+          "compression_capacity": 0,
+          "decode_capacity": 131072,
+          "table_capacity_bound": 0
+        }
+      }
+    }
+  },
+  "validation": {
+    "public_https_checks": 95,
+    "staged_http_checks": 98,
+    "rust_tests": 187,
+    "python_checks": 41,
+    "javascript_tests": 49,
+    "arm_all_features_clippy_and_build": true,
+    "browser_build": true,
+    "ipad_user_report": "Home and Layout Lab load"
+  },
+  "mac_publisher": {
+    "host": "OTriProMax",
+    "launch_agent": "com.otri.otrios-dashboard-watch",
+    "disabled_and_unloaded_by_user": true,
+    "no_subprocess_or_cron_reported_by_user": true
+  }
+}
