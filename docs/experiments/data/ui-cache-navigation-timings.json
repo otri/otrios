@@ -1156,6 +1156,36 @@
       5,
       6
     ],
-    "actual_ipad_validation": "pending"
+    "actual_ipad_validation": "user device startup report received; navigation samples pending"
+  },
+  "user_device_report": {
+    "format": "otrios-navigation-timings-v1",
+    "completion": "UI and controls installed, GL draw submitted, next animation frame (not physical display latency)",
+    "milestonesMs": {
+      "fontLoaded": 1279,
+      "catalogAdmitted": 1383,
+      "wasmCompiled": 2467,
+      "presenterReady": 2477
+    },
+    "samples": [
+      {
+        "kind": "startup",
+        "screen": "home",
+        "totalMs": 3743,
+        "ms": {
+          "workerDispatch": 5,
+          "sendHandoff": 1,
+          "responseWait": 202,
+          "responseDelivery": 0,
+          "qualification": 11,
+          "frameBuild": 3,
+          "frameDelivery": 1,
+          "draw": 625,
+          "presentation": 13
+        },
+        "responseBytes": 19643,
+        "uiCacheHits": 0
+      }
+    ]
   }
 }

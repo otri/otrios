@@ -40,8 +40,15 @@ The earlier overlapping build/browser trial is excluded from these results.
 
 Median cold Home was 2.13 s, and same-profile warm reload was 1.14 s. The three
 cold samples were 2.13/2.81/2.12 s, warm 1.14/0.98/1.17 s. No cold-start gain is
-claimed for this change. Real Safari/iPad timings remain to be collected using
-the report above; these Chromium numbers are not iPad predictions.
+claimed for this change. These Chromium numbers are not iPad predictions. The user subsequently supplied
+a device startup report: Home completed in 3,743 ms, with font/catalog ready at
+1,279/1,383 ms, Wasm fetch/compile at 2,467 ms, and presenter ready at 2,477 ms.
+Mount response wait was 202 ms, qualification 11 ms, and initial UI installation/
+rendering 625 ms. The Wasm milestone includes download and compilation; the
+render bucket includes UI installation and waiting for the draw, rather than
+measuring GPU execution alone. Other startup gaps need finer milestones before
+attributing them to worker loading or graphics initialization. This sample has
+no UI cache hits and does not yet measure on-device app navigation.
 
 | App | First bytes | Repeat bytes | First release-to-render ms | Repeat release-to-render ms |
 | --- | ---: | ---: | ---: | ---: |
@@ -76,6 +83,7 @@ pre-deployment sample, and all seven durable app roots remain present. The
 configured publisher-key fingerprint is unchanged. A UI-only publish would have
 been insufficient because this release changes the state codec.
 
-Actual iPad/Safari validation of the timing panel remains a user check; the
-automated rendering tests used Chromium. The Cloudflare cache-rule task remains
+The user supplied a working on-device Home startup report after deployment.
+On-device navigation comparisons remain pending; automated rendering tests used
+Chromium. The Cloudflare cache-rule task remains
 separate.
