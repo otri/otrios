@@ -656,10 +656,10 @@ async function measure(index) {
             kind: m.method.endsWith("Sent") ? "ws-sent" : "ws-received",
             at: p.timestamp * 1000 + (epochOffset || 0),
             bytes: b.length,
-            compressed: b[0] === 1 && b.subarray(1, 5).toString() === "OTC4" && b[5] === 1,
+            compressed: b[0] === 1 && b.subarray(1, 5).toString() === "OTC5" && b[5] === 1,
             prefix: b.subarray(0, 12).toString("hex"),
             tag:
-              b[0] === 1 && b.subarray(1, 5).toString() === "OTC4" && b[5] === 0
+              b[0] === 1 && b.subarray(1, 5).toString() === "OTC5" && b[5] === 0
                 ? b[11]
                 : null,
           });

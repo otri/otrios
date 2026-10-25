@@ -4,7 +4,7 @@ use crate::release::Release;
 use serde::{Deserialize, Serialize};
 pub const VERSION: u32 = 1;
 pub const MAX_CONTROL_BYTES: usize = 8192;
-pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v4";
+pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v5";
 pub const STATE: u8 = 1;
 pub const INK: u8 = 2;
 #[derive(Debug, Serialize, Deserialize)]

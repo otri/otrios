@@ -351,6 +351,7 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
                 epoch: 1,
                 ui_ref: "app:layout-lab/ui".into(),
                 state_ref: "app:component-playground/state".into(),
+                known_ui: None,
                 known_code: vec![],
                 writer: vec![9; 16],
                 resume: 0,

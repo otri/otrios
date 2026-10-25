@@ -28,10 +28,10 @@ try{
   });
   const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout: ${method}`));},30000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
   const evaluate=async(session,expression)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-  const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
+  const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
-  const page=async(width,height,route)=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)},sessionId);await ready(sessionId,route,width<height?'800x1280':'1280x800');return sessionId;};
-  const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
+  const page=async(width,height,route,query=args.includes('--timings')?'?timings=1':'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)+query},sessionId);await ready(sessionId,route,width<height?'800x1280':'1280x800');return sessionId;};
+  const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds;
     await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:x+w/2,y:y+h/2},session);
@@ -39,7 +39,29 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--wait-route-rename')){
+  if(args.includes('--timings')){
+    const a=await page(800,1280,'home');
+    const report=()=>evaluate(a,"JSON.parse(document.querySelector('#timing-report').value)");
+    await wait(a,"document.querySelector('#timing-report')?.value.includes('startup')");
+    assert.equal((await report()).samples[0].kind,'startup');
+    const results=[];
+    for(let pass=0;pass<2;pass++)for(const [label,screen] of [['Component Playground','component-playground'],['Layout Lab','layout-lab'],['Input Lab','input-lab'],['Animation Lab','animation-lab'],['3D Lab','three-d-lab']]){
+      const before=(await report()).samples.length;
+      await click(a,label,screen);
+      await wait(a,`JSON.parse(document.querySelector('#timing-report').value).samples.length>${before}`);
+      const sample=(await report()).samples.at(-1);assert.equal(sample.screen,screen);assert(sample.totalMs>0);assert(Number.isFinite(sample.ms.queue));assert(Number.isFinite(sample.ms.responseWait));results.push({pass,...sample});
+      const count=(await report()).samples.length;
+      if(screen==='input-lab'){await click(a,'First text field',screen);await evaluate(a,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');assert.equal((await report()).samples.length,count,'editing local state is not navigation');}
+      await click(a,'Home','home','800x1280');
+      await wait(a,`JSON.parse(document.querySelector('#timing-report').value).samples.length>${count}`);
+    }
+    for(const sample of results.filter(s=>s.pass===1)){const first=results.find(s=>s.pass===0&&s.screen===sample.screen);assert(sample.responseBytes<first.responseBytes,`${sample.screen}: cached mount must save bytes`);assert(sample.uiCacheHits>first.uiCacheHits);}
+    assert.equal(await evaluate(a,"location.search"),'?timings=1');
+    await screenshot(a,'portrait-timings');
+    const clean=await page(1280,800,'home','');assert.equal(await evaluate(clean,"document.querySelector('#navigation-timings')"),null,'default page has no diagnostic panel');assert.equal(await evaluate(clean,"performance.getEntriesByType('resource').some(e=>e.name.includes('navigation-timings.mjs'))"),false,'default page does not fetch timing code');
+    const result={passed:true,results,report:await report(),checks:['startup and tap through draw plus next RAF','phase timings across real worker and WebSocket','all five public apps have smaller repeat mount responses','local edits do not record navigation','query survives navigation','no panel by default']};
+    await writeFile(join(output,'timings-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--wait-route-rename')){
     const a=await page(800,1280,'layout-lab'),owner=await page(1280,800,'home');
     await call('Page.bringToFront',{},a);
     const snapshot=()=>evaluate(a,"({path:location.pathname,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length,epoch:document.querySelector('#revision').dataset.epoch,state:document.querySelector('#revision').dataset.state,ui:document.querySelector('#revision').dataset.ui})");

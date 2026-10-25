@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Bounded sync-v4 packets. Canonical Merkle, UI and schema bytes are independent.
+//! Bounded sync-v5 packets. Canonical Merkle, UI and schema bytes are independent.
 use super::*;
 use std::cell::RefCell;
 const DIGEST_BYTES: usize = 32;
@@ -99,7 +99,7 @@ fn compress_in_place(raw: &mut Vec<u8>) -> Result<bool> {
 }
 
 use otrios_interfaces::layout::Value;
-const MAGIC: &[u8; 4] = b"OTC4";
+const MAGIC: &[u8; 4] = b"OTC5";
 const HEADER: usize = 10;
 const MAX_REF: usize = 128;
 const MAX_CODES: usize = 8;
@@ -323,7 +323,8 @@ fn write(
     encode: impl FnOnce(&mut Writer<'_>) -> Result<()>,
 ) -> Result<()> {
     out.clear();
-    out.extend_from_slice(&[b'O', b'T', b'C', b'4', 0, 0, 0, 0, 0, 0]);
+    out.extend_from_slice(MAGIC);
+    out.resize(HEADER, 0);
     let mut writer = Writer(out);
     writer.u8(tag)?;
     encode(&mut writer)?;
@@ -367,6 +368,7 @@ pub fn encode_client_into(value: &ClientMessage, out: &mut Vec<u8>) -> Result<()
             ui_ref,
             state_ref,
             catalog_hash,
+            known_ui,
             known_code,
             writer,
             resume,
@@ -375,6 +377,10 @@ pub fn encode_client_into(value: &ClientMessage, out: &mut Vec<u8>) -> Result<()
             w.text(ui_ref, MAX_REF)?;
             w.text(state_ref, MAX_REF)?;
             w.fixed(catalog_hash, 32)?;
+            w.u8(u8::from(known_ui.is_some()))?;
+            if let Some(hash) = known_ui {
+                w.fixed(hash, 32)?;
+            }
             if known_code.len() > MAX_CODES {
                 return Err("Canvas code cache count".into());
             }
@@ -403,6 +409,11 @@ pub fn decode_client(bytes: &[u8]) -> Result<ClientMessage> {
                 let ui_ref = r.text(MAX_REF)?;
                 let state_ref = r.text(MAX_REF)?;
                 let catalog_hash = r.take(32)?.to_vec();
+                let known_ui = match r.u8()? {
+                    0 => None,
+                    1 => Some(r.take(32)?.to_vec()),
+                    _ => return Err("Canvas UI cache flag".into()),
+                };
                 let count = r.u8()? as usize;
                 if count > MAX_CODES || count * 32 > r.0.len() {
                     return Err("Canvas code cache count".into());
@@ -416,6 +427,7 @@ pub fn decode_client(bytes: &[u8]) -> Result<ClientMessage> {
                     ui_ref,
                     state_ref,
                     catalog_hash,
+                    known_ui,
                     known_code,
                     writer: r.take(16)?.to_vec(),
                     resume: r.u64()?,
@@ -639,6 +651,7 @@ mod tests {
                 ui_ref: "ui".into(),
                 state_ref: "state".into(),
                 catalog_hash: vec![1; 32],
+                known_ui: Some(vec![7; 32]),
                 known_code: vec![vec![2; 32]],
                 writer: vec![3; 16],
                 resume: 9,
@@ -718,9 +731,29 @@ mod tests {
         }
     }
     #[test]
+    fn ui_hint_flags_and_previous_state_codec_fail_closed() {
+        let message = ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: "ui".into(),
+            state_ref: "state".into(),
+            catalog_hash: vec![1; 32],
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![1; 16],
+            resume: 0,
+        };
+        let mut bytes = encode_client(&message).unwrap();
+        let flag = bytes.len() - 26; // hint flag, code count, writer and resume
+        bytes[flag] = 2;
+        assert!(decode_client(&bytes).is_err());
+        let mut bytes = encode_client(&message).unwrap();
+        bytes[..4].copy_from_slice(b"OTC4");
+        assert!(decode_client(&bytes).is_err());
+    }
+    #[test]
     fn fixed_endianness_and_direction_tags_are_explicit() {
         let bytes = encode_client(&ClientMessage::AcceptMount { epoch: 0x01020304 }).unwrap();
-        assert_eq!(hex(&bytes), "4f5443340000050000000204030201");
+        assert_eq!(hex(&bytes), "4f5443350000050000000204030201");
         assert!(decode_server(&bytes).is_err());
         assert!(decode_state_request(&bytes).is_err());
         assert!(decode_state_response(&bytes).is_err());

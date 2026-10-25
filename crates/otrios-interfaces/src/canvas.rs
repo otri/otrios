@@ -206,6 +206,8 @@ pub enum ClientMessage {
         ui_ref: String,
         state_ref: String,
         catalog_hash: Vec<u8>,
+        /// One cached UI digest for this target. Never an access grant.
+        known_ui: Option<Vec<u8>>,
         known_code: Vec<Vec<u8>>,
         /// RAM-only nonce for durable deduplication; never an access grant.
         writer: Vec<u8>,

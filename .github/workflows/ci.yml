@@ -37,7 +37,7 @@ jobs:
           cargo build -p otrios-web-host --lib --release --locked --target wasm32-unknown-unknown
           node --test scripts/test-canvas-host-exports.mjs scripts/test_gpu_scene.mjs
       - name: Check distributed module handoff
-        run: node --test scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs scripts/test-viewport.mjs scripts/test-ui-update.mjs
+        run: node --test scripts/test-navigation-timings.mjs scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs scripts/test-viewport.mjs scripts/test-ui-update.mjs
       - name: Test the native Canvas worker boundary
         run: cargo test -p otrios-dashboard --features direct --bin dashboard-direct --locked
       - name: Compile the owned Linux display host

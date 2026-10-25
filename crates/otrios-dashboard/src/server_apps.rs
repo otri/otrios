@@ -117,7 +117,7 @@ impl Hub {
                 let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
                 if manifest["format"] != "otrios-release-v1"
                     || manifest["state_schema"] != "otrios-canvas-merkle-state-v1"
-                    || manifest["sync_protocol"] != "otrios-canvas-sync-v4"
+                    || manifest["sync_protocol"] != "otrios-canvas-sync-v5"
                 {
                     return Err("Installed release app protocol mismatch".into());
                 }
@@ -356,6 +356,7 @@ impl Hub {
                 ui_ref,
                 state_ref,
                 catalog_hash,
+                known_ui,
                 known_code,
                 writer,
                 resume,
@@ -363,6 +364,7 @@ impl Hub {
                 if epoch == 0
                     || epoch <= leases.last_epoch
                     || known_code.len() > 8
+                    || known_ui.as_ref().is_some_and(|h| h.len() != 32)
                     || known_code.iter().any(|h| h.len() != 32)
                 {
                     return Err("Invalid Canvas mount generation/cache".into());
@@ -407,7 +409,11 @@ impl Hub {
                     .ok_or("Missing initial Merkle state")?;
                 messages.push(ServerMessage::Mounted {
                     epoch,
-                    ui: p.ui,
+                    ui: if !p.private && known_ui.as_ref() == Some(&p.ui_hash) {
+                        vec![]
+                    } else {
+                        p.ui
+                    },
                     ui_hash: p.ui_hash,
                     code: if known_code.contains(&canvas::hash(&p.code)) {
                         vec![]
@@ -563,7 +569,7 @@ async fn emit(
         return false;
     };
     // UI/code mounts are bulk transfers. Keep interactive state deltas raw;
-    // sync-v4 already supports independent bounded LZ4 blocks on both clients.
+    // sync-v5 already supports independent bounded LZ4 blocks on both clients.
     if matches!(message, ServerMessage::Mounted { .. }) && bytes.len() >= 8 * 1024 {
         let mut compressed = Vec::new();
         if canvas::compress_packet_into(&bytes, &mut compressed).is_err() {
