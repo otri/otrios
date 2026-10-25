@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Browser startup and app navigation — 2026-10-25
 
+This is the frozen baseline. The subsequent [deployment and before/after
+measurements](startup-improvements.md) describe the implemented changes.
+
 Home became interactive in **2.22 s cold** and **0.95 s on reload** in a controlled
 fast-4G browser replay. Home → app navigation took **145–232 ms median after tap
 release**, depending on the app. Monitoring was excluded.

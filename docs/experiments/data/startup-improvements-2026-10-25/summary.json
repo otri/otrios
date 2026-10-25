@@ -1,0 +1,4049 @@
+{
+  "format": "otrios-startup-improvements-v1",
+  "date": "2026-10-25",
+  "source": "cd78e5a",
+  "release": "fe98da6b5478528c8abc07944d4df57a170268f6fccad1711f083f8fccf396b2",
+  "baseline_release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+  "conditions": {
+    "download_mbps": 9,
+    "upload_mbps": 1.5,
+    "rtt_ms": 60,
+    "viewport": [
+      800,
+      1280
+    ],
+    "device_scale_factor": 1,
+    "cpu_throttling": false,
+    "gpu": "SwiftShader software rendering",
+    "cold": "fresh Chromium process and profile; navigation excludes browser launch",
+    "warm": "same-profile reload after visits to the public apps",
+    "completion": "matching UI and controls plus draw submission followed by requestAnimationFrame",
+    "tap": "trusted pointer event timestamps; primary release-to-presentation; full gesture also recorded",
+    "radio_tcp_tls_cdn": "not modeled by the HTTP/1.1 replay; live HTTPS delivery probes reported separately",
+    "state": "optimized x86_64 disposable authority, fresh roots per case; no live state edits",
+    "monitoring": "excluded"
+  },
+  "browser": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/154.0.8037.57",
+    "revision": "@73c14f6228d7cd537c855007e8f88678969cc0eb",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+    "jsVersion": "15.4.80.11"
+  },
+  "method": {
+    "snapshot": "https://otrios.otri.ca",
+    "network": {
+      "download_bps": 9000000,
+      "upload_bps": 1500000,
+      "rtt_ms": 60
+    },
+    "variant": "baseline",
+    "experimental": false,
+    "cache": "fresh Chromium profile for each cold run; same-profile warm reload",
+    "cpu": "unthrottled",
+    "websocket_shaped": true,
+    "publisher_signature_verified": true,
+    "tap_uses_event_timestamp": true,
+    "transport": "HTTP/1.1 replay, no DNS/TLS/CDN delay",
+    "monitoring": "excluded",
+    "upstream": "disposable local authority"
+  },
+  "calibration": {
+    "rtt_samples": [
+      105.06120300000003,
+      70.33535999999998,
+      69.29628500000001
+    ],
+    "aggregate_mib_ms": 1010.0769779999999,
+    "closed_connection_bytes": 65536,
+    "upload_kib_ms": 1477.0275539999998
+  },
+  "startup": {
+    "before": {
+      "cold_ms": {
+        "n": 5,
+        "median": 2218.9,
+        "min": 2037.4,
+        "max": 2600.9,
+        "samples": [
+          2600.9,
+          2037.4,
+          2197.1,
+          2218.9,
+          2321.1
+        ]
+      },
+      "warm_ms": {
+        "n": 5,
+        "median": 954.0,
+        "min": 845.0,
+        "max": 1364.7,
+        "samples": [
+          948.4,
+          1364.7,
+          954.0,
+          969.8,
+          845.0
+        ]
+      },
+      "worker_wasm_ms": {
+        "n": 5,
+        "median": 103.9,
+        "min": 92.3,
+        "max": 272.2,
+        "samples": [
+          272.2,
+          103.9,
+          96.8,
+          92.3,
+          124.7
+        ]
+      }
+    },
+    "after": {
+      "cold_ms": {
+        "n": 5,
+        "median": 2051.3,
+        "min": 1952.2,
+        "max": 2186.5,
+        "samples": [
+          2099.6,
+          1952.2,
+          2036.4,
+          2186.5,
+          2051.3
+        ]
+      },
+      "warm_ms": {
+        "n": 5,
+        "median": 1057.2,
+        "min": 984.0,
+        "max": 1226.6,
+        "samples": [
+          1226.6,
+          984.0,
+          1057.2,
+          985.3,
+          1211.2
+        ]
+      },
+      "worker_wasm_ms": {
+        "n": 5,
+        "median": 1.0,
+        "min": 0.6,
+        "max": 2.2,
+        "samples": [
+          0.8,
+          1.0,
+          0.6,
+          1.3,
+          2.2
+        ]
+      }
+    }
+  },
+  "navigation": [
+    {
+      "app": "Component Playground",
+      "before": {
+        "first-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 280.2,
+            "min": 243.3,
+            "max": 621.5,
+            "samples": [
+              621.5,
+              243.3,
+              261.5,
+              280.2,
+              287.2
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 228.9,
+            "min": 200.2,
+            "max": 565,
+            "samples": [
+              565,
+              200.2,
+              215.6,
+              228.9,
+              235
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 33.82,
+            "min": 25.41,
+            "max": 48.56,
+            "samples": [
+              25.41,
+              33.82,
+              32.16,
+              48.56,
+              34.68
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 110.99,
+            "min": 107.52,
+            "max": 445.6,
+            "samples": [
+              445.6,
+              107.52,
+              107.63,
+              110.99,
+              111.26
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 33.76,
+            "min": 23.56,
+            "max": 57.19,
+            "samples": [
+              57.19,
+              23.56,
+              28.01,
+              39.46,
+              33.76
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 36.8,
+            "min": 29.9,
+            "max": 55.3,
+            "samples": [
+              36.8,
+              35.3,
+              47.8,
+              29.9,
+              55.3
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 49361,
+            "min": 49361,
+            "max": 49361,
+            "samples": [
+              49361,
+              49361,
+              49361,
+              49361,
+              49361
+            ]
+          }
+        },
+        "repeat-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 208,
+            "min": 201.6,
+            "max": 253.3,
+            "samples": [
+              208,
+              201.6,
+              207.8,
+              253.3,
+              217.5
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 168,
+            "min": 165.6,
+            "max": 203.3,
+            "samples": [
+              165.6,
+              168,
+              170.4,
+              203.3,
+              167.1
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 34.55,
+            "min": 19.73,
+            "max": 36.28,
+            "samples": [
+              33.92,
+              19.73,
+              36.28,
+              35.84,
+              34.55
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 105.96,
+            "min": 104.71,
+            "max": 115.29,
+            "samples": [
+              105.34,
+              115.29,
+              104.71,
+              105.96,
+              106.69
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 6.84,
+            "min": 6.19,
+            "max": 11.3,
+            "samples": [
+              6.84,
+              6.19,
+              6.71,
+              11.3,
+              7.06
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 22.7,
+            "min": 18.8,
+            "max": 50.2,
+            "samples": [
+              19.5,
+              26.8,
+              22.7,
+              50.2,
+              18.8
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 49143,
+            "min": 49143,
+            "max": 49143,
+            "samples": [
+              49143,
+              49143,
+              49143,
+              49143,
+              49143
+            ]
+          }
+        }
+      },
+      "after": {
+        "first-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 187.1,
+            "min": 180.8,
+            "max": 234.5,
+            "samples": [
+              209.7,
+              182.2,
+              187.1,
+              180.8,
+              234.5
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 239.4,
+            "min": 226.8,
+            "max": 276.8,
+            "samples": [
+              258.1,
+              226.8,
+              239.4,
+              229.8,
+              276.8
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 21694,
+            "min": 21668,
+            "max": 22653,
+            "samples": [
+              22643,
+              22653,
+              21668,
+              21694,
+              21691
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 33.22,
+            "min": 31.69,
+            "max": 37.3,
+            "samples": [
+              37.3,
+              33.22,
+              33.54,
+              31.69,
+              32.01
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 86.2,
+            "min": 82.37,
+            "max": 91.92,
+            "samples": [
+              91.92,
+              83.8,
+              86.2,
+              90.21,
+              82.37
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 36.47,
+            "min": 32.7,
+            "max": 44.19,
+            "samples": [
+              44.19,
+              39.27,
+              36.47,
+              32.7,
+              34.12
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 30.9,
+            "min": 25.9,
+            "max": 86.0,
+            "samples": [
+              36.3,
+              25.9,
+              30.9,
+              26.2,
+              86.0
+            ]
+          }
+        },
+        "repeat-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 166.5,
+            "min": 152.7,
+            "max": 199.6,
+            "samples": [
+              166.5,
+              152.7,
+              199.6,
+              183.1,
+              154
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 201.6,
+            "min": 198.1,
+            "max": 234.4,
+            "samples": [
+              201.6,
+              198.1,
+              234.4,
+              220.4,
+              200.7
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 21475,
+            "min": 21469,
+            "max": 22465,
+            "samples": [
+              21469,
+              22465,
+              21474,
+              21500,
+              21475
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 35.58,
+            "min": 33.46,
+            "max": 38.2,
+            "samples": [
+              38.2,
+              35.08,
+              35.71,
+              33.46,
+              35.58
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 87.12,
+            "min": 80.62,
+            "max": 89.51,
+            "samples": [
+              87.12,
+              89.51,
+              82.41,
+              87.93,
+              80.62
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 9.31,
+            "min": 6.91,
+            "max": 12.11,
+            "samples": [
+              11.68,
+              6.91,
+              8.38,
+              12.11,
+              9.31
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 29.5,
+            "min": 21.2,
+            "max": 73.1,
+            "samples": [
+              29.5,
+              21.2,
+              73.1,
+              49.6,
+              28.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "Layout Lab",
+      "before": {
+        "first-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 240,
+            "min": 226.2,
+            "max": 270,
+            "samples": [
+              270,
+              244.3,
+              240,
+              236.8,
+              226.2
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 200.3,
+            "min": 188.6,
+            "max": 221.3,
+            "samples": [
+              221.3,
+              199.6,
+              201.2,
+              200.3,
+              188.6
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 36.47,
+            "min": 33.79,
+            "max": 38.63,
+            "samples": [
+              37.62,
+              36.0,
+              36.47,
+              38.63,
+              33.79
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 121.63,
+            "min": 115.12,
+            "max": 123.91,
+            "samples": [
+              123.91,
+              119.54,
+              122.56,
+              115.12,
+              121.63
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 13.68,
+            "min": 9.28,
+            "max": 15.65,
+            "samples": [
+              13.68,
+              13.47,
+              14.57,
+              15.65,
+              9.28
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 30.6,
+            "min": 23.9,
+            "max": 46.1,
+            "samples": [
+              46.1,
+              30.6,
+              27.6,
+              30.9,
+              23.9
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 56485,
+            "min": 56485,
+            "max": 56485,
+            "samples": [
+              56485,
+              56485,
+              56485,
+              56485,
+              56485
+            ]
+          }
+        },
+        "repeat-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 243.9,
+            "min": 208.8,
+            "max": 264.5,
+            "samples": [
+              243.9,
+              208.8,
+              264.5,
+              250.2,
+              235.7
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 192.9,
+            "min": 167.2,
+            "max": 226.9,
+            "samples": [
+              192.9,
+              167.2,
+              226.9,
+              204.6,
+              179.6
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 34.7,
+            "min": 19.27,
+            "max": 36.8,
+            "samples": [
+              36.37,
+              19.27,
+              36.8,
+              34.7,
+              28.92
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 112.33,
+            "min": 111.24,
+            "max": 128.87,
+            "samples": [
+              112.01,
+              114.04,
+              112.33,
+              128.87,
+              111.24
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 7.02,
+            "min": 5.07,
+            "max": 10.14,
+            "samples": [
+              7.02,
+              7.09,
+              5.07,
+              6.74,
+              10.14
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 34.3,
+            "min": 26.8,
+            "max": 72.7,
+            "samples": [
+              37.5,
+              26.8,
+              72.7,
+              34.3,
+              29.3
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 56485,
+            "min": 56485,
+            "max": 56485,
+            "samples": [
+              56485,
+              56485,
+              56485,
+              56485,
+              56485
+            ]
+          }
+        }
+      },
+      "after": {
+        "first-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 194.8,
+            "min": 169.8,
+            "max": 234.1,
+            "samples": [
+              170.6,
+              194.8,
+              169.8,
+              229.2,
+              234.1
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 245.5,
+            "min": 204.4,
+            "max": 278.9,
+            "samples": [
+              208.6,
+              245.5,
+              204.4,
+              270.1,
+              278.9
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 23320,
+            "min": 23315,
+            "max": 24835,
+            "samples": [
+              24834,
+              24835,
+              23315,
+              23318,
+              23320
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 36.85,
+            "min": 34.85,
+            "max": 38.59,
+            "samples": [
+              34.85,
+              36.85,
+              36.5,
+              38.59,
+              37.88
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 90.61,
+            "min": 89.45,
+            "max": 135.05,
+            "samples": [
+              89.45,
+              105.65,
+              90.61,
+              135.05,
+              90.23
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 19.5,
+            "min": 9.98,
+            "max": 23.17,
+            "samples": [
+              11.7,
+              19.5,
+              9.98,
+              23.17,
+              21.29
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 32.8,
+            "min": 32.4,
+            "max": 84.7,
+            "samples": [
+              34.6,
+              32.8,
+              32.7,
+              32.4,
+              84.7
+            ]
+          }
+        },
+        "repeat-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 155,
+            "min": 150.6,
+            "max": 161.5,
+            "samples": [
+              155,
+              156.3,
+              151.9,
+              150.6,
+              161.5
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 190.7,
+            "min": 188.4,
+            "max": 215.3,
+            "samples": [
+              201.7,
+              190.7,
+              188.4,
+              190.3,
+              215.3
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 23315,
+            "min": 23300,
+            "max": 24839,
+            "samples": [
+              23300,
+              24839,
+              23315,
+              23315,
+              23322
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 35.28,
+            "min": 33.58,
+            "max": 37.09,
+            "samples": [
+              35.28,
+              35.36,
+              37.09,
+              34.13,
+              33.58
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 84.53,
+            "min": 82.27,
+            "max": 91.39,
+            "samples": [
+              82.72,
+              91.39,
+              82.27,
+              84.53,
+              87.18
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 9.14,
+            "min": 5.75,
+            "max": 10.74,
+            "samples": [
+              10.4,
+              5.75,
+              8.14,
+              9.14,
+              10.74
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 24.4,
+            "min": 22.8,
+            "max": 30.0,
+            "samples": [
+              26.6,
+              23.8,
+              24.4,
+              22.8,
+              30.0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "Input Lab",
+      "before": {
+        "first-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 270.3,
+            "min": 265.9,
+            "max": 285.4,
+            "samples": [
+              285.4,
+              266.5,
+              265.9,
+              277,
+              270.3
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 232.4,
+            "min": 212.1,
+            "max": 247.7,
+            "samples": [
+              247.7,
+              212.1,
+              218.3,
+              233,
+              232.4
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 34.69,
+            "min": 30.91,
+            "max": 35.9,
+            "samples": [
+              33.0,
+              30.91,
+              34.69,
+              35.46,
+              35.9
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 153.71,
+            "min": 152.38,
+            "max": 158.36,
+            "samples": [
+              154.8,
+              153.71,
+              152.44,
+              158.36,
+              152.38
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 12.48,
+            "min": 8.76,
+            "max": 31.89,
+            "samples": [
+              31.89,
+              12.97,
+              8.76,
+              12.48,
+              11.82
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 26.7,
+            "min": 14.5,
+            "max": 32.3,
+            "samples": [
+              28.0,
+              14.5,
+              22.4,
+              26.7,
+              32.3
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 100836,
+            "min": 100836,
+            "max": 100836,
+            "samples": [
+              100836,
+              100836,
+              100836,
+              100836,
+              100836
+            ]
+          }
+        },
+        "repeat-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 262.1,
+            "min": 244,
+            "max": 283.5,
+            "samples": [
+              262.1,
+              244,
+              261.6,
+              283.5,
+              277.9
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 218.2,
+            "min": 201,
+            "max": 233.4,
+            "samples": [
+              217.5,
+              201,
+              218.2,
+              233.2,
+              233.4
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 35.44,
+            "min": 19.58,
+            "max": 36.29,
+            "samples": [
+              36.29,
+              19.58,
+              35.44,
+              34.99,
+              36.06
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 154.57,
+            "min": 149.96,
+            "max": 161.43,
+            "samples": [
+              149.96,
+              154.57,
+              150.97,
+              158.19,
+              161.43
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 9.94,
+            "min": 8.95,
+            "max": 13.61,
+            "samples": [
+              9.94,
+              8.95,
+              11.39,
+              13.61,
+              9.11
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 21.3,
+            "min": 17.9,
+            "max": 26.8,
+            "samples": [
+              21.3,
+              17.9,
+              20.4,
+              26.4,
+              26.8
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 100836,
+            "min": 100836,
+            "max": 100836,
+            "samples": [
+              100836,
+              100836,
+              100836,
+              100836,
+              100836
+            ]
+          }
+        }
+      },
+      "after": {
+        "first-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 183.6,
+            "min": 182.4,
+            "max": 4326.6,
+            "samples": [
+              183.8,
+              182.9,
+              182.4,
+              4326.6,
+              183.6
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 224.4,
+            "min": 218.9,
+            "max": 4430.8,
+            "samples": [
+              227.2,
+              218.9,
+              222.9,
+              4430.8,
+              224.4
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 38807,
+            "min": 38797,
+            "max": 38810,
+            "samples": [
+              38797,
+              38807,
+              38810,
+              38809,
+              38805
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 36.43,
+            "min": 34.46,
+            "max": 3180.37,
+            "samples": [
+              36.79,
+              36.39,
+              34.46,
+              3180.37,
+              36.43
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 102.28,
+            "min": 99.58,
+            "max": 1049.34,
+            "samples": [
+              99.58,
+              112.57,
+              100.63,
+              1049.34,
+              102.28
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 14.39,
+            "min": 13.04,
+            "max": 25.99,
+            "samples": [
+              19.93,
+              13.04,
+              14.31,
+              25.99,
+              14.39
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 30.5,
+            "min": 20.9,
+            "max": 70.9,
+            "samples": [
+              27.5,
+              20.9,
+              33.0,
+              70.9,
+              30.5
+            ]
+          }
+        },
+        "repeat-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 165.1,
+            "min": 150.9,
+            "max": 724.2,
+            "samples": [
+              164,
+              150.9,
+              165.1,
+              724.2,
+              167.7
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 211.3,
+            "min": 196.1,
+            "max": 957.8,
+            "samples": [
+              205.3,
+              196.1,
+              211.3,
+              957.8,
+              215.7
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 38807,
+            "min": 38797,
+            "max": 38810,
+            "samples": [
+              38797,
+              38807,
+              38810,
+              38809,
+              38805
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 35.29,
+            "min": 22.01,
+            "max": 66.47,
+            "samples": [
+              32.68,
+              22.01,
+              35.29,
+              66.47,
+              35.78
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 99.39,
+            "min": 96.27,
+            "max": 259.89,
+            "samples": [
+              96.27,
+              99.39,
+              96.64,
+              259.89,
+              99.97
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 13.15,
+            "min": 10.45,
+            "max": 233.64,
+            "samples": [
+              13.15,
+              12.0,
+              14.97,
+              233.64,
+              10.45
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 21.5,
+            "min": 17.5,
+            "max": 164.2,
+            "samples": [
+              21.9,
+              17.5,
+              18.2,
+              164.2,
+              21.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "Animation Lab",
+      "before": {
+        "first-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 191.3,
+            "min": 178,
+            "max": 2031.9,
+            "samples": [
+              2031.9,
+              178,
+              192.1,
+              191.3,
+              187.5
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 152.6,
+            "min": 136,
+            "max": 186.9,
+            "samples": [
+              186.9,
+              136,
+              157.3,
+              152.6,
+              143.9
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 34.76,
+            "min": 21.83,
+            "max": 35.64,
+            "samples": [
+              35.53,
+              21.83,
+              34.76,
+              35.64,
+              34.31
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 86.75,
+            "min": 82.2,
+            "max": 97.54,
+            "samples": [
+              97.54,
+              82.2,
+              86.75,
+              89.41,
+              82.63
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 4.9,
+            "min": 3.97,
+            "max": 12.06,
+            "samples": [
+              6.33,
+              3.97,
+              4.9,
+              4.55,
+              12.06
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 28.0,
+            "min": 14.9,
+            "max": 47.5,
+            "samples": [
+              47.5,
+              28.0,
+              30.9,
+              23.0,
+              14.9
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 18798,
+            "min": 18798,
+            "max": 18798,
+            "samples": [
+              18798,
+              18798,
+              18798,
+              18798,
+              18798
+            ]
+          }
+        },
+        "repeat-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 176.5,
+            "min": 170.8,
+            "max": 210.9,
+            "samples": [
+              170.8,
+              176.5,
+              172.9,
+              210.9,
+              195.4
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 135.5,
+            "min": 133.7,
+            "max": 176.6,
+            "samples": [
+              135.1,
+              133.7,
+              135.5,
+              176.6,
+              148.6
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 19.4,
+            "min": 18.66,
+            "max": 36.72,
+            "samples": [
+              19.29,
+              18.66,
+              19.4,
+              36.72,
+              33.3
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 79.64,
+            "min": 78.43,
+            "max": 82.07,
+            "samples": [
+              82.07,
+              79.64,
+              80.89,
+              78.43,
+              78.61
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 3.79,
+            "min": 2.34,
+            "max": 5.2,
+            "samples": [
+              2.34,
+              5.2,
+              3.21,
+              4.25,
+              3.79
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 32.0,
+            "min": 30.2,
+            "max": 57.2,
+            "samples": [
+              31.4,
+              30.2,
+              32.0,
+              57.2,
+              32.9
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 18798,
+            "min": 18798,
+            "max": 18798,
+            "samples": [
+              18798,
+              18798,
+              18798,
+              18798,
+              18798
+            ]
+          }
+        }
+      },
+      "after": {
+        "first-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 149,
+            "min": 133.3,
+            "max": 302.6,
+            "samples": [
+              171.7,
+              133.3,
+              146.9,
+              302.6,
+              149
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 199.5,
+            "min": 180.9,
+            "max": 344,
+            "samples": [
+              208.4,
+              180.9,
+              193.9,
+              344,
+              199.5
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 9016,
+            "min": 9012,
+            "max": 9379,
+            "samples": [
+              9017,
+              9379,
+              9014,
+              9012,
+              9016
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 36.85,
+            "min": 35.65,
+            "max": 37.69,
+            "samples": [
+              36.85,
+              35.65,
+              35.69,
+              37.69,
+              37.12
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 80.66,
+            "min": 73.13,
+            "max": 231.43,
+            "samples": [
+              80.66,
+              73.13,
+              85.41,
+              231.43,
+              79.65
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 5.39,
+            "min": 4.31,
+            "max": 5.93,
+            "samples": [
+              5.39,
+              4.31,
+              5.1,
+              5.87,
+              5.93
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 26.3,
+            "min": 20.2,
+            "max": 48.8,
+            "samples": [
+              48.8,
+              20.2,
+              20.7,
+              27.6,
+              26.3
+            ]
+          }
+        },
+        "repeat-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 131.7,
+            "min": 118.9,
+            "max": 149.6,
+            "samples": [
+              131.7,
+              149.6,
+              132.4,
+              118.9,
+              130.4
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 170.4,
+            "min": 165.4,
+            "max": 200,
+            "samples": [
+              170.4,
+              200,
+              173.5,
+              165.4,
+              166.6
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 9016,
+            "min": 9012,
+            "max": 9019,
+            "samples": [
+              9017,
+              9019,
+              9014,
+              9012,
+              9016
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 34.65,
+            "min": 19.77,
+            "max": 41.82,
+            "samples": [
+              38.36,
+              41.82,
+              34.65,
+              19.77,
+              32.67
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 72.56,
+            "min": 71.53,
+            "max": 75.16,
+            "samples": [
+              72.86,
+              71.73,
+              71.53,
+              72.56,
+              75.16
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 3.48,
+            "min": 3.05,
+            "max": 7.42,
+            "samples": [
+              3.77,
+              3.05,
+              7.42,
+              3.37,
+              3.48
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 19.1,
+            "min": 16.7,
+            "max": 33.0,
+            "samples": [
+              16.7,
+              33.0,
+              18.8,
+              23.2,
+              19.1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "3D Lab",
+      "before": {
+        "first-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 192.6,
+            "min": 173.6,
+            "max": 196.8,
+            "samples": [
+              196.1,
+              181.8,
+              196.8,
+              173.6,
+              192.6
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 144.9,
+            "min": 133.8,
+            "max": 162.4,
+            "samples": [
+              144.9,
+              133.8,
+              162.4,
+              134,
+              146.6
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 19.21,
+            "min": 18.99,
+            "max": 33.3,
+            "samples": [
+              20.51,
+              19.21,
+              19.14,
+              18.99,
+              33.3
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 84.57,
+            "min": 82.69,
+            "max": 86.1,
+            "samples": [
+              86.1,
+              84.01,
+              82.69,
+              84.57,
+              85.81
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 3.94,
+            "min": 2.48,
+            "max": 5.79,
+            "samples": [
+              5.79,
+              2.48,
+              2.77,
+              3.94,
+              4.5
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 28.1,
+            "min": 23,
+            "max": 57.8,
+            "samples": [
+              32.5,
+              28.1,
+              57.8,
+              26.5,
+              23
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 18770,
+            "min": 18770,
+            "max": 18770,
+            "samples": [
+              18770,
+              18770,
+              18770,
+              18770,
+              18770
+            ]
+          }
+        },
+        "repeat-visit": {
+          "tap_ms": {
+            "n": 5,
+            "median": 202,
+            "min": 179.5,
+            "max": 224.3,
+            "samples": [
+              202,
+              223.9,
+              179.5,
+              185.9,
+              224.3
+            ]
+          },
+          "release_ms": {
+            "n": 5,
+            "median": 162,
+            "min": 136,
+            "max": 174.6,
+            "samples": [
+              162,
+              172,
+              139.3,
+              136,
+              174.6
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 35.49,
+            "min": 18.96,
+            "max": 36.61,
+            "samples": [
+              18.96,
+              32.9,
+              35.49,
+              36.61,
+              36.32
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 78.13,
+            "min": 76.71,
+            "max": 81.95,
+            "samples": [
+              81.95,
+              78.13,
+              77.83,
+              76.71,
+              79.1
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 3.18,
+            "min": 2.67,
+            "max": 3.78,
+            "samples": [
+              2.69,
+              3.67,
+              2.67,
+              3.18,
+              3.78
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 55.4,
+            "min": 19.5,
+            "max": 58.4,
+            "samples": [
+              58.4,
+              57.3,
+              23.3,
+              19.5,
+              55.4
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 18770,
+            "min": 18770,
+            "max": 18770,
+            "samples": [
+              18770,
+              18770,
+              18770,
+              18770,
+              18770
+            ]
+          }
+        }
+      },
+      "after": {
+        "first-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 149.6,
+            "min": 138.1,
+            "max": 371.8,
+            "samples": [
+              151.9,
+              146.2,
+              138.1,
+              371.8,
+              149.6
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 195.8,
+            "min": 187.2,
+            "max": 584,
+            "samples": [
+              195.8,
+              187.2,
+              187.9,
+              584,
+              196.2
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 9041,
+            "min": 9028,
+            "max": 9320,
+            "samples": [
+              9038,
+              9320,
+              9041,
+              9028,
+              9043
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 35.61,
+            "min": 26.59,
+            "max": 68.07,
+            "samples": [
+              35.61,
+              32.38,
+              26.59,
+              68.07,
+              36.06
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 77.22,
+            "min": 75.05,
+            "max": 267.8,
+            "samples": [
+              76.93,
+              77.91,
+              75.05,
+              267.8,
+              77.22
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 4.76,
+            "min": 3.15,
+            "max": 5.31,
+            "samples": [
+              4.76,
+              5.31,
+              3.15,
+              4.93,
+              4.63
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 31.7,
+            "min": 30.6,
+            "max": 34.6,
+            "samples": [
+              34.6,
+              30.6,
+              33.3,
+              31.0,
+              31.7
+            ]
+          }
+        },
+        "repeat-visit": {
+          "release_ms": {
+            "n": 5,
+            "median": 132.3,
+            "min": 117,
+            "max": 210.5,
+            "samples": [
+              131.2,
+              149.3,
+              117,
+              210.5,
+              132.3
+            ]
+          },
+          "tap_ms": {
+            "n": 5,
+            "median": 177,
+            "min": 151.2,
+            "max": 259.1,
+            "samples": [
+              175,
+              187.5,
+              151.2,
+              259.1,
+              177
+            ]
+          },
+          "wire_received": {
+            "n": 5,
+            "median": 9041,
+            "min": 9028,
+            "max": 9049,
+            "samples": [
+              9038,
+              9049,
+              9041,
+              9028,
+              9043
+            ]
+          },
+          "dispatch_ms": {
+            "n": 5,
+            "median": 34.35,
+            "min": 19.34,
+            "max": 54.72,
+            "samples": [
+              33.17,
+              34.52,
+              19.34,
+              54.72,
+              34.35
+            ]
+          },
+          "network_authority_ms": {
+            "n": 5,
+            "median": 75.42,
+            "min": 71.05,
+            "max": 93.81,
+            "samples": [
+              71.05,
+              89.22,
+              75.42,
+              93.81,
+              72.0
+            ]
+          },
+          "worker_ms": {
+            "n": 5,
+            "median": 4.94,
+            "min": 3.36,
+            "max": 18.06,
+            "samples": [
+              4.99,
+              3.36,
+              4.94,
+              18.06,
+              3.55
+            ]
+          },
+          "render_ms": {
+            "n": 5,
+            "median": 22.2,
+            "min": 17.3,
+            "max": 43.9,
+            "samples": [
+              22.0,
+              22.2,
+              17.3,
+              43.9,
+              22.4
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "navigation_samples": [
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "first-visit",
+      "tap_ms": 258.10009765625,
+      "release_ms": 209.699951171875,
+      "wire_received": 22643,
+      "wire_sent": 241,
+      "input_delay_ms": 13,
+      "run": 1,
+      "gesture_ms": 48.400146484375,
+      "dispatch_ms": 37.2978515625,
+      "network_authority_ms": 91.9150390625,
+      "worker_ms": 44.18701171875,
+      "render_ms": 36.300048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 207.800048828125,
+      "release_ms": 166.300048828125,
+      "wire_received": 19640,
+      "wire_sent": 244,
+      "input_delay_ms": 8,
+      "run": 1,
+      "gesture_ms": 41.5,
+      "dispatch_ms": 36.153076171875,
+      "network_authority_ms": 81.7958984375,
+      "worker_ms": 12.450927734375,
+      "render_ms": 35.900146484375
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 208.599853515625,
+      "release_ms": 170.599853515625,
+      "wire_received": 24834,
+      "wire_sent": 253,
+      "input_delay_ms": 4.89990234375,
+      "run": 1,
+      "gesture_ms": 38.0,
+      "dispatch_ms": 34.848876953125,
+      "network_authority_ms": 89.449951171875,
+      "worker_ms": 11.701171875,
+      "render_ms": 34.599853515625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 216.699951171875,
+      "release_ms": 174.5,
+      "wire_received": 19639,
+      "wire_sent": 244,
+      "input_delay_ms": 9.699951171875,
+      "run": 1,
+      "gesture_ms": 42.199951171875,
+      "dispatch_ms": 33.64404296875,
+      "network_authority_ms": 87.0810546875,
+      "worker_ms": 10.974853515625,
+      "render_ms": 42.800048828125
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 227.199951171875,
+      "release_ms": 183.800048828125,
+      "wire_received": 38797,
+      "wire_sent": 251,
+      "input_delay_ms": 11.699951171875,
+      "run": 1,
+      "gesture_ms": 43.39990234375,
+      "dispatch_ms": 36.7880859375,
+      "network_authority_ms": 99.583984375,
+      "worker_ms": 19.927978515625,
+      "render_ms": 27.5
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 246.099853515625,
+      "release_ms": 204.800048828125,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 9,
+      "run": 1,
+      "gesture_ms": 41.2998046875,
+      "dispatch_ms": 35.248046875,
+      "network_authority_ms": 78.64208984375,
+      "worker_ms": 12.60986328125,
+      "render_ms": 78.300048828125
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 208.400146484375,
+      "release_ms": 171.7001953125,
+      "wire_received": 9017,
+      "wire_sent": 259,
+      "input_delay_ms": 4,
+      "run": 1,
+      "gesture_ms": 36.699951171875,
+      "dispatch_ms": 36.85107421875,
+      "network_authority_ms": 80.662109375,
+      "worker_ms": 5.386962890625,
+      "render_ms": 48.800048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 245.60009765625,
+      "release_ms": 187,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 25.10009765625,
+      "run": 1,
+      "gesture_ms": 58.60009765625,
+      "dispatch_ms": 51.39306640625,
+      "network_authority_ms": 78.6708984375,
+      "worker_ms": 11.035888671875,
+      "render_ms": 45.900146484375
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 195.800048828125,
+      "release_ms": 151.900146484375,
+      "wire_received": 9038,
+      "wire_sent": 255,
+      "input_delay_ms": 11.699951171875,
+      "run": 1,
+      "gesture_ms": 43.89990234375,
+      "dispatch_ms": 35.606201171875,
+      "network_authority_ms": 76.931884765625,
+      "worker_ms": 4.761962890625,
+      "render_ms": 34.60009765625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 343.2001953125,
+      "release_ms": 275,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 32.800048828125,
+      "run": 1,
+      "gesture_ms": 68.2001953125,
+      "dispatch_ms": 49.346923828125,
+      "network_authority_ms": 78.840087890625,
+      "worker_ms": 9.712890625,
+      "render_ms": 137.10009765625
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 201.599853515625,
+      "release_ms": 166.5,
+      "wire_received": 21469,
+      "wire_sent": 273,
+      "input_delay_ms": 3.199951171875,
+      "run": 1,
+      "gesture_ms": 35.099853515625,
+      "dispatch_ms": 38.203125,
+      "network_authority_ms": 87.118896484375,
+      "worker_ms": 11.677978515625,
+      "render_ms": 29.5
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 203,
+      "release_ms": 161.300048828125,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 9.599853515625,
+      "run": 1,
+      "gesture_ms": 41.699951171875,
+      "dispatch_ms": 35.044921875,
+      "network_authority_ms": 80.24609375,
+      "worker_ms": 8.908935546875,
+      "render_ms": 37.10009765625
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 201.699951171875,
+      "release_ms": 155,
+      "wire_received": 23300,
+      "wire_sent": 253,
+      "input_delay_ms": 14,
+      "run": 1,
+      "gesture_ms": 46.699951171875,
+      "dispatch_ms": 35.281982421875,
+      "network_authority_ms": 82.716064453125,
+      "worker_ms": 10.402099609375,
+      "render_ms": 26.599853515625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 183.60009765625,
+      "release_ms": 136,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 16.199951171875,
+      "run": 1,
+      "gesture_ms": 47.60009765625,
+      "dispatch_ms": 18.7119140625,
+      "network_authority_ms": 79.9208984375,
+      "worker_ms": 10.26708984375,
+      "render_ms": 27.10009765625
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 205.300048828125,
+      "release_ms": 164,
+      "wire_received": 38797,
+      "wire_sent": 251,
+      "input_delay_ms": 9.699951171875,
+      "run": 1,
+      "gesture_ms": 41.300048828125,
+      "dispatch_ms": 32.675048828125,
+      "network_authority_ms": 96.27099609375,
+      "worker_ms": 13.15380859375,
+      "render_ms": 21.900146484375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 190.199951171875,
+      "release_ms": 151.89990234375,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 5.39990234375,
+      "run": 1,
+      "gesture_ms": 38.300048828125,
+      "dispatch_ms": 33.85888671875,
+      "network_authority_ms": 78.570068359375,
+      "worker_ms": 11.970947265625,
+      "render_ms": 27.5
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 170.39990234375,
+      "release_ms": 131.699951171875,
+      "wire_received": 9017,
+      "wire_sent": 259,
+      "input_delay_ms": 5.199951171875,
+      "run": 1,
+      "gesture_ms": 38.699951171875,
+      "dispatch_ms": 38.361083984375,
+      "network_authority_ms": 72.864990234375,
+      "worker_ms": 3.77392578125,
+      "render_ms": 16.699951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 336,
+      "release_ms": 275.199951171875,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 28.699951171875,
+      "run": 1,
+      "gesture_ms": 60.800048828125,
+      "dispatch_ms": 56.321044921875,
+      "network_authority_ms": 79.366943359375,
+      "worker_ms": 7.7119140625,
+      "render_ms": 131.800048828125
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 175,
+      "release_ms": 131.199951171875,
+      "wire_received": 9038,
+      "wire_sent": 255,
+      "input_delay_ms": 11.60009765625,
+      "run": 1,
+      "gesture_ms": 43.800048828125,
+      "dispatch_ms": 33.1650390625,
+      "network_authority_ms": 71.046142578125,
+      "worker_ms": 4.98876953125,
+      "render_ms": 22.0
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 292.10009765625,
+      "release_ms": 229,
+      "wire_received": 19639,
+      "wire_sent": 244,
+      "input_delay_ms": 30.300048828125,
+      "run": 1,
+      "gesture_ms": 63.10009765625,
+      "dispatch_ms": 50.99609375,
+      "network_authority_ms": 80.197998046875,
+      "worker_ms": 10.60595703125,
+      "render_ms": 87.199951171875
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "first-visit",
+      "tap_ms": 226.800048828125,
+      "release_ms": 182.199951171875,
+      "wire_received": 22653,
+      "wire_sent": 241,
+      "input_delay_ms": 10.300048828125,
+      "run": 2,
+      "gesture_ms": 44.60009765625,
+      "dispatch_ms": 33.22412109375,
+      "network_authority_ms": 83.803955078125,
+      "worker_ms": 39.27197265625,
+      "render_ms": 25.89990234375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 174,
+      "release_ms": 140.60009765625,
+      "wire_received": 19648,
+      "wire_sent": 244,
+      "input_delay_ms": 1.5,
+      "run": 2,
+      "gesture_ms": 33.39990234375,
+      "dispatch_ms": 23.27099609375,
+      "network_authority_ms": 77.9580078125,
+      "worker_ms": 13.071044921875,
+      "render_ms": 26.300048828125
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 245.5,
+      "release_ms": 194.800048828125,
+      "wire_received": 24835,
+      "wire_sent": 253,
+      "input_delay_ms": 17.5,
+      "run": 2,
+      "gesture_ms": 50.699951171875,
+      "dispatch_ms": 36.84716796875,
+      "network_authority_ms": 105.64892578125,
+      "worker_ms": 19.50390625,
+      "render_ms": 32.800048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 219,
+      "release_ms": 166.900146484375,
+      "wire_received": 19648,
+      "wire_sent": 244,
+      "input_delay_ms": 16,
+      "run": 2,
+      "gesture_ms": 52.099853515625,
+      "dispatch_ms": 31.1201171875,
+      "network_authority_ms": 79.885986328125,
+      "worker_ms": 10.7939453125,
+      "render_ms": 45.10009765625
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 218.89990234375,
+      "release_ms": 182.89990234375,
+      "wire_received": 38807,
+      "wire_sent": 251,
+      "input_delay_ms": 3.599853515625,
+      "run": 2,
+      "gesture_ms": 36.0,
+      "dispatch_ms": 36.387939453125,
+      "network_authority_ms": 112.574951171875,
+      "worker_ms": 13.037109375,
+      "render_ms": 20.89990234375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 209.300048828125,
+      "release_ms": 160.900146484375,
+      "wire_received": 19647,
+      "wire_sent": 244,
+      "input_delay_ms": 15.699951171875,
+      "run": 2,
+      "gesture_ms": 48.39990234375,
+      "dispatch_ms": 33.979248046875,
+      "network_authority_ms": 79.239990234375,
+      "worker_ms": 8.580810546875,
+      "render_ms": 39.10009765625
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 180.89990234375,
+      "release_ms": 133.300048828125,
+      "wire_received": 9379,
+      "wire_sent": 259,
+      "input_delay_ms": 16.199951171875,
+      "run": 2,
+      "gesture_ms": 47.599853515625,
+      "dispatch_ms": 35.653076171875,
+      "network_authority_ms": 73.134033203125,
+      "worker_ms": 4.31298828125,
+      "render_ms": 20.199951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 302.300048828125,
+      "release_ms": 233.300048828125,
+      "wire_received": 19632,
+      "wire_sent": 244,
+      "input_delay_ms": 36.89990234375,
+      "run": 2,
+      "gesture_ms": 69.0,
+      "dispatch_ms": 51.912109375,
+      "network_authority_ms": 80.625,
+      "worker_ms": 12.162841796875,
+      "render_ms": 88.60009765625
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 187.199951171875,
+      "release_ms": 146.199951171875,
+      "wire_received": 9320,
+      "wire_sent": 255,
+      "input_delay_ms": 8.5,
+      "run": 2,
+      "gesture_ms": 41.0,
+      "dispatch_ms": 32.376220703125,
+      "network_authority_ms": 77.911865234375,
+      "worker_ms": 5.31201171875,
+      "render_ms": 30.599853515625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 353.39990234375,
+      "release_ms": 293.300048828125,
+      "wire_received": 19654,
+      "wire_sent": 244,
+      "input_delay_ms": 28.599853515625,
+      "run": 2,
+      "gesture_ms": 60.099853515625,
+      "dispatch_ms": 57.607177734375,
+      "network_authority_ms": 82.058837890625,
+      "worker_ms": 12.93408203125,
+      "render_ms": 140.699951171875
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 198.099853515625,
+      "release_ms": 152.699951171875,
+      "wire_received": 22465,
+      "wire_sent": 273,
+      "input_delay_ms": 13.5,
+      "run": 2,
+      "gesture_ms": 45.39990234375,
+      "dispatch_ms": 35.076171875,
+      "network_authority_ms": 89.512939453125,
+      "worker_ms": 6.910888671875,
+      "render_ms": 21.199951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 204.199951171875,
+      "release_ms": 154.699951171875,
+      "wire_received": 19649,
+      "wire_sent": 244,
+      "input_delay_ms": 16.599853515625,
+      "run": 2,
+      "gesture_ms": 49.5,
+      "dispatch_ms": 33.212890625,
+      "network_authority_ms": 81.715087890625,
+      "worker_ms": 6.77197265625,
+      "render_ms": 33.0
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 190.699951171875,
+      "release_ms": 156.300048828125,
+      "wire_received": 24839,
+      "wire_sent": 253,
+      "input_delay_ms": 2.2998046875,
+      "run": 2,
+      "gesture_ms": 34.39990234375,
+      "dispatch_ms": 35.35595703125,
+      "network_authority_ms": 91.38916015625,
+      "worker_ms": 5.7548828125,
+      "render_ms": 23.800048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 194,
+      "release_ms": 150.5,
+      "wire_received": 19647,
+      "wire_sent": 244,
+      "input_delay_ms": 12.10009765625,
+      "run": 2,
+      "gesture_ms": 43.5,
+      "dispatch_ms": 35.01904296875,
+      "network_authority_ms": 83.9951171875,
+      "worker_ms": 6.785888671875,
+      "render_ms": 24.699951171875
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 196.10009765625,
+      "release_ms": 150.900146484375,
+      "wire_received": 38807,
+      "wire_sent": 251,
+      "input_delay_ms": 13.89990234375,
+      "run": 2,
+      "gesture_ms": 45.199951171875,
+      "dispatch_ms": 22.010009765625,
+      "network_authority_ms": 99.39404296875,
+      "worker_ms": 11.99609375,
+      "render_ms": 17.5
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 208.199951171875,
+      "release_ms": 159.39990234375,
+      "wire_received": 18509,
+      "wire_sent": 244,
+      "input_delay_ms": 16.300048828125,
+      "run": 2,
+      "gesture_ms": 48.800048828125,
+      "dispatch_ms": 33.742919921875,
+      "network_authority_ms": 77.5830078125,
+      "worker_ms": 6.573974609375,
+      "render_ms": 41.5
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 200,
+      "release_ms": 149.60009765625,
+      "wire_received": 9019,
+      "wire_sent": 259,
+      "input_delay_ms": 18,
+      "run": 2,
+      "gesture_ms": 50.39990234375,
+      "dispatch_ms": 41.822265625,
+      "network_authority_ms": 71.726806640625,
+      "worker_ms": 3.051025390625,
+      "render_ms": 33.0
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 282.699951171875,
+      "release_ms": 218.400146484375,
+      "wire_received": 18509,
+      "wire_sent": 244,
+      "input_delay_ms": 31.699951171875,
+      "run": 2,
+      "gesture_ms": 64.2998046875,
+      "dispatch_ms": 48.62109375,
+      "network_authority_ms": 79.818115234375,
+      "worker_ms": 13.660888671875,
+      "render_ms": 76.300048828125
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 187.5,
+      "release_ms": 149.2998046875,
+      "wire_received": 9049,
+      "wire_sent": 255,
+      "input_delay_ms": 5.60009765625,
+      "run": 2,
+      "gesture_ms": 38.2001953125,
+      "dispatch_ms": 34.516845703125,
+      "network_authority_ms": 89.218994140625,
+      "worker_ms": 3.364013671875,
+      "render_ms": 22.199951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 230.5,
+      "release_ms": 171.699951171875,
+      "wire_received": 18509,
+      "wire_sent": 244,
+      "input_delay_ms": 24.400146484375,
+      "run": 2,
+      "gesture_ms": 58.800048828125,
+      "dispatch_ms": 51.5361328125,
+      "network_authority_ms": 79.467041015625,
+      "worker_ms": 14.996826171875,
+      "render_ms": 25.699951171875
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "first-visit",
+      "tap_ms": 239.39990234375,
+      "release_ms": 187.10009765625,
+      "wire_received": 21668,
+      "wire_sent": 241,
+      "input_delay_ms": 17.89990234375,
+      "run": 3,
+      "gesture_ms": 52.2998046875,
+      "dispatch_ms": 33.536865234375,
+      "network_authority_ms": 86.196044921875,
+      "worker_ms": 36.46728515625,
+      "render_ms": 30.89990234375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 207.800048828125,
+      "release_ms": 166.199951171875,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 7.699951171875,
+      "run": 3,
+      "gesture_ms": 41.60009765625,
+      "dispatch_ms": 31.602783203125,
+      "network_authority_ms": 88.60302734375,
+      "worker_ms": 13.89404296875,
+      "render_ms": 32.10009765625
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 204.39990234375,
+      "release_ms": 169.800048828125,
+      "wire_received": 23315,
+      "wire_sent": 253,
+      "input_delay_ms": 2.699951171875,
+      "run": 3,
+      "gesture_ms": 34.599853515625,
+      "dispatch_ms": 36.5048828125,
+      "network_authority_ms": 90.614990234375,
+      "worker_ms": 9.980224609375,
+      "render_ms": 32.699951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 202.2001953125,
+      "release_ms": 157.800048828125,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 12.10009765625,
+      "run": 3,
+      "gesture_ms": 44.400146484375,
+      "dispatch_ms": 35.916748046875,
+      "network_authority_ms": 80.293212890625,
+      "worker_ms": 8.18994140625,
+      "render_ms": 33.400146484375
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 222.900146484375,
+      "release_ms": 182.400146484375,
+      "wire_received": 38810,
+      "wire_sent": 251,
+      "input_delay_ms": 8.300048828125,
+      "run": 3,
+      "gesture_ms": 40.5,
+      "dispatch_ms": 34.4609375,
+      "network_authority_ms": 100.6259765625,
+      "worker_ms": 14.313232421875,
+      "render_ms": 33.0
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 201,
+      "release_ms": 153.099853515625,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 16.300048828125,
+      "run": 3,
+      "gesture_ms": 47.900146484375,
+      "dispatch_ms": 18.460693359375,
+      "network_authority_ms": 80.77001953125,
+      "worker_ms": 10.669189453125,
+      "render_ms": 43.199951171875
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 193.89990234375,
+      "release_ms": 146.89990234375,
+      "wire_received": 9014,
+      "wire_sent": 259,
+      "input_delay_ms": 14.699951171875,
+      "run": 3,
+      "gesture_ms": 47.0,
+      "dispatch_ms": 35.688720703125,
+      "network_authority_ms": 85.4130859375,
+      "worker_ms": 5.09814453125,
+      "render_ms": 20.699951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 256.5,
+      "release_ms": 181.5,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 38.89990234375,
+      "run": 3,
+      "gesture_ms": 75.0,
+      "dispatch_ms": 49.4189453125,
+      "network_authority_ms": 82.657958984375,
+      "worker_ms": 7.322998046875,
+      "render_ms": 42.10009765625
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 187.900146484375,
+      "release_ms": 138.10009765625,
+      "wire_received": 9041,
+      "wire_sent": 255,
+      "input_delay_ms": 17.900146484375,
+      "run": 3,
+      "gesture_ms": 49.800048828125,
+      "dispatch_ms": 26.592041015625,
+      "network_authority_ms": 75.054931640625,
+      "worker_ms": 3.153076171875,
+      "render_ms": 33.300048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 250.300048828125,
+      "release_ms": 190.89990234375,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 25.2001953125,
+      "run": 3,
+      "gesture_ms": 59.400146484375,
+      "dispatch_ms": 53.763916015625,
+      "network_authority_ms": 80.97900390625,
+      "worker_ms": 13.35693359375,
+      "render_ms": 42.800048828125
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 234.400146484375,
+      "release_ms": 199.60009765625,
+      "wire_received": 21474,
+      "wire_sent": 273,
+      "input_delay_ms": 2.900146484375,
+      "run": 3,
+      "gesture_ms": 34.800048828125,
+      "dispatch_ms": 35.712890625,
+      "network_authority_ms": 82.41015625,
+      "worker_ms": 8.376953125,
+      "render_ms": 73.10009765625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 196.10009765625,
+      "release_ms": 156.7001953125,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 5.5,
+      "run": 3,
+      "gesture_ms": 39.39990234375,
+      "dispatch_ms": 33.68798828125,
+      "network_authority_ms": 79.783935546875,
+      "worker_ms": 11.028076171875,
+      "render_ms": 32.2001953125
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 188.400146484375,
+      "release_ms": 151.900146484375,
+      "wire_received": 23315,
+      "wire_sent": 253,
+      "input_delay_ms": 4.199951171875,
+      "run": 3,
+      "gesture_ms": 36.5,
+      "dispatch_ms": 37.093017578125,
+      "network_authority_ms": 82.27001953125,
+      "worker_ms": 8.136962890625,
+      "render_ms": 24.400146484375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 193.5,
+      "release_ms": 150.89990234375,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 10.60009765625,
+      "run": 3,
+      "gesture_ms": 42.60009765625,
+      "dispatch_ms": 35.855712890625,
+      "network_authority_ms": 79.503173828125,
+      "worker_ms": 9.841064453125,
+      "render_ms": 25.699951171875
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 211.300048828125,
+      "release_ms": 165.10009765625,
+      "wire_received": 38810,
+      "wire_sent": 251,
+      "input_delay_ms": 13.199951171875,
+      "run": 3,
+      "gesture_ms": 46.199951171875,
+      "dispatch_ms": 35.2890625,
+      "network_authority_ms": 96.640869140625,
+      "worker_ms": 14.97021484375,
+      "render_ms": 18.199951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 277,
+      "release_ms": 242.5,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 2.10009765625,
+      "run": 3,
+      "gesture_ms": 34.5,
+      "dispatch_ms": 35.265869140625,
+      "network_authority_ms": 80.51123046875,
+      "worker_ms": 10.52294921875,
+      "render_ms": 116.199951171875
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 173.5,
+      "release_ms": 132.39990234375,
+      "wire_received": 9014,
+      "wire_sent": 259,
+      "input_delay_ms": 8.60009765625,
+      "run": 3,
+      "gesture_ms": 41.10009765625,
+      "dispatch_ms": 34.65380859375,
+      "network_authority_ms": 71.528076171875,
+      "worker_ms": 7.41796875,
+      "render_ms": 18.800048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 234.599853515625,
+      "release_ms": 170.39990234375,
+      "wire_received": 18523,
+      "wire_sent": 244,
+      "input_delay_ms": 29,
+      "run": 3,
+      "gesture_ms": 64.199951171875,
+      "dispatch_ms": 45.2177734375,
+      "network_authority_ms": 83.7490234375,
+      "worker_ms": 9.43310546875,
+      "render_ms": 32.0
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 151.199951171875,
+      "release_ms": 117,
+      "wire_received": 9041,
+      "wire_sent": 255,
+      "input_delay_ms": 2.300048828125,
+      "run": 3,
+      "gesture_ms": 34.199951171875,
+      "dispatch_ms": 19.341796875,
+      "network_authority_ms": 75.421142578125,
+      "worker_ms": 4.93701171875,
+      "render_ms": 17.300048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 304.800048828125,
+      "release_ms": 244.699951171875,
+      "wire_received": 18527,
+      "wire_sent": 244,
+      "input_delay_ms": 28,
+      "run": 3,
+      "gesture_ms": 60.10009765625,
+      "dispatch_ms": 53.9677734375,
+      "network_authority_ms": 80.296142578125,
+      "worker_ms": 8.736083984375,
+      "render_ms": 101.699951171875
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "first-visit",
+      "tap_ms": 229.800048828125,
+      "release_ms": 180.800048828125,
+      "wire_received": 21694,
+      "wire_sent": 241,
+      "input_delay_ms": 14.599853515625,
+      "run": 4,
+      "gesture_ms": 49.0,
+      "dispatch_ms": 31.69091796875,
+      "network_authority_ms": 90.212158203125,
+      "worker_ms": 32.69677734375,
+      "render_ms": 26.2001953125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 212.60009765625,
+      "release_ms": 178,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 3,
+      "run": 4,
+      "gesture_ms": 34.60009765625,
+      "dispatch_ms": 19.658935546875,
+      "network_authority_ms": 78.43505859375,
+      "worker_ms": 12.7060546875,
+      "render_ms": 67.199951171875
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 270.10009765625,
+      "release_ms": 229.199951171875,
+      "wire_received": 23318,
+      "wire_sent": 253,
+      "input_delay_ms": 8.7001953125,
+      "run": 4,
+      "gesture_ms": 40.900146484375,
+      "dispatch_ms": 38.587890625,
+      "network_authority_ms": 135.046142578125,
+      "worker_ms": 23.166015625,
+      "render_ms": 32.39990234375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 341.5,
+      "release_ms": 306.400146484375,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 2.099853515625,
+      "run": 4,
+      "gesture_ms": 35.099853515625,
+      "dispatch_ms": 34.37109375,
+      "network_authority_ms": 130.025146484375,
+      "worker_ms": 23.303955078125,
+      "render_ms": 118.699951171875
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 4430.800048828125,
+      "release_ms": 4326.60009765625,
+      "wire_received": 38809,
+      "wire_sent": 251,
+      "input_delay_ms": 8.5,
+      "run": 4,
+      "gesture_ms": 104.199951171875,
+      "dispatch_ms": 3180.366943359375,
+      "network_authority_ms": 1049.343017578125,
+      "worker_ms": 25.989990234375,
+      "render_ms": 70.900146484375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 383.699951171875,
+      "release_ms": 281.39990234375,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 17.89990234375,
+      "run": 4,
+      "gesture_ms": 102.300048828125,
+      "dispatch_ms": 41.371826171875,
+      "network_authority_ms": 160.4541015625,
+      "worker_ms": 26.473876953125,
+      "render_ms": 53.10009765625
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 344,
+      "release_ms": 302.60009765625,
+      "wire_received": 9012,
+      "wire_sent": 259,
+      "input_delay_ms": 8,
+      "run": 4,
+      "gesture_ms": 41.39990234375,
+      "dispatch_ms": 37.694091796875,
+      "network_authority_ms": 231.43408203125,
+      "worker_ms": 5.871826171875,
+      "render_ms": 27.60009765625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 1024.599853515625,
+      "release_ms": 967,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 23.89990234375,
+      "run": 4,
+      "gesture_ms": 57.599853515625,
+      "dispatch_ms": 48.758056640625,
+      "network_authority_ms": 781.469970703125,
+      "worker_ms": 78.47216796875,
+      "render_ms": 58.2998046875
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 584,
+      "release_ms": 371.800048828125,
+      "wire_received": 9028,
+      "wire_sent": 255,
+      "input_delay_ms": 5.699951171875,
+      "run": 4,
+      "gesture_ms": 212.199951171875,
+      "dispatch_ms": 68.069091796875,
+      "network_authority_ms": 267.798095703125,
+      "worker_ms": 4.932861328125,
+      "render_ms": 31.0
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 1801.699951171875,
+      "release_ms": 1583.2998046875,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 31.5,
+      "run": 4,
+      "gesture_ms": 218.400146484375,
+      "dispatch_ms": 1105.745849609375,
+      "network_authority_ms": 147.9140625,
+      "worker_ms": 26.239990234375,
+      "render_ms": 303.39990234375
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 220.39990234375,
+      "release_ms": 183.10009765625,
+      "wire_received": 21500,
+      "wire_sent": 273,
+      "input_delay_ms": 3.099853515625,
+      "run": 4,
+      "gesture_ms": 37.2998046875,
+      "dispatch_ms": 33.460205078125,
+      "network_authority_ms": 87.930908203125,
+      "worker_ms": 12.10888671875,
+      "render_ms": 49.60009765625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 200.199951171875,
+      "release_ms": 162.199951171875,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 5.800048828125,
+      "run": 4,
+      "gesture_ms": 38.0,
+      "dispatch_ms": 34.845947265625,
+      "network_authority_ms": 79.295166015625,
+      "worker_ms": 11.2587890625,
+      "render_ms": 36.800048828125
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 190.2998046875,
+      "release_ms": 150.599853515625,
+      "wire_received": 23315,
+      "wire_sent": 253,
+      "input_delay_ms": 6.5,
+      "run": 4,
+      "gesture_ms": 39.699951171875,
+      "dispatch_ms": 34.12890625,
+      "network_authority_ms": 84.529052734375,
+      "worker_ms": 9.14208984375,
+      "render_ms": 22.7998046875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 428.5,
+      "release_ms": 379.89990234375,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 15.7001953125,
+      "run": 4,
+      "gesture_ms": 48.60009765625,
+      "dispatch_ms": 38.054931640625,
+      "network_authority_ms": 249.05615234375,
+      "worker_ms": 37.788818359375,
+      "render_ms": 55.0
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 957.800048828125,
+      "release_ms": 724.2001953125,
+      "wire_received": 38809,
+      "wire_sent": 251,
+      "input_delay_ms": 74.89990234375,
+      "run": 4,
+      "gesture_ms": 233.599853515625,
+      "dispatch_ms": 66.47412109375,
+      "network_authority_ms": 259.889892578125,
+      "worker_ms": 233.635986328125,
+      "render_ms": 164.2001953125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 447.699951171875,
+      "release_ms": 362.39990234375,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 32.099853515625,
+      "run": 4,
+      "gesture_ms": 85.300048828125,
+      "dispatch_ms": 46.5,
+      "network_authority_ms": 234.47802734375,
+      "worker_ms": 19.921875,
+      "render_ms": 61.5
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 165.400146484375,
+      "release_ms": 118.900146484375,
+      "wire_received": 9012,
+      "wire_sent": 259,
+      "input_delay_ms": 15.10009765625,
+      "run": 4,
+      "gesture_ms": 46.5,
+      "dispatch_ms": 19.76904296875,
+      "network_authority_ms": 72.564208984375,
+      "worker_ms": 3.366943359375,
+      "render_ms": 23.199951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 432.300048828125,
+      "release_ms": 336.400146484375,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 38,
+      "run": 4,
+      "gesture_ms": 95.89990234375,
+      "dispatch_ms": 70.114013671875,
+      "network_authority_ms": 90.6171875,
+      "worker_ms": 26.768798828125,
+      "render_ms": 148.900146484375
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 259.099853515625,
+      "release_ms": 210.5,
+      "wire_received": 9028,
+      "wire_sent": 255,
+      "input_delay_ms": 14.099853515625,
+      "run": 4,
+      "gesture_ms": 48.599853515625,
+      "dispatch_ms": 54.72314453125,
+      "network_authority_ms": 93.81396484375,
+      "worker_ms": 18.06298828125,
+      "render_ms": 43.89990234375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 3454.300048828125,
+      "release_ms": 3247.10009765625,
+      "wire_received": 18505,
+      "wire_sent": 244,
+      "input_delay_ms": 26.800048828125,
+      "run": 4,
+      "gesture_ms": 207.199951171875,
+      "dispatch_ms": 3019.697021484375,
+      "network_authority_ms": 108.88818359375,
+      "worker_ms": 14.61474609375,
+      "render_ms": 103.900146484375
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "first-visit",
+      "tap_ms": 276.800048828125,
+      "release_ms": 234.5,
+      "wire_received": 21691,
+      "wire_sent": 241,
+      "input_delay_ms": 7.5,
+      "run": 5,
+      "gesture_ms": 42.300048828125,
+      "dispatch_ms": 32.0107421875,
+      "network_authority_ms": 82.3740234375,
+      "worker_ms": 34.115234375,
+      "render_ms": 86.0
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 205,
+      "release_ms": 162.900146484375,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 9.89990234375,
+      "run": 5,
+      "gesture_ms": 42.099853515625,
+      "dispatch_ms": 35.9619140625,
+      "network_authority_ms": 79.77587890625,
+      "worker_ms": 16.3623046875,
+      "render_ms": 30.800048828125
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 278.89990234375,
+      "release_ms": 234.099853515625,
+      "wire_received": 23320,
+      "wire_sent": 253,
+      "input_delay_ms": 12.60009765625,
+      "run": 5,
+      "gesture_ms": 44.800048828125,
+      "dispatch_ms": 37.884765625,
+      "network_authority_ms": 90.22900390625,
+      "worker_ms": 21.2861328125,
+      "render_ms": 84.699951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 201.39990234375,
+      "release_ms": 160.7998046875,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 8.39990234375,
+      "run": 5,
+      "gesture_ms": 40.60009765625,
+      "dispatch_ms": 18.5927734375,
+      "network_authority_ms": 84.3330078125,
+      "worker_ms": 16.174072265625,
+      "render_ms": 41.699951171875
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 224.39990234375,
+      "release_ms": 183.599853515625,
+      "wire_received": 38805,
+      "wire_sent": 251,
+      "input_delay_ms": 9,
+      "run": 5,
+      "gesture_ms": 40.800048828125,
+      "dispatch_ms": 36.42578125,
+      "network_authority_ms": 102.283935546875,
+      "worker_ms": 14.39013671875,
+      "render_ms": 30.5
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 194,
+      "release_ms": 157.5,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 4,
+      "run": 5,
+      "gesture_ms": 36.5,
+      "dispatch_ms": 34.918701171875,
+      "network_authority_ms": 79.2919921875,
+      "worker_ms": 9.4892578125,
+      "render_ms": 33.800048828125
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 199.5,
+      "release_ms": 149,
+      "wire_received": 9016,
+      "wire_sent": 259,
+      "input_delay_ms": 17.800048828125,
+      "run": 5,
+      "gesture_ms": 50.5,
+      "dispatch_ms": 37.124755859375,
+      "network_authority_ms": 79.64697265625,
+      "worker_ms": 5.92822265625,
+      "render_ms": 26.300048828125
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 305.800048828125,
+      "release_ms": 249.2001953125,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 23.89990234375,
+      "run": 5,
+      "gesture_ms": 56.599853515625,
+      "dispatch_ms": 111.69482421875,
+      "network_authority_ms": 83.198974609375,
+      "worker_ms": 16.40625,
+      "render_ms": 37.900146484375
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "first-visit",
+      "tap_ms": 196.199951171875,
+      "release_ms": 149.60009765625,
+      "wire_received": 9043,
+      "wire_sent": 255,
+      "input_delay_ms": 14.199951171875,
+      "run": 5,
+      "gesture_ms": 46.599853515625,
+      "dispatch_ms": 36.058837890625,
+      "network_authority_ms": 77.215087890625,
+      "worker_ms": 4.626220703125,
+      "render_ms": 31.699951171875
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 244.699951171875,
+      "release_ms": 188.5,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 21.300048828125,
+      "run": 5,
+      "gesture_ms": 56.199951171875,
+      "dispatch_ms": 49.7138671875,
+      "network_authority_ms": 79.36083984375,
+      "worker_ms": 29.8251953125,
+      "render_ms": 29.60009765625
+    },
+    {
+      "label": "Component Playground",
+      "ui": "app:component-playground/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 200.699951171875,
+      "release_ms": 154,
+      "wire_received": 21475,
+      "wire_sent": 273,
+      "input_delay_ms": 14.7998046875,
+      "run": 5,
+      "gesture_ms": 46.699951171875,
+      "dispatch_ms": 35.57568359375,
+      "network_authority_ms": 80.615966796875,
+      "worker_ms": 9.308349609375,
+      "render_ms": 28.5
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 191.599853515625,
+      "release_ms": 155.800048828125,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 3.39990234375,
+      "run": 5,
+      "gesture_ms": 35.7998046875,
+      "dispatch_ms": 33.94580078125,
+      "network_authority_ms": 84.196044921875,
+      "worker_ms": 8.158203125,
+      "render_ms": 29.5
+    },
+    {
+      "label": "Layout Lab",
+      "ui": "app:layout-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 215.300048828125,
+      "release_ms": 161.5,
+      "wire_received": 23322,
+      "wire_sent": 253,
+      "input_delay_ms": 21.10009765625,
+      "run": 5,
+      "gesture_ms": 53.800048828125,
+      "dispatch_ms": 33.582763671875,
+      "network_authority_ms": 87.177001953125,
+      "worker_ms": 10.740234375,
+      "render_ms": 30.0
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 189,
+      "release_ms": 147.39990234375,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 7.60009765625,
+      "run": 5,
+      "gesture_ms": 41.60009765625,
+      "dispatch_ms": 30.872802734375,
+      "network_authority_ms": 79.97998046875,
+      "worker_ms": 13.7470703125,
+      "render_ms": 22.800048828125
+    },
+    {
+      "label": "Input Lab",
+      "ui": "app:input-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 215.699951171875,
+      "release_ms": 167.699951171875,
+      "wire_received": 38805,
+      "wire_sent": 251,
+      "input_delay_ms": 16.10009765625,
+      "run": 5,
+      "gesture_ms": 48.0,
+      "dispatch_ms": 35.78076171875,
+      "network_authority_ms": 99.965087890625,
+      "worker_ms": 10.4541015625,
+      "render_ms": 21.5
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 262.39990234375,
+      "release_ms": 226.5,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 3.800048828125,
+      "run": 5,
+      "gesture_ms": 35.89990234375,
+      "dispatch_ms": 17.415771484375,
+      "network_authority_ms": 77.97802734375,
+      "worker_ms": 13.106201171875,
+      "render_ms": 118.0
+    },
+    {
+      "label": "Animation Lab",
+      "ui": "app:animation-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 166.599853515625,
+      "release_ms": 130.39990234375,
+      "wire_received": 9016,
+      "wire_sent": 259,
+      "input_delay_ms": 4.5,
+      "run": 5,
+      "gesture_ms": 36.199951171875,
+      "dispatch_ms": 32.667724609375,
+      "network_authority_ms": 75.156982421875,
+      "worker_ms": 3.475341796875,
+      "render_ms": 19.099853515625
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 234.89990234375,
+      "release_ms": 175.699951171875,
+      "wire_received": 18502,
+      "wire_sent": 244,
+      "input_delay_ms": 24.60009765625,
+      "run": 5,
+      "gesture_ms": 59.199951171875,
+      "dispatch_ms": 50.221923828125,
+      "network_authority_ms": 83.81787109375,
+      "worker_ms": 9.66015625,
+      "render_ms": 32.0
+    },
+    {
+      "label": "3D Lab",
+      "ui": "app:three-d-lab/ui",
+      "phase": "repeat-visit",
+      "tap_ms": 177,
+      "release_ms": 132.300048828125,
+      "wire_received": 9043,
+      "wire_sent": 255,
+      "input_delay_ms": 12,
+      "run": 5,
+      "gesture_ms": 44.699951171875,
+      "dispatch_ms": 34.3486328125,
+      "network_authority_ms": 71.9970703125,
+      "worker_ms": 3.55419921875,
+      "render_ms": 22.400146484375
+    },
+    {
+      "label": "Home",
+      "ui": "app:home/ui",
+      "phase": "return",
+      "tap_ms": 253.300048828125,
+      "release_ms": 197,
+      "wire_received": 18504,
+      "wire_sent": 244,
+      "input_delay_ms": 24.5,
+      "run": 5,
+      "gesture_ms": 56.300048828125,
+      "dispatch_ms": 52.105712890625,
+      "network_authority_ms": 87.660888671875,
+      "worker_ms": 12.533203125,
+      "render_ms": 44.7001953125
+    }
+  ],
+  "home_return_release_ms": {
+    "n": 50,
+    "median": 176.85,
+    "min": 136,
+    "max": 3247.1,
+    "samples": [
+      166.3,
+      174.5,
+      204.8,
+      187,
+      275,
+      161.3,
+      136,
+      151.9,
+      275.2,
+      229,
+      140.6,
+      166.9,
+      160.9,
+      233.3,
+      293.3,
+      154.7,
+      150.5,
+      159.4,
+      218.4,
+      171.7,
+      166.2,
+      157.8,
+      153.1,
+      181.5,
+      190.9,
+      156.7,
+      150.9,
+      242.5,
+      170.4,
+      244.7,
+      178,
+      306.4,
+      281.4,
+      967,
+      1583.3,
+      162.2,
+      379.9,
+      362.4,
+      336.4,
+      3247.1,
+      162.9,
+      160.8,
+      157.5,
+      249.2,
+      188.5,
+      155.8,
+      147.4,
+      226.5,
+      175.7,
+      197
+    ]
+  },
+  "wasm": {
+    "decoded_sha256": "9b1ba418ff3eb0e1697350707e25cf1c0a9c543fc0a109386ea48e01211ffc65",
+    "decoded_bytes": 2970576,
+    "before_wire_bytes": 777007,
+    "before_encoding": "br",
+    "after_wire_bytes": 831978,
+    "after_encoding": "gzip",
+    "origin_precompressed": true
+  },
+  "public_delivery": {
+    "before": {
+      "samples": [
+        {
+          "base": "http://127.0.0.1:8877",
+          "run": 1,
+          "headers_ms": 315.42510498547927,
+          "total_ms": 354.7919199918397,
+          "wire_bytes": 2970576,
+          "encoding": "identity",
+          "cf_cache_status": null,
+          "age": null
+        },
+        {
+          "base": "http://127.0.0.1:8877",
+          "run": 2,
+          "headers_ms": 29.404069995507598,
+          "total_ms": 77.11138104787096,
+          "wire_bytes": 2970576,
+          "encoding": "identity",
+          "cf_cache_status": null,
+          "age": null
+        },
+        {
+          "base": "https://otrios.otri.ca",
+          "run": 1,
+          "headers_ms": 241.8099309434183,
+          "total_ms": 4716.910782968625,
+          "wire_bytes": 777219,
+          "encoding": "br",
+          "cf_cache_status": "DYNAMIC",
+          "age": null
+        },
+        {
+          "base": "https://otrios.otri.ca",
+          "run": 2,
+          "headers_ms": 218.306566006504,
+          "total_ms": 4705.72331600124,
+          "wire_bytes": 777184,
+          "encoding": "br",
+          "cf_cache_status": "DYNAMIC",
+          "age": null
+        },
+        {
+          "base": "https://otrios.otri.ca",
+          "run": 3,
+          "headers_ms": 241.6378459893167,
+          "total_ms": 4342.443012981676,
+          "wire_bytes": 777202,
+          "encoding": "br",
+          "cf_cache_status": "DYNAMIC",
+          "age": null
+        }
+      ],
+      "public_total_ms": {
+        "n": 3,
+        "median": 4705.72,
+        "min": 4342.44,
+        "max": 4716.91,
+        "samples": [
+          4716.91,
+          4705.72,
+          4342.44
+        ]
+      },
+      "public_headers_ms": {
+        "n": 3,
+        "median": 241.64,
+        "min": 218.31,
+        "max": 241.81,
+        "samples": [
+          241.81,
+          218.31,
+          241.64
+        ]
+      },
+      "cf_cache_status": [
+        "DYNAMIC",
+        "DYNAMIC",
+        "DYNAMIC"
+      ]
+    },
+    "after": {
+      "samples": [
+        {
+          "base": "http://127.0.0.1:8877",
+          "run": 1,
+          "status": 200,
+          "headers_ms": 306.66013300651684,
+          "total_ms": 321.62435696227476,
+          "wire_bytes": 831978,
+          "encoding": "gzip",
+          "cf_cache_status": null,
+          "age": null,
+          "cache_control": "public, max-age=31536000, immutable",
+          "decoded_sha256": "9b1ba418ff3eb0e1697350707e25cf1c0a9c543fc0a109386ea48e01211ffc65"
+        },
+        {
+          "base": "http://127.0.0.1:8877",
+          "run": 2,
+          "status": 200,
+          "headers_ms": 14.870015031192452,
+          "total_ms": 26.25199599424377,
+          "wire_bytes": 831978,
+          "encoding": "gzip",
+          "cf_cache_status": null,
+          "age": null,
+          "cache_control": "public, max-age=31536000, immutable",
+          "decoded_sha256": "9b1ba418ff3eb0e1697350707e25cf1c0a9c543fc0a109386ea48e01211ffc65"
+        },
+        {
+          "base": "https://otrios.otri.ca",
+          "run": 1,
+          "status": 200,
+          "headers_ms": 230.90714000863954,
+          "total_ms": 2373.914047027938,
+          "wire_bytes": 831978,
+          "encoding": "gzip",
+          "cf_cache_status": "DYNAMIC",
+          "age": null,
+          "cache_control": "public, max-age=31536000, immutable",
+          "decoded_sha256": "9b1ba418ff3eb0e1697350707e25cf1c0a9c543fc0a109386ea48e01211ffc65"
+        },
+        {
+          "base": "https://otrios.otri.ca",
+          "run": 2,
+          "status": 200,
+          "headers_ms": 210.19563602749258,
+          "total_ms": 2380.3552099852823,
+          "wire_bytes": 831978,
+          "encoding": "gzip",
+          "cf_cache_status": "DYNAMIC",
+          "age": null,
+          "cache_control": "public, max-age=31536000, immutable",
+          "decoded_sha256": "9b1ba418ff3eb0e1697350707e25cf1c0a9c543fc0a109386ea48e01211ffc65"
+        },
+        {
+          "base": "https://otrios.otri.ca",
+          "run": 3,
+          "status": 200,
+          "headers_ms": 268.6449509928934,
+          "total_ms": 2062.9845149815083,
+          "wire_bytes": 831978,
+          "encoding": "gzip",
+          "cf_cache_status": "DYNAMIC",
+          "age": null,
+          "cache_control": "public, max-age=31536000, immutable",
+          "decoded_sha256": "9b1ba418ff3eb0e1697350707e25cf1c0a9c543fc0a109386ea48e01211ffc65"
+        }
+      ],
+      "public_total_ms": {
+        "n": 3,
+        "median": 2373.91,
+        "min": 2062.98,
+        "max": 2380.36,
+        "samples": [
+          2373.91,
+          2380.36,
+          2062.98
+        ]
+      }
+    },
+    "method": "sequential frame-to-public HTTPS Wasm reads; separate from replay, no mobile timing claim"
+  },
+  "cloudflare": {
+    "rule_applied": false,
+    "status": [
+      "DYNAMIC",
+      "DYNAMIC",
+      "DYNAMIC"
+    ],
+    "pending": "Cloudflare account/API access or dashboard application of prepared rule"
+  },
+  "native": {
+    "before": {
+      "authority": {
+        "app_roots": 7,
+        "catalogs": 1,
+        "ink_limit": 68,
+        "ink_subscribers": 0,
+        "peer_limits": [
+          4,
+          64
+        ],
+        "presentation": true,
+        "public_sessions": 0,
+        "release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+        "status": "ok",
+        "trusted_sessions": 1
+      },
+      "authority_pid": 13037,
+      "native": {
+        "pid": 13083,
+        "release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+        "ui_release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+        "runtime_release": "d9fa55ceab9782ef59b54d849b09730b448c479f862e87a066207f70a09a8e10",
+        "ui_updates": true,
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v3",
+        "screen": "",
+        "epoch": 1,
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct",
+        "runtime_resources": {
+          "behavior_cache_bytes": 0,
+          "behavior_cache_entries": 0,
+          "behavior_hash": null,
+          "dispatch": {
+            "issued_age_ms": null,
+            "issued_fields": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "pending_fields": 0,
+            "pending_payload_bytes": 0,
+            "ready_in_ms": null
+          },
+          "reflow_editing": false,
+          "reflow_order": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "sampled_monotonic_ms": 24634735,
+          "state": {
+            "replica_root_shared": true,
+            "selected_canonical_bytes": 2394,
+            "selected_nodes": 12
+          },
+          "wire": {
+            "buffer_grows": 0,
+            "compression_capacity": 0,
+            "decode_capacity": 0,
+            "table_capacity_bound": 0
+          }
+        }
+      }
+    },
+    "after": {
+      "authority": {
+        "app_roots": 7,
+        "catalogs": 1,
+        "ink_limit": 68,
+        "ink_subscribers": 0,
+        "peer_limits": [
+          4,
+          64
+        ],
+        "presentation": true,
+        "public_sessions": 0,
+        "release": "fe98da6b5478528c8abc07944d4df57a170268f6fccad1711f083f8fccf396b2",
+        "status": "ok",
+        "trusted_sessions": 1
+      },
+      "authority_pid": 17682,
+      "native": {
+        "pid": 17693,
+        "release": "fe98da6b5478528c8abc07944d4df57a170268f6fccad1711f083f8fccf396b2",
+        "ui_release": "fe98da6b5478528c8abc07944d4df57a170268f6fccad1711f083f8fccf396b2",
+        "runtime_release": "fe98da6b5478528c8abc07944d4df57a170268f6fccad1711f083f8fccf396b2",
+        "ui_updates": true,
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v3",
+        "screen": "",
+        "epoch": 1,
+        "stream_ready": true,
+        "state_confirmed": true,
+        "output": [
+          800,
+          1280
+        ],
+        "rotation": 90,
+        "renderer": "gles2-direct",
+        "runtime_resources": {
+          "behavior_cache_bytes": 0,
+          "behavior_cache_entries": 0,
+          "behavior_hash": null,
+          "dispatch": {
+            "issued_age_ms": null,
+            "issued_fields": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "pending_fields": 0,
+            "pending_payload_bytes": 0,
+            "ready_in_ms": null
+          },
+          "reflow_editing": false,
+          "reflow_order": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "sampled_monotonic_ms": 68,
+          "state": {
+            "replica_root_shared": true,
+            "selected_canonical_bytes": 2394,
+            "selected_nodes": 12
+          },
+          "wire": {
+            "buffer_grows": 1,
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0
+          }
+        }
+      }
+    }
+  },
+  "validation": {
+    "rust_tests": 186,
+    "python_checks": 41,
+    "javascript_tests": 49,
+    "compiled_module_memory_acceptance": true,
+    "arm_all_features_clippy_and_release_build": true,
+    "staged_http_checks": 101,
+    "public_https_checks": 98,
+    "cold_runs": 5,
+    "warm_runs": 5,
+    "app_taps": 50,
+    "home_returns": 50,
+    "publisher_signature_and_signed_asset_hashes": true,
+    "ui_republish_idempotent": true
+  },
+  "authority_binaries_sha256": {
+    "arm": "088bde7a8a6ca3d79b9247c198edc06ebee86e61d5706cdb455f63b61179c64e",
+    "replay": "06753fd04fbd5f0695074d481783eea45e7ad19ef7a7a318e0f000b2a5e496ae"
+  }
+}
