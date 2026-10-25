@@ -15,7 +15,8 @@ def main():
     lock=open('/run/otrios-display-trial.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     spec=importlib.util.spec_from_file_location('agent','/opt/otrios-dashboard/frame-dashboard-agent.py');agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
     matrix=agent.touch_calibration(pathlib.Path('/etc/udev/rules.d/99-spd-touch.rules'))
-    names=[n for n in ['otrios-dashboard-direct','otrios-dashboard','spd-weston','spd-browser'] if subprocess.run(['systemctl','cat',n],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0];active={n:subprocess.run(['systemctl','is-active','--quiet',n]).returncode==0 for n in names}
+    service='otrios-dashboard-direct.service'
+    active=subprocess.run(['systemctl','is-active','--quiet',service]).returncode==0
     kiosk=pwd.getpwnam('kiosk');a.output.mkdir(parents=True,exist_ok=True);os.chown(a.output,kiosk.pw_uid,kiosk.pw_gid);a.output.chmod(0o700)
     console=None;saved=None;results=[]
     def run(command,name,timeout):
@@ -30,7 +31,7 @@ def main():
                     try:child.wait(timeout=5)
                     except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
     try:
-        subprocess.run(['systemctl','stop',*names],check=True)
+        subprocess.run(['systemctl','stop',service],check=True)
         console=os.open('/dev/tty1',os.O_RDWR);buf=bytearray(4);fcntl.ioctl(console,0x4b3b,buf);saved=struct.unpack('i',buf)[0];fcntl.ioctl(console,0x4b3a,1)
         for fmt in a.format or ['xrgb8888','rgb565']:
             base=['runuser','-u','kiosk','--','env','HOME=/home/kiosk','OTRIOS_SCANOUT_FORMAT='+fmt,str(a.executable),'--apps',str(a.apps),'--rotation','90','--touch-matrix',matrix]
@@ -44,9 +45,7 @@ def main():
         if console is not None:
             if saved is not None:fcntl.ioctl(console,0x4b3a,saved)
             os.close(console)
-        subprocess.run(['systemctl','stop','spd-weston','spd-browser'],check=False)
-        for n in ['spd-weston','otrios-dashboard','spd-browser','otrios-dashboard-direct']:
-            if active.get(n,False):subprocess.run(['systemctl','start',n],check=True)
+        if active:subprocess.run(['systemctl','start',service],check=True)
         (a.output/'results.json').write_text(json.dumps({'development_binary_sha256':a.sha256,'measured_at_unix':time.time(),'scenarios':results},indent=2))
     print('COMPLETE; previous services restored',flush=True)
 if __name__=='__main__':main()

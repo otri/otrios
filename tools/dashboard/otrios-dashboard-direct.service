@@ -2,8 +2,7 @@
 # Direct native host; enable this service for boot after deployment acceptance.
 [Unit]
 Description=OTriOS direct KMS/GBM GLES2 dashboard
-After=otrios-authority.service otrios-dashboard.service spd-weston.service spd-browser.service tailscaled.service
-Conflicts=otrios-dashboard.service spd-weston.service spd-browser.service
+After=otrios-authority.service tailscaled.service
 Wants=tailscaled.service otrios-authority.service
 StartLimitIntervalSec=0
 

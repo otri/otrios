@@ -1,0 +1,153 @@
+{
+  "date": "2026-10-25",
+  "operation": "retire-legacy-kiosk-services",
+  "purged_packages": [
+    "seatd"
+  ],
+  "deleted_launchers": [
+    "/usr/lib/spd-kiosk/browser-wpe",
+    "/usr/lib/spd-kiosk/gate.py"
+  ],
+  "app_release_modified": false,
+  "app_state_modified": false,
+  "protected_services_restarted": false,
+  "checks": {
+    "rust_tests": 186,
+    "python_checks": 41
+  },
+  "before": {
+    "services": {
+      "otrios-authority.service": {
+        "ActiveState": "active",
+        "MainPID": "17900"
+      },
+      "otrios-dashboard-direct.service": {
+        "ActiveState": "active",
+        "MainPID": "13073"
+      },
+      "otrios-tunnel.service": {
+        "ActiveState": "active",
+        "MainPID": "272"
+      },
+      "tailscaled.service": {
+        "ActiveState": "active",
+        "MainPID": "250"
+      },
+      "spd-wpa.service": {
+        "ActiveState": "active",
+        "MainPID": "254"
+      }
+    },
+    "health": {
+      "8876": {
+        "http_status": 503,
+        "body": "State unavailable"
+      },
+      "8877": {
+        "http_status": 503,
+        "body": {
+          "release": "844fe3dc71aa5a4eedb6807cf789400fd9a699fa61c2854316ae35f64a62aba8",
+          "state_available": false,
+          "status": "state-unavailable"
+        }
+      }
+    },
+    "native": {
+      "pid": 17911,
+      "release": "",
+      "ui_release": "",
+      "ui_ref": "",
+      "state_ref": "",
+      "stream_ready": false,
+      "state_confirmed": false,
+      "output": [
+        800,
+        1280
+      ],
+      "rotation": 90
+    },
+    "order": []
+  },
+  "after": {
+    "services": {
+      "otrios-authority.service": {
+        "ActiveState": "active",
+        "MainPID": "17900"
+      },
+      "otrios-dashboard-direct.service": {
+        "ActiveState": "active",
+        "MainPID": "13073"
+      },
+      "otrios-tunnel.service": {
+        "ActiveState": "active",
+        "MainPID": "272"
+      },
+      "tailscaled.service": {
+        "ActiveState": "active",
+        "MainPID": "250"
+      },
+      "spd-wpa.service": {
+        "ActiveState": "active",
+        "MainPID": "254"
+      }
+    },
+    "health": {
+      "8876": {
+        "http_status": 503,
+        "body": "State unavailable"
+      },
+      "8877": {
+        "http_status": 503,
+        "body": {
+          "release": "844fe3dc71aa5a4eedb6807cf789400fd9a699fa61c2854316ae35f64a62aba8",
+          "state_available": false,
+          "status": "state-unavailable"
+        }
+      }
+    },
+    "native": {
+      "pid": 17911,
+      "release": "",
+      "ui_release": "",
+      "ui_ref": "",
+      "state_ref": "",
+      "stream_ready": false,
+      "state_confirmed": false,
+      "output": [
+        800,
+        1280
+      ],
+      "rotation": 90
+    },
+    "order": []
+  },
+  "removed": [
+    "spd-browser.service",
+    "spd-weston.service",
+    "spd-kiosk-gate.service",
+    "seatd.service"
+  ],
+  "verification": {
+    "removed_unit_load_states": {
+      "spd-browser.service": "not-found",
+      "spd-weston.service": "not-found",
+      "spd-kiosk-gate.service": "not-found",
+      "seatd.service": "not-found"
+    },
+    "ssh_sockets": {
+      "spd-ssh.socket": "active",
+      "spd-lan-ssh.socket": "active"
+    },
+    "systemd_analyze_verify_exit_code": 0,
+    "installed_native_unit_matches_repository_sha256": "b148a6a67f7089aa2b37c7872547204638c7ee35fc7e1473a9b6b1953c3f0752",
+    "legacy_unit_references_remaining": [],
+    "public_root": {
+      "status": 200,
+      "cache_control": "no-store"
+    },
+    "public_release": {
+      "status": 200,
+      "cache_control": "no-store"
+    }
+  }
+}
