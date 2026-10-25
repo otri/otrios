@@ -271,7 +271,7 @@ mod tests {
         let ui = |id, links| AppUi::new(id, id, schema("test", &[])).build(id, links);
         let parent = ui(
             "package-b",
-            vec![button("Child").navigate_to(Destination::app("package-c").route("signal"))],
+            vec![button("Child").navigate_to(Destination::app("package-c").route("detail"))],
         );
         let child = ui("package-c", vec![]);
         let owner = |name| {
@@ -284,7 +284,7 @@ mod tests {
             format: "otrios-app-catalog-v1".into(),
             apps: vec![],
         };
-        for document in [owner("layout-lab"), parent, child] {
+        for document in [owner("fixture"), parent, child] {
             let id = document
                 .ui_ref
                 .strip_prefix("app:")
@@ -307,17 +307,17 @@ mod tests {
                 .iter()
                 .map(|e| e.path.as_str())
                 .collect::<Vec<_>>(),
-            ["", "layout-lab", "layout-lab/signal"]
+            ["", "fixture", "fixture/detail"]
         );
         let child_bytes = fs::read(root.join("package-c/package/ui.flex")).unwrap();
-        compatible_ui(&owner("layout-lab"), &owner("layouts")).unwrap();
+        compatible_ui(&owner("fixture"), &owner("renamed")).unwrap();
         write_changed(
             &root.join("package-a/package/ui.flex"),
-            &encode_ui(&owner("layouts")).unwrap(),
+            &encode_ui(&owner("renamed")).unwrap(),
         )
         .unwrap();
         resolve_paths(&root, &mut catalog).unwrap();
-        assert_eq!(catalog.apps[2].path, "layouts/signal");
+        assert_eq!(catalog.apps[2].path, "renamed/detail");
         assert_eq!(
             fs::read(root.join("package-c/package/ui.flex")).unwrap(),
             child_bytes

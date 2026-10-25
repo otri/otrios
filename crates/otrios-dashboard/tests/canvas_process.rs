@@ -52,6 +52,41 @@ impl Server {
                 .unwrap()
                 .success()
         );
+        // The shipped catalog has only real apps. Add a child exclusively to
+        // this disposable fixture to retain process-level nested State coverage.
+        let mut catalog =
+            decode_catalog(&std::fs::read(root.join("apps/catalog.flex")).unwrap()).unwrap();
+        assert_eq!(catalog.apps.len(), 7);
+        assert!(catalog.apps.iter().all(|entry| !entry.path.contains('/')));
+        let parent = catalog
+            .apps
+            .iter()
+            .find(|entry| entry.app.id == "layout-lab")
+            .unwrap()
+            .clone();
+        let mut child =
+            decode_ui(&std::fs::read(root.join("apps/layout-lab/package/ui.flex")).unwrap())
+                .unwrap();
+        child.ui_ref = "app:layout-lab/test-detail/ui".into();
+        let mut app = parent.app;
+        app.id = "layout-lab/test-detail".into();
+        app.ui_ref = child.ui_ref.clone();
+        let bytes = encode_ui(&child).unwrap();
+        let folder = root.join("apps/layout-lab/test-detail/package");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("ui.flex"), &bytes).unwrap();
+        std::fs::write(folder.join("app.flex"), encode_app(&app).unwrap()).unwrap();
+        catalog.apps.push(CatalogEntry {
+            app,
+            path: "layout-lab/test-detail".into(),
+            ui_hash: hash(&bytes),
+            private: false,
+        });
+        std::fs::write(
+            root.join("apps/catalog.flex"),
+            encode_catalog(&catalog).unwrap(),
+        )
+        .unwrap();
         let port = TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -243,8 +278,8 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
     );
 
     // Nested screens mount their own UI against the same admitted durable State.
-    let mut cards = server.peer("app:layout-lab/cards/ui", "app:layout-lab/state");
-    assert_eq!(cards.c.path(), "layout-lab/cards");
+    let mut cards = server.peer("app:layout-lab/test-detail/ui", "app:layout-lab/state");
+    assert_eq!(cards.c.path(), "layout-lab/test-detail");
     edit(&mut cards.c, "Panel width", 720);
     cards.settle();
     layout.settle();
