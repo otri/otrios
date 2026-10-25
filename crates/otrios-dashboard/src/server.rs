@@ -555,12 +555,8 @@ async fn release_asset(
                             header::VARY,
                             header::HeaderValue::from_static("Accept-Encoding"),
                         );
-                        h.insert(
-                            header::CACHE_CONTROL,
-                            header::HeaderValue::from_static(
-                                "public, max-age=31536000, immutable, no-transform",
-                            ),
-                        );
+                        // The edge may normalize Accept-Encoding on the origin
+                        // request. Allow it to adapt gzip for the actual client.
                         return response;
                     }
                 }

@@ -101,7 +101,12 @@ try{
   function leaveLogin(){command({type:'navigate',screen:null});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  worker.postMessage({type:'start',wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,screen:restoreScreen()});
+  const start={type:'start',wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,screen:restoreScreen()};
+  try{worker.postMessage(start);}catch(error){
+    // Older engines may instantiate Wasm but reject cloning compiled modules.
+    if(error.name!=='DataCloneError')throw error;
+    delete start.wasmModule;worker.postMessage(start);
+  }
   const pointers=new Set(),moves=new Map();
   function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,performance.now()]};}
   canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
