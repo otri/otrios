@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Public UI cache and iPad timing qualification
 
-2026-10-25. Signed full-runtime candidate `f469a04009c0b8085eec6902059bb744d439f9d5908bf539a9f541143e9def59`.
+2026-10-25. Deployed signed full runtime `f469a04009c0b8085eec6902059bb744d439f9d5908bf539a9f541143e9def59`.
 See [RFC 0016](../rfcs/0016-ui-cache-and-navigation-timings.md) and
 [measurement data](data/ui-cache-navigation-timings.json).
 
@@ -64,6 +64,18 @@ work when another long navigation occurs.
 
 ## Deployment
 
-Full deployment and native/public readiness are verified after activation; a
-UI-only publish is insufficient because this release changes the state codec.
-The Cloudflare cache-rule task remains separate.
+The complete signed browser/native/server/helper bundle was deployed over pinned
+SSH. The public HTTPS site passed 97 checks after activation. Authority and native
+both report the release above; trusted/public health return HTTP 200. The four
+authority, direct-display, tunnel and Monitoring-timer services are active.
+
+Native readiness confirms Home `app:home/ui`, State `app:home/state-v3`, connected
+and confirmed, 800 × 1280 output at rotation 90. It reports one cached public UI
+(41,963 canonical bytes). Home card order remains `[1,2,3,4,5,6]`, matching the
+pre-deployment sample, and all seven durable app roots remain present. The
+configured publisher-key fingerprint is unchanged. A UI-only publish would have
+been insufficient because this release changes the state codec.
+
+Actual iPad/Safari validation of the timing panel remains a user check; the
+automated rendering tests used Chromium. The Cloudflare cache-rule task remains
+separate.

@@ -656,7 +656,15 @@
       "wire_received": 2479
     }
   ],
-  "on_device_report_acceptance": {
+  "checks": [
+    "startup and tap through draw plus next RAF",
+    "phase timings across real worker and WebSocket",
+    "all five public apps have smaller repeat mount responses",
+    "local edits do not record navigation",
+    "query survives navigation",
+    "no panel by default"
+  ],
+  "browser_diagnostic_report": {
     "format": "otrios-navigation-timings-v1",
     "completion": "UI and controls installed, GL draw submitted, next animation frame (not physical display latency)",
     "milestonesMs": {
@@ -1126,12 +1134,28 @@
       }
     ]
   },
-  "checks": [
-    "startup and tap through draw plus next RAF",
-    "phase timings across real worker and WebSocket",
-    "all five public apps have smaller repeat mount responses",
-    "local edits do not record navigation",
-    "query survives navigation",
-    "no panel by default"
-  ]
+  "deployment": {
+    "public_https_checks": 97,
+    "authority_release": "f469a04009c0b8085eec6902059bb744d439f9d5908bf539a9f541143e9def59",
+    "native_release": "f469a04009c0b8085eec6902059bb744d439f9d5908bf539a9f541143e9def59",
+    "app_roots": 7,
+    "native_stream_ready": true,
+    "native_state_confirmed": true,
+    "native_output": [
+      800,
+      1280
+    ],
+    "native_rotation": 90,
+    "native_ui_cache_entries": 1,
+    "native_ui_cache_bytes": 41963,
+    "home_order_before_and_after": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "actual_ipad_validation": "pending"
+  }
 }
