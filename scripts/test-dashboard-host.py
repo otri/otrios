@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Public code/demo and private Monitoring conformance. Never logs credentials."""
-import argparse,base64,hashlib,http.client,json,pathlib,secrets,socket,urllib.parse
+import argparse,base64,gzip,hashlib,http.client,json,pathlib,secrets,socket,urllib.parse
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--credentials',type=pathlib.Path);p.add_argument('--public-only',action='store_true',help='Skip authenticated login checks');p.add_argument('--connect-ip',help='DNS override retaining TLS hostname verification');p.add_argument('--state-unavailable',action='store_true');a=p.parse_args()
@@ -34,6 +34,18 @@ def main():
         if name.endswith('.wasm'):assert headers.get('Content-Type')=='application/wasm'
         if name.endswith('artifact-cache-worker.js'):assert headers.get('Service-Worker-Allowed')=='/'
         count+=1
+    wasm='web/pkg/otrios_dashboard_bg.wasm'
+    if wasm+'.gz' in manifest['assets']:
+        status,headers,packed=request(prefix+wasm,extra={'Accept-Encoding':'gzip'})
+        assert status==200 and headers.get('Content-Encoding')=='gzip'
+        decoded=gzip.decompress(packed);assert hashlib.sha256(decoded).hexdigest()==manifest['assets'][wasm]['sha256']
+        assert 'accept-encoding' in headers.get('Vary','').lower();count+=1
+        # A CDN normalizes origin request encodings. Check the origin parser
+        # directly; the public identity path is covered by the asset loop above.
+        for encoding in (['gzip;q=0','xgzip','gzip;q=invalid'] if url.scheme=='http' else []):
+            status,headers,identity=request(prefix+wasm,extra={'Accept-Encoding':encoding})
+            assert status==200 and headers.get('Content-Encoding') is None
+            assert hashlib.sha256(identity).hexdigest()==manifest['assets'][wasm]['sha256'];count+=1
     assert manifest['state_schema']=='otrios-canvas-merkle-state-v1' and manifest['sync_protocol']=='otrios-canvas-sync-v4';count+=1
     assert 'apps/catalog.flex' in manifest['assets'];count+=1
     for name in manifest.get('authority',{}):

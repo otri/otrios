@@ -559,9 +559,18 @@ async fn emit(
     message: ServerMessage,
     private: bool,
 ) -> bool {
-    let Ok(bytes) = canvas::encode_server(&message) else {
+    let Ok(mut bytes) = canvas::encode_server(&message) else {
         return false;
     };
+    // UI/code mounts are bulk transfers. Keep interactive state deltas raw;
+    // sync-v4 already supports independent bounded LZ4 blocks on both clients.
+    if matches!(message, ServerMessage::Mounted { .. }) && bytes.len() >= 8 * 1024 {
+        let mut compressed = Vec::new();
+        if canvas::compress_packet_into(&bytes, &mut compressed).is_err() {
+            return false;
+        }
+        bytes = compressed;
+    }
     matches!(
         tokio::time::timeout(
             Duration::from_secs(2),

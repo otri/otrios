@@ -106,6 +106,15 @@ fn frame(series: bool, update: bool) -> Vec<u8> {
     }
 }
 fn main() {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        assert!(
+            args.len() == 2 && args[0] == "--app-release",
+            "Use --app-release RELEASE_DIRECTORY, or no arguments for state-frame costs"
+        );
+        mount_cost(std::path::Path::new(&args[1]));
+        return;
+    }
     for repetition in 0..3 {
         for (name, frame) in [
             ("scalar-delta", frame(false, true)),
@@ -195,5 +204,57 @@ fn main() {
                 packed.len()
             );
         }
+    }
+}
+
+/// Size/codec costs of admitted public UI+code packets. State bytes, network,
+/// filesystem access, UI interpretation and authority durability are excluded.
+fn mount_cost(release: &std::path::Path) {
+    let catalog =
+        decode_catalog(&std::fs::read(release.join("apps/catalog.flex")).unwrap()).unwrap();
+    for entry in catalog.apps.iter().filter(|entry| !entry.private) {
+        let folder = release.join("authority/apps").join(&entry.app.id);
+        let ui = std::fs::read(folder.join("ui.flex")).unwrap();
+        assert_eq!(hash(&ui), entry.ui_hash);
+        let description = decode_ui(&ui).unwrap();
+        let code = if let Some(reference) = &description.behavior {
+            let code = std::fs::read(folder.join("behavior.wasm")).unwrap();
+            assert_eq!(hash(&code), reference.sha256);
+            code
+        } else {
+            vec![]
+        };
+        let ui_bytes = ui.len();
+        let code_bytes = code.len();
+        let message = ServerMessage::Mounted {
+            epoch: 1,
+            ui_hash: hash(&ui),
+            ui,
+            code,
+            state: vec![],
+        };
+        let raw = encode_server(&message).unwrap();
+        let mut packed = vec![];
+        let compressed = compress_packet_into(&raw, &mut packed).unwrap();
+        assert_eq!(decode_server(&packed).unwrap(), message);
+        let mut scratch = vec![];
+        let encode_us = cost(
+            || {
+                black_box(compress_packet_into(&raw, &mut scratch).unwrap());
+            },
+            100,
+        );
+        let decode_us = cost(
+            || {
+                black_box(decode_server(&packed).unwrap());
+            },
+            100,
+        );
+        println!(
+            "{{\"app\":{:?},\"ui_bytes\":{ui_bytes},\"code_bytes\":{code_bytes},\"raw_bytes\":{},\"lz4_bytes\":{},\"compressed\":{compressed},\"encode_us\":{encode_us:.3},\"decode_us\":{decode_us:.3}}}",
+            entry.app.id,
+            raw.len(),
+            packed.len()
+        );
     }
 }

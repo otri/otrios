@@ -421,6 +421,13 @@ async fn health(State(app): State<Arc<App>>) -> Response {
     binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":app.peer_limits[1]-app.public_peers.available_permits(),"trusted_sessions":app.peer_limits[0]-app.peers.available_permits(),"peer_limits":app.peer_limits,"ink_subscribers":app.ink.subscribers(),"ink_limit":app.peer_limits.iter().sum::<usize>(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
+    if let Some(source) = path.strip_suffix(".gz")
+        && source.starts_with("web/")
+        && !source.ends_with(".gz")
+        && asset_type(source).is_some()
+    {
+        return Some("application/gzip");
+    }
     match path {
         "index.html" | "web/index.html" => Some("text/html; charset=utf-8"),
         "app.js"
@@ -524,14 +531,75 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
 async fn release_asset(
     State(app): State<Arc<App>>,
     RoutePath((id, path)): RoutePath<(String, String)>,
+    headers: HeaderMap,
 ) -> Response {
     if !valid_id(&id) {
         return failure(StatusCode::NOT_FOUND, "Not found");
     }
     match (&app.releases, asset_type(&path)) {
-        (Some(root), Some(kind)) => serve_file(root.join(id).join(path), kind, true).await,
+        (Some(root), Some(kind)) => {
+            let folder = root.join(id);
+            if path.starts_with("web/") && !path.ends_with(".gz") {
+                if accepts_gzip(&headers) {
+                    let encoded = folder.join(format!("{path}.gz"));
+                    if let Ok(data) = tokio::fs::read(encoded).await
+                        && data.len() <= 32 * 1024 * 1024
+                    {
+                        let mut response = binary(kind, data, true);
+                        let h = response.headers_mut();
+                        h.insert(
+                            header::CONTENT_ENCODING,
+                            header::HeaderValue::from_static("gzip"),
+                        );
+                        h.insert(
+                            header::VARY,
+                            header::HeaderValue::from_static("Accept-Encoding"),
+                        );
+                        // The edge may normalize Accept-Encoding on the origin
+                        // request. Allow it to adapt gzip for the actual client.
+                        return response;
+                    }
+                }
+                let mut response = serve_file(folder.join(path), kind, true).await;
+                response.headers_mut().insert(
+                    header::VARY,
+                    header::HeaderValue::from_static("Accept-Encoding"),
+                );
+                response
+            } else {
+                serve_file(folder.join(path), kind, true).await
+            }
+        }
         _ => failure(StatusCode::NOT_FOUND, "Not found"),
     }
+}
+fn accepts_gzip(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .any(|value| {
+            value.to_str().unwrap_or("").split(',').any(|coding| {
+                let mut fields = coding.trim().split(';');
+                if !fields
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .eq_ignore_ascii_case("gzip")
+                {
+                    return false;
+                }
+                fields.all(|parameter| {
+                    let Some((key, value)) = parameter.trim().split_once('=') else {
+                        return false;
+                    };
+                    key.trim().eq_ignore_ascii_case("q")
+                        && value
+                            .trim()
+                            .parse::<f32>()
+                            .is_ok_and(|q| q > 0.0 && q <= 1.0)
+                })
+            })
+        })
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
