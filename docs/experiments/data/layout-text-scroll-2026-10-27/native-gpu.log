@@ -1,0 +1,110 @@
+<string>:7: DeprecationWarning: Python 3.14 will, by default, filter extracted tar archives and reject files or modify their metadata. Use the filter argument to control this behavior.
+SCALE 2
+
+running 6 tests
+test ffi::tests::mesa_color_transfer_matches_selected_pipeline_all_256_bytes ... ok
+test ffi::tests::mesa_partial_text_cache_preserves_fallback_order_and_viewport_clips ... ok
+test ffi::tests::mesa_real_roboto_coverage_survives_fp16_addresses_lines_and_rotation ... ok
+test ffi::tests::mesa_retained_geometry_and_alpha_pixels ... ok
+test ffi::tests::mesa_retained_text_viewports_match_clipped_meshes_and_reuse_coverage ... ok
+test ffi::tests::mesa_slug_quadratic_holes_cache_and_selected_color_pipeline ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 10.51s
+
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 7.886 ms; GPU buffer upload 1.204 ms total; recent hits 3
+Text probe GL renderer: Mali400
+Real Roboto 0deg: interior 187/187; exterior 764/764
+Text cache key preparation 9.472 ms; GPU buffer upload 0.283 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Real Roboto 90deg: interior 187/187; exterior 764/764
+Text cache key preparation 10.827 ms; GPU buffer upload 0.339 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Retained clip 0deg offset 0: maximum byte error 4
+Retained clip 0deg offset 0.25: maximum byte error 2
+Retained clip 0deg offset 20.5: maximum byte error 2
+Retained clip 0deg offset 110: maximum byte error 3
+Text cache key preparation 16.206 ms; GPU buffer upload 1.078 ms total; recent hits 181
+Text probe GL renderer: Mali400
+Retained clip 90deg offset 0: maximum byte error 4
+Retained clip 90deg offset 0.25: maximum byte error 2
+Retained clip 90deg offset 20.5: maximum byte error 2
+Retained clip 90deg offset 110: maximum byte error 3
+Text cache key preparation 25.302 ms; GPU buffer upload 1.152 ms total; recent hits 181
+Text probe GL renderer: Mali400
+Text cache key preparation 7.558 ms; GPU buffer upload 0.599 ms total; recent hits 2
+
+SCALE 3
+
+running 6 tests
+test ffi::tests::mesa_color_transfer_matches_selected_pipeline_all_256_bytes ... ok
+test ffi::tests::mesa_partial_text_cache_preserves_fallback_order_and_viewport_clips ... ok
+test ffi::tests::mesa_real_roboto_coverage_survives_fp16_addresses_lines_and_rotation ... ok
+test ffi::tests::mesa_retained_geometry_and_alpha_pixels ... ok
+test ffi::tests::mesa_retained_text_viewports_match_clipped_meshes_and_reuse_coverage ... ok
+test ffi::tests::mesa_slug_quadratic_holes_cache_and_selected_color_pipeline ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 11.23s
+
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 7.033 ms; GPU buffer upload 1.269 ms total; recent hits 3
+Text probe GL renderer: Mali400
+Real Roboto 0deg: interior 187/187; exterior 764/764
+Text cache key preparation 15.796 ms; GPU buffer upload 0.551 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Real Roboto 90deg: interior 187/187; exterior 764/764
+Text cache key preparation 10.005 ms; GPU buffer upload 0.343 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Retained clip 0deg offset 0: maximum byte error 4
+Retained clip 0deg offset 0.25: maximum byte error 2
+Retained clip 0deg offset 20.5: maximum byte error 2
+Retained clip 0deg offset 110: maximum byte error 3
+Text cache key preparation 16.902 ms; GPU buffer upload 1.125 ms total; recent hits 181
+Text probe GL renderer: Mali400
+Retained clip 90deg offset 0: maximum byte error 4
+Retained clip 90deg offset 0.25: maximum byte error 2
+Retained clip 90deg offset 20.5: maximum byte error 2
+Retained clip 90deg offset 110: maximum byte error 3
+Text cache key preparation 17.860 ms; GPU buffer upload 0.982 ms total; recent hits 181
+Text probe GL renderer: Mali400
+Text cache key preparation 7.582 ms; GPU buffer upload 0.593 ms total; recent hits 2
+
+SCALE 0
+
+running 6 tests
+test ffi::tests::mesa_color_transfer_matches_selected_pipeline_all_256_bytes ... ok
+test ffi::tests::mesa_partial_text_cache_preserves_fallback_order_and_viewport_clips ... ok
+test ffi::tests::mesa_real_roboto_coverage_survives_fp16_addresses_lines_and_rotation ... ok
+test ffi::tests::mesa_retained_geometry_and_alpha_pixels ... ok
+test ffi::tests::mesa_retained_text_viewports_match_clipped_meshes_and_reuse_coverage ... ok
+test ffi::tests::mesa_slug_quadratic_holes_cache_and_selected_color_pipeline ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 4.08s
+
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Real Roboto 0deg: interior 187/187; exterior 764/764
+Text cache key preparation 9.253 ms; GPU buffer upload 0.277 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Real Roboto 90deg: interior 187/187; exterior 764/764
+Text cache key preparation 9.083 ms; GPU buffer upload 0.276 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 0.000 ms; GPU buffer upload 0.000 ms total; recent hits 0
+Text probe GL renderer: Mali400
+Text cache key preparation 8.253 ms; GPU buffer upload 0.914 ms total; recent hits 0
+

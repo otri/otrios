@@ -10,6 +10,7 @@ apps/
   home/                         # Admitted app launcher
   component-playground/         # Controls, bounded Wasm reducer, ephemeral trails
   layout-lab/                   # Reusable components and five-minute signal
+  layout-text-scroll/           # Layout Lab child: local two-axis momentum demo
   input-lab/                    # Shared text registers; local editing/keyboard
   animation-lab/                 # Shared intent, local animation clock
   three-d-lab/                   # Shared intent, local tetrahedron presentation
@@ -39,6 +40,9 @@ bind app identities and UI/State references to UI hashes; the UI binds optional
 behavior bytes and permitted field writes. Status/dependency strings do not grant
 capabilities. UI v2 supports typed, bounded fields and declared operations;
 custom reducers still use the small, separately versioned Wasm ABI v1.
+The text scrolling presentation uses UI v3; other shipped screens remain v2.
+Open Layout Lab's **Text scroll demo** (`/layout-lab/text-scroll`) to inspect the
+retained full-page workload. Its offsets, velocity and FPS meter stay local.
 
 The signed release publishes the generic browser/native hosts, catalog and public
 font resources. App UI/code bytes are retained in its signed `authority/apps/`

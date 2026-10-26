@@ -86,6 +86,13 @@ of position attributes without adding an explicit shader conversion. It does
 not reduce the 32-bit position bandwidth or guarantee hardware conversion on
 this driver. Verify the actual Mali path and timing.
 
+The vertex shader still receives floating-point values. `GL_FIXED` does not
+preserve every bit of a large 16.16 value through shader arithmetic. Subtract
+the wide viewport/batch origin before submission, keep shader positions local,
+and preserve the fixed CPU representation for layout and culling. Measure both
+raw-to-shader conversion and complete frames; do not describe this as an
+integer shader pipeline.
+
 Rebased `GL_SHORT` coordinates are another candidate. Fold their power-of-two
 scale into the projection matrix where possible, preserve their full range and
 prove clipping/sample precision. Do not introduce extra draw calls or shader
