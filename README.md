@@ -32,9 +32,9 @@ Rust 1.90.0 is pinned for reproducibility. Linux CI is configured for Ubuntu 24.
 | `crates/otrios-dashboard` | Thin native/browser hosts and demo sync server | Apache-2.0 |
 | `web/canvas` | Browser host for the shared compositor | Apache-2.0 |
 | `interfaces` | IDL requirements before choosing a generator | Apache-2.0 |
-| `docs` | Architecture, PoC milestones, and collaboration setup | Apache-2.0 |
+| `docs` | Architecture, RFCs, experiment evidence, and development guides | Apache-2.0 |
 
-Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), [Tess handoff](docs/TESS_HANDOFF.md), and [Cloud setup](docs/CODEX_CLOUD.md). See [contribution instructions](CONTRIBUTING.md).
+Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), and [development instructions](AGENTS.md). Follow the [contribution instructions](CONTRIBUTING.md) for scoped changes and review.
 
 ## Licensing
 
