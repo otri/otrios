@@ -92,6 +92,7 @@ try{
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
     revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!f.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
+    if(f.resources?.text_scroll)revision.dataset.textScroll=JSON.stringify(f.resources.text_scroll);else{delete revision.dataset.textScroll;scrollLabel='';scrollSamples=[];scrollLast=null;}
     reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui);
     pump();worker.postMessage({type:'frame-ack'});
   }
@@ -119,7 +120,22 @@ try{
   window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
   window.addEventListener('keydown',e=>{if(e.isComposing||e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(e.key==='Escape'){e.preventDefault();command({type:'back'},e);return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
   window.addEventListener('paste',e=>{if(e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(model?.editing){e.preventDefault();command({type:'text',text:e.clipboardData.getData('text/plain')});}});
-  let lastMetric=0;
+  let lastMetric=0,scrollSamples=[],scrollLast=null,scrollLabel='',scrollHudAt=0,scrollWasActive=false,scrollHudExtent='';
+  function textScrollHud(now,active){
+    if(active){
+      const dt=scrollLast===null?0:now-scrollLast;
+      if(dt>0&&dt<500)scrollSamples.push([now,dt]);else scrollSamples=[];
+      scrollLast=now;while(scrollSamples.length>240||scrollSamples[0]?.[0]<now-1000)scrollSamples.shift();
+    }else{scrollLast=null;}
+    if(now-scrollHudAt>=500||active!==scrollWasActive||!scrollLabel||scrollHudExtent!==model.extent.join(',')){
+      const elapsed=scrollSamples.reduce((sum,p)=>sum+p[1],0);
+      scrollLabel=active?(elapsed?`${(scrollSamples.length*1000/elapsed).toFixed(1)} fps - retained text / momentum scroll`:'Measuring scroll frames...'):'Idle - drag in any direction; release to coast';
+      const [w,h]=model.extent;
+      hudLayer.setFrame({vertices:presenter.scroll_hud(scrollLabel,w,h),glyphVertices:presenter.scroll_hud_glyphs(),draws:presenter.scroll_hud_draws()});
+      scrollHudAt=now;scrollWasActive=active;scrollHudExtent=model.extent.join(',');
+      revision.dataset.scrollStats=JSON.stringify({label:scrollLabel,active,samples:scrollSamples.length});
+    }
+  }
   function frame(now){
     try{
       if(!busy)for(const [id,m]of moves){command(m);moves.delete(id);break;}
@@ -129,9 +145,11 @@ try{
       if(model&&(dirty||animated||reflow)){
         if(model.reflow)staticLayer.setFrame({vertices:presenter.reflow_vertices(now),glyphVertices:presenter.reflow_glyphs(),draws:presenter.reflow_draws()});
         if(animated){const [playing,speed,count]=model.intent;motionLayer.setFrame({vertices:presenter.vertices(model.intent[3]!==0,playing!==0,speed,count,now,model.updates)});if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();hudLayer.setFrame({vertices:presenter.hud(),glyphVertices:presenter.hud_glyph_vertices(),draws:presenter.hud_draws()});}}
-        renderer.prepare(animated?[staticLayer,hudLayer]:[staticLayer]);
+        const scrolling=model.presentation==='text-scroll';
+        if(scrolling)textScrollHud(now,!!model.resources?.text_scroll?.active);
+        renderer.prepare(animated||scrolling?[staticLayer,hudLayer]:[staticLayer]);
         renderer.beginFrame();staticLayer.draw();
-        if(animated){motionLayer.draw();hudLayer.draw();}renderer.endFrame();if(fontProbeRequested&&!fontProbed&&staticLayer.glyphVertices.length){fontProbed=true;const result=renderer.probe([staticLayer]);canvas.dataset.fontProbe=JSON.stringify(result);if(!result.passed)throw Error('GPU font probe did not pass: '+JSON.stringify(result));}
+        if(animated)motionLayer.draw();if(animated||scrolling)hudLayer.draw();renderer.endFrame();if(fontProbeRequested&&!fontProbed&&staticLayer.glyphVertices.length){fontProbed=true;const result=renderer.probe([staticLayer]);canvas.dataset.fontProbe=JSON.stringify(result);if(!result.passed)throw Error('GPU font probe did not pass: '+JSON.stringify(result));}
         const fontCache=JSON.stringify(renderer.cacheStats);if(fontCache!==lastFontCache){revision.dataset.fontCache=fontCache;lastFontCache=fontCache;}
         if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');dirty=false;
         const sample=timings?.drawn(model.epoch);if(sample)requestAnimationFrame(()=>timings.presented(sample,model?.epoch));

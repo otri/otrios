@@ -40,7 +40,45 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--input-viewport')){
+  if(args.includes('--text-scroll')){
+    const a=await page(1280,800,'layout-lab');
+    await click(a,'Text scroll demo','layout-text-scroll','1280x800');
+    await wait(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'{}').limit?.every(v=>v>0)");
+    assert.equal(await evaluate(a,'location.pathname'),'/layout-lab/text-scroll');
+    const info=()=>evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll)");
+    const initial=await info();assert(initial.limit.every(v=>v>0));assert.deepEqual(initial.offset,[0,0]);
+    await screenshot(a,'text-scroll-start');
+    const rect=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};})()");
+    const point=(x,y)=>({id:1,x:rect.x+x*rect.w/1280,y:rect.y+y*rect.h/800});
+    await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point(1000,550)]},a);
+    for(let i=1;i<=4;i++){
+      await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[point(1000-i*45,550-i*45)]},a);
+      await new Promise(r=>setTimeout(r,40));
+    }
+    await wait(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll).offset.every(v=>v>100)");
+    const dragged=await info();
+    await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
+    await new Promise(r=>setTimeout(r,120));const coast=await info();
+    assert(coast.offset.every((v,i)=>v>dragged.offset[i]),'both axes coast after release');
+    await wait(a,"/\\d[.]\\d fps/.test(JSON.parse(document.querySelector('#revision').dataset.scrollStats||'{}').label||'')");
+    const fps=await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.scrollStats)");
+    await screenshot(a,'text-scroll-coasting');
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point(900,500)]},a);
+    await call('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]},a);
+    await wait(a,"!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
+    const stopped=await info();await new Promise(r=>setTimeout(r,250));assert.deepEqual((await info()).offset,stopped.offset,'cancel stops momentum');
+    const b=await page(1280,800,'layout-lab');await click(b,'Text scroll demo','layout-text-scroll','1280x800');
+    await wait(b,"!!document.querySelector('#revision').dataset.textScroll");
+    assert.deepEqual(await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll).offset"),[0,0],'panning is client-local');
+    await metrics(a,800,1280);await ready(a,'layout-text-scroll','800x1280');
+    const portrait=await info();assert(portrait.offset.every((v,i)=>v>=0&&v<=portrait.limit[i]));
+    await screenshot(a,'text-scroll-portrait');
+    const cache=await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.fontCache)");assert(cache.bytes<=4194304,'bounded glyph cache');
+    await click(a,'Back','layout-lab','800x1280');await click(a,'Home','home','800x1280');
+    const result={passed:true,checks:['Layout Lab owns child route','full text page uses real WebGL','two-axis touch drag and release momentum','cancel stops coasting','panning is client-local','portrait reflow and bounds','Back and Home navigation'],initial,dragged,coast,portrait,fps,cache};
+    await writeFile(join(output,'text-scroll-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--input-viewport')){
     const a=await page(1280,800,'input-lab');
     await click(a,'First text field','input-lab','1280x800');
     await wait(a,"[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')==='SPACE')");

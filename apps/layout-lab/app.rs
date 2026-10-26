@@ -2,6 +2,8 @@
 mod components;
 #[path = "state/schema.rs"]
 mod state;
+#[path = "../layout-text-scroll/app.rs"]
+mod text_scroll;
 mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
@@ -21,5 +23,5 @@ pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
 }
 
 pub fn screens() -> Vec<crate::authoring::AppScreen> {
-    vec![(manifest(), ui)]
+    vec![(manifest(), ui), (text_scroll::manifest(), text_scroll::ui)]
 }

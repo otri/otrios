@@ -52,12 +52,20 @@ impl Server {
                 .unwrap()
                 .success()
         );
-        // The shipped catalog has only real apps. Add a child exclusively to
-        // this disposable fixture to retain process-level nested State coverage.
+        // Add an editable child exclusively to this disposable fixture. The
+        // shipped read-only scroll demo has no State fields to exercise here.
         let mut catalog =
             decode_catalog(&std::fs::read(root.join("apps/catalog.flex")).unwrap()).unwrap();
-        assert_eq!(catalog.apps.len(), 7);
-        assert!(catalog.apps.iter().all(|entry| !entry.path.contains('/')));
+        assert_eq!(catalog.apps.len(), 8);
+        assert_eq!(
+            catalog
+                .apps
+                .iter()
+                .filter(|entry| entry.path.contains('/'))
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            ["layout-lab/text-scroll"]
+        );
         let parent = catalog
             .apps
             .iter()

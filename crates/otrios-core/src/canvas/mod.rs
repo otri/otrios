@@ -5,6 +5,7 @@ mod client;
 pub mod reflow;
 mod selection;
 mod state;
+pub mod text_scroll;
 mod text_viewport;
 mod transport;
 pub use behavior::Behavior;
@@ -24,6 +25,17 @@ pub use transport::{
 };
 pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;
+/// UI schema version is independent of the unchanged state sync protocol.
+pub fn validate_ui_format(ui: &Ui) -> Result<()> {
+    if !matches!(ui.format.as_str(), "otrios-canvas-v2" | "otrios-canvas-v3")
+        || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
+            && ui.format != "otrios-canvas-v3")
+    {
+        return Err("Unsupported Canvas UI format".into());
+    }
+    Ok(())
+}
+
 pub fn hash(bytes: &[u8]) -> Vec<u8> {
     Sha256::digest(bytes).to_vec()
 }

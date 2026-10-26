@@ -37,7 +37,10 @@ pub fn description(state_schema: StateSchema) -> Ui {
     let wide = column(
         16.,
         vec![
-            row(16., vec![heading(), home()]),
+            row(
+                16.,
+                vec![heading(), place("text-demo", [250., 80.]), home()],
+            ),
             intro(),
             top(),
             controls(),
@@ -47,7 +50,13 @@ pub fn description(state_schema: StateSchema) -> Ui {
     let tall = column(
         16.,
         vec![
-            column(12., vec![heading(), home()]),
+            column(
+                12.,
+                vec![
+                    heading(),
+                    row(16., vec![place("text-demo", [250., 80.]), home()]),
+                ],
+            ),
             intro(),
             top(),
             controls(),
@@ -59,6 +68,9 @@ pub fn description(state_schema: StateSchema) -> Ui {
         .build(
             "Layout Lab",
             vec![
+                button("Text scroll demo")
+                    .navigate_to(Destination::app("layout-text-scroll").route("text-scroll"))
+                    .key("text-demo"),
                 button("Home")
                     .navigate_to(Destination::app("home"))
                     .key("home"),

@@ -147,6 +147,7 @@ impl CanvasApp {
     pub fn presentation_kind(&self) -> String {
         match self.inner.presentation() {
             Some(Presentation::Motion { .. }) => "motion",
+            Some(Presentation::TextScroll { .. }) => "text-scroll",
             Some(Presentation::Editor { .. }) => "input",
             Some(Presentation::TouchPad { .. }) => "touch-pad",
             _ => "none",
@@ -418,6 +419,7 @@ pub struct CanvasPresentation {
     reflow_mesh: Mesh,
     updates: u64,
     inner: otrios_core::dashboard::motion::Presenter,
+    scroll_hud_mesh: Mesh,
 }
 #[wasm_bindgen]
 impl CanvasPresentation {
@@ -527,6 +529,21 @@ impl CanvasPresentation {
 
     pub fn stats(&self) -> String {
         self.inner.stats()
+    }
+    pub fn scroll_hud(&mut self, label: &str, width: f32, height: f32) -> Result<Vec<f32>, String> {
+        let mesh = otrios_core::canvas::text_scroll::hud(
+            label,
+            [width, height],
+            self.font.as_ref().ok_or("Missing font")?,
+        )?;
+        self.scroll_hud_mesh = mesh;
+        Ok(self.scroll_hud_mesh.vertices.clone())
+    }
+    pub fn scroll_hud_glyphs(&self) -> Vec<f32> {
+        self.scroll_hud_mesh.glyph_vertices.clone()
+    }
+    pub fn scroll_hud_draws(&self) -> Vec<u32> {
+        self.scroll_hud_mesh.draws.clone()
     }
 }
 

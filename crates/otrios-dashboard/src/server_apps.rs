@@ -194,7 +194,7 @@ impl Hub {
                 verify_asset(m, &format!("authority/apps/{}/ui.flex", a.id), &ui)?;
             }
             let description = canvas::decode_ui(&ui)?;
-            if description.ui_ref != a.ui_ref || description.format != "otrios-canvas-v2" {
+            if description.ui_ref != a.ui_ref || canvas::validate_ui_format(&description).is_err() {
                 return Err("UI reference/format differs from admitted catalog".into());
             }
             canvas::validate_schema(&description.state_schema)?;
