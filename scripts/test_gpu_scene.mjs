@@ -110,3 +110,17 @@ test('clipped glyph edges reuse the complete prefiltered coverage',()=>{
   for(const i of [0,2]){f.glyphVertices[i*16]=13;f.glyphVertices[i*16+2]=0.3;}
   layer.setFrame(f);renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,1);
 });
+
+test('stable retained quads correct UVs without multiplying long-pen cache sizes',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl,{stableTextQuads:true}),layer=renderer.createLayer();renderer.setFont(packet());
+  const f=frame(.25);f.draws=new Uint32Array([1,0,4]);layer.setFrame(f);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);
+  const cached=calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array).at(-1)[2];
+  assert.equal(cached[0],10);assert.equal(cached[8],21);assert.notEqual(cached[2],cached[10]);assert.equal(renderer.cacheStats.misses,1);
+  const next=frame(.25);for(let i=0;i<4;i++)next.glyphVertices[i*16]+=10000+(i%2?.004:0);next.draws=f.draws;layer.setFrame(next);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);
+  assert.equal(renderer.cacheStats.misses,1,'retained font size comes from the local Y span');
+  const degenerate=frame();degenerate.draws=f.draws;for(const i of [1,3])degenerate.glyphVertices[i*16]=degenerate.glyphVertices[0];layer.setFrame(degenerate);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));calls.length=0;renderer.prepare([layer]);
+  assert.equal(renderer.cacheStats.fallbacks,1,'a degenerate retained quad uses the original draw path');
+  assert(calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array).every(c=>c[2].every(Number.isFinite)));
+  const cropped=frame(.25);cropped.draws=f.draws;layer.setFrame(cropped);calls.length=0;renderer.prepare([layer]);
+  const rawBounds=calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array).at(-1)[2];assert.equal(rawBounds[0],10.25,'CPU-clipped quads without a viewport do not expand');
+});

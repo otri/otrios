@@ -560,6 +560,113 @@ mod tests {
     }
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
+    fn mesa_partial_text_cache_preserves_fallback_order_and_viewport_clips() {
+        if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
+            return;
+        }
+        let _display_owner = mesa_display_owner();
+        use otrios_core::dashboard::{
+            components::{WHITE, background, canvas, text},
+            font::Font,
+            font_reference::RESOURCE_SHA256,
+            render_scene_with_font,
+            scene::Scene,
+        };
+        let font = Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            RESOURCE_SHA256,
+        )
+        .unwrap();
+        let atlas = font.atlas();
+        let bounds = background(0, 256., 256., WHITE, 0.).frame;
+        let mut text_bounds = bounds;
+        text_bounds.x = 8.;
+        text_bounds.y = 8.;
+        text_bounds.width = 200.;
+        text_bounds.height = 50.;
+        let scene =
+            Scene::new(canvas(0, bounds, vec![text(1, text_bounds, "H", 2, WHITE)])).unwrap();
+        let base = render_scene_with_font(&scene, &font).glyph_vertices;
+        assert_eq!(base.len(), 64);
+        let mut parts = [base.clone(), base.clone(), base.clone()];
+        // The middle quad exceeds the atlas while its ink intersects the second
+        // clip. The two small quads can reuse coverage around that raw draw.
+        for q in parts[1].chunks_exact_mut(16) {
+            q[0] = 28. + (q[0] - base[0]) * 100.;
+            q[1] = -100. + (q[1] - base[1]) * 100.;
+            q[4..8].copy_from_slice(&[1., 0.2, 0.1, 0.7]);
+        }
+        for q in parts[2].chunks_exact_mut(16) {
+            q[1] += 128.;
+            q[4..8].copy_from_slice(&[0.1, 0.4, 1., 0.6]);
+        }
+        let clips = [
+            [0., 0., 128., 128.],
+            [128., 0., 256., 128.],
+            [0., 128., 128., 256.],
+        ];
+        let projection = [2. / 256., 0., 0., 0., -2. / 256., 0., -1., 1., 1.];
+        let mut display = Display::headless([256, 256], false).unwrap();
+        display
+            .set_font(
+                atlas.curve_width,
+                atlas.curve_height,
+                &atlas.curves,
+                atlas.band_width,
+                atlas.band_height,
+                &atlas.bands,
+            )
+            .unwrap();
+        let mut expected = Vec::new();
+        for (i, part) in parts.iter().enumerate() {
+            display.upload_scene(0, &[], part, &[1, 0, 4]).unwrap();
+            let [l, t, r, b] = clips[i];
+            display
+                .text_views(0, &[0., 4., 0., 0., l, t, r, b])
+                .unwrap();
+            display.draw(projection, false).unwrap();
+            let image = display.pixels().unwrap();
+            if i == 0 {
+                expected = image;
+            } else {
+                for y in t as usize..b as usize {
+                    for x in l as usize..r as usize {
+                        let offset = ((255 - y) * 256 + x) * 4;
+                        expected[offset..offset + 4].copy_from_slice(&image[offset..offset + 4]);
+                    }
+                }
+            }
+        }
+        let background = [16, 28, 41];
+        for [l, t, r, b] in clips {
+            assert!(
+                (t as usize..b as usize)
+                    .flat_map(|y| (l as usize..r as usize).map(move |x| ((255 - y) * 256 + x) * 4))
+                    .any(|p| expected[p..p + 3] != background),
+                "each cached/raw reference region must contain ink"
+            );
+        }
+        let glyphs: Vec<_> = parts.into_iter().flatten().collect();
+        display
+            .upload_scene(0, &[], &glyphs, &[1, 0, 4, 1, 4, 4, 1, 8, 4])
+            .unwrap();
+        let views: Vec<_> = clips
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, [l, t, r, b])| [i as f32 * 4., 4., 0., 0., l, t, r, b])
+            .collect();
+        display.text_views(0, &views).unwrap();
+        display.draw(projection, false).unwrap();
+        assert_eq!(
+            display.pixels().unwrap(),
+            expected,
+            "mixed cache/raw draws preserve program state and clips"
+        );
+        assert!(display.glyph_cache_stats()[1] > 0);
+        assert_eq!(display.glyph_cache_stats()[2], 4 * 1024 * 1024);
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_slug_quadratic_holes_cache_and_selected_color_pipeline() {
         let _display_owner = mesa_display_owner();
         let mut d = Display::headless([128, 128], false).unwrap();

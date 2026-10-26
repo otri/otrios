@@ -1,5 +1,7 @@
 # Fixed point and SIMD evaluation — 2026-10-27
 
+This records the initial `fbd3ff9` candidate. A [raster follow-up](fixed-point-raster-followup-2026-10-27.md) improves the DPR 1/2 comparisons but exposes a performance regression and a DPR-limit failure.
+
 The candidate is **experimental and disabled by default**. Dense Mali scrolling
 still clears 30 fps, and the integer packing kernel uses verified NEON, but the
 new pixel comparison gate fails at large scales and browser DPR 2. Checked layout

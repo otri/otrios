@@ -94,43 +94,49 @@ fn axis_fixed(
     rule: AxisResize,
 ) -> Result<(f32, f32)> {
     let originals = [start, length, reference];
-    let start = Fixed::from_f32(start)?;
-    let length = Fixed::from_f32(length)?;
-    let parent = Fixed::from_f32(parent)?;
-    let reference = Fixed::from_f32(reference)?;
     let (start, length) = match rule {
-        AxisResize::Fixed => (start, length),
+        // Identity requires no arithmetic or rounding. Geometry is already
+        // admitted by resolve_with, including positive sub-grid dimensions.
+        AxisResize::Fixed => return Ok((start, length)),
         AxisResize::Pins {
             leading: Some(a),
             trailing: Some(b),
         } => {
             let a = Fixed::from_f32(a)?;
-            (a, parent.checked_sub(a)?.checked_sub(Fixed::from_f32(b)?)?)
+            (
+                a,
+                Fixed::from_f32(parent)?
+                    .checked_sub(a)?
+                    .checked_sub(Fixed::from_f32(b)?)?,
+            )
         }
         AxisResize::Pins {
             leading: Some(a),
             trailing: None,
-        } => (Fixed::from_f32(a)?, length),
+        } => (Fixed::from_f32(a)?, Fixed::from_f32(length)?),
         AxisResize::Pins {
             leading: None,
             trailing: Some(b),
         } => (
-            parent
+            Fixed::from_f32(parent)?
                 .checked_sub(Fixed::from_f32(b)?)?
-                .checked_sub(length)?,
-            length,
+                .checked_sub(Fixed::from_f32(length)?)?,
+            Fixed::from_f32(length)?,
         ),
         AxisResize::Pins {
             leading: None,
             trailing: None,
         } => return Err("Pins need an edge".into()),
-        AxisResize::Center { offset } => (
-            parent
-                .checked_sub(length)?
-                .checked_div_int(2)?
-                .checked_add(Fixed::from_f32(offset)?)?,
-            length,
-        ),
+        AxisResize::Center { offset } => {
+            let length = Fixed::from_f32(length)?;
+            (
+                Fixed::from_f32(parent)?
+                    .checked_sub(length)?
+                    .checked_div_int(2)?
+                    .checked_add(Fixed::from_f32(offset)?)?,
+                length,
+            )
+        }
         AxisResize::Springs {
             leading,
             length: size,
@@ -146,7 +152,7 @@ fn axis_fixed(
                 }
             }
             let count = flexible.iter().filter(|f| **f).count() as i64;
-            let delta = parent.checked_sub(reference)?;
+            let delta = Fixed::from_f32(parent)?.checked_sub(Fixed::from_f32(reference)?)?;
             let share = |i: usize| -> Result<Fixed> {
                 if !flexible[i] || count == 0 {
                     Ok(Fixed::ZERO)
@@ -157,8 +163,8 @@ fn axis_fixed(
                 }
             };
             (
-                start.checked_add(share(0)?)?,
-                length.checked_add(share(1)?)?,
+                Fixed::from_f32(start)?.checked_add(share(0)?)?,
+                Fixed::from_f32(length)?.checked_add(share(1)?)?,
             )
         }
     };

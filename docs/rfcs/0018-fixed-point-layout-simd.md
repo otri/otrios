@@ -1,7 +1,7 @@
 # RFC 0018: Fixed point layout and SIMD stretch milestone
 
 Status: experimental candidate, disabled by default; not accepted. Requested
-2026-10-26, measured 2026-10-27. [Evaluation and unresolved pixel gate](../experiments/fixed-point-text-2026-10-27.md).
+2026-10-26, measured 2026-10-27. [Current raster follow-up and remaining gates](../experiments/fixed-point-raster-followup-2026-10-27.md). [Evaluation and unresolved pixel gate](../experiments/fixed-point-text-2026-10-27.md).
 
 ## Objective and baseline
 

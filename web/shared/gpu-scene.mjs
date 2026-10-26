@@ -48,12 +48,17 @@ function cacheGlyphExact(vertices,offset,scaleX=1,scaleY=1){
   const key=[];for(let i=0;i<4;i++){const v=offset+i*16;key.push(vertices[v]*scaleX-x,vertices[v+1]*scaleY-y,vertices[v+2],vertices[v+3],...vertices.subarray(v+8,v+16));}
   return {key:key.join(','),x,y,width,height,offset};
 }
-function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2){
+function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2,retained=false){
   if(!sampling)return cacheGlyphExact(vertices,offset,scaleX,scaleY);
   const q=vertices.subarray(offset,offset+64),du=q[18]-q[2],dv=q[35]-q[3];
   for(let i=1;i<4;i++)for(let j=4;j<16;j++)if(q[i*16+j]!==q[j])return null;
   if(!Number.isFinite(du)||!Number.isFinite(dv)||Math.abs(du)<1e-8||Math.abs(dv)<1e-8||q[8]<=0||q[9]<=0)return null;
-  const sx=Math.round(Math.abs((q[16]-q[0])*scaleX/du)*256)/256,sy=Math.round(Math.abs((q[33]-q[1])*scaleY/dv)*256)/256;
+  if(retained&&(q[16]<=q[0]||q[33]<=q[1]))return null;
+  // Retained font strips are uniformly scaled in logical space. Their Y span
+  // stays local; X may be a long accumulated pen and loses f32 subtraction
+  // precision. Use that local span for both axes to avoid duplicate cache sizes.
+  const emY=Math.abs((q[33]-q[1])/dv);
+  const sx=Math.round((retained?emY*scaleX:Math.abs((q[16]-q[0])*scaleX/du))*256)/256,sy=Math.round((retained?emY*scaleY:Math.abs((q[33]-q[1])*scaleY/dv))*256)/256;
   if(sx<=0||sy<=0||q[17]!==q[1]||q[32]!==q[0])return null;
   const x0=-q[10]/q[8],y1=(q[15]+1-q[11])/q[9],pad=2*sampling;
   const width=Math.ceil((q[14]+1)/q[8]*sx*sampling+2*pad),height=Math.ceil((q[15]+1)/q[9]*sy*sampling+2*pad);
@@ -62,7 +67,7 @@ function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2){
 }
 function appendRun(runs,kind,first,count,groups,view,source){const n=runs.length;if(n&&runs[n-3]===kind&&runs[n-2]+runs[n-1]===first&&groups.at(-2)===view&&groups.at(-1)+(kind===2?runs[n-1]/6*4:runs[n-1])===source)runs[n-1]+=count;else{runs.push(kind,first,count);groups.push(view,source);}}
 export class SceneRenderer {
-  constructor(gl,{width=1280,height=800,linearLight=false,atlasScale=2}={}){
+  constructor(gl,{width=1280,height=800,linearLight=false,atlasScale=2,stableTextQuads=false}={}){
     if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw Error('Invalid presentation dimensions');
     const floatTexture=gl.getExtension('OES_texture_float'),halfTexture=floatTexture?null:gl.getExtension('OES_texture_half_float');
     if(!floatTexture&&!halfTexture)throw Error('Analytic font rendering requires floating point textures');
@@ -70,7 +75,7 @@ export class SceneRenderer {
     if(!gl.getExtension('OES_standard_derivatives'))throw Error('Analytic font rendering requires shader derivatives');
     if(!gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT)?.precision)throw Error('Analytic font rendering requires high precision fragment math');
     if(![0,2,3].includes(atlasScale))throw Error('Choose exact reference (0), 2x or 3x text sampling');this.atlasScale=atlasScale;
-    this.linearLight=!!linearLight;this.gl=gl;this.layers=new Set();this.lost=false;this.font=null;this.activeAttributes=new Set();
+    this.stableTextQuads=!!stableTextQuads;this.linearLight=!!linearLight;this.gl=gl;this.layers=new Set();this.lost=false;this.font=null;this.activeAttributes=new Set();
     this.transform=new Float32Array([2/width,0,0,0,-2/height,0,-1,1,1]);
     const tintExpression=this.linearLight?'decodeSrgb(color.rgb)':'color.rgb',decode=this.linearLight?DECODE_SRGB:'';
     this.geometry=program(gl,'attribute vec2 position;attribute vec4 color;uniform mat3 transform;varying mediump vec4 tint;'+decode+'void main(){vec3 p=transform*vec3(position,1.0);gl_Position=vec4(p.xy,0.0,1.0);tint=vec4('+tintExpression+'*color.a,color.a);}','precision mediump float;varying mediump vec4 tint;void main(){gl_FragColor=tint;}');
@@ -139,19 +144,29 @@ export class SceneRenderer {
   }
   prepare(layers){
     this.assertReady();if(layers.every(layer=>layer.preparedGeneration===this.cacheGeneration))return;
-    const gl=this.gl,requests=[];for(const layer of layers){for(let offset=0;offset<layer.glyphVertices.length;offset+=64){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,offset,this.scaleX,this.scaleY,this.atlasScale);if(glyph)requests.push(glyph);}}
+    const gl=this.gl,requests=[];for(const layer of layers){for(let offset=0;offset<layer.glyphVertices.length;offset+=64){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,offset,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length);if(glyph)requests.push(glyph);}}
     // Predict shelf use before invalidating any UVs. Reset at most once, before drawing.
     let x=this.cacheX,y=this.cacheY,row=this.cacheRow,full=false;const unseen=new Set();for(const glyph of requests){if(this.cache.has(glyph.key)||unseen.has(glyph.key))continue;unseen.add(glyph.key);if(this.cache.size+unseen.size>MAX_CACHE_ENTRIES){full=true;break;}if(x+glyph.width>ATLAS_SIZE){x=0;y+=row;row=0;}if(y+glyph.height>ATLAS_SIZE){full=true;break;}x+=glyph.width;row=Math.max(row,glyph.height);}
     if(full){this.cache.clear();this.cacheX=0;this.cacheY=0;this.cacheRow=0;this.cacheGeneration++;this.cacheStats.resets++;}
     let bound=false;const previousViewport=gl.getParameter(gl.VIEWPORT),previousFramebuffer=gl.getParameter(gl.FRAMEBUFFER_BINDING);
     try{for(const layer of layers){const runs=[],cached=[],groups=[];
       for(let i=0;i<layer.draws.length;i+=3){const kind=layer.draws[i],first=layer.draws[i+1],count=layer.draws[i+2];if(kind===0){appendRun(runs,kind,first,count,groups,i/3,first);continue;}
-        for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale);let tile=glyph&&this.cache.get(glyph.key);
+        for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length);let tile=glyph&&this.cache.get(glyph.key);
           if(tile)this.cacheStats.hits++;
           else if(glyph){tile=this.allocateGlyph(glyph);if(tile){if(!bound){bound=true;gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.viewport(0,0,ATLAS_SIZE,ATLAS_SIZE);gl.enable(gl.SCISSOR_TEST);gl.clearColor(0,0,0,0);}this.rasterGlyph(layer,glyph,tile);this.cache.set(glyph.key,tile);this.cacheStats.misses++;}}
           if(!tile){appendRun(runs,1,vertex,4,groups,i/3,vertex);this.cacheStats.fallbacks++;continue;}
           const color=layer.glyphVertices.subarray(vertex*16+4,vertex*16+8),start=cached.length/8;
-          const points=glyph.sampling?[0,1,3,2].map(i=>{const q=vertex*16+i*16;return [layer.glyphVertices[q]*this.scaleX,layer.glyphVertices[q+1]*this.scaleY,(tile.x+glyph.pad+(layer.glyphVertices[q+2]-glyph.x0)*glyph.sx*glyph.sampling)/ATLAS_SIZE,1-(tile.y+glyph.pad+(glyph.y1-layer.glyphVertices[q+3])*glyph.sy*glyph.sampling)/ATLAS_SIZE];}):[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
+          const q=layer.glyphVertices.subarray(vertex*16,vertex*16+64),stable=glyph.sampling&&this.stableTextQuads&&layer.textViews.length;
+          const left=q[0]*this.scaleX,top=q[1]*this.scaleY,right=q[16]*this.scaleX,bottom=q[33]*this.scaleY;
+          const points=glyph.sampling?[0,1,3,2].map(i=>{
+            let x=q[i*16]*this.scaleX,y=q[i*16+1]*this.scaleY,u=q[i*16+2],v=q[i*16+3];
+            // Retained strips have an explicit viewport scissor. Expand their
+            // transparent guard band to whole pixel bounds and correct UVs;
+            // tiny placement changes then affect sampling rather than raster
+            // edges. CPU-clipped quads without a viewport keep their bounds.
+            if(stable){x=i%2?Math.ceil(right):Math.floor(left);y=i<2?Math.floor(top):Math.ceil(bottom);u=q[2]+(x-left)*(q[18]-q[2])/(right-left);v=q[3]+(y-top)*(q[35]-q[3])/(bottom-top);}
+            return [x,y,(tile.x+glyph.pad+(u-glyph.x0)*glyph.sx*glyph.sampling)/ATLAS_SIZE,1-(tile.y+glyph.pad+(glyph.y1-v)*glyph.sy*glyph.sampling)/ATLAS_SIZE];
+          }):[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
           for(const corner of [0,1,2,0,2,3]){const [x,y,u,v]=points[corner];cached.push(x/this.scaleX,y/this.scaleY,u,v,...color);}appendRun(runs,2,start,6,groups,i/3,vertex);
         }
       }
@@ -230,7 +245,7 @@ class SceneLayer {
     floats(views,8,'text viewport');
     if(views.length&&views.length!==this.draws.length/3*8)throw Error('Text viewport dimensions');
     for(let i=0;i<this.draws.length/3&&views.length;i++)if(this.draws[i*3]===1){const v=views.subarray(i*8,i*8+8),start=this.draws[i*3+1],end=start+this.draws[i*3+2];if(!Number.isInteger(v[0])||!Number.isInteger(v[1])||v[0]%4||v[1]%4||v[0]<start||v[1]<0||v[0]>end||v[1]>end-v[0])throw Error('Culled text range');}
-    if(this.owner.atlasScale===0&&!!views.length!==!!this.textViews.length)this.preparedGeneration=0;
+    if((this.owner.atlasScale===0||this.owner.stableTextQuads)&&!!views.length!==!!this.textViews.length)this.preparedGeneration=0;
     this.textViews=views;
   }
   draw(){

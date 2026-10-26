@@ -30,6 +30,7 @@ fn main() -> Result<(), String> {
         font_reference::RESOURCE_SHA256,
     )?;
     let atlas = font.atlas();
+    let mut passed = true;
     for rotation in [0, 90] {
         let surface = Surface::new(rotation)?;
         let [w, h] = surface.extent();
@@ -87,6 +88,7 @@ fn main() -> Result<(), String> {
                 above_one += u64::from(pixel_max > 1);
             }
             let name = format!("rotation-{rotation}-frame-{i}");
+            passed &= maximum <= 8;
             if i == 17 {
                 ppm(
                     &output.join(format!("{name}-reference.ppm")),
@@ -135,5 +137,9 @@ fn main() -> Result<(), String> {
             );
         }
     }
-    Ok(())
+    if passed {
+        Ok(())
+    } else {
+        Err("Fixed/reference exceeds 8-byte comparison gate".into())
+    }
 }
