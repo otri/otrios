@@ -51,8 +51,10 @@ impl Scene {
                 {
                     return Err("Invalid viewport scale".into());
                 }
+                // A bounded editor holds 256 UTF-8 bytes plus its local caret.
+                // Authored layout literals retain their separate 96-byte bound.
                 Primitive::Text { value, scale, .. }
-                    if value.len() > 96 || !(1..=8).contains(scale) =>
+                    if value.len() > 257 || !(1..=8).contains(scale) =>
                 {
                     return Err("Invalid text primitive".into());
                 }

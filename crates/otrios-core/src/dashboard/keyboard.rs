@@ -278,20 +278,12 @@ impl TextBuffer {
     /// Each rendered run maps back to source byte boundaries. The local caret
     /// marker occupies glyph width, but maps both sides to the same text boundary.
     fn display_runs(&self, focused: bool) -> Vec<(usize, usize, &str)> {
-        let n = self.text[..self.cursor].graphemes(true).count();
-        let start = n.saturating_sub(36);
         let mut runs = Vec::new();
-        let mut bytes = 0;
-        for (index, g) in self.text.grapheme_indices(true).skip(start).take(38) {
+        for (index, g) in self.text.grapheme_indices(true) {
             if focused && index == self.cursor {
                 runs.push((index, index, "|"));
-                bytes += 1;
-            }
-            if bytes + g.len() > 88 {
-                break;
             }
             runs.push((index, index + g.len(), g));
-            bytes += g.len();
         }
         if focused && self.cursor == self.text.len() {
             runs.push((self.cursor, self.cursor, "|"));
@@ -304,7 +296,33 @@ impl TextBuffer {
             .map(|(_, _, text)| text)
             .collect()
     }
-    /// Nearest grapheme boundary in the currently displayed run, using the same
+    pub fn caret_x(&self, font: &super::font::Font, scale: f32) -> f32 {
+        font.text_width(&self.text[..self.cursor], scale)
+    }
+    /// A pixel window may begin inside a glyph; preserve its fractional offset
+    /// and clip the ink rather than snapping the viewport to character boundaries.
+    pub fn window(
+        &self,
+        offset: f32,
+        width: f32,
+        font: &super::font::Font,
+        scale: f32,
+        focused: bool,
+    ) -> (String, f32) {
+        let mut pen = 0.;
+        let mut start = None;
+        let mut value = String::new();
+        for (_, _, run) in self.display_runs(focused) {
+            let advance = font.text_width(run, scale);
+            if pen + advance >= offset && pen <= offset + width {
+                start.get_or_insert(pen);
+                value.push_str(run);
+            }
+            pen += advance;
+        }
+        (value, start.unwrap_or(offset) - offset)
+    }
+    /// Nearest grapheme boundary in the complete text run, using the same
     /// proportional font advances as the renderer, not a character-count estimate.
     pub fn hit_test(&self, x: f32, font: &super::font::Font, scale: f32, focused: bool) -> usize {
         let runs = self.display_runs(focused);
