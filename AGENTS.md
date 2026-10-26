@@ -11,7 +11,6 @@ Read README.md, docs/POC.md, docs/ARCHITECTURE.md, and LICENSE.md before changin
 - Test snapshot isolation, publication conflicts, slow-reader backpressure, and process boundaries. Do not claim Linux IPC works based on in-process tests.
 - Use a feature branch and a pull request for follow-up work. Report actual commands and results; distinguish scaffold checks from PoC acceptance tests.
 - Do not assign work to Tess, install integrations, add collaborators, change visibility, publish packages, or deploy services without user authorization for that action.
-- Full Xcode is installed at `/Applications/Xcode-beta.app` for optional local Apple builds. Linux integration is the acceptance target.
 
 ## Release control and client state
 
