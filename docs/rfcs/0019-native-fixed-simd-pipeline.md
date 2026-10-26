@@ -47,21 +47,26 @@ remain boundary inputs; this internal migration needs no state wire change.
 Any later wire change must bump its declared protocol while retaining release
 control's opening v1 compatibility envelope.
 
-## Stages, in order
+## Delivery milestones
 
-| Stage | Change | Expected SIMD work | Evidence needed |
-| --- | --- | --- | --- |
-| 0 | Attribute CPU costs separately: admission, hierarchy, wide math, culling, conversion, allocation/packing and host copies | None required | Same frame workload; p50/p95, bytes copied/allocated, rebuild/coast distinction |
-| 1 | Retain fixed placements and GPU-facing rounded counterparts; remove float/fixed round trips and duplicate normalization | Integer offsets and clip comparisons | Unchanged frames avoid admission; exact invalidation and held-snapshot tests |
-| 2 | Compile dirty transforms into contiguous arrays grouped by compatible parent/scale | Four i32 x/y/bounds lanes; batched min/max and visibility masks | Actual native instructions and reduced full CPU time |
-| 3 | Batch glyph packing and final conversion; write directly into reusable presentation staging | Integer packing plus vector fixed-to-float conversion | Assembly proves vector conversion; preserve rounding and pixel gates |
-| 4 | Compare native GLES2 vertex formats | GL_FLOAT control, GL_FIXED positions, rebased GL_SHORT positions | Cold/warm upload, submission, GPU/present timings and native pixels |
-| 5 | Compile shared batches for Wasm SIMD128 | Same integer semantics, host vector lowering | Wasm SIMD opcodes plus real browser CPU/pixel tests; scalar fallback |
-| 6 | Expand fixed layout and geometry only where profiles justify it | Repeated admitted sibling/layout operations | Full pipeline improvement, not isolated kernel throughput |
+| Milestone | Complete outcome | Qualification |
+| --- | --- | --- |
+| 1. Faster native fixed/SIMD renderer | Retain admitted fixed placements and clips, remove float/fixed round trips and duplicate normalization, and batch dirty transforms, culling and glyph packing through reusable staging. Include useful repeated rectangle/linear layout work. Complete the GPU boundary by comparing GL_FLOAT, GL_FIXED and rebased GL_SHORT on Mali-400; keep the existing format if alternatives lose. | Unchanged frames avoid admission and geometry rebuilds; invalidation and held snapshots remain correct. Verify native SIMD instructions, pixel parity and complete CPU/present improvements, including cold/warm upload and bytes transferred. Avoid extra draw calls and preserve text density. |
+| 2. Shared SIMD renderer on the web | Compile the qualified batch operations for Wasm SIMD128, retain scalar fallback, and select the compatible module before loading. Carry across a packed GPU format only if browser measurements support it. | Verify emitted Wasm SIMD operations, scalar/SIMD output parity, real browser CPU/pixel results and fallback loading. |
 
-Each stage is independently reviewable and switchable. Keep scalar fixed and
-float32 controls available throughout. A stage that loses full-frame performance
-stays experimental even if it improves a microbenchmark.
+Profiling and validation are part of each milestone. Attribute admission,
+hierarchy/wide math, culling, conversion, allocation/packing and host copies;
+record p50/p95, bytes copied/allocated, and cold rebuild versus coasting. Use
+those measurements to choose the work within a milestone, rather than treating
+each kernel or instrumentation change as a separate delivery stage.
+
+The native milestone is one end-to-end jump: retaining fixed data, batching its
+consumers and choosing the GPU boundary belong together so conversion and packing
+costs are actually removed. The web milestone reuses the qualified representation.
+Keep scalar fixed and float32 controls available throughout. Changes that lose
+full-frame performance stay experimental even if they improve a microbenchmark.
+Broader nonlinear layout and geometry remain follow-up work requiring their own
+evidence.
 
 ## Culling and geometry
 
@@ -145,7 +150,7 @@ the same as NEON's gain.
   The demo reports actual native presentations or browser drawn frames, not
   state-worker tick rate; those counters must remain distinguishable.
 - Run the required repository, native GPU and real browser checks for each
-  affected stage. Preserve clipping, ordering, input recovery and hot upgrades.
+  affected milestone. Preserve clipping, ordering, input recovery and hot upgrades.
 
 ## Primary references
 
