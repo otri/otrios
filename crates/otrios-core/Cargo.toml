@@ -82,3 +82,7 @@ version = "=0.14.0"
 default-features = false
 features = ["std", "safe-encode", "safe-decode", "checked-decode"]
 optional = true
+
+[[example]]
+name = "text_scroll_frames"
+required-features = ["canvas"]

@@ -12,11 +12,11 @@ pub struct Mesh {
     pub draws: Vec<u32>,
 }
 #[derive(Clone, Copy)]
-struct Clip {
-    left: f32,
-    top: f32,
-    right: f32,
-    bottom: f32,
+pub(super) struct Clip {
+    pub(super) left: f32,
+    pub(super) top: f32,
+    pub(super) right: f32,
+    pub(super) bottom: f32,
 }
 impl Clip {
     fn intersect(self, r: Rect) -> Self {
@@ -53,6 +53,7 @@ fn render_optional_font(scene: &Scene, font: Option<&Font>) -> Mesh {
             bottom: scene.root().frame.height,
         },
         font,
+        None,
     );
     mesh
 }
@@ -245,13 +246,14 @@ impl Mesh {
         self.triangle([p[0], p[1], p[2]], c, clip);
         self.triangle([p[2], p[1], p[3]], c, clip);
     }
-    fn paint(
+    pub(super) fn paint(
         &mut self,
         node: &SceneNode,
         parent: [f32; 2],
         factor: f32,
         clip: Clip,
         font: Option<&Font>,
+        mut retained: Option<&mut Vec<(usize, u32)>>,
     ) {
         let f = node.frame;
         let r = Rect::new(
@@ -265,7 +267,14 @@ impl Mesh {
                 let clip = if *enabled { clip.intersect(r) } else { clip };
                 if !clip.empty() {
                     for child in &node.children {
-                        self.paint(child, [r.x, r.y], factor, clip, font);
+                        self.paint(
+                            child,
+                            [r.x, r.y],
+                            factor,
+                            clip,
+                            font,
+                            retained.as_deref_mut(),
+                        );
                     }
                 }
             }
@@ -273,7 +282,14 @@ impl Mesh {
                 let clip = clip.intersect(r);
                 if !clip.empty() {
                     for child in &node.children {
-                        self.paint(child, [r.x, r.y], factor * scale, clip, font);
+                        self.paint(
+                            child,
+                            [r.x, r.y],
+                            factor * scale,
+                            clip,
+                            font,
+                            retained.as_deref_mut(),
+                        );
                     }
                 }
             }
@@ -283,7 +299,35 @@ impl Mesh {
                 color,
             } => {
                 if let Some(font) = font {
-                    self.text(r, value, *scale as f32 * factor, *color, clip, font);
+                    if let Some(runs) = retained {
+                        let first = self.glyph_vertices.len() / 16;
+                        let before = self.draws.len();
+                        let previous = self.draws.last().copied();
+                        self.text(
+                            Rect::new(0., 0., 100_000., 100_000.),
+                            value,
+                            *scale as f32 * factor,
+                            *color,
+                            Clip {
+                                left: -100_000.,
+                                top: -100_000.,
+                                right: 100_000.,
+                                bottom: 100_000.,
+                            },
+                            font,
+                        );
+                        let count = self.glyph_vertices.len() / 16 - first;
+                        self.draws.truncate(before);
+                        if let Some(old) = previous {
+                            self.draws[before - 1] = old;
+                        }
+                        if count > 0 {
+                            runs.push((self.draws.len() / 3, node.id));
+                            self.draws.extend([1, first as u32, count as u32]);
+                        }
+                    } else {
+                        self.text(r, value, *scale as f32 * factor, *color, clip, font);
+                    }
                 }
             }
             Primitive::Superellipse {

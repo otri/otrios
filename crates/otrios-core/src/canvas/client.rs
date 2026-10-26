@@ -2268,17 +2268,8 @@ fn present_text_views(m: &Mount, scene: &Scene, root: &mut SceneNode) {
         if n.id == frame.node {
             let editor = &m.editors[&frame.field];
             let offset = m.text_views.get(&frame.field).map_or(0., |v| v.offset);
-            let (value, x) = if let Some(font) = &m.font {
-                editor.window(
-                    offset,
-                    frame.width,
-                    font,
-                    frame.scale,
-                    m.focus == Some(frame.field),
-                )
-            } else {
-                (editor.display(m.focus == Some(frame.field)), 0.)
-            };
+            let value = editor.display(m.focus == Some(frame.field));
+            let x = -offset;
             let mut text = n.clone();
             text.id = TEXT_RUN_ID + u32::from(frame.field);
             text.frame.x = x;

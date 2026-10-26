@@ -44,6 +44,11 @@ Live Controls now includes a [primitive component playground](docs/COMPONENT_PLA
 
 Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](docs/ANIMATION.md). The [direct KMS display path](docs/DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](docs/experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](docs/rfcs/0001-direct-linux-gles2.md).
 
+[Retained text viewports and culling](docs/rfcs/0017-retained-text-viewports.md)
+reach [35–36 kernel-presented fps for a dense scrolling text page](docs/experiments/text-rendering-performance.md)
+on the Mali-400 frame. The float32 captures and measurements establish the baseline
+for the [fixed point/SIMD stretch milestone](docs/rfcs/0018-fixed-point-layout-simd.md).
+
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 
 The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home mounts Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and private Monitoring through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.

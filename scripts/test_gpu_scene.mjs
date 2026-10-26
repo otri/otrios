@@ -48,7 +48,9 @@ test('cache misses use analytic coverage once; warm glyph tint preserves draw or
   layer.setFrame(frame(0,[0.4,0.2,0.7,0.5]));renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,1);assert.equal(renderer.cacheStats.hits,1);
   assert.equal(calls.filter(call=>call[0]==='texImage2D').length,0);assert.equal(uploads,3);
   assert.equal(renderer.cacheStats.bytes,4*1024*1024);
-  layer.setFrame(frame(0.25));renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,2);
+  layer.setFrame(frame(0.25));renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,1);
+  for(let phase=0;phase<4;phase+=0.03125){layer.setFrame(frame(phase));renderer.prepare([layer]);}
+  assert.equal(renderer.cacheStats.misses,1,'fractional positions reuse one prefiltered glyph');
 });
 test('quad indices match TL TR BL BR and invalid plans cannot publish GPU buffers',()=>{
   const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();
@@ -64,10 +66,10 @@ test('linear coverage is composited before the single sRGB encoding pass',()=>{
 });
 test('physical viewport changes rebuild glyph coverage at the new device scale',()=>{
   const {gl}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();renderer.setFont(packet());layer.setFrame(frame());renderer.prepare([layer]);
-  assert.equal([...renderer.cache.values()][0].width,12);
+  assert.equal([...renderer.cache.values()][0].width,28);
   const canvas={width:1280,height:800,dataset:{},getBoundingClientRect:()=>({width:1280,height:800})};
   assert.equal(renderer.fitCanvas(canvas,2),true);assert.equal(canvas.width,2560);assert.equal(canvas.height,1600);assert.equal(canvas.dataset.presentationPixels,'2560x1600');assert.equal(renderer.cache.size,0);
-  renderer.prepare([layer]);assert.equal([...renderer.cache.values()][0].width,22);assert.equal(renderer.cacheStats.misses,2);
+  renderer.prepare([layer]);assert.equal([...renderer.cache.values()][0].width,48);assert.equal(renderer.cacheStats.misses,2);
   assert.equal(renderer.fitCanvas(canvas,2),false);
 });
 
@@ -86,4 +88,25 @@ test('direct default allocates only the glyph atlas and composites premultiplied
   const vertices=calls.filter(call=>call[0]==='shaderSource').map(call=>call[2]);assert.ok(vertices.some(source=>source.includes('tint=vec4(color.rgb*color.a,color.a)')));assert.ok(vertices.some(source=>source.includes('gl_FragColor=tint*texture2D(atlas,texcoord)')));
   calls.length=0;renderer.beginFrame();renderer.endFrame();assert.equal(calls.filter(call=>call[0]==='drawArrays').length,0);assert.ok(calls.filter(call=>call[0]==='blendFuncSeparate').every(call=>call[1]==='ONE'&&call[2]==='ONE_MINUS_SRC_ALPHA'));
   calls.length=0;renderer.resize(2560,1600);assert.equal(calls.filter(call=>call[0]==='texImage2D').length,0);
+});
+
+test('retained viewports change only uniforms and cull indexed glyph ranges',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();renderer.setFont(packet());
+  const f=frame(),glyphs=new Float32Array(128);glyphs.set(f.glyphVertices);glyphs.set(f.glyphVertices,64);
+  f.glyphVertices=glyphs;f.draws=new Uint32Array([0,0,3,1,0,8,0,3,3]);layer.setFrame(f);
+  const views=new Float32Array(24);views.set([4,4,2.25,0,10,10,20,20],8);layer.setTextViews(views);renderer.prepare([layer]);
+  calls.length=0;renderer.beginFrame();layer.draw();renderer.endFrame();
+  assert(calls.some(c=>c[0]==='drawArrays'&&c[2]===6&&c[3]===6),'only the second cached glyph is drawn');
+  assert(calls.some(c=>c[0]==='scissor'&&JSON.stringify(c.slice(1))==='[10,780,10,10]'));
+  const misses=renderer.cacheStats.misses;calls.length=0;views[10]=10.5;views[9]=0;layer.setTextViews(views);renderer.prepare([layer]);layer.draw();
+  assert.equal(renderer.cacheStats.misses,misses);assert.equal(calls.filter(c=>c[0]==='bufferData').length,0);
+  assert.deepEqual(calls.filter(c=>c[0]==='drawArrays').map(c=>c.slice(2)),[[0,3],[3,3]],'a culled run sends no text draw');
+  views[9]=100;assert.throws(()=>layer.setTextViews(views),/Culled text/);
+});
+
+test('clipped glyph edges reuse the complete prefiltered coverage',()=>{
+  const {gl}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();renderer.setFont(packet());
+  layer.setFrame(frame());renderer.prepare([layer]);const f=frame();
+  for(const i of [0,2]){f.glyphVertices[i*16]=13;f.glyphVertices[i*16+2]=0.3;}
+  layer.setFrame(f);renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,1);
 });

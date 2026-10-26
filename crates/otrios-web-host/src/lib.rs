@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Browser adapter; Canvas state/guest memory live only in the worker's RAM.
 use otrios_core::canvas::Client;
-use otrios_core::dashboard::{Mesh, font::Font, render_scene_with_font, scene::Scene};
+use otrios_core::dashboard::{
+    Mesh,
+    font::Font,
+    retained_text::{TextFrame, TextPresentation},
+    scene::Scene,
+};
 use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
 use otrios_interfaces::{canvas::Presentation, keyboard::Edit};
 use std::sync::Arc;
@@ -10,7 +15,8 @@ use wasm_bindgen::prelude::*;
 #[derive(Default)]
 pub struct CanvasApp {
     font: Option<Arc<Font>>,
-    rendered: Option<(Arc<Scene>, Mesh)>,
+    rendered: Option<(Arc<Scene>, TextFrame)>,
+    text_presentation: TextPresentation,
     inner: Client,
 }
 #[wasm_bindgen]
@@ -91,6 +97,7 @@ impl CanvasApp {
     pub fn clear_private(&mut self) {
         self.inner.clear_private();
         self.rendered = None;
+        self.text_presentation = TextPresentation::default();
     }
     pub fn input_busy(&self) -> bool {
         self.inner.input_busy()
@@ -236,6 +243,25 @@ impl CanvasApp {
     pub fn draws(&mut self) -> Result<Vec<u32>, String> {
         Ok(self.compose()?.draws.clone())
     }
+    pub fn text_generation(&mut self) -> Result<u32, String> {
+        self.compose()?;
+        Ok(self
+            .rendered
+            .as_ref()
+            .ok_or("No rendered scene")?
+            .1
+            .generation)
+    }
+    pub fn text_views(&mut self) -> Result<Vec<f32>, String> {
+        self.compose()?;
+        Ok(self
+            .rendered
+            .as_ref()
+            .ok_or("No rendered scene")?
+            .1
+            .views
+            .clone())
+    }
     pub fn set_font(&mut self, bytes: &[u8], hash: &str) -> Result<(), String> {
         let font = Arc::new(Font::from_zstd(bytes, hash)?);
         self.inner.set_font(font.clone());
@@ -363,10 +389,10 @@ impl CanvasApp {
             .is_none_or(|(old, _)| !Arc::ptr_eq(old, &scene))
         {
             let font = self.font.as_ref().ok_or("Font resource not loaded")?;
-            let mesh = render_scene_with_font(&scene, font);
+            let mesh = self.text_presentation.compose(&scene, font);
             self.rendered = Some((scene, mesh));
         }
-        Ok(&self.rendered.as_ref().ok_or("No rendered scene")?.1)
+        Ok(&self.rendered.as_ref().ok_or("No rendered scene")?.1.mesh)
     }
 }
 

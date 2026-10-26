@@ -39,7 +39,7 @@ function program(gl,vertex,fragment){
 function required(gl,p,name){const value=gl.getUniformLocation(p,name);if(value===null)throw Error(`Missing GPU uniform ${name}`);return value;}
 function attribute(gl,p,name){const value=gl.getAttribLocation(p,name);if(value<0)throw Error(`Missing GPU attribute ${name}`);return value;}
 const ATLAS_SIZE=1024,MAX_CACHE_ENTRIES=4096;
-function cacheGlyph(vertices,offset,scaleX=1,scaleY=1){
+function cacheGlyphExact(vertices,offset,scaleX=1,scaleY=1){
   let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
   for(let i=0;i<4;i++){left=Math.min(left,vertices[offset+i*16]*scaleX);right=Math.max(right,vertices[offset+i*16]*scaleX);top=Math.min(top,vertices[offset+i*16+1]*scaleY);bottom=Math.max(bottom,vertices[offset+i*16+1]*scaleY);}
   const corners=new Set();for(let i=0;i<4;i++){const x=vertices[offset+i*16]*scaleX,y=vertices[offset+i*16+1]*scaleY;if((x!==left&&x!==right)||(y!==top&&y!==bottom))return null;corners.add(`${x},${y}`);}if(corners.size!==4)return null;
@@ -48,15 +48,28 @@ function cacheGlyph(vertices,offset,scaleX=1,scaleY=1){
   const key=[];for(let i=0;i<4;i++){const v=offset+i*16;key.push(vertices[v]*scaleX-x,vertices[v+1]*scaleY-y,vertices[v+2],vertices[v+3],...vertices.subarray(v+8,v+16));}
   return {key:key.join(','),x,y,width,height,offset};
 }
-function appendRun(runs,kind,first,count){const n=runs.length;if(n&&runs[n-3]===kind&&runs[n-2]+runs[n-1]===first)runs[n-1]+=count;else runs.push(kind,first,count);}
+function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2){
+  if(!sampling)return cacheGlyphExact(vertices,offset,scaleX,scaleY);
+  const q=vertices.subarray(offset,offset+64),du=q[18]-q[2],dv=q[35]-q[3];
+  for(let i=1;i<4;i++)for(let j=4;j<16;j++)if(q[i*16+j]!==q[j])return null;
+  if(!Number.isFinite(du)||!Number.isFinite(dv)||Math.abs(du)<1e-8||Math.abs(dv)<1e-8||q[8]<=0||q[9]<=0)return null;
+  const sx=Math.round(Math.abs((q[16]-q[0])*scaleX/du)*256)/256,sy=Math.round(Math.abs((q[33]-q[1])*scaleY/dv)*256)/256;
+  if(sx<=0||sy<=0||q[17]!==q[1]||q[32]!==q[0])return null;
+  const x0=-q[10]/q[8],y1=(q[15]+1-q[11])/q[9],pad=2*sampling;
+  const width=Math.ceil((q[14]+1)/q[8]*sx*sampling+2*pad),height=Math.ceil((q[15]+1)/q[9]*sy*sampling+2*pad);
+  if(!Number.isFinite(width)||!Number.isFinite(height)||width>ATLAS_SIZE||height>ATLAS_SIZE||width<=0||height<=0)return null;
+  return {key:[sx,sy,...q.subarray(8,16)].join(','),width,height,offset,sx,sy,x0,y1,pad,sampling};
+}
+function appendRun(runs,kind,first,count,groups,view,source){const n=runs.length;if(n&&runs[n-3]===kind&&runs[n-2]+runs[n-1]===first&&groups.at(-2)===view&&groups.at(-1)+(kind===2?runs[n-1]/6*4:runs[n-1])===source)runs[n-1]+=count;else{runs.push(kind,first,count);groups.push(view,source);}}
 export class SceneRenderer {
-  constructor(gl,{width=1280,height=800,linearLight=false}={}){
+  constructor(gl,{width=1280,height=800,linearLight=false,atlasScale=2}={}){
     if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw Error('Invalid presentation dimensions');
     const floatTexture=gl.getExtension('OES_texture_float'),halfTexture=floatTexture?null:gl.getExtension('OES_texture_half_float');
     if(!floatTexture&&!halfTexture)throw Error('Analytic font rendering requires floating point textures');
     this.curveTextureType=floatTexture?gl.FLOAT:halfTexture.HALF_FLOAT_OES;
     if(!gl.getExtension('OES_standard_derivatives'))throw Error('Analytic font rendering requires shader derivatives');
     if(!gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT)?.precision)throw Error('Analytic font rendering requires high precision fragment math');
+    if(![0,2,3].includes(atlasScale))throw Error('Choose exact reference (0), 2x or 3x text sampling');this.atlasScale=atlasScale;
     this.linearLight=!!linearLight;this.gl=gl;this.layers=new Set();this.lost=false;this.font=null;this.activeAttributes=new Set();
     this.transform=new Float32Array([2/width,0,0,0,-2/height,0,-1,1,1]);
     const tintExpression=this.linearLight?'decodeSrgb(color.rgb)':'color.rgb',decode=this.linearLight?DECODE_SRGB:'';
@@ -65,12 +78,12 @@ export class SceneRenderer {
     this.geometryAttributes=[attribute(gl,this.geometry,'position'),attribute(gl,this.geometry,'color')];
     this.textAttributes=['position','renderCoord','color','bandTransform','glyph'].map(name=>attribute(gl,this.text,name));
     this.geometryTransform=required(gl,this.geometry,'transform');
-    this.textUniforms=Object.fromEntries(['transform','curveTexture','bandTexture','curveSize','bandSize','linearTint'].map(name=>[name,required(gl,this.text,name)]));
+    this.textUniforms=Object.fromEntries(['transform','curveTexture','bandTexture','curveSize','bandSize','linearTint','coverageScale'].map(name=>[name,required(gl,this.text,name)]));
     this.indices=gl.createBuffer();if(!this.indices)throw Error('Unable to allocate glyph indices');this.indexGlyphs=0;
     this.cacheProgram=program(gl,'attribute vec2 position;attribute vec2 uv;attribute vec4 color;uniform mat3 transform;varying highp vec2 texcoord;varying mediump vec4 tint;'+decode+'void main(){vec3 p=transform*vec3(position,1.0);gl_Position=vec4(p.xy,0.0,1.0);texcoord=uv;tint=vec4('+tintExpression+'*color.a,color.a);}','precision mediump float;uniform sampler2D atlas;varying highp vec2 texcoord;varying mediump vec4 tint;void main(){gl_FragColor=tint*texture2D(atlas,texcoord);}');
     this.cacheAttributes=['position','uv','color'].map(name=>attribute(gl,this.cacheProgram,name));this.cacheTransform=required(gl,this.cacheProgram,'transform');this.cacheSampler=required(gl,this.cacheProgram,'atlas');
     this.atlas=gl.createTexture();this.atlasFramebuffer=gl.createFramebuffer();this.scratch=gl.createBuffer();if(!this.atlas||!this.atlasFramebuffer||!this.scratch)throw Error('Unable to allocate the bounded glyph cache');
-    gl.bindTexture(gl.TEXTURE_2D,this.atlas);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,ATLAS_SIZE,ATLAS_SIZE,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,this.atlas,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Glyph cache framebuffer is unavailable');gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.bindTexture(gl.TEXTURE_2D,this.atlas);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,atlasScale?gl.LINEAR:gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,atlasScale?gl.LINEAR:gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,ATLAS_SIZE,ATLAS_SIZE,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,this.atlas,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Glyph cache framebuffer is unavailable');gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     this.width=width;this.height=height;this.logicalWidth=width;this.logicalHeight=height;this.scaleX=1;this.scaleY=1;
     if(this.linearLight){
     this.linearTexture=gl.createTexture();this.linearFramebuffer=gl.createFramebuffer();this.resolveBuffer=gl.createBuffer();if(!this.linearTexture||!this.linearFramebuffer||!this.resolveBuffer)throw Error('Unable to allocate the linear presentation target');
@@ -111,35 +124,38 @@ export class SceneRenderer {
     if(this.cacheY+glyph.height>ATLAS_SIZE)return null;
     const tile={x:this.cacheX,y:this.cacheY,width:glyph.width,height:glyph.height};this.cacheX+=glyph.width;this.cacheRow=Math.max(this.cacheRow,glyph.height);return tile;
   }
-  bindText(buffer,transform=this.transform){
+  bindText(buffer,transform=this.transform,coverageScale=1){
     const gl=this.gl,u=this.textUniforms,f=this.font;if(!f)throw Error('The verified font resource has not arrived');
-    gl.useProgram(this.text);gl.uniformMatrix3fv(u.transform,false,transform);gl.uniform1f(u.linearTint,this.linearLight?1:0);gl.uniform1i(u.curveTexture,0);gl.uniform1i(u.bandTexture,1);gl.uniform2fv(u.curveSize,f.curveSize);gl.uniform2fv(u.bandSize,f.bandSize);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,f.curves);gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,f.bands);this.useAttributes(this.textAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,buffer);for(const [j,size,offset] of [[0,2,0],[1,2,8],[2,4,16],[3,4,32],[4,4,48]])gl.vertexAttribPointer(this.textAttributes[j],size,gl.FLOAT,false,64,offset);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indices);
+    gl.useProgram(this.text);gl.uniformMatrix3fv(u.transform,false,transform);gl.uniform1f(u.linearTint,this.linearLight?1:0);gl.uniform1f(u.coverageScale,coverageScale);gl.uniform1i(u.curveTexture,0);gl.uniform1i(u.bandTexture,1);gl.uniform2fv(u.curveSize,f.curveSize);gl.uniform2fv(u.bandSize,f.bandSize);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,f.curves);gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,f.bands);this.useAttributes(this.textAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,buffer);for(const [j,size,offset] of [[0,2,0],[1,2,8],[2,4,16],[3,4,32],[4,4,48]])gl.vertexAttribPointer(this.textAttributes[j],size,gl.FLOAT,false,64,offset);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indices);
   }
   rasterGlyph(layer,glyph,tile){
-    const gl=this.gl,vertices=layer.glyphVertices.slice(glyph.offset,glyph.offset+64);for(let i=0;i<4;i++)vertices.fill(1,i*16+4,i*16+8);
+    const gl=this.gl,vertices=layer.glyphVertices.slice(glyph.offset,glyph.offset+64);for(let i=0;i<4;i++){
+      vertices.fill(1,i*16+4,i*16+8);
+      if(glyph.sampling){const x=(i%2)*tile.width,y=Math.floor(i/2)*tile.height;vertices[i*16]=tile.x+x;vertices[i*16+1]=tile.y+y;vertices[i*16+2]=glyph.x0+(x-glyph.pad)/(glyph.sx*glyph.sampling);vertices[i*16+3]=glyph.y1-(y-glyph.pad)/(glyph.sy*glyph.sampling);}
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER,this.scratch);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STREAM_DRAW);
-    const transform=new Float32Array([2*this.scaleX/ATLAS_SIZE,0,0,0,-2*this.scaleY/ATLAS_SIZE,0,2*(tile.x-glyph.x)/ATLAS_SIZE-1,1-2*(tile.y-glyph.y)/ATLAS_SIZE,1]);
-    this.bindText(this.scratch,transform);gl.scissor(tile.x,ATLAS_SIZE-tile.y-tile.height,tile.width,tile.height);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.BLEND);gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0);gl.enable(gl.BLEND);
+    const transform=glyph.sampling?new Float32Array([2/ATLAS_SIZE,0,0,0,-2/ATLAS_SIZE,0,-1,1,1]):new Float32Array([2*this.scaleX/ATLAS_SIZE,0,0,0,-2*this.scaleY/ATLAS_SIZE,0,2*(tile.x-glyph.x)/ATLAS_SIZE-1,1-2*(tile.y-glyph.y)/ATLAS_SIZE,1]);
+    this.bindText(this.scratch,transform,glyph.sampling||1);gl.scissor(tile.x,ATLAS_SIZE-tile.y-tile.height,tile.width,tile.height);gl.clear(gl.COLOR_BUFFER_BIT);gl.disable(gl.BLEND);gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0);gl.enable(gl.BLEND);
   }
   prepare(layers){
     this.assertReady();if(layers.every(layer=>layer.preparedGeneration===this.cacheGeneration))return;
-    const gl=this.gl,requests=[];for(const layer of layers){for(let offset=0;offset<layer.glyphVertices.length;offset+=64){const glyph=cacheGlyph(layer.glyphVertices,offset,this.scaleX,this.scaleY);if(glyph)requests.push(glyph);}}
+    const gl=this.gl,requests=[];for(const layer of layers){for(let offset=0;offset<layer.glyphVertices.length;offset+=64){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,offset,this.scaleX,this.scaleY,this.atlasScale);if(glyph)requests.push(glyph);}}
     // Predict shelf use before invalidating any UVs. Reset at most once, before drawing.
     let x=this.cacheX,y=this.cacheY,row=this.cacheRow,full=false;const unseen=new Set();for(const glyph of requests){if(this.cache.has(glyph.key)||unseen.has(glyph.key))continue;unseen.add(glyph.key);if(this.cache.size+unseen.size>MAX_CACHE_ENTRIES){full=true;break;}if(x+glyph.width>ATLAS_SIZE){x=0;y+=row;row=0;}if(y+glyph.height>ATLAS_SIZE){full=true;break;}x+=glyph.width;row=Math.max(row,glyph.height);}
     if(full){this.cache.clear();this.cacheX=0;this.cacheY=0;this.cacheRow=0;this.cacheGeneration++;this.cacheStats.resets++;}
     let bound=false;const previousViewport=gl.getParameter(gl.VIEWPORT),previousFramebuffer=gl.getParameter(gl.FRAMEBUFFER_BINDING);
-    try{for(const layer of layers){const runs=[],cached=[];
-      for(let i=0;i<layer.draws.length;i+=3){const kind=layer.draws[i],first=layer.draws[i+1],count=layer.draws[i+2];if(kind===0){appendRun(runs,kind,first,count);continue;}
-        for(let vertex=first;vertex<first+count;vertex+=4){const glyph=cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY);let tile=glyph&&this.cache.get(glyph.key);
+    try{for(const layer of layers){const runs=[],cached=[],groups=[];
+      for(let i=0;i<layer.draws.length;i+=3){const kind=layer.draws[i],first=layer.draws[i+1],count=layer.draws[i+2];if(kind===0){appendRun(runs,kind,first,count,groups,i/3,first);continue;}
+        for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale);let tile=glyph&&this.cache.get(glyph.key);
           if(tile)this.cacheStats.hits++;
           else if(glyph){tile=this.allocateGlyph(glyph);if(tile){if(!bound){bound=true;gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.viewport(0,0,ATLAS_SIZE,ATLAS_SIZE);gl.enable(gl.SCISSOR_TEST);gl.clearColor(0,0,0,0);}this.rasterGlyph(layer,glyph,tile);this.cache.set(glyph.key,tile);this.cacheStats.misses++;}}
-          if(!tile){appendRun(runs,1,vertex,4);this.cacheStats.fallbacks++;continue;}
+          if(!tile){appendRun(runs,1,vertex,4,groups,i/3,vertex);this.cacheStats.fallbacks++;continue;}
           const color=layer.glyphVertices.subarray(vertex*16+4,vertex*16+8),start=cached.length/8;
-          const points=[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
-          for(const corner of [0,1,2,0,2,3]){const [x,y,u,v]=points[corner];cached.push(x/this.scaleX,y/this.scaleY,u,v,...color);}appendRun(runs,2,start,6);
+          const points=glyph.sampling?[0,1,3,2].map(i=>{const q=vertex*16+i*16;return [layer.glyphVertices[q]*this.scaleX,layer.glyphVertices[q+1]*this.scaleY,(tile.x+glyph.pad+(layer.glyphVertices[q+2]-glyph.x0)*glyph.sx*glyph.sampling)/ATLAS_SIZE,1-(tile.y+glyph.pad+(glyph.y1-layer.glyphVertices[q+3])*glyph.sy*glyph.sampling)/ATLAS_SIZE];}):[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
+          for(const corner of [0,1,2,0,2,3]){const [x,y,u,v]=points[corner];cached.push(x/this.scaleX,y/this.scaleY,u,v,...color);}appendRun(runs,2,start,6,groups,i/3,vertex);
         }
       }
-      gl.bindBuffer(gl.ARRAY_BUFFER,layer.cached);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cached),gl.STATIC_DRAW);layer.preparedDraws=new Uint32Array(runs);layer.preparedGeneration=this.cacheGeneration;
+      gl.bindBuffer(gl.ARRAY_BUFFER,layer.cached);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(cached),gl.STATIC_DRAW);layer.preparedDraws=new Uint32Array(runs);layer.preparedGroups=groups;layer.preparedGeneration=this.cacheGeneration;
     }}finally{if(bound){gl.disable(gl.SCISSOR_TEST);gl.bindFramebuffer(gl.FRAMEBUFFER,previousFramebuffer);gl.viewport(...previousViewport);gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.ONE,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);}}
   }
   setLogicalSize(width,height){
@@ -200,7 +216,7 @@ export class SceneRenderer {
   }
 }
 class SceneLayer {
-  constructor(owner){this.owner=owner;const gl=owner.gl;this.geometry=gl.createBuffer();this.text=gl.createBuffer();this.cached=gl.createBuffer();this.glyphVertices=new Float32Array();this.preparedGeneration=0;this.preparedDraws=null;if(!this.geometry||!this.text||!this.cached)throw Error('Unable to allocate presentation buffers');this.draws=new Uint32Array();this.invalid=false;}
+  constructor(owner){this.owner=owner;const gl=owner.gl;this.geometry=gl.createBuffer();this.text=gl.createBuffer();this.cached=gl.createBuffer();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.preparedGroups=[];this.preparedGeneration=0;this.preparedDraws=null;if(!this.geometry||!this.text||!this.cached)throw Error('Unable to allocate presentation buffers');this.draws=new Uint32Array();this.invalid=false;}
   setFrame({vertices,glyphVertices=new Float32Array(),draws}){
     const owner=this.owner;owner.assertReady();if(this.invalid)throw Error('Presentation layer is unavailable');
     floats(vertices,6,'geometry');floats(glyphVertices,16,'glyph vertices');
@@ -208,20 +224,36 @@ class SceneLayer {
     if(draws===undefined){if(glyphVertices.length)throw Error('Text requires an ordered drawing plan');draws=vertices.length?new Uint32Array([0,0,vertices.length/6]):new Uint32Array();}
     if(!(draws instanceof Uint32Array)||draws.length%3||draws.length>65536)throw Error('Invalid drawing plan');
     for(let i=0;i<draws.length;i+=3){const kind=draws[i],first=draws[i+1],count=draws[i+2],stride=kind===0?3:4,limit=kind===0?vertices.length/6:glyphVertices.length/16;if(kind>1||first%stride||count%stride||first+count>limit)throw Error('Drawing plan exceeds its presentation buffer');}
-    const gl=owner.gl;gl.bindBuffer(gl.ARRAY_BUFFER,this.geometry);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.bindBuffer(gl.ARRAY_BUFFER,this.text);gl.bufferData(gl.ARRAY_BUFFER,glyphVertices,gl.STATIC_DRAW);owner.ensureIndices(glyphVertices.length/64);this.draws=draws;this.glyphVertices=glyphVertices;this.preparedGeneration=0;this.preparedDraws=null;
+    const gl=owner.gl;gl.bindBuffer(gl.ARRAY_BUFFER,this.geometry);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.bindBuffer(gl.ARRAY_BUFFER,this.text);gl.bufferData(gl.ARRAY_BUFFER,glyphVertices,gl.STATIC_DRAW);owner.ensureIndices(glyphVertices.length/64);this.draws=draws;this.textViews=new Float32Array();this.glyphVertices=glyphVertices;this.preparedGeneration=0;this.preparedDraws=null;
+  }
+  setTextViews(views){
+    floats(views,8,'text viewport');
+    if(views.length&&views.length!==this.draws.length/3*8)throw Error('Text viewport dimensions');
+    for(let i=0;i<this.draws.length/3&&views.length;i++)if(this.draws[i*3]===1){const v=views.subarray(i*8,i*8+8),start=this.draws[i*3+1],end=start+this.draws[i*3+2];if(!Number.isInteger(v[0])||!Number.isInteger(v[1])||v[0]%4||v[1]%4||v[0]<start||v[1]<0||v[0]>end||v[1]>end-v[0])throw Error('Culled text range');}
+    if(this.owner.atlasScale===0&&!!views.length!==!!this.textViews.length)this.preparedGeneration=0;
+    this.textViews=views;
   }
   draw(){
     const owner=this.owner;owner.assertReady();if(this.invalid)throw Error('Presentation layer is unavailable');const gl=owner.gl;
     let active=-1;
     const draws=this.preparedGeneration===owner.cacheGeneration?this.preparedDraws:this.draws;
-    for(let i=0;i<draws.length;i+=3){const kind=draws[i],first=draws[i+1],count=draws[i+2];if(!count)continue;
+    for(let i=0;i<draws.length;i+=3){const kind=draws[i];let first=draws[i+1],count=draws[i+2];if(!count)continue;
+      let view;
+      if(kind!==0&&this.textViews.length){const prepared=this.preparedGeneration===owner.cacheGeneration,group=prepared?this.preparedGroups[i/3*2]:i/3,source=prepared?this.preparedGroups[i/3*2+1]:first;view=this.textViews.subarray(group*8,group*8+8);const ratio=kind===2?1.5:1,end=Math.min(source+count/ratio,view[0]+view[1]),start=Math.max(source,view[0]);if(end<=start||view[6]<=view[4]||view[7]<=view[5])continue;first+=(start-source)*ratio;count=(end-start)*ratio;}
+
       if(active!==kind){
         active=kind;
         if(kind===0){gl.useProgram(owner.geometry);gl.uniformMatrix3fv(owner.geometryTransform,false,owner.transform);owner.useAttributes(owner.geometryAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.geometry);gl.vertexAttribPointer(owner.geometryAttributes[0],2,gl.FLOAT,false,24,0);gl.vertexAttribPointer(owner.geometryAttributes[1],4,gl.FLOAT,false,24,8);}
         else if(kind===1)owner.bindText(this.text);
         else{gl.useProgram(owner.cacheProgram);gl.uniformMatrix3fv(owner.cacheTransform,false,owner.transform);gl.uniform1i(owner.cacheSampler,2);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,owner.atlas);owner.useAttributes(owner.cacheAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.cached);gl.vertexAttribPointer(owner.cacheAttributes[0],2,gl.FLOAT,false,32,0);gl.vertexAttribPointer(owner.cacheAttributes[1],2,gl.FLOAT,false,32,8);gl.vertexAttribPointer(owner.cacheAttributes[2],4,gl.FLOAT,false,32,16);}
       }
+      if(kind!==0){
+        const transform=owner.transform.slice();
+        if(view){transform[6]+=owner.transform[0]*view[2]+owner.transform[3]*view[3];transform[7]+=owner.transform[1]*view[2]+owner.transform[4]*view[3];const edge=(v,max)=>Math.ceil(Math.max(0,Math.min(max,v))-.5),x0=edge(view[4]*owner.scaleX,owner.width),x1=edge(view[6]*owner.scaleX,owner.width),y0=edge(owner.height-view[7]*owner.scaleY,owner.height),y1=edge(owner.height-view[5]*owner.scaleY,owner.height);if(x1<=x0||y1<=y0)continue;gl.enable(gl.SCISSOR_TEST);gl.scissor(x0,y0,x1-x0,y1-y0);}
+        gl.uniformMatrix3fv(kind===1?owner.textUniforms.transform:owner.cacheTransform,false,transform);
+      }
       if(kind!==1)gl.drawArrays(gl.TRIANGLES,first,count);else gl.drawElements(gl.TRIANGLES,count/4*6,gl.UNSIGNED_SHORT,first/4*12);
+      if(view)gl.disable(gl.SCISSOR_TEST);
     }
   }
   dispose(){if(this.invalid)return;this.owner.gl.deleteBuffer(this.geometry);this.owner.gl.deleteBuffer(this.text);this.owner.gl.deleteBuffer(this.cached);this.owner.layers.delete(this);this.invalid=true;this.draws=new Uint32Array();}

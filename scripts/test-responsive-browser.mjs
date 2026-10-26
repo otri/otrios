@@ -39,7 +39,42 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--timings')){
+  if(args.includes('--input-viewport')){
+    const a=await page(1280,800,'input-lab');
+    await click(a,'First text field','input-lab','1280x800');
+    await wait(a,"[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')==='SPACE')");
+    const label=()=>evaluate(a,"document.querySelector('#view').getAttribute('aria-label')");
+    const pixels=async()=>{const x=await call('Page.captureScreenshot',{format:'png'},a);return x.data;};
+    const key=async(key,ctrl=false)=>{await evaluate(a,`(()=>{document.activeElement?.blur();window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(key)},ctrlKey:${ctrl},bubbles:true,cancelable:true}));})()`);await new Promise(r=>setTimeout(r,100));};
+    await key('a',true);await key('Backspace');
+    const source=Array.from({length:60},(_,i)=>`W${String(i).padStart(2,'0')} `).join('');
+    await evaluate(a,`(()=>{const d=new DataTransfer();d.setData('text/plain',${JSON.stringify(source)});window.dispatchEvent(new ClipboardEvent('paste',{clipboardData:d,bubbles:true,cancelable:true}));})()`);
+    await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('W59 |')");
+    await screenshot(a,'input-caret-end');
+    await key('a',true);await key('ArrowLeft');
+    await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('|W00')");
+    const atStart=await label();assert(atStart.includes('W20'),'wide field draws beyond the former 38-grapheme cap');
+    await screenshot(a,'input-full-width');
+    await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
+    const field=(await controls(a)).find(c=>c.label==='First text field');assert(field);
+    const [x,y,w,h]=field.bounds,sy=y+h/2,sx=x+w*.75;
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:sx,y:sy}]},a);
+    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:sx-100,y:sy}]},a);
+    await new Promise(r=>setTimeout(r,50));
+    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:sx-200,y:sy}]},a);
+    await new Promise(r=>setTimeout(r,30));const moving=await pixels();
+    await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
+    await new Promise(r=>setTimeout(r,100));const coasting=await pixels();assert.notEqual(coasting,moving,'text coasts after touch release');
+    await new Promise(r=>setTimeout(r,1200));const preview=await pixels();assert((await label()).includes('|W00'),'panning preserves the original caret');
+    await new Promise(r=>setTimeout(r,400));assert.equal(await pixels(),preview,'settled viewport stays at preview');
+    await screenshot(a,'input-touch-preview');
+    await key('ArrowLeft');await new Promise(r=>setTimeout(r,250));assert.notEqual(await pixels(),preview,'left recovers panned caret');await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('|W00')");
+    await screenshot(a,'input-arrow-recovery');
+    await key('!');await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('!|W00')");
+    assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true);
+    const result={passed:true,release:await evaluate(a,"document.querySelector('#revision').dataset.release"),checks:['real Chromium WebGL and worker mount','long pasted text follows caret to end','wide field displays beyond old character cap','physical touch panning and release momentum','idle preview stays independent of caret','left at unchanged beginning recovers hidden caret','typing edits original caret after panning']};
+    await writeFile(join(output,'input-viewport-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--timings')){
     const a=await page(800,1280,'home');
     const report=()=>evaluate(a,"JSON.parse(document.querySelector('#timing-report').value)");
     await wait(a,"document.querySelector('#timing-report')?.value.includes('startup')");

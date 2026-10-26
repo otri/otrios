@@ -137,6 +137,10 @@ an acceptance test for either correct glyphs or achieved frame rate.
 
 ## Bounded reusable glyph coverage
 
+The exact-phase policy below records the original cache. [RFC 0017](0017-retained-text-viewports.md)
+amends it with phase-independent 2×/3× prefiltered coverage and retained, culled
+text viewports. Scale zero remains an exact-phase diagnostic.
+
 Analytic outlines remain the canonical font representation. A presentation owner
 may cache the shader's pixel coverage to avoid repeating curve evaluation for
 unchanged text. Both hosts allocate a 1,024×1,024 RGBA8 coverage target: **4 MiB**,

@@ -180,6 +180,9 @@ pub(super) fn run() -> Result<(), String> {
                         display.upload_scene(0, &f.vertices, &f.glyph_vertices, &f.draws)?;
                         retained = Some(f.vertices.clone());
                     }
+                    if f.reflow.is_none() {
+                        display.text_views(0, &f.text_views)?;
+                    }
                     if animated {
                         let now = started.elapsed().as_secs_f64() * 1000.;
                         let mesh =

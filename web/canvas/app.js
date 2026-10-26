@@ -61,7 +61,7 @@ try{
   function pump(){if(!busy&&model&&queue.length){busy=true;const message=queue.shift();timings?.dispatched(message.timing);worker.postMessage(message);}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
   window.addEventListener('popstate',()=>command({type:'navigate',screen:restoreScreen()}));
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
-  const query=new URL(location.href).searchParams,renderer=new SceneRenderer(gl,{linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'}),staticLayer=renderer.createLayer(),motionLayer=renderer.createLayer(),hudLayer=renderer.createLayer();
+  const query=new URL(location.href).searchParams,renderer=new SceneRenderer(gl,{atlasScale:query.has('font-probe')?0:2,linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'}),staticLayer=renderer.createLayer(),motionLayer=renderer.createLayer(),hudLayer=renderer.createLayer();
   const [curveWidth,curveHeight,bandWidth,bandHeight]=presenter.font_dimensions();
   renderer.setFont({curveWidth,curveHeight,curves:presenter.font_curves(),bandWidth,bandHeight,bands:presenter.font_bands()});revision.dataset.fontRenderer='analytic-quadratic-cached';revision.dataset.gamma=renderer.linearLight?'linear-light-srgb':'authored-srgb';revision.dataset.alpha='premultiplied';
   let hudRevision=-1,dirty=true,lastFontCache='',fontProbed=false;const fontProbeRequested=['1','direct'].includes(query.get('font-probe'));const controls=new Map();
@@ -75,15 +75,15 @@ try{
     }
   });
   function accept(f){
-    if(model?.screen!==f.screen)presenter.suspend();timings?.accept(f);
+    const wasReflow=!!model?.reflow;if(model?.screen!==f.screen)presenter.suspend();timings?.accept(f);
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
     model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();
-    if(f.vertices){
+    if(f.controls){
       renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
       canvas.dataset.logicalSize=f.extent.join('x');resize();
       presenter.set_reflow(f.reflow||new Uint8Array(),performance.now());
-      model.reflow=!!f.reflow?.length;staticLayer.setFrame(f);
+      model.reflow=!!f.reflow?.length;if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);if(!model.reflow)staticLayer.setTextViews(f.textViews||new Float32Array());
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',event=>command({type:'activate',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id},event));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
         b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');Object.assign(b.style,semanticBounds(c.bounds,f.extent));}
