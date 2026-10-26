@@ -32,7 +32,7 @@ struct mesh { GLuint vbo; GLsizei count; int opaque; };
 #define CACHE_SIZE 1024
 #define CACHE_ENTRIES 4096
 #define CACHE_BUCKETS 8192
-struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; int raw_dirty,cache_all; };
+struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; int raw_dirty,cache_all; };
 struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
@@ -202,7 +202,7 @@ int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats) {
     }
     glBindBuffer(GL_ARRAY_BUFFER,d->meshes[slot].vbo);
     glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(count*sizeof(*packed)),packed,slot==1?GL_STREAM_DRAW:GL_STATIC_DRAW);
-    free(d->text[slot].views);d->text[slot].views=NULL;free(d->text[slot].draws);d->text[slot].draws=NULL;d->text[slot].draw_words=0;d->text[slot].count=0;
+    free(d->text[slot].views);d->text[slot].views=NULL;free(d->text[slot].ems);d->text[slot].ems=NULL;free(d->text[slot].draws);d->text[slot].draws=NULL;d->text[slot].draw_words=0;d->text[slot].count=0;
     free(packed);d->meshes[slot].count=(GLsizei)count;d->meshes[slot].opaque=opaque;
     return gl_ok(d,"Upload retained vertex buffer");
 }
@@ -294,7 +294,7 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
     // larger analytic stream until a fallback actually needs it; indices grow once.
     m->raw_dirty=1;
     if(grow){glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)(count/4*6*sizeof(*indices)),indices,GL_STATIC_DRAW);m->index_capacity=count;}
-    free(indices);m->cached_generation=0;free(m->draws);m->draws=plan;m->draw_words=words;m->count=(GLsizei)count;
+    free(indices);free(m->ems);m->ems=NULL;m->cached_generation=0;free(m->draws);m->draws=plan;m->draw_words=words;m->count=(GLsizei)count;
     return gl_ok(d,"Upload retained glyph quads");
 }
 int ot_linear_scene(ot_display *d) { return d->linear_scene; }
@@ -312,6 +312,22 @@ int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats) 
     }
     if(!m->views){m->views=malloc(floats*sizeof(float));if(!m->views)return fail(d,"Text viewport allocation");if(d->stable_text)m->cached_generation=0;}
     memcpy(m->views,views,floats*sizeof(float));return 0;
+}
+int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count) {
+    if(slot>=3)return fail(d,"Invalid text style slot");
+    struct text_mesh *m=&d->text[slot];
+    if(!count){if(m->ems)m->cached_generation=0;free(m->ems);m->ems=NULL;return 0;}
+    if(count!=m->draw_words/3 || count>4096)return fail(d,"Invalid text style dimensions");
+    float *ems=calloc((size_t)m->count/4,sizeof(*ems));
+    if(m->count && !ems)return fail(d,"Text style allocation");
+    for(size_t i=0;i<count;i++){
+        float em=styles[i];if(!isfinite(em)||em<0||em>1000000.f){free(ems);return fail(d,"Invalid text style scale");}
+        if(m->draws[i*3]!=1 || em==0)continue;
+        for(uint32_t q=m->draws[i*3+1]/4,end=q+m->draws[i*3+2]/4;q<end;q++){
+            if(ems[q]!=0 && ems[q]!=em){free(ems);return fail(d,"Conflicting text style ranges");}ems[q]=em;
+        }
+    }
+    free(m->ems);m->ems=ems;m->cached_generation=0;return 0;
 }
 void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*4:0; }
 static void draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count) {
@@ -546,7 +562,7 @@ static int cache_quad_exact(ot_display *d,const float *q,const float *projection
 // Phase-independent, prefiltered coverage: raster once at 2x/3x, with
 // analytic coverage still integrated over one destination pixel. Linear sampling
 // then reconstructs fractional placement without changing the glyph cache key.
-static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex *out,int retained) {
+static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex *out,int retained,float declared_em) {
     uint8_t tint[4];
     for(int i=1;i<4;i++)if(memcmp(q+4,q+i*16+4,12*sizeof(float)))return 1;
     float du=q[18]-q[2],dv=q[35]-q[3];
@@ -555,9 +571,25 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     // Band addresses are already bounded by the safe Rust admission layer.
     // This is only a hint: compare the complete metadata and physical size
     // before reusing the entry, including when the visible quad is clipped.
+    if(d->stable_text){
+        const float *p=d->sampled_pixel_transform;
+        if((p[0]!=0 && p[1]!=0)||(p[2]!=0 && p[3]!=0))return 1;
+        float ey=fabsf((q[33]-q[1])/dv),ex=fabsf((q[16]-q[0])/du);
+        if(retained){if(declared_em>0)ey=declared_em;ex=ey;}
+        float px=fabsf(d->sampled_pixel_transform[0])+fabsf(d->sampled_pixel_transform[1]),py=fabsf(d->sampled_pixel_transform[2])+fabsf(d->sampled_pixel_transform[3]);
+        float tx=roundf(ex*px*256.f)/256.f,ty=roundf(ey*py*256.f)/256.f,ss=(float)d->atlas_scale,pad=3.f*ss;
+        float x0=-q[10]/q[8],y0=-q[11]/q[9],width=ceilf((q[14]+1.f)/q[8]*tx*ss+2.f*pad),height=ceilf((q[15]+1.f)/q[9]*ty*ss+2.f*pad),clear=pad-ss;
+        for(int i=0;i<4;i++){
+            float u=pad+(q[i*16+2]-x0)*tx*ss,v=pad+(q[i*16+3]-y0)*ty*ss;
+            if(u-.5f< -clear||u+.5f>width+clear||v-.5f< -clear||v+.5f>height+clear)return 1;
+        }
+    }
     unsigned recent=(((unsigned)q[12]+(unsigned)q[13]*256u)/16u)&(CACHE_ENTRIES-1u);
     struct glyph_entry *entry=d->glyph_recent[recent]?&d->glyph_cache[d->glyph_recent[recent]-1]:NULL;
     const float *p=d->sampled_pixel_transform;
+    float em=(retained && d->stable_text)?(declared_em>0?declared_em:fabsf((q[33]-q[1])/dv)):0;
+    float canonical_x=em*(fabsf(p[0])+fabsf(p[1])),canonical_y=em*(fabsf(p[2])+fabsf(p[3]));
+    float target_x=roundf(canonical_x*256.f)/256.f,target_y=roundf(canonical_y*256.f)/256.f;
     float dx=q[16]-q[0],dy=q[17]-q[1];
     float ux_span=p[0]*dx+p[2]*dy,uy_span=p[1]*dx+p[3]*dy;
     dx=q[32]-q[0];dy=q[33]-q[1];
@@ -565,8 +597,8 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     if(entry && !memcmp(entry->key+2,q+8,8*sizeof(float)) &&
        (ux_span==0.f || uy_span==0.f) && (vx_span==0.f || vy_span==0.f) &&
        ((ux_span==0.f && vy_span==0.f) || (uy_span==0.f && vx_span==0.f)) &&
-       fabsf(fabsf(ux_span)+fabsf(uy_span)-fabsf(du)*entry->key[0])<=0.001f+fabsf(du)/512.f &&
-       fabsf(fabsf(vx_span)+fabsf(vy_span)-fabsf(dv)*entry->key[1])<=0.001f+fabsf(dv)/512.f){
+       (em>0?(entry->key[0]==target_x && entry->key[1]==target_y):(fabsf(fabsf(ux_span)+fabsf(uy_span)-fabsf(du)*entry->key[0])<=0.001f+fabsf(du)/512.f &&
+       fabsf(fabsf(vx_span)+fabsf(vy_span)-fabsf(dv)*entry->key[1])<=0.001f+fabsf(dv)/512.f))){
         d->text_hits++;
         if(d->profile_text)d->profile_recent++;
         goto emit_sampled;
@@ -581,13 +613,13 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     if(retained && d->stable_text){
         // Retained font strips scale uniformly in logical space. Y stays local,
         // unlike a long X pen whose f32 subtraction can invent cache sizes.
-        su=fabsf((q[33]-q[1])/dv)*(fabsf(p[0])+fabsf(p[1]));
+        su=canonical_x;sv=canonical_y;
     }
     if(!isfinite(su)||!isfinite(sv)||su<=0||sv<=0||su>65536.f||sv>65536.f)return 1;
     float sx=(float)(uint32_t)(su*256.f+0.5f)/256.f,sy=(float)(uint32_t)(sv*256.f+0.5f)/256.f;
     if(sx<=0 || sy<=0)return 1;
     float x0=-q[10]/q[8],y0=-q[11]/q[9],x1=(q[14]+1.f-q[10])/q[8],y1=(q[15]+1.f-q[11])/q[9];
-    float ss=(float)d->atlas_scale,pad=2.f*ss;
+    float ss=(float)d->atlas_scale,pad=(d->stable_text?3.f:2.f)*ss;
     float fw=(x1-x0)*sx*ss+2.f*pad,fh=(y1-y0)*sy*ss+2.f*pad;
     if(!isfinite(fw)||!isfinite(fh)||fw<1||fh<1||fw>CACHE_SIZE-2||fh>CACHE_SIZE-2)return 1;
     int w=(int)fw,h=(int)fh;w+=((float)w<fw);h+=((float)h<fh);
@@ -624,25 +656,16 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     d->glyph_recent[recent]=(int)(entry-d->glyph_cache)+1;
 emit_sampled:
     for(int j=0;j<4;j++)tint[j]=(uint8_t)(q[j+4]*255.f+0.5f);
-    float scale_x=fabsf(p[0])+fabsf(p[1]),scale_y=fabsf(p[2])+fabsf(p[3]);
-    float left=q[0]*scale_x,right=q[16]*scale_x,top=q[1]*scale_y,bottom=q[33]*scale_y;
     for(int i=0;i<4;i++){
         struct cached_vertex *v=out+i;float u=q[i*16+2],w=q[i*16+3];v->x=q[i*16];v->y=q[i*16+1];
-        if(retained && d->stable_text){
-            // The viewport scissor preserves the clip while transparent quad
-            // bounds expand to pixel edges. Correct UVs rather than moving ink.
-            float x=(i&1)?ceilf(right):floorf(left),y=(i<2)?floorf(top):ceilf(bottom);
-            u=q[2]+(x-left)*du/(right-left);w=q[3]+(y-top)*dv/(bottom-top);
-            v->x=x/scale_x;v->y=y/scale_y;
-        }
         v->u=entry->uv_bias[0]+u*entry->uv_scale[0];
         v->v=entry->uv_bias[1]+w*entry->uv_scale[1];
         memcpy(v->rgba,tint,sizeof(tint));
     }
     return 0;
 }
-static int cache_quad(ot_display *d,const float *q,const float *projection,struct cached_vertex *out,int retained) {
-    return d->atlas_scale?cache_quad_sampled(d,q,out,retained):cache_quad_exact(d,q,projection,out);
+static int cache_quad(ot_display *d,const float *q,const float *projection,struct cached_vertex *out,int retained,float declared_em) {
+    return d->atlas_scale?cache_quad_sampled(d,q,out,retained,declared_em):cache_quad_exact(d,q,projection,out);
 }
 static uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;}
 static int prepare_glyph_cache(ot_display *d,const float *projection,int animated) {
@@ -676,7 +699,7 @@ static int prepare_glyph_cache(ot_display *d,const float *projection,int animate
             uint64_t profile_start=d->profile_text?monotonic_ns():0;
             int status=0;m->cache_all=1;
             for(int q=0;q<m->count/4;q++){
-                status=cache_quad(d,m->vertices+q*64,projection,cached+q*4,m->views!=NULL);
+                status=cache_quad(d,m->vertices+q*64,projection,cached+q*4,m->views!=NULL,m->ems?m->ems[q]:0);
                 if(status==2 && attempt==0)break;
                 m->cached_valid[q]=(status==0);
                 if(status){m->cache_all=0;memset(cached+q*4,0,4*sizeof(*cached));}
@@ -817,7 +840,7 @@ void ot_close(ot_display *d) {
     free(d->saved_connectors);
     if(d->input>=0)close(d->input);
     if(d->fd>=0){drmDropMaster(d->fd);close(d->fd);}
-    for(int i=0;i<3;i++){free(d->text[i].views);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
+    for(int i=0;i<3;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
     free(d->glyph_cache);
     free(d);
 }

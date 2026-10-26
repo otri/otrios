@@ -252,6 +252,17 @@ impl CanvasApp {
             .1
             .generation)
     }
+    pub fn text_styles(&mut self) -> Result<Vec<f32>, String> {
+        self.compose()?;
+        Ok(self
+            .rendered
+            .as_ref()
+            .ok_or("No rendered scene")?
+            .1
+            .styles
+            .as_ref()
+            .clone())
+    }
     pub fn text_views(&mut self) -> Result<Vec<f32>, String> {
         self.compose()?;
         Ok(self

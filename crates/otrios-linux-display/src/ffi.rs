@@ -73,6 +73,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn ot_linear_scene(d: *mut c_void) -> c_int;
     fn ot_text_stats(d: *mut c_void, stats: *mut u64);
+    fn ot_text_styles(d: *mut c_void, slot: u32, styles: *const f32, floats: usize) -> c_int;
     fn ot_text_views(d: *mut c_void, slot: u32, views: *const f32, floats: usize) -> c_int;
     fn ot_present(d: *mut c_void, flip: *mut Flip) -> c_int;
     fn ot_input(d: *mut c_void, events: *mut Touch, capacity: usize) -> c_int;
@@ -241,6 +242,22 @@ impl Display {
         // integral ranges against the admitted draw plan before retaining them.
         self.result(unsafe {
             ot_text_views(self.owner.as_ptr(), slot, views.as_ptr(), views.len())
+        })
+    }
+    /// Immutable logical font em per draw. Zero retains legacy inference.
+    pub fn text_styles(&mut self, slot: u32, styles: &[f32]) -> Result<(), String> {
+        if slot >= 3
+            || styles.len() > 4096
+            || styles
+                .iter()
+                .any(|v| !v.is_finite() || *v < 0. || *v > 1000000.)
+        {
+            return Err("Invalid text styles".into());
+        }
+        // SAFETY: finite bounded borrowed values, synchronously copied. C checks
+        // draw-plan dimensions and conflicting ranges before replacing metadata.
+        self.result(unsafe {
+            ot_text_styles(self.owner.as_ptr(), slot, styles.as_ptr(), styles.len())
         })
     }
     pub fn draw(&mut self, projection: [f32; 9], animated: bool) -> Result<(), String> {
@@ -620,6 +637,12 @@ mod tests {
         let mut expected = Vec::new();
         for (i, part) in parts.iter().enumerate() {
             display.upload_scene(0, &[], part, &[1, 0, 4]).unwrap();
+            display
+                .text_styles(
+                    0,
+                    &[font.metrics().cache_em(2.) * if i == 1 { 100. } else { 1. }],
+                )
+                .unwrap();
             let [l, t, r, b] = clips[i];
             display
                 .text_views(0, &[0., 4., 0., 0., l, t, r, b])
@@ -655,12 +678,31 @@ mod tests {
             .enumerate()
             .flat_map(|(i, [l, t, r, b])| [i as f32 * 4., 4., 0., 0., l, t, r, b])
             .collect();
+        display
+            .text_styles(
+                0,
+                &[
+                    font.metrics().cache_em(2.),
+                    font.metrics().cache_em(2.) * 100.,
+                    font.metrics().cache_em(2.),
+                ],
+            )
+            .unwrap();
         display.text_views(0, &views).unwrap();
         display.draw(projection, false).unwrap();
         assert_eq!(
             display.pixels().unwrap(),
             expected,
             "mixed cache/raw draws preserve program state and clips"
+        );
+        assert!(display.text_styles(0, &[1.]).is_err());
+        assert!(display.text_styles(0, &[f32::NAN; 3]).is_err());
+        assert!(display.text_styles(0, &[-1.; 3]).is_err());
+        display.draw(projection, false).unwrap();
+        assert_eq!(
+            display.pixels().unwrap(),
+            expected,
+            "rejected style metadata does not change the frame"
         );
         assert!(display.glyph_cache_stats()[1] > 0);
         assert_eq!(display.glyph_cache_stats()[2], 4 * 1024 * 1024);

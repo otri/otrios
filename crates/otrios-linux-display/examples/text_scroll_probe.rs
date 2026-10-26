@@ -58,6 +58,7 @@ fn main() -> Result<(), String> {
         let before = Instant::now();
         if previous.as_ref().is_none_or(|old| !Arc::ptr_eq(old, mesh)) {
             display.upload_scene(0, &mesh.vertices, &mesh.glyphs, &mesh.draws)?;
+            display.text_styles(0, &mesh.styles)?;
         }
         previous = Some(mesh.clone());
         display.text_views(0, &frame.views)?;

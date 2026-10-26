@@ -48,7 +48,7 @@ function cacheGlyphExact(vertices,offset,scaleX=1,scaleY=1){
   const key=[];for(let i=0;i<4;i++){const v=offset+i*16;key.push(vertices[v]*scaleX-x,vertices[v+1]*scaleY-y,vertices[v+2],vertices[v+3],...vertices.subarray(v+8,v+16));}
   return {key:key.join(','),x,y,width,height,offset};
 }
-function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2,retained=false){
+function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2,retained=false,declaredEm=0,guard=2){
   if(!sampling)return cacheGlyphExact(vertices,offset,scaleX,scaleY);
   const q=vertices.subarray(offset,offset+64),du=q[18]-q[2],dv=q[35]-q[3];
   for(let i=1;i<4;i++)for(let j=4;j<16;j++)if(q[i*16+j]!==q[j])return null;
@@ -57,13 +57,20 @@ function cacheGlyph(vertices,offset,scaleX=1,scaleY=1,sampling=2,retained=false)
   // Retained font strips are uniformly scaled in logical space. Their Y span
   // stays local; X may be a long accumulated pen and loses f32 subtraction
   // precision. Use that local span for both axes to avoid duplicate cache sizes.
-  const emY=Math.abs((q[33]-q[1])/dv);
+  const emY=declaredEm||Math.abs((q[33]-q[1])/dv);
   const sx=Math.round((retained?emY*scaleX:Math.abs((q[16]-q[0])*scaleX/du))*256)/256,sy=Math.round((retained?emY*scaleY:Math.abs((q[33]-q[1])*scaleY/dv))*256)/256;
   if(sx<=0||sy<=0||q[17]!==q[1]||q[32]!==q[0])return null;
-  const x0=-q[10]/q[8],y1=(q[15]+1-q[11])/q[9],pad=2*sampling;
+  const x0=-q[10]/q[8],y1=(q[15]+1-q[11])/q[9],pad=guard*sampling;
   const width=Math.ceil((q[14]+1)/q[8]*sx*sampling+2*pad),height=Math.ceil((q[15]+1)/q[9]*sy*sampling+2*pad);
   if(!Number.isFinite(width)||!Number.isFinite(height)||width>ATLAS_SIZE||height>ATLAS_SIZE||width<=0||height<=0)return null;
-  return {key:[sx,sy,...q.subarray(8,16)].join(','),width,height,offset,sx,sy,x0,y1,pad,sampling};
+  if(guard>2){
+    // Include the prefilter support, the bilinear footprint and (for retained
+    // quads) at most half a pixel of vertex correction. Outside this clear
+    // border use analytic fallback instead of sampling a neighboring tile.
+    const mx=.5+(retained?.5*sampling*sx/(emY*scaleX):0),my=.5+(retained?.5*sampling*sy/(emY*scaleY):0),clear=pad-sampling;
+    for(let i=0;i<4;i++){const u=pad+(q[i*16+2]-x0)*sx*sampling,v=pad+(y1-q[i*16+3])*sy*sampling;if(u-mx< -clear||u+mx>width+clear||v-my< -clear||v+my>height+clear)return null;}
+  }
+  return {key:[sx,sy,pad,...q.subarray(8,16)].join(','),width,height,offset,sx,sy,x0,y1,pad,sampling};
 }
 function appendRun(runs,kind,first,count,groups,view,source){const n=runs.length;if(n&&runs[n-3]===kind&&runs[n-2]+runs[n-1]===first&&groups.at(-2)===view&&groups.at(-1)+(kind===2?runs[n-1]/6*4:runs[n-1])===source)runs[n-1]+=count;else{runs.push(kind,first,count);groups.push(view,source);}}
 export class SceneRenderer {
@@ -85,8 +92,9 @@ export class SceneRenderer {
     this.geometryTransform=required(gl,this.geometry,'transform');
     this.textUniforms=Object.fromEntries(['transform','curveTexture','bandTexture','curveSize','bandSize','linearTint','coverageScale'].map(name=>[name,required(gl,this.text,name)]));
     this.indices=gl.createBuffer();if(!this.indices)throw Error('Unable to allocate glyph indices');this.indexGlyphs=0;
-    this.cacheProgram=program(gl,'attribute vec2 position;attribute vec2 uv;attribute vec4 color;uniform mat3 transform;varying highp vec2 texcoord;varying mediump vec4 tint;'+decode+'void main(){vec3 p=transform*vec3(position,1.0);gl_Position=vec4(p.xy,0.0,1.0);texcoord=uv;tint=vec4('+tintExpression+'*color.a,color.a);}','precision mediump float;uniform sampler2D atlas;varying highp vec2 texcoord;varying mediump vec4 tint;void main(){gl_FragColor=tint*texture2D(atlas,texcoord);}');
-    this.cacheAttributes=['position','uv','color'].map(name=>attribute(gl,this.cacheProgram,name));this.cacheTransform=required(gl,this.cacheProgram,'transform');this.cacheSampler=required(gl,this.cacheProgram,'atlas');
+    const snapDeclarations=this.stableTextQuads?'uniform vec2 snapViewport;uniform mat2 snapUv;':'',snapVertex=this.stableTextQuads?'if(snapViewport.x>0.0){vec2 pixel=(p.xy+1.0)*snapViewport*0.5;vec2 snapped=ceil(pixel-0.5);texcoord+=snapUv*(snapped-pixel);p.xy=snapped*2.0/snapViewport-1.0;}':'';
+    this.cacheProgram=program(gl,'attribute vec2 position;attribute vec2 uv;attribute vec4 color;uniform mat3 transform;'+snapDeclarations+'varying highp vec2 texcoord;varying mediump vec4 tint;'+decode+'void main(){vec3 p=transform*vec3(position,1.0);texcoord=uv;'+snapVertex+'gl_Position=vec4(p.xy,0.0,1.0);tint=vec4('+tintExpression+'*color.a,color.a);}','precision mediump float;uniform sampler2D atlas;varying highp vec2 texcoord;varying mediump vec4 tint;void main(){gl_FragColor=tint*texture2D(atlas,texcoord);}');
+    this.cacheAttributes=['position','uv','color'].map(name=>attribute(gl,this.cacheProgram,name));this.cacheTransform=required(gl,this.cacheProgram,'transform');this.cacheSampler=required(gl,this.cacheProgram,'atlas');if(this.stableTextQuads){this.cacheSnapViewport=required(gl,this.cacheProgram,'snapViewport');this.cacheSnapUv=required(gl,this.cacheProgram,'snapUv');}
     this.atlas=gl.createTexture();this.atlasFramebuffer=gl.createFramebuffer();this.scratch=gl.createBuffer();if(!this.atlas||!this.atlasFramebuffer||!this.scratch)throw Error('Unable to allocate the bounded glyph cache');
     gl.bindTexture(gl.TEXTURE_2D,this.atlas);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,atlasScale?gl.LINEAR:gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,atlasScale?gl.LINEAR:gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,ATLAS_SIZE,ATLAS_SIZE,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,this.atlas,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Glyph cache framebuffer is unavailable');gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     this.width=width;this.height=height;this.logicalWidth=width;this.logicalHeight=height;this.scaleX=1;this.scaleY=1;
@@ -144,29 +152,20 @@ export class SceneRenderer {
   }
   prepare(layers){
     this.assertReady();if(layers.every(layer=>layer.preparedGeneration===this.cacheGeneration))return;
-    const gl=this.gl,requests=[];for(const layer of layers){for(let offset=0;offset<layer.glyphVertices.length;offset+=64){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,offset,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length);if(glyph)requests.push(glyph);}}
+    const gl=this.gl,requests=[];for(const layer of layers){for(let i=0;i<layer.draws.length;i+=3){if(layer.draws[i]!==1)continue;const em=layer.textStyles[i/3]||0;for(let vertex=layer.draws[i+1];vertex<layer.draws[i+1]+layer.draws[i+2];vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length,em,this.stableTextQuads?3:2);if(glyph)requests.push(glyph);}}}
+
     // Predict shelf use before invalidating any UVs. Reset at most once, before drawing.
     let x=this.cacheX,y=this.cacheY,row=this.cacheRow,full=false;const unseen=new Set();for(const glyph of requests){if(this.cache.has(glyph.key)||unseen.has(glyph.key))continue;unseen.add(glyph.key);if(this.cache.size+unseen.size>MAX_CACHE_ENTRIES){full=true;break;}if(x+glyph.width>ATLAS_SIZE){x=0;y+=row;row=0;}if(y+glyph.height>ATLAS_SIZE){full=true;break;}x+=glyph.width;row=Math.max(row,glyph.height);}
     if(full){this.cache.clear();this.cacheX=0;this.cacheY=0;this.cacheRow=0;this.cacheGeneration++;this.cacheStats.resets++;}
     let bound=false;const previousViewport=gl.getParameter(gl.VIEWPORT),previousFramebuffer=gl.getParameter(gl.FRAMEBUFFER_BINDING);
     try{for(const layer of layers){const runs=[],cached=[],groups=[];
       for(let i=0;i<layer.draws.length;i+=3){const kind=layer.draws[i],first=layer.draws[i+1],count=layer.draws[i+2];if(kind===0){appendRun(runs,kind,first,count,groups,i/3,first);continue;}
-        for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length);let tile=glyph&&this.cache.get(glyph.key);
+        for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length,layer.textStyles[i/3]||0,this.stableTextQuads?3:2);let tile=glyph&&this.cache.get(glyph.key);
           if(tile)this.cacheStats.hits++;
           else if(glyph){tile=this.allocateGlyph(glyph);if(tile){if(!bound){bound=true;gl.bindFramebuffer(gl.FRAMEBUFFER,this.atlasFramebuffer);gl.viewport(0,0,ATLAS_SIZE,ATLAS_SIZE);gl.enable(gl.SCISSOR_TEST);gl.clearColor(0,0,0,0);}this.rasterGlyph(layer,glyph,tile);this.cache.set(glyph.key,tile);this.cacheStats.misses++;}}
           if(!tile){appendRun(runs,1,vertex,4,groups,i/3,vertex);this.cacheStats.fallbacks++;continue;}
           const color=layer.glyphVertices.subarray(vertex*16+4,vertex*16+8),start=cached.length/8;
-          const q=layer.glyphVertices.subarray(vertex*16,vertex*16+64),stable=glyph.sampling&&this.stableTextQuads&&layer.textViews.length;
-          const left=q[0]*this.scaleX,top=q[1]*this.scaleY,right=q[16]*this.scaleX,bottom=q[33]*this.scaleY;
-          const points=glyph.sampling?[0,1,3,2].map(i=>{
-            let x=q[i*16]*this.scaleX,y=q[i*16+1]*this.scaleY,u=q[i*16+2],v=q[i*16+3];
-            // Retained strips have an explicit viewport scissor. Expand their
-            // transparent guard band to whole pixel bounds and correct UVs;
-            // tiny placement changes then affect sampling rather than raster
-            // edges. CPU-clipped quads without a viewport keep their bounds.
-            if(stable){x=i%2?Math.ceil(right):Math.floor(left);y=i<2?Math.floor(top):Math.ceil(bottom);u=q[2]+(x-left)*(q[18]-q[2])/(right-left);v=q[3]+(y-top)*(q[35]-q[3])/(bottom-top);}
-            return [x,y,(tile.x+glyph.pad+(u-glyph.x0)*glyph.sx*glyph.sampling)/ATLAS_SIZE,1-(tile.y+glyph.pad+(glyph.y1-v)*glyph.sy*glyph.sampling)/ATLAS_SIZE];
-          }):[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
+          const points=glyph.sampling?[0,1,3,2].map(i=>{const q=vertex*16+i*16;return [layer.glyphVertices[q]*this.scaleX,layer.glyphVertices[q+1]*this.scaleY,(tile.x+glyph.pad+(layer.glyphVertices[q+2]-glyph.x0)*glyph.sx*glyph.sampling)/ATLAS_SIZE,1-(tile.y+glyph.pad+(glyph.y1-layer.glyphVertices[q+3])*glyph.sy*glyph.sampling)/ATLAS_SIZE];}):[[glyph.x,glyph.y,tile.x/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y,(tile.x+tile.width)/ATLAS_SIZE,1-tile.y/ATLAS_SIZE],[glyph.x+tile.width,glyph.y+tile.height,(tile.x+tile.width)/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE],[glyph.x,glyph.y+tile.height,tile.x/ATLAS_SIZE,1-(tile.y+tile.height)/ATLAS_SIZE]];
           for(const corner of [0,1,2,0,2,3]){const [x,y,u,v]=points[corner];cached.push(x/this.scaleX,y/this.scaleY,u,v,...color);}appendRun(runs,2,start,6,groups,i/3,vertex);
         }
       }
@@ -231,14 +230,16 @@ export class SceneRenderer {
   }
 }
 class SceneLayer {
-  constructor(owner){this.owner=owner;const gl=owner.gl;this.geometry=gl.createBuffer();this.text=gl.createBuffer();this.cached=gl.createBuffer();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.preparedGroups=[];this.preparedGeneration=0;this.preparedDraws=null;if(!this.geometry||!this.text||!this.cached)throw Error('Unable to allocate presentation buffers');this.draws=new Uint32Array();this.invalid=false;}
-  setFrame({vertices,glyphVertices=new Float32Array(),draws}){
+  constructor(owner){this.owner=owner;const gl=owner.gl;this.geometry=gl.createBuffer();this.text=gl.createBuffer();this.cached=gl.createBuffer();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.preparedGroups=[];this.preparedGeneration=0;this.preparedDraws=null;if(!this.geometry||!this.text||!this.cached)throw Error('Unable to allocate presentation buffers');this.draws=new Uint32Array();this.invalid=false;}
+  setFrame({vertices,glyphVertices=new Float32Array(),draws,textStyles=new Float32Array()}){
     const owner=this.owner;owner.assertReady();if(this.invalid)throw Error('Presentation layer is unavailable');
     floats(vertices,6,'geometry');floats(glyphVertices,16,'glyph vertices');
     if(glyphVertices.length/16>MAX_GLYPH_VERTICES||glyphVertices.length%64)throw Error('Invalid glyph quad count');
     if(draws===undefined){if(glyphVertices.length)throw Error('Text requires an ordered drawing plan');draws=vertices.length?new Uint32Array([0,0,vertices.length/6]):new Uint32Array();}
     if(!(draws instanceof Uint32Array)||draws.length%3||draws.length>65536)throw Error('Invalid drawing plan');
     for(let i=0;i<draws.length;i+=3){const kind=draws[i],first=draws[i+1],count=draws[i+2],stride=kind===0?3:4,limit=kind===0?vertices.length/6:glyphVertices.length/16;if(kind>1||first%stride||count%stride||first+count>limit)throw Error('Drawing plan exceeds its presentation buffer');}
+    floats(textStyles,1,'text styles');if(textStyles.length>4096||(textStyles.length&&textStyles.length!==draws.length/3))throw Error('Text style dimensions');if(textStyles.some(v=>v<0||v>1000000))throw Error('Text style range');
+    if(textStyles.length){const assigned=new Float32Array(glyphVertices.length/64);for(let i=0;i<draws.length;i+=3){const em=textStyles[i/3];if(draws[i]!==1||!em)continue;for(let q=draws[i+1]/4,end=q+draws[i+2]/4;q<end;q++){if(assigned[q]&&assigned[q]!==em)throw Error('Conflicting text style ranges');assigned[q]=em;}}}this.textStyles=textStyles;
     const gl=owner.gl;gl.bindBuffer(gl.ARRAY_BUFFER,this.geometry);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.bindBuffer(gl.ARRAY_BUFFER,this.text);gl.bufferData(gl.ARRAY_BUFFER,glyphVertices,gl.STATIC_DRAW);owner.ensureIndices(glyphVertices.length/64);this.draws=draws;this.textViews=new Float32Array();this.glyphVertices=glyphVertices;this.preparedGeneration=0;this.preparedDraws=null;
   }
   setTextViews(views){
@@ -253,8 +254,8 @@ class SceneLayer {
     let active=-1;
     const draws=this.preparedGeneration===owner.cacheGeneration?this.preparedDraws:this.draws;
     for(let i=0;i<draws.length;i+=3){const kind=draws[i];let first=draws[i+1],count=draws[i+2];if(!count)continue;
-      let view;
-      if(kind!==0&&this.textViews.length){const prepared=this.preparedGeneration===owner.cacheGeneration,group=prepared?this.preparedGroups[i/3*2]:i/3,source=prepared?this.preparedGroups[i/3*2+1]:first;view=this.textViews.subarray(group*8,group*8+8);const ratio=kind===2?1.5:1,end=Math.min(source+count/ratio,view[0]+view[1]),start=Math.max(source,view[0]);if(end<=start||view[6]<=view[4]||view[7]<=view[5])continue;first+=(start-source)*ratio;count=(end-start)*ratio;}
+      let view,sourceVertex=0,sourceDraw=i/3;
+      if(kind!==0&&this.textViews.length){const prepared=this.preparedGeneration===owner.cacheGeneration,group=prepared?this.preparedGroups[i/3*2]:i/3,source=prepared?this.preparedGroups[i/3*2+1]:first;sourceVertex=source;sourceDraw=group;view=this.textViews.subarray(group*8,group*8+8);const ratio=kind===2?1.5:1,end=Math.min(source+count/ratio,view[0]+view[1]),start=Math.max(source,view[0]);if(end<=start||view[6]<=view[4]||view[7]<=view[5])continue;first+=(start-source)*ratio;count=(end-start)*ratio;}
 
       if(active!==kind){
         active=kind;
@@ -263,6 +264,11 @@ class SceneLayer {
         else{gl.useProgram(owner.cacheProgram);gl.uniformMatrix3fv(owner.cacheTransform,false,owner.transform);gl.uniform1i(owner.cacheSampler,2);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,owner.atlas);owner.useAttributes(owner.cacheAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.cached);gl.vertexAttribPointer(owner.cacheAttributes[0],2,gl.FLOAT,false,32,0);gl.vertexAttribPointer(owner.cacheAttributes[1],2,gl.FLOAT,false,32,8);gl.vertexAttribPointer(owner.cacheAttributes[2],4,gl.FLOAT,false,32,16);}
       }
       if(kind!==0){
+        if(kind===2&&owner.stableTextQuads){
+          if(view&&owner.atlasScale){const q=this.glyphVertices.subarray(sourceVertex*16,sourceVertex*16+64),em=this.textStyles[sourceDraw]||Math.abs((q[33]-q[1])/(q[35]-q[3])),sx=Math.round(em*owner.scaleX*256)/256,sy=Math.round(em*owner.scaleY*256)/256;
+            gl.uniform2f(owner.cacheSnapViewport,owner.width,owner.height);gl.uniformMatrix2fv(owner.cacheSnapUv,false,new Float32Array([sx/em/owner.scaleX*owner.atlasScale/ATLAS_SIZE,0,0,sy/em/owner.scaleY*owner.atlasScale/ATLAS_SIZE]));
+          }else gl.uniform2f(owner.cacheSnapViewport,0,0);
+        }
         const transform=owner.transform.slice();
         if(view){transform[6]+=owner.transform[0]*view[2]+owner.transform[3]*view[3];transform[7]+=owner.transform[1]*view[2]+owner.transform[4]*view[3];const edge=(v,max)=>Math.ceil(Math.max(0,Math.min(max,v))-.5),x0=edge(view[4]*owner.scaleX,owner.width),x1=edge(view[6]*owner.scaleX,owner.width),y0=edge(owner.height-view[7]*owner.scaleY,owner.height),y1=edge(owner.height-view[5]*owner.scaleY,owner.height);if(x1<=x0||y1<=y0)continue;gl.enable(gl.SCISSOR_TEST);gl.scissor(x0,y0,x1-x0,y1-y0);}
         gl.uniformMatrix3fv(kind===1?owner.textUniforms.transform:owner.cacheTransform,false,transform);

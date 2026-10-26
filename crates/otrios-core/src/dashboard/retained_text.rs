@@ -28,6 +28,8 @@ pub struct TextPresentation {
     font: String,
     mesh: Arc<Mesh>,
     runs: Vec<Run>,
+    styles: Arc<Vec<f32>>,
+    em_cache: Vec<(u32, f32)>,
     generation: u32,
     math: TextMath,
     glyph_math: super::fixed_text::GlyphMathCache,
@@ -45,6 +47,8 @@ pub struct TextFrame {
     /// Eight floats per draw: visible first/count, translation xy, clip l/t/r/b.
     /// Geometry entries are ignored by hosts. No glyph vertices change on scrolling.
     pub views: Vec<f32>,
+    /// Canonical logical em per draw; zero requests legacy inference.
+    pub styles: Arc<Vec<f32>>,
     pub generation: u32,
 }
 impl TextPresentation {
@@ -62,6 +66,13 @@ impl TextPresentation {
         let mut positions = BTreeMap::new();
         let extent = [key.frame.width, key.frame.height];
         let mut glyphs = 0;
+        if self.font != font.hash() {
+            self.em_cache.clear();
+        }
+        let mut scales = EmScales {
+            font,
+            cache: &mut self.em_cache,
+        };
         normalize(
             &mut key,
             [0., 0.],
@@ -69,6 +80,7 @@ impl TextPresentation {
             [0., 0., extent[0], extent[1]],
             &mut positions,
             &mut glyphs,
+            &mut scales,
         );
         if self.key.as_ref() != Some(&key) || self.font != font.hash() {
             if self.font != font.hash() {
@@ -108,9 +120,11 @@ impl TextPresentation {
                 mesh = super::render_scene_with_font(scene, font);
                 self.key = None;
             }
+            let mut styles = vec![0.; mesh.draws.len() / 3];
             self.runs = runs
                 .into_iter()
                 .map(|(draw, id)| {
+                    styles[draw] = positions.get(&id).map_or(0., |p| p[6]);
                     let first = mesh.draws[draw * 3 + 1] as usize;
                     let count = mesh.draws[draw * 3 + 2] as usize;
                     let mut right = Vec::new();
@@ -141,6 +155,7 @@ impl TextPresentation {
                     }
                 })
                 .collect();
+            self.styles = Arc::new(styles);
             self.mesh = Arc::new(mesh);
             self.font = font.hash().into();
             self.key = (glyphs <= 16384).then_some(key);
@@ -148,7 +163,7 @@ impl TextPresentation {
         }
         let mut views = vec![0.; self.mesh.draws.len() / 3 * 8];
         for run in &self.runs {
-            let Some(&[x, y, l, t, r, b]) = positions.get(&run.id) else {
+            let Some(&[x, y, l, t, r, b, _]) = positions.get(&run.id) else {
                 continue;
             };
             let start = run.right.partition_point(|right| *right <= l - x);
@@ -176,7 +191,26 @@ impl TextPresentation {
             mesh: self.mesh.clone(),
             views,
             generation: self.generation,
+            styles: self.styles.clone(),
         }
+    }
+}
+struct EmScales<'a> {
+    font: &'a Font,
+    cache: &'a mut Vec<(u32, f32)>,
+}
+impl EmScales<'_> {
+    fn get(&mut self, scale: f32) -> f32 {
+        let key = scale.to_bits();
+        if let Some((_, em)) = self.cache.iter().find(|(s, _)| *s == key) {
+            return *em;
+        }
+        if self.cache.len() == 8 {
+            self.cache.clear();
+        }
+        let em = self.font.metrics().cache_em(scale);
+        self.cache.push((key, em));
+        em
     }
 }
 fn normalize(
@@ -184,8 +218,9 @@ fn normalize(
     parent: [f32; 2],
     factor: f32,
     clip: [f32; 4],
-    out: &mut BTreeMap<u32, [f32; 6]>,
+    out: &mut BTreeMap<u32, [f32; 7]>,
     glyphs: &mut usize,
+    scales: &mut EmScales<'_>,
 ) {
     let f = node.frame;
     let x = parent[0] + f.x * factor;
@@ -193,9 +228,20 @@ fn normalize(
     let mut clip = clip;
     let mut factor = factor;
     match &node.primitive {
-        Primitive::Text { value, .. } => {
+        Primitive::Text { value, scale, .. } => {
             *glyphs += value.chars().count();
-            out.insert(node.id, [x, y, clip[0], clip[1], clip[2], clip[3]]);
+            out.insert(
+                node.id,
+                [
+                    x,
+                    y,
+                    clip[0],
+                    clip[1],
+                    clip[2],
+                    clip[3],
+                    scales.get(*scale as f32 * factor),
+                ],
+            );
             node.frame = otrios_interfaces::scene::Rect::new(0., 0., 0., 0.);
         }
         Primitive::Canvas { clip: true } | Primitive::Viewport { .. } => {
@@ -212,7 +258,7 @@ fn normalize(
         _ => {}
     }
     for child in &mut node.children {
-        normalize(child, [x, y], factor, clip, out, glyphs);
+        normalize(child, [x, y], factor, clip, out, glyphs, scales);
     }
 }
 
@@ -242,6 +288,7 @@ mod tests {
         let original = a.mesh.glyph_vertices.clone();
         let b = renderer.compose(&scene(30.25, 0., text), &font);
         assert!(Arc::ptr_eq(&a.mesh, &b.mesh));
+        assert!(Arc::ptr_eq(&a.styles, &b.styles));
         assert_eq!(a.generation, b.generation);
         assert_eq!(&b.views[2..8], &[-20.25, 10., 10., 10., 50., 34.]);
         assert!(b.views[0] > a.views[0]);
@@ -255,5 +302,23 @@ mod tests {
             a.mesh.glyph_vertices, original,
             "Held snapshots stay immutable after a new content generation"
         );
+    }
+    #[test]
+    fn declared_font_scale_does_not_depend_on_glyph_placement_rounding() {
+        let font = super::super::font::test_font();
+        let mut float = TextPresentation::with_math(TextMath::Float32);
+        let mut fixed = TextPresentation::with_math(TextMath::Fixed);
+        for scale in [0.1_f32, 0.33, 1., 1.25, 2., 4.] {
+            let mut root = scene(30.25, 0., "ABC").root().clone();
+            root.children[0].primitive = Primitive::Viewport { scale };
+            let scene = Scene::new(root).unwrap();
+            let a = float.compose(&scene, &font);
+            let b = fixed.compose(&scene, &font);
+            assert_eq!(a.styles, b.styles);
+            let expected = 8. * 2. * f64::from(scale) * f64::from(font.metrics().units_per_em)
+                / f64::from(font.metrics().cap_height);
+            let actual = a.styles.iter().copied().find(|v| *v > 0.).unwrap();
+            assert!((f64::from(actual) - expected).abs() < 0.00002);
+        }
     }
 }

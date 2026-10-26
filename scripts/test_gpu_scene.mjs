@@ -115,7 +115,7 @@ test('stable retained quads correct UVs without multiplying long-pen cache sizes
   const {gl,calls}=device(),renderer=new SceneRenderer(gl,{stableTextQuads:true}),layer=renderer.createLayer();renderer.setFont(packet());
   const f=frame(.25);f.draws=new Uint32Array([1,0,4]);layer.setFrame(f);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);
   const cached=calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array).at(-1)[2];
-  assert.equal(cached[0],10);assert.equal(cached[8],21);assert.notEqual(cached[2],cached[10]);assert.equal(renderer.cacheStats.misses,1);
+  assert.equal(cached[0],10.25);assert.equal(cached[8],20.25);assert.notEqual(cached[2],cached[10]);assert.equal(renderer.cacheStats.misses,1);
   const next=frame(.25);for(let i=0;i<4;i++)next.glyphVertices[i*16]+=10000+(i%2?.004:0);next.draws=f.draws;layer.setFrame(next);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);
   assert.equal(renderer.cacheStats.misses,1,'retained font size comes from the local Y span');
   const degenerate=frame();degenerate.draws=f.draws;for(const i of [1,3])degenerate.glyphVertices[i*16]=degenerate.glyphVertices[0];layer.setFrame(degenerate);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));calls.length=0;renderer.prepare([layer]);
@@ -123,4 +123,19 @@ test('stable retained quads correct UVs without multiplying long-pen cache sizes
   assert(calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array).every(c=>c[2].every(Number.isFinite)));
   const cropped=frame(.25);cropped.draws=f.draws;layer.setFrame(cropped);calls.length=0;renderer.prepare([layer]);
   const rawBounds=calls.filter(c=>c[0]==='bufferData'&&c[2] instanceof Float32Array).at(-1)[2];assert.equal(rawBounds[0],10.25,'CPU-clipped quads without a viewport do not expand');
+});
+
+test('declared text scales are validated before publication and stay independent of quad rounding',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl,{width:4096,height:2560,stableTextQuads:true}),layer=renderer.createLayer();renderer.setLogicalSize(1280,800);renderer.setFont(packet());
+  const f=frame();f.draws=new Uint32Array([1,0,4]);f.textStyles=new Float32Array([10]);layer.setFrame(f);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,1);
+  const changed=frame();changed.draws=f.draws;changed.textStyles=f.textStyles;for(const i of [2,3])changed.glyphVertices[i*16+1]+=.004;
+  layer.setFrame(changed);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);assert.equal(renderer.cacheStats.misses,1,'the declared font scale controls coverage identity');
+  const outside=frame();outside.draws=f.draws;outside.textStyles=f.textStyles;for(let i=0;i<4;i++)outside.glyphVertices[i*16+2]-=10;
+  layer.setFrame(outside);layer.setTextViews(new Float32Array([0,4,0,0,0,0,1280,800]));renderer.prepare([layer]);assert.equal(renderer.cacheStats.fallbacks,1,'quads outside the clear sampling domain use analytic fallback');
+  calls.length=0;
+  assert.throws(()=>layer.setFrame({...f,textStyles:new Float32Array([NaN])}),/Nonfinite/);
+  assert.throws(()=>layer.setFrame({...f,textStyles:new Float32Array([-1])}),/range/);
+  assert.throws(()=>layer.setFrame({...f,textStyles:new Float32Array([1,2])}),/dimensions/);
+  assert.throws(()=>layer.setFrame({...f,draws:new Uint32Array([1,0,4,1,0,4]),textStyles:new Float32Array([1,2])}),/Conflicting/);
+  assert.equal(calls.filter(c=>c[0]==='bufferData').length,0,'invalid metadata cannot replace GPU buffers');
 });

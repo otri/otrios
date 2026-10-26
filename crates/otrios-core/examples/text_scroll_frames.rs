@@ -45,6 +45,7 @@ fn main() -> Result<()> {
     {
         return Err("Invalid text probe dimensions".into());
     }
+    let with_styles = args.iter().any(|a| a == "--styles");
     let retained = std::env::args().any(|a| a == "--retained");
     let math = if std::env::args().any(|a| a == "--fixed") {
         otrios_core::dashboard::retained_text::TextMath::Fixed
@@ -126,7 +127,15 @@ fn main() -> Result<()> {
     };
     let mut output = std::io::BufWriter::new(stream);
     output
-        .write_all(if retained { b"OTRTEXT2" } else { b"OTRTEXT1" })
+        .write_all(if retained {
+            if with_styles {
+                b"OTRTEXT3"
+            } else {
+                b"OTRTEXT2"
+            }
+        } else {
+            b"OTRTEXT1"
+        })
         .map_err(|e| e.to_string())?;
     output
         .write_all(&frame_count.to_le_bytes())
@@ -240,6 +249,18 @@ fn main() -> Result<()> {
                 .write_all(&(views.len() as u32).to_le_bytes())
                 .map_err(|e| e.to_string())?;
         }
+        if retained && with_styles {
+            output
+                .write_all(
+                    &(if changed {
+                        frame.as_ref().map_or(0, |f| f.styles.len()) as u32
+                    } else {
+                        0
+                    })
+                    .to_le_bytes(),
+                )
+                .map_err(|e| e.to_string())?;
+        }
         for n in mesh
             .vertices
             .iter()
@@ -259,6 +280,13 @@ fn main() -> Result<()> {
             output
                 .write_all(&n.to_le_bytes())
                 .map_err(|e| e.to_string())?;
+        }
+        if retained && with_styles && changed {
+            for n in frame.as_ref().unwrap().styles.iter() {
+                output
+                    .write_all(&n.to_le_bytes())
+                    .map_err(|e| e.to_string())?;
+            }
         }
     }
     let cold = times[0];

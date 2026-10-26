@@ -5,6 +5,7 @@ pub struct Mesh {
     pub vertices: Vec<f32>,
     pub glyphs: Vec<f32>,
     pub draws: Vec<u32>,
+    pub styles: Vec<f32>,
 }
 pub struct Frame {
     pub mesh: Arc<Mesh>,
@@ -19,7 +20,8 @@ pub fn load(path: &str) -> Result<Vec<Frame>, String> {
     let mut input = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| e.to_string())?);
     let mut magic = [0; 8];
     input.read_exact(&mut magic).map_err(|e| e.to_string())?;
-    let retained = &magic == b"OTRTEXT2";
+    let styled = &magic == b"OTRTEXT3";
+    let retained = &magic == b"OTRTEXT2" || styled;
     if &magic != b"OTRTEXT1" && !retained {
         return Err("Invalid mesh stream".into());
     }
@@ -34,6 +36,10 @@ pub fn load(path: &str) -> Result<Vec<Frame>, String> {
         }
         let counts = [word(&mut input)?, word(&mut input)?, word(&mut input)?];
         let view_count = if retained { word(&mut input)? } else { 0 };
+        let style_count = if styled { word(&mut input)? } else { 0 };
+        if style_count > 4096 {
+            return Err("Style limit".into());
+        }
         if view_count > 4096 * 8 {
             return Err("Viewport limit".into());
         }
@@ -53,13 +59,20 @@ pub fn load(path: &str) -> Result<Vec<Frame>, String> {
         let views = (0..view_count)
             .map(|_| word(&mut input).map(f32::from_bits))
             .collect::<Result<Vec<_>, _>>()?;
+        let styles = (0..style_count)
+            .map(|_| word(&mut input).map(f32::from_bits))
+            .collect::<Result<Vec<_>, _>>()?;
         let mesh = if retained && counts == [0, 0, 0] {
+            if style_count != 0 {
+                return Err("Styles without mesh generation".into());
+            }
             meshes.last().ok_or("Missing initial mesh")?.mesh.clone()
         } else {
             Arc::new(Mesh {
                 vertices,
                 glyphs,
                 draws,
+                styles,
             })
         };
         meshes.push(Frame { mesh, views });

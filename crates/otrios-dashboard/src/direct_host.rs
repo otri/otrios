@@ -178,6 +178,7 @@ pub(super) fn run() -> Result<(), String> {
                         .is_none_or(|old| !Arc::ptr_eq(old, &f.vertices))
                     {
                         display.upload_scene(0, &f.vertices, &f.glyph_vertices, &f.draws)?;
+                        display.text_styles(0, &f.text_styles)?;
                         retained = Some(f.vertices.clone());
                     }
                     if f.reflow.is_none() {

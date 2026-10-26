@@ -20,6 +20,7 @@ int ot_linear_scene(ot_display *d);
 void ot_text_stats(ot_display *d,uint64_t *stats);
 int ot_draw(ot_display *d,const float *projection,int animated);
 int ot_present(ot_display *d,ot_flip *flip);
+int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t floats);
 int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats);
 int ot_input(ot_display *d,ot_touch *events,size_t capacity);
 int ot_pixels(ot_display *d,uint8_t *rgba,size_t length);

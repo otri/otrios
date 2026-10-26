@@ -40,6 +40,7 @@ pub(super) struct Frame {
     pub(super) glyph_vertices: Arc<Vec<f32>>,
     pub(super) draws: Arc<Vec<u32>>,
     pub(super) text_views: Vec<f32>,
+    pub(super) text_styles: Arc<Vec<f32>>,
     pub(super) snapshot: String,
     pub(super) layout: String,
     pub(super) screen: String,
@@ -70,6 +71,7 @@ impl Frame {
             glyph_vertices: Arc::new(vec![]),
             draws: Arc::new(vec![]),
             text_views: vec![],
+            text_styles: Arc::new(vec![]),
             snapshot: String::new(),
             layout: String::new(),
             screen: "locked".into(),
@@ -356,6 +358,7 @@ pub(super) fn state_worker(
     let mut text_presentation = TextPresentation::default();
     let mut text_generation = 0;
     let mut text_views = vec![];
+    let mut style_cache = Arc::new(vec![]);
     let mut stopping: Option<Instant> = None;
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
@@ -612,6 +615,7 @@ pub(super) fn state_worker(
             text_presentation = TextPresentation::default();
             text_generation = 0;
             text_views.clear();
+            style_cache = Arc::new(vec![]);
             dirty = false;
         }
         if dirty && !client.ui_ref().is_empty() {
@@ -625,6 +629,7 @@ pub(super) fn state_worker(
                     mesh_cache = Arc::new(frame.mesh.vertices.clone());
                     glyph_cache = Arc::new(frame.mesh.glyph_vertices.clone());
                     draws_cache = Arc::new(frame.mesh.draws.clone());
+                    style_cache = frame.styles.clone();
                     text_generation = frame.generation;
                 }
                 text_views = frame.views;
@@ -649,6 +654,7 @@ pub(super) fn state_worker(
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),
                 text_views: text_views.clone(),
+                text_styles: style_cache.clone(),
                 // These telemetry fields now identify logical app roots, not old
                 // dashboard snapshot/layout hashes.
                 snapshot: state_ref.clone(),

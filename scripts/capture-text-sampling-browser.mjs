@@ -9,18 +9,18 @@ import {resolve} from 'node:path';
 const args=process.argv.slice(2),arg=(name,fallback)=>{const i=args.indexOf(name);return i<0?fallback:args[i+1];};
 const repo=fileURLToPath(new URL('..',import.meta.url)),out=resolve(arg('--output',repo+'/target/text-rendering'));
 const fixture=arg('--fixture');if(!fixture)throw Error('Supply --fixture from text_scroll_frames --dense --retained');await mkdir(out,{recursive:true});
-const font=await readFile(fixture+'.font'),stream=await readFile(fixture);let at=16;
-const n=Array.from({length:4},()=>{const x=stream.readUInt32LE(at);at+=4;return x;});
+const font=await readFile(fixture+'.font'),stream=await readFile(fixture),magic=stream.subarray(0,8).toString();assert(['OTRTEXT2','OTRTEXT3'].includes(magic),'Supply a retained fixture');let at=16;
+const n=Array.from({length:magic==='OTRTEXT3'?5:4},()=>{const x=stream.readUInt32LE(at);at+=4;return x;});
 const arr=(count,kind)=>{const x=Array.from({length:count},(_,i)=>kind==='u'?stream.readUInt32LE(at+i*4):stream.readFloatLE(at+i*4));at+=count*4;return x;};
-const v=arr(n[0]),g=arr(n[1]),d=arr(n[2],'u'),views=arr(n[3]),i=d.findIndex((x,i)=>i%3===0&&x===1),first=d[i+1],count=d[i+2];
-const frame={vertices:v,glyphVertices:g.slice(first*16,(first+count)*16),draws:[0,0,v.length/6,1,0,count],textViews:[...Array(8).fill(0),...views.slice(i/3*8,i/3*8+8)]};frame.textViews[8]-=first;
+const v=arr(n[0]),g=arr(n[1]),d=arr(n[2],'u'),views=arr(n[3]),styles=arr(n[4]||0),i=d.findIndex((x,i)=>i%3===0&&x===1),first=d[i+1],count=d[i+2];
+const frame={vertices:v,glyphVertices:g.slice(first*16,(first+count)*16),draws:[0,0,v.length/6,1,0,count],textStyles:styles.length?[0,styles[i/3]]:[],textViews:[...Array(8).fill(0),...views.slice(i/3*8,i/3*8+8)]};frame.textViews[8]-=first;
 const html=`<body style="margin:0;background:#101c29"><canvas id="view" width="1280" height="800"></canvas><script type="module">
 import {SceneRenderer} from '/gpu-scene.mjs';
 window.result=null;
 try{
 const data=await(await fetch('/frame')).json(),b=await(await fetch('/font')).arrayBuffer(),h=new DataView(b),cw=h.getUint32(8,true),ch=h.getUint32(12,true),bw=h.getUint32(16,true),bh=h.getUint32(20,true),packet={curveWidth:cw,curveHeight:ch,bandWidth:bw,bandHeight:bh,curves:new Float32Array(b,24,cw*ch*4),bands:new Uint8Array(b,24+cw*ch*16,bw*bh*4)};
 const results=[],captures=[];const canvas=document.querySelector('#view'),gl=canvas.getContext('webgl',{alpha:false,antialias:false,preserveDrawingBuffer:true});
-for(const sampling of [2,3,0]){const r=new SceneRenderer(gl,{atlasScale:sampling}),l=r.createLayer();r.setFont(packet);l.setFrame({vertices:new Float32Array(data.vertices),glyphVertices:new Float32Array(data.glyphVertices),draws:new Uint32Array(data.draws)});r.prepare([l]);const misses=r.cacheStats.misses;
+for(const sampling of [2,3,0]){const r=new SceneRenderer(gl,{atlasScale:sampling,stableTextQuads:${args.includes("--stable-quads")}}),l=r.createLayer();r.setFont(packet);l.setFrame({vertices:new Float32Array(data.vertices),glyphVertices:new Float32Array(data.glyphVertices),draws:new Uint32Array(data.draws),textStyles:new Float32Array(data.textStyles)});l.setTextViews(new Float32Array(data.textViews));r.prepare([l]);const misses=r.cacheStats.misses;
 for(const phase of [0,.25,.5,.75]){const views=new Float32Array(data.textViews);views[10]-=phase;l.setTextViews(views);const report=r.probe([l]);results.push({sampling,phase,...report});
 if(sampling!==0&&phase===.25){
  const count=1280*800*4,a=new Uint8Array(count),b=new Uint8Array(count);gl.readPixels(0,0,1280,800,gl.RGBA,gl.UNSIGNED_BYTE,a);const generation=l.preparedGeneration;l.preparedGeneration=0;r.beginFrame();l.draw();r.endFrame();gl.readPixels(0,0,1280,800,gl.RGBA,gl.UNSIGNED_BYTE,b);l.preparedGeneration=generation;

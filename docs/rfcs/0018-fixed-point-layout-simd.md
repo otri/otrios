@@ -1,7 +1,7 @@
 # RFC 0018: Fixed point layout and SIMD stretch milestone
 
 Status: experimental candidate, disabled by default; not accepted. Requested
-2026-10-26, measured 2026-10-27. [Current raster follow-up and remaining gates](../experiments/fixed-point-raster-followup-2026-10-27.md). [Evaluation and unresolved pixel gate](../experiments/fixed-point-text-2026-10-27.md).
+2026-10-26, measured 2026-10-27. [Current raster comparison and remaining math gates](../experiments/fixed-point-canonical-scale-2026-10-27.md). [Evaluation and unresolved pixel gate](../experiments/fixed-point-text-2026-10-27.md).
 
 ## Objective and baseline
 
@@ -63,5 +63,7 @@ hardware arithmetic limits or make nonlinear shader operations exact.
 
 The prototype and comparison tools are implemented behind `fixed-ui-math`.
 The isolated integer kernel is faster, checked layout is slower, and the
-large-scale/DPR pixel gate fails. No default enablement or complete fixed point
+raster and scanout gates now pass after canonical scale metadata and bounded
+sampling corrections. Hierarchy transforms, flow and fixed culling remain open.
+No default enablement or complete fixed point
 UI migration has been accepted by this RFC.
