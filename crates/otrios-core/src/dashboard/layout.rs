@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Bounded FlexBuffers reader and typed component/binding interpreter. No JSON path.
 use super::{Result, scene::Scene};
-mod composition;
+pub mod composition;
+mod fixed_composition;
 pub mod resizing;
 use flexbuffers::{FlexBufferType, Reader};
 use otrios_interfaces::{layout::*, scene::*};

@@ -4,6 +4,7 @@ use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
 pub(super) struct RetainedPaint<'a> {
     pub runs: &'a mut Vec<(usize, u32)>,
     pub fixed: Option<&'a mut super::fixed_text::GlyphMathCache>,
+    pub placements: Option<&'a std::collections::BTreeMap<u32, super::fixed_space::Placement>>,
 }
 /// Ordered geometry and Slug glyph runs, retained by both GPU hosts.
 #[derive(Default)]
@@ -260,12 +261,21 @@ impl Mesh {
         mut retained: Option<&mut RetainedPaint<'_>>,
     ) {
         let f = node.frame;
-        let r = Rect::new(
+        let mut r = Rect::new(
             parent[0] + f.x * factor,
             parent[1] + f.y * factor,
             f.width * factor,
             f.height * factor,
         );
+        let mut clip = clip;
+        if let Some(p) = retained
+            .as_ref()
+            .and_then(|p| p.placements)
+            .and_then(|p| p.get(&node.id))
+        {
+            r = p.rect();
+            clip = p.clip();
+        }
         match &node.primitive {
             Primitive::Canvas { clip: enabled } => {
                 let clip = if *enabled { clip.intersect(r) } else { clip };

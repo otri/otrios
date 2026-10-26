@@ -44,6 +44,7 @@ fn signed_magnitude(magnitude: u64, negative: bool) -> Result<i64> {
     }
 }
 impl Scalar {
+    pub const ONE: Self = Self(1 << 32);
     pub const ZERO: Self = Self(0);
     pub const fn raw(self) -> i64 {
         self.0
@@ -76,12 +77,57 @@ impl Scalar {
     }
     #[inline]
     pub fn checked_mul(self, rhs: Self) -> Result<Self> {
+        // Unscaled viewports dominate ordinary UI trees. Preserve the exact
+        // identity without a wide product/divide on 32-bit CPUs.
+        if rhs == Self::ONE {
+            return Ok(self);
+        }
+        if self == Self::ONE {
+            return Ok(rhs);
+        }
+        if self == Self::ZERO || rhs == Self::ZERO {
+            return Ok(Self::ZERO);
+        }
+        if rhs.0 & 0xffff_ffff == 0 {
+            return self
+                .0
+                .checked_mul(rhs.0 >> 32)
+                .map(Self)
+                .ok_or_else(|| "Fixed scalar multiplication overflow".into());
+        }
+        if self.0 & 0xffff_ffff == 0 {
+            return rhs
+                .0
+                .checked_mul(self.0 >> 32)
+                .map(Self)
+                .ok_or_else(|| "Fixed scalar multiplication overflow".into());
+        }
         let product = i128::from(self.0) * i128::from(rhs.0);
         let raw = rounded_ratio(product, 4294967296)?;
         if raw == 0 && product != 0 {
             return Err("Fixed scalar multiplication underflow".into());
         }
         Ok(Self(raw))
+    }
+    pub fn checked_div_int(self, denominator: i64) -> Result<Self> {
+        rounded_ratio(i128::from(self.0), i128::from(denominator)).map(Self)
+    }
+    pub fn checked_mul_ratio(self, numerator: Self, denominator: Self) -> Result<Self> {
+        if denominator.0 == 0 {
+            return Err("Fixed point division by zero".into());
+        }
+        // Cancel a shared exact power of two before the wide product. Integer
+        // flex weights then use a native division instead of software i128.
+        let shift = numerator
+            .0
+            .unsigned_abs()
+            .trailing_zeros()
+            .min(denominator.0.unsigned_abs().trailing_zeros());
+        rounded_ratio(
+            i128::from(self.0) * i128::from(numerator.0 >> shift),
+            i128::from(denominator.0 >> shift),
+        )
+        .map(Self)
     }
     /// Put proportional inputs on one exact power-of-two scale before Q32
     /// admission. This keeps tiny absolute spring segments accurate as ratios.
@@ -292,6 +338,65 @@ pub(super) fn add4_admitted(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scalar_identity_integer_and_ratio_paths_match_wide_rounding() {
+        for a in [
+            i64::MIN,
+            -4294967296,
+            -65537,
+            -1,
+            0,
+            1,
+            65537,
+            4294967296,
+            i64::MAX,
+        ] {
+            for b in [
+                -8589934592_i64,
+                -4294967296,
+                -1,
+                0,
+                1,
+                4294967296,
+                8589934592,
+                i64::MAX,
+            ] {
+                let product = i128::from(a) * i128::from(b);
+                let expected = rounded_ratio(product, 4294967296).and_then(|r| {
+                    if r == 0 && product != 0 {
+                        Err("underflow".into())
+                    } else {
+                        Ok(r)
+                    }
+                });
+                let actual = Scalar(a).checked_mul(Scalar(b));
+                assert_eq!(actual.as_ref().ok().map(|v| v.raw()), expected.ok());
+                for d in [
+                    i64::MIN,
+                    -8589934592,
+                    -1,
+                    1,
+                    4294967296,
+                    34359738368,
+                    i64::MAX,
+                ] {
+                    assert_eq!(
+                        Scalar(a)
+                            .checked_mul_ratio(Scalar(b), Scalar(d))
+                            .as_ref()
+                            .ok()
+                            .map(|v| v.raw()),
+                        rounded_ratio(product, i128::from(d)).ok()
+                    );
+                }
+            }
+        }
+        assert!(
+            Scalar::ONE
+                .checked_mul_ratio(Scalar::ZERO, Scalar::ZERO)
+                .is_err()
+        );
+    }
     #[test]
     fn binary_admission_matches_wide_float_reference_over_exponents_and_rounding_boundaries() {
         let mut bits = 0x12345678_u32;

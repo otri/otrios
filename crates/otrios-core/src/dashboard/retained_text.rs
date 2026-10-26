@@ -34,7 +34,14 @@ pub struct TextPresentation {
     math: TextMath,
     glyph_math: super::fixed_text::GlyphMathCache,
 }
+struct Bounds {
+    right: Vec<super::fixed::Scalar>,
+    left: Vec<super::fixed::Scalar>,
+    top: super::fixed::Scalar,
+    bottom: super::fixed::Scalar,
+}
 struct Run {
+    fixed: Option<Bounds>,
     draw: usize,
     id: u32,
     right: Vec<f32>,
@@ -62,6 +69,9 @@ impl TextPresentation {
         }
     }
     pub fn compose(&mut self, scene: &Scene, font: &Font) -> TextFrame {
+        let placements = (self.math == TextMath::Fixed)
+            .then(|| super::fixed_space::placements(scene.root()).ok())
+            .flatten();
         let mut key = scene.root().clone();
         let mut positions = BTreeMap::new();
         let extent = [key.frame.width, key.frame.height];
@@ -102,6 +112,7 @@ impl TextPresentation {
                 let mut paint = RetainedPaint {
                     runs: &mut runs,
                     fixed: (self.math == TextMath::Fixed).then_some(&mut self.glyph_math),
+                    placements: placements.as_ref(),
                 };
                 mesh.paint(
                     scene.root(),
@@ -145,7 +156,27 @@ impl TextPresentation {
                         minimum = minimum.min(*x);
                         *x = minimum;
                     }
+                    let fixed = (self.math == TextMath::Fixed)
+                        .then(|| {
+                            use super::fixed::Scalar;
+                            Some(Bounds {
+                                right: right
+                                    .iter()
+                                    .map(|v| Scalar::from_f32(*v))
+                                    .collect::<Result<_, _>>()
+                                    .ok()?,
+                                left: left
+                                    .iter()
+                                    .map(|v| Scalar::from_f32(*v))
+                                    .collect::<Result<_, _>>()
+                                    .ok()?,
+                                top: Scalar::from_f32(top).ok()?,
+                                bottom: Scalar::from_f32(bottom).ok()?,
+                            })
+                        })
+                        .flatten();
                     Run {
+                        fixed,
                         draw,
                         id,
                         right,
@@ -163,16 +194,49 @@ impl TextPresentation {
         }
         let mut views = vec![0.; self.mesh.draws.len() / 3 * 8];
         for run in &self.runs {
-            let Some(&[x, y, l, t, r, b, _]) = positions.get(&run.id) else {
+            let Some(&[mut x, mut y, mut l, mut t, mut r, mut b, _]) = positions.get(&run.id)
+            else {
                 continue;
             };
-            let start = run.right.partition_point(|right| *right <= l - x);
-            let end = run.left.partition_point(|left| *left < r - x);
-            let count = if r > l && b > t && run.bottom + y > t && run.top + y < b {
-                end.saturating_sub(start) * 4
-            } else {
-                0
+            if let Some(p) = placements.as_ref().and_then(|p| p.get(&run.id)) {
+                let rect = p.rect();
+                x = rect.x;
+                y = rect.y;
+                [l, t, r, b] = p.clip.map(super::fixed::Scalar::to_f32);
+            }
+            let legacy = || {
+                let start = run.right.partition_point(|right| *right <= l - x);
+                let end = run.left.partition_point(|left| *left < r - x);
+                let count = if r > l && b > t && run.bottom + y > t && run.top + y < b {
+                    end.saturating_sub(start) * 4
+                } else {
+                    0
+                };
+                (start, count)
             };
+            let (start, count) = run
+                .fixed
+                .as_ref()
+                .and_then(|bounds| {
+                    // Cull against the exact values sent to the GPU, in integer
+                    // space. This also accounts for final attribute rounding.
+                    use super::fixed::Scalar;
+                    let [x, y, l, t, r, b] = [x, y, l, t, r, b].map(Scalar::from_f32);
+                    let (x, y, l, t, r, b) = (x.ok()?, y.ok()?, l.ok()?, t.ok()?, r.ok()?, b.ok()?);
+                    let left = l.checked_sub(x).ok()?;
+                    let right = r.checked_sub(x).ok()?;
+                    let top = t.checked_sub(y).ok()?;
+                    let bottom = b.checked_sub(y).ok()?;
+                    let start = bounds.right.partition_point(|v| *v <= left);
+                    let end = bounds.left.partition_point(|v| *v < right);
+                    let count = if r > l && b > t && bounds.bottom > top && bounds.top < bottom {
+                        end.saturating_sub(start) * 4
+                    } else {
+                        0
+                    };
+                    Some((start, count))
+                })
+                .unwrap_or_else(legacy);
             views[run.draw * 8..run.draw * 8 + 8].copy_from_slice(&[
                 self.mesh.draws[run.draw * 3 + 1] as f32 + (start * 4) as f32,
                 count as f32,
@@ -319,6 +383,30 @@ mod tests {
                 / f64::from(font.metrics().cap_height);
             let actual = a.styles.iter().copied().find(|v| *v > 0.).unwrap();
             assert!((f64::from(actual) - expected).abs() < 0.00002);
+        }
+    }
+    #[test]
+    fn fixed_viewport_preserves_cancellation_and_culls_each_clip_edge() {
+        let font = super::super::font::test_font();
+        let mut floating = TextPresentation::with_math(TextMath::Float32);
+        let mut fixed = TextPresentation::with_math(TextMath::Fixed);
+        let mut root = scene(0., 0., "jyABC").root().clone();
+        let mut text = root.children[0].children.remove(0);
+        text.frame = Rect::new(-8176., 4., 1000., 24.);
+        let mut inner = canvas(4, Rect::new(0.0001, 0., 100., 100.), vec![text]);
+        inner.primitive = Primitive::Canvas { clip: false };
+        let mut outer = canvas(3, Rect::new(8192., 0., 100., 100.), vec![inner]);
+        outer.primitive = Primitive::Canvas { clip: false };
+        root.children = vec![outer];
+        let cancellation = Scene::new(root).unwrap();
+        let a = floating.compose(&cancellation, &font);
+        let b = fixed.compose(&cancellation, &font);
+        assert_eq!(a.views[2], 16.);
+        assert!((b.views[2] - 16.0001).abs() < 0.000002);
+        assert!(b.views[1] > 0.);
+        for (x, y) in [(500., 0.), (-500., 0.), (0., 100.), (0., -100.)] {
+            let hidden = fixed.compose(&scene(x, y, "jyABC"), &font);
+            assert_eq!(hidden.views[1], 0.);
         }
     }
 }

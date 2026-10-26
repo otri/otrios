@@ -1,7 +1,11 @@
 # RFC 0018: Fixed point layout and SIMD stretch milestone
 
-Status: experimental candidate, disabled by default; not accepted. Requested
-2026-10-26, measured 2026-10-27. [Current raster comparison and remaining math gates](../experiments/fixed-point-canonical-scale-2026-10-27.md). [Evaluation and unresolved pixel gate](../experiments/fixed-point-text-2026-10-27.md).
+Status: bounded implementation and evaluation complete; qualified opt-in candidate.
+Float32 remains the default because full checked layout is slower on Cortex-A7.
+Requested 2026-10-26, measured 2026-10-27.
+[Final coordinate, pixel and performance evaluation](../experiments/fixed-point-hierarchy-2026-10-27.md).
+[Canonical-scale raster correction](../experiments/fixed-point-canonical-scale-2026-10-27.md).
+The earlier failed experiments remain linked as historical controls.
 
 ## Objective and baseline
 
@@ -18,9 +22,11 @@ Changing filtering and coordinate representation together would hide regressions
 
 ## Representation to evaluate
 
-The pilot uses i64 Q48.16 for resize coordinates, i64 Q32.32 for numeric
-expressions and accumulated glyph advances, and admitted local i32 Q16 lanes
-for glyph packing. Viewport offsets and flow/culling remain float32. A 16.16 i32 position alone
+The opt-in implementation uses i64 Q48.16 for resize coordinates, i64 Q32.32
+for numeric expressions, accumulated glyph advances, hierarchy transforms,
+viewport clipping and flow allocation, and admitted local i32 Q16 lanes for
+glyph packing. Culling compares integer bounds corresponding to final GPU
+attributes. Unsupported fixed intermediates retain the float32 fallback. A 16.16 i32 position alone
 does not cover the current ±100,000 admission bound; widen checked intermediates
 or use separate bounded types. Do not silently narrow that public limit.
 Accumulate advances before rounding to the final presentation grid so rounding
@@ -61,9 +67,10 @@ hardware arithmetic limits or make nonlinear shader operations exact.
   Sign-off requires both performance and pixel comparisons; scaffold checks alone
   do not qualify.
 
-The prototype and comparison tools are implemented behind `fixed-ui-math`.
-The isolated integer kernel is faster, checked layout is slower, and the
-raster and scanout gates now pass after canonical scale metadata and bounded
-sampling corrections. Hierarchy transforms, flow and fixed culling remain open.
-No default enablement or complete fixed point
-UI migration has been accepted by this RFC.
+The implementation and comparison tools remain behind `fixed-ui-math`.
+The isolated admitted integer SIMD kernel is faster; complete checked layout is
+slower. The six-workload native/browser pixel matrix and repeated 30 fps scanout
+gates pass without loosening thresholds. The final report preserves independent
+float32 baselines, scalar/NEON stream identity, instruction evidence and all CPU
+costs. No default enablement, deployment or wholesale conversion of hit testing,
+physics or nonlinear geometry/shader evaluation is implied by this bounded RFC.

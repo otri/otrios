@@ -29,10 +29,16 @@ fn main() -> Result<()> {
         .unwrap_or("2")
         .parse::<u32>()
         .map_err(|e| e.to_string())?;
+    let hierarchy = args.iter().any(|a| a == "--hierarchy");
     let viewport_scale = arg("--viewport-scale")
         .unwrap_or("1")
         .parse::<f32>()
         .map_err(|e| e.to_string())?;
+    let viewport_scale = if hierarchy {
+        1.25 * 0.66
+    } else {
+        viewport_scale
+    };
     let origin = arg("--origin-x")
         .unwrap_or("16")
         .parse::<f32>()
@@ -168,6 +174,9 @@ fn main() -> Result<()> {
             if rebuild && i % 2 != 0 {
                 paragraph.replace_range(..1, "t");
             }
+            if hierarchy {
+                paragraph.insert_str(0, "(jy) Égy ");
+            }
             let offset = offset.min(
                 (font.text_width(&paragraph, text_scale as f32) * viewport_scale - 1248.).max(0.),
             );
@@ -196,7 +205,35 @@ fn main() -> Result<()> {
                         scale: viewport_scale,
                     };
                 }
-                nodes.push(row_node);
+                if hierarchy {
+                    use otrios_interfaces::scene::Primitive;
+                    let mut child = row_node.children.remove(0);
+                    child.frame.y = -1.125;
+                    let mut nested = canvas(
+                        1000 + row * 3,
+                        Rect::new(0., 0., 1248. / 1.25, height / 1.25),
+                        vec![child],
+                    );
+                    nested.primitive = Primitive::Viewport { scale: 0.66 };
+                    row_node.primitive = Primitive::Viewport { scale: 1.25 };
+                    row_node.children = vec![nested];
+                    row_node.frame.x = origin - 8192.;
+                    let mut small = canvas(
+                        1001 + row * 3,
+                        Rect::new(0.0001, 0., 1280., 800.),
+                        vec![row_node],
+                    );
+                    small.primitive = Primitive::Canvas { clip: false };
+                    let mut large = canvas(
+                        1002 + row * 3,
+                        Rect::new(8192., 0., 1280., 800.),
+                        vec![small],
+                    );
+                    large.primitive = Primitive::Canvas { clip: false };
+                    nodes.push(large);
+                } else {
+                    nodes.push(row_node);
+                }
             }
             Arc::new(Scene::new(canvas(
                 0,

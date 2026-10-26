@@ -48,6 +48,9 @@ Animation and 3D experiments: [presentation ownership, load controls and hardwar
 reach [35–36 kernel-presented fps for a dense scrolling text page](docs/experiments/text-rendering-performance.md)
 on the Mali-400 frame. The float32 captures and measurements establish the baseline
 for the [fixed point/SIMD stretch milestone](docs/rfcs/0018-fixed-point-layout-simd.md).
+Its [coordinate and pixel evaluation](docs/experiments/fixed-point-hierarchy-2026-10-27.md)
+records verified NEON packing, passing raster/scanout gates, and the CPU cost of
+checked layout; fixed math remains opt-in.
 
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 

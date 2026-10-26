@@ -129,4 +129,52 @@ fn main() {
             );
         }
     }
+    use otrios_core::dashboard::layout::composition;
+    use otrios_interfaces::layout::{Alignment, Composition, Flow, FlowKind, FlowPlan};
+    let plan = FlowPlan {
+        insets: [0.125, 0.25, 0.375, 0.5],
+        content: Flow {
+            flexible: [true, false],
+            kind: FlowKind::Group {
+                axis: 0,
+                gap: 10.125,
+                alignment: Alignment::Center,
+                children: (0..8)
+                    .map(|node| Flow {
+                        flexible: [true, false],
+                        kind: FlowKind::Item {
+                            node,
+                            preferred: [120.25, 100.125],
+                            minimum: [80.125, 100.125],
+                        },
+                    })
+                    .collect(),
+            },
+        },
+    };
+    let plan = Composition {
+        wide_min_width: 600.,
+        wide: plan.clone(),
+        tall: plan,
+    };
+    for (name, run) in [
+        ("float32", composition::resolve_float32 as fn(_, _) -> _),
+        ("fixed", composition::resolve_fixed),
+    ] {
+        let mut times = vec![];
+        for _ in 0..9 {
+            let start = Instant::now();
+            for i in 0..10000 {
+                black_box(
+                    run(black_box(&plan), black_box([1280. + (i % 64) as f32, 800.])).unwrap(),
+                );
+            }
+            times.push(start.elapsed().as_nanos());
+        }
+        times.sort_unstable();
+        println!(
+            "{{\"layout\":\"flow-eight-items\",\"mode\":\"{name}\",\"iterations\":10000,\"samples\":9,\"ns_per_frame\":{}}}",
+            times[4] as f64 / 10000.
+        );
+    }
 }
