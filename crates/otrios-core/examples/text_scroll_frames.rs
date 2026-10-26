@@ -19,8 +19,39 @@ use std::{io::Write, sync::Arc, time::Instant};
 fn main() -> Result<()> {
     let output = std::env::args().nth(1).ok_or("Supply mesh output path")?;
     let dense = std::env::args().any(|a| a == "--dense");
+    let args: Vec<_> = std::env::args().collect();
+    let arg = |name: &str| {
+        args.windows(2)
+            .find(|a| a[0] == name)
+            .map(|a| a[1].as_str())
+    };
+    let text_scale = arg("--scale")
+        .unwrap_or("2")
+        .parse::<u32>()
+        .map_err(|e| e.to_string())?;
+    let viewport_scale = arg("--viewport-scale")
+        .unwrap_or("1")
+        .parse::<f32>()
+        .map_err(|e| e.to_string())?;
+    let origin = arg("--origin-x")
+        .unwrap_or("16")
+        .parse::<f32>()
+        .map_err(|e| e.to_string())?;
+    let measure_only = args.iter().any(|a| a == "--measure-only");
+    let rebuild = args.iter().any(|a| a == "--rebuild");
+    if !(1..=8).contains(&text_scale)
+        || !(0.1..=4.).contains(&viewport_scale)
+        || !(0. ..=32.).contains(&origin)
+    {
+        return Err("Invalid text probe dimensions".into());
+    }
     let retained = std::env::args().any(|a| a == "--retained");
-    let mut presentation = otrios_core::dashboard::retained_text::TextPresentation::default();
+    let math = if std::env::args().any(|a| a == "--fixed") {
+        otrios_core::dashboard::retained_text::TextMath::Fixed
+    } else {
+        otrios_core::dashboard::retained_text::TextMath::Float32
+    };
+    let mut presentation = otrios_core::dashboard::retained_text::TextPresentation::with_math(math);
     let mut generation = 0;
     let frame_count = if dense { 120_u32 } else { 240_u32 };
     let font = Arc::new(Font::from_zstd(
@@ -41,7 +72,9 @@ fn main() -> Result<()> {
         packet.extend(value.to_le_bytes());
     }
     packet.extend(&atlas.bands);
-    std::fs::write(format!("{output}.font"), packet).map_err(|e| e.to_string())?;
+    if !measure_only {
+        std::fs::write(format!("{output}.font"), packet).map_err(|e| e.to_string())?;
+    }
     let (app, make_ui) = input_lab::screens().remove(0);
     let ui = make_ui(&[]);
     let bytes = encode_ui(&ui)?;
@@ -86,8 +119,12 @@ fn main() -> Result<()> {
             position: [900., 220.],
         },
     )?;
-    let mut output =
-        std::io::BufWriter::new(std::fs::File::create(output).map_err(|e| e.to_string())?);
+    let stream: Box<dyn Write> = if measure_only {
+        Box::new(std::io::sink())
+    } else {
+        Box::new(std::fs::File::create(output).map_err(|e| e.to_string())?)
+    };
+    let mut output = std::io::BufWriter::new(stream);
     output
         .write_all(if retained { b"OTRTEXT2" } else { b"OTRTEXT1" })
         .map_err(|e| e.to_string())?;
@@ -118,21 +155,39 @@ fn main() -> Result<()> {
                 scene::Scene,
             };
             use otrios_interfaces::scene::Rect;
-            let paragraph = "The quick brown fox jumps over the lazy dog. ".repeat(5);
-            let offset = offset.min((font.text_width(&paragraph, 2.) - 1248.).max(0.));
+            let mut paragraph = "The quick brown fox jumps over the lazy dog. ".repeat(5);
+            if rebuild && i % 2 != 0 {
+                paragraph.replace_range(..1, "t");
+            }
+            let offset = offset.min(
+                (font.text_width(&paragraph, text_scale as f32) * viewport_scale - 1248.).max(0.),
+            );
             let mut nodes = vec![background(1, 1280., 800., BG, 0.)];
-            for row in 0..28 {
-                nodes.push(canvas(
+            let height = 13. * text_scale as f32 * viewport_scale;
+            let rows = (768. / (height + 1.)).floor().clamp(1., 64.) as u32;
+            for row in 0..rows {
+                let mut row_node = canvas(
                     10 + row * 2,
-                    Rect::new(16., 16. + row as f32 * 27., 1248., 26.),
+                    Rect::new(origin, 16. + row as f32 * (height + 1.), 1248., height),
                     vec![text(
                         11 + row * 2,
-                        Rect::new(-offset, 0., 1248. + offset, 26.),
+                        Rect::new(
+                            -offset / viewport_scale,
+                            0.,
+                            ((1248. + offset) / viewport_scale).min(8192.),
+                            height / viewport_scale,
+                        ),
                         &paragraph,
-                        2,
+                        text_scale,
                         WHITE,
                     )],
-                ));
+                );
+                if viewport_scale != 1. {
+                    row_node.primitive = otrios_interfaces::scene::Primitive::Viewport {
+                        scale: viewport_scale,
+                    };
+                }
+                nodes.push(row_node);
             }
             Arc::new(Scene::new(canvas(
                 0,
@@ -161,6 +216,9 @@ fn main() -> Result<()> {
             mesh.glyph_vertices.len() / 64
         };
         times.push(start.elapsed().as_micros());
+        if measure_only {
+            continue;
+        }
         if retained {
             output
                 .write_all(&generation.to_le_bytes())
@@ -203,7 +261,13 @@ fn main() -> Result<()> {
                 .map_err(|e| e.to_string())?;
         }
     }
+    let cold = times[0];
     times.sort_unstable();
+    println!(
+        "Fixed text runs / fallback runs: {:?}",
+        presentation.math_counts()
+    );
+    println!("Cold layout/mesh microseconds: {cold}");
     println!(
         "Synthetic layout/mesh microseconds: p50={} p95={} max={}",
         times[times.len() / 2],

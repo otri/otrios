@@ -13,6 +13,8 @@ otrios-interfaces = { path = "../otrios-interfaces" }
 [features]
 canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex"]
 merkle = ["dep:sha2"]
+# Explicit candidate until the fixed/float pixel and hardware gates are reviewed.
+fixed-ui-math = ["dashboard"]
 default = []
 dashboard = ["otrios-interfaces/layout", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
 
@@ -86,3 +88,7 @@ optional = true
 [[example]]
 name = "text_scroll_frames"
 required-features = ["canvas"]
+
+[[example]]
+name = "fixed_coord_probe"
+required-features = ["dashboard"]

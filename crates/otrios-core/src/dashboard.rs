@@ -5,6 +5,8 @@
 pub mod clock;
 pub mod components;
 pub mod display;
+pub mod fixed;
+mod fixed_text;
 pub mod font;
 pub mod font_reference;
 pub mod ink;

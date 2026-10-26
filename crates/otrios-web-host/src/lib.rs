@@ -388,6 +388,7 @@ impl CanvasApp {
             .as_ref()
             .is_none_or(|(old, _)| !Arc::ptr_eq(old, &scene))
         {
+            self.rendered = None;
             let font = self.font.as_ref().ok_or("Font resource not loaded")?;
             let mesh = self.text_presentation.compose(&scene, font);
             self.rendered = Some((scene, mesh));

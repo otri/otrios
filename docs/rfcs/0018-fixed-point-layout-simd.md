@@ -1,6 +1,7 @@
 # RFC 0018: Fixed point layout and SIMD stretch milestone
 
-Status: proposed follow-up to the 30 fps text milestone, requested 2026-10-26.
+Status: experimental candidate, disabled by default; not accepted. Requested
+2026-10-26, measured 2026-10-27. [Evaluation and unresolved pixel gate](../experiments/fixed-point-text-2026-10-27.md).
 
 ## Objective and baseline
 
@@ -17,8 +18,9 @@ Changing filtering and coordinate representation together would hide regressions
 
 ## Representation to evaluate
 
-Measure 24.8 signed coordinates for bounded layout/viewport positions and higher
-fractional precision for accumulated font advances. A 16.16 i32 position alone
+The pilot uses i64 Q48.16 for resize coordinates, i64 Q32.32 for numeric
+expressions and accumulated glyph advances, and admitted local i32 Q16 lanes
+for glyph packing. Viewport offsets and flow/culling remain float32. A 16.16 i32 position alone
 does not cover the current ±100,000 admission bound; widen checked intermediates
 or use separate bounded types. Do not silently narrow that public limit.
 Accumulate advances before rounding to the final presentation grid so rounding
@@ -59,4 +61,7 @@ hardware arithmetic limits or make nonlinear shader operations exact.
   Sign-off requires both performance and pixel comparisons; scaffold checks alone
   do not qualify.
 
-No fixed point or SIMD speedup has been accepted by this RFC yet.
+The prototype and comparison tools are implemented behind `fixed-ui-math`.
+The isolated integer kernel is faster, checked layout is slower, and the
+large-scale/DPR pixel gate fails. No default enablement or complete fixed point
+UI migration has been accepted by this RFC.

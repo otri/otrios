@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::{font::Font, scene::Scene};
 use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
+pub(super) struct RetainedPaint<'a> {
+    pub runs: &'a mut Vec<(usize, u32)>,
+    pub fixed: Option<&'a mut super::fixed_text::GlyphMathCache>,
+}
 /// Ordered geometry and Slug glyph runs, retained by both GPU hosts.
 #[derive(Default)]
 pub struct Mesh {
@@ -253,7 +257,7 @@ impl Mesh {
         factor: f32,
         clip: Clip,
         font: Option<&Font>,
-        mut retained: Option<&mut Vec<(usize, u32)>>,
+        mut retained: Option<&mut RetainedPaint<'_>>,
     ) {
         let f = node.frame;
         let r = Rect::new(
@@ -299,30 +303,43 @@ impl Mesh {
                 color,
             } => {
                 if let Some(font) = font {
-                    if let Some(runs) = retained {
+                    if let Some(paint) = retained {
                         let first = self.glyph_vertices.len() / 16;
                         let before = self.draws.len();
                         let previous = self.draws.last().copied();
-                        self.text(
-                            Rect::new(0., 0., 100_000., 100_000.),
-                            value,
-                            *scale as f32 * factor,
-                            *color,
-                            Clip {
-                                left: -100_000.,
-                                top: -100_000.,
-                                right: 100_000.,
-                                bottom: 100_000.,
-                            },
-                            font,
-                        );
+                        let fixed = paint.fixed.as_deref_mut().is_some_and(|cache| {
+                            super::fixed_text::append(
+                                font,
+                                cache,
+                                value,
+                                *scale as f32 * factor,
+                                *color,
+                                &mut self.glyph_vertices,
+                            )
+                            .is_ok()
+                        });
+                        if !fixed {
+                            self.text(
+                                Rect::new(0., 0., 100_000., 100_000.),
+                                value,
+                                *scale as f32 * factor,
+                                *color,
+                                Clip {
+                                    left: -100_000.,
+                                    top: -100_000.,
+                                    right: 100_000.,
+                                    bottom: 100_000.,
+                                },
+                                font,
+                            );
+                        }
                         let count = self.glyph_vertices.len() / 16 - first;
                         self.draws.truncate(before);
                         if let Some(old) = previous {
                             self.draws[before - 1] = old;
                         }
                         if count > 0 {
-                            runs.push((self.draws.len() / 3, node.id));
+                            paint.runs.push((self.draws.len() / 3, node.id));
                             self.draws.extend([1, first as u32, count as u32]);
                         }
                     } else {

@@ -286,11 +286,12 @@ impl Font {
         self.metrics
     }
     pub fn glyph(&self, ch: char) -> &Glyph {
-        let index = self
-            .glyphs
+        &self.glyphs[self.glyph_index(ch)]
+    }
+    pub(super) fn glyph_index(&self, ch: char) -> usize {
+        self.glyphs
             .binary_search_by_key(&(ch as u32), |g| g.scalar as u32)
-            .unwrap_or(self.fallback);
-        &self.glyphs[index]
+            .unwrap_or(self.fallback)
     }
     pub fn glyph_by_id(&self, id: u32) -> Option<&Glyph> {
         self.glyphs.iter().find(|g| g.id == id)

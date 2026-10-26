@@ -2,11 +2,25 @@
 //! Retained text strips: immutable local glyphs, moving viewport, conservative culling.
 use super::{
     font::Font,
-    render::{Clip, Mesh},
+    render::{Clip, Mesh, RetainedPaint},
     scene::Scene,
 };
 use otrios_interfaces::scene::{Primitive, SceneNode};
 use std::{collections::BTreeMap, sync::Arc};
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextMath {
+    Float32,
+    Fixed,
+}
+impl Default for TextMath {
+    fn default() -> Self {
+        if cfg!(feature = "fixed-ui-math") {
+            Self::Fixed
+        } else {
+            Self::Float32
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct TextPresentation {
@@ -15,6 +29,8 @@ pub struct TextPresentation {
     mesh: Arc<Mesh>,
     runs: Vec<Run>,
     generation: u32,
+    math: TextMath,
+    glyph_math: super::fixed_text::GlyphMathCache,
 }
 struct Run {
     draw: usize,
@@ -32,6 +48,15 @@ pub struct TextFrame {
     pub generation: u32,
 }
 impl TextPresentation {
+    pub fn math_counts(&self) -> [u64; 2] {
+        self.glyph_math.counts()
+    }
+    pub fn with_math(math: TextMath) -> Self {
+        Self {
+            math,
+            ..Default::default()
+        }
+    }
     pub fn compose(&mut self, scene: &Scene, font: &Font) -> TextFrame {
         let mut key = scene.root().clone();
         let mut positions = BTreeMap::new();
@@ -46,11 +71,26 @@ impl TextPresentation {
             &mut glyphs,
         );
         if self.key.as_ref() != Some(&key) || self.font != font.hash() {
-            let mut mesh = Mesh::default();
+            if self.font != font.hash() {
+                self.glyph_math.clear();
+            }
+            // Recycle CPU storage only after every immutable frame snapshot has
+            // been released. Held snapshots keep their buffers and bytes intact.
+            let mut mesh = Arc::get_mut(&mut self.mesh)
+                .map(std::mem::take)
+                .unwrap_or_default();
+            mesh.vertices.clear();
+            mesh.glyph_vertices.clear();
+            mesh.draws.clear();
             let mut runs = Vec::new();
             // Oversized documents retain the existing visible-only bounded path.
             // Input fields are limited to 256 bytes; normal strips fit comfortably.
             if glyphs <= 16384 {
+                mesh.glyph_vertices.reserve(glyphs * 64);
+                let mut paint = RetainedPaint {
+                    runs: &mut runs,
+                    fixed: (self.math == TextMath::Fixed).then_some(&mut self.glyph_math),
+                };
                 mesh.paint(
                     scene.root(),
                     [0., 0.],
@@ -62,7 +102,7 @@ impl TextPresentation {
                         bottom: extent[1],
                     },
                     Some(font),
-                    Some(&mut runs),
+                    Some(&mut paint),
                 );
             } else {
                 mesh = super::render_scene_with_font(scene, font);
@@ -199,6 +239,7 @@ mod tests {
         let mut renderer = TextPresentation::default();
         let text = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         let a = renderer.compose(&scene(0., 0., text), &font);
+        let original = a.mesh.glyph_vertices.clone();
         let b = renderer.compose(&scene(30.25, 0., text), &font);
         assert!(Arc::ptr_eq(&a.mesh, &b.mesh));
         assert_eq!(a.generation, b.generation);
@@ -210,5 +251,9 @@ mod tests {
         assert_eq!(off.views[1], 0.);
         let changed = renderer.compose(&scene(30.25, 0., "New contents"), &font);
         assert!(!Arc::ptr_eq(&changed.mesh, &b.mesh));
+        assert_eq!(
+            a.mesh.glyph_vertices, original,
+            "Held snapshots stay immutable after a new content generation"
+        );
     }
 }

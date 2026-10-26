@@ -3,6 +3,60 @@ use super::*;
 fn n(v: f32) -> Expr {
     Expr::Literal(Value::Number(v))
 }
+#[test]
+fn fixed_expression_keeps_small_terms_until_the_scene_boundary() {
+    let state = BTreeMap::new();
+    let params = BTreeMap::new();
+    let bindings = Bindings { local: &state };
+    let frame = [0., 0., 8192., 4096.];
+    let expression = Expr::Subtract(
+        Box::new(Expr::Add(Box::new(n(8192.)), Box::new(n(0.0001)))),
+        Box::new(n(8192.)),
+    );
+    let fixed = eval_fixed_number(&expression, frame, &params, &bindings)
+        .unwrap()
+        .unwrap()
+        .to_f32();
+    assert!((fixed - 0.0001).abs() < 0.000000001);
+    assert_eq!(
+        number(eval_float32(&expression, frame, &params, &bindings).unwrap()).unwrap(),
+        0.
+    );
+    let ratio = Expr::Multiply(Box::new(n(0.0001)), Box::new(Expr::Width));
+    let fixed = eval_fixed_number(&ratio, frame, &params, &bindings)
+        .unwrap()
+        .unwrap()
+        .to_f32();
+    assert!((fixed - 0.0001 * 8192.).abs() < 0.000002);
+    // Nonnumeric conditional branches still use the existing typed interpreter.
+    let text = Expr::Select {
+        condition: Box::new(Expr::Literal(Value::Boolean(true))),
+        yes: Box::new(s("yes")),
+        no: Box::new(s("no")),
+    };
+    assert!(
+        eval_fixed_number(&text, frame, &params, &bindings)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        eval(&text, frame, &params, &bindings).unwrap(),
+        Value::Text("yes".into())
+    );
+    // A candidate range limit must not reject an expression the old contract
+    // accepts. Overflow and sub-grid products fall back as a whole expression.
+    for expression in [
+        Expr::Subtract(Box::new(n(1e20)), Box::new(n(1e20))),
+        Expr::Multiply(Box::new(n(1e-6)), Box::new(n(1e-6))),
+        Expr::Add(Box::new(n(1e-30)), Box::new(n(0.))),
+    ] {
+        assert!(eval_fixed_number(&expression, frame, &params, &bindings).is_err());
+        assert_eq!(
+            eval(&expression, frame, &params, &bindings).unwrap(),
+            eval_float32(&expression, frame, &params, &bindings).unwrap()
+        );
+    }
+}
 fn s(v: &str) -> Expr {
     Expr::Literal(Value::Text(v.into()))
 }
