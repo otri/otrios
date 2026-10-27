@@ -86,3 +86,11 @@ optional = true
 [[example]]
 name = "text_scroll_frames"
 required-features = ["canvas"]
+
+[[example]]
+name = "document_cost"
+required-features = ["canvas"]
+
+[[example]]
+name = "document_frames"
+required-features = ["canvas"]

@@ -31,7 +31,7 @@ try{
   const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
-  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)+query},sessionId);await ready(sessionId,route,width<height?'800x1280':'1280x800');return sessionId;};
+  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)+query},sessionId);await ready(sessionId,route==='layout-lab/document'?'layout-document':route,width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds;
@@ -40,7 +40,46 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--text-scroll')){
+  if(args.includes('--document')){
+    const a=await page(1280,800,'layout-lab');
+    await click(a,'Long document','layout-document','1280x800');
+    const info=()=>evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'null')");
+    await wait(a,"!!JSON.parse(document.querySelector('#revision').dataset.textScroll||'null')?.anchor&&document.querySelector('#revision').dataset.documentLoading==='false'");
+    const initial=await info();assert(initial.source_bytes>=1024*1024);assert.equal(initial.offset,0);assert(initial.working_bytes<=8*1024*1024);
+    assert.equal(await evaluate(a,'location.pathname'),'/layout-lab/document');await screenshot(a,'document-start');
+    const rect=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};})()");
+    const point=(x,y)=>({id:1,x:rect.x+x*rect.w/1280,y:rect.y+y*rect.h/800});
+    await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point(900,600)]},a);
+    for(let i=1;i<=6;i++){await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[point(900,600-i*40)]},a);await new Promise(r=>setTimeout(r,30));}
+    const dragged=await info();assert(dragged.offset>100);
+    // Keep inspection round trips out of the lift-off interval. A deliberately
+    // paused release should stop; this case qualifies a fresh moving release.
+    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[point(900,320)]},a);
+    await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
+    await wait(a,`JSON.parse(document.querySelector('#revision').dataset.textScroll).offset>${dragged.offset+60}`);
+    await wait(a,"!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
+    const coast=await info();assert(coast.working_bytes<=8*1024*1024);assert.equal(coast.loading,false);
+    await screenshot(a,'document-coasted');
+    const b=await page(1280,800,'layout-lab/document');await wait(b,"document.querySelector('#revision').dataset.documentLoading==='false'");
+    assert.equal((await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll)")).offset,0,'document viewport is local to its client');
+    await metrics(a,800,1280);await ready(a,'layout-document','800x1280');
+    await wait(a,"document.querySelector('#revision').dataset.documentLoading==='false'&&!JSON.parse(document.querySelector('#revision').dataset.textScroll).loading");
+    const resized=await info();assert.equal(resized.anchor.block,coast.anchor.block);assert(resized.anchor.source_byte<=coast.anchor.source_byte);assert(coast.anchor.source_byte-resized.anchor.source_byte<400);
+    await screenshot(a,'document-portrait');
+    // Lose and restore the real WebGL context without replacing the authority,
+    // source or app state. The resource ACK map must request a complete replay.
+    for(let restore=0;restore<3;restore++){
+    await evaluate(a,"window.documentLoss=document.querySelector('#view').getContext('webgl').getExtension('WEBGL_lose_context');documentLoss.loseContext()");
+    await wait(a,"document.querySelector('#revision').dataset.graphics==='lost'");
+    await evaluate(a,'documentLoss.restoreContext()');
+    await wait(a,"document.querySelector('#revision').dataset.graphics==='ready'&&document.querySelector('#revision').dataset.documentLoading==='false'");
+    await screenshot(a,'document-context-restored');assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true,await evaluate(a,"document.querySelector('#error').textContent"));}
+    await click(a,'Back','layout-lab','800x1280');
+    await wait(a,"document.querySelector('#revision').dataset.documentResources==='0'");
+    const result={passed:true,checks:['1 MiB source admission','touch drag and momentum','bounded working memory','independent client viewports','source anchor across reflow','context-loss resource replay','navigation retires document resources'],initial,dragged,coast,resized,screenshots:output};
+    await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));process.exitCode=0;
+  }else if(args.includes('--text-scroll')){
     const a=await page(1280,800,'layout-lab');
     await click(a,'Text scroll demo','layout-text-scroll','1280x800');
     await wait(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'{}').limit?.every(v=>v>0)");

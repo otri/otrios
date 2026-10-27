@@ -39,7 +39,12 @@ pub fn description(state_schema: StateSchema) -> Ui {
         vec![
             row(
                 16.,
-                vec![heading(), place("text-demo", [250., 80.]), home()],
+                vec![
+                    heading(),
+                    place("text-demo", [220., 80.]),
+                    place("document-demo", [220., 80.]),
+                    home(),
+                ],
             ),
             intro(),
             top(),
@@ -55,6 +60,7 @@ pub fn description(state_schema: StateSchema) -> Ui {
                 vec![
                     heading(),
                     row(16., vec![place("text-demo", [250., 80.]), home()]),
+                    place("document-demo", [250., 64.]),
                 ],
             ),
             intro(),
@@ -68,6 +74,9 @@ pub fn description(state_schema: StateSchema) -> Ui {
         .build(
             "Layout Lab",
             vec![
+                button("Long document")
+                    .navigate_to(Destination::app("layout-document").route("document"))
+                    .key("document-demo"),
                 button("Text scroll demo")
                     .navigate_to(Destination::app("layout-text-scroll").route("text-scroll"))
                     .key("text-demo"),

@@ -128,9 +128,26 @@ pub struct OrderItem {
     pub node: u16,
     pub field: u16,
 }
+/// Immutable UTF-8 resource embedded in an admitted UI. LZ4 block bytes, without
+/// a size prefix; the declared size is checked before decoding. SHA-256 covers
+/// the original UTF-8 bytes. UI v4, independent of replicated state protocols.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextResource {
+    pub decoded_bytes: u32,
+    pub sha256: Vec<u8>,
+    pub lz4: Vec<u8>,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Presentation {
+    /// Read-only, wrapped document; source is not stored in scene text nodes.
+    TextDocument {
+        viewport: u16,
+        source: TextResource,
+        scale: u8,
+        color: [u8; 4],
+    },
     /// Mount-local text-only viewport. UI format v3; offsets are never state.
     TextScroll {
         viewport: u16,

@@ -438,6 +438,8 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/artifact-cache.mjs"
         | "state-worker.js"
         | "web/state-worker.js"
+        | "document-transfer.mjs"
+        | "web/document-transfer.mjs"
         | "monitoring-session.mjs"
         | "web/monitoring-session.mjs"
         | "release-gate.mjs"
@@ -510,6 +512,7 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                         | "release-gate.mjs"
                         | "session.mjs"
                         | "monitoring-session.mjs"
+                        | "document-transfer.mjs"
                         | "app-catalog.mjs"
                         | "Slug-LICENSE.txt"
                         | "navigation-timings.mjs"
@@ -524,7 +527,7 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                 file = app.web.join("../shared").join(&path);
             }
             if !file.exists() && path == "fonts/Roboto-Regular.otq.zst" {
-                file = app.web.join("../dashboard").join(&path);
+                file = app.web.join("../shared").join(&path);
             }
             serve_file(file, kind, false).await
         }

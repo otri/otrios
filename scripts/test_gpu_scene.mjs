@@ -39,6 +39,21 @@ function frame(phase=0,color=[1,1,1,1]){
   for(const [i,x,y] of [[0,10+phase,10],[1,20+phase,10],[2,10+phase,20],[3,20+phase,20]])glyphVertices.set([x,y,i%2,Math.floor(i/2),...color,8,8,0,0,0,0,7,7],i*16);
   return {vertices:new Float32Array(36),glyphVertices,draws:new Uint32Array([0,0,3,1,0,4,0,3,3])};
 }
+test('a new retained chunk does not repack or upload prepared neighbors',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),a=renderer.createLayer(),b=renderer.createLayer();renderer.setFont(packet());
+  a.setFrame(frame());renderer.prepare([a]);const prepared=a.preparedDraws;
+  b.setFrame(frame(.25));calls.length=0;renderer.prepare([a,b]);
+  assert.equal(a.preparedDraws,prepared);
+  assert.equal(calls.filter(c=>c[0]==='bufferData').length,1,'only the new cached vertex stream is uploaded');
+  renderer.resize(2560,1600);calls.length=0;renderer.prepare([a,b]);
+  assert.notEqual(a.preparedDraws,prepared,'an atlas generation change repairs dependent buffers');
+});
+test('disposing a lost-context resource releases its CPU arrays and owner reference',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();layer.setFrame(frame());
+  renderer.contextLost();calls.length=0;layer.dispose();
+  assert(!renderer.layers.has(layer));assert.equal(layer.glyphVertices.length,0);assert.equal(layer.textViews.length,0);
+  assert.equal(calls.filter(c=>c[0]==='deleteBuffer').length,0,'lost GPU handles are not reused');
+});
 test('cache misses use analytic coverage once; warm glyph tint preserves draw ordering',()=>{
   const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();renderer.setFont(packet());
   const uploads=calls.filter(call=>call[0]==='texImage2D').length;

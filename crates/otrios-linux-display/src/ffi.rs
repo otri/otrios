@@ -52,6 +52,13 @@ unsafe extern "C" {
     fn ot_get_info(d: *mut c_void, info: *mut Info);
     fn ot_upload(d: *mut c_void, slot: u32, vertices: *const f32, floats: usize) -> c_int;
     fn ot_draw(d: *mut c_void, projection: *const f32, animated: c_int) -> c_int;
+    fn ot_draw_slots(
+        d: *mut c_void,
+        projection: *const f32,
+        slots: *const u32,
+        count: usize,
+    ) -> c_int;
+    fn ot_retire_slot(d: *mut c_void, slot: u32) -> c_int;
     fn ot_set_font(
         d: *mut c_void,
         cw: u32,
@@ -145,7 +152,7 @@ impl Display {
         info
     }
     pub fn upload(&mut self, slot: u32, vertices: &[f32]) -> Result<(), String> {
-        if slot >= 3 {
+        if slot >= crate::MAX_SCENE_SLOTS {
             return Err("Invalid VBO slot".into());
         }
         validate_mesh(vertices)?;
@@ -231,7 +238,7 @@ impl Display {
     }
     /// Update only culled draw ranges, translations and clipping rectangles.
     pub fn text_views(&mut self, slot: u32, views: &[f32]) -> Result<(), String> {
-        if slot >= 3
+        if slot >= crate::MAX_SCENE_SLOTS
             || views.len() > 4096 * 8
             || !views.len().is_multiple_of(8)
             || views.iter().any(|v| !v.is_finite() || v.abs() > 100_000.)
@@ -246,7 +253,7 @@ impl Display {
     }
     /// Immutable logical font em per draw. Zero retains legacy inference.
     pub fn text_styles(&mut self, slot: u32, styles: &[f32]) -> Result<(), String> {
-        if slot >= 3
+        if slot >= crate::MAX_SCENE_SLOTS
             || styles.len() > 4096
             || styles
                 .iter()
@@ -275,6 +282,36 @@ impl Display {
         // SAFETY: output ABI matches C and remains borrowed until flip completes.
         self.result(unsafe { ot_present(self.owner.as_ptr(), &mut flip) })?;
         Ok(flip)
+    }
+    /// Ordered resident resources. The caller retains their buffers and updates
+    /// only views until an independently versioned resource changes.
+    pub fn draw_slots(&mut self, projection: [f32; 9], slots: &[u32]) -> Result<(), String> {
+        if projection
+            .iter()
+            .any(|v| !v.is_finite() || v.abs() > 100_000.)
+            || slots.len() > crate::MAX_SCENE_SLOTS as usize
+            || slots.iter().any(|s| *s >= crate::MAX_SCENE_SLOTS)
+        {
+            return Err("Invalid ordered scene resources".into());
+        }
+        // SAFETY: bounded finite projection, validated slot IDs, synchronous
+        // borrowed arrays. C keeps no pointers and rechecks dimensions.
+        self.result(unsafe {
+            ot_draw_slots(
+                self.owner.as_ptr(),
+                projection.as_ptr(),
+                slots.as_ptr(),
+                slots.len(),
+            )
+        })
+    }
+    pub fn retire_slot(&mut self, slot: u32) -> Result<(), String> {
+        if slot >= crate::MAX_SCENE_SLOTS {
+            return Err("Invalid retirement slot".into());
+        }
+        // SAFETY: same-thread live GL owner and bounded slot; C releases owned
+        // allocations synchronously. No external pointer/handle is invalidated.
+        self.result(unsafe { ot_retire_slot(self.owner.as_ptr(), slot) })
     }
     pub fn input(&mut self) -> Result<Vec<Touch>, String> {
         let mut events = [Touch::default(); 64];
@@ -330,6 +367,92 @@ mod tests {
             assert!(Display::open("/no/otrios-card", "/no/touch", [64, 64], false).is_err());
         }
         assert!(Display::headless([0, 64], false).is_err());
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL; includes real font only in the test binary"]
+    fn mesa_independent_resource_order_retirement_and_shared_coverage() {
+        let _display_owner = mesa_display_owner();
+        use otrios_core::dashboard::{
+            components::{BG, background, canvas, text},
+            font::Font,
+            font_reference,
+            retained_text::TextPresentation,
+            scene::Scene,
+        };
+        let font = Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            font_reference::RESOURCE_SHA256,
+        )
+        .unwrap();
+        let atlas = font.atlas();
+        let mut display = Display::headless([128, 64], false).unwrap();
+        display
+            .set_font(
+                atlas.curve_width,
+                atlas.curve_height,
+                &atlas.curves,
+                atlas.band_width,
+                atlas.band_height,
+                &atlas.bands,
+            )
+            .unwrap();
+        let bounds = background(0, 128., 64., BG, 0.).frame;
+        let mut glyph_frame = background(0, 100., 32., BG, 0.).frame;
+        glyph_frame.x = 20.;
+        glyph_frame.y = 10.;
+        let make = |colors: &[[u8; 4]]| {
+            let scene = Scene::new(canvas(
+                0,
+                bounds,
+                colors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| text(i as u32 + 1, glyph_frame, "M", 2, *c))
+                    .collect(),
+            ))
+            .unwrap();
+            TextPresentation::default().compose(&scene, &font)
+        };
+        let red = [255, 0, 0, 180];
+        let blue = [0, 0, 255, 210];
+        let a = make(&[red]);
+        let b = make(&[blue]);
+        let reference = make(&[red, blue]);
+        let projection = [2. / 128., 0., 0., 0., -2. / 64., 0., -1., 1., 1.];
+        for (slot, frame) in [(0, &reference), (3, &a), (4, &b)] {
+            display
+                .upload_scene(
+                    slot,
+                    &frame.mesh.vertices,
+                    &frame.mesh.glyph_vertices,
+                    &frame.mesh.draws,
+                )
+                .unwrap();
+            display.text_styles(slot, &frame.styles).unwrap();
+            display.text_views(slot, &frame.views).unwrap();
+        }
+        display.draw(projection, false).unwrap();
+        let expected = display.pixels().unwrap();
+        display.draw_slots(projection, &[3, 4]).unwrap();
+        assert_eq!(expected, display.pixels().unwrap());
+        display.draw_slots(projection, &[4, 3]).unwrap();
+        assert_ne!(expected, display.pixels().unwrap());
+        display.retire_slot(3).unwrap();
+        display.draw_slots(projection, &[4]).unwrap();
+        let retained = display.pixels().unwrap();
+        display
+            .upload_scene(0, &b.mesh.vertices, &b.mesh.glyph_vertices, &b.mesh.draws)
+            .unwrap();
+        display.text_styles(0, &b.styles).unwrap();
+        display.text_views(0, &b.views).unwrap();
+        display.draw(projection, false).unwrap();
+        assert_eq!(retained, display.pixels().unwrap());
+        assert!(
+            display
+                .draw_slots(projection, &[crate::MAX_SCENE_SLOTS])
+                .is_err()
+        );
+        assert!(display.retire_slot(crate::MAX_SCENE_SLOTS).is_err());
     }
     #[test]
     #[ignore = "Requires Mesa EGL; includes real font only in the test binary"]

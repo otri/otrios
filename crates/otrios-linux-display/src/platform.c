@@ -34,7 +34,7 @@ struct mesh { GLuint vbo; GLsizei count; int opaque; };
 #define CACHE_ALPHA_ENTRY_LIMIT 256
 #define CACHE_ENTRIES 4096
 #define CACHE_BUCKETS 8192
-struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; int raw_dirty,cache_all; };
+struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; float alpha_transform[4]; int alpha_valid,alpha_compatible,raw_dirty,cache_all; };
 struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
@@ -49,8 +49,8 @@ struct ot_display {
     struct framebuffer fb[MAX_BO]; size_t fb_count;
     EGLDisplay egl; EGLContext context; EGLSurface surface;
     GLuint program; GLint transform;
-    struct mesh meshes[3];
-    struct text_mesh text[3];
+    struct mesh meshes[OT_MAX_SCENE_SLOTS];
+    struct text_mesh text[OT_MAX_SCENE_SLOTS];
     GLuint text_program,curve_texture,band_texture;
     GLint text_transform,text_curve_size,text_band_size;
     uint32_t curve_width,curve_height,band_width,band_height;
@@ -92,7 +92,7 @@ static int init_gl(ot_display *d) {
     glUniform1f(glGetUniformLocation(d->program,"linearTint"),d->linear_scene?1.f:0.f);
     glViewport(0,0,d->width,d->height); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE); glDisable(GL_DITHER);
     glBlendFuncSeparate(GL_ONE,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-    for(int i=0;i<3;i++) {
+    for(uint32_t i=0;i<OT_MAX_SCENE_SLOTS;i++) {
         glGenBuffers(1,&d->meshes[i].vbo);
         glGenBuffers(1,&d->text[i].vbo);
         glGenBuffers(1,&d->text[i].ibo);
@@ -196,7 +196,7 @@ bad:
 }
 void ot_get_info(ot_display *d,ot_info *info){*info=d->info;}
 int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats) {
-    if(slot>=3 || floats%18 || floats/6>MAX_VERTICES)return fail(d,"Invalid mesh length");
+    if(slot>=OT_MAX_SCENE_SLOTS || floats%18 || floats/6>MAX_VERTICES)return fail(d,"Invalid mesh length");
     size_t count=floats/6;
     struct vertex *packed=count?malloc(count*sizeof(*packed)):NULL;
     if(count && !packed)return fail(d,"Mesh packing allocation");
@@ -272,7 +272,7 @@ int ot_set_font(ot_display *d,uint32_t cw,uint32_t ch,const float *curves,size_t
     return 0;
 }
 int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floats,const uint32_t *draws,size_t words) {
-    if(slot>=3 || floats%64 || floats/16>65536 || words%3 || words>12288)return fail(d,"Invalid indexed text mesh dimensions");
+    if(slot>=OT_MAX_SCENE_SLOTS || floats%64 || floats/16>65536 || words%3 || words>12288)return fail(d,"Invalid indexed text mesh dimensions");
     size_t count=floats/16;
     // Scalar contents are validated once by the safe Rust wrapper before FFI.
     // Keep all C-side dimensions, ordered ranges and allocation checks here.
@@ -299,16 +299,27 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
     if(words)memcpy(plan,draws,words*sizeof(*plan));
     // Cached draws consume only their compact UV buffer. Defer uploading the
     // larger analytic stream until a fallback actually needs it; indices grow once.
-    m->raw_dirty=1;
+    m->raw_dirty=1;m->alpha_valid=0;
     if(grow){glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)(count/4*6*sizeof(*indices)),indices,GL_STATIC_DRAW);m->index_capacity=count;}
     free(indices);free(m->ems);m->ems=NULL;m->cached_generation=0;free(m->draws);m->draws=plan;m->draw_words=words;m->count=(GLsizei)count;
     return gl_ok(d,"Upload retained glyph quads");
 }
 int ot_linear_scene(ot_display *d) { return d->linear_scene; }
-int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats) {
-    if(slot>=3)return fail(d,"Invalid text viewport slot");
+int ot_retire_slot(ot_display *d,uint32_t slot) {
+    if(slot>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid retirement slot");
     struct text_mesh *m=&d->text[slot];
-    if(!floats){if(m->views && d->stable_text)m->cached_generation=0;free(m->views);m->views=NULL;return 0;}
+    GLuint vbo=m->vbo,ibo=m->ibo,cached=m->cached_vbo;
+    free(m->vertices);free(m->views);free(m->ems);free(m->draws);free(m->cached_vertices);free(m->cached_valid);
+    memset(m,0,sizeof(*m));m->vbo=vbo;m->ibo=ibo;m->cached_vbo=cached;
+    GLuint buffers[4]={d->meshes[slot].vbo,vbo,ibo,cached};
+    for(int i=0;i<4;i++){glBindBuffer(GL_ARRAY_BUFFER,buffers[i]);glBufferData(GL_ARRAY_BUFFER,0,NULL,GL_STATIC_DRAW);}
+    d->meshes[slot].count=0;
+    return gl_ok(d,"Retire scene resource");
+}
+int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats) {
+    if(slot>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid text viewport slot");
+    struct text_mesh *m=&d->text[slot];
+    if(!floats){if(m->views){m->alpha_valid=0;if(d->stable_text)m->cached_generation=0;}free(m->views);m->views=NULL;return 0;}
     if(floats!=m->draw_words/3*8)return fail(d,"Invalid text viewport dimensions");
     for(size_t i=0;i<m->draw_words/3;i++)if(m->draws[i*3]==1){
         const float *v=views+i*8;
@@ -317,13 +328,13 @@ int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats) 
         uint32_t begin=m->draws[i*3+1],end=begin+m->draws[i*3+2];
         if(v[0]<0 || v[1]<0 || v[0]!=(float)first || v[1]!=(float)count || first%4 || count%4 || first<begin || first>end || count>end-first)return fail(d,"Invalid culled text range");
     }
-    if(!m->views){m->views=malloc(floats*sizeof(float));if(!m->views)return fail(d,"Text viewport allocation");if(d->stable_text)m->cached_generation=0;}
+    if(!m->views){m->alpha_valid=0;m->views=malloc(floats*sizeof(float));if(!m->views)return fail(d,"Text viewport allocation");if(d->stable_text)m->cached_generation=0;}
     memcpy(m->views,views,floats*sizeof(float));return 0;
 }
 int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count) {
-    if(slot>=3)return fail(d,"Invalid text style slot");
+    if(slot>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid text style slot");
     struct text_mesh *m=&d->text[slot];
-    if(!count){if(m->ems)m->cached_generation=0;free(m->ems);m->ems=NULL;return 0;}
+    if(!count){m->alpha_valid=0;if(m->ems)m->cached_generation=0;free(m->ems);m->ems=NULL;return 0;}
     if(count!=m->draw_words/3 || count>4096)return fail(d,"Invalid text style dimensions");
     float *ems=calloc((size_t)m->count/4,sizeof(*ems));
     if(m->count && !ems)return fail(d,"Text style allocation");
@@ -334,7 +345,7 @@ int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count)
             if(ems[q]!=0 && ems[q]!=em){free(ems);return fail(d,"Conflicting text style ranges");}ems[q]=em;
         }
     }
-    free(m->ems);m->ems=ems;m->cached_generation=0;return 0;
+    free(m->ems);m->ems=ems;m->cached_generation=0;m->alpha_valid=0;return 0;
 }
 void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }
 static void draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count) {
@@ -428,15 +439,20 @@ static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
     }
     if(scissoring)glDisable(GL_SCISSOR_TEST);
 }
-static int prepare_glyph_cache(ot_display *d,const float *projection,int animated);
+static int prepare_glyph_cache(ot_display *d,const float *projection,const uint32_t *slots,size_t count);
 int ot_draw(ot_display *d,const float *projection,int animated) {
-    if(prepare_glyph_cache(d,projection,animated)<0)return -1;
+    const uint32_t slots[3]={0,1,2};
+    return ot_draw_slots(d,projection,slots,animated?3:1);
+}
+int ot_draw_slots(ot_display *d,const float *projection,const uint32_t *slots,size_t count) {
+    if(count>OT_MAX_SCENE_SLOTS)return fail(d,"Scene draw-list limit");
+    for(size_t i=0;i<count;i++)if(slots[i]>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid draw-list slot");
+    if(prepare_glyph_cache(d,projection,slots,count)<0)return -1;
     glBindFramebuffer(GL_FRAMEBUFFER,d->linear_scene?d->scene_fbo:0);glViewport(0,0,d->width,d->height);
     if(d->linear_scene)glClearColor(0.0051815167f,0.0116122452f,0.0221738848f,1);
     else glClearColor(16.f/255,28.f/255,41.f/255,1);
     glClear(GL_COLOR_BUFFER_BIT);
-    draw_slot(d,0,projection);
-    if(animated){draw_slot(d,1,projection);draw_slot(d,2,projection);}
+    for(size_t i=0;i<count;i++)draw_slot(d,slots[i],projection);
     if(!d->linear_scene)return gl_ok(d,"Draw direct cached glyphs and primitives");
     glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,d->width,d->height);
     glUseProgram(d->resolve_program);glDisable(GL_BLEND);
@@ -728,11 +744,8 @@ static int upload_cached_vertices(ot_display *d,struct text_mesh *m) {
 // alpha copy path loses both cold performance and raster parity at large sizes
 // on Mali-400, even within scratch capacity. Oversized entries remain raw either
 // way. Coasting does not scan glyphs or change atlas storage.
-static int wants_alpha_cache(ot_display *d,int slots) {
-    if(!d->alpha_enabled || !d->atlas_scale)return 0;
+static int mesh_accepts_alpha(ot_display *d,const struct text_mesh *m) {
     const float *p=d->sampled_pixel_transform;
-    for(int slot=0;slot<slots;slot++){
-        const struct text_mesh *m=&d->text[slot];
         for(int glyph=0;glyph<m->count/4;glyph++){
             const float *q=m->vertices+glyph*64;
             float du=q[18]-q[2],dv=q[35]-q[3];
@@ -752,6 +765,17 @@ static int wants_alpha_cache(ot_display *d,int slots) {
             float h=fabsf((q[15]+1.f)/q[9])*sy*(float)d->atlas_scale+2.f*pad;
             if(w<=CACHE_SIZE-2 && h<=CACHE_SIZE-2 && (w>CACHE_ALPHA_ENTRY_LIMIT || h>CACHE_ALPHA_ENTRY_LIMIT))return 0;
         }
+    return 1;
+}
+static int wants_alpha_cache(ot_display *d,const uint32_t *slots,size_t count) {
+    if(!d->alpha_enabled || !d->atlas_scale)return 0;
+    for(size_t i=0;i<count;i++){
+        struct text_mesh *m=&d->text[slots[i]];if(!m->count)continue;
+        if(!m->alpha_valid || memcmp(m->alpha_transform,d->sampled_pixel_transform,sizeof(m->alpha_transform))){
+            m->alpha_compatible=mesh_accepts_alpha(d,m);
+            memcpy(m->alpha_transform,d->sampled_pixel_transform,sizeof(m->alpha_transform));m->alpha_valid=1;
+        }
+        if(!m->alpha_compatible)return 0;
     }
     return 1;
 }
@@ -761,29 +785,29 @@ static void discard_glyph_target(ot_display *d) {
     d->cache_texture=d->cache_scratch=d->cache_fbo=d->cache_program=d->cache_upload=0;
     free(d->glyph_cache);d->glyph_cache=NULL;
 }
-static int prepare_glyph_cache(ot_display *d,const float *projection,int animated) {
+static int prepare_glyph_cache(ot_display *d,const float *projection,const uint32_t *slots,size_t count) {
     d->sampled_pixel_transform[0]=projection[0]*(float)d->width*.5f;
     d->sampled_pixel_transform[1]=projection[1]*(float)d->height*.5f;
     d->sampled_pixel_transform[2]=projection[3]*(float)d->width*.5f;
     d->sampled_pixel_transform[3]=projection[4]*(float)d->height*.5f;
-    d->cache_ready=0;int slots=animated?3:1,has_text=0;
-    for(int i=0;i<slots;i++)if(d->text[i].count)has_text=1;
+    d->cache_ready=0;int has_text=0;
+    for(size_t i=0;i<count;i++)if(d->text[slots[i]].count)has_text=1;
     if(!has_text)return 0;
-    if(!d->atlas_scale)for(int i=0;i<slots;i++)if(d->text[i].views)return 0;
+    if(!d->atlas_scale)for(size_t i=0;i<count;i++)if(d->text[slots[i]].views)return 0;
     if(!d->curve_texture || !d->text_program)return fail(d,"Glyph scene has no admitted font resource");
     int dirty=!d->cache_texture || d->cache_dirty;
-    for(int slot=0;slot<slots;slot++)if(d->text[slot].count &&
-        (d->text[slot].cached_generation!=d->cache_generation || memcmp(d->text[slot].cached_projection,projection,9*sizeof(float))))dirty=1;
+    for(size_t i=0;i<count;i++)if(d->text[slots[i]].count &&
+        (d->text[slots[i]].cached_generation!=d->cache_generation || memcmp(d->text[slots[i]].cached_projection,projection,9*sizeof(float))))dirty=1;
     if(dirty){
-        int alpha=wants_alpha_cache(d,slots);
+        int alpha=wants_alpha_cache(d,slots,count);
         if(alpha!=d->alpha_atlas){discard_glyph_target(d);d->alpha_atlas=alpha;}
     }
     if(init_glyph_cache(d)<0)return -1;
     if(d->cache_dirty)clear_glyph_cache(d);
     for(int attempt=0;attempt<2;attempt++) {
         int restart=0;
-        for(int slot=0;slot<slots && !restart;slot++) {
-            struct text_mesh *m=&d->text[slot];if(!m->count)continue;
+        for(size_t i=0;i<count && !restart;i++) {
+            struct text_mesh *m=&d->text[slots[i]];if(!m->count)continue;
             if(m->cached_generation==d->cache_generation && !memcmp(m->cached_projection,projection,9*sizeof(float))){d->text_hits+=(uint64_t)m->count/4;continue;}
             if((size_t)m->count>m->cached_capacity){
                 struct cached_vertex *next=realloc(m->cached_vertices,(size_t)m->count*sizeof(*next));
@@ -911,7 +935,7 @@ void ot_close(ot_display *d) {
     }
     if(d->egl!=EGL_NO_DISPLAY && d->context!=EGL_NO_CONTEXT) {
         if(eglMakeCurrent(d->egl,d->surface,d->surface,d->context)) {
-            for(int i=0;i<3;i++) {
+            for(uint32_t i=0;i<OT_MAX_SCENE_SLOTS;i++) {
                 if(d->meshes[i].vbo)glDeleteBuffers(1,&d->meshes[i].vbo);
                 glDeleteBuffers(1,&d->text[i].vbo);glDeleteBuffers(1,&d->text[i].ibo);glDeleteBuffers(1,&d->text[i].cached_vbo);
             }
@@ -941,7 +965,7 @@ void ot_close(ot_display *d) {
     free(d->saved_connectors);
     if(d->input>=0)close(d->input);
     if(d->fd>=0){drmDropMaster(d->fd);close(d->fd);}
-    for(int i=0;i<3;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
+    for(uint32_t i=0;i<OT_MAX_SCENE_SLOTS;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
     free(d->glyph_cache);
     free(d);
 }

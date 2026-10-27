@@ -57,6 +57,13 @@ the optimized float path and slower rebuilds. The pilot and unsuccessful GPU
 position formats are retired. [RFC 0019](docs/rfcs/0019-native-fixed-simd-pipeline.md)
 records the outcome and evidence required for any future float SIMD batches.
 
+[The chunked document reader](docs/rfcs/0020-chunked-text-documents.md) adds
+paragraph reflow and bounded retained chunks through shared Rust layout and
+native/WebGL resource adapters. Layout Lab’s **Long document** experiment opens
+a 1 MiB momentum reader at `/layout-lab/document`. Source anchors survive width
+changes; rich text and editing remain the second delivery. See the
+[qualification report](docs/experiments/chunked-documents-2026-10-27.md).
+
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 
 The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home mounts Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and private Monitoring through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
