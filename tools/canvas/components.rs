@@ -23,21 +23,22 @@ pub fn keyboard() -> Element {
         (37, [1128., 706., 136., 62.]),
     ]);
     let keyboard = otrios_core::dashboard::keyboard::Keyboard::default();
-    canvas(
-        keys.into_iter()
-            .map(|(key, frame)| {
-                canvas(vec![
-                    rounded_rect(CARD).pin_edges(0.),
-                    keyboard_label(key)
-                        .frame([12., 20., frame[2] - 24., 32.])
-                        .pin_left(12.)
-                        .pin_right(12.),
-                ])
-                .frame(frame)
-                .semantic_label(&keyboard.label(key))
-                .on_press(Event::key(key))
-            })
-            .collect(),
-    )
-    .visible(keyboard_visible())
+    // Keys do not overlap: paint their backgrounds together, then their labels.
+    // This preserves painter order while avoiding a GPU program switch per key.
+    let mut children: Vec<_> = keys
+        .iter()
+        .map(|(_, frame)| rounded_rect(CARD).frame(*frame))
+        .collect();
+    children.extend(keys.into_iter().map(|(key, frame)| {
+        canvas(vec![
+            keyboard_label(key)
+                .frame([12., 20., frame[2] - 24., 32.])
+                .pin_left(12.)
+                .pin_right(12.),
+        ])
+        .frame(frame)
+        .semantic_label(&keyboard.label(key))
+        .on_press(Event::key(key))
+    }));
+    canvas(children).visible(keyboard_visible())
 }

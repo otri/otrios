@@ -1,0 +1,121 @@
+{
+  "date": "2026-10-26",
+  "hardware": {
+    "soc": "RK3126",
+    "cpu": "Cortex-A7, NEON and VFPv4 reported by /proc/cpuinfo",
+    "gpu": "Mali400 MP2, Mesa Lima 25.0.7",
+    "gpu_clock_hz": 148500000,
+    "gpu_l2_bytes": 65536,
+    "gpu_l2_associativity": 4,
+    "gpu_l2_line_bytes": 64,
+    "panel_hz": 56.6464,
+    "physical_pixels": [
+      800,
+      1280
+    ],
+    "rotation": 90,
+    "scanout": "RGB565"
+  },
+  "scope": "Isolated synthetic renderer replay; kernel-presented FPS, 120 warmup + 240 measured frames per run. CPU layout measured separately. No deployment.",
+  "binary_sha256": "41cf6805f6f8048c43853f6845485762589e6e3f62f3cad2746b3a3487886d12",
+  "fixture_sha256": "388be1fa8ed800bb17646d2cf86c79d24c7bfffc09b43bb21f421862114493f0",
+  "visible_glyphs_per_frame_mean": 2781,
+  "retained_glyphs": 5040,
+  "runs": [
+    {
+      "mode": "scroll",
+      "seconds": 11.280941781,
+      "kernel_fps": 35.34863441125962,
+      "missed_vblanks": 144,
+      "compose_p50_us": 4109,
+      "compose_p95_us": 4458,
+      "present_p50_us": 30944,
+      "cache_hits": 1814372,
+      "cache_misses": 28,
+      "atlas_bytes": 4194304,
+      "scale": 2,
+      "run": 0
+    },
+    {
+      "mode": "scroll",
+      "seconds": 11.219622895,
+      "kernel_fps": 35.53418284314498,
+      "missed_vblanks": 142,
+      "compose_p50_us": 4094,
+      "compose_p95_us": 4393,
+      "present_p50_us": 30975,
+      "cache_hits": 1814372,
+      "cache_misses": 28,
+      "atlas_bytes": 4194304,
+      "scale": 2,
+      "run": 1
+    },
+    {
+      "mode": "scroll",
+      "seconds": 11.138807281,
+      "kernel_fps": 35.72175354650501,
+      "missed_vblanks": 140,
+      "compose_p50_us": 4111,
+      "compose_p95_us": 4546,
+      "present_p50_us": 30844,
+      "cache_hits": 1814372,
+      "cache_misses": 28,
+      "atlas_bytes": 4194304,
+      "scale": 2,
+      "run": 2
+    }
+  ],
+  "cpu_scene_layout_mesh_us": {
+    "flat": {
+      "p50": 11700,
+      "p95": 13955
+    },
+    "retained": {
+      "p50": 4189,
+      "p95": 4679
+    }
+  },
+  "gamma_probe_scope": "Offscreen full-screen shader, already-linear foreground/background, arithmetic coverage ramp, glFinish after each draw; excludes fetching arbitrary destination and presentation.",
+  "gamma_probe": [
+    {
+      "mode": "pow-reference",
+      "table_bytes": 0,
+      "gpu_ms": 73.067679,
+      "completed_fps": 13.6859,
+      "max_byte_error": 0,
+      "mean_byte_error": 0.0
+    },
+    {
+      "mode": "encode-1d-64",
+      "table_bytes": 64,
+      "gpu_ms": 66.099612,
+      "completed_fps": 15.1287,
+      "max_byte_error": 4,
+      "mean_byte_error": 0.215136
+    },
+    {
+      "mode": "encode-1d-256",
+      "table_bytes": 256,
+      "gpu_ms": 66.136979,
+      "completed_fps": 15.1201,
+      "max_byte_error": 1,
+      "mean_byte_error": 0.181189
+    },
+    {
+      "mode": "add-2d-64x64",
+      "table_bytes": 4096,
+      "gpu_ms": 73.182969,
+      "completed_fps": 13.6644,
+      "max_byte_error": 5,
+      "mean_byte_error": 0.226414
+    },
+    {
+      "mode": "blend-3d-64",
+      "table_bytes": 262144,
+      "gpu_ms": 98.508002,
+      "completed_fps": 10.1515,
+      "max_byte_error": 10,
+      "mean_byte_error": 0.871333
+    }
+  ]
+}

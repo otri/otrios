@@ -61,7 +61,7 @@ try{
   function pump(){if(!busy&&model&&queue.length){busy=true;const message=queue.shift();timings?.dispatched(message.timing);worker.postMessage(message);}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
   window.addEventListener('popstate',()=>command({type:'navigate',screen:restoreScreen()}));
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
-  const query=new URL(location.href).searchParams,renderer=new SceneRenderer(gl,{linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'}),staticLayer=renderer.createLayer(),motionLayer=renderer.createLayer(),hudLayer=renderer.createLayer();
+  const query=new URL(location.href).searchParams,renderer=new SceneRenderer(gl,{stableTextQuads:query.get('stable-quads')==='1',atlasScale:query.has('font-probe')?0:2,linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'}),staticLayer=renderer.createLayer(),motionLayer=renderer.createLayer(),hudLayer=renderer.createLayer();
   const [curveWidth,curveHeight,bandWidth,bandHeight]=presenter.font_dimensions();
   renderer.setFont({curveWidth,curveHeight,curves:presenter.font_curves(),bandWidth,bandHeight,bands:presenter.font_bands()});revision.dataset.fontRenderer='analytic-quadratic-cached';revision.dataset.gamma=renderer.linearLight?'linear-light-srgb':'authored-srgb';revision.dataset.alpha='premultiplied';
   let hudRevision=-1,dirty=true,lastFontCache='',fontProbed=false;const fontProbeRequested=['1','direct'].includes(query.get('font-probe'));const controls=new Map();
@@ -75,15 +75,15 @@ try{
     }
   });
   function accept(f){
-    if(model?.screen!==f.screen)presenter.suspend();timings?.accept(f);
+    const wasReflow=!!model?.reflow;if(model?.screen!==f.screen)presenter.suspend();timings?.accept(f);
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
     model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();
-    if(f.vertices){
+    if(f.controls){
       renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
       canvas.dataset.logicalSize=f.extent.join('x');resize();
       presenter.set_reflow(f.reflow||new Uint8Array(),performance.now());
-      model.reflow=!!f.reflow?.length;staticLayer.setFrame(f);
+      model.reflow=!!f.reflow?.length;if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);if(!model.reflow)staticLayer.setTextViews(f.textViews||new Float32Array());
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',event=>command({type:'activate',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id},event));b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
         b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');Object.assign(b.style,semanticBounds(c.bounds,f.extent));}
@@ -92,6 +92,7 @@ try{
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
     revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!f.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
+    if(f.resources?.text_scroll)revision.dataset.textScroll=JSON.stringify(f.resources.text_scroll);else{delete revision.dataset.textScroll;scrollLabel='';scrollSamples=[];scrollLast=null;}
     reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui);
     pump();worker.postMessage({type:'frame-ack'});
   }
@@ -119,7 +120,22 @@ try{
   window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
   window.addEventListener('keydown',e=>{if(e.isComposing||e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(e.key==='Escape'){e.preventDefault();command({type:'back'},e);return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
   window.addEventListener('paste',e=>{if(e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(model?.editing){e.preventDefault();command({type:'text',text:e.clipboardData.getData('text/plain')});}});
-  let lastMetric=0;
+  let lastMetric=0,scrollSamples=[],scrollLast=null,scrollLabel='',scrollHudAt=0,scrollWasActive=false,scrollHudExtent='';
+  function textScrollHud(now,active){
+    if(active){
+      const dt=scrollLast===null?0:now-scrollLast;
+      if(dt>0&&dt<500)scrollSamples.push([now,dt]);else scrollSamples=[];
+      scrollLast=now;while(scrollSamples.length>240||scrollSamples[0]?.[0]<now-1000)scrollSamples.shift();
+    }else{scrollLast=null;}
+    if(now-scrollHudAt>=500||active!==scrollWasActive||!scrollLabel||scrollHudExtent!==model.extent.join(',')){
+      const elapsed=scrollSamples.reduce((sum,p)=>sum+p[1],0);
+      scrollLabel=active?(elapsed?`${(scrollSamples.length*1000/elapsed).toFixed(1)} fps - retained text / momentum scroll`:'Measuring scroll frames...'):'Idle - drag in any direction; release to coast';
+      const [w,h]=model.extent;
+      hudLayer.setFrame({vertices:presenter.scroll_hud(scrollLabel,w,h),glyphVertices:presenter.scroll_hud_glyphs(),draws:presenter.scroll_hud_draws()});
+      scrollHudAt=now;scrollWasActive=active;scrollHudExtent=model.extent.join(',');
+      revision.dataset.scrollStats=JSON.stringify({label:scrollLabel,active,samples:scrollSamples.length});
+    }
+  }
   function frame(now){
     try{
       if(!busy)for(const [id,m]of moves){command(m);moves.delete(id);break;}
@@ -129,9 +145,11 @@ try{
       if(model&&(dirty||animated||reflow)){
         if(model.reflow)staticLayer.setFrame({vertices:presenter.reflow_vertices(now),glyphVertices:presenter.reflow_glyphs(),draws:presenter.reflow_draws()});
         if(animated){const [playing,speed,count]=model.intent;motionLayer.setFrame({vertices:presenter.vertices(model.intent[3]!==0,playing!==0,speed,count,now,model.updates)});if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();hudLayer.setFrame({vertices:presenter.hud(),glyphVertices:presenter.hud_glyph_vertices(),draws:presenter.hud_draws()});}}
-        renderer.prepare(animated?[staticLayer,hudLayer]:[staticLayer]);
+        const scrolling=model.presentation==='text-scroll';
+        if(scrolling)textScrollHud(now,!!model.resources?.text_scroll?.active);
+        renderer.prepare(animated||scrolling?[staticLayer,hudLayer]:[staticLayer]);
         renderer.beginFrame();staticLayer.draw();
-        if(animated){motionLayer.draw();hudLayer.draw();}renderer.endFrame();if(fontProbeRequested&&!fontProbed&&staticLayer.glyphVertices.length){fontProbed=true;const result=renderer.probe([staticLayer]);canvas.dataset.fontProbe=JSON.stringify(result);if(!result.passed)throw Error('GPU font probe did not pass: '+JSON.stringify(result));}
+        if(animated)motionLayer.draw();if(animated||scrolling)hudLayer.draw();renderer.endFrame();if(fontProbeRequested&&!fontProbed&&staticLayer.glyphVertices.length){fontProbed=true;const result=renderer.probe([staticLayer]);canvas.dataset.fontProbe=JSON.stringify(result);if(!result.passed)throw Error('GPU font probe did not pass: '+JSON.stringify(result));}
         const fontCache=JSON.stringify(renderer.cacheStats);if(fontCache!==lastFontCache){revision.dataset.fontCache=fontCache;lastFontCache=fontCache;}
         if(gl.getError()!==gl.NO_ERROR)throw new Error('GPU rendering failed.');dirty=false;
         const sample=timings?.drawn(model.epoch);if(sample)requestAnimationFrame(()=>timings.presented(sample,model?.epoch));

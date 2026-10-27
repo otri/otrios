@@ -2784,7 +2784,7 @@ fn entry_and_app_links_resolve_app_owned_catalog_state_references() {
 }
 
 #[test]
-fn shipped_apps_do_not_include_example_subscreens() {
+fn shipped_apps_include_only_the_qualified_text_scroll_subscreen() {
     let screens: Vec<_> = [
         home::screens,
         playground::screens,
@@ -2797,7 +2797,14 @@ fn shipped_apps_do_not_include_example_subscreens() {
     .into_iter()
     .flat_map(|screens| screens())
     .collect();
-    assert_eq!(screens.len(), 7);
+    assert_eq!(screens.len(), 8);
+    assert_eq!(
+        screens
+            .iter()
+            .filter(|(app, _)| app.id == "layout-text-scroll")
+            .count(),
+        1
+    );
     for (app, factory) in screens {
         assert!(valid_destination(&app.id));
         assert!(!app.id.contains('/'));

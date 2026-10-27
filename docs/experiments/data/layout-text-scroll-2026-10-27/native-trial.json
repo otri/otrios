@@ -1,0 +1,165 @@
+{
+  "root": "/tmp/otrios-text-demo-fm2g1sk6",
+  "binary_sha256": "5aff488f9cb2253f82daf82c1d51f05a19f70f909363452b048d1d32fcc42470",
+  "input": "synthetic evdev ABS_X/ABS_Y and BTN_TOUCH through the existing calibrated reader",
+  "trace": [
+    {
+      "phase": "initial",
+      "scroll": {
+        "active": false,
+        "limit": [
+          1151.0439453125,
+          1148.0
+        ],
+        "offset": [
+          0.0,
+          0.0
+        ]
+      },
+      "input_busy": false,
+      "pending": 0
+    },
+    {
+      "phase": "drag",
+      "scroll": {
+        "active": true,
+        "limit": [
+          1151.0439453125,
+          1148.0
+        ],
+        "offset": [
+          574.418701171875,
+          239.41046142578125
+        ]
+      },
+      "input_busy": true,
+      "pending": 0
+    },
+    {
+      "phase": "drag",
+      "scroll": {
+        "active": true,
+        "limit": [
+          1151.0439453125,
+          1148.0
+        ],
+        "offset": [
+          66.9830322265625,
+          28.7171630859375
+        ]
+      },
+      "input_busy": true,
+      "pending": 0
+    },
+    {
+      "phase": "drag",
+      "scroll": {
+        "active": true,
+        "limit": [
+          1151.0439453125,
+          1148.0
+        ],
+        "offset": [
+          578.69677734375,
+          241.00927734375
+        ]
+      },
+      "input_busy": true,
+      "pending": 0
+    },
+    {
+      "phase": "release",
+      "scroll": {
+        "active": true,
+        "limit": [
+          1151.0439453125,
+          1148.0
+        ],
+        "offset": [
+          597.2235717773438,
+          248.98580932617188
+        ]
+      },
+      "input_busy": true,
+      "pending": 0
+    },
+    {
+      "phase": "coast",
+      "scroll": {
+        "active": true,
+        "limit": [
+          1151.0439453125,
+          1148.0
+        ],
+        "offset": [
+          606.31787109375,
+          254.066162109375
+        ]
+      },
+      "input_busy": false,
+      "pending": 0
+    }
+  ],
+  "report": {
+    "alpha": "premultiplied",
+    "cadence": {
+      "fps": 0.0,
+      "frames": 0,
+      "over_25ms": 0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "samples": 0
+    },
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ],
+    "compose_submit_max_us": 262600,
+    "compose_submit_p50_us": 6111,
+    "compose_submit_p95_us": 8149,
+    "compose_submit_p99_us": 22766,
+    "drawn": 225,
+    "font_cache": [
+      2645988,
+      63,
+      4194304
+    ],
+    "font_renderer": "slug-coverage-cache",
+    "font_resource": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+    "gamma": "srgb-framebuffer-blend",
+    "kernel_flips": {
+      "crtc": 37,
+      "events": 209,
+      "fps": 27.46497126807489,
+      "max_us": 264803,
+      "missed_vblanks": 221,
+      "p50_us": 35307,
+      "p95_us": 35313,
+      "p99_us": 35317,
+      "seconds": 7.573283
+    },
+    "load_requested_hz": 0,
+    "load_updates": 0,
+    "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+    "objects": 12,
+    "output": [
+      800,
+      1280
+    ],
+    "present_p50_us": 29079,
+    "present_p95_us": 31620,
+    "received_app_updates": 0,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "scanout_format": "RGB565",
+    "screen": "layout-lab/text-scroll",
+    "seconds": 14.008364689,
+    "stride": 1600,
+    "video": "DRM",
+    "worker_stall_ms": 0
+  },
+  "log": "Text probe GL renderer: Mali400\nDirect DRM/GBM/EGL/GLES2 800x1280 format=RGB565 bits=5/6/5/0\n{\"alpha\":\"premultiplied\",\"cadence\":{\"fps\":0.0,\"frames\":0,\"over_25ms\":0,\"p50_ms\":0.0,\"p95_ms\":0.0,\"p99_ms\":0.0,\"samples\":0},\"color_bits\":[5,6,5,0],\"compose_submit_max_us\":262600,\"compose_submit_p50_us\":6111,\"compose_submit_p95_us\":8149,\"compose_submit_p99_us\":22766,\"drawn\":225,\"font_cache\":[2645988,63,4194304],\"font_renderer\":\"slug-coverage-cache\",\"font_resource\":\"bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b\",\"gamma\":\"srgb-framebuffer-blend\",\"kernel_flips\":{\"crtc\":37,\"events\":209,\"fps\":27.46497126807489,\"max_us\":264803,\"missed_vblanks\":221,\"p50_us\":35307,\"p95_us\":35313,\"p99_us\":35317,\"seconds\":7.573283},\"load_requested_hz\":0,\"load_updates\":0,\"measurement\":\"kernel page-flip completions after two-second warmup; no tracing\",\"objects\":12,\"output\":[800,1280],\"present_p50_us\":29079,\"present_p95_us\":31620,\"received_app_updates\":0,\"renderer\":\"gles2-direct\",\"rotation\":90,\"scanout_format\":\"RGB565\",\"screen\":\"layout-lab/text-scroll\",\"seconds\":14.008364689,\"stride\":1600,\"video\":\"DRM\",\"worker_stall_ms\":0}\nText cache key preparation 66.137 ms; GPU buffer upload 13.252 ms total; recent hits 12364\n"
+}

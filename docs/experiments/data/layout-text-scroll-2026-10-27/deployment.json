@@ -1,0 +1,46 @@
+{
+  "release": "c08c3e68c509554dd354ec3d4674504ce07a49f165cb6df803e038f69a45480f",
+  "native_sha256": "5aff488f9cb2253f82daf82c1d51f05a19f70f909363452b048d1d32fcc42470",
+  "server_sha256": "182d59955ff273050b7a0ad4086d517e0dee603d099e576318e7e44eec043605",
+  "services": [
+    "active",
+    "active",
+    "active"
+  ],
+  "native": {
+    "renderer": "gles2-direct",
+    "video": "DRM",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ],
+    "touch_calibrated": true,
+    "touch_devices": 1,
+    "stream_ready": true,
+    "state_confirmed": true,
+    "reload_ready": true,
+    "release": "c08c3e68c509554dd354ec3d4674504ce07a49f165cb6df803e038f69a45480f",
+    "runtime_release": "c08c3e68c509554dd354ec3d4674504ce07a49f165cb6df803e038f69a45480f"
+  },
+  "live_demo": {
+    "screen": "layout-lab/text-scroll",
+    "release": "c08c3e68c509554dd354ec3d4674504ce07a49f165cb6df803e038f69a45480f",
+    "runtime_release": "c08c3e68c509554dd354ec3d4674504ce07a49f165cb6df803e038f69a45480f",
+    "scroll": {
+      "active": false,
+      "limit": [
+        1151.0439453125,
+        1148.0
+      ],
+      "offset": [
+        0.0,
+        0.0
+      ]
+    },
+    "state_confirmed": true,
+    "reload_ready": true
+  },
+  "public_host_checks": 99,
+  "public_host_scope": "signed assets, release/session bootstrap, private/admin isolation, anonymous denial; authenticated login not tested"
+}

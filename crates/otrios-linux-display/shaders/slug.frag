@@ -9,6 +9,8 @@ uniform highp sampler2D curveTexture;
 uniform highp sampler2D bandTexture;
 uniform vec2 curveSize;
 uniform vec2 bandSize;
+// 1 for direct rendering; atlas oversampling factor for destination-pixel prefiltering.
+uniform float coverageScale;
 varying highp vec2 sampleCoord;
 varying highp vec4 banding;
 varying highp vec4 glyphData;
@@ -81,7 +83,7 @@ vec2 solveVertical(vec4 p12, vec2 p3) {
     return (a.y * t - 2.0 * b.y) * t + p12.y;
 }
 void main() {
-    vec2 pixelsPerEm = 1.0 / (max(fwidth(sampleCoord), vec2(1.0 / 16384.0)) * CURVE_SCALE);
+    vec2 pixelsPerEm = 1.0 / (max(fwidth(sampleCoord) * max(coverageScale, 1.0), vec2(1.0 / 16384.0)) * CURVE_SCALE);
     vec2 bandIndex = clamp(floor(sampleCoord * banding.xy + banding.zw), vec2(0.0), glyphData.zw);
     vec4 horizontal = bandAt(glyphData.xy + vec2(bandIndex.y, 0.0));
     float xcov = 0.0;

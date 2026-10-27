@@ -39,6 +39,12 @@ impl TextViewport {
         }
         self.last_tick = now;
     }
+    pub fn animating(&self) -> bool {
+        self.contact.is_some() || self.target.is_some() || self.velocity != 0.
+    }
+    pub fn limit(&self) -> f32 {
+        self.limit
+    }
     pub fn active(&self) -> bool {
         self.contact.is_some()
     }

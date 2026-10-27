@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Bounded FlexBuffers reader and typed component/binding interpreter. No JSON path.
 use super::{Result, scene::Scene};
-mod composition;
+pub mod composition;
+mod fixed_composition;
 pub mod resizing;
 use flexbuffers::{FlexBufferType, Reader};
 use otrios_interfaces::{layout::*, scene::*};
@@ -443,7 +444,65 @@ fn eval(
     params: &BTreeMap<u16, Value>,
     b: &Bindings<'_>,
 ) -> Result<Value> {
-    let run = |e: &Expr| eval(e, frame, params, b);
+    #[cfg(feature = "fixed-ui-math")]
+    if matches!(
+        e,
+        Expr::Add(..) | Expr::Subtract(..) | Expr::Multiply(..) | Expr::Select { .. }
+    ) && let Ok(Some(value)) = eval_fixed_number(e, frame, params, b)
+    {
+        return Ok(Value::Number(value.to_f32()));
+    }
+    eval_float32(e, frame, params, b)
+}
+#[cfg(any(test, feature = "fixed-ui-math"))]
+fn eval_fixed_number(
+    e: &Expr,
+    frame: [f32; 4],
+    params: &BTreeMap<u16, Value>,
+    b: &Bindings<'_>,
+) -> Result<Option<super::fixed::Scalar>> {
+    use super::fixed::Scalar;
+    let leaf = |v: &Value| -> Result<Option<Scalar>> {
+        if let Value::Number(n) = v {
+            Ok(Some(Scalar::from_f32(*n)?))
+        } else {
+            Ok(None)
+        }
+    };
+    let run = |e: &Expr| eval_fixed_number(e, frame, params, b);
+    Ok(match e {
+        Expr::Literal(v) => leaf(v)?,
+        Expr::Parameter(key) => leaf(params.get(key).ok_or("Unbound component parameter")?)?,
+        Expr::State(Binding::Local(id)) => leaf(b.local.get(id).ok_or("Missing local binding")?)?,
+        Expr::Width => Some(Scalar::from_f32(frame[2])?),
+        Expr::Height => Some(Scalar::from_f32(frame[3])?),
+        Expr::Add(a, c) | Expr::Subtract(a, c) | Expr::Multiply(a, c) => {
+            let a = run(a)?.ok_or("Expected numeric expression")?;
+            let c = run(c)?.ok_or("Expected numeric expression")?;
+            Some(match e {
+                Expr::Add(..) => a.checked_add(c)?,
+                Expr::Subtract(..) => a.checked_sub(c)?,
+                _ => a.checked_mul(c)?,
+            })
+        }
+        Expr::Select { condition, yes, no } => {
+            let condition = boolean(eval_float32(condition, frame, params, b)?)?;
+            let yes = run(yes)?;
+            let no = run(no)?;
+            if yes.is_some() != no.is_some() {
+                return Err("Conditional branch types differ".into());
+            }
+            if condition { yes } else { no }
+        }
+    })
+}
+fn eval_float32(
+    e: &Expr,
+    frame: [f32; 4],
+    params: &BTreeMap<u16, Value>,
+    b: &Bindings<'_>,
+) -> Result<Value> {
+    let run = |e: &Expr| eval_float32(e, frame, params, b);
     Ok(match e {
         Expr::Literal(v) => v.clone(),
         Expr::Parameter(key) => params

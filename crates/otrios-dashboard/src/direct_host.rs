@@ -76,12 +76,20 @@ pub(super) fn run() -> Result<(), String> {
             .try_send(e)
             .map_err(|e| format!("State input queue unavailable: {e}"))
     };
-    let (hud_tx, hud_requests) = mpsc::sync_channel::<(u64, String)>(1);
+    let (hud_tx, hud_requests) = mpsc::sync_channel::<(u32, u64, String, Option<[f32; 2]>)>(1);
     let (hud_results, hud_rx) = mpsc::sync_channel(1);
     let hud_font = font.clone();
     let hud_worker = thread::spawn(move || {
-        while let Ok((bucket, label)) = hud_requests.recv() {
-            let _ = hud_results.try_send((bucket, render_hud_with_font(&label, &hud_font)));
+        while let Ok((epoch, bucket, label, extent)) = hud_requests.recv() {
+            let mesh = if let Some(extent) = extent {
+                match otrios_core::canvas::text_scroll::hud(&label, extent, &hud_font) {
+                    Ok(mesh) => mesh,
+                    Err(_) => continue,
+                }
+            } else {
+                render_hud_with_font(&label, &hud_font)
+            };
+            let _ = hud_results.try_send((epoch, bucket, mesh));
         }
     });
     let started = Instant::now();
@@ -91,6 +99,8 @@ pub(super) fn run() -> Result<(), String> {
     let mut reflow_serial = None;
     let mut retained = None;
     let mut hud = u64::MAX;
+    let mut scroll_meter = otrios_core::canvas::text_scroll::FrameMeter::default();
+    let mut scroll_active = false;
     let mut drawn = 0;
     let mut acked = 0;
     let mut dirty = true;
@@ -146,7 +156,11 @@ pub(super) fn run() -> Result<(), String> {
                     .as_ref()
                     .is_some_and(|old| old.ui_ref != next.ui_ref || old.state_ref != next.state_ref)
                 {
+                    display.upload(1, &[])?;
+                    display.upload_scene(2, &[], &[], &[])?;
                     presenter = Presenter::default();
+                    scroll_meter = Default::default();
+                    scroll_active = false;
                     hud = u64::MAX;
                 }
                 model = Some(next);
@@ -162,6 +176,17 @@ pub(super) fn run() -> Result<(), String> {
                     reflow_serial = Some(f.serial);
                 }
                 let flowing = f.reflow.is_some() && reflow.active(now);
+                while let Ok((epoch, _bucket, mesh)) = hud_rx.try_recv() {
+                    if epoch == f.epoch {
+                        display.upload_scene(
+                            2,
+                            &mesh.vertices,
+                            &mesh.glyph_vertices,
+                            &mesh.draws,
+                        )?;
+                        dirty = true;
+                    }
+                }
                 if dirty || animated || flowing {
                     let before = Instant::now();
                     if f.reflow.is_some() {
@@ -178,7 +203,11 @@ pub(super) fn run() -> Result<(), String> {
                         .is_none_or(|old| !Arc::ptr_eq(old, &f.vertices))
                     {
                         display.upload_scene(0, &f.vertices, &f.glyph_vertices, &f.draws)?;
+                        display.text_styles(0, &f.text_styles)?;
                         retained = Some(f.vertices.clone());
+                    }
+                    if f.reflow.is_none() {
+                        display.text_views(0, &f.text_views)?;
                     }
                     if animated {
                         let now = started.elapsed().as_secs_f64() * 1000.;
@@ -188,21 +217,33 @@ pub(super) fn run() -> Result<(), String> {
                         let bucket = (now / 1000.) as u64;
                         if hud != bucket
                             && hud_tx
-                                .try_send((bucket, presenter.hud_label(f.updates)))
+                                .try_send((f.epoch, bucket, presenter.hud_label(f.updates), None))
                                 .is_ok()
                         {
                             hud = bucket;
                         }
-                        while let Ok((_bucket, mesh)) = hud_rx.try_recv() {
-                            display.upload_scene(
-                                2,
-                                &mesh.vertices,
-                                &mesh.glyph_vertices,
-                                &mesh.draws,
-                            )?;
+                    }
+                    let scrolling = f.resources.text_scroll.as_ref();
+                    if let Some(scroll) = scrolling {
+                        let bucket = (now / 500.) as u64;
+                        if (hud != bucket || scroll_active != scroll.active)
+                            && hud_tx
+                                .try_send((
+                                    f.epoch,
+                                    bucket,
+                                    scroll_meter.label(scroll.active),
+                                    Some(f.viewport),
+                                ))
+                                .is_ok()
+                        {
+                            hud = bucket;
+                            scroll_active = scroll.active;
                         }
                     }
-                    display.draw(surface.projection_for(f.viewport), animated)?;
+                    display.draw(
+                        surface.projection_for(f.viewport),
+                        animated || scrolling.is_some(),
+                    )?;
                     if drawn >= capture_after
                         && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()
@@ -223,6 +264,13 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     let before = Instant::now();
                     let flip = display.present()?;
+                    if f.resources.text_scroll.as_ref().is_some_and(|s| s.active) {
+                        scroll_meter.record(if flip.usec > 0 {
+                            flip.usec as f64 / 1000.
+                        } else {
+                            started.elapsed().as_secs_f64() * 1000.
+                        });
+                    }
                     if present.len() < 20000 {
                         present.push(before.elapsed().as_micros() as u64);
                     }

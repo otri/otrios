@@ -39,3 +39,13 @@ Refactor the existing safe state/network worker into a module shared by the SDL 
 Check Rust formatting/strict Clippy, core and worker tests, C compilation with warnings as errors, bad geometry/resource limits, headless Mesa shader/pixel checks, partial-init cleanup, real KMS colour/rotation and physical touch. Measure kernel page-flip completions in the backend itself, alongside CPU/GPU work. Compare idle and loaded scenes with 250 ms state-worker stalls. Report missed vblanks and p95/p99; an FPS average alone is not evidence of refresh lock.
 
 Success is sustained delivery at the existing approximately 56.6 Hz panel refresh with no missed vblanks in the accepted bounded runs, preserved live state/code updates and working touch/navigation. Literal 60 Hz needs a separately validated panel mode. Leave the existing boot recovery intact while testing.
+
+## Canonical text styles within the existing boundary — 2026-10-27
+
+The style update follows the same approved synchronous slice-copy boundary as
+text viewports. Rust checks a maximum 4,096 finite nonnegative font em values;
+C checks the count against its owned draw plan, validates overlapping ranges,
+and builds an owned per-quad scale table before replacing the previous one.
+Zero retains inference for older callers. Geometry replacement and destruction
+free the table. No Rust pointer is retained and the owner stays on its EGL thread.
+This extends the graphics adapter, not shared-memory IPC or the state protocol.

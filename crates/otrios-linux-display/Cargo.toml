@@ -18,3 +18,11 @@ all = "warn"
 
 [dev-dependencies]
 otrios-core = { path = "../otrios-core", features = ["dashboard"] }
+
+[[example]]
+name = "text_scroll_probe"
+required-features = ["platform"]
+
+[[example]]
+name = "text_pixel_probe"
+required-features = ["platform"]

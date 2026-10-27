@@ -5,6 +5,9 @@
 pub mod clock;
 pub mod components;
 pub mod display;
+pub mod fixed;
+mod fixed_space;
+mod fixed_text;
 pub mod font;
 pub mod font_reference;
 pub mod ink;
@@ -15,5 +18,6 @@ pub mod motion;
 mod render;
 pub mod scene;
 pub use render::{Mesh, render_scene, render_scene_with_font};
+pub mod retained_text;
 
 pub type Result<T> = std::result::Result<T, String>;

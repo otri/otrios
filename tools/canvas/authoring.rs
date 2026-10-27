@@ -702,6 +702,10 @@ impl Arrangement {
         }
         self
     }
+    pub fn flex_height(mut self) -> Self {
+        self.flexible[1] = true;
+        self
+    }
     pub fn flex_width(mut self) -> Self {
         self.flexible[0] = true;
         self
@@ -751,6 +755,7 @@ pub struct AppUi {
     presentation: Option<Presentation>,
     composition: Option<(Arrangement, Arrangement)>,
     touch_pad: Option<String>,
+    text_scroll: Option<(String, [f32; 2])>,
     reorder: Vec<(String, u16)>,
 }
 impl AppUi {
@@ -763,6 +768,7 @@ impl AppUi {
             presentation: None,
             composition: None,
             touch_pad: None,
+            text_scroll: None,
             reorder: vec![],
         }
     }
@@ -775,6 +781,10 @@ impl AppUi {
             .iter()
             .map(|(key, field)| ((*key).into(), *field))
             .collect();
+        self
+    }
+    pub fn with_text_scroll(mut self, key: &str, content: [f32; 2]) -> Self {
+        self.text_scroll = Some((key.into(), content));
         self
     }
     pub fn with_touch_pad(mut self, key: &str) -> Self {
@@ -827,7 +837,15 @@ impl AppUi {
                 content: tall.compile(&compiler.named_nodes),
             },
         });
-        let presentation = if !self.reorder.is_empty() {
+        let presentation = if let Some((key, content)) = self.text_scroll {
+            Some(Presentation::TextScroll {
+                viewport: *compiler
+                    .named_nodes
+                    .get(&key)
+                    .expect("named scroll viewport"),
+                content,
+            })
+        } else if !self.reorder.is_empty() {
             Some(Presentation::Reorder {
                 items: self
                     .reorder
@@ -874,7 +892,12 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: "otrios-canvas-v2".into(),
+            format: if matches!(presentation, Some(Presentation::TextScroll { .. })) {
+                "otrios-canvas-v3"
+            } else {
+                "otrios-canvas-v2"
+            }
+            .into(),
             ui_ref: format!("app:{}/ui", self.id),
             title: self.title,
             state_schema: self.schema,

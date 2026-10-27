@@ -42,6 +42,7 @@ struct Mount {
     keyboard: Keyboard,
     editors: BTreeMap<u16, TextBuffer>,
     text_views: BTreeMap<u16, TextViewport>,
+    text_scroll: Option<super::text_scroll::Scroll>,
     font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
     ink: crate::dashboard::ink::Ink,
@@ -130,6 +131,7 @@ pub struct ResourceUsage {
     pub reflow_order: Vec<u16>,
     pub reflow_editing: bool,
     pub wire: WireUsage,
+    pub text_scroll: Option<super::text_scroll::Info>,
 }
 #[derive(Default)]
 pub struct Client {
@@ -179,6 +181,9 @@ impl Client {
             self.cancel()?;
             let m = self.active.as_mut().ok_or("No Canvas")?;
             m.viewport = viewport;
+            if let Some(s) = &mut m.text_scroll {
+                s.bounds_dirty = true;
+            }
             m.invalidate();
             self.viewport = Some(viewport);
             return Ok(true);
@@ -388,6 +393,7 @@ impl Client {
                 || m.keyboard_pointer.is_some()
                 || m.order_drag.is_some()
                 || m.text_views.values().any(TextViewport::active)
+                || m.text_scroll.as_ref().is_some_and(|s| s.touching())
         })
     }
     pub fn value(&self, id: u16) -> Result<u16> {
@@ -517,6 +523,7 @@ impl Client {
                 .collect(),
             reflow_editing: self.active.as_ref().is_some_and(|m| m.order_editing),
             wire: wire_usage(),
+            text_scroll: self.text_scroll_info(),
         }
     }
     pub fn dispatch_usage(&self) -> DispatchUsage {
@@ -1100,6 +1107,14 @@ impl Client {
         }
         let scene = self.scene()?;
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        if let Some(scroll) = &mut m.text_scroll {
+            if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
+                scroll.cancel();
+            } else if let Some(changed) = scroll.pointer(&scene, event, m.now)? {
+                m.invalidate();
+                return Ok(changed);
+            }
+        }
         if m.order_editing
             && self.requested.as_ref().is_none_or(|r| r.reconnecting)
             && let Some(changed) = order_pointer(m, &scene, event)?
@@ -1290,6 +1305,12 @@ impl Client {
         }
         Ok(false)
     }
+    pub fn text_scroll_info(&self) -> Option<super::text_scroll::Info> {
+        self.active
+            .as_ref()
+            .and_then(|m| m.text_scroll.as_ref())
+            .map(|s| s.info())
+    }
     pub fn keyboard_visible(&self) -> bool {
         self.active.as_ref().is_some_and(|m| m.keyboard.visible)
     }
@@ -1374,6 +1395,9 @@ impl Client {
     pub fn cancel(&mut self) -> Result<bool> {
         if let Some(m) = &mut self.active {
             m.input.cancel_all();
+            if let Some(s) = &mut m.text_scroll {
+                s.cancel();
+            }
             for view in m.text_views.values_mut() {
                 view.cancel();
             }
@@ -1426,6 +1450,16 @@ impl Client {
         let mut scrolled = false;
         for view in m.text_views.values_mut() {
             scrolled |= view.tick(now);
+        }
+        if m.text_scroll.as_ref().is_some_and(|s| s.bounds_dirty) {
+            let scene = cached_scene(m)?;
+            if let Some(s) = &mut m.text_scroll {
+                s.sync(&scene)?;
+                scrolled = true;
+            }
+        }
+        if let Some(s) = &mut m.text_scroll {
+            scrolled |= s.tick(now);
         }
         let changed = m.ink.tick(now) || clock || scrolled;
         let edit = m.keyboard.tick(now);
@@ -1603,8 +1637,8 @@ fn qualify(
         private,
         writer,
     } = identity;
-    if ui.format != "otrios-canvas-v2"
-        || ui.title.len() > 96
+    validate_ui_format(&ui)?;
+    if ui.title.len() > 96
         || ui.selectors.len() > 128
         || ui.handlers.len() > 128
         || ui.navigation.len() > 32
@@ -1680,6 +1714,45 @@ fn qualify(
     }
     if let Some(p) = &ui.presentation {
         match p {
+            Presentation::TextScroll { viewport, content } => {
+                if content
+                    .iter()
+                    .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
+                {
+                    return Err("Invalid scroll content bounds".into());
+                }
+                fn find(
+                    n: &otrios_interfaces::layout::TemplateNode,
+                    id: u16,
+                ) -> Option<&otrios_interfaces::layout::TemplateNode> {
+                    if n.id == id {
+                        Some(n)
+                    } else {
+                        n.children.iter().find_map(|c| find(c, id))
+                    }
+                }
+                let layout = Layout::from_bytes(&ui.layout)?;
+                let node = layout
+                    .blueprint()
+                    .templates
+                    .iter()
+                    .find_map(|t| find(&t.root, *viewport))
+                    .ok_or("Missing text scroll viewport")?;
+                if !matches!(
+                    node.shape,
+                    otrios_interfaces::layout::Shape::Canvas { clip: true }
+                ) || node.children.is_empty()
+                    || node.children.len() > 256
+                    || node.children.iter().any(|n| {
+                        !matches!(n.shape, otrios_interfaces::layout::Shape::Text { .. })
+                            || n.responder.is_some()
+                    })
+                {
+                    return Err(
+                        "Text scroll requires direct text children in a clipped canvas".into(),
+                    );
+                }
+            }
             Presentation::Reorder { items } => {
                 let nodes: std::collections::BTreeSet<_> = items.iter().map(|i| i.node).collect();
                 let fields: std::collections::BTreeSet<_> = items.iter().map(|i| i.field).collect();
@@ -1802,7 +1875,14 @@ fn qualify(
             editors.insert(*id, b);
         }
     }
+    let text_scroll = if let Some(Presentation::TextScroll { viewport, content }) = &ui.presentation
+    {
+        Some(super::text_scroll::Scroll::new(*viewport, *content))
+    } else {
+        None
+    };
     let mut m = Mount {
+        text_scroll,
         epoch,
         viewport: [1280., 800.],
         ui,
@@ -1930,6 +2010,9 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
     let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
     let mut root = scene.root().clone();
     present_text_views(m, &scene, &mut root);
+    if let Some(scroll) = &m.text_scroll {
+        scroll.present(&mut root);
+    }
     if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
@@ -2268,17 +2351,8 @@ fn present_text_views(m: &Mount, scene: &Scene, root: &mut SceneNode) {
         if n.id == frame.node {
             let editor = &m.editors[&frame.field];
             let offset = m.text_views.get(&frame.field).map_or(0., |v| v.offset);
-            let (value, x) = if let Some(font) = &m.font {
-                editor.window(
-                    offset,
-                    frame.width,
-                    font,
-                    frame.scale,
-                    m.focus == Some(frame.field),
-                )
-            } else {
-                (editor.display(m.focus == Some(frame.field)), 0.)
-            };
+            let value = editor.display(m.focus == Some(frame.field));
+            let x = -offset;
             let mut text = n.clone();
             text.id = TEXT_RUN_ID + u32::from(frame.field);
             text.frame.x = x;

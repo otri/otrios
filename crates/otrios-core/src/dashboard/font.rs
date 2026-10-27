@@ -25,6 +25,22 @@ pub struct Metrics {
     pub cap_height: i16,
 }
 impl Metrics {
+    /// Canonical cache scale from the admitted text contract, independent of
+    /// rounded quad bounds. A failed fixed admission keeps the legacy fallback.
+    pub fn cache_em(self, text_scale: f32) -> f32 {
+        use super::fixed::{Scalar, rounded_ratio};
+        Scalar::from_f32(text_scale)
+            .and_then(|scale| {
+                rounded_ratio(
+                    i128::from(scale.raw()) * 8 * i128::from(self.units_per_em),
+                    i128::from(self.cap_height),
+                )
+            })
+            .map(|raw| raw as f32 / 4294967296.)
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0. && *v <= 1000000.)
+            .unwrap_or(0.)
+    }
     /// Existing UI text scale means an eight-logical-unit capital height.
     pub fn scale(self, text_scale: f32) -> f32 {
         8. * text_scale / f32::from(self.cap_height)
@@ -286,11 +302,12 @@ impl Font {
         self.metrics
     }
     pub fn glyph(&self, ch: char) -> &Glyph {
-        let index = self
-            .glyphs
+        &self.glyphs[self.glyph_index(ch)]
+    }
+    pub(super) fn glyph_index(&self, ch: char) -> usize {
+        self.glyphs
             .binary_search_by_key(&(ch as u32), |g| g.scalar as u32)
-            .unwrap_or(self.fallback);
-        &self.glyphs[index]
+            .unwrap_or(self.fallback)
     }
     pub fn glyph_by_id(&self, id: u32) -> Option<&Glyph> {
         self.glyphs.iter().find(|g| g.id == id)

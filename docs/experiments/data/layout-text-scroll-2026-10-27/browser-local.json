@@ -1,0 +1,68 @@
+{
+  "passed": true,
+  "checks": [
+    "Layout Lab owns child route",
+    "full text page uses real WebGL",
+    "two-axis touch drag and release momentum",
+    "cancel stops coasting",
+    "panning is client-local",
+    "portrait reflow and bounds",
+    "Back and Home navigation"
+  ],
+  "initial": {
+    "offset": [
+      0,
+      0
+    ],
+    "limit": [
+      1151.044,
+      1148
+    ],
+    "active": false
+  },
+  "dragged": {
+    "offset": [
+      180,
+      180
+    ],
+    "limit": [
+      1151.044,
+      1148
+    ],
+    "active": true
+  },
+  "coast": {
+    "offset": [
+      255.04686,
+      255.04686
+    ],
+    "limit": [
+      1151.044,
+      1148
+    ],
+    "active": true
+  },
+  "portrait": {
+    "offset": [
+      316.24496,
+      316.24496
+    ],
+    "limit": [
+      1583.044,
+      660
+    ],
+    "active": false
+  },
+  "fps": {
+    "label": "32.0 fps - retained text / momentum scroll",
+    "active": true,
+    "samples": 16
+  },
+  "cache": {
+    "hits": 82304,
+    "misses": 209,
+    "fallbacks": 0,
+    "resets": 3,
+    "bytes": 4194304
+  }
+}

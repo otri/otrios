@@ -73,6 +73,8 @@ unsafe extern "C" {
     ) -> c_int;
     fn ot_linear_scene(d: *mut c_void) -> c_int;
     fn ot_text_stats(d: *mut c_void, stats: *mut u64);
+    fn ot_text_styles(d: *mut c_void, slot: u32, styles: *const f32, floats: usize) -> c_int;
+    fn ot_text_views(d: *mut c_void, slot: u32, views: *const f32, floats: usize) -> c_int;
     fn ot_present(d: *mut c_void, flip: *mut Flip) -> c_int;
     fn ot_input(d: *mut c_void, events: *mut Touch, capacity: usize) -> c_int;
     fn ot_pixels(d: *mut c_void, rgba: *mut u8, length: usize) -> c_int;
@@ -226,6 +228,37 @@ impl Display {
         // SAFETY: fixed ABI writes exactly three u64 counters, no retention.
         unsafe { ot_text_stats(self.owner.as_ptr(), stats.as_mut_ptr()) };
         stats
+    }
+    /// Update only culled draw ranges, translations and clipping rectangles.
+    pub fn text_views(&mut self, slot: u32, views: &[f32]) -> Result<(), String> {
+        if slot >= 3
+            || views.len() > 4096 * 8
+            || !views.len().is_multiple_of(8)
+            || views.iter().any(|v| !v.is_finite() || v.abs() > 100_000.)
+        {
+            return Err("Invalid text viewports".into());
+        }
+        // SAFETY: bounded finite borrowed scalars, copied synchronously; C checks
+        // integral ranges against the admitted draw plan before retaining them.
+        self.result(unsafe {
+            ot_text_views(self.owner.as_ptr(), slot, views.as_ptr(), views.len())
+        })
+    }
+    /// Immutable logical font em per draw. Zero retains legacy inference.
+    pub fn text_styles(&mut self, slot: u32, styles: &[f32]) -> Result<(), String> {
+        if slot >= 3
+            || styles.len() > 4096
+            || styles
+                .iter()
+                .any(|v| !v.is_finite() || *v < 0. || *v > 1000000.)
+        {
+            return Err("Invalid text styles".into());
+        }
+        // SAFETY: finite bounded borrowed values, synchronously copied. C checks
+        // draw-plan dimensions and conflicting ranges before replacing metadata.
+        self.result(unsafe {
+            ot_text_styles(self.owner.as_ptr(), slot, styles.as_ptr(), styles.len())
+        })
     }
     pub fn draw(&mut self, projection: [f32; 9], animated: bool) -> Result<(), String> {
         if projection
@@ -449,6 +482,233 @@ mod tests {
 
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
+    fn mesa_retained_text_viewports_match_clipped_meshes_and_reuse_coverage() {
+        // This compares placement/clipping within the selected prefiltered pipeline.
+        // Exact-phase caching and direct analytic rendering have a different FP16
+        // interpolation path on Utgard; the other tests exercise that diagnostic.
+        if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
+            return;
+        }
+        let _display_owner = mesa_display_owner();
+        use otrios_core::dashboard::{
+            components::{WHITE, canvas, text},
+            display::Surface,
+            font::Font,
+            font_reference::RESOURCE_SHA256,
+            render_scene_with_font,
+            retained_text::TextPresentation,
+            scene::Scene,
+        };
+        let font = Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            RESOURCE_SHA256,
+        )
+        .unwrap();
+        let atlas = font.atlas();
+        let mut presentation = TextPresentation::default();
+        for angle in [0, 90] {
+            let surface = Surface::new(angle).unwrap();
+            let [w, h] = surface.extent();
+            let mut d = Display::headless([w, h], false).unwrap();
+            d.set_font(
+                atlas.curve_width,
+                atlas.curve_height,
+                &atlas.curves,
+                atlas.band_width,
+                atlas.band_height,
+                &atlas.bands,
+            )
+            .unwrap();
+            for offset in [0., 0.25, 20.5, 110.] {
+                let bounds =
+                    otrios_core::dashboard::components::background(0, 1280., 800., WHITE, 0.).frame;
+                let mut field = canvas(
+                    1,
+                    bounds,
+                    vec![text(
+                        2,
+                        bounds,
+                        "The quick brown fox jumps over the lazy dog.",
+                        2,
+                        WHITE,
+                    )],
+                );
+                field.frame.x = 20.;
+                field.frame.y = 20.;
+                field.frame.width = 200.;
+                field.frame.height = 26.;
+                field.children[0].frame.x = -offset;
+                field.children[0].frame.width = 1000.;
+                field.children[0].frame.height = 26.;
+                let mut root = canvas(0, bounds, vec![field]);
+                root.frame.width = 1280.;
+                root.frame.height = 800.;
+                let scene = Scene::new(root).unwrap();
+                let flat = render_scene_with_font(&scene, &font);
+                d.upload_scene(0, &flat.vertices, &flat.glyph_vertices, &flat.draws)
+                    .unwrap();
+                d.draw(surface.projection(), false).unwrap();
+                let expected = d.pixels().unwrap();
+                let retained = presentation.compose(&scene, &font);
+                d.upload_scene(
+                    0,
+                    &retained.mesh.vertices,
+                    &retained.mesh.glyph_vertices,
+                    &retained.mesh.draws,
+                )
+                .unwrap();
+                d.text_views(0, &retained.views).unwrap();
+                d.draw(surface.projection(), false).unwrap();
+                let actual = d.pixels().unwrap();
+                let max = expected
+                    .iter()
+                    .zip(&actual)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .unwrap();
+                eprintln!("Retained clip {angle}deg offset {offset}: maximum byte error {max}");
+                assert!(max <= 8, "Retained text changed clipping or placement");
+                assert!(d.text_views(0, &[0.; 8]).is_ok());
+                let mut invalid = retained.views.clone();
+                invalid[1] = 100_000.;
+                assert!(d.text_views(0, &invalid).is_err());
+            }
+        }
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
+    fn mesa_partial_text_cache_preserves_fallback_order_and_viewport_clips() {
+        if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
+            return;
+        }
+        let _display_owner = mesa_display_owner();
+        use otrios_core::dashboard::{
+            components::{WHITE, background, canvas, text},
+            font::Font,
+            font_reference::RESOURCE_SHA256,
+            render_scene_with_font,
+            scene::Scene,
+        };
+        let font = Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            RESOURCE_SHA256,
+        )
+        .unwrap();
+        let atlas = font.atlas();
+        let bounds = background(0, 256., 256., WHITE, 0.).frame;
+        let mut text_bounds = bounds;
+        text_bounds.x = 8.;
+        text_bounds.y = 8.;
+        text_bounds.width = 200.;
+        text_bounds.height = 50.;
+        let scene =
+            Scene::new(canvas(0, bounds, vec![text(1, text_bounds, "H", 2, WHITE)])).unwrap();
+        let base = render_scene_with_font(&scene, &font).glyph_vertices;
+        assert_eq!(base.len(), 64);
+        let mut parts = [base.clone(), base.clone(), base.clone()];
+        // The middle quad exceeds the atlas while its ink intersects the second
+        // clip. The two small quads can reuse coverage around that raw draw.
+        for q in parts[1].chunks_exact_mut(16) {
+            q[0] = 28. + (q[0] - base[0]) * 100.;
+            q[1] = -100. + (q[1] - base[1]) * 100.;
+            q[4..8].copy_from_slice(&[1., 0.2, 0.1, 0.7]);
+        }
+        for q in parts[2].chunks_exact_mut(16) {
+            q[1] += 128.;
+            q[4..8].copy_from_slice(&[0.1, 0.4, 1., 0.6]);
+        }
+        let clips = [
+            [0., 0., 128., 128.],
+            [128., 0., 256., 128.],
+            [0., 128., 128., 256.],
+        ];
+        let projection = [2. / 256., 0., 0., 0., -2. / 256., 0., -1., 1., 1.];
+        let mut display = Display::headless([256, 256], false).unwrap();
+        display
+            .set_font(
+                atlas.curve_width,
+                atlas.curve_height,
+                &atlas.curves,
+                atlas.band_width,
+                atlas.band_height,
+                &atlas.bands,
+            )
+            .unwrap();
+        let mut expected = Vec::new();
+        for (i, part) in parts.iter().enumerate() {
+            display.upload_scene(0, &[], part, &[1, 0, 4]).unwrap();
+            display
+                .text_styles(
+                    0,
+                    &[font.metrics().cache_em(2.) * if i == 1 { 100. } else { 1. }],
+                )
+                .unwrap();
+            let [l, t, r, b] = clips[i];
+            display
+                .text_views(0, &[0., 4., 0., 0., l, t, r, b])
+                .unwrap();
+            display.draw(projection, false).unwrap();
+            let image = display.pixels().unwrap();
+            if i == 0 {
+                expected = image;
+            } else {
+                for y in t as usize..b as usize {
+                    for x in l as usize..r as usize {
+                        let offset = ((255 - y) * 256 + x) * 4;
+                        expected[offset..offset + 4].copy_from_slice(&image[offset..offset + 4]);
+                    }
+                }
+            }
+        }
+        let background = [16, 28, 41];
+        for [l, t, r, b] in clips {
+            assert!(
+                (t as usize..b as usize)
+                    .flat_map(|y| (l as usize..r as usize).map(move |x| ((255 - y) * 256 + x) * 4))
+                    .any(|p| expected[p..p + 3] != background),
+                "each cached/raw reference region must contain ink"
+            );
+        }
+        let glyphs: Vec<_> = parts.into_iter().flatten().collect();
+        display
+            .upload_scene(0, &[], &glyphs, &[1, 0, 4, 1, 4, 4, 1, 8, 4])
+            .unwrap();
+        let views: Vec<_> = clips
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, [l, t, r, b])| [i as f32 * 4., 4., 0., 0., l, t, r, b])
+            .collect();
+        display
+            .text_styles(
+                0,
+                &[
+                    font.metrics().cache_em(2.),
+                    font.metrics().cache_em(2.) * 100.,
+                    font.metrics().cache_em(2.),
+                ],
+            )
+            .unwrap();
+        display.text_views(0, &views).unwrap();
+        display.draw(projection, false).unwrap();
+        assert_eq!(
+            display.pixels().unwrap(),
+            expected,
+            "mixed cache/raw draws preserve program state and clips"
+        );
+        assert!(display.text_styles(0, &[1.]).is_err());
+        assert!(display.text_styles(0, &[f32::NAN; 3]).is_err());
+        assert!(display.text_styles(0, &[-1.; 3]).is_err());
+        display.draw(projection, false).unwrap();
+        assert_eq!(
+            display.pixels().unwrap(),
+            expected,
+            "rejected style metadata does not change the frame"
+        );
+        assert!(display.glyph_cache_stats()[1] > 0);
+        assert_eq!(display.glyph_cache_stats()[2], 4 * 1024 * 1024);
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_slug_quadratic_holes_cache_and_selected_color_pipeline() {
         let _display_owner = mesa_display_owner();
         let mut d = Display::headless([128, 128], false).unwrap();
@@ -518,17 +778,31 @@ mod tests {
         assert_eq!(d.pixels().unwrap(), first);
         assert_eq!(d.glyph_cache_stats()[1], 1); // no rerasterization on a cache hit
         assert!(d.glyph_cache_stats()[0] > stats[0]);
-        // Exact subpixel phase and a new font generation cause fresh coverage.
+        // Fractional placement samples existing prefiltered coverage; font replacement invalidates it.
         for v in glyphs.chunks_exact_mut(16) {
             v[0] += 0.25 / 64.;
         }
         d.upload_scene(0, &[], &glyphs, &[1, 0, 4]).unwrap();
         d.draw(projection, false).unwrap();
-        assert_eq!(d.glyph_cache_stats()[1], 2);
+        assert_eq!(
+            d.glyph_cache_stats()[1],
+            if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
+                2
+            } else {
+                1
+            }
+        );
         assert_ne!(d.pixels().unwrap(), first);
         d.set_font(16, 1, &curves, 32, 1, &bands).unwrap();
         d.draw(projection, false).unwrap();
-        assert_eq!(d.glyph_cache_stats()[1], 3);
+        assert_eq!(
+            d.glyph_cache_stats()[1],
+            if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
+                3
+            } else {
+                2
+            }
+        );
         // Recoloring reuses coverage. Premultiplied RGB/alpha must each receive
         // coverage once, including fractional edge pixels and non-unit tint alpha.
         let opaque = d.pixels().unwrap();
@@ -538,7 +812,14 @@ mod tests {
         d.upload_scene(0, &[], &glyphs, &[1, 0, 4]).unwrap();
         d.draw(projection, false).unwrap();
         let tinted = d.pixels().unwrap();
-        assert_eq!(d.glyph_cache_stats()[1], 3);
+        assert_eq!(
+            d.glyph_cache_stats()[1],
+            if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
+                3
+            } else {
+                2
+            }
+        );
         if !d.linear_scene_enabled() {
             for (full, half) in opaque.chunks_exact(4).zip(tinted.chunks_exact(4)) {
                 for channel in 0..3 {

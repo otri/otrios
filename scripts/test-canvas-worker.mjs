@@ -26,7 +26,7 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
     outgoing(){if(cancel){cancel=false;rejected=false;return new Uint8Array([42]);}return null;},
     path:()=> 'layout-lab',screen:()=> 'layout-lab',epoch:()=>7,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'app:layout-lab/state',
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
-    reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
+    text_generation:()=>1,text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
     tick:()=>false,take_sign_out:()=>false,activate:()=>{activations++;return true;}};
   const context=vm.createContext({prepareUiUpdate:async()=>null,URL,location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),setTimeout(){},clearTimeout(){},fake});
   vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=1',context);
@@ -117,7 +117,7 @@ test('timing traces follow the mount generation and ignore earlier control packe
     receive(){epoch=2;return true;},rejected_mount_pending:()=>false,
     path:()=> 'layout-lab',screen:()=> 'layout-lab',epoch:()=>epoch,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'state',
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
-    reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'App',title:()=> 'App',controls:()=>[]};
+    text_generation:()=>1,text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'App',title:()=> 'App',controls:()=>[]};
   let time=100;const context=vm.createContext({fake,timestamp,performance:{timeOrigin:1700000000000,now:()=>time++},Date,postMessage:m=>messages.push(m)});
   vm.runInContext(source,context);vm.runInContext('app=fake;timings=true;transportReady=true;transportEpoch=1',context);
   await context.onmessage({data:{type:'activate',id:12,timing:{id:7}}});

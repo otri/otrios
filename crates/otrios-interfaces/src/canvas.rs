@@ -131,6 +131,11 @@ pub struct OrderItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Presentation {
+    /// Mount-local text-only viewport. UI format v3; offsets are never state.
+    TextScroll {
+        viewport: u16,
+        content: [f32; 2],
+    },
     Reorder {
         items: Vec<OrderItem>,
     },

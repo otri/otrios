@@ -16,10 +16,8 @@ pub fn validate_mesh(vertices: &[f32]) -> Result<(), String> {
     for vertex in vertices.chunks_exact(6) {
         if vertex[..2]
             .iter()
-            .any(|v| !v.is_finite() || v.abs() > 100_000.)
-            || vertex[2..]
-                .iter()
-                .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
+            .any(|v| v.to_bits() & 0x7fff_ffff > 100_000_f32.to_bits())
+            || vertex[2..].iter().any(|v| !(0. ..=1.).contains(v))
         {
             return Err("Invalid position or RGBA value".into());
         }
@@ -40,17 +38,42 @@ pub fn validate_text_mesh(
     {
         return Err("Invalid glyph quad or draw-plan dimensions".into());
     }
-    for vertex in glyphs.chunks_exact(16) {
-        if vertex.iter().any(|v| !v.is_finite() || v.abs() > 100000.)
-            || vertex[4..8].iter().any(|v| !(0. ..=1.).contains(v))
-            || vertex[12] < 0.
-            || vertex[12] > 255.
-            || vertex[13] < 0.
-            || vertex[13] > 255.
-            || vertex[14] != 7.
-            || vertex[15] != 7.
-        {
-            return Err("Invalid glyph vertex".into());
+    for quad in glyphs.chunks_exact(64) {
+        // IEEE absolute-value bits are ordered for nonnegative finite f32.
+        // The bound comparison also rejects infinities and every NaN payload.
+        let attributes = &quad[4..16];
+        for (i, vertex) in quad.chunks_exact(16).enumerate() {
+            if vertex[..4]
+                .iter()
+                .any(|v| v.to_bits() & 0x7fff_ffff > 100_000_f32.to_bits())
+            {
+                return Err("Invalid glyph vertex".into());
+            }
+            // Ordinary glyphs repeat tint/band metadata on all four corners.
+            // Bit comparisons avoid rechecking those scalar constraints four times;
+            // gradient/nonuniform attributes still take the complete validation path.
+            if i > 0
+                && vertex[4..16]
+                    .iter()
+                    .zip(attributes)
+                    .fold(0, |difference, (a, b)| {
+                        difference | (a.to_bits() ^ b.to_bits())
+                    })
+                    == 0
+            {
+                continue;
+            }
+            if vertex[4..8].iter().any(|v| !(0. ..=1.).contains(v))
+                || vertex[8..12]
+                    .iter()
+                    .any(|v| v.to_bits() & 0x7fff_ffff > 100_000_f32.to_bits())
+                || !(0. ..=255.).contains(&vertex[12])
+                || !(0. ..=255.).contains(&vertex[13])
+                || vertex[14] != 7.
+                || vertex[15] != 7.
+            {
+                return Err("Invalid glyph vertex".into());
+            }
         }
     }
     for draw in draws.chunks_exact(3) {
@@ -75,6 +98,31 @@ pub fn validate_text_mesh(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn glyph_validation_checks_every_corner_and_nonuniform_metadata() {
+        let mut glyphs = vec![0.; 64];
+        for v in glyphs.chunks_exact_mut(16) {
+            v[4..8].fill(1.);
+            v[14] = 7.;
+            v[15] = 7.;
+        }
+        assert!(validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_ok());
+        for index in 0..64 {
+            let saved = glyphs[index];
+            for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 100001.] {
+                glyphs[index] = bad;
+                assert!(
+                    validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_err(),
+                    "accepted index {index}"
+                );
+            }
+            glyphs[index] = saved;
+        }
+        glyphs[20] = 0.5; // A valid gradient takes the nonuniform attribute path.
+        assert!(validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_ok());
+        glyphs[52] = 1.1;
+        assert!(validate_text_mesh(&glyphs, &[1, 0, 4], 0).is_err());
+    }
     #[test]
     fn glyph_ffi_rejects_partial_quads_and_invalid_ordered_ranges() {
         let mut glyphs = vec![0.; 64];
