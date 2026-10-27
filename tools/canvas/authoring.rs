@@ -756,6 +756,7 @@ pub struct AppUi {
     composition: Option<(Arrangement, Arrangement)>,
     touch_pad: Option<String>,
     text_scroll: Option<(String, [f32; 2])>,
+    text_document: Option<(String, TextResource, u8, [u8; 4])>,
     reorder: Vec<(String, u16)>,
 }
 impl AppUi {
@@ -769,6 +770,7 @@ impl AppUi {
             composition: None,
             touch_pad: None,
             text_scroll: None,
+            text_document: None,
             reorder: vec![],
         }
     }
@@ -785,6 +787,16 @@ impl AppUi {
     }
     pub fn with_text_scroll(mut self, key: &str, content: [f32; 2]) -> Self {
         self.text_scroll = Some((key.into(), content));
+        self
+    }
+    pub fn with_text_document(
+        mut self,
+        key: &str,
+        source: TextResource,
+        scale: u8,
+        color: [u8; 4],
+    ) -> Self {
+        self.text_document = Some((key.into(), source, scale, color));
         self
     }
     pub fn with_touch_pad(mut self, key: &str) -> Self {
@@ -837,7 +849,17 @@ impl AppUi {
                 content: tall.compile(&compiler.named_nodes),
             },
         });
-        let presentation = if let Some((key, content)) = self.text_scroll {
+        let presentation = if let Some((key, source, scale, color)) = self.text_document {
+            Some(Presentation::TextDocument {
+                viewport: *compiler
+                    .named_nodes
+                    .get(&key)
+                    .expect("named document viewport"),
+                source,
+                scale,
+                color,
+            })
+        } else if let Some((key, content)) = self.text_scroll {
             Some(Presentation::TextScroll {
                 viewport: *compiler
                     .named_nodes
@@ -892,7 +914,9 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: if matches!(presentation, Some(Presentation::TextScroll { .. })) {
+            format: if matches!(presentation, Some(Presentation::TextDocument { .. })) {
+                "otrios-canvas-v4"
+            } else if matches!(presentation, Some(Presentation::TextScroll { .. })) {
                 "otrios-canvas-v3"
             } else {
                 "otrios-canvas-v2"

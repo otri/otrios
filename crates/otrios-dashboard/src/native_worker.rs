@@ -36,6 +36,8 @@ pub(super) struct Frame {
     pub(super) ui_release: String,
     pub(super) viewport: [f32; 2],
     pub(super) reflow: Option<otrios_core::canvas::reflow::Frame>,
+    pub(super) document: Option<otrios_core::canvas::document::Frame>,
+    pub(super) overlay: Option<otrios_core::dashboard::retained_text::TextFrame>,
     pub(super) vertices: Arc<Vec<f32>>,
     pub(super) glyph_vertices: Arc<Vec<f32>>,
     pub(super) draws: Arc<Vec<u32>>,
@@ -67,6 +69,8 @@ impl Frame {
             ui_release: String::new(),
             viewport: [1280., 800.],
             reflow: None,
+            document: None,
+            overlay: None,
             vertices: Arc::new(vec![]),
             glyph_vertices: Arc::new(vec![]),
             draws: Arc::new(vec![]),
@@ -356,6 +360,8 @@ pub(super) fn state_worker(
     let mut glyph_cache = Arc::new(Vec::new());
     let mut draws_cache = Arc::new(Vec::new());
     let mut text_presentation = TextPresentation::default();
+    let mut overlay_presentation = TextPresentation::default();
+    let mut overlay_cache = None;
     let mut text_generation = 0;
     let mut text_views = vec![];
     let mut style_cache = Arc::new(vec![]);
@@ -613,9 +619,14 @@ pub(super) fn state_worker(
             pending = Some(frame);
             scene_cache = None;
             text_presentation = TextPresentation::default();
+            overlay_presentation = TextPresentation::default();
+            overlay_cache = None;
             text_generation = 0;
             text_views.clear();
             style_cache = Arc::new(vec![]);
+            mesh_cache = Arc::new(vec![]);
+            glyph_cache = Arc::new(vec![]);
+            draws_cache = Arc::new(vec![]);
             dirty = false;
         }
         if dirty && !client.ui_ref().is_empty() {
@@ -624,7 +635,13 @@ pub(super) fn state_worker(
                 .as_ref()
                 .is_none_or(|old| !Arc::ptr_eq(old, &scene))
             {
-                let frame = text_presentation.compose(&scene, &font);
+                let frame = if let Some((before, after)) = client.document_scene_parts(&scene)? {
+                    overlay_cache = Some(overlay_presentation.compose(&after, &font));
+                    text_presentation.compose(&before, &font)
+                } else {
+                    overlay_cache = None;
+                    text_presentation.compose(&scene, &font)
+                };
                 if text_generation != frame.generation {
                     mesh_cache = Arc::new(frame.mesh.vertices.clone());
                     glyph_cache = Arc::new(frame.mesh.glyph_vertices.clone());
@@ -650,6 +667,8 @@ pub(super) fn state_worker(
                     [scene.root().frame.width, scene.root().frame.height]
                 },
                 reflow: client.reflow_frame()?,
+                document: client.document_frame(),
+                overlay: overlay_cache.clone(),
                 vertices: mesh_cache.clone(),
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),

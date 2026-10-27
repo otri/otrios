@@ -6,6 +6,8 @@ use otrios_core::dashboard::{
 };
 use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use otrios_linux_display::Display;
+#[path = "document_gpu.rs"]
+mod document_gpu;
 use std::{
     fs,
     sync::{Arc, mpsc},
@@ -89,7 +91,7 @@ pub(super) fn run() -> Result<(), String> {
             } else {
                 render_hud_with_font(&label, &hud_font)
             };
-            let _ = hud_results.try_send((epoch, bucket, mesh));
+            let _ = hud_results.try_send((epoch, bucket, extent, mesh));
         }
     });
     let started = Instant::now();
@@ -98,9 +100,11 @@ pub(super) fn run() -> Result<(), String> {
     let mut reflow = otrios_core::canvas::reflow::Presenter::default();
     let mut reflow_serial = None;
     let mut retained = None;
+    let mut retained_overlay = None;
     let mut hud = u64::MAX;
     let mut scroll_meter = otrios_core::canvas::text_scroll::FrameMeter::default();
     let mut scroll_active = false;
+    let mut document_gpu = document_gpu::Cache::default();
     let mut drawn = 0;
     let mut acked = 0;
     let mut dirty = true;
@@ -154,14 +158,23 @@ pub(super) fn run() -> Result<(), String> {
             while let Ok(next) = frame_rx.try_recv() {
                 if model
                     .as_ref()
-                    .is_some_and(|old| old.ui_ref != next.ui_ref || old.state_ref != next.state_ref)
+                    .is_some_and(|old| old.viewport != next.viewport)
                 {
-                    display.upload(1, &[])?;
+                    hud = u64::MAX;
+                }
+                if model.as_ref().is_some_and(|old| {
+                    old.epoch != next.epoch
+                        || old.ui_ref != next.ui_ref
+                        || old.state_ref != next.state_ref
+                }) {
+                    display.retire_slot(1)?;
+                    retained_overlay = None;
                     display.upload_scene(2, &[], &[], &[])?;
                     presenter = Presenter::default();
                     scroll_meter = Default::default();
                     scroll_active = false;
                     hud = u64::MAX;
+                    document_gpu.clear(&mut display)?;
                 }
                 model = Some(next);
                 dirty = true;
@@ -176,8 +189,8 @@ pub(super) fn run() -> Result<(), String> {
                     reflow_serial = Some(f.serial);
                 }
                 let flowing = f.reflow.is_some() && reflow.active(now);
-                while let Ok((epoch, _bucket, mesh)) = hud_rx.try_recv() {
-                    if epoch == f.epoch {
+                while let Ok((epoch, _bucket, extent, mesh)) = hud_rx.try_recv() {
+                    if epoch == f.epoch && extent.is_none_or(|extent| extent == f.viewport) {
                         display.upload_scene(
                             2,
                             &mesh.vertices,
@@ -223,27 +236,56 @@ pub(super) fn run() -> Result<(), String> {
                             hud = bucket;
                         }
                     }
-                    let scrolling = f.resources.text_scroll.as_ref();
-                    if let Some(scroll) = scrolling {
+                    let scrolling = f
+                        .resources
+                        .text_scroll
+                        .as_ref()
+                        .map(|s| s.active)
+                        .or_else(|| f.resources.text_document.as_ref().map(|s| s.active));
+                    let (document_slots, uploading) =
+                        document_gpu.update(&mut display, f.document.as_ref())?;
+                    if let Some(overlay) = &f.overlay {
+                        if retained_overlay
+                            .as_ref()
+                            .is_none_or(|old| !Arc::ptr_eq(old, &overlay.mesh))
+                        {
+                            display.upload_scene(
+                                1,
+                                &overlay.mesh.vertices,
+                                &overlay.mesh.glyph_vertices,
+                                &overlay.mesh.draws,
+                            )?;
+                            display.text_styles(1, &overlay.styles)?;
+                            retained_overlay = Some(overlay.mesh.clone());
+                        }
+                        display.text_views(1, &overlay.views)?;
+                    }
+                    if let Some(active) = scrolling {
                         let bucket = (now / 500.) as u64;
-                        if (hud != bucket || scroll_active != scroll.active)
+                        if (hud != bucket || scroll_active != active)
                             && hud_tx
                                 .try_send((
                                     f.epoch,
                                     bucket,
-                                    scroll_meter.label(scroll.active),
+                                    if uploading || f.document.as_ref().is_some_and(|d| d.loading) {
+                                        "Preparing document...".into()
+                                    } else {
+                                        scroll_meter.label(active)
+                                    },
                                     Some(f.viewport),
                                 ))
                                 .is_ok()
                         {
                             hud = bucket;
-                            scroll_active = scroll.active;
+                            scroll_active = active;
                         }
                     }
-                    display.draw(
-                        surface.projection_for(f.viewport),
-                        animated || scrolling.is_some(),
-                    )?;
+                    let mut slots = vec![0];
+                    slots.extend(document_slots);
+                    if animated || scrolling.is_some() {
+                        slots.extend([1, 2]);
+                    }
+                    display.draw_slots(surface.projection_for(f.viewport), &slots)?;
                     if drawn >= capture_after
                         && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()
@@ -264,7 +306,7 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     let before = Instant::now();
                     let flip = display.present()?;
-                    if f.resources.text_scroll.as_ref().is_some_and(|s| s.active) {
+                    if scrolling == Some(true) {
                         scroll_meter.record(if flip.usec > 0 {
                             flip.usec as f64 / 1000.
                         } else {
@@ -296,7 +338,7 @@ pub(super) fn run() -> Result<(), String> {
                         acked = f.serial;
                     }
                     drawn += 1;
-                    dirty = false;
+                    dirty = uploading;
                     if frames.is_some_and(|n| drawn >= n) {
                         break;
                     }

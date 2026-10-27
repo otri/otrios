@@ -45,6 +45,7 @@ struct Mount {
     text_views: BTreeMap<u16, TextViewport>,
     text_bounds_dirty: bool,
     text_scroll: Option<super::text_scroll::Scroll>,
+    text_document: Option<super::document::Viewport>,
     font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
     ink: crate::dashboard::ink::Ink,
@@ -134,6 +135,7 @@ pub struct ResourceUsage {
     pub reflow_editing: bool,
     pub wire: WireUsage,
     pub text_scroll: Option<super::text_scroll::Info>,
+    pub text_document: Option<super::document::Stats>,
 }
 #[derive(Default)]
 pub struct Client {
@@ -396,6 +398,7 @@ impl Client {
                 || m.order_drag.is_some()
                 || m.text_views.values().any(TextViewport::active)
                 || m.text_scroll.as_ref().is_some_and(|s| s.touching())
+                || m.text_document.as_ref().is_some_and(|s| s.touching())
         })
     }
     pub fn value(&self, id: u16) -> Result<u16> {
@@ -424,8 +427,10 @@ impl Client {
     pub fn reload_ready(&self) -> bool {
         !self.input_busy() && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
     }
-    pub fn presentation(&self) -> Option<Presentation> {
-        self.active.as_ref().and_then(|m| m.ui.presentation.clone())
+    pub fn presentation(&self) -> Option<&Presentation> {
+        self.active
+            .as_ref()
+            .and_then(|m| m.ui.presentation.as_ref())
     }
     pub fn motion_intent(&self) -> Result<Option<(bool, crate::dashboard::motion::Intent)>> {
         let Some(Presentation::Motion {
@@ -439,12 +444,12 @@ impl Client {
             return Ok(None);
         };
         let i = crate::dashboard::motion::Intent {
-            playing: self.value(playing)? > 0,
-            speed: 0.25 + f32::from(self.value(speed)?) * 0.00375,
-            count: (1. + f32::from(self.value(count)?) * 0.063).round() as u16,
+            playing: self.value(*playing)? > 0,
+            speed: 0.25 + f32::from(self.value(*speed)?) * 0.00375,
+            count: (1. + f32::from(self.value(*count)?) * 0.063).round() as u16,
         };
         i.validate()?;
-        Ok(Some((three_d, i)))
+        Ok(Some((*three_d, i)))
     }
     pub fn stress_hz(&self) -> u8 {
         self.active.as_ref().map_or(0, |m| m.stress)
@@ -526,6 +531,11 @@ impl Client {
             reflow_editing: self.active.as_ref().is_some_and(|m| m.order_editing),
             wire: wire_usage(),
             text_scroll: self.text_scroll_info(),
+            text_document: self
+                .active
+                .as_ref()
+                .and_then(|m| m.text_document.as_ref())
+                .and_then(|s| s.stats()),
         }
     }
     pub fn dispatch_usage(&self) -> DispatchUsage {
@@ -813,7 +823,10 @@ impl Client {
                     )?;
                     candidate.font = self.font.clone();
                     candidate.viewport = self.viewport.unwrap_or([1280., 800.]);
-                    resolve_scene(&candidate)?;
+                    let scene = resolve_scene(&candidate)?;
+                    if let Some(reader) = &mut candidate.text_document {
+                        reader.sync(&scene, candidate.font.as_ref())?;
+                    }
                     candidate.invalidate();
                     candidate.doc.set_dispatch_policy(self.dispatch);
                     if let Some(old) = &self.active
@@ -1113,6 +1126,7 @@ impl Client {
         let captured_text = self.active.as_ref().is_some_and(|m| {
             m.text_views.values().any(|v| v.owns(event.id))
                 || m.text_scroll.as_ref().is_some_and(|s| s.touching())
+                || m.text_document.as_ref().is_some_and(|s| s.touching())
         });
         let scene = if captured_text && event.phase != PointerPhase::Down {
             cached_layout(self.active.as_ref().ok_or("No Canvas")?)?
@@ -1120,6 +1134,13 @@ impl Client {
             self.scene()?
         };
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        if let Some(reader) = &mut m.text_document {
+            if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
+                reader.cancel();
+            } else if let Some(changed) = reader.pointer(&scene, event, m.now) {
+                return Ok(changed);
+            }
+        }
         if let Some(scroll) = &mut m.text_scroll {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 scroll.cancel();
@@ -1324,6 +1345,17 @@ impl Client {
             .and_then(|m| m.text_scroll.as_ref())
             .map(|s| s.info())
     }
+    pub fn document_frame(&mut self) -> Option<super::document::Frame> {
+        self.active.as_mut()?.text_document.as_mut()?.frame()
+    }
+    pub fn document_scene_parts(&self, scene: &Scene) -> Result<Option<(Scene, Scene)>> {
+        match self.presentation() {
+            Some(Presentation::TextDocument { viewport, .. }) => {
+                super::document::scene::split(scene, u32::from(*viewport)).map(Some)
+            }
+            _ => Ok(None),
+        }
+    }
     pub fn keyboard_visible(&self) -> bool {
         self.active.as_ref().is_some_and(|m| m.keyboard.visible)
     }
@@ -1411,6 +1443,9 @@ impl Client {
             if let Some(s) = &mut m.text_scroll {
                 s.cancel();
             }
+            if let Some(s) = &mut m.text_document {
+                s.cancel();
+            }
             for view in m.text_views.values_mut() {
                 view.cancel();
             }
@@ -1474,6 +1509,17 @@ impl Client {
         if let Some(s) = &mut m.text_scroll {
             scrolled |= s.tick(now);
         }
+        if m.text_document.as_ref().is_some_and(|s| s.bounds_dirty) {
+            let scene = cached_layout(m)?;
+            if let Some(s) = &mut m.text_document {
+                s.sync(&scene, m.font.as_ref())?;
+            }
+        }
+        let document_changed = if let Some(s) = &mut m.text_document {
+            s.tick(now)?
+        } else {
+            false
+        };
         let changed = m.ink.tick(now) || clock || scrolled;
         let edit = m.keyboard.tick(now);
         if changed {
@@ -1486,7 +1532,7 @@ impl Client {
         if let Some(edit) = edit {
             return self.hardware_edit(&edit);
         }
-        Ok(changed)
+        Ok(changed || document_changed)
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
         self.active
@@ -1618,6 +1664,9 @@ impl Mount {
     }
     fn invalidate(&mut self) {
         self.layout_scene.take();
+        if let Some(s) = &mut self.text_document {
+            s.bounds_dirty = true;
+        }
         self.text_bounds_dirty = true;
         self.invalidate_presentation();
     }
@@ -1736,6 +1785,44 @@ fn qualify(
     }
     if let Some(p) = &ui.presentation {
         match p {
+            Presentation::TextDocument {
+                viewport,
+                source,
+                scale,
+                ..
+            } => {
+                if !(1..=8).contains(scale)
+                    || source.decoded_bytes as usize > super::document::MAX_SOURCE_BYTES
+                    || source.sha256.len() != 32
+                    || source.lz4.is_empty()
+                    || source.lz4.len() > MAX_BYTES
+                {
+                    return Err("Invalid document resource contract".into());
+                }
+                fn find(
+                    n: &otrios_interfaces::layout::TemplateNode,
+                    id: u16,
+                ) -> Option<&otrios_interfaces::layout::TemplateNode> {
+                    if n.id == id {
+                        Some(n)
+                    } else {
+                        n.children.iter().find_map(|c| find(c, id))
+                    }
+                }
+                let layout = Layout::from_bytes(&ui.layout)?;
+                for template in &layout.blueprint().templates {
+                    let node =
+                        find(&template.root, *viewport).ok_or("Missing document viewport")?;
+                    if !matches!(
+                        node.shape,
+                        otrios_interfaces::layout::Shape::Canvas { clip: true }
+                    ) || !node.children.is_empty()
+                        || node.responder.is_some()
+                    {
+                        return Err("Document requires an empty clipped canvas".into());
+                    }
+                }
+            }
             Presentation::TextScroll { viewport, content } => {
                 if content
                     .iter()
@@ -1904,6 +1991,19 @@ fn qualify(
         None
     };
     let mut m = Mount {
+        text_document: if let Some(Presentation::TextDocument {
+            viewport,
+            source,
+            scale,
+            color,
+        }) = &ui.presentation
+        {
+            Some(super::document::Viewport::new(
+                *viewport, source, *scale, *color,
+            )?)
+        } else {
+            None
+        },
         text_scroll,
         epoch,
         viewport: [1280., 800.],

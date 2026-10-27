@@ -3,12 +3,30 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import {DocumentTransfer} from '../web/canvas/document-transfer.mjs';
+function workerContext(fields){if(fields.fake){fields.fake.document_frame??=()=> 'null';for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])fields.fake[key]??=()=>new Float32Array();fields.fake.overlay_draws??=()=>new Uint32Array();}return vm.createContext({DocumentTransfer,...fields});}
+test('context loss pauses transfers and replay resends complete current resource dependencies',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const messages=[],fake={viewport_size:()=>[1280,800],path:()=> 'layout-lab/document',screen:()=> 'layout-document',epoch:()=>7,ui_ref:()=> 'app:layout-document/ui',state_ref:()=> 'app:layout-document/state',
+    keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'text-document',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
+    text_generation:()=>1,text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Document',title:()=> 'Document',controls:()=>[],
+    document_frame:()=>JSON.stringify({epoch:'1',em:24,loading:false,draws:[{version:'1',glyphs:1,view:[0,4,0,0,0,0,100,100]}]}),document_chunk_vertices:()=>new Float32Array(64)};
+  const context=workerContext({fake,postMessage:m=>messages.push(m)});
+  vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
+  const first=messages.find(m=>m.type==='frame');assert.equal(first.document.upserts.length,1);
+  await context.onmessage({data:{type:'graphics-lost'}});
+  await context.onmessage({data:{type:'frame-ack',documentToken:first.document.token}});
+  vm.runInContext('publish();publish()',context);assert.equal(messages.filter(m=>m.type==='frame').length,1);
+  await context.onmessage({data:{type:'document-replay'}});
+  const replay=messages.filter(m=>m.type==='frame').at(-1);
+  assert.equal(replay.document.upserts.length,1);assert(replay.vertices);assert(replay.document.token>first.document.token);
+});
 
 test('app worker owns no sockets and scopes ink to the active app/transport epoch',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const messages=[];let received=0,active='',presentation='none',sockets=0;
   const fake={viewport_size:()=>[1280,800],ui_ref:()=>active,presentation_kind:()=>presentation,receive_ink:()=>{received++;return false;}};
-  const context=vm.createContext({prepareUiUpdate:async()=>null,performance:{now:()=>0},postMessage:m=>messages.push(m),fake,WebSocket:class{constructor(){sockets++;}}});
+  const context=workerContext({prepareUiUpdate:async()=>null,performance:{now:()=>0},postMessage:m=>messages.push(m),fake,WebSocket:class{constructor(){sockets++;}}});
   vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=1;connect();transportReady=true;syncInk()',context);
   active='app:component-playground/ui';presentation='touch-pad';vm.runInContext('syncInk();syncInk()',context);
   assert.equal(messages.filter(m=>m.type==='ink-subscribe'&&m.active).length,1);
@@ -28,7 +46,7 @@ test('a rejected candidate sends Cancel and leaves the current app usable; corru
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
     text_generation:()=>1,text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Current app',title:()=> 'Layout Lab',controls:()=>[],
     tick:()=>false,take_sign_out:()=>false,activate:()=>{activations++;return true;}};
-  const context=vm.createContext({prepareUiUpdate:async()=>null,URL,location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),setTimeout(){},clearTimeout(){},fake});
+  const context=workerContext({prepareUiUpdate:async()=>null,URL,location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),setTimeout(){},clearTimeout(){},fake});
   vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=1',context);
   await context.onmessage({data:{type:'state-frame',bytes:new Uint8Array([1]),epoch:1}});
   assert.deepEqual([...messages.find(m=>m.type==='state-send').bytes],[42]);assert(!messages.some(m=>m.type==='transport-reconnect'));assert(!messages.some(m=>m.type==='error'||m.type==='clear-private'));
@@ -45,7 +63,7 @@ test('a Canvas sign-out action clears private pixels and revokes the browser ses
     set_session_controls(value){calls.push(['session-controls',value]);},navigate:screen=>calls.push(['navigate',screen]),
     activate(){requested=true;return true;},take_sign_out(){const value=requested;requested=false;return value;},
     path:()=> '',screen:()=> 'home',epoch:()=>1,state_ref:()=>'',keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}'};
-  const context=vm.createContext({prepareUiUpdate:async()=>null,URL,WebSocket:{OPEN:1},location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),clearTimeout(){},fake,monitoringFake:{logout(){calls.push('logout');}}});
+  const context=workerContext({prepareUiUpdate:async()=>null,URL,WebSocket:{OPEN:1},location:{href:'https://otrios.example/'},performance:{now:()=>0},postMessage:m=>messages.push(m),clearTimeout(){},fake,monitoringFake:{logout(){calls.push('logout');}}});
   vm.runInContext(source,context);vm.runInContext('app=fake;monitoring=monitoringFake',context);
   await context.onmessage({data:{type:'activate',id:12}});
   assert.deepEqual(calls,['clear',['session-controls',false],['navigate',''],'logout']);
@@ -58,7 +76,7 @@ test('release control waits for connected edits/gestures and handles supersessio
   const descriptor=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`});
   const messages=[],timers=[];let edits=true,gesture=false;
   const fake={viewport_size:()=>[1280,800],reload_ready:()=>!edits&&!gesture,input_busy:()=>gesture,reset_connection(){}};
-  const context=vm.createContext({prepareUiUpdate:async()=>null,URL,AbortController,location:{href:'https://otrios.example/'},
+  const context=workerContext({prepareUiUpdate:async()=>null,URL,AbortController,location:{href:'https://otrios.example/'},
     postMessage:m=>messages.push(m),setTimeout:fn=>timers.push(fn),clearTimeout(){},fake,validRelease});
   vm.runInContext(source,context);vm.runInContext(`app=fake;started=true;activeRelease='${'a'.repeat(64)}';transportReady=true;stateOnline=true`,context);
   await context.onmessage({data:{type:'release-discovered',release:descriptor('b')}});
@@ -81,7 +99,7 @@ test('disconnected RAM edits do not strand a release upgrade',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const {validRelease}=await import('../web/shared/session.mjs');const messages=[];
   const fake={viewport_size:()=>[1280,800],reload_ready:()=>false,input_busy:()=>false};
-  const context=vm.createContext({prepareUiUpdate:async()=>null,postMessage:m=>messages.push(m),setTimeout,clearTimeout,fake,validRelease});
+  const context=workerContext({prepareUiUpdate:async()=>null,postMessage:m=>messages.push(m),setTimeout,clearTimeout,fake,validRelease});
   vm.runInContext(source,context);vm.runInContext(`app=fake;started=true;activeRelease='${'a'.repeat(64)}';stateOnline=false`,context);
   const entry=`/releases/${'b'.repeat(64)}/web/index.html`;
   await context.onmessage({data:{type:'release-discovered',release:{id:'b'.repeat(64),web_entry:entry}}});
@@ -94,7 +112,7 @@ test('disconnected RAM edits do not strand a release upgrade',async()=>{
 test('worker state output uses a bounded credit window and ignores stale acknowledgements',async()=>{
  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');const messages=[];let packets=10;
  const fake={viewport_size:()=>[1280,800],outgoing:()=>packets-->0?new Uint8Array([4]):null};
- const context=vm.createContext({prepareUiUpdate:async()=>null,fake,postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=2;outgoing()',context);
+ const context=workerContext({prepareUiUpdate:async()=>null,fake,postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=2;outgoing()',context);
  assert.equal(messages.filter(m=>m.type==='state-send').length,4);
  await context.onmessage({data:{type:'state-send-ack',epoch:1}});assert.equal(messages.filter(m=>m.type==='state-send').length,4);
  await context.onmessage({data:{type:'state-send-ack',epoch:2}});assert.equal(messages.filter(m=>m.type==='state-send').length,5);
@@ -103,7 +121,7 @@ test('worker state output uses a bounded credit window and ignores stale acknowl
 test('navigation delegates destination paths to the shared runtime',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const calls=[],fake={auth_required:()=>false,ui_ref:()=> 'app:launcher/ui',screen:()=> 'launcher',navigate:id=>calls.push(id)};
-  const context=vm.createContext({fake});vm.runInContext(source,context);vm.runInContext('app=fake;navigate("launcher");navigate("example-app");navigate(null)',context);
+  const context=workerContext({fake});vm.runInContext(source,context);vm.runInContext('app=fake;navigate("launcher");navigate("example-app");navigate(null)',context);
   assert.deepEqual(calls,['launcher','example-app','']);
 });
 
@@ -118,7 +136,7 @@ test('timing traces follow the mount generation and ignore earlier control packe
     path:()=> 'layout-lab',screen:()=> 'layout-lab',epoch:()=>epoch,ui_ref:()=> 'app:layout-lab/ui',state_ref:()=> 'state',
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
     text_generation:()=>1,text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'App',title:()=> 'App',controls:()=>[]};
-  let time=100;const context=vm.createContext({fake,timestamp,performance:{timeOrigin:1700000000000,now:()=>time++},Date,postMessage:m=>messages.push(m)});
+  let time=100;const context=workerContext({fake,timestamp,performance:{timeOrigin:1700000000000,now:()=>time++},Date,postMessage:m=>messages.push(m)});
   vm.runInContext(source,context);vm.runInContext('app=fake;timings=true;transportReady=true;transportEpoch=1',context);
   await context.onmessage({data:{type:'activate',id:12,timing:{id:7}}});
   const sent=messages.filter(m=>m.type==='state-send');assert.equal(sent.length,2);assert.equal(sent[0].timing,undefined);assert.equal(sent[1].timing.id,7);assert.equal(sent[1].timing.epoch,2);

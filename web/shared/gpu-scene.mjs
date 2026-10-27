@@ -152,13 +152,13 @@ export class SceneRenderer {
   }
   prepare(layers){
     this.assertReady();if(layers.every(layer=>layer.preparedGeneration===this.cacheGeneration))return;
-    const gl=this.gl,requests=[];for(const layer of layers){for(let i=0;i<layer.draws.length;i+=3){if(layer.draws[i]!==1)continue;const em=layer.textStyles[i/3]||0;for(let vertex=layer.draws[i+1];vertex<layer.draws[i+1]+layer.draws[i+2];vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length,em,this.stableTextQuads?3:2);if(glyph)requests.push(glyph);}}}
+    const gl=this.gl,requests=[];for(const layer of layers){if(layer.preparedGeneration===this.cacheGeneration)continue;for(let i=0;i<layer.draws.length;i+=3){if(layer.draws[i]!==1)continue;const em=layer.textStyles[i/3]||0;for(let vertex=layer.draws[i+1];vertex<layer.draws[i+1]+layer.draws[i+2];vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length,em,this.stableTextQuads?3:2);if(glyph)requests.push(glyph);}}}
 
     // Predict shelf use before invalidating any UVs. Reset at most once, before drawing.
     let x=this.cacheX,y=this.cacheY,row=this.cacheRow,full=false;const unseen=new Set();for(const glyph of requests){if(this.cache.has(glyph.key)||unseen.has(glyph.key))continue;unseen.add(glyph.key);if(this.cache.size+unseen.size>MAX_CACHE_ENTRIES){full=true;break;}if(x+glyph.width>ATLAS_SIZE){x=0;y+=row;row=0;}if(y+glyph.height>ATLAS_SIZE){full=true;break;}x+=glyph.width;row=Math.max(row,glyph.height);}
     if(full){this.cache.clear();this.cacheX=0;this.cacheY=0;this.cacheRow=0;this.cacheGeneration++;this.cacheStats.resets++;}
     let bound=false;const previousViewport=gl.getParameter(gl.VIEWPORT),previousFramebuffer=gl.getParameter(gl.FRAMEBUFFER_BINDING);
-    try{for(const layer of layers){const runs=[],cached=[],groups=[];
+    try{for(const layer of layers){if(layer.preparedGeneration===this.cacheGeneration)continue;const runs=[],cached=[],groups=[];
       for(let i=0;i<layer.draws.length;i+=3){const kind=layer.draws[i],first=layer.draws[i+1],count=layer.draws[i+2];if(kind===0){appendRun(runs,kind,first,count,groups,i/3,first);continue;}
         for(let vertex=first;vertex<first+count;vertex+=4){const glyph=this.atlasScale===0&&layer.textViews.length?null:cacheGlyph(layer.glyphVertices,vertex*16,this.scaleX,this.scaleY,this.atlasScale,this.stableTextQuads&&!!layer.textViews.length,layer.textStyles[i/3]||0,this.stableTextQuads?3:2);let tile=glyph&&this.cache.get(glyph.key);
           if(tile)this.cacheStats.hits++;
@@ -277,5 +277,5 @@ class SceneLayer {
       if(view)gl.disable(gl.SCISSOR_TEST);
     }
   }
-  dispose(){if(this.invalid)return;this.owner.gl.deleteBuffer(this.geometry);this.owner.gl.deleteBuffer(this.text);this.owner.gl.deleteBuffer(this.cached);this.owner.layers.delete(this);this.invalid=true;this.draws=new Uint32Array();}
+  dispose(){if(!this.invalid){this.owner.gl.deleteBuffer(this.geometry);this.owner.gl.deleteBuffer(this.text);this.owner.gl.deleteBuffer(this.cached);}this.owner.layers.delete(this);this.invalid=true;this.draws=new Uint32Array();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.preparedDraws=null;this.preparedGroups=[];}
 }

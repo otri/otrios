@@ -2,6 +2,7 @@
 //! Opt-in app-scoped Canvas runtime. No filesystem or network access in guest code.
 mod behavior;
 mod client;
+pub mod document;
 pub mod reflow;
 mod selection;
 mod state;
@@ -27,9 +28,13 @@ pub type Result<T> = std::result::Result<T, String>;
 pub const MAX_BYTES: usize = 512 * 1024;
 /// UI schema version is independent of the unchanged state sync protocol.
 pub fn validate_ui_format(ui: &Ui) -> Result<()> {
-    if !matches!(ui.format.as_str(), "otrios-canvas-v2" | "otrios-canvas-v3")
-        || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
-            && ui.format != "otrios-canvas-v3")
+    if !matches!(
+        ui.format.as_str(),
+        "otrios-canvas-v2" | "otrios-canvas-v3" | "otrios-canvas-v4"
+    ) || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
+        && !matches!(ui.format.as_str(), "otrios-canvas-v3" | "otrios-canvas-v4"))
+        || (matches!(ui.presentation, Some(Presentation::TextDocument { .. }))
+            && ui.format != "otrios-canvas-v4")
     {
         return Err("Unsupported Canvas UI format".into());
     }
