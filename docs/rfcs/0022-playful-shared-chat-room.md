@@ -6,28 +6,32 @@ the design is agreed. Native and browser ship the same room and behavior.
 
 ## Experience
 
-Add **Chat Room** to Home alongside Test Playground and Monitoring. The preserved
-Lunar concept is **Moon Lounge**, `#moon-lounge`, with the topic “Low gravity. High nonsense.”
-Use the existing navy, lime and teal app style. Keep Home's compact icon, title
-and subheading cards. This is a shared app, rather than another Playground demo.
+Add **Chat Room** to Home alongside Test Playground and Monitoring. The current
+design direction is **The Brass Relay**: a Steampunk telegraph room with the topic
+“Good company. Questionable engineering.” Keep Home's compact icon, title and
+subheading cards. This is a shared app, rather than another Playground demo.
 
-The recommended **Lounge** layout has a roomy message stream, an IRC-style member
-rail, a small live-draft stage and the composer. A **Terminal** mockup alternative
-uses denser timestamped rows and a compact member strip. Both have the same
-capabilities. On narrow displays, Members opens a sheet; typing remains visible
-above the composer. Avoid a channel sidebar while there is only one room.
+The user prefers the **Lounge** layout: a roomy message stream, an IRC-style
+member rail, a small live-draft stage and a compact composer. On narrow displays,
+Members opens a sheet; typing remains visible above the composer. Avoid a channel
+sidebar while there is only one room. Day separators show only Today, Yesterday
+or the date on day changes; omit the redundant channel-name breadcrumb.
 
-### Theme decision: preserve Lunar and explore Steampunk
+### Theme direction: Steampunk Lounge, with Lunar preserved
 
 The user has a Steampunk identity and requested that the Lunar theme remain
 available for review before replacing anything. **Do not erase the Lunar design.**
-Theme/name selection remains open; it does not change the shared room mechanics.
+The later feedback favors a stronger Steampunk treatment in Lounge mode; it
+does not change the shared room mechanics. The original **Moon Lounge** Lunar
+mockup remains available for comparison.
 
 The Steampunk direction is **The Brass Relay**, `#brass-relay`: a shared telegraph
-room with brass fittings, copper accents, dark enamel and warm paper. A cozy
-**Drawing Room** layout corresponds to Lounge, while a compact **Telegraph Office**
-corresponds to Terminal. Keep ornament sparse, touch targets large and timestamps
-readable; the genre must not make navigation or moderation cryptic.
+room with brass fittings, copper accents, dark enamel and warm paper. Keep the
+chosen Lounge layout, using an engraved serif nameplate, restrained brass bevels,
+clockwork emblems and a telegraph-style incoming draft strip. Keep ornament sparse,
+touch targets large and timestamps readable; the genre must not make navigation
+or moderation cryptic. A separate Terminal/Telegraph Office variant is no longer
+needed for the Steampunk preview.
 
 Possible elements to compare with Lunar:
 
@@ -37,19 +41,20 @@ Possible elements to compare with Lunar:
 | Live drafts | Incoming transmissions with small caret sparks | Telegraph transmissions with copper sparks and an optional brief steam wisp |
 | Member list | On the moon; standard `@` Admin markers | Operators on the wire; the same `@` markers and explicit Admin labels |
 | Ambient character | Low gravity, snack jokes, confetti | Engraved headings, restrained mechanical details, dispatch-style notices |
-| Command flavor | `/boop`, `/confetti` | Consider `/salute` and `/steam` as bounded cosmetic alternatives |
+| Command flavor | `/boop`, `/confetti` | `/salute` and `/steam` as bounded cosmetic alternatives |
 
 Avoid full-screen moving gears, permanent steam, physical dial controls for
 ordinary text actions, or invented telemetry gauges. Both themes use the same
-particle budget and reduced-motion behavior. The Lunar interactive mockup is the
-current review surface; the Steampunk concept is proposed, not yet substituted.
+particle budget and reduced-motion behavior. A separate interactive Brass Relay
+preview shows the current direction without overwriting the Lunar source.
 
 ### Shared behavior
 
-- Join immediately as a funny name, such as Waffle Wizard, Disco Turnip or
-  Captain Crumb. Change the name and avatar through your profile button.
-- Offer 64 distinct, named, bundled vector avatar designs: animals, snacks,
-  space oddities and tiny machines. Palette choices are additional, not counted
+- Join immediately as a funny name, such as Professor Piston, Lady Gearbox or
+  Captain Sprocket. Change the name and avatar through your profile button.
+- Offer 64 distinct, named, bundled vector avatar designs: clockwork animals,
+  airships, diving helmets, automatons and peculiar inventions. Palette choices
+  are additional, not counted
   as different icons. Cache their masks; require no downloaded images or emoji
   font support. The mockup previews a subset of this proposed collection.
 - Show avatar, name, timestamp and wrapped body for each message. Use `@` plus
@@ -58,11 +63,17 @@ current review surface; the Steampunk concept is proposed, not yet substituted.
 - Clearly disclose **Live drafts on — everyone can see what you type** before
   the first keystroke. A composer toggle permits private composition. Shared
   drafts are temporary, visually distinct from sent messages, and never history.
+- Keep the empty composer to one compact row: command key, expanding text field,
+  Live/Private control and Send. Remove the redundant room label and permanent
+  helper/status paragraphs. Show the disclosure once on first focus and retain
+  an accessible description and privacy tooltip. Switching Live/Private updates
+  the control without a separate confirmation notice. Other brief operation
+  feedback overlays the draft area and expires; it does not enlarge the composer.
 - Keep up to three active remote drafts in a separate stage, with an “N more
   typing” summary. Updating a draft must not move previously sent messages.
   Screen readers get a debounced typing summary, not every draft character.
-- Emit small caret sparks while typing, a little ripple for `/boop`, and a short
-  confetti burst for `/confetti`. No perpetual animation or sound. Respect
+- Emit small copper caret sparks while typing, a hat-tip effect for `/salute`,
+  and a brief puff for `/steam`. No perpetual animation or sound. Respect
   reduced motion and offer Quiet / Playful / Off effects without hiding content.
 - New messages follow the bottom only when already there. While reading older
   messages, preserve the reading anchor and show an “N new messages” button.
@@ -87,11 +98,11 @@ not display names supplied by the client, identify moderation targets.
 | `/nick name` | Change your name; roster and subsequent messages update |
 | `/avatar` | Open the avatar picker |
 | `/who` | Open Members, with operator markers and connection status |
-| `/me action` | Send a plain-text action, e.g. “Waffle Wizard adopts a moon rock” |
+| `/me action` | Send a plain-text action, e.g. “Professor Piston oils the clockwork pigeon” |
 | `/roll [NdM]` | Authority chooses and publishes a bounded dice result; default 1d20 |
 | `/shrug [text]` | Append a bundled text shrug to an ordinary message |
-| `/boop name` | Send one small, rate-limited greeting effect, never change input focus |
-| `/confetti` | One bounded room burst; receiver effect preferences still apply |
+| `/salute name` | Send one small, rate-limited hat-tip effect, never change input focus |
+| `/steam` | One bounded steam puff; receiver effect preferences still apply |
 | `/topic text` | Admin changes the topic; publish a system event |
 | `/kick name [reason]` | Admin previews target and reason, then confirms removal |
 
@@ -313,3 +324,7 @@ and local interactions for escaped text, profiles/avatars, private composition,
 dice, particles, kick cleanup and help. Desktop and narrow profile screenshots
 were visually inspected. These validate the plan/preview, not implemented chat
 transport, authentication, persistence or native performance.
+
+The revised Steampunk preview keeps Lounge as the sole layout, with a compact
+composer and date-only separators. Its browser checks cover light/dark appearance,
+desktop/phone widths, profiles, private drafts, commands, effects and kick cleanup.
