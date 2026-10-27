@@ -1,5 +1,6 @@
 {
   "date": "2026-10-27",
+  "cleaned_source": "d3eb5e4475e70e8ade6a1b071772f446e27a43ce",
   "qualified_pre_cleanup_source": "0e73043316b464031401b1f6d14c0423904776c4",
   "selection": "Float CPU geometry, GL_FLOAT positions, retained viewports/layout and adaptive alpha coverage. Fixed-point and GPU position-format pilots removed. No new float SIMD optimization is claimed.",
   "staged_release": "1a66f19cea17426e058f34bd19caddc2b5e536f9312ba1c677bf63a7a0ec6bab",
@@ -400,6 +401,17 @@
       "uncompressed_bytes": 599587924,
       "archive_bytes": 256514700,
       "kept_original_baseline": "target/native-retained-fixed/baseline"
+    },
+    "final_remote_trials": {
+      "removed_files": 93,
+      "freed_bytes": 61299050,
+      "archive_sha256": "405f402e5607bf39d3273a113edaf123dc5d76af36db42de382e469474e418db",
+      "disk": "Filesystem     1K-blocks   Used Available Use% Mounted on\ntmpfs             497368 297452    199916  60% /tmp\n",
+      "services": [
+        "active",
+        "active",
+        "active"
+      ]
     }
   },
   "signed_native_demo": {
@@ -567,5 +579,43 @@
       "compose_submit_p50_us": 4560,
       "compose_submit_p95_us": 12241
     }
-  ]
+  ],
+  "deployment": {
+    "release": "1a66f19cea17426e058f34bd19caddc2b5e536f9312ba1c677bf63a7a0ec6bab",
+    "services": [
+      "active",
+      "active",
+      "active"
+    ],
+    "renderer_flags": {},
+    "hosts": [
+      {
+        "sha256": "6e257365f691f57226974b98cab055fc9b2eecba41861e7455c6de8f457d0a6c",
+        "ready": {
+          "renderer": "gles2-direct",
+          "release": "1a66f19cea17426e058f34bd19caddc2b5e536f9312ba1c677bf63a7a0ec6bab",
+          "runtime_release": "1a66f19cea17426e058f34bd19caddc2b5e536f9312ba1c677bf63a7a0ec6bab",
+          "ui_release": "1a66f19cea17426e058f34bd19caddc2b5e536f9312ba1c677bf63a7a0ec6bab",
+          "screen": "",
+          "stream_ready": true,
+          "state_confirmed": true,
+          "rotation": 90,
+          "touch_calibrated": true,
+          "touch_devices": 1,
+          "reload_ready": true,
+          "ui_ref": "app:home/ui",
+          "output": [
+            800,
+            1280
+          ],
+          "scanout_format": "RGB565",
+          "pending_commands": 0,
+          "input_busy": false
+        }
+      }
+    ],
+    "server_sha256": "4aaa15033fd5bbad6979cd45786816ccf24a7672780d9ecea27a7d789c81a31a"
+  },
+  "public_acceptance": "PASS 99 checks: public signed code, release/session negotiation, private/admin isolation and anonymous denial (login not tested)",
+  "browser_acceptance": "{\"passed\":true,\"checks\":[\"Layout Lab owns child route\",\"full text page uses real WebGL\",\"two-axis touch drag and release momentum\",\"cancel stops coasting\",\"panning is client-local\",\"portrait reflow and bounds\",\"Back and Home navigation\"],\"initial\":{\"offset\":[0,0],\"limit\":[1151.044,1148],\"active\":false},\"dragged\":{\"offset\":[180,180],\"limit\":[1151.044,1148],\"active\":true},\"coast\":{\"offset\":[254.44609,254.44609],\"limit\":[1151.044,1148],\"active\":true},\"portrait\":{\"offset\":[317.13577,317.13577],\"limit\":[1583.044,660],\"active\":false},\"fps\":{\"label\":\"38.0 fps - retained text / momentum scroll\",\"active\":true,\"samples\":19},\"cache\":{\"hits\":82304,\"misses\":209,\"fallbacks\":0,\"resets\":3,\"bytes\":4194304}}"
 }

@@ -249,3 +249,22 @@ The [cleanup evidence record](data/native-renderer-cleanup-2026-10-27.json)
 records the selected artifacts and acceptance results. Future SIMD work can
 operate on float data; adoption requires a measured batch and complete-frame
 benefit under the same pixel gates.
+
+
+Cleanup source `d3eb5e4475e70e8ade6a1b071772f446e27a43ce` is deployed as signed
+release `1a66f19cea17426e058f34bd19caddc2b5e536f9312ba1c677bf63a7a0ec6bab`.
+The running native executable and authority match the staged hashes. Authority,
+native dashboard and tunnel are active; state is confirmed, release identities
+agree, pending edits are zero, renderer overrides are absent, and touch
+calibration/rotation remain intact. All 99 public/isolation checks and deployed
+Chromium momentum/cancel, client-local state, portrait and navigation checks pass.
+Authenticated login is outside the public-only check. The previous release is
+preserved as an operational rollback; canonical state was retained. The final
+93 trial files (61,299,050 bytes) were removed only after matching their hashes
+to local copies or the archive of remaining trial logs. The ARM build container
+was restored to its original stopped state.
+
+The cleaned build's raw probes, selected executable, captures, reports and trial
+controllers are preserved in ignored
+`target/renderer-cleanup/current-trials-evidence.tar.gz` with per-file hashes;
+unpacked generated copies and temporary experiment controllers are removed.
