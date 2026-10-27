@@ -1,0 +1,51 @@
+{
+  "browser": {
+    "passed": true,
+    "checks": [
+      "unified Home in both orientations",
+      "independent persistent guest cookies",
+      "live draft visibility and private clearing",
+      "bidirectional durable messages",
+      "64-avatar paging and profile rename",
+      "wrapped composer grows and scrolls its caret into view",
+      "no app keyboard in browsers",
+      "multiline paste",
+      "identity and history survive reload",
+      "commands and particles",
+      "member dialog close control",
+      "responsive retained transcript",
+      "WebGL loss/recovery replays resources and preserves identity"
+    ]
+  },
+  "activation": {
+    "renderer": "gles2-direct",
+    "video": "DRM",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ],
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ],
+    "ui_ref": "app:brass-relay/ui",
+    "state_ref": "app:brass-relay/state",
+    "state_confirmed": true,
+    "stream_ready": true,
+    "reload_ready": true,
+    "pending_commands": 0,
+    "release": "8d9e948dc9c89dee6398e4d96216b327e2cbb6acc9abd3a3cb47f00a4e53e134",
+    "native_sha256": "b57501988bad892a326da4dd9e5c0c1e2c631c78484df409c8edec0b8939412a",
+    "calibration_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e",
+    "services": [
+      "active",
+      "active",
+      "active"
+    ]
+  },
+  "rollback": "/var/lib/otrios-authority/rollback/2026-10-27-chat-input-fixes",
+  "collection_sync_migration": "proposed in RFC 0024; not implemented in this release"
+}

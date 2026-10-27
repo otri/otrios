@@ -146,6 +146,7 @@ pub struct Client {
     chat_enabled: bool,
     chat_native: bool,
     chat_reduced_motion: bool,
+    external_keyboard: bool,
     viewport: Option<[f32; 2]>,
     wire_clock: u64,
     decode_budget: DecodeBudget,
@@ -170,6 +171,14 @@ pub struct Client {
     dispatch: DispatchPolicy,
 }
 impl Client {
+    /// The host supplies text input; retain editor focus without drawing keys.
+    pub fn set_software_keyboard(&mut self, enabled: bool) {
+        self.external_keyboard = !enabled;
+        if let Some(m) = &mut self.active {
+            m.keyboard.set_enabled(enabled);
+            m.invalidate();
+        }
+    }
     pub fn chat_info(&self) -> Option<super::chat::Info> {
         self.active
             .as_ref()?
@@ -235,7 +244,7 @@ impl Client {
         let Some(chat) = &mut m.chat else {
             return Ok(false);
         };
-        let had_drafts = chat.has_drafts();
+        let old_bounds = (chat.input_height(), chat.draft_height());
         if let Some(token) = chat.receive(event, follow)? {
             self.chat_credential = Some(token.clone());
             self.chat_new_credential = Some(token);
@@ -243,7 +252,7 @@ impl Client {
         if let Some(viewport) = &mut m.text_document {
             chat.synchronize_document(viewport)?;
         }
-        if had_drafts != chat.has_drafts() {
+        if old_bounds != (chat.input_height(), chat.draft_height()) {
             m.invalidate();
         } else if !cosmetic {
             m.invalidate_local_scene();
@@ -958,6 +967,7 @@ impl Client {
                         candidate.order_editing = old.order_editing;
                     }
                     candidate.session_controls = self.session_controls;
+                    candidate.keyboard.set_enabled(!self.external_keyboard);
                     candidate.invalidate();
                     cached_scene(&candidate)?;
                     Ok(candidate)
@@ -1268,6 +1278,9 @@ impl Client {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 reader.cancel();
             } else if let Some(changed) = reader.pointer(&scene, event, at) {
+                if changed && m.chat.is_some() {
+                    m.invalidate_presentation();
+                }
                 return Ok(changed);
             }
         }
@@ -1654,7 +1667,7 @@ impl Client {
         m.now = now;
         let (chat_changed, chat_bounds_changed, chat_effects) = if let Some(chat) = &mut m.chat {
             chat.prepare(m.viewport, m.keyboard.visible, m.font.clone());
-            let had_drafts = chat.has_drafts();
+            let old_bounds = (chat.input_height(), chat.draft_height());
             let (changed, effects) = chat.tick(now, (wall.max(0) as u64).saturating_mul(1000));
             if let Some(doc) = &mut m.text_document {
                 if doc.at_top() {
@@ -1662,7 +1675,11 @@ impl Client {
                 }
                 chat.synchronize_document(doc)?;
             }
-            (changed, had_drafts != chat.has_drafts(), effects)
+            (
+                changed,
+                old_bounds != (chat.input_height(), chat.draft_height()),
+                effects,
+            )
         } else {
             (false, false, false)
         };

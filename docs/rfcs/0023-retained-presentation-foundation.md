@@ -56,6 +56,9 @@ context recovery must replay resources, and both signed hosts must qualify.
 
 ## Delivery 2: Stable structured document blocks
 
+[RFC 0024](0024-viewport-scoped-collections.md) connects stable message blocks to
+the missing reusable viewport-scoped collection synchronization boundary.
+
 Give messages/paragraphs stable source identities with immutable content and
 separate order. Preserve existing layout summaries, chunks and viewport anchors
 when prepending or appending pages. Cache layout by block revision, width, font

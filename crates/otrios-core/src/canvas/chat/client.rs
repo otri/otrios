@@ -27,7 +27,13 @@ pub(super) enum Focus {
     Username,
     Password,
 }
+pub(super) enum Spark {
+    Compose(usize),
+    Draft(String, usize),
+}
 pub(super) struct RemoteDraft {
+    pub layout: super::text::Wrapped,
+    pub caret: usize,
     pub text: String,
     pub expires: u64,
     pub generation: u64,
@@ -63,6 +69,8 @@ pub struct Client {
     pub(super) panel: Panel,
     pub(super) focus: Option<Focus>,
     pub(super) compose: TextBuffer,
+    pub(super) compose_layout: super::text::Wrapped,
+    pending_spark: Option<Spark>,
     pub(super) nickname: TextBuffer,
     pub(super) username: TextBuffer,
     pub(super) password: TextBuffer,
@@ -133,6 +141,8 @@ impl Default for Client {
             panel: Panel::None,
             focus: None,
             compose: TextBuffer::multiline(2048),
+            compose_layout: Default::default(),
+            pending_spark: None,
             nickname: TextBuffer::with_limit(96),
             username: TextBuffer::with_limit(320),
             password: TextBuffer::with_limit(1024),
@@ -214,9 +224,6 @@ fn day_label(day: u64, today: u64) -> String {
     format!("{year:04}-{m:02}-{d:02}")
 }
 impl Client {
-    pub(crate) fn has_drafts(&self) -> bool {
-        !self.drafts.is_empty()
-    }
     pub(crate) fn prepare(
         &mut self,
         size: [f32; 2],
@@ -225,6 +232,7 @@ impl Client {
     ) {
         self.viewport = [size[0], super::view::room_height(size, keyboard)];
         self.font = font;
+        self.refresh_text_layouts();
     }
     pub(crate) fn native(&mut self, native: bool) {
         self.native = native;
@@ -604,20 +612,37 @@ impl Client {
                     && self.drafts.len() < 68
                     && self.members.iter().any(|m| m.profile.id == participant)
                 {
+                    let changed = super::text::changed_end(
+                        self.drafts
+                            .get(&participant)
+                            .map_or("", |d| d.text.as_str()),
+                        &text,
+                    );
+                    let caret = changed.unwrap_or_else(|| {
+                        self.drafts
+                            .get(&participant)
+                            .map_or(text.len(), |d| d.caret)
+                    });
                     let deadline = self.now + expires.saturating_sub(self.wall).min(3000);
+                    let layout = self
+                        .drafts
+                        .remove(&participant)
+                        .map_or_else(Default::default, |d| d.layout);
                     self.drafts.insert(
-                        participant,
+                        participant.clone(),
                         RemoteDraft {
                             text,
+                            caret,
+                            layout,
                             expires: deadline,
                             generation,
                             revision,
                         },
                     );
-                    self.emit(
-                        false,
-                        [self.viewport[0].min(1000.) * 0.5, self.viewport[1] - 136.],
-                    );
+                    self.refresh_text_layouts();
+                    if let Some(byte) = changed {
+                        self.pending_spark = Some(Spark::Draft(participant, byte));
+                    }
                 } else {
                     self.drafts.remove(&participant);
                 }
@@ -681,10 +706,20 @@ impl Client {
         if clear {
             self.notice.clear();
         }
+        self.refresh_text_layouts();
         let moving = self.input_view.tick(now);
+        let mut emitted = false;
+        if let Some(anchor) = self.pending_spark.take() {
+            if let Some(position) = self.spark_origin(&anchor) {
+                self.emit(false, position);
+                emitted = true;
+            } else if matches!(anchor, Spark::Compose(_)) && self.input_view.animating() {
+                self.pending_spark = Some(anchor);
+            }
+        }
         (
             date_changed || drafts != self.drafts.len() || clear || moving,
-            old != 0,
+            old != 0 || emitted,
         )
     }
     fn emit(&mut self, steam: bool, position: [f32; 2]) {
@@ -737,21 +772,16 @@ impl Client {
             Some(Focus::Password) => &mut self.password,
             None => return Ok(false),
         };
+        let old_text = buffer.text().to_owned();
         let changed = buffer.edit(edit);
-        self.draft_dirty |= self.focus == Some(Focus::Compose) && changed;
-        if let Some(font) = &self.font {
-            let width = self.input_width();
-            let content = font.text_width(&self.compose.display(true), 2.);
-            self.input_view.bounds(content, width);
-            self.input_view.follow(
-                self.compose.caret_x(font, 2.),
-                font.text_width("|", 2.),
-                width,
-                self.now,
-            );
-        }
-        if changed && self.focus == Some(Focus::Compose) {
-            self.emit(false, [self.input_left() + 32., self.compose_y() + 12.]);
+        let text_changed = old_text != buffer.text();
+        self.draft_dirty |= self.focus == Some(Focus::Compose) && text_changed;
+        self.refresh_text_layouts();
+        if self.focus == Some(Focus::Compose) {
+            self.follow_caret();
+            if text_changed {
+                self.pending_spark = Some(Spark::Compose(self.compose.cursor()));
+            }
         }
         Ok(changed)
     }
@@ -814,6 +844,7 @@ impl Client {
         });
         self.compose.replace("");
         self.input_view = Default::default();
+        self.pending_spark = None;
         self.draft_dirty = true;
         self.tail = true;
         Ok(())
@@ -976,28 +1007,29 @@ impl Client {
             if x < self.input_left()
                 || x >= self.input_left() + self.input_width()
                 || y < self.compose_y()
-                || y > self.compose_y() + 60.
+                || y > self.compose_y() + self.input_height()
             {
                 return None;
             }
-            self.input_view.down(event.id, x, now);
+            self.input_view.down(event.id, y, now);
             return Some(true);
         }
         if !self.input_view.owns(event.id) {
             return None;
         }
         match event.phase {
-            PointerPhase::Move => self.input_view.motion(x, now),
+            PointerPhase::Move => self.input_view.motion(y, now),
             PointerPhase::Up => {
-                let dragged = self.input_view.up(x, now);
+                let dragged = self.input_view.up(y, now);
                 if !dragged {
                     self.focus = Some(Focus::Compose);
                     if let Some(font) = &self.font {
-                        let at = self.compose.hit_test(
-                            x - self.input_left() + self.input_view.offset,
+                        let at = self.compose_layout.hit_test(
+                            [
+                                x - self.input_left(),
+                                y - self.compose_y() - 12. + self.input_view.offset,
+                            ],
                             font,
-                            2.,
-                            true,
                         );
                         self.compose.place_cursor(at);
                     }
@@ -1019,7 +1051,100 @@ impl Client {
         self.page_width() - 284.
     }
     pub(super) fn compose_y(&self) -> f32 {
-        self.viewport[1] - 88.
+        self.viewport[1] - 28. - self.input_height()
+    }
+    fn refresh_text_layouts(&mut self) {
+        let mut rewrapped = false;
+        if let Some(font) = &self.font {
+            rewrapped = self
+                .compose_layout
+                .update(self.compose.text(), self.input_width(), font);
+            let width = self.page_width() - 52.;
+            for draft in self.drafts.values_mut() {
+                draft.layout.update(&draft.text, width, font);
+            }
+        }
+        self.input_view.bounds(
+            self.compose_layout.lines.len() as f32 * self.line_height(),
+            self.input_height() - 24.,
+        );
+        if rewrapped && self.focus == Some(Focus::Compose) {
+            self.follow_caret();
+        }
+    }
+    fn follow_caret(&mut self) {
+        if let Some(font) = &self.font {
+            let caret = self.compose_layout.position(self.compose.cursor(), font);
+            self.input_view.follow(
+                caret[1],
+                self.line_height(),
+                self.input_height() - 24.,
+                self.now,
+            );
+        }
+    }
+    pub(super) fn line_height(&self) -> f32 {
+        self.compose_layout.line_height.max(20.)
+    }
+    pub(crate) fn input_height(&self) -> f32 {
+        (self.compose_layout.lines.len().clamp(1, 4) as f32 * self.line_height() + 24.).max(60.)
+    }
+    pub(crate) fn draft_height(&self) -> f32 {
+        self.drafts.values().next().map_or(32., |d| {
+            (d.layout.lines.len().clamp(1, 4) as f32 * d.layout.line_height.max(20.) + 36.).max(72.)
+        })
+    }
+    pub(super) fn draft_y(&self) -> f32 {
+        (self.compose_y() - 4. - self.draft_height()).max(172.)
+    }
+    pub(super) fn draft_start(draft: &RemoteDraft) -> usize {
+        draft.layout.line_at(draft.caret).saturating_sub(3)
+    }
+    fn spark_origin(&self, anchor: &Spark) -> Option<[f32; 2]> {
+        if self.panel != Panel::None {
+            return None;
+        }
+        let font = self.font.as_ref()?;
+        match anchor {
+            Spark::Compose(byte) => {
+                if self.compose.text().is_empty() {
+                    return None;
+                }
+                let p = self
+                    .compose_layout
+                    .position((*byte).min(self.compose.text().len()), font);
+                let y = p[1] - self.input_view.offset;
+                (y >= -0.5 && y + self.line_height() <= self.input_height() - 23.).then_some([
+                    self.input_left() + p[0],
+                    self.compose_y() + 12. + y + self.line_height() * 0.5,
+                ])
+            }
+            Spark::Draft(id, byte) => {
+                let (visible, draft) = self.drafts.iter().next()?;
+                if visible != id {
+                    return None;
+                }
+                let p = draft.layout.position(*byte, font);
+                Some([
+                    50. + p[0],
+                    self.draft_y() + 27. + p[1]
+                        - Self::draft_start(draft) as f32 * draft.layout.line_height
+                        + draft.layout.line_height * 0.5,
+                ])
+            }
+        }
+    }
+    pub(super) fn composer_lines(&self) -> Vec<(f32, String)> {
+        self.compose_layout
+            .lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, _)| {
+                let y = i as f32 * self.line_height() - self.input_view.offset;
+                (y + self.line_height() > 0. && y < self.input_height() - 24.)
+                    .then(|| (y, self.compose_layout.display(i, None)))
+            })
+            .collect()
     }
     pub(super) fn input_display(&self, font: Option<&Font>) -> String {
         let editor = self.editor();
@@ -1115,5 +1240,136 @@ mod tests {
         client.online = true;
         let retry = decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap();
         assert_eq!(sent, retry);
+    }
+}
+
+#[cfg(test)]
+mod anchor_tests {
+    use super::*;
+    #[test]
+    fn replacement_sparks_follow_wrapped_local_and_remote_source_positions() {
+        let font = std::sync::Arc::new(crate::dashboard::font::test_font());
+        let member = Member {
+            profile: Profile {
+                id: "1".repeat(32),
+                name: "Clockwork".into(),
+                avatar: 1,
+            },
+            generation: 1,
+            admin: false,
+        };
+        let mut c = Client {
+            members: vec![member.clone()],
+            focus: Some(Focus::Compose),
+            ..Client::default()
+        };
+        c.prepare([800., 1280.], false, Some(font.clone()));
+        c.tick(1000, 1_700_000_000_000);
+        c.edit(&Edit::Commit(
+            "A brass dispatch with room to replace words.".into(),
+        ))
+        .unwrap();
+        c.tick(1100, 1_700_000_000_000);
+        let local = c.spark_origin(&Spark::Compose(c.compose.cursor())).unwrap();
+        assert_eq!(c.particles.last().unwrap().origin, local);
+        assert!(local[0] > c.input_left() + 32.);
+        c.edit(&Edit::SelectAll).unwrap();
+        let count = c.particles.len();
+        c.tick(1150, 1_700_000_000_000);
+        assert_eq!(c.particles.len(), count);
+        c.edit(&Edit::Commit(
+            "An exceedingly long clockwork dispatch. ".repeat(20),
+        ))
+        .unwrap();
+        for now in (1200..1600).step_by(20) {
+            c.tick(now, 1_700_000_000_000);
+        }
+        assert!(c.compose_layout.lines.len() > 4);
+        assert!(c.input_height() <= c.line_height() * 4. + 24.);
+        assert!(
+            c.spark_origin(&Spark::Compose(c.compose.cursor()))
+                .is_some()
+        );
+        c.particles.clear();
+        let base = crate::dashboard::scene::Scene::new(crate::dashboard::components::canvas(
+            1,
+            otrios_interfaces::scene::Rect::new(0., 0., 800., 1280.),
+            vec![],
+        ))
+        .unwrap();
+        let composer_id = |c: &Client| {
+            c.scene(&base, [800., 1280.], false)
+                .unwrap()
+                .controls()
+                .into_iter()
+                .find(|n| {
+                    n.node
+                        .semantics
+                        .as_ref()
+                        .is_some_and(|s| s.label == "Message composer")
+                })
+                .unwrap()
+                .node
+                .id
+        };
+        let control = composer_id(&c);
+        for (revision, text) in [
+            (1, "A live draft with an unchanged tail"),
+            (2, "A live REPLACEMENT with an unchanged tail"),
+        ] {
+            c.receive(
+                Event::Draft {
+                    participant: member.profile.id.clone(),
+                    generation: 1,
+                    revision,
+                    text: text.into(),
+                    expires: 1_700_000_003_000,
+                },
+                false,
+            )
+            .unwrap();
+            c.tick(1700 + revision * 100, 1_700_000_000_000);
+        }
+        let expected = c
+            .spark_origin(&Spark::Draft(member.profile.id.clone(), 18))
+            .unwrap();
+        assert_eq!(c.drafts[&member.profile.id].caret, 18);
+        assert_eq!(c.particles.last().unwrap().origin, expected);
+        let count = c.particles.len();
+        c.receive(
+            Event::Draft {
+                participant: member.profile.id.clone(),
+                generation: 1,
+                revision: 3,
+                text: "A live REPLACEMENT with an unchanged tail".into(),
+                expires: 1_700_000_003_000,
+            },
+            false,
+        )
+        .unwrap();
+        c.tick(2000, 1_700_000_000_000);
+        assert_eq!(composer_id(&c), control);
+        c.receive(
+            Event::Draft {
+                participant: member.profile.id.clone(),
+                generation: 1,
+                revision: 4,
+                text: "A long live draft that wraps across multiple lines. ".repeat(4),
+                expires: 1_700_000_003_000,
+            },
+            false,
+        )
+        .unwrap();
+        assert!(c.draft_height() > 72.);
+        assert_eq!(
+            composer_id(&c),
+            control,
+            "Wrapped preview rows must not renumber the composer control"
+        );
+        assert_eq!(
+            c.particles.len(),
+            count,
+            "Lease renewal must not emit a typing spark"
+        );
     }
 }

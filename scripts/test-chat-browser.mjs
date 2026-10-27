@@ -53,7 +53,7 @@ try{
   await screenshot(a,'home-landscape');await click(a,'The Brass Relay','brass-relay');await online(a);
   const b=await page(800,1280,'brass-relay');await online(b);console.log('guests online');
   assert.notEqual((await info(a)).participant,(await info(b)).participant);
-  await control(a,'Message composer');await paste(a,draft);
+  await control(a,'Message composer');assert(!(await evaluate(a,"document.querySelector('#view').getAttribute('aria-label')")).includes('BKSP'),'browser input must not show the app keyboard');await paste(a,draft);
   await wait(b,"JSON.parse(document.querySelector('#revision').dataset.chat).drafts===1");
   assert.equal(await evaluate(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify(draft)})`),false,'draft is not sent history');
   await screenshot(b,'live-draft-portrait');console.log('draft visible');
@@ -70,9 +70,13 @@ try{
   await control(a,'Edit room name');await press(a,'a',2);await paste(a,nickname);await control(a,'Save profile');
   await wait(a,`JSON.parse(document.querySelector('#revision').dataset.chat).name===${JSON.stringify(nickname)}`);
   assert((await info(a)).avatar>=56);
+  const shortComposerHeight=(await controls(a)).find(c=>c.label==='Message composer').bounds[3];
   const tail='TAIL'+Date.now();
   await control(a,'Message composer');await paste(a,'Clockwork text across the field. '.repeat(20)+tail);
   await wait(a,`document.querySelector('#view').getAttribute('aria-label').includes(${JSON.stringify(tail)})`);
+  assert((await controls(a)).find(c=>c.label==='Message composer').bounds[3]>shortComposerHeight,'long composition grows into wrapped lines');
+  assert(!(await evaluate(a,"document.querySelector('#view').getAttribute('aria-label')")).includes('BKSP'));
+  await screenshot(a,'wrapped-composer');
   await press(a,'ArrowLeft');await press(a,'ArrowRight');await press(a,'Enter');
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify(tail)})`);
   await dispatch(a,'A multiline dispatch.\nSecond line preserved.');
@@ -97,7 +101,7 @@ try{
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Dispatch after graphics recovery '+nickname)})`);
   await control(a,'Back to OTriOS');await ready(a,'home','800x1280');await screenshot(a,'home-portrait');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
-  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','long composer caret follows within its margins','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
+  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{
   socket?.close();if(browser.pid&&browser.exitCode===null&&browser.signalCode===null){browser.kill('SIGTERM');await new Promise(resolve=>browser.once('exit',resolve));}await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});

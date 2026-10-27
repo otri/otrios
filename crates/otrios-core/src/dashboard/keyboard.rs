@@ -31,15 +31,25 @@ pub struct Keyboard {
     pub shift: Shift,
     pub page: u8,
     pub visible: bool,
+    disabled: bool,
     contact: Option<(u32, Option<u16>)>,
     repeat_at: Option<u64>,
 }
 impl Keyboard {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.disabled = !enabled;
+        if !enabled {
+            self.hide();
+        }
+    }
     pub fn cancel(&mut self) {
         self.contact = None;
         self.repeat_at = None;
     }
     pub fn focus(&mut self) {
+        if self.disabled {
+            return;
+        }
         self.cancel();
         if self.shift != Shift::Locked {
             self.shift = Shift::Off;
@@ -299,6 +309,9 @@ impl TextBuffer {
     }
     pub fn text(&self) -> &str {
         &self.text
+    }
+    pub fn cursor(&self) -> usize {
+        self.cursor
     }
     /// Each rendered run maps back to source byte boundaries. The local caret
     /// marker occupies glyph width, but maps both sides to the same text boundary.

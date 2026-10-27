@@ -21,7 +21,9 @@ pub struct CanvasApp {
 impl CanvasApp {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self::default()
+        let mut app = Self::default();
+        app.inner.set_software_keyboard(false);
+        app
     }
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<bool, String> {
         self.inner.set_viewport([width, height])

@@ -3413,3 +3413,148 @@ fn shared_presentation_preserves_existing_geometry_views_and_paint_order() {
         assert_eq!(replay.base.mesh.vertices, frame.base.mesh.vertices);
     }
 }
+
+#[test]
+fn host_keyboard_policy_keeps_focus_and_wrapped_composition_without_software_keys() {
+    use otrios_interfaces::keyboard::Edit;
+    use std::sync::Arc;
+    let font = Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut c = Client::default();
+    c.set_software_keyboard(false);
+    c.set_font(font);
+    activate(&mut c, brass_relay::ui(&[]), "browser-keyboard", vec![]);
+    let id = node(&c, "Message composer");
+    c.activate(c.epoch(), id).unwrap();
+    assert!(c.editing());
+    assert!(!c.keyboard_visible());
+    c.hardware_edit(&Edit::Commit(
+        "Clockwork words that must wrap rather than disappear. ".repeat(14),
+    ))
+    .unwrap();
+    for t in (1000..1400).step_by(20) {
+        c.tick(t, 1_700_000_000).unwrap();
+    }
+    let scene = c.scene().unwrap();
+    let field = scene.path(id).unwrap();
+    let bounds = field.last().unwrap().node.frame;
+    assert!(bounds.height > 60. && bounds.height < 160.);
+    assert!(!c.keyboard_visible());
+    let viewport = scene.path(60_000).unwrap();
+    let viewport = viewport.last().unwrap();
+    assert!(viewport.origin[1] + viewport.node.frame.height < field.last().unwrap().origin[1]);
+    c.set_software_keyboard(true);
+    c.show_keyboard().unwrap();
+    assert!(c.keyboard_visible());
+}
+
+#[test]
+fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
+    use otrios_interfaces::{
+        chat::{Event, Kind, Member, Message, Profile},
+        scene::{PointerEvent, PointerPhase},
+    };
+    use std::{collections::BTreeMap, sync::Arc};
+    let mut c = Client::default();
+    c.set_font(Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    ));
+    activate(&mut c, brass_relay::ui(&[]), "avatar-scroll", vec![]);
+    let member = Member {
+        profile: Profile {
+            id: "a".repeat(32),
+            name: "Captain Anchor".into(),
+            avatar: 3,
+        },
+        generation: 1,
+        admin: false,
+    };
+    let messages = (1..=40)
+        .map(|i| Message {
+            sequence: i,
+            at: 1_700_000_000_000,
+            sender: member.profile.clone(),
+            kind: Kind::Message,
+            text: format!("Dispatch {i}: ")
+                + &"A long paragraph wraps across the viewport. ".repeat(4),
+            nonce: format!("{i:032x}"),
+        })
+        .collect();
+    c.receive_chat(
+        &chat::encode_event(&Event::Welcome {
+            you: member.clone(),
+            temporary: false,
+            credential: None,
+            epoch: 1,
+            members: vec![member],
+            messages,
+            oldest: 1,
+            newest: 40,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    for t in 1000..1500 {
+        c.tick(t, 1_700_000_000).unwrap();
+    }
+    fn origins(c: &Client) -> BTreeMap<u32, f32> {
+        fn walk(n: &otrios_interfaces::scene::SceneNode, out: &mut Vec<u32>) {
+            if (5_000_000..6_000_000).contains(&n.id) && n.id.is_multiple_of(32) {
+                out.push(n.id);
+                return;
+            }
+            for child in &n.children {
+                walk(child, out);
+            }
+        }
+        let scene = c.scene().unwrap();
+        let mut ids = vec![];
+        walk(scene.root(), &mut ids);
+        ids.into_iter()
+            .map(|id| (id, scene.path(id).unwrap().last().unwrap().origin[1]))
+            .collect()
+    }
+    let before = origins(&c);
+    assert!(!before.is_empty());
+    let offset = c.resource_usage().text_document.unwrap().offset;
+    for (phase, y, t) in [
+        (PointerPhase::Down, 200., 2000),
+        (PointerPhase::Move, 250., 2050),
+    ] {
+        assert!(
+            c.pointer_at(
+                c.epoch(),
+                PointerEvent {
+                    id: 7,
+                    phase,
+                    position: [160., y]
+                },
+                t
+            )
+            .unwrap()
+        );
+    }
+    let delta = c.resource_usage().text_document.unwrap().offset - offset;
+    assert!(delta.abs() > 1.);
+    let after = origins(&c);
+    let mut matched = 0;
+    for (id, y) in before {
+        if let Some(next) = after.get(&id) {
+            assert!((f64::from(*next - y) + delta).abs() < 0.01);
+            matched += 1;
+        }
+    }
+    assert!(
+        matched > 0,
+        "Compare an avatar retained across both visible windows"
+    );
+}

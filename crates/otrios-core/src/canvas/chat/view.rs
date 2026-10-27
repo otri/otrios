@@ -11,6 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 struct Paint {
     nodes: Vec<SceneNode>,
     next: u32,
+    buttons: [u8; 201],
 }
 impl Paint {
     fn id(&mut self) -> u32 {
@@ -47,7 +48,11 @@ impl Paint {
         ));
     }
     fn button(&mut self, command: u16, r: [f32; 4], label: &str, caption: &str, primary: bool) {
-        let id = self.id();
+        // Wrapping drafts must not change the identity of later controls while
+        // a host still has an input event queued against the previous frame.
+        let occurrence = &mut self.buttons[usize::from(command)];
+        let id = 3_000_000 + u32::from(command) * 2048 + u32::from(*occurrence) * 8;
+        *occurrence += 1;
         let color = if primary { BRASS } else { CARD };
         let mut children = vec![node(
             id + 1,
@@ -135,6 +140,7 @@ impl Client {
         let mut p = Paint {
             nodes: vec![],
             next: 9_000_000,
+            buttons: [0; 201],
         };
         for particle in &self.particles {
             let t = self.now.saturating_sub(particle.at) as f32 / 1000.;
@@ -143,8 +149,11 @@ impl Client {
             let s = if particle.steam { 10. + t * 12. } else { 4. };
             let x = particle.origin[0] + particle.velocity[0] * t;
             let y = particle.origin[1] + particle.velocity[1] * t;
+            if x + s < 0. || y + s < 0. || x >= w || y >= h {
+                continue;
+            }
             p.rect(
-                [x.clamp(24., w - 24. - s), y.clamp(100., h - 24. - s), s, s],
+                [x, y, s, s],
                 color,
                 // Sparks are tiny quads. Rounded rectangles would tessellate
                 // 52 triangles and evaluate trigonometry for every particle.
@@ -162,6 +171,7 @@ impl Client {
         let mut p = Paint {
             nodes: vec![],
             next: 2_000_000,
+            buttons: [0; 201],
         };
         p.rect([0., 0., w, full_h], BG, 0.);
         p.button(
@@ -181,9 +191,18 @@ impl Client {
         );
         p.button(4, [w - 116., 24., 92., 60.], "Edit profile", "You", false);
         let page_y = 108.;
-        let draft_h = if self.drafts.is_empty() { 32. } else { 72. };
-        let content_h = (h - page_y - 92. - draft_h).max(40.);
-        p.rect([24., page_y, page_w, content_h + draft_h + 68.], CARD, 10.);
+        let draft_h = self.draft_height();
+        let content_h = self.draft_y() - page_y;
+        p.rect(
+            [
+                24.,
+                page_y,
+                page_w,
+                content_h + draft_h + self.input_height() + 8.,
+            ],
+            CARD,
+            10.,
+        );
         let mut viewport = canvas(
             u32::from(VIEWPORT),
             Rect::new(88., page_y + 16., (page_w - 80.).max(1.), content_h - 24.),
@@ -239,7 +258,7 @@ impl Client {
                 .iter()
                 .find(|m| m.profile.id == *id)
                 .map_or("Someone", |m| m.profile.name.as_str());
-            p.rect([40., dy, page_w - 32., 58.], BG, 3.);
+            p.rect([40., dy, page_w - 32., draft_h - 14.], BG, 3.);
             p.text(
                 50.,
                 dy + 5.,
@@ -255,69 +274,82 @@ impl Client {
                 1,
                 COPPER,
             );
-            p.text(
-                50.,
-                dy + 27.,
-                page_w - 52.,
-                &draft.text.graphemes(true).take(96).collect::<String>(),
-                2,
-                MUTED,
-            );
+            let start = Self::draft_start(draft);
+            for line in start..draft.layout.lines.len().min(start + 4) {
+                p.text(
+                    50.,
+                    dy + 27. + (line - start) as f32 * draft.layout.line_height,
+                    page_w - 52.,
+                    &draft.layout.display(line, None),
+                    2,
+                    MUTED,
+                );
+            }
         }
-        let cy = h - 88.;
-        p.button(19, [36., cy, 40., 60.], "Commands", "/", false);
+        let cy = self.compose_y();
+        let input_h = self.input_height();
+        p.button(19, [36., cy, 40., input_h], "Commands", "/", false);
         p.button(
             1,
-            [84., cy, page_w - 260., 60.],
+            [84., cy, page_w - 260., input_h],
             "Message composer",
             "",
             false,
         );
-        let (display, shift) = if self.compose.text().is_empty() {
-            (
+        let mut rows = vec![];
+        if self.compose.text().is_empty() {
+            let id = p.id();
+            rows.push(text(
+                id,
+                Rect::new(0., 0., self.input_width(), self.line_height()),
                 if self.focus == Some(Focus::Compose) {
-                    "|".into()
+                    "|"
                 } else {
-                    "Message...".into()
+                    "Message..."
                 },
-                0.,
-            )
-        } else if let Some(font) = &self.font {
-            let (value, shift) = self.compose.window(
-                self.input_view.offset,
-                page_w - 284.,
-                font,
-                2.,
-                self.focus == Some(Focus::Compose),
-            );
-            (
-                value
-                    .graphemes(true)
-                    .scan(0, |n, g| {
-                        *n += g.len();
-                        (*n <= 256).then_some(g)
-                    })
-                    .collect(),
-                shift,
-            )
+                2,
+                MUTED,
+            ));
         } else {
-            (self.compose.display(self.focus == Some(Focus::Compose)), 0.)
-        };
+            for (y, value) in self.composer_lines() {
+                let id = p.id();
+                rows.push(text(
+                    id,
+                    Rect::new(0., y, self.input_width(), self.line_height()),
+                    &value,
+                    2,
+                    TEXT,
+                ));
+            }
+        }
+        if !self.compose.text().is_empty()
+            && self.focus == Some(Focus::Compose)
+            && let Some(font) = &self.font
+        {
+            let caret = self.compose_layout.position(self.compose.cursor(), font);
+            let id = p.id();
+            rows.push(text(
+                id,
+                Rect::new(
+                    caret[0],
+                    caret[1] - self.input_view.offset,
+                    font.text_width("|", 2.),
+                    self.line_height(),
+                ),
+                "|",
+                2,
+                TEXT,
+            ));
+        }
         let id = p.id();
-        p.nodes.last_mut().unwrap().children.push(text(
+        p.nodes.last_mut().unwrap().children.push(canvas(
             id,
-            Rect::new(12. + shift, 20., page_w - 284., 28.),
-            &display,
-            2,
-            if self.compose.text().is_empty() {
-                MUTED
-            } else {
-                TEXT
-            },
+            Rect::new(12., 12., self.input_width(), input_h - 24.),
+            rows,
         ));
         p.button(
             5,
-            [page_w - 164., cy, 82., 60.],
+            [page_w - 164., cy, 82., input_h],
             if self.private {
                 "Private draft: enable live drafts"
             } else {
@@ -328,7 +360,7 @@ impl Client {
         );
         p.button(
             2,
-            [page_w - 74., cy, 94., 60.],
+            [page_w - 74., cy, 94., input_h],
             "Send message",
             "Send",
             true,

@@ -4,6 +4,7 @@ mod authority;
 mod client;
 pub mod icons;
 mod journal;
+mod text;
 mod view;
 use super::{Result, err};
 pub use authority::{Delivery, Room};

@@ -24,7 +24,12 @@ messages preserve your reading position; the new-dispatch control returns to the
 latest page. Older history loads in pages of at most 64 messages. The local
 window holds at most 1,024 messages. Day separators show Today, Yesterday or the
 date; this first version uses UTC for dates and timestamps. The composer supports
-horizontal panning, caret following, hardware editing and multiline paste.
+wrapped text, caret following, hardware editing and multiline paste. It grows to
+four lines, then supports vertical drag/coast preview. Live drafts wrap too.
+Browsers keep editor focus without displaying OTriOS's software keyboard; the
+native frame retains that keyboard. Typing sparks originate at the visible edit
+position, including replacements inside a remote draft; lease renewals do not
+emit sparks.
 
 | Command | Behavior |
 | --- | --- |
@@ -59,6 +64,12 @@ only adapts cookies, authentication, bounded queues and the shared WebSocket.
 Chat uses channel 3 under state protocol v6. Release discovery keeps its stable
 v1 opening envelope. A failed chat journal closes the room while release/control
 and other apps remain available. Slow room queues explicitly resynchronize.
+
+The separate chat history channel is a prototype shortcut. The intended shared
+data model uses coherent viewport-scoped collection leases, so long threads can
+use OTriOS partial synchronization without replicating the full log. See
+[RFC 0024](rfcs/0024-viewport-scoped-collections.md); that migration is proposed,
+not implemented by these UI corrections.
 
 The mode-0600 `brass-relay.journal` lives beside the authority's app state. Records
 have lengths and SHA-256 checksums; writes sync before receipt publication. A
