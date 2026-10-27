@@ -5,6 +5,11 @@ qualified and deployed. Fixed-point and alternate GPU position pilots retired.
 Further SIMD work is deferred until a measured float batch justifies it.
 Requested 2026-10-27.
 
+[RFC 0020](0020-chunked-text-documents.md) proposes the next workload: long,
+reflowed documents with bounded chunk generation, retained viewport scrolling
+and a path to rich text. Its generation measurements will determine whether
+float SIMD earns a place in the selected renderer.
+
 ## Selected outcome
 
 Keep float CPU geometry and `GL_FLOAT` GPU positions. Retain Canvas layout/editor
