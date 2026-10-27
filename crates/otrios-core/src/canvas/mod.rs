@@ -4,6 +4,7 @@ mod behavior;
 pub mod chat;
 mod client;
 pub mod document;
+pub mod presentation;
 pub mod reflow;
 mod selection;
 mod state;

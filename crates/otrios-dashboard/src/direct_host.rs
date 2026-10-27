@@ -101,6 +101,7 @@ pub(super) fn run() -> Result<(), String> {
     let mut reflow_serial = None;
     let mut retained = None;
     let mut retained_overlay = None;
+    let mut effect_revision = None;
     let mut hud = u64::MAX;
     let mut scroll_meter = otrios_core::canvas::text_scroll::FrameMeter::default();
     let mut scroll_active = false;
@@ -139,7 +140,10 @@ pub(super) fn run() -> Result<(), String> {
                 if let Some(position) = surface.touch_for(
                     calibration,
                     [e.x, e.y],
-                    model.as_ref().map(|f| f.viewport).unwrap_or([1280., 800.]),
+                    model
+                        .as_ref()
+                        .map(|f| f.paint.viewport)
+                        .unwrap_or([1280., 800.]),
                 ) {
                     send(Input::CanvasPointer(
                         model.as_ref().map(|f| f.epoch).unwrap_or(0),
@@ -161,7 +165,7 @@ pub(super) fn run() -> Result<(), String> {
             while let Ok(next) = frame_rx.try_recv() {
                 if model
                     .as_ref()
-                    .is_some_and(|old| old.viewport != next.viewport)
+                    .is_some_and(|old| old.paint.viewport != next.paint.viewport)
                 {
                     hud = u64::MAX;
                 }
@@ -172,6 +176,7 @@ pub(super) fn run() -> Result<(), String> {
                 }) {
                     display.retire_slot(1)?;
                     retained_overlay = None;
+                    effect_revision = None;
                     display.upload_scene(2, &[], &[], &[])?;
                     presenter = Presenter::default();
                     scroll_meter = Default::default();
@@ -185,15 +190,15 @@ pub(super) fn run() -> Result<(), String> {
             if let Some(f) = &model {
                 let animated = f.motion_kind.is_some();
                 let now = started.elapsed().as_secs_f64() * 1000.;
-                if let Some(frame) = &f.reflow
+                if let Some(frame) = &f.paint.reflow
                     && reflow_serial != Some(f.serial)
                 {
                     reflow.update(frame.clone(), &font, now)?;
                     reflow_serial = Some(f.serial);
                 }
-                let flowing = f.reflow.is_some() && reflow.active(now);
+                let flowing = f.paint.reflow.is_some() && reflow.active(now);
                 while let Ok((epoch, _bucket, extent, mesh)) = hud_rx.try_recv() {
-                    if epoch == f.epoch && extent.is_none_or(|extent| extent == f.viewport) {
+                    if epoch == f.epoch && extent.is_none_or(|extent| extent == f.paint.viewport) {
                         display.upload_scene(
                             2,
                             &mesh.vertices,
@@ -205,7 +210,7 @@ pub(super) fn run() -> Result<(), String> {
                 }
                 if dirty || animated || flowing {
                     let before = Instant::now();
-                    if f.reflow.is_some() {
+                    if f.paint.reflow.is_some() {
                         let mesh = reflow.mesh(now);
                         display.upload_scene(
                             0,
@@ -216,14 +221,19 @@ pub(super) fn run() -> Result<(), String> {
                         retained = None;
                     } else if retained
                         .as_ref()
-                        .is_none_or(|old| !Arc::ptr_eq(old, &f.vertices))
+                        .is_none_or(|old| !Arc::ptr_eq(old, &f.paint.base.mesh))
                     {
-                        display.upload_scene(0, &f.vertices, &f.glyph_vertices, &f.draws)?;
-                        display.text_styles(0, &f.text_styles)?;
-                        retained = Some(f.vertices.clone());
+                        display.upload_scene(
+                            0,
+                            &f.paint.base.mesh.vertices,
+                            &f.paint.base.mesh.glyph_vertices,
+                            &f.paint.base.mesh.draws,
+                        )?;
+                        display.text_styles(0, &f.paint.base.styles)?;
+                        retained = Some(f.paint.base.mesh.clone());
                     }
-                    if f.reflow.is_none() {
-                        display.text_views(0, &f.text_views)?;
+                    if f.paint.reflow.is_none() {
+                        display.text_views(0, &f.paint.base.views)?;
                     }
                     if animated {
                         let now = started.elapsed().as_secs_f64() * 1000.;
@@ -249,8 +259,8 @@ pub(super) fn run() -> Result<(), String> {
                             .or_else(|| f.resources.text_document.as_ref().map(|s| s.active))
                     };
                     let (document_slots, uploading) =
-                        document_gpu.update(&mut display, f.document.as_ref())?;
-                    if let Some(overlay) = &f.overlay {
+                        document_gpu.update(&mut display, f.paint.document.as_ref())?;
+                    if let Some(overlay) = &f.paint.overlay {
                         if retained_overlay
                             .as_ref()
                             .is_none_or(|old| !Arc::ptr_eq(old, &overlay.mesh))
@@ -273,12 +283,14 @@ pub(super) fn run() -> Result<(), String> {
                                 .try_send((
                                     f.epoch,
                                     bucket,
-                                    if uploading || f.document.as_ref().is_some_and(|d| d.loading) {
+                                    if uploading
+                                        || f.paint.document.as_ref().is_some_and(|d| d.loading)
+                                    {
                                         "Preparing document...".into()
                                     } else {
                                         scroll_meter.label(active)
                                     },
-                                    Some(f.viewport),
+                                    Some(f.paint.viewport),
                                 ))
                                 .is_ok()
                         {
@@ -286,21 +298,34 @@ pub(super) fn run() -> Result<(), String> {
                             scroll_active = active;
                         }
                     }
-                    if f.resources.chat.is_some() {
-                        display.upload(2, &f.effects)?;
+                    if !animated
+                        && scrolling.is_none()
+                        && effect_revision != Some(f.paint.revisions.effects)
+                    {
+                        display.upload(2, &f.paint.effects)?;
+                        effect_revision = Some(f.paint.revisions.effects);
                     }
-                    let mut slots = vec![0];
-                    slots.extend(document_slots);
-                    if animated || f.overlay.is_some() {
+                    let mut slots = vec![];
+                    for layer in &f.paint.order {
+                        use otrios_core::canvas::presentation::Layer;
+                        match layer {
+                            Layer::Base => slots.push(0),
+                            Layer::Document => slots.extend(document_slots.iter().copied()),
+                            Layer::Overlay => slots.push(1),
+                            Layer::Effects => slots.push(2),
+                        }
+                    }
+                    // An unopened mount still presents a cleared surface.
+                    if slots.is_empty() {
+                        slots.push(0);
+                    }
+                    if animated {
                         slots.push(1);
                     }
-                    if animated
-                        || scrolling.is_some()
-                        || (f.resources.chat.is_some() && !f.effects.is_empty())
-                    {
+                    if animated || scrolling.is_some() {
                         slots.push(2);
                     }
-                    display.draw_slots(surface.projection_for(f.viewport), &slots)?;
+                    display.draw_slots(surface.projection_for(f.paint.viewport), &slots)?;
                     if drawn >= capture_after
                         && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()

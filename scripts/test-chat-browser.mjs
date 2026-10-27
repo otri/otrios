@@ -87,9 +87,17 @@ try{
   assert(!(await evaluate(b,"document.querySelector('#view').getAttribute('aria-label')")).includes('questionable ideas'));
   await control(b,'Close dialog');
   await metrics(a,800,1280);await ready(a,'brass-relay','800x1280');await screenshot(a,'lounge-resized');
+  await evaluate(a,"window.__graphicsRecovery=document.querySelector('#view').getContext('webgl').getExtension('WEBGL_lose_context');window.__graphicsRecovery.loseContext();true");
+  await wait(a,"document.querySelector('#revision').dataset.graphics==='lost'");
+  await evaluate(a,"window.__graphicsRecovery.restoreContext();true");
+  await wait(a,"document.querySelector('#revision').dataset.graphics==='ready'&&document.querySelector('#revision').dataset.documentResources!=='0'");
+  await ready(a,'brass-relay','800x1280');await online(a);
+  assert.equal((await info(a)).participant,identity);
+  await dispatch(a,'Dispatch after graphics recovery '+nickname);
+  await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Dispatch after graphics recovery '+nickname)})`);
   await control(a,'Back to OTriOS');await ready(a,'home','800x1280');await screenshot(a,'home-portrait');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
-  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','long composer caret follows within its margins','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript'],screenshots:output};
+  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','long composer caret follows within its margins','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{
   socket?.close();if(browser.pid&&browser.exitCode===null&&browser.signalCode===null){browser.kill('SIGTERM');await new Promise(resolve=>browser.once('exit',resolve));}await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});

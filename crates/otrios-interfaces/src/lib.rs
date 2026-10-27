@@ -51,3 +51,6 @@ pub mod release;
 
 #[cfg(feature = "release")]
 pub mod session;
+
+/// Host-local retained presentation metadata.
+pub mod presentation;

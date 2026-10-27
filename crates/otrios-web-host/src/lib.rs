@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Browser adapter; Canvas state/guest memory live only in the worker's RAM.
-use otrios_core::canvas::Client;
-use otrios_core::dashboard::{
-    Mesh,
-    font::Font,
-    retained_text::{TextFrame, TextPresentation},
-    scene::Scene,
+use otrios_core::canvas::{
+    Client,
+    presentation::{Composer, Demand, Frame},
 };
+use otrios_core::dashboard::{Mesh, font::Font};
 use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
 use otrios_interfaces::{canvas::Presentation, keyboard::Edit};
 use std::sync::Arc;
@@ -15,13 +13,8 @@ use wasm_bindgen::prelude::*;
 #[derive(Default)]
 pub struct CanvasApp {
     font: Option<Arc<Font>>,
-    rendered: Option<(Arc<Scene>, TextFrame)>,
-    text_presentation: TextPresentation,
-    overlay_presentation: TextPresentation,
-    overlay: Option<TextFrame>,
-    geometry_versions: (u32, u32),
-    geometry_generation: u32,
-    document: Option<otrios_core::canvas::document::Frame>,
+    composer: Composer,
+    demand: Demand,
     inner: Client,
 }
 #[wasm_bindgen]
@@ -101,12 +94,7 @@ impl CanvasApp {
     }
     pub fn clear_private(&mut self) {
         self.inner.clear_private();
-        self.rendered = None;
-        self.text_presentation = TextPresentation::default();
-        self.overlay_presentation = TextPresentation::default();
-        self.overlay = None;
-        self.geometry_versions = (0, 0);
-        self.document = None;
+        self.composer.clear();
     }
     pub fn input_busy(&self) -> bool {
         self.inner.input_busy()
@@ -184,8 +172,9 @@ impl CanvasApp {
         .into()
     }
     pub fn reflow_frame(&self) -> Result<Vec<u8>, String> {
-        self.inner
-            .reflow_frame()?
+        self.frame()?
+            .reflow
+            .as_ref()
             .map(|f| f.encode())
             .transpose()
             .map(|f| f.unwrap_or_default())
@@ -264,48 +253,49 @@ impl CanvasApp {
     pub fn reload_ready(&self) -> bool {
         self.inner.reload_ready()
     }
+    pub fn request_frame(&mut self) {
+        self.demand.request();
+    }
+    pub fn begin_frame(&mut self) -> Option<u64> {
+        self.demand.begin()
+    }
+    pub fn frame_presented(&mut self, serial: u64) -> bool {
+        self.demand.presented(serial)
+    }
+    /// Assemble once per renderer credit. All following getters read this snapshot.
+    pub fn prepare_frame(&mut self) -> Result<String, String> {
+        let font = self.font.as_ref().ok_or("Font resource not loaded")?;
+        let frame = self.composer.compose(&mut self.inner, font)?;
+        serde_json::to_string(
+            &serde_json::json!({"revisions": frame.revisions, "order": frame.order}),
+        )
+        .map_err(|e| e.to_string())
+    }
     pub fn effect_vertices(&self) -> Result<Vec<f32>, String> {
-        self.inner.effect_vertices()
+        Ok(self.frame()?.effects.as_ref().clone())
     }
-    pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
-        Ok(self.compose()?.vertices.clone())
+    pub fn vertices(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.mesh.vertices.clone())
     }
-    pub fn glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
-        Ok(self.compose()?.glyph_vertices.clone())
+    pub fn glyph_vertices(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.mesh.glyph_vertices.clone())
     }
-    pub fn draws(&mut self) -> Result<Vec<u32>, String> {
-        Ok(self.compose()?.draws.clone())
+    pub fn draws(&self) -> Result<Vec<u32>, String> {
+        Ok(self.frame()?.base.mesh.draws.clone())
     }
-    pub fn text_generation(&mut self) -> Result<u32, String> {
-        self.compose()?;
-        Ok(self.geometry_generation)
+    pub fn text_generation(&self) -> Result<u32, String> {
+        Ok(self.frame()?.revisions.content)
     }
-    pub fn text_styles(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
-        Ok(self
-            .rendered
-            .as_ref()
-            .ok_or("No rendered scene")?
-            .1
-            .styles
-            .as_ref()
-            .clone())
+    pub fn text_styles(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.styles.as_ref().clone())
     }
-    pub fn text_views(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
-        Ok(self
-            .rendered
-            .as_ref()
-            .ok_or("No rendered scene")?
-            .1
-            .views
-            .clone())
+    pub fn text_views(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.views.clone())
     }
     /// Metadata only on warm scrolls. This pins exactly the immutable resources
     /// named by the current transfer snapshot until the next metadata request.
     pub fn document_frame(&mut self) -> Result<String, String> {
-        self.document = self.inner.document_frame();
-        let Some(frame) = &self.document else {
+        let Some(frame) = &self.frame()?.document else {
             return Ok("null".into());
         };
         serde_json::to_string(&serde_json::json!({
@@ -321,43 +311,44 @@ impl CanvasApp {
         let version = version
             .parse::<u64>()
             .map_err(|_| "Invalid document version")?;
-        self.document
+        self.frame()?
+            .document
             .as_ref()
             .and_then(|f| f.draws.iter().find(|d| d.chunk.version == version))
             .map(|d| d.chunk.mesh.glyph_vertices.clone())
             .ok_or_else(|| "Document resource is outside the pinned transfer snapshot".into())
     }
-    pub fn overlay_vertices(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_vertices(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.mesh.vertices.clone()))
     }
-    pub fn overlay_glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_glyph_vertices(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.mesh.glyph_vertices.clone()))
     }
-    pub fn overlay_draws(&mut self) -> Result<Vec<u32>, String> {
-        self.compose()?;
+    pub fn overlay_draws(&self) -> Result<Vec<u32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.mesh.draws.clone()))
     }
-    pub fn overlay_styles(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_styles(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.styles.as_ref().clone()))
     }
-    pub fn overlay_views(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_views(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.views.clone()))
@@ -366,7 +357,7 @@ impl CanvasApp {
         let font = Arc::new(Font::from_zstd(bytes, hash)?);
         self.inner.set_font(font.clone());
         self.font = Some(font);
-        self.rendered = None;
+        self.composer.clear();
         Ok(())
     }
     pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
@@ -486,33 +477,10 @@ impl CanvasApp {
 }
 
 impl CanvasApp {
-    fn compose(&mut self) -> Result<&Mesh, String> {
-        let scene = self.inner.scene()?;
-        if self
-            .rendered
-            .as_ref()
-            .is_none_or(|(old, _)| !Arc::ptr_eq(old, &scene))
-        {
-            self.rendered = None;
-            let font = self.font.as_ref().ok_or("Font resource not loaded")?;
-            let mesh = if let Some((before, after)) = self.inner.document_scene_parts(&scene)? {
-                self.overlay = Some(self.overlay_presentation.compose(&after, font));
-                self.text_presentation.compose(&before, font)
-            } else {
-                self.overlay = None;
-                self.text_presentation.compose(&scene, font)
-            };
-            let versions = (
-                mesh.generation,
-                self.overlay.as_ref().map_or(0, |f| f.generation),
-            );
-            if versions != self.geometry_versions {
-                self.geometry_generation = self.geometry_generation.wrapping_add(1).max(1);
-                self.geometry_versions = versions;
-            }
-            self.rendered = Some((scene, mesh));
-        }
-        Ok(&self.rendered.as_ref().ok_or("No rendered scene")?.1.mesh)
+    fn frame(&self) -> Result<&Frame, String> {
+        self.composer
+            .frame()
+            .ok_or_else(|| "Frame has not been prepared".into())
     }
 }
 

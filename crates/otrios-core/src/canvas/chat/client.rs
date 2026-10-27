@@ -60,8 +60,6 @@ pub struct Client {
     next_byte: u32,
     source_messages: BTreeMap<u64, (u32, u32)>,
     source_day: Option<u64>,
-    paint_at: u64,
-    paint_flags: u8,
     pub(super) panel: Panel,
     pub(super) focus: Option<Focus>,
     pub(super) compose: TextBuffer,
@@ -132,8 +130,6 @@ impl Default for Client {
             next_byte: 0,
             source_messages: BTreeMap::new(),
             source_day: None,
-            paint_at: 0,
-            paint_flags: 0,
             panel: Panel::None,
             focus: None,
             compose: TextBuffer::multiline(2048),
@@ -220,16 +216,6 @@ fn day_label(day: u64, today: u64) -> String {
 impl Client {
     pub(crate) fn has_drafts(&self) -> bool {
         !self.drafts.is_empty()
-    }
-    /// Sample input/physics at host cadence, but compose animation at most 60 Hz.
-    /// Latch the final turn so an effect or coast ending between frames is painted.
-    pub(crate) fn paint(&mut self, now: u64, layout: bool, document: bool, effects: bool) -> u8 {
-        self.paint_flags |= u8::from(layout) | (u8::from(document) << 1) | (u8::from(effects) << 2);
-        if self.paint_flags == 0 || now.saturating_sub(self.paint_at) < 16 {
-            return 0;
-        }
-        self.paint_at = now;
-        std::mem::take(&mut self.paint_flags)
     }
     pub(crate) fn prepare(
         &mut self,
@@ -1109,15 +1095,6 @@ mod tests {
                 .map(|s| s.len() + 1)
                 .sum::<usize>()
         );
-    }
-    #[test]
-    fn paint_cadence_preserves_the_final_animation_and_document_turn() {
-        let mut client = Client::default();
-        assert_eq!(client.paint(1, true, false, false), 0);
-        assert_eq!(client.paint(16, false, false, false), 1);
-        assert_eq!(client.paint(20, false, true, true), 0);
-        assert_eq!(client.paint(32, false, false, false), 6);
-        assert_eq!(client.paint(64, false, false, false), 0);
     }
     #[test]
     fn new_sends_refresh_epoch_and_pending_retries_keep_original_nonce() {

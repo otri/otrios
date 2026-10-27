@@ -73,6 +73,7 @@ try{
   }
   const [curveWidth,curveHeight,bandWidth,bandHeight]=presenter.font_dimensions();
   createGraphics();revision.dataset.fontRenderer='analytic-quadratic-cached';revision.dataset.gamma=renderer.linearLight?'linear-light-srgb':'authored-srgb';revision.dataset.alpha='premultiplied';
+  let pendingFrameAck=null;
   let hudRevision=-1,dirty=true,lastFontCache='',fontProbed=false;const fontProbeRequested=['1','direct'].includes(query.get('font-probe'));const controls=new Map();
   function resize(){if(graphicsLost||gl.isContextLost())return;try{dirty=renderer.fitCanvas(canvas)||dirty;}catch(error){fatal(error);}}
   resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',()=>{
@@ -84,18 +85,23 @@ try{
     }
   });
   function accept(f){
-    if(graphicsLost||gl.isContextLost()||f.graphicsGeneration!==graphicsGeneration){worker.postMessage({type:'frame-ack',documentToken:f.document?.token});return;}
+    if(graphicsLost||gl.isContextLost()||f.graphicsGeneration!==graphicsGeneration){worker.postMessage({type:'frame-ack',serial:f.serial,documentToken:f.document?.token});return;}
     const wasReflow=!!model?.reflow;if(model?.screen!==f.screen){presenter.suspend();hudRevision=-1;scrollLabel='';}timings?.accept(f);
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
     if(f.document){documentLayers.accept(f.document);revision.dataset.documentLoading=String(documentLayers.loading);revision.dataset.documentResources=String(documentLayers.layers.size);}
     model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();
-    if(f.presentation==='chat'&&f.effects)hudLayer.setFrame({vertices:f.effects});
+    if(f.effects)hudLayer.setFrame({vertices:f.effects});
+    if(f.reflow)model.reflow=!!f.reflow.length;
+    if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);
+    if(f.textViews&&!model.reflow)staticLayer.setTextViews(f.textViews);
+    if(f.overlayVertices)motionLayer.setFrame({vertices:f.overlayVertices,glyphVertices:f.overlayGlyphVertices,draws:f.overlayDraws,textStyles:f.overlayStyles});
+    if(f.overlayViews)motionLayer.setTextViews(f.overlayViews);
     if(f.controls){
       renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
       canvas.dataset.logicalSize=f.extent.join('x');resize();
       presenter.set_reflow(f.reflow||new Uint8Array(),performance.now());
-      model.reflow=!!f.reflow?.length;if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);if(!model.reflow)staticLayer.setTextViews(f.textViews||new Float32Array());if(f.overlayVertices)motionLayer.setFrame({vertices:f.overlayVertices,glyphVertices:f.overlayGlyphVertices,draws:f.overlayDraws,textStyles:f.overlayStyles});if(f.overlayViews)motionLayer.setTextViews(f.overlayViews);
+
       const ids=new Set(f.controls.map(c=>c.id));for(const [id,b] of controls)if(!ids.has(id)){b.remove();controls.delete(id);}
       for(const c of f.controls){let b=controls.get(c.id);if(!b){b=document.createElement('button');b.type='button';b.dataset.sceneNode=String(c.id);b.addEventListener('click',event=>{command({type:'activate',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id},event);if(model?.screen==='brass-relay')canvas.focus({preventScroll:true});});b.addEventListener('keydown',event=>{const delta={ArrowLeft:[-50,0],ArrowRight:[50,0],ArrowUp:[0,50],ArrowDown:[0,-50]}[event.key];if(delta&&b.dataset.draggable==='true'){event.preventDefault();event.stopPropagation();command({type:'adjust',epoch:Number(b.dataset.epoch),viewportRevision:model.viewportRevision,id:c.id,dx:delta[0],dy:delta[1]});}});controlsLayer.append(b);controls.set(c.id,b);}
         b.dataset.epoch=String(f.epoch);b.dataset.draggable=String(c.draggable);if(Number.isFinite(c.value)){b.setAttribute('aria-valuemin','0');b.setAttribute('aria-valuemax','100');b.setAttribute('aria-valuenow',String(c.value));}else{for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow'])b.removeAttribute(name);}b.setAttribute('aria-label',c.label);b.disabled=c.disabled;b.setAttribute('role',c.role);if(c.role==='switch')b.setAttribute('aria-checked',String(c.checked));else b.removeAttribute('aria-checked');Object.assign(b.style,semanticBounds(c.bounds,f.extent));}
@@ -103,11 +109,11 @@ try{
       canvas.setAttribute('aria-label',f.text);revision.textContent=`VIEW ${f.snapshot.slice(0,12)}`;revision.dataset.snapshot=f.snapshot;revision.dataset.layout=f.layout;
     }
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
-    revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!f.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
+    revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!model.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
     if(f.resources?.chat)revision.dataset.chat=JSON.stringify(f.resources.chat);else delete revision.dataset.chat;
     if(f.resources?.text_scroll||f.resources?.text_document)revision.dataset.textScroll=JSON.stringify(f.resources.text_scroll||f.resources.text_document);else{delete revision.dataset.textScroll;scrollLabel='';scrollSamples=[];scrollLast=null;}
     reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui);
-    pump();worker.postMessage({type:'frame-ack',documentToken:f.document?.token});
+    pump();pendingFrameAck={type:'frame-ack',serial:f.serial,documentToken:f.document?.token};
   }
   transportBridge=bridgeWorker(session,(message,transfer=[])=>{if(timings&&message.type==='state-frame')message.receivedAt=timingTools.timestamp(performance);worker.postMessage(message,transfer);});
   worker.onmessage=event=>{try{const m=event.data;if(m.type==='chat-log'){const log=document.querySelector('#chat-log'),wanted=new Set(m.messages.map(v=>String(v.sequence)));for(const old of log.children)if(!wanted.has(old.dataset.sequence))old.remove();for(const message of m.messages)if(![...log.children].some(n=>n.dataset.sequence===String(message.sequence))){const row=document.createElement('p');row.dataset.sequence=String(message.sequence);row.textContent=message.sender.name+': '+message.text;const next=[...log.children].find(n=>Number(n.dataset.sequence)>message.sequence);log.insertBefore(row,next||null);}return;}if(m.type==='chat-identity'){fetch('/chat/identity',{method:'POST',credentials:'same-origin',headers:{'x-otrios-request':'session'}}).then(async response=>{if(!response.ok)throw Error('Guest identity is temporarily unavailable');const profile=await response.json();try{localStorage.setItem('otrios-chat-participant',JSON.stringify(profile));}catch{}session.reconnect();worker.postMessage({type:'chat-identity-ready'});}).catch(error=>{worker.postMessage({type:'chat-identity-ready'});connection.textContent=String(error);});return;}if(m.type==='state-send'&&m.timing)timings?.sent(m.timing);if(transportBridge.handle(m))return;switch(m.type){case 'clear-private':documentLayers.clear();presenter.set_reflow(new Uint8Array(),performance.now());model={epoch:model?.epoch,extent:model?.extent||[1280,800],reflow:false,presentation:'none',intent:[],ui:'',state:'',editing:false,screen:''};if(!graphicsLost&&!gl.isContextLost()){staticLayer.setFrame({vertices:new Float32Array()});motionLayer.setFrame({vertices:new Float32Array()});hudLayer.setFrame({vertices:new Float32Array()});}else{staticLayer.dispose();motionLayer.dispose();hudLayer.dispose();}controlsLayer.replaceChildren();controls.clear();canvas.setAttribute('aria-label','Opening app');revision.dataset.ui='';revision.dataset.state='';dirty=true;break;case 'frame':accept(m);break;case 'command-ack':busy=false;pump();break;case 'release-candidate':releaseCandidate=m.entry;pump();break;case 'release-retry':if(releaseCandidate===m.entry)releaseCandidate=null;reloading=false;pump();break;case 'release':location.replace(screenUrl());break;case 'release-id':revision.dataset.release=m.id;session.setRelease(m.id);if(m.uiOnly){revision.dataset.uiUpdates=String(Number(revision.dataset.uiUpdates||0)+1);}break;case 'monitoring-auth':monitoringAuth=m;showAuth();break;case 'online':dot.classList.toggle('online',m.online);connection.textContent=m.online?'Live shared space':'Offline · unconfirmed changes held in memory';break;case 'warning':connection.textContent=m.message;break;case 'error':fatal(m.message);break;}}catch(error){fatal(error);}};
@@ -162,19 +168,21 @@ try{
         if(model.reflow)staticLayer.setFrame({vertices:presenter.reflow_vertices(now),glyphVertices:presenter.reflow_glyphs(),draws:presenter.reflow_draws()});
         if(animated){const [playing,speed,count]=model.intent;motionLayer.setFrame({vertices:presenter.vertices(model.intent[3]!==0,playing!==0,speed,count,now,model.updates)});if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();hudLayer.setFrame({vertices:presenter.hud(),glyphVertices:presenter.hud_glyph_vertices(),draws:presenter.hud_draws()});}}
         const scrolling=['text-scroll','text-document'].includes(model.presentation);
-        const documentOverlay=['text-document','chat'].includes(model.presentation);
         if(scrolling)textScrollHud(now,!!(model.resources?.text_scroll||model.resources?.text_document)?.active);
-        renderer.prepare([staticLayer,...documentLayers.draws,...(documentOverlay?[motionLayer]:[]),...(animated||scrolling||model.presentation==='chat'?[hudLayer]:[])]);
-        renderer.beginFrame();staticLayer.draw();for(const layer of documentLayers.draws)layer.draw();
-        if(animated||documentOverlay)motionLayer.draw();if(animated||scrolling||model.presentation==='chat')hudLayer.draw();renderer.endFrame();if(fontProbeRequested&&!fontProbed&&staticLayer.glyphVertices.length){fontProbed=true;const result=renderer.probe([staticLayer]);canvas.dataset.fontProbe=JSON.stringify(result);if(!result.passed)throw Error('GPU font probe did not pass: '+JSON.stringify(result));}
+        const layers=(model.order||['base']).flatMap(layer=>({base:[staticLayer],document:documentLayers.draws,overlay:[motionLayer],effects:[hudLayer]})[layer]||[]);
+        if(animated)layers.push(motionLayer);
+        if(animated||scrolling)layers.push(hudLayer);
+        renderer.prepare(layers);
+        renderer.beginFrame();for(const layer of layers)layer.draw();renderer.endFrame();if(fontProbeRequested&&!fontProbed&&staticLayer.glyphVertices.length){fontProbed=true;const result=renderer.probe([staticLayer]);canvas.dataset.fontProbe=JSON.stringify(result);if(!result.passed)throw Error('GPU font probe did not pass: '+JSON.stringify(result));}
         const fontCache=JSON.stringify(renderer.cacheStats);if(fontCache!==lastFontCache){revision.dataset.fontCache=fontCache;lastFontCache=fontCache;}
         const gpuError=gl.getError();if(gpuError!==gl.NO_ERROR&&gpuError!==gl.CONTEXT_LOST_WEBGL)throw new Error('GPU rendering failed.');dirty=false;
         const sample=timings?.drawn(model.epoch);if(sample)requestAnimationFrame(()=>timings.presented(sample,model?.epoch));
         if(animated&&now-lastMetric>=1000){lastMetric=now;revision.dataset.frameStats=presenter.stats();}
       }
     }catch(e){if(!gl.isContextLost()){fatal(e);return;}}
+    if(pendingFrameAck){worker.postMessage(pendingFrameAck);pendingFrameAck=null;}
     requestAnimationFrame(frame);
   }
-  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();graphicsLost=true;graphicsGeneration++;renderer.contextLost();documentLayers.clear();staticLayer.dispose();motionLayer.dispose();hudLayer.dispose();if(model)model.document=null;revision.dataset.graphics='lost';revision.dataset.documentLoading='true';revision.dataset.documentResources='0';controlsLayer.inert=true;moves.clear();for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});worker.postMessage({type:'graphics-lost',generation:graphicsGeneration});connection.textContent='Restoring graphics...';});
+  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();graphicsLost=true;graphicsGeneration++;pendingFrameAck=null;renderer.contextLost();documentLayers.clear();staticLayer.dispose();motionLayer.dispose();hudLayer.dispose();if(model)model.document=null;revision.dataset.graphics='lost';revision.dataset.documentLoading='true';revision.dataset.documentResources='0';controlsLayer.inert=true;moves.clear();for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});worker.postMessage({type:'graphics-lost',generation:graphicsGeneration});connection.textContent='Restoring graphics...';});
   canvas.addEventListener('webglcontextrestored',()=>{try{documentLayers.clear();createGraphics();graphicsLost=false;if(model?.extent)renderer.setLogicalSize(...model.extent);resize();if(model?.vertices&&!model.reflow)staticLayer.setFrame(model);scrollLabel='';hudRevision=-1;dirty=true;revision.dataset.graphics='ready';controlsLayer.inert=false;connection.textContent=dot.classList.contains('online')?'Live shared space':'Offline · unconfirmed changes held in memory';worker.postMessage({type:'document-replay',generation:graphicsGeneration});}catch(e){fatal(e);}});requestAnimationFrame(frame);
 }catch(e){fatal(e);}

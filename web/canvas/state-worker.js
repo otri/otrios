@@ -8,10 +8,10 @@ import {DocumentTransfer} from './document-transfer.mjs';
 const documents=new DocumentTransfer();
 let timings=false,navigationTiming=null,graphicsPaused=false,graphicsGeneration=0;
 const timingNow=()=>performance.timeOrigin+performance.now();
-let viewportRevision=0,lastTextGeneration=0;
+let viewportRevision=0,lastTextGeneration=0,lastPlacement=0,lastSemantics=0,lastEffects=0,pendingGeometry=false;
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
-let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
+let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
 let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false;
 let chatLogKey='';
 function pumpChat(){
@@ -19,18 +19,38 @@ function pumpChat(){
   if(transportReady&&!chatSending){const bytes=app?.chat_outgoing();if(bytes){chatSending=true;postMessage({type:'chat-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 }
 function error(e){postMessage({type:'error',message:String(e)});}
-function sendFrame(){if(graphicsPaused||inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;if(f.timing&&navigationTiming?.id===f.timing.id)navigationTiming=null;if(f.vertices)lastTextGeneration=f.textGeneration;f.graphicsGeneration=graphicsGeneration;f.document=documents.take(id=>app.document_chunk_vertices(id));postMessage({type:'frame',...f},[f.effects.buffer,...(f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer,f.textStyles.buffer,f.overlayVertices.buffer,f.overlayGlyphVertices.buffer,f.overlayDraws.buffer,f.overlayStyles.buffer]:[]),...(f.textViews?[f.textViews.buffer,f.overlayViews.buffer]:[]),...f.document.upserts.map(u=>u.glyphVertices.buffer)]);}
-function publish(geometry=true){
+// Input and network work continue while the renderer holds its single credit.
+// Coalesce dirty requests before crossing Wasm or assembling transferable arrays.
+function publish(geometry=true){pendingGeometry ||= geometry;app.request_frame();sendFrame();}
+function sendFrame(){
+  if(graphicsPaused||inFlight!==null)return;
+  const serial=app.begin_frame();if(serial===undefined||serial===null)return;
+  inFlight=serial;
+  const geometry=pendingGeometry;pendingGeometry=false;
   syncInk();
   const chat=JSON.parse(app.chat_info());const logKey=chat?`${chat.first_sequence}:${chat.last_sequence}:${chat.messages}`:'';if(logKey!==chatLogKey){chatLogKey=logKey;postMessage({type:'chat-log',messages:chat?JSON.parse(app.chat_messages()):[]});}
-  const frame={effects:app.effect_vertices(),extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui:app.ui_ref(),state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
-  documents.update(JSON.parse(app.document_frame()),`${frame.ui}:${frame.epoch}`);
+  const ui=app.ui_ref();
+  const plan=ui?JSON.parse(app.prepare_frame()):{revisions:{content:0,placement:0,semantics:0,effects:0},order:[]};
+  const revisions=plan.revisions;
+  const frame={serial,order:plan.order,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
+  documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   if(frame.authRequired)frame.path="/"+app.pending_path();
-  if(geometry&&frame.ui){frame.reflow=app.reflow_frame();frame.textGeneration=app.text_generation();frame.textViews=app.text_views();frame.overlayViews=app.overlay_views();if(frame.textGeneration!==lastTextGeneration&&frame.textGeneration!==pendingFrame?.textGeneration){frame.vertices=app.vertices();frame.glyphVertices=app.glyph_vertices();frame.draws=app.draws();frame.textStyles=app.text_styles();frame.overlayVertices=app.overlay_vertices();frame.overlayGlyphVertices=app.overlay_glyph_vertices();frame.overlayDraws=app.overlay_draws();frame.overlayStyles=app.overlay_styles();}frame.text=app.text();frame.title=app.title();frame.snapshot=frame.state;frame.layout=frame.ui;frame.controls=Array.from(app.controls(),id=>({id,label:app.label(id),bounds:Array.from(app.bounds(id)),disabled:app.auth_required(),value:app.control_value(id),role:Number.isFinite(app.control_value(id))?'slider':'button',checked:app.control_checked(id),draggable:app.control_draggable(id)}));}
-  if(timings){frame.timing=geometry&&frame.ui&&navigationTiming?.epoch===frame.epoch?{...navigationTiming,frameReady:timingNow()}:pendingFrame?.epoch===frame.epoch?pendingFrame.timing:null;}
-  pendingFrame={...pendingFrame,...frame};sendFrame();
+  if(geometry&&ui){
+    frame.textGeneration=revisions.content;
+    if(revisions.content!==lastTextGeneration){frame.vertices=app.vertices();frame.glyphVertices=app.glyph_vertices();frame.draws=app.draws();frame.textStyles=app.text_styles();frame.overlayVertices=app.overlay_vertices();frame.overlayGlyphVertices=app.overlay_glyph_vertices();frame.overlayDraws=app.overlay_draws();frame.overlayStyles=app.overlay_styles();}
+    if(revisions.placement!==lastPlacement||revisions.content!==lastTextGeneration){frame.textViews=app.text_views();frame.overlayViews=app.overlay_views();}
+    if(revisions.semantics!==lastSemantics){frame.reflow=app.reflow_frame();frame.text=app.text();frame.title=app.title();frame.snapshot=frame.state;frame.layout=frame.ui;frame.controls=Array.from(app.controls(),id=>({id,label:app.label(id),bounds:Array.from(app.bounds(id)),disabled:app.auth_required(),value:app.control_value(id),role:Number.isFinite(app.control_value(id))?'slider':'button',checked:app.control_checked(id),draggable:app.control_draggable(id)}));}
+    lastTextGeneration=revisions.content;lastPlacement=revisions.placement;lastSemantics=revisions.semantics;
+  }
+
+  if(timings){frame.timing=geometry&&frame.ui&&navigationTiming?.epoch===frame.epoch?{...navigationTiming,frameReady:timingNow()}:null;}
+  if(frame.timing&&navigationTiming?.id===frame.timing.id)navigationTiming=null;
+  frame.graphicsGeneration=graphicsGeneration;frame.document=documents.take(id=>app.document_chunk_vertices(id));
+  const transfer=[...(frame.effects?[frame.effects.buffer]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.map(u=>u.glyphVertices.buffer)];
+  postMessage({type:'frame',...frame},transfer);
 }
-function clearPresentation(){documents.reset();syncInk();pendingFrame=null;lastTextGeneration=0;postMessage({type:'clear-private'});}
+function clearPresentation(){documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
 function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('');monitoring.logout();}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();}
@@ -92,9 +112,9 @@ onmessage=async({data:m})=>{try{
     if(discoveredRelease)release({release:discoveredRelease});
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
-  if(m.type==='frame-ack'){documents.ack(m.documentToken);inFlight=false;sendFrame();return;}
-  if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;documents.reset();lastTextGeneration=0;pendingFrame=null;return;}
-  if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();lastTextGeneration=0;pendingFrame=null;if(app)publish();return;}
+  if(m.type==='frame-ack'){if(m.serial!==inFlight||!app.frame_presented(m.serial))return;documents.ack(m.documentToken);inFlight=null;sendFrame();return;}
+  if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;return;}
+  if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
   if(!app)return;
   if(m.type==='transport'){
     if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;if(changed){stateSends=0;inkSending=false;chatSending=false;}

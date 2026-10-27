@@ -1703,12 +1703,11 @@ impl Client {
         } else {
             false
         };
-        let paint = m
-            .chat
-            .as_mut()
-            .map_or(if document_changed { 2 } else { 0 }, |chat| {
-                chat.paint(now, chat_changed, document_changed, chat_effects)
-            });
+        // The host's renderer credit coalesces paint requests. Input/physics
+        // clocks do not impose a second, app-specific presentation cadence.
+        let paint = u8::from(chat_changed)
+            | (u8::from(document_changed) << 1)
+            | (u8::from(chat_effects) << 2);
         if paint & 1 != 0 {
             m.invalidate_local_scene();
         } else if paint & 2 != 0 && m.chat.is_some() {

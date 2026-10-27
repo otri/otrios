@@ -3269,7 +3269,18 @@ fn brass_relay_qualifies_crowded_roster_avatar_pages_and_native_keyboard_in_both
 #[test]
 fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
     use otrios_interfaces::chat::{Event, Member, Profile};
+    use presentation::{Composer, Layer};
+    use std::sync::Arc;
+    let font = Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut composer = Composer::default();
     let mut client = Client::default();
+    client.set_font(font.clone());
     activate(&mut client, brass_relay::ui(&[]), "brass-particles", vec![]);
     let member = Member {
         profile: Profile {
@@ -3297,6 +3308,7 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
         .unwrap();
     client.tick(1000, 1_700_000_000).unwrap();
     let scene = client.scene().unwrap();
+    let idle = composer.compose(&mut client, &font).unwrap().clone();
     client
         .receive_chat(
             &chat::encode_event(&Event::Effect {
@@ -3307,13 +3319,97 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
             .unwrap(),
         )
         .unwrap();
+    let start = composer.compose(&mut client, &font).unwrap().clone();
+    assert_eq!(start.revisions.content, idle.revisions.content);
+    assert_eq!(start.revisions.semantics, idle.revisions.semantics);
+    assert!(Arc::ptr_eq(&start.base.mesh, &idle.base.mesh));
+    assert_eq!(start.order.last(), Some(&Layer::Effects));
     let first = client.effect_vertices().unwrap();
     assert!(!first.is_empty());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
     client.tick(1100, 1_700_000_000).unwrap();
+    let moving = composer.compose(&mut client, &font).unwrap().clone();
+    assert_ne!(moving.revisions.effects, start.revisions.effects);
+    assert_eq!(moving.revisions.content, start.revisions.content);
+    assert_eq!(moving.revisions.placement, start.revisions.placement);
+    assert_eq!(moving.revisions.semantics, start.revisions.semantics);
+    assert!(Arc::ptr_eq(&moving.base.mesh, &start.base.mesh));
+    assert_eq!(
+        start.effects.as_ref(),
+        &first,
+        "Held effect snapshots stay immutable"
+    );
     assert_ne!(first, client.effect_vertices().unwrap());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
     client.tick(2100, 1_700_000_000).unwrap();
+    let ended = composer.compose(&mut client, &font).unwrap().clone();
+    assert!(!ended.order.contains(&Layer::Effects));
+    assert_ne!(ended.revisions.effects, moving.revisions.effects);
+    assert_eq!(ended.revisions.content, idle.revisions.content);
+    assert_eq!(ended.order, idle.order);
+    let unchanged = composer.compose(&mut client, &font).unwrap();
+    assert!(Arc::ptr_eq(&unchanged.effects, &ended.effects));
     assert!(client.effect_vertices().unwrap().is_empty());
     assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+}
+
+#[test]
+fn shared_presentation_preserves_existing_geometry_views_and_paint_order() {
+    use otrios_core::dashboard::{font::Font, retained_text::TextPresentation};
+    use presentation::{Composer, Layer};
+    use std::sync::Arc;
+    let font = Arc::new(
+        Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut composer = Composer::default();
+    for ui in [home::ui(&[]), layout::ui(&[]), brass_relay::ui(&[])] {
+        let mut client = Client::default();
+        client.set_font(font.clone());
+        activate(&mut client, ui, "presentation-parity", vec![]);
+        client.tick(1000, 1_700_000_000).unwrap();
+        let scene = client.scene().unwrap();
+        let (before, after) = client
+            .document_scene_parts(&scene)
+            .unwrap()
+            .map_or((scene.as_ref().clone(), None), |(a, b)| (a, Some(b)));
+        let reference = TextPresentation::default().compose(&before, &font);
+        let frame = composer.compose(&mut client, &font).unwrap().clone();
+        assert_eq!(frame.base.mesh.vertices, reference.mesh.vertices);
+        assert_eq!(
+            frame.base.mesh.glyph_vertices,
+            reference.mesh.glyph_vertices
+        );
+        assert_eq!(frame.base.mesh.draws, reference.mesh.draws);
+        assert_eq!(frame.base.views, reference.views);
+        assert_eq!(frame.base.styles, reference.styles);
+        assert_eq!(frame.order[0], Layer::Base);
+        if let Some(after) = after {
+            let overlay = TextPresentation::default().compose(&after, &font);
+            let actual = frame.overlay.as_ref().unwrap();
+            assert_eq!(actual.mesh.vertices, overlay.mesh.vertices);
+            assert_eq!(actual.mesh.glyph_vertices, overlay.mesh.glyph_vertices);
+            assert_eq!(actual.mesh.draws, overlay.mesh.draws);
+            assert_eq!(actual.views, overlay.views);
+            assert_eq!(actual.styles, overlay.styles);
+            assert_eq!(
+                frame.order,
+                vec![Layer::Base, Layer::Document, Layer::Overlay]
+            );
+        } else {
+            assert_eq!(frame.order, vec![Layer::Base]);
+        }
+        let next = composer.compose(&mut client, &font).unwrap();
+        assert_eq!(next.revisions.content, frame.revisions.content);
+        assert_eq!(next.revisions.placement, frame.revisions.placement);
+        assert_eq!(next.revisions.semantics, frame.revisions.semantics);
+        assert!(Arc::ptr_eq(&next.base.mesh, &frame.base.mesh));
+        composer.clear();
+        let replay = composer.compose(&mut client, &font).unwrap();
+        assert_ne!(replay.revisions.content, frame.revisions.content);
+        assert_eq!(replay.base.mesh.vertices, frame.base.mesh.vertices);
+    }
 }
