@@ -36,6 +36,10 @@ raw replication path unless an explicit compressed packet is processed.
 | Authority host | Configurable trusted/public permits (defaults 64/32, frame 4/64); eight catalogs, 128 app roots | Reject admission/refresh beyond budget; no client-created arbitrary room names |
 | Ephemeral ink | At most one subscription per admitted peer (frame 68 total); 64 points/s per sender, 32 points/batch, 1,024 recent points, five-second expiry, 128 broadcast batches | Invalid/excess input closes the session; lagged recipients can lose transient points; no durable replay guarantee |
 | Journal per root | Rotate checkpoint at 4 MiB, maximum journal 16 MiB, record ≤512 KiB | Durable failure leaves prior publication authoritative; corrupt complete records fail closed |
+| Collection selection | Generic ≤64 records / 512 KiB selected bytes; canonical qualified view ≤1 MiB; active + replacement lease, one flight each | Schema/field/admission checks precede selection; coalesce superseded work; explicit resync, expiry and revocation |
+| Chat collection | Authority ≤50,000 retained messages / 32 MiB canonical; client selects ≤64 / 256 KiB; eight separate pending sends | Durable receipt after fsync; one stable journal owner; expired anchors choose a notified retained neighbor |
+| Structured message source | ≤256 blocks, 512 KiB text allocation, 128 KiB per inline allocation / 4 MiB shared inline allocations | Reject source before replacement; unselected blocks/layout are disposable |
+| Document presentation | Core layout 8 MiB + host staging reserve 8 MiB; source index 8 MiB; GPU geometry 8 MiB; upload ≤512 KiB/turn | Bound held snapshots and reverse reserve; progressive loading/backpressure; text/avatar share resource admission, placement and clip |
 | Artifact caches | Browser target 512 MiB, native frame target 128 MiB; disposable immutable verified code/font/blob resources | Evict least recently used resources; storage unavailable never makes document state durable on client |
 
 A session's addressing/projection roots share immutable nodes. While a flight is
@@ -60,3 +64,11 @@ in the workspace lock; it serializes the shared diagnostics type rather than
 maintaining separate numeric field layouts in JavaScript and native code.
 
 The shared client also reports `ui_cache_entries`, `ui_cache_bytes` and cumulative `ui_cache_hits`. The cache retains only qualified public UI in RAM, at most eight documents and 2 MiB. It excludes app State and private UI; repeat mounts still obtain a fresh authoritative State session. Browser-only `?timings=1` adds a copyable local phase report without collecting app contents or sending telemetry; see [RFC 0016](rfcs/0016-ui-cache-and-navigation-timings.md).
+
+Collection windows and document diagnostics report selected/replica canonical
+bytes, source allocation, source index, layout workspace and pinned resources
+separately. Browser `data-document-gpu` additionally reports retained resource
+versions, budgeted geometry and cumulative raw upload/eviction counters. These
+are budget/accounting observations, not physical GPU allocation or process RSS.
+[The RFC 0024 ledger](experiments/collection-windows-2026-10-28.md) records those
+limits alongside actual isolate and independent-process memory measurements.

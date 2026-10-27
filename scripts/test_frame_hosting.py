@@ -9,8 +9,16 @@ def module(name,file):
 
 collector=module('collector','collect-monitoring.py')
 pruner=module('pruner','prune-dashboard-releases.py')
+host_check=module('host_check','test-dashboard-host.py')
 
 class FrameHosting(unittest.TestCase):
+    def test_navigation_shell_allows_only_catalog_title_variations(self):
+        root=b'<title>OTriOS</title><meta property="og:title" content="OTriOS"><script src="/releases/abc/web/app.js"></script>'
+        app=root.replace(b'<title>OTriOS</title>',b'<title>OTriOS Monitoring</title>').replace(b'content="OTriOS"',b'content="Monitoring"')
+        self.assertEqual(host_check.entry_shell(root),host_check.entry_shell(app))
+        self.assertNotEqual(host_check.entry_shell(root),host_check.entry_shell(app.replace(b'/abc/',b'/def/')))
+        self.assertNotEqual(host_check.entry_shell(root),host_check.entry_shell(app+b'<p>unexpected body</p>'))
+
     def test_pruning_keeps_active_and_unrelated_data_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=pathlib.Path(tmp);active='a'*64;old='b'*64

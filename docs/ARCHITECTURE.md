@@ -48,7 +48,12 @@ Select a concrete IDL and schema evolution rules; measure serialization versus d
 
 [RFC 0002](rfcs/0002-incremental-crdt-hierarchy.md) proposes immutable typed CRDT leaves and incremental ancestor hashing, with measured hash-path costs on the frame. The bounded [RFC 0005 library](rfcs/0005-merkle-subtree-prototype.md) now implements immutable incremental nodes, causal register joins and subtree transport; the live Canvas adapter uses app-scoped Merkle state and durable server receipts ([RFC 0006](rfcs/0006-durable-canvas-merkle-adapter.md)). Hash equality includes merge metadata and never replaces conflict semantics or access policy.
 
-[The app package prototype](../apps/README.md) implements the live `Canvas(uiRef, stateRef)` mount with independent app documents, binary UI/selectors and a bounded Wasm behavior interpreter. [RFC 0004](rfcs/0004-canvas-behavior-and-app-packages.md) records its execution and package boundaries; all seven Home/demo apps now use those mounts. The durable adapter is deployed on both hosts; general collection selectors, cross-authority transactions and Linux shared-memory IPC remain future work.
+[The app package prototype](../apps/README.md) implements the live `Canvas(uiRef, stateRef)` mount with independent app documents, binary UI/selectors and a bounded Wasm behavior interpreter. [RFC 0004](rfcs/0004-canvas-behavior-and-app-packages.md) records its execution and package boundaries; all seven Home/demo apps now use those mounts. The durable adapter is deployed on both hosts. [RFC 0024](rfcs/0024-viewport-scoped-collections.md)
+adds bounded schema-checked ordered collection windows on the same negotiated
+session, with coherent partial replicas and one active plus one replacement
+lease. Brass Relay uses that collection owner and stable structured message
+blocks; its existing journal recovers privately before publication. Cross-authority
+collection queries/transactions and Linux shared-memory IPC remain future work.
 
 Follow the [modern app pattern and retirement map](MODERN_APP_PATTERN.md) for new
 app work. It separates the production target from current prototype evidence and

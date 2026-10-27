@@ -1,0 +1,388 @@
+{
+  "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+  "url": "https://otrios.otri.ca",
+  "public_conformance": "PASS 120 checks: public signed code, release/session negotiation, private/admin isolation and anonymous denial (login not tested)",
+  "browser_before_restart": {
+    "passed": true,
+    "hello": {
+      "type": "hello",
+      "version": 1,
+      "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "state_protocol": "otrios-canvas-sync-v8",
+      "state": true
+    },
+    "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+    "chat": {
+      "messages": 11,
+      "first_sequence": 1,
+      "last_sequence": 11,
+      "selected_bytes": 5176,
+      "replica_bytes": 7015,
+      "pending": 0
+    },
+    "resources": {
+      "chat": {
+        "participant": "f5a924213e8dab443ff9c491ebf8b64f",
+        "name": "Dame Rivet",
+        "avatar": 7,
+        "admin": false,
+        "online": true,
+        "messages": 11,
+        "authors_revision": 1,
+        "first_sequence": 1,
+        "last_sequence": 11,
+        "pending": 0,
+        "drafts": 0,
+        "history_loading": false,
+        "selected_bytes": 5176,
+        "replica_bytes": 7015,
+        "lease_generation": 1,
+        "kicked": false
+      },
+      "sampled_monotonic_ms": 1051,
+      "dispatch": {
+        "pending_fields": 0,
+        "issued_fields": 0,
+        "pending_payload_bytes": 0,
+        "issued_payload_bytes": 0,
+        "pending_age_ms": null,
+        "issued_age_ms": null,
+        "ready_in_ms": null
+      },
+      "state": {
+        "selected_nodes": 1,
+        "selected_canonical_bytes": 264,
+        "replica_root_shared": true
+      },
+      "behavior_cache_entries": 0,
+      "behavior_cache_bytes": 0,
+      "ui_cache_entries": 1,
+      "ui_cache_bytes": 95705,
+      "ui_cache_hits": 1,
+      "behavior_hash": null,
+      "reflow_order": [],
+      "reflow_editing": false,
+      "wire": {
+        "compression_capacity": 0,
+        "decode_capacity": 131072,
+        "table_capacity_bound": 0,
+        "buffer_grows": 1
+      },
+      "text_scroll": null,
+      "text_document": {
+        "anchor": {
+          "block": 6,
+          "source_byte": 0,
+          "viewport_y": -9.846153846153925
+        },
+        "anchor_identity": {
+          "object": 5,
+          "part": 0
+        },
+        "anchor_revision": "900c78c2c5d4a3b4ccb755495318c063398d1a3bdd6271e87d3fb5fa5dc21965",
+        "work_ns": 0,
+        "max_work_ns": 0,
+        "measurement_ns": 0,
+        "breaking_ns": 0,
+        "packing_ns": 0,
+        "source_bytes": 24295,
+        "source_index_bytes": 684,
+        "working_bytes": 233320,
+        "pinned_mesh_bytes": 115784,
+        "resident_pages": 14,
+        "exact_blocks": 13,
+        "blocks": 13,
+        "measured_clusters": 764,
+        "broken_clusters": 966,
+        "packed_glyphs": 711,
+        "laid_out_lines": 42,
+        "evictions": 0,
+        "backpressure": 0,
+        "offset": 431.8241758241759,
+        "extent": 975.8241758241759,
+        "extent_exact": true,
+        "active": false,
+        "velocity": 0,
+        "loading": false
+      }
+    },
+    "dom_records": 11,
+    "tail_sequences": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "tail_text_sha256": [
+      "e35723a5c88e125d0c5bdb8cf8cd42787db7e10b745959977f90c53ce3d46594",
+      "969479124de5fa440abfaaf5135230bd71cb986eddd1c9a79198076c74a3e609",
+      "65da973d856656fa814273f63224b1d0a53292d0f301aca215fa9e2703f4994c",
+      "a6057ebf5c1bfa6226e8eb5ebc427334b06294e8e290cfac0d2d34a3f0755cf9",
+      "8260aaafce8372113925120cd3b137bdbf442b5c2e258cdeae375984b85287e7",
+      "d97975adb02c08f8aa4886bfaed30d442220a6251cdc777fbea64242ebc57ea3",
+      "04f7cc81ba5d33cbcdcd9e26c81d27c2dfb797d9d703e6e71f76abb653d73ff7",
+      "fd54b7f962f1b6e01d054d5a01209798baceb81f23b8e374a08cc1a1b6830791",
+      "c430576a51b9bb698d324574bf4e88adb77280e1753cc28d66017f52b6ae731f",
+      "5215266e29150b70399e5bcf9f65dc2c51183074d54e730cac6a631c47e07cca"
+    ],
+    "tail_sha256": "671a6c7397456cb056aad7387fb9ff555b75032f063a49d7badf129c60e35375",
+    "sent_message_commands": 0
+  },
+  "browser_after_restart": {
+    "passed": true,
+    "hello": {
+      "type": "hello",
+      "version": 1,
+      "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "state_protocol": "otrios-canvas-sync-v8",
+      "state": true
+    },
+    "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+    "chat": {
+      "messages": 11,
+      "first_sequence": 1,
+      "last_sequence": 11,
+      "selected_bytes": 5176,
+      "replica_bytes": 7015,
+      "pending": 0
+    },
+    "resources": {
+      "chat": {
+        "participant": "1735948771b5d291e5b5b1bedff1780f",
+        "name": "Inspector Pigeon",
+        "avatar": 19,
+        "admin": false,
+        "online": true,
+        "messages": 11,
+        "authors_revision": 1,
+        "first_sequence": 1,
+        "last_sequence": 11,
+        "pending": 0,
+        "drafts": 0,
+        "history_loading": false,
+        "selected_bytes": 5176,
+        "replica_bytes": 7015,
+        "lease_generation": 1,
+        "kicked": false
+      },
+      "sampled_monotonic_ms": 846,
+      "dispatch": {
+        "pending_fields": 0,
+        "issued_fields": 0,
+        "pending_payload_bytes": 0,
+        "issued_payload_bytes": 0,
+        "pending_age_ms": null,
+        "issued_age_ms": null,
+        "ready_in_ms": null
+      },
+      "state": {
+        "selected_nodes": 1,
+        "selected_canonical_bytes": 264,
+        "replica_root_shared": true
+      },
+      "behavior_cache_entries": 0,
+      "behavior_cache_bytes": 0,
+      "ui_cache_entries": 1,
+      "ui_cache_bytes": 95705,
+      "ui_cache_hits": 1,
+      "behavior_hash": null,
+      "reflow_order": [],
+      "reflow_editing": false,
+      "wire": {
+        "compression_capacity": 0,
+        "decode_capacity": 131072,
+        "table_capacity_bound": 0,
+        "buffer_grows": 1
+      },
+      "text_scroll": null,
+      "text_document": {
+        "anchor": {
+          "block": 6,
+          "source_byte": 0,
+          "viewport_y": -9.846153846153925
+        },
+        "anchor_identity": {
+          "object": 5,
+          "part": 0
+        },
+        "anchor_revision": "900c78c2c5d4a3b4ccb755495318c063398d1a3bdd6271e87d3fb5fa5dc21965",
+        "work_ns": 0,
+        "max_work_ns": 0,
+        "measurement_ns": 0,
+        "breaking_ns": 0,
+        "packing_ns": 0,
+        "source_bytes": 24295,
+        "source_index_bytes": 684,
+        "working_bytes": 233320,
+        "pinned_mesh_bytes": 115784,
+        "resident_pages": 14,
+        "exact_blocks": 13,
+        "blocks": 13,
+        "measured_clusters": 764,
+        "broken_clusters": 966,
+        "packed_glyphs": 711,
+        "laid_out_lines": 42,
+        "evictions": 0,
+        "backpressure": 0,
+        "offset": 431.8241758241759,
+        "extent": 975.8241758241759,
+        "extent_exact": true,
+        "active": false,
+        "velocity": 0,
+        "loading": false
+      }
+    },
+    "dom_records": 11,
+    "tail_sequences": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "tail_text_sha256": [
+      "e35723a5c88e125d0c5bdb8cf8cd42787db7e10b745959977f90c53ce3d46594",
+      "969479124de5fa440abfaaf5135230bd71cb986eddd1c9a79198076c74a3e609",
+      "65da973d856656fa814273f63224b1d0a53292d0f301aca215fa9e2703f4994c",
+      "a6057ebf5c1bfa6226e8eb5ebc427334b06294e8e290cfac0d2d34a3f0755cf9",
+      "8260aaafce8372113925120cd3b137bdbf442b5c2e258cdeae375984b85287e7",
+      "d97975adb02c08f8aa4886bfaed30d442220a6251cdc777fbea64242ebc57ea3",
+      "04f7cc81ba5d33cbcdcd9e26c81d27c2dfb797d9d703e6e71f76abb653d73ff7",
+      "fd54b7f962f1b6e01d054d5a01209798baceb81f23b8e374a08cc1a1b6830791",
+      "c430576a51b9bb698d324574bf4e88adb77280e1753cc28d66017f52b6ae731f",
+      "5215266e29150b70399e5bcf9f65dc2c51183074d54e730cac6a631c47e07cca"
+    ],
+    "tail_sha256": "671a6c7397456cb056aad7387fb9ff555b75032f063a49d7badf129c60e35375",
+    "sent_message_commands": 0
+  },
+  "live_restart": {
+    "native_before_pid": 16286,
+    "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+    "stopped_journal_sha256": "7d1202ec828212217f6e6baba87724f0fbc81da5e799656d9a4efcb3224020a2",
+    "stopped_journal_bytes": 117750,
+    "health": {
+      "app_roots": 11,
+      "catalogs": 1,
+      "ink_limit": 68,
+      "ink_subscribers": 0,
+      "peer_limits": [
+        4,
+        64
+      ],
+      "presentation": true,
+      "public_sessions": 0,
+      "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "status": "ok",
+      "trusted_sessions": 1
+    },
+    "native_ready": {
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ],
+      "epoch": 2,
+      "input_busy": false,
+      "keyboard_visible": false,
+      "layout": "app:home/ui",
+      "motion": {
+        "count": 12,
+        "playing": true,
+        "speed": 1.0
+      },
+      "output": [
+        800,
+        1280
+      ],
+      "pending_commands": 0,
+      "pid": 16286,
+      "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "reload_ready": true,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "runtime_release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "runtime_resources": {
+        "behavior_cache_bytes": 0,
+        "behavior_cache_entries": 0,
+        "behavior_hash": null,
+        "chat": null,
+        "dispatch": {
+          "issued_age_ms": null,
+          "issued_fields": 0,
+          "issued_payload_bytes": 0,
+          "pending_age_ms": null,
+          "pending_fields": 0,
+          "pending_payload_bytes": 0,
+          "ready_in_ms": null
+        },
+        "reflow_editing": false,
+        "reflow_order": [],
+        "sampled_monotonic_ms": 174767,
+        "state": {
+          "replica_root_shared": true,
+          "selected_canonical_bytes": 253,
+          "selected_nodes": 1
+        },
+        "text_document": null,
+        "text_scroll": null,
+        "ui_cache_bytes": 24977,
+        "ui_cache_entries": 1,
+        "ui_cache_hits": 1,
+        "wire": {
+          "buffer_grows": 1,
+          "compression_capacity": 0,
+          "decode_capacity": 32768,
+          "table_capacity_bound": 0
+        }
+      },
+      "scanout_format": "RGB565",
+      "screen": "",
+      "snapshot": "app:home/state-v4",
+      "state_confirmed": true,
+      "state_ref": "app:home/state-v4",
+      "stream_ready": true,
+      "stride": 1600,
+      "sync_to_present_ms": 37.456382000000005,
+      "touch_calibrated": true,
+      "touch_devices": 1,
+      "ui_ref": "app:home/ui",
+      "ui_release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "ui_updates": true,
+      "video": "DRM"
+    },
+    "reconnected_same_native_pid": true,
+    "journal_sha256_after_recovery": "7d1202ec828212217f6e6baba87724f0fbc81da5e799656d9a4efcb3224020a2",
+    "recovery_seconds": 5.136700868606567,
+    "services": {
+      "otrios-authority": true,
+      "otrios-dashboard-direct": true,
+      "otrios-tunnel": true,
+      "otrios-monitoring.timer": true
+    }
+  },
+  "cleanup": {
+    "disposable_authority_stopped": true,
+    "private_fixture_removed": true,
+    "test_relay_installed": false,
+    "rollback_retained": true,
+    "services": {
+      "otrios-authority": true,
+      "otrios-tunnel": true,
+      "otrios-dashboard-direct": true,
+      "otrios-monitoring.timer": true
+    }
+  },
+  "deployment_log": "TRANSFER bytes=25333760 mode=full\nFRAME {\"active\": \"37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16\", \"obsolete\": 1, \"bytes\": 13862624, \"applied\": true}\nNATIVE {\"active\": \"37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16\", \"obsolete\": 1, \"bytes\": 7410625, \"applied\": true}"
+}

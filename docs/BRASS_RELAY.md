@@ -89,9 +89,10 @@ replacement and navigation wait for those receipts. A retention-expired anchor
 moves to the first retained key at or after it, or the last retained key if it
 is beyond the tail, with an explicit notice. Immutable message blocks keep each
 sent label, body and avatar together. Overlapping windows reuse their layout
-chunks; the avatar and text share placement and clipping on both hosts. Physical
-frame/pixel and deployed acceptance gates of [RFC 0024](rfcs/0024-viewport-scoped-collections.md)
-remain in progress; see the [qualification ledger](experiments/collection-windows-2026-10-28.md).
+chunks; the avatar and text share placement and clipping on both hosts. The frame/pixel, large-thread, journal rollback/restart and signed deployment
+gates of [RFC 0024](rfcs/0024-viewport-scoped-collections.md) are complete; see the
+[qualification ledger](experiments/collection-windows-2026-10-28.md) for commands,
+measurements and remaining renderer/human-interaction limits.
 
 The mode-0600 `brass-relay.journal` lives beside the authority's app state. Records
 have lengths and SHA-256 checksums; writes sync before receipt publication. A

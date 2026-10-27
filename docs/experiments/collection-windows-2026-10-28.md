@@ -613,13 +613,116 @@ Node worker/session/cache/GPU/input checks passed. The final Wasm build and ARMv
 probes/direct host/authority/helper builds passed with Rust 1.90.0 and the locked
 offline dependency cache. No dependency was added.
 
-## Remaining completion gates
+## Stopped rollback point and ARM journal recovery
 
-1. Establish the stopped live-data rollback point and qualify actual journal
-   restart/rollback with the signed candidate and prior authority.
-2. Finish production-mode physical measurements and complete browser/native
-   acceptance against the final release, recording the scope of synthetic
-   gestures/typists separately from physical touch or network evidence.
-3. Deploy the verified complete signed release to the existing frame/web
-   environment, verify native readiness and public/reconnect/private boundaries,
-   and make it available to test. Finish final commits, then open a non-draft PR.
+The stopped snapshot at
+`/var/lib/otrios-authority/rollback/2026-10-28-rfc0024` contains 119 verified
+files: canonical app checkpoints/journals, presentation, the complete prior
+signed release and authority/bootstrap/supervisor executables. The collector,
+authority and native display were stopped while copying. Every copied state
+and release file was checked against the stopped source before existing services
+were restored. The journal is 116,010 bytes, SHA-256
+`547023d3dc1b6357b0da571571a7f069ac75c23b692fcad8ca9bf5dbd97d296b`.
+The prior signed release is
+`f8cacaa81ae3a748dd853b4357403077f1d48735a4fcd2fa28c02dc4b36b9e00`.
+The snapshot is retained outside active-only release pruning.
+
+A separate bounded ARM authority recovered a private copy of those stopped
+files on loopback ports 18984/18985. The thin Apache `chat_loopback_probe` uses
+the core codecs and coherent-replica qualifier; it contains no runtime/store
+implementation. It durably sent a fixed fixture canary through v8, then stopped
+the candidate. The prior actual v6 authority recovered the same updated journal
+and returned the canary in its retired Welcome body. The probe deliberately
+treats that body as opaque bytes: the current strict v8 codec rejects its
+retired fields, as intended. The candidate then recovered the journal after
+rollback and again after another process restart. All v8 qualifications retained
+the same message-window root
+`083b36c56f4622cd6d71a9aa87a7b3b2206fe63c173bd26c94da300e26be0838`.
+The immutable stopped backup's digest remained unchanged and production health
+remained good. Only one authority ran against the disposable journal at a time.
+See [the round-trip record](data/collection-journal-roundtrip-2026-10-28.json)
+and [snapshot summary](data/collection-stopped-backup-2026-10-28.json).
+
+The frame's SSH policy disables TCP forwarding. Automatic approval review
+rejected a proposed Tailscale test relay because it could expose the private
+journal copy/candidate beyond the local machine. No relay was installed or
+listener exposed. Recovery/native checks ran entirely on-frame over loopback;
+browser qualification of the exact signed release ran against the local
+Mac authority. These are separate host-adapter observations.
+
+The exact signed native executable (`dd7a6d11...10b22781`) then ran on real
+KMS/GLES2 against the disposable ARM authority, using verified public
+code/font/catalog copies in a kiosk-accessible temporary directory. It reached
+Brass Relay with stream ready, state confirmed, zero pending commands, 13 rows,
+6,096 selected and 8,095 replica canonical bytes. Document source allocation
+was 32,843 bytes, layout workspace 271,624 bytes and index 788 bytes. The actual
+RGB565 output/90-degree rotation and accepted calibration hash
+`44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e`
+were preserved. This idle readiness run drew two initial frames and has no
+post-warmup cadence samples; it establishes no FPS result. Scrolling FPS is the
+separate kernel-flip workload above. The service and console were restored.
+See [native readiness](data/collection-native-client-2026-10-28.json).
+
+After the probe additions, `bash scripts/check.sh` passed again, as did isolated
+Linux `cargo clippy --workspace --all-targets --all-features --locked --offline --
+-D warnings`. The reusable read-only browser release probe also passed against
+the signed local candidate. It records release/control negotiation and hashes
+of the selected sent-message tail; it sends no message commands and does not
+write raw chat text into its report.
+
+## Signed live cutover and completion
+
+The established deployment command verified the complete signed asset graph,
+transferred 25,333,760 bytes, installed the new ARM authority/helpers, activated
+release `37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16`
+and notified release control only after complete installation. The native updater
+qualified that same signed release as last-good and reached connected, confirmed
+Home with zero pending commands. Active-only code caches were pruned; the
+stopped rollback snapshot above remains intact. All four production services
+(authority, tunnel, native display and collector timer) are active.
+
+```sh
+python3 scripts/deploy-dashboard-frame.py --config /PRIVATE/rfc0024-config.json --pointer target/rfc0024-qualification/staged-release.json --server target/rfc0024-qualification/arm/dashboard-server --monitoring target/rfc0024-qualification/arm/dashboard-monitoring --bootstrap target/rfc0024-qualification/arm/session-bootstrap
+python3 scripts/test-dashboard-host.py --url https://otrios.otri.ca --public-only
+node scripts/probe-chat-release-browser.mjs --url https://otrios.otri.ca --release 37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16 --chromium '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --output target/rfc0024-qualification/live-browser-after-restart
+```
+
+The public checker passes **120 checks**: signed public asset bytes, opening
+control v1/state v8 negotiation, discovery with an obsolete state protocol,
+private/admin route isolation and anonymous denial. Authenticated Monitoring
+login is explicitly excluded by `--public-only`; its process tests remain
+separate. This checker had a stale assumption that all app navigation HTML was
+byte-identical. Existing per-app browser/Open Graph titles intentionally differ.
+It now normalizes only those two title fields before comparing the complete
+executable/style/body shell; a regression test still rejects changed release
+URLs or unexpected body content. Initial pre-activation probes saw the old v6
+release, and the stale shell assertion failed before this correction; they are
+not counted as successful deployed acceptance.
+
+The real public Chrome probe loads 11 recovered messages through the collection
+lane, sends no message commands and verifies release/control identifiers. After
+a stopped live authority restart, the journal retained exactly the same SHA-256
+`7d1202ec828212217f6e6baba87724f0fbc81da5e799656d9a4efcb3224020a2`
+(117,750 bytes). The existing native process, PID 16286, reconnected without a
+renderer restart, reached confirmed state and retained the same signed runtime
+and UI release. Recovery to those checks took 5.137 seconds. A fresh public
+browser recovered the identical final ten message sequences and text digest:
+`671a6c7397456cb056aad7387fb9ff555b75032f063a49d7badf129c60e35375`.
+Reports contain hashes rather than raw sent-message text. Production admission
+can append identity metadata; no fixture message was sent to production.
+
+The complete post-deployment `bash scripts/check.sh` passed. Final results,
+native readiness, browser before/after snapshots and cleanup are committed in
+[data/collection-live-release-2026-10-28.json](data/collection-live-release-2026-10-28.json).
+The disposable ARM authority was stopped, its private state copy removed, and
+only this task's remote probes/captures were removed. The local disposable
+authority was stopped too. No test relay was installed. No dependency, kernel,
+driver, rotation or calibration change was introduced.
+
+Both RFC delivery gates are complete and the change is available for testing at
+[The Brass Relay](https://otrios.otri.ca/brass-relay). Physical human touch/typing,
+long-term soak, and default-renderer DPR 3.2 subpixel rounding remain outside
+these acceptance claims; the default DPR 1/2 and actual native pixel gates pass,
+and the existing stable-quad option also passes at DPR 3.2. Module execution,
+portable compilation, general transactions and CRDT acceleration remain later
+RFC work. Final source/evidence commits precede PR creation.

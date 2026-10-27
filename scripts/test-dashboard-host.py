@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """Public code/demo and private Monitoring conformance. Never logs credentials."""
-import argparse,base64,gzip,hashlib,http.client,json,pathlib,secrets,socket,urllib.parse
+import argparse,base64,gzip,hashlib,http.client,json,pathlib,re,secrets,socket,urllib.parse
+
+def entry_shell(data):
+    # Navigation intentionally varies these two public catalog title fields.
+    # Require the complete executable/style/body shell to remain identical.
+    data=re.sub(rb'<title>[^<]*</title>',b'<title>OTriOS</title>',data,count=1)
+    return re.sub(rb'property="og:title" content="[^"]*"',b'property="og:title" content="OTriOS"',data,count=1)
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--credentials',type=pathlib.Path);p.add_argument('--public-only',action='store_true',help='Skip authenticated login checks');p.add_argument('--connect-ip',help='DNS override retaining TLS hostname verification');p.add_argument('--state-unavailable',action='store_true');a=p.parse_args()
@@ -23,7 +29,7 @@ def main():
     release=json.loads(raw);prefix='/releases/'+release['id']+'/'
     status,headers,entry=request('/');assert status==200 and headers.get('Cache-Control')=='no-store' and (prefix+'web/app.js').encode() in entry;count+=1
     for screen in ['test-playground','test-playground/components','test-playground/layouts','test-playground/long-document','test-playground/text-panning','test-playground/text-input','test-playground/animations-two-d','test-playground/animations-three-d','monitoring']:
-        status,headers,data=request('/'+screen);assert status==200 and data==entry and headers.get('Cache-Control')=='no-store';count+=1
+        status,headers,data=request('/'+screen);assert status==200 and entry_shell(data)==entry_shell(entry) and headers.get('Cache-Control')=='no-store';count+=1
     for retired in ['/layout-lab/signal','/layout-lab/cards']:
         assert request(retired)[0]==404;count+=1
     assert request('/not-an-app')[0]==404;count+=1
