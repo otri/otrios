@@ -546,23 +546,19 @@ impl<'a> Reader<'a> {
 }
 
 #[cfg(test)]
+const TEST_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../web/shared/fonts/Roboto-Regular.otq.zst");
+#[cfg(test)]
 pub(crate) fn test_font() -> Font {
-    let bytes = std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../web/shared/fonts/Roboto-Regular.otq.zst"),
-    )
-    .unwrap();
-    Font::from_zstd(&bytes, super::font_reference::RESOURCE_SHA256).unwrap()
+    // Keep cross-compiled unit tests runnable on the frame without the build
+    // machine's checkout path. Production resource lookup remains host-owned.
+    Font::from_zstd(TEST_FONT_BYTES, super::font_reference::RESOURCE_SHA256).unwrap()
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     fn compressed() -> Vec<u8> {
-        std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../web/shared/fonts/Roboto-Regular.otq.zst"),
-        )
-        .unwrap()
+        TEST_FONT_BYTES.to_vec()
     }
     fn decoded() -> Vec<u8> {
         let bytes = compressed();

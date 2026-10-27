@@ -1,7 +1,7 @@
 # RFC 0019: Retained fixed coordinates and SIMD drawing batches
 
-Status: proposed plan, native first. The separately deployable Layout Lab text
-scroll demo is a workload and inspection tool; it does not enable this migration.
+Status: native milestone qualified; Wasm SIMD milestone remains planned.
+The separately deployable Layout Lab text scroll demo is the interactive workload.
 Requested 2026-10-27. The [qualified opt-in baseline](0018-fixed-point-layout-simd.md)
 remains the scalar/pixel control.
 
@@ -151,6 +151,18 @@ the same as NEON's gain.
   state-worker tick rate; those counters must remain distinguishable.
 - Run the required repository, native GPU and real browser checks for each
   affected milestone. Preserve clipping, ordering, input recovery and hot upgrades.
+
+## Native implementation evidence
+
+[Native retained/SIMD qualification](../experiments/native-retained-simd-2026-10-27.md)
+records changed-source admission, retained layout/placements, early culling,
+vector conversion/packing and the three GPU position formats. The shared client
+retention improvements apply with float math. Fixed math remains opt-in because
+optimized float rebuilds are still faster; GL_FLOAT remains the selected GPU
+position format. Adaptive alpha coverage storage is a separate measured GPU
+improvement within the native milestone. Checked wide layout arithmetic remains
+scalar. The web milestone still requires its own module selection, SIMD code
+inspection and browser timing evidence.
 
 ## Primary references
 

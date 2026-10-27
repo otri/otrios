@@ -6,7 +6,7 @@ use super::{
     scene::Scene,
 };
 use otrios_interfaces::scene::{Primitive, SceneNode};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextMath {
     Float32,
@@ -25,6 +25,8 @@ impl Default for TextMath {
 #[derive(Default)]
 pub struct TextPresentation {
     key: Option<SceneNode>,
+    source: Option<Scene>,
+    spaces: super::fixed_space::Cache,
     font: String,
     mesh: Arc<Mesh>,
     runs: Vec<Run>,
@@ -41,6 +43,7 @@ struct Bounds {
     bottom: super::fixed::Scalar,
 }
 struct Run {
+    slot: Option<usize>,
     fixed: Option<Bounds>,
     draw: usize,
     id: u32,
@@ -58,6 +61,16 @@ pub struct TextFrame {
     pub styles: Arc<Vec<f32>>,
     pub generation: u32,
 }
+/// Opt-in probe timings. Ordinary composition reads no profiling clock.
+#[derive(Default, Debug)]
+pub struct ComposeProfile {
+    pub placement_us: u128,
+    pub rebuild_us: u128,
+    pub cull_us: u128,
+    pub changed_placements: usize,
+    pub mesh_payload_bytes: usize,
+    pub viewport_bytes: usize,
+}
 impl TextPresentation {
     pub fn math_counts(&self) -> [u64; 2] {
         self.glyph_math.counts()
@@ -69,12 +82,33 @@ impl TextPresentation {
         }
     }
     pub fn compose(&mut self, scene: &Scene, font: &Font) -> TextFrame {
-        let placements = (self.math == TextMath::Fixed)
-            .then(|| super::fixed_space::placements(scene.root()).ok())
-            .flatten();
-        let mut key = scene.root().clone();
+        self.compose_inner(scene, font, None)
+    }
+    pub fn compose_profiled(
+        &mut self,
+        scene: &Scene,
+        font: &Font,
+        profile: &mut ComposeProfile,
+    ) -> TextFrame {
+        *profile = ComposeProfile::default();
+        self.compose_inner(scene, font, Some(profile))
+    }
+    fn compose_inner(
+        &mut self,
+        scene: &Scene,
+        font: &Font,
+        mut profile: Option<&mut ComposeProfile>,
+    ) -> TextFrame {
+        let start = profile.as_ref().map(|_| Instant::now());
+        let cached = self.math == TextMath::Fixed && self.spaces.update(scene.root()).is_ok();
+        let changed = cached
+            && self
+                .source
+                .as_ref()
+                .is_none_or(|old| !same_geometry(old.root(), scene.root()));
+        let mut key = (!cached).then(|| scene.root().clone());
         let mut positions = BTreeMap::new();
-        let extent = [key.frame.width, key.frame.height];
+        let extent = [scene.root().frame.width, scene.root().frame.height];
         let mut glyphs = 0;
         if self.font != font.hash() {
             self.em_cache.clear();
@@ -83,16 +117,33 @@ impl TextPresentation {
             font,
             cache: &mut self.em_cache,
         };
-        normalize(
-            &mut key,
-            [0., 0.],
-            1.,
-            [0., 0., extent[0], extent[1]],
-            &mut positions,
-            &mut glyphs,
-            &mut scales,
-        );
-        if self.key.as_ref() != Some(&key) || self.font != font.hash() {
+        if let Some(key) = &mut key {
+            normalize(
+                key,
+                [0., 0.],
+                1.,
+                [0., 0., extent[0], extent[1]],
+                &mut positions,
+                &mut glyphs,
+                &mut scales,
+            );
+        } else if changed || self.font != font.hash() {
+            fixed_positions(
+                scene.root(),
+                &self.spaces,
+                &mut 0,
+                &mut positions,
+                &mut glyphs,
+                &mut scales,
+            );
+        }
+        if let Some(p) = profile.as_deref_mut() {
+            p.placement_us = start.unwrap().elapsed().as_micros();
+            p.changed_placements = if cached { self.spaces.changed } else { 0 };
+        }
+        let rebuild_start = profile.as_ref().map(|_| Instant::now());
+        if changed || (!cached && self.key.as_ref() != key.as_ref()) || self.font != font.hash() {
+            let placements = cached.then(|| self.spaces.placements());
             if self.font != font.hash() {
                 self.glyph_math.clear();
             }
@@ -176,6 +227,7 @@ impl TextPresentation {
                         })
                         .flatten();
                     Run {
+                        slot: cached.then(|| self.spaces.slot(id)).flatten(),
                         fixed,
                         draw,
                         id,
@@ -188,53 +240,73 @@ impl TextPresentation {
                 .collect();
             self.styles = Arc::new(styles);
             self.mesh = Arc::new(mesh);
+            if let Some(p) = profile.as_deref_mut() {
+                p.mesh_payload_bytes = (self.mesh.vertices.len()
+                    + self.mesh.glyph_vertices.len()
+                    + self.mesh.draws.len())
+                    * 4;
+            }
             self.font = font.hash().into();
-            self.key = (glyphs <= 16384).then_some(key);
+            self.key = if glyphs <= 16384 { key } else { None };
+            self.source = (cached && glyphs <= 16384).then(|| scene.clone());
             self.generation = self.generation.wrapping_add(1);
         }
+        if let Some(p) = profile.as_deref_mut() {
+            p.rebuild_us = rebuild_start.unwrap().elapsed().as_micros();
+        }
+        let cull_start = profile.as_ref().map(|_| Instant::now());
         let mut views = vec![0.; self.mesh.draws.len() / 3 * 8];
         for run in &self.runs {
-            let Some(&[mut x, mut y, mut l, mut t, mut r, mut b, _]) = positions.get(&run.id)
-            else {
+            let (gpu, rounded) = if let Some(slot) = run.slot.filter(|_| cached) {
+                self.spaces.view(slot)
+            } else if let Some(&[x, y, l, t, r, b, _]) = positions.get(&run.id) {
+                ([x, y, l, t, r, b], None)
+            } else {
                 continue;
             };
-            if let Some(p) = placements.as_ref().and_then(|p| p.get(&run.id)) {
-                let rect = p.rect();
-                x = rect.x;
-                y = rect.y;
-                [l, t, r, b] = p.clip.map(super::fixed::Scalar::to_f32);
-            }
+            let [x, y, l, t, r, b] = gpu;
             let legacy = || {
+                let visible = r > l && b > t && run.bottom + y > t && run.top + y < b;
+                if self.math == TextMath::Fixed && !visible {
+                    return (0, 0);
+                }
                 let start = run.right.partition_point(|right| *right <= l - x);
                 let end = run.left.partition_point(|left| *left < r - x);
-                let count = if r > l && b > t && run.bottom + y > t && run.top + y < b {
-                    end.saturating_sub(start) * 4
-                } else {
-                    0
-                };
-                (start, count)
+                (
+                    start,
+                    if visible {
+                        end.saturating_sub(start) * 4
+                    } else {
+                        0
+                    },
+                )
             };
             let (start, count) = run
                 .fixed
                 .as_ref()
                 .and_then(|bounds| {
-                    // Cull against the exact values sent to the GPU, in integer
-                    // space. This also accounts for final attribute rounding.
+                    // Cached integer counterparts exactly match the rounded GPU
+                    // attributes; no float/readmission round trip while coasting.
                     use super::fixed::Scalar;
-                    let [x, y, l, t, r, b] = [x, y, l, t, r, b].map(Scalar::from_f32);
-                    let (x, y, l, t, r, b) = (x.ok()?, y.ok()?, l.ok()?, t.ok()?, r.ok()?, b.ok()?);
-                    let left = l.checked_sub(x).ok()?;
-                    let right = r.checked_sub(x).ok()?;
+                    let [x, y, l, t, r, b] = if let Some(v) = rounded {
+                        v
+                    } else {
+                        let [x, y, l, t, r, b] = gpu.map(Scalar::from_f32);
+                        [x.ok()?, y.ok()?, l.ok()?, t.ok()?, r.ok()?, b.ok()?]
+                    };
+                    if r <= l || b <= t {
+                        return Some((0, 0));
+                    }
                     let top = t.checked_sub(y).ok()?;
                     let bottom = b.checked_sub(y).ok()?;
+                    if bounds.bottom <= top || bounds.top >= bottom {
+                        return Some((0, 0));
+                    }
+                    let left = l.checked_sub(x).ok()?;
+                    let right = r.checked_sub(x).ok()?;
                     let start = bounds.right.partition_point(|v| *v <= left);
                     let end = bounds.left.partition_point(|v| *v < right);
-                    let count = if r > l && b > t && bounds.bottom > top && bounds.top < bottom {
-                        end.saturating_sub(start) * 4
-                    } else {
-                        0
-                    };
-                    Some((start, count))
+                    Some((start, end.saturating_sub(start) * 4))
                 })
                 .unwrap_or_else(legacy);
             views[run.draw * 8..run.draw * 8 + 8].copy_from_slice(&[
@@ -251,12 +323,64 @@ impl TextPresentation {
         if self.runs.is_empty() {
             views.clear();
         }
+        if cached && self.source.is_some() {
+            self.source = Some(scene.clone());
+        }
+        if let Some(p) = profile {
+            p.cull_us = cull_start.unwrap().elapsed().as_micros();
+            p.viewport_bytes = views.len() * 4;
+        }
         TextFrame {
             mesh: self.mesh.clone(),
             views,
             generation: self.generation,
             styles: self.styles.clone(),
         }
+    }
+}
+/// Match the old normalized geometry key without cloning text or allocating a
+/// second tree. Text frames affect only viewport state; every other source field
+/// retains the previous invalidation semantics.
+fn same_geometry(a: &SceneNode, b: &SceneNode) -> bool {
+    a.id == b.id
+        && a.primitive == b.primitive
+        && a.responder == b.responder
+        && a.semantics == b.semantics
+        && (matches!(a.primitive, Primitive::Text { .. }) || a.frame == b.frame)
+        && a.children.len() == b.children.len()
+        && a.children
+            .iter()
+            .zip(&b.children)
+            .all(|(a, b)| same_geometry(a, b))
+}
+fn fixed_positions(
+    node: &SceneNode,
+    cache: &super::fixed_space::Cache,
+    cursor: &mut usize,
+    out: &mut BTreeMap<u32, [f32; 7]>,
+    glyphs: &mut usize,
+    scales: &mut EmScales<'_>,
+) {
+    let slot = *cursor;
+    *cursor += 1;
+    if let Primitive::Text { value, scale, .. } = &node.primitive {
+        *glyphs += value.chars().count();
+        let ([x, y, l, t, r, b], _) = cache.view(slot);
+        out.insert(
+            node.id,
+            [
+                x,
+                y,
+                l,
+                t,
+                r,
+                b,
+                scales.get(*scale as f32 * cache.factor(slot)),
+            ],
+        );
+    }
+    for child in &node.children {
+        fixed_positions(child, cache, cursor, out, glyphs, scales);
     }
 }
 struct EmScales<'a> {
@@ -408,5 +532,36 @@ mod tests {
             let hidden = fixed.compose(&scene(x, y, "jyABC"), &font);
             assert_eq!(hidden.views[1], 0.);
         }
+    }
+    #[test]
+    fn cached_fixed_geometry_invalidates_for_content_scale_and_topology() {
+        let font = super::super::font::test_font();
+        let mut renderer = TextPresentation::with_math(TextMath::Fixed);
+        let first = renderer.compose(&scene(0., 0., "ABC"), &font);
+        let second = renderer.compose(&scene(0., 0., "ABC"), &font);
+        assert_eq!(renderer.spaces.changed, 0);
+        assert!(Arc::ptr_eq(&first.mesh, &second.mesh));
+        let scrolled = renderer.compose(&scene(1.25, 0., "ABC"), &font);
+        assert_eq!(renderer.spaces.changed, 1);
+        assert!(Arc::ptr_eq(&first.mesh, &scrolled.mesh));
+        let mut root = scene(1.25, 0., "ABC").root().clone();
+        root.children[0].primitive = Primitive::Viewport { scale: 1.25 };
+        let scaled = renderer.compose(&Scene::new(root.clone()).unwrap(), &font);
+        assert!(!Arc::ptr_eq(&first.mesh, &scaled.mesh));
+        let original = scaled.mesh.glyph_vertices.clone();
+        root.children[0].children[0].primitive = Primitive::Text {
+            value: "XYZ".into(),
+            scale: 2,
+            color: WHITE,
+        };
+        let changed = renderer.compose(&Scene::new(root.clone()).unwrap(), &font);
+        assert!(!Arc::ptr_eq(&scaled.mesh, &changed.mesh));
+        root.children[0].children[0].id = 7;
+        let topology = renderer.compose(&Scene::new(root).unwrap(), &font);
+        assert!(!Arc::ptr_eq(&changed.mesh, &topology.mesh));
+        assert_eq!(
+            scaled.mesh.glyph_vertices, original,
+            "Held snapshots never change"
+        );
     }
 }

@@ -61,6 +61,26 @@ impl Scalar {
     pub fn to_f32(self) -> f32 {
         self.0 as f32 / 4294967296.
     }
+    /// Exact Q32 value of the final f32 attribute, without a float/readmission
+    /// round trip. Integer-to-float rounding is nearest with ties to even.
+    /// None covers rounding beyond i64, where culling must use the float path.
+    pub(super) fn gpu_rounded(self) -> Option<Self> {
+        let magnitude = self.0.unsigned_abs();
+        let shift = (64 - magnitude.leading_zeros()).saturating_sub(24);
+        if shift == 0 {
+            return Some(self);
+        }
+        let mask = (1_u64 << shift) - 1;
+        let half = 1_u64 << (shift - 1);
+        let remainder = magnitude & mask;
+        let mut rounded = magnitude >> shift;
+        if remainder > half || (remainder == half && rounded & 1 != 0) {
+            rounded += 1;
+        }
+        signed_magnitude(rounded << shift, self.0 < 0)
+            .ok()
+            .map(Self)
+    }
     #[inline]
     pub fn checked_add(self, rhs: Self) -> Result<Self> {
         self.0
@@ -338,6 +358,32 @@ pub(super) fn add4_admitted(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn integer_gpu_rounding_matches_float_attributes_at_ties_and_extrema() {
+        let mut values = vec![0, 1, -1, i64::MIN, i64::MAX, i64::MIN + 1];
+        for bit in 24..63 {
+            let center = 1_i64 << bit;
+            let half = 1_i64 << (bit - 24);
+            for offset in [-half - 1, -half, -half + 1, half - 1, half, half + 1] {
+                values.push(center + offset);
+                values.push(-(center + offset));
+            }
+        }
+        let mut seed = 42_u64;
+        for _ in 0..10000 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            values.push(seed as i64);
+        }
+        for raw in values {
+            let value = Scalar(raw);
+            assert_eq!(
+                value.gpu_rounded(),
+                Scalar::from_f32(value.to_f32()).ok(),
+                "raw={raw}"
+            );
+        }
+    }
+
     #[test]
     fn scalar_identity_integer_and_ratio_paths_match_wide_rounding() {
         for a in [

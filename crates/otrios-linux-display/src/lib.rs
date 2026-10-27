@@ -7,6 +7,14 @@ mod ffi;
 pub use ffi::{Display, Flip, Info, Touch};
 
 pub const MAX_VERTICES: usize = 2_000_000;
+/// Experimental cached-text vertex fetch formats. Float remains the control.
+#[derive(Clone, Copy)]
+#[repr(i32)]
+pub enum TextPositionFormat {
+    Float = 0,
+    Fixed = 1,
+    Short = 2,
+}
 /// Bound allocations and reject malformed geometry before FFI. Coordinates stay
 /// logical; the independently checked projection performs output rotation.
 pub fn validate_mesh(vertices: &[f32]) -> Result<(), String> {

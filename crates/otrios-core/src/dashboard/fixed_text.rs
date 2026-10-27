@@ -2,7 +2,7 @@
 //! Fixed glyph placement pilot; outlines and coverage remain the admitted font.
 use super::{
     Result,
-    fixed::{Scalar, add4_admitted, rounded_ratio},
+    fixed::{Scalar, rounded_ratio},
     font::Font,
 };
 use otrios_interfaces::scene::Color;
@@ -151,38 +151,59 @@ pub(super) fn append(
         end.checked_add(style.max_x)
             .ok_or("Fixed text strip bounds overflow")?;
         let count = count.min((65536_usize.saturating_sub(out.len() / 16)) / 4);
-        for base in (0..count).step_by(4) {
-            let n = (count - base).min(4);
-            let mut pen = [0; 4];
-            let mut left = [0; 4];
-            let mut right = [0; 4];
-            for lane in 0..n {
-                let i = base + lane;
-                let glyph = &style.glyphs[indices[i]];
-                pen[lane] = ((pens[i] + 32768) >> 16) as i32;
-                left[lane] = glyph.bounds[0];
-                right[lane] = glyph.bounds[2];
-            }
-            let [left, right] = pack_x(pen, left, right);
-            for lane in 0..n {
-                let left = left[lane] as f32 / 65536.;
-                let right = right[lane] as f32 / 65536.;
-                let index = indices[base + lane];
-                let source = &font.glyphs()[index];
-                let glyph = &style.glyphs[index];
-                let e = glyph.em;
-                let [top, bottom] = glyph.y;
-                for [x, y, u, v] in [
-                    [left, top, e[0], e[1]],
-                    [right, top, e[2], e[1]],
-                    [left, bottom, e[0], e[3]],
-                    [right, bottom, e[2], e[3]],
-                ] {
-                    out.extend([x, y, u, v]);
-                    out.extend(tint);
-                    out.extend(source.band_transform);
-                    out.extend(source.band_data());
-                }
+        // Admit a complete strip, then convert contiguous lanes in one pass.
+        // Keeping this separate from interleaved vertex emission lets LLVM use
+        // NEON integer adds and vector conversion rather than scalar VFP casts.
+        let mut pen = [0_i32; 257];
+        let mut left = [0_i32; 257];
+        let mut right = [0_i32; 257];
+        let mut x0 = [0_f32; 257];
+        let mut x1 = [0_f32; 257];
+        for i in 0..count {
+            let glyph = &style.glyphs[indices[i]];
+            pen[i] = ((pens[i] + 32768) >> 16) as i32;
+            left[i] = glyph.bounds[0];
+            right[i] = glyph.bounds[2];
+        }
+        place_x(
+            &pen[..count],
+            &left[..count],
+            &right[..count],
+            &mut x0[..count],
+            &mut x1[..count],
+        );
+        for i in 0..count {
+            let index = indices[i];
+            let source = &font.glyphs()[index];
+            let glyph = &style.glyphs[index];
+            let e = glyph.em;
+            let [top, bottom] = glyph.y;
+            for position in [
+                [x0[i], top, e[0], e[1]],
+                [x1[i], top, e[2], e[1]],
+                [x0[i], bottom, e[0], e[3]],
+                [x1[i], bottom, e[2], e[3]],
+            ] {
+                let band = source.band_transform;
+                let data = source.band_data();
+                out.extend([
+                    position[0],
+                    position[1],
+                    position[2],
+                    position[3],
+                    tint[0],
+                    tint[1],
+                    tint[2],
+                    tint[3],
+                    band[0],
+                    band[1],
+                    band[2],
+                    band[3],
+                    data[0],
+                    data[1],
+                    data[2],
+                    data[3],
+                ]);
             }
         }
         Ok(())
@@ -196,18 +217,49 @@ pub(super) fn append(
     result
 }
 
-// Structure-of-arrays groups four ink glyphs, so the compiler can vectorize the
-// X additions without wasted space-glyph work. Keep this integer kernel separate
-// from presentation conversion: otherwise LLVM scalarizes it into VFP converts
-// on Cortex-A7. Portable builds still use the identical scalar semantics.
+// Bounds were proved for the entire strip before entering this function.
+// No unsafe intrinsics or wrapping arithmetic; scalar and SIMD share semantics.
 #[inline(never)]
-fn pack_x(pen: [i32; 4], left: [i32; 4], right: [i32; 4]) -> [[i32; 4]; 2] {
-    [add4_admitted(pen, left), add4_admitted(pen, right)]
+fn place_x(pen: &[i32], left: &[i32], right: &[i32], x0: &mut [f32], x1: &mut [f32]) {
+    for ((((pen, left), right), x0), x1) in pen.iter().zip(left).zip(right).zip(x0).zip(x1) {
+        *x0 = lane_float(*pen + *left);
+        *x1 = lane_float(*pen + *right);
+    }
+}
+#[inline]
+fn lane_float(value: i32) -> f32 {
+    // Every nonzero i32 converts to a normal f32 at least 1 in magnitude.
+    // Scaling by 2^-16 therefore changes only its exponent, exactly. Avoiding
+    // floating arithmetic lets strict ARM builds vectorize without fast-math
+    // assumptions about subnormals or global rounding modes.
+    let bits = (value as f32).to_bits();
+    f32::from_bits(if value == 0 { 0 } else { bits - (16 << 23) })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn batch_conversion_matches_scalar_rounding_across_signed_lanes() {
+        let mut values = vec![i32::MIN, i32::MAX, 0, 1, -1, 65535, 65536, -65537];
+        let mut seed = 17_u32;
+        for _ in 0..10000 {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            values.push(seed as i32);
+        }
+        for v in values {
+            assert_eq!(lane_float(v).to_bits(), (v as f32 / 65536.).to_bits());
+        }
+        let pen = [0, 65536, 1 << 24, -(1 << 24)];
+        let left = [-65536, 1, -1, 0];
+        let right = [65536, 65537, 0, 65536];
+        let (mut a, mut b) = ([0.; 4], [0.; 4]);
+        place_x(&pen, &left, &right, &mut a, &mut b);
+        for i in 0..4 {
+            assert_eq!(a[i], (pen[i] + left[i]) as f32 / 65536.);
+            assert_eq!(b[i], (pen[i] + right[i]) as f32 / 65536.);
+        }
+    }
     #[test]
     fn accumulated_placement_stays_on_the_grid_of_the_high_precision_font_reference() {
         let font = Font::from_zstd(

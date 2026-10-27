@@ -2,7 +2,7 @@
 //! Same-pipeline native reference/output/difference comparison. Not an FPS test.
 mod common;
 use otrios_core::dashboard::{display::Surface, font::Font, font_reference};
-use otrios_linux_display::Display;
+use otrios_linux_display::{Display, TextPositionFormat};
 use std::path::Path;
 fn edge(pixels: &[u8], index: usize, width: usize, height: usize) -> bool {
     let (x, y) = (index % width, index / width);
@@ -28,9 +28,21 @@ fn ppm(path: &Path, pixels: &[u8], w: usize, h: usize) -> Result<(), String> {
 }
 fn main() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 3 {
-        return Err("Supply reference.mesh candidate.mesh OUTPUT_DIRECTORY".into());
+    if args.len() != 3 && !(args.len() == 5 && args[3] == "--positions") {
+        return Err(
+            "Supply reference.mesh candidate.mesh OUTPUT_DIRECTORY [--positions float|fixed|short]"
+                .into(),
+        );
     }
+    let positions = args
+        .get(4)
+        .map(|s| match s.as_str() {
+            "float" => Ok(TextPositionFormat::Float),
+            "fixed" => Ok(TextPositionFormat::Fixed),
+            "short" => Ok(TextPositionFormat::Short),
+            _ => Err("Invalid position format"),
+        })
+        .transpose()?;
     let reference = common::load(&args[0])?;
     let candidate = common::load(&args[1])?;
     if reference.len() != candidate.len() {
@@ -59,7 +71,14 @@ fn main() -> Result<(), String> {
         let mut worst = 0;
         for i in [0, 1, 17, 59, reference.len() - 1] {
             let mut pixels = vec![];
-            for frame in [&reference[i], &candidate[i]] {
+            for (part, frame) in [&reference[i], &candidate[i]].into_iter().enumerate() {
+                if let Some(format) = positions {
+                    display.text_position_format(if part == 0 {
+                        TextPositionFormat::Float
+                    } else {
+                        format
+                    })?;
+                }
                 display.upload_scene(
                     0,
                     &frame.mesh.vertices,
