@@ -4,7 +4,8 @@ use crate::authoring::*;
 use otrios_interfaces::canvas::{StateSchema, Ui};
 
 pub fn description(state_schema: StateSchema) -> Ui {
-    let home = || place("home", [200., 80.]);
+    let home = || place("home", [140., 80.]);
+    let back = || place("back", [140., 80.]);
     let intro = || place("intro", [752., 32.]).flex_width();
     let controls = || {
         row(
@@ -37,15 +38,7 @@ pub fn description(state_schema: StateSchema) -> Ui {
     let wide = column(
         16.,
         vec![
-            row(
-                16.,
-                vec![
-                    heading(),
-                    place("text-demo", [220., 80.]),
-                    place("document-demo", [220., 80.]),
-                    home(),
-                ],
-            ),
+            row(16., vec![heading(), back(), home()]),
             intro(),
             top(),
             controls(),
@@ -55,31 +48,19 @@ pub fn description(state_schema: StateSchema) -> Ui {
     let tall = column(
         16.,
         vec![
-            column(
-                12.,
-                vec![
-                    heading(),
-                    row(16., vec![place("text-demo", [250., 80.]), home()]),
-                    place("document-demo", [250., 64.]),
-                ],
-            ),
+            column(12., vec![heading(), row(16., vec![back(), home()])]),
             intro(),
             top(),
             controls(),
             column(16., vec![a(), b()]),
         ],
     );
-    AppUi::new("layout-lab", "Layout Lab", state_schema)
+    AppUi::new("layout-lab", "Layouts", state_schema)
         .with_composition(wide, tall)
         .build(
-            "Layout Lab",
+            "Layouts",
             vec![
-                button("Long document")
-                    .navigate_to(Destination::app("layout-document").route("document"))
-                    .key("document-demo"),
-                button("Text scroll demo")
-                    .navigate_to(Destination::app("layout-text-scroll").route("text-scroll"))
-                    .key("text-demo"),
+                button("Back").on_press(Event::back()).key("back"),
                 button("Home")
                     .navigate_to(Destination::app("home"))
                     .key("home"),

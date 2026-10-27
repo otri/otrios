@@ -7,10 +7,12 @@ it does not import another app's document or executable instance.
 
 ```text
 apps/
-  home/                         # Admitted app launcher
+  home/                         # Test Playground and Monitoring launcher
+  test-playground/              # Seven demo destinations and editable card order
   component-playground/         # Controls, bounded Wasm reducer, ephemeral trails
   layout-lab/                   # Reusable components and five-minute signal
-  layout-text-scroll/           # Layout Lab child: local two-axis momentum demo
+  layout-document/              # Bounded reflowed document reader
+  layout-text-scroll/           # Local two-axis momentum demo
   input-lab/                    # Shared text registers; local editing/keyboard
   animation-lab/                 # Shared intent, local animation clock
   three-d-lab/                   # Shared intent, local tetrahedron presentation
@@ -41,7 +43,7 @@ behavior bytes and permitted field writes. Status/dependency strings do not gran
 capabilities. UI v2 supports typed, bounded fields and declared operations;
 custom reducers still use the small, separately versioned Wasm ABI v1.
 The text scrolling presentation uses UI v3; other shipped screens remain v2.
-Open Layout Lab's **Text scroll demo** (`/layout-lab/text-scroll`) to inspect the
+Open Test Playground's **Text Panning** (`/test-playground/text-panning`) to inspect the
 retained full-page workload. Its offsets, velocity and FPS meter stay local.
 
 The signed release publishes the generic browser/native hosts, catalog and public
@@ -112,7 +114,7 @@ omit `.route(...)` and target the same stable identity from anywhere.
 
 The packer walks named edges from the first catalog screen (Home at `/`) and
 writes resolved paths into the catalog. Browser and native use those paths.
-Renaming Home's edge to `layouts` yields `/layouts` and rebases any future
+Renaming Home's Test Playground edge to `playground` yields `/playground` and rebases its
 descendants without changing their package identities. UI-only publication recalculates descendant
 paths, and active child mounts retain their state and local interaction.
 
@@ -214,7 +216,7 @@ The common publisher also supports `--kind behavior` for an existing guest modul
 see [RFC 0014](../docs/rfcs/0014-app-behavior-updates.md). It compiles that app's
 Wasm and updates its hash references while reusing the UI layout and host runtimes.
 
-Home uses the bounded [reorder presentation](../docs/rfcs/0015-editable-home-reflow.md):
+Test Playground uses the bounded [reorder presentation](../docs/rfcs/0015-editable-home-reflow.md):
 `.with_reorder(...)` maps stable position fields to authored component keys, and
 `wrap_cards(...)` reflows those components without changing their structure.
 Its local Edit/Done action controls dragging and wiggle; shared writes contain
@@ -223,5 +225,17 @@ only a moved card's position. The renderer owns interpolation and its clock.
 Future nested screens follow the same incremental publishing contract: selecting
 their package identity with `--app` rebuilds only that UI document and its catalog
 hash, retaining sibling documents and the qualified host runtime. Adding/removing
-screen declarations requires repacking the complete catalog. Layout Lab currently
-declares only its main screen; the example Signal/Cards subroutes are not shipped.
+screen declarations requires repacking the complete catalog. Test Playground declares its hub and demo screens; Layouts declares only its main screen.
+
+## Test Playground navigation
+
+Home contains only Test Playground and Monitoring. `test-playground/app.rs`
+registers its hub and all seven demo screens. Its UI owns their relative route
+names (`components`, `layouts`, `long-document`, `text-panning`, `text-input`,
+`animations-two-d`, `animations-three-d`). Demo package/UI/State identities stay stable;
+the catalog resolves them under `/test-playground/`. Layouts no longer owns the
+reader/panning edges. Back returns to the hub and Home returns to `/`.
+
+The shared primitive launcher card in `tools/canvas/components.rs` contains an
+icon, title and subheading. Test Playground owns Edit/Done and its seven order
+registers. Home's `state-v4` binding is empty; the old Home ordering is retired.

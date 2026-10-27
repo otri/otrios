@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Home and reusable input
 
-Home is an admitted Canvas app and launcher. Its navigation targets UI/State
-references for Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab
-and private Monitoring. Home has no Back/Home controls of its own. Other app
-headers own their navigation; Input Lab uses Home without a redundant Back.
-Monitoring sign-out uses the same component styling and server revocation.
+Home is an admitted Canvas launcher with two compact cards: **Test Playground**
+and **Monitoring**. Each card contains an icon, title and subheading. Test
+Playground owns the seven demo destinations: Components, Layouts, Long Document,
+Text Panning, Text Input, 2D Animations and 3D Animations. Layouts has no extra
+links to the document or panning demos. Demo headers provide Back to their parent
+and Home to the launcher. Monitoring retains its private admission boundary.
 
 Navigation and route history stay on the device. A candidate Canvas qualifies
 UI, behavior and selected state before accepting its lease; a rejected candidate
@@ -38,29 +39,27 @@ See [app sources](../apps/README.md), [scene routing](SCENE_TREE.md),
 [storage](CLIENT_STORAGE.md) and [current acceptance](experiments/canvas-packed-wire.md).
 The earlier Shell, screen enum and global dashboard navigation actions are retired.
 
-## Editing Home card order
+## Editing Test Playground card order
 
-Home's UI document declares the card components and a wrapping flow. The shared
-Home state holds a position register per card; a move changes that one register.
-Portrait and landscape use the same order with two and three columns respectively.
+Test Playground owns Edit/Done and the wrapping demo cards. Its independent
+`app:test-playground/state` holds seven position registers. A move changes only
+the moved card's register; other connected clients animate the order while keeping
+their own editing mode. Landscape uses three columns and portrait uses two.
+Keyboard arrows, cancellation and reflow use the existing bounded reorder runtime
+from [RFC 0015](rfcs/0015-editable-home-reflow.md).
 
-Choose **Edit** at the top right, then drag a card to another slot. Other connected
-clients animate the new order while retaining their own interaction mode.
-**Done** restores card launching. Keyboard arrows move a focused card while editing.
-Editing, wiggle, pointer coordinates and animation frames stay local. Cancelling
-a gesture retains moves already sent; rotating cancels capture before reflow.
-
-The reusable runtime behavior and its limits are described in
-[RFC 0015](rfcs/0015-editable-home-reflow.md). This first release adds the runtime
-support and starts Home's previously empty state at `app:home/state-v3`; the other
-app state roots retain their contents. Later compatible arrangement/style edits
-can use the existing Home UI-only publisher.
+Home has no Edit mode or writable fields. Its new empty `app:home/state-v4`
+binding retires the earlier Home card arrangement; the seven demo identities,
+behavior and their existing State references retain their data. Existing
+historical experiment reports describe the former Home arrangement.
 
 ## Shareable screen URLs
 
-Home opens at `/`. It owns the route names of its app destinations, such as
-`/component-playground`, `/layout-lab`, `/input-lab` and `/monitoring`. Layout Lab
-currently has one screen. Opening or refreshing a path restores that screen;
+Home opens at `/` and owns `/test-playground` and `/monitoring`. The hub owns
+`/test-playground/components`, `/test-playground/layouts`,
+`/test-playground/long-document`, `/test-playground/text-panning`,
+`/test-playground/text-input`, `/test-playground/animations-two-d` and
+`/test-playground/animations-three-d`. Opening or refreshing a path restores that screen;
 Back/Forward follows visited paths. Keyboard visibility, focus, Edit mode and drag
 state remain local. Monitoring links still require sign-in before private admission.
 
@@ -77,7 +76,7 @@ catalog paths by walking named edges from the first catalog screen; there is no
 hand-maintained global route map. Every screen has one route owner; duplicate
 sibling names, missing targets, cycles and unreachable screens fail packing.
 
-Native uses the identical resolved path (`--screen layout-lab`, also
+Native uses the identical resolved path (`--screen test-playground/layouts`, also
 accepting a leading `/`). The catalog binds each path to its UI document and
 app-owned State reference. Future child screens may explicitly share their
 owning app's State; the routing mechanism does not require demonstration screens.

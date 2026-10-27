@@ -1,25 +1,21 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 #![cfg(feature = "canvas")]
-#[path = "../../../apps/animation-lab/app.rs"]
-mod animation_lab;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
 #[path = "../../../tools/canvas/components.rs"]
 pub mod components;
 #[path = "../../../apps/home/app.rs"]
 mod home;
-#[path = "../../../apps/input-lab/app.rs"]
-mod input_lab;
-#[path = "../../../apps/layout-lab/app.rs"]
-mod layout;
 #[path = "../../../apps/monitoring/app.rs"]
 mod monitoring_app;
-#[path = "../../../apps/component-playground/app.rs"]
-mod playground;
-#[path = "../../../apps/three-d-lab/app.rs"]
-mod three_d_lab;
+#[path = "../../../apps/test-playground/app.rs"]
+mod test_playground;
 use otrios_core::canvas::*;
 use otrios_interfaces::canvas::*;
+use test_playground::{
+    animation as animation_lab, components_demo as playground, input as input_lab,
+    layouts as layout, three_d as three_d_lab,
+};
 fn edit(c: &mut Client, label: &str, a: u16, b: u16) {
     let scene = c.scene().unwrap();
     let node = scene
@@ -312,7 +308,7 @@ fn wasm_reducer_and_declarative_app_are_qualified_at_extremes() {
     }
     assert_eq!(playground::manifest().dependencies.len(), 5);
     assert_eq!(layout::manifest().id, "layout-lab");
-    assert_eq!(home::manifest().state_ref, "app:home/state-v3");
+    assert_eq!(home::manifest().state_ref, "app:home/state-v4");
 }
 fn guest(wat: &str, writes: Vec<u16>) -> Result<Behavior> {
     let b = wat::parse_str(wat).unwrap();
@@ -2457,11 +2453,12 @@ fn invalid_behavior_replacement_retains_active_guest_and_permissions() {
     assert!(compatible_app_update(&old, &changed).is_err());
 }
 
-fn home_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
+fn playground_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
     let scene = client.scene().unwrap();
     let mut cards: Vec<_> = scene
         .controls()
         .into_iter()
+        .filter(|c| c.node.semantics.as_ref().is_none_or(|s| s.label != "Home"))
         .filter(|c| {
             matches!(
                 c.node.responder,
@@ -2484,13 +2481,13 @@ fn home_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
     cards.sort_by(|a, b| a.2[1].total_cmp(&b.2[1]).then(a.2[0].total_cmp(&b.2[0])));
     cards
 }
-fn home_values(client: &Client) -> Vec<otrios_interfaces::layout::Value> {
-    (1..=6).map(|id| client.typed_value(id).unwrap()).collect()
+fn playground_values(client: &Client) -> Vec<otrios_interfaces::layout::Value> {
+    (1..=7).map(|id| client.typed_value(id).unwrap()).collect()
 }
 #[test]
-fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
+fn playground_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase};
-    let ui = home::ui(&[]);
+    let ui = test_playground::ui(&[]);
     let mut a = Client::default();
     let mut b = Client::default();
     activate(&mut a, ui.clone(), "home-edit", vec![]);
@@ -2501,18 +2498,18 @@ fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
     let mut sb = Session::default();
     pump(&mut a, &mut authority, &mut sa);
     pump(&mut b, &mut authority, &mut sb);
-    let initial = home_values(&a);
+    let initial = playground_values(&a);
     let root = authority.root_hash();
-    let cards = home_cards(&a);
+    let cards = playground_cards(&a);
     let before = b.reflow_frame().unwrap().unwrap();
     edit(&mut a, "Edit cards", 0, 0);
     assert!(a.reflow_frame().unwrap().unwrap().editing);
     assert_eq!(a.pending_count(), 0);
-    assert_eq!(home_values(&a), initial);
+    assert_eq!(playground_values(&a), initial);
     assert!(!b.reflow_frame().unwrap().unwrap().editing);
     let epoch = a.epoch();
     for (phase, position) in [
-        (PointerPhase::Down, cards[5].2),
+        (PointerPhase::Down, cards[6].2),
         (PointerPhase::Move, cards[1].2),
     ] {
         a.pointer(
@@ -2527,9 +2524,9 @@ fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
     }
     assert!(a.input_busy());
     assert_eq!(a.pending_count(), 1);
-    let moved = home_values(&a);
+    let moved = playground_values(&a);
     assert_eq!(moved[..5], initial[..5]);
-    assert_ne!(moved[5], initial[5]);
+    assert_ne!(moved[6], initial[6]);
     for _ in 0..20 {
         a.pointer(
             epoch,
@@ -2542,7 +2539,7 @@ fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
         .unwrap();
     }
     assert_eq!(a.pending_count(), 1);
-    assert_eq!(home_values(&a), moved);
+    assert_eq!(playground_values(&a), moved);
     a.pointer(
         epoch,
         PointerEvent {
@@ -2554,16 +2551,22 @@ fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
     .unwrap();
     assert!(!a.input_busy());
     assert_eq!(a.epoch(), epoch);
-    assert_eq!(a.ui_ref(), "app:home/ui");
+    assert_eq!(a.ui_ref(), "app:test-playground/ui");
     pump(&mut a, &mut authority, &mut sa);
     pump(&mut b, &mut authority, &mut sb);
     assert_ne!(authority.root_hash(), root);
-    assert_eq!(home_values(&b), moved);
+    assert_eq!(playground_values(&b), moved);
     assert_eq!(
-        home_cards(&a).iter().map(|v| &v.0).collect::<Vec<_>>(),
-        home_cards(&b).iter().map(|v| &v.0).collect::<Vec<_>>()
+        playground_cards(&a)
+            .iter()
+            .map(|v| &v.0)
+            .collect::<Vec<_>>(),
+        playground_cards(&b)
+            .iter()
+            .map(|v| &v.0)
+            .collect::<Vec<_>>()
     );
-    assert_eq!(home_cards(&b)[1].0, "Monitoring");
+    assert_eq!(playground_cards(&b)[1].0, "3D Animations");
     assert!(!b.reflow_frame().unwrap().unwrap().editing);
     let font = otrios_core::dashboard::font::Font::from_zstd(
         include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
@@ -2579,12 +2582,12 @@ fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
     assert_ne!(presenter.mesh(100.).vertices, presenter.mesh(320.).vertices);
     assert!(!presenter.active(320.));
     assert_eq!(b.pending_count(), 0);
-    assert_eq!(home_values(&b), moved);
+    assert_eq!(playground_values(&b), moved);
     edit(&mut a, "Done editing cards", 0, 0);
     assert_eq!(a.pending_count(), 0);
     assert!(!a.reflow_frame().unwrap().unwrap().editing);
     // Node identities and their app destinations survive moves and orientation changes.
-    let mut ids = home_cards(&a)
+    let mut ids = playground_cards(&a)
         .iter()
         .map(|v| (v.0.clone(), v.1))
         .collect::<Vec<_>>();
@@ -2594,9 +2597,9 @@ fn home_drag_shares_only_one_position_and_remote_reflow_keeps_editing_local() {
     assert_eq!(ids, original);
 }
 #[test]
-fn home_concurrent_different_card_moves_survive_and_resize_cancels_capture() {
+fn playground_concurrent_different_card_moves_survive_and_resize_cancels_capture() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase};
-    let ui = home::ui(&[]);
+    let ui = test_playground::ui(&[]);
     let mut a = Client::default();
     let mut b = Client::default();
     activate(&mut a, ui.clone(), "concurrent-home", vec![]);
@@ -2606,22 +2609,22 @@ fn home_concurrent_different_card_moves_survive_and_resize_cancels_capture() {
     let mut sb = Session::default();
     pump(&mut a, &mut authority, &mut sa);
     pump(&mut b, &mut authority, &mut sb);
-    let initial = home_values(&a);
-    let cards = home_cards(&a);
+    let initial = playground_values(&a);
+    let cards = playground_cards(&a);
     edit(&mut a, "Edit cards", 0, 0);
     edit(&mut b, "Edit cards", 0, 0);
     a.adjust_control(cards[0].1, 50, 0).unwrap();
-    b.adjust_control(cards[5].1, -50, 0).unwrap();
+    b.adjust_control(cards[6].1, -50, 0).unwrap();
     let first = a.typed_value(1).unwrap();
-    let last = b.typed_value(6).unwrap();
+    let last = b.typed_value(7).unwrap();
     pump(&mut a, &mut authority, &mut sa);
     pump(&mut b, &mut authority, &mut sb);
     pump(&mut a, &mut authority, &mut sa);
-    assert_eq!(home_values(&a), home_values(&b));
+    assert_eq!(playground_values(&a), playground_values(&b));
     assert_eq!(a.typed_value(1).unwrap(), first);
-    assert_eq!(a.typed_value(6).unwrap(), last);
-    assert_eq!(home_values(&a)[1..5], initial[1..5]);
-    let cards = home_cards(&a);
+    assert_eq!(a.typed_value(7).unwrap(), last);
+    assert_eq!(playground_values(&a)[1..6], initial[1..6]);
+    let cards = playground_cards(&a);
     a.pointer(
         a.epoch(),
         PointerEvent {
@@ -2643,7 +2646,7 @@ fn home_concurrent_different_card_moves_survive_and_resize_cancels_capture() {
         },
     )
     .unwrap();
-    assert_eq!(a.ui_ref(), "app:home/ui");
+    assert_eq!(a.ui_ref(), "app:test-playground/ui");
     assert_eq!(a.pending_count(), 0);
 }
 
@@ -2653,7 +2656,7 @@ fn wrap_requires_its_layout_version_and_nonfinite_touch_cancels_order_capture() 
         layout::Blueprint,
         scene::{PointerEvent, PointerPhase},
     };
-    let ui = home::ui(&[]);
+    let ui = test_playground::ui(&[]);
     let mut blueprint: Blueprint = otrios_core::dashboard::layout::Layout::from_bytes(&ui.layout)
         .unwrap()
         .blueprint()
@@ -2664,8 +2667,8 @@ fn wrap_requires_its_layout_version_and_nonfinite_touch_cancels_order_capture() 
     let mut client = Client::default();
     activate(&mut client, ui, "finite-touch", vec![]);
     edit(&mut client, "Edit cards", 0, 0);
-    let initial = home_values(&client);
-    let card = home_cards(&client)[0].2;
+    let initial = playground_values(&client);
+    let card = playground_cards(&client)[0].2;
     client
         .pointer(
             client.epoch(),
@@ -2688,7 +2691,7 @@ fn wrap_requires_its_layout_version_and_nonfinite_touch_cancels_order_capture() 
         )
         .unwrap();
     assert!(!client.input_busy());
-    assert_eq!(home_values(&client), initial);
+    assert_eq!(playground_values(&client), initial);
 }
 
 #[test]
@@ -2787,17 +2790,13 @@ fn entry_and_app_links_resolve_app_owned_catalog_state_references() {
 fn shipped_apps_include_the_retained_text_and_document_subscreens() {
     let screens: Vec<_> = [
         home::screens,
-        playground::screens,
-        layout::screens,
-        input_lab::screens,
-        animation_lab::screens,
-        three_d_lab::screens,
+        test_playground::screens,
         monitoring_app::screens,
     ]
     .into_iter()
     .flat_map(|screens| screens())
     .collect();
-    assert_eq!(screens.len(), 9);
+    assert_eq!(screens.len(), 10);
     assert_eq!(
         screens
             .iter()

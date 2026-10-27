@@ -18,7 +18,7 @@ fn slider(label: &str, field: StateField, frame: [f32; 4]) -> Element {
 }
 
 pub fn description(state_schema: StateSchema) -> Ui {
-    AppUi::new("animation-lab", "Animation Lab", state_schema)
+    AppUi::new("animation-lab", "2D Animations", state_schema)
         .with_presentation(Presentation::Motion {
             three_d: false,
             playing: PLAYING_ID,
@@ -27,8 +27,11 @@ pub fn description(state_schema: StateSchema) -> Ui {
             load: LOAD_ID,
         })
         .build(
-            "Animation Lab",
+            "2D Animations",
             vec![
+                button("Back")
+                    .on_press(Event::back())
+                    .frame([860., 35., 140., 80.]),
                 button("Home")
                     .navigate_to(Destination::app("home"))
                     .frame([1020., 35., 200., 80.])

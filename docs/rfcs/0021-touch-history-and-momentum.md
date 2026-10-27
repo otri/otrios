@@ -82,7 +82,7 @@ pinned SSH configuration:
 
 ```sh
 python3 scripts/capture-touch-trace.py --config /PRIVATE/config.json \
-  --screen component-playground --control 'Rotary dial' --seconds 15 \
+  --screen test-playground/components --control 'Rotary dial' --seconds 15 \
   --output target/touch-input/my-dial.json
 ```
 

@@ -1,7 +1,7 @@
 {
   "format": "otrios-touch-trace-v1",
   "source": "captured-synthetic-evdev",
-  "screen": "layout-lab/document",
+  "screen": "test-playground/long-document",
   "control": "synthetic repeated strokes",
   "viewport": [
     1280,

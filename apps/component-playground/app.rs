@@ -8,7 +8,7 @@ use otrios_interfaces::canvas::*;
 pub fn manifest() -> App {
     crate::authoring::app(
         "component-playground",
-        "Component Playground",
+        "Components",
         "canvas-app",
         &[
             "ui.rs",

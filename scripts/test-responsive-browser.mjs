@@ -31,16 +31,40 @@ try{
   const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
-  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)+query},sessionId);await ready(sessionId,route==='layout-lab/document'?'layout-document':route==='layout-lab/text-scroll'?'layout-text-scroll':route,width<height?'800x1280':'1280x800');return sessionId;};
+  const routes={'component-playground':'test-playground/components','layout-lab':'test-playground/layouts','layout-document':'test-playground/long-document','layout-text-scroll':'test-playground/text-panning','input-lab':'test-playground/text-input','animation-lab':'test-playground/animations-two-d','three-d-lab':'test-playground/animations-three-d'};
+  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,['input-lab','animation-lab','three-d-lab'].includes(route)?'1280x800':width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
-  const click=async(session,label,screen,extent)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds;
+  const click=async(session,label,screen,extent)=>{let control=(await controls(session)).find(c=>c.label===label);if(!control&&(await controls(session)).some(c=>c.label==='Test Playground')){await click(session,'Test Playground','test-playground',extent);control=(await controls(session)).find(c=>c.label===label);}assert(control,label);const [x,y,w,h]=control.bounds;
     await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:x+w/2,y:y+h/2},session);
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:x+w/2,y:y+h/2},session);
-    await ready(session,screen,extent);};
+    await ready(session,screen,['input-lab','animation-lab','three-d-lab'].includes(screen)?'1280x800':extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--touch-replay')){
+  if(args.includes('--playground')){
+    const expected=[['Components','component-playground'],['Layouts','layout-lab'],['Long Document','layout-document'],['Text Panning','layout-text-scroll'],['Text Input','input-lab'],['2D Animations','animation-lab'],['3D Animations','three-d-lab']];
+    const a=await page(1280,800,'home');
+    for(const [width,height]of [[1280,800],[800,1280]]){
+      await metrics(a,width,height);await ready(a,'home',width+'x'+height);
+      assert.deepEqual((await controls(a)).map(c=>c.label),['Test Playground','Monitoring']);
+      assert(!await evaluate(a,"document.querySelector('#view').getAttribute('aria-label').includes('OPEN')"));
+      await screenshot(a,'home-'+width);
+      await click(a,'Test Playground','test-playground',width+'x'+height);
+      assert.deepEqual((await controls(a)).filter(c=>!['Edit cards','Home'].includes(c.label)).map(c=>c.label),expected.map(x=>x[0]));
+      const bounds=await evaluate(a,"({w:innerWidth,h:innerHeight})");
+      for(const c of await controls(a)){const[x,y,w,h]=c.bounds;assert(x>=0&&y>=0&&x+w<=bounds.w+1&&y+h<=bounds.h+1,JSON.stringify(c));}
+      await screenshot(a,'test-playground-'+width);
+      for(const[label,screen]of expected){
+        await click(a,label,screen,width+'x'+height);
+        assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),screen);
+        if(screen==='layout-lab')assert(!(await controls(a)).some(c=>['Long Document','Text Panning','Long Document','Text Panning'].includes(c.label)));
+        await click(a,'Back','test-playground',width+'x'+height);
+      }
+      await click(a,'Home','home',width+'x'+height);
+    }
+    const result={passed:true,checks:['Home has only Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and parent Back','Layouts has no extra demo links','Edit belongs to Test Playground']};
+    await writeFile(join(output,'playground-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--touch-replay')){
     const a=await page(1280,800,'component-playground'),results=[];
     const replay=async(session,name)=>{
       const fixture=JSON.parse(await readFile(new URL('../crates/otrios-core/tests/fixtures/touch/'+name+'.json',import.meta.url),'utf8'));
@@ -60,10 +84,10 @@ try{
       const result=(await controls(a)).find(c=>c.label===label);results.push({fixture:name,value:Number(result.value)});
     }
     await screenshot(a,'touch-controls');
-    const b=await page(1280,800,'layout-lab/text-scroll');await replay(b,'scroll-slow-lift');
+    const b=await page(1280,800,'layout-text-scroll');await replay(b,'scroll-slow-lift');
     await wait(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'{}').offset?.[0]>=16&&!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
     const slow=await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll)");assert(slow.offset[0]<45);results.push({fixture:'scroll-slow-lift',...slow});
-    const c=await page(1280,800,'layout-lab/document');await wait(c,"document.querySelector('#revision').dataset.documentLoading==='false'");await replay(c,'document-repeat');
+    const c=await page(1280,800,'layout-document');await wait(c,"document.querySelector('#revision').dataset.documentLoading==='false'");await replay(c,'document-repeat');
     // CDP itself can deliver after the recorded release, so the published
     // instantaneous speed may already have decayed. Total travel distinguishes
     // boost (>3300 px) from five unboosted strokes (<2700 px).
@@ -72,12 +96,12 @@ try{
     const result={passed:true,checks:['real timed touch replay','slider filtered lift','pad filtered lift','dial filtered lift','slow scroll without release kick','repeated strokes exceed single-stroke velocity'],results};
     await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--document')){
-    const a=await page(1280,800,'layout-lab');
-    await click(a,'Long document','layout-document','1280x800');
+    const a=await page(1280,800,'test-playground');
+    await click(a,'Long Document','layout-document','1280x800');
     const info=()=>evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'null')");
     await wait(a,"!!JSON.parse(document.querySelector('#revision').dataset.textScroll||'null')?.anchor&&document.querySelector('#revision').dataset.documentLoading==='false'");
     const initial=await info();assert(initial.source_bytes>=1024*1024);assert.equal(initial.offset,0);assert(initial.working_bytes<=8*1024*1024);
-    assert.equal(await evaluate(a,'location.pathname'),'/layout-lab/document');await screenshot(a,'document-start');
+    assert.equal(await evaluate(a,'location.pathname'),'/test-playground/long-document');await screenshot(a,'document-start');
     const rect=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};})()");
     const point=(x,y)=>({id:1,x:rect.x+x*rect.w/1280,y:rect.y+y*rect.h/800});
     await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
@@ -92,7 +116,7 @@ try{
     await wait(a,"!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
     const coast=await info();assert(coast.working_bytes<=8*1024*1024);assert.equal(coast.loading,false);
     await screenshot(a,'document-coasted');
-    const b=await page(1280,800,'layout-lab/document');await wait(b,"document.querySelector('#revision').dataset.documentLoading==='false'");
+    const b=await page(1280,800,'layout-document');await wait(b,"document.querySelector('#revision').dataset.documentLoading==='false'");
     assert.equal((await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll)")).offset,0,'document viewport is local to its client');
     await metrics(a,800,1280);await ready(a,'layout-document','800x1280');
     await wait(a,"document.querySelector('#revision').dataset.documentLoading==='false'&&!JSON.parse(document.querySelector('#revision').dataset.textScroll).loading");
@@ -106,15 +130,15 @@ try{
     await evaluate(a,'documentLoss.restoreContext()');
     await wait(a,"document.querySelector('#revision').dataset.graphics==='ready'&&document.querySelector('#revision').dataset.documentLoading==='false'");
     await screenshot(a,'document-context-restored');assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true,await evaluate(a,"document.querySelector('#error').textContent"));}
-    await click(a,'Back','layout-lab','800x1280');
+    await click(a,'Back','test-playground','800x1280');
     await wait(a,"document.querySelector('#revision').dataset.documentResources==='0'");
     const result={passed:true,checks:['1 MiB source admission','touch drag and momentum','bounded working memory','independent client viewports','source anchor across reflow','context-loss resource replay','navigation retires document resources'],initial,dragged,coast,resized,screenshots:output};
     await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));process.exitCode=0;
   }else if(args.includes('--text-scroll')){
-    const a=await page(1280,800,'layout-lab');
-    await click(a,'Text scroll demo','layout-text-scroll','1280x800');
+    const a=await page(1280,800,'test-playground');
+    await click(a,'Text Panning','layout-text-scroll','1280x800');
     await wait(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'{}').limit?.every(v=>v>0)");
-    assert.equal(await evaluate(a,'location.pathname'),'/layout-lab/text-scroll');
+    assert.equal(await evaluate(a,'location.pathname'),'/test-playground/text-panning');
     const info=()=>evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll)");
     const initial=await info();assert(initial.limit.every(v=>v>0));assert.deepEqual(initial.offset,[0,0]);
     await screenshot(a,'text-scroll-start');
@@ -138,15 +162,15 @@ try{
     await call('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]},a);
     await wait(a,"!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
     const stopped=await info();await new Promise(r=>setTimeout(r,250));assert.deepEqual((await info()).offset,stopped.offset,'cancel stops momentum');
-    const b=await page(1280,800,'layout-lab');await click(b,'Text scroll demo','layout-text-scroll','1280x800');
+    const b=await page(1280,800,'test-playground');await click(b,'Text Panning','layout-text-scroll','1280x800');
     await wait(b,"!!document.querySelector('#revision').dataset.textScroll");
     assert.deepEqual(await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll).offset"),[0,0],'panning is client-local');
     await metrics(a,800,1280);await ready(a,'layout-text-scroll','800x1280');
     const portrait=await info();assert(portrait.offset.every((v,i)=>v>=0&&v<=portrait.limit[i]));
     await screenshot(a,'text-scroll-portrait');
     const cache=await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.fontCache)");assert(cache.bytes<=4194304,'bounded glyph cache');
-    await click(a,'Back','layout-lab','800x1280');await click(a,'Home','home','800x1280');
-    const result={passed:true,checks:['Layout Lab owns child route','full text page uses real WebGL','two-axis touch drag and release momentum','cancel stops coasting','panning is client-local','portrait reflow and bounds','Back and Home navigation'],initial,dragged,coast,portrait,fps,cache};
+    await click(a,'Back','test-playground','800x1280');await click(a,'Home','home','800x1280');
+    const result={passed:true,checks:['Test Playground owns demo routes','full text page uses real WebGL','two-axis touch drag and release momentum','cancel stops coasting','panning is client-local','portrait reflow and bounds','Back and Home navigation'],initial,dragged,coast,portrait,fps,cache};
     await writeFile(join(output,'text-scroll-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--input-viewport')){
     const a=await page(1280,800,'input-lab');
@@ -189,7 +213,7 @@ try{
     await wait(a,"document.querySelector('#timing-report')?.value.includes('startup')");
     assert.equal((await report()).samples[0].kind,'startup');
     const results=[];
-    for(let pass=0;pass<2;pass++)for(const [label,screen] of [['Component Playground','component-playground'],['Layout Lab','layout-lab'],['Input Lab','input-lab'],['Animation Lab','animation-lab'],['3D Lab','three-d-lab']]){
+    for(let pass=0;pass<2;pass++)for(const [label,screen] of [['Components','component-playground'],['Layouts','layout-lab'],['Text Input','input-lab'],['2D Animations','animation-lab'],['3D Animations','three-d-lab']]){
       const before=(await report()).samples.length;
       await click(a,label,screen);
       await wait(a,`JSON.parse(document.querySelector('#timing-report').value).samples.length>${before}`);
@@ -211,12 +235,12 @@ try{
     const snapshot=()=>evaluate(a,"({path:location.pathname,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length,epoch:document.querySelector('#revision').dataset.epoch,state:document.querySelector('#revision').dataset.state,ui:document.querySelector('#revision').dataset.ui})");
     const before=await snapshot();const sockets=socketCount.get(a);
     await writeFile(join(output,'route-rename-ready.json'),JSON.stringify(before));console.log('READY for an app-owned parent rename');
-    await wait(a,"location.pathname==='/layouts'",90000);const after=await snapshot();
+    await wait(a,"location.pathname==='/playground/layouts'",90000);const after=await snapshot();
     assert.equal(after.time,before.time);assert.equal(after.length,before.length);assert.equal(after.epoch,before.epoch);assert.equal(after.state,before.state);assert.equal(after.ui,before.ui);assert.equal(socketCount.get(a),sockets);
-    await click(a,'Home','home','800x1280');await click(a,'Layout Lab','layout-lab','800x1280');await wait(a,"location.pathname==='/layouts'");
-    await call('Page.reload',{},a);await ready(a,'layout-lab','800x1280');assert.equal(await evaluate(a,'location.pathname'),'/layouts');
+    await click(a,'Home','home','800x1280');await click(a,'Layouts','layout-lab','800x1280');await wait(a,"location.pathname==='/playground/layouts'");
+    await call('Page.reload',{},a);await ready(a,'layout-lab','800x1280');assert.equal(await evaluate(a,'location.pathname'),'/playground/layouts');
     await wait(owner,`document.querySelector('#revision').dataset.release!==${JSON.stringify(before.release)}`);await call('Page.bringToFront',{},owner);
-    await click(owner,'Layout Lab','layout-lab','1280x800');await wait(owner,"location.pathname==='/layouts'");
+    await click(owner,'Layouts','layout-lab','1280x800');await wait(owner,"location.pathname==='/playground/layouts'");
     const result={passed:true,before,after,checks:['owner UI hot-swaps and launches its renamed route','owner rename rebases an active app URL','same UI, state, epoch, page and WebSocket','rename replaces the current history entry','parent Back and refresh use the new owner path']};
     await writeFile(join(output,'route-rename-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--wait-route-update')){
@@ -229,36 +253,36 @@ try{
     const result={passed:true,before,after,checks:['full upgrades reload the same screen URL','history length stays fixed','hello carries the new module release']};await writeFile(join(output,'route-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--navigation')){
     const a=await page(1280,800,'input-lab'),snapshot=()=>evaluate(a,"({path:location.pathname,hash:location.hash,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length})");
-    const initial=await snapshot();assert.equal(initial.path,'/input-lab');assert.equal(initial.hash,'');assert.equal(hellos.get(a).release,initial.release,'hello identifies the module release at a clean URL');
+    const initial=await snapshot();assert.equal(initial.path,'/test-playground/text-input');assert.equal(initial.hash,'');assert.equal(hellos.get(a).release,initial.release,'hello identifies the module release at a clean URL');
     await click(a,'First text field','input-lab','1280x800');assert.equal((await snapshot()).path,initial.path);assert.equal((await snapshot()).length,initial.length,'local keyboard creates no navigation entry');
     await click(a,'Home','home','1280x800');assert.equal((await snapshot()).path,'/');
-    await click(a,'Component Playground','component-playground','1280x800');assert.equal((await snapshot()).path,'/component-playground');
+    await click(a,'Components','component-playground','1280x800');assert.equal((await snapshot()).path,'/test-playground/components');
     const sockets=socketCount.get(a);
-    for(const [action,screen]of [['back','home'],['back','input-lab'],['forward','home'],['forward','component-playground']]){
-      await evaluate(a,`history.${action}()`);await ready(a,screen,'1280x800');await wait(a,`location.pathname===${JSON.stringify(screen==='home'?'/':'/'+screen)}`);
+    for(const [action,screen]of [['back','test-playground'],['back','home'],['back','input-lab'],['forward','home'],['forward','test-playground'],['forward','component-playground']]){
+      await evaluate(a,`history.${action}()`);await ready(a,screen,'1280x800');await wait(a,`location.pathname===${JSON.stringify(screen==='home'?'/':'/'+(routes[screen]||screen))}`);
     }
     assert.equal((await snapshot()).time,initial.time);assert.equal(socketCount.get(a),sockets,'screen navigation keeps the same page and session');
-    await call('Page.reload',{},a);await ready(a,'component-playground','1280x800');assert.equal((await snapshot()).path,'/component-playground');assert.equal(hellos.get(a).release,(await snapshot()).release);
+    await call('Page.reload',{},a);await ready(a,'component-playground','1280x800');assert.equal((await snapshot()).path,'/test-playground/components');assert.equal(hellos.get(a).release,(await snapshot()).release);
     await call('Page.navigate',{url:origin+'/monitoring'},a);await wait(a,"document.querySelector('#monitoring-login').open");assert.equal((await snapshot()).path,'/monitoring');assert.equal(await evaluate(a,"(async()=> (await fetch('/monitoring/presentation')).status)()"),401);
     await evaluate(a,"document.querySelector('#login-back').click()");await ready(a,'home','1280x800');await wait(a,"location.pathname==='/'");assert.equal(await evaluate(a,"document.querySelector('#monitoring-login').open"),false);
-    await click(a,'Layout Lab','layout-lab','1280x800');
+    await click(a,'Layouts','layout-lab','1280x800');
     assert(!(await controls(a)).some(c=>['Signal screen','Cards screen'].includes(c.label)));
-    await call('Page.reload',{},a);await ready(a,'layout-lab','1280x800');assert.equal((await snapshot()).path,'/layout-lab');
+    await call('Page.reload',{},a);await ready(a,'layout-lab','1280x800');assert.equal((await snapshot()).path,'/test-playground/layouts');
     const portrait=await page(800,1280,'layout-lab');
     await click(portrait,'Home','home','800x1280');
     assert.equal(await evaluate(portrait,'location.pathname'),'/');
-    for(const retired of ['/layout-lab/signal','/layout-lab/cards'])assert.equal(await evaluate(a,`(async()=> (await fetch(${JSON.stringify(retired)})).status)()`),404);
+    for(const retired of ['/test-playground/layouts/signal','/test-playground/layouts/cards'])assert.equal(await evaluate(a,`(async()=> (await fetch(${JSON.stringify(retired)})).status)()`),404);
     await call('Page.bringToFront',{},a);
     const resources=await evaluate(a,"performance.getEntriesByType('resource').filter(r=>r.name.endsWith('/app.js')).map(r=>r.name)");assert(resources.every(u=>/\/releases\/[a-f0-9]{64}\/web\/app.js$/.test(u)));
     assert.equal(await evaluate(a,"(async()=> (await fetch('/not-an-app')).status)()"),404);assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true);
-    const result={passed:true,checks:['direct app links with refresh','example Layout Lab screens and routes removed','portrait Layout Lab and Home navigation','Back/Forward without page/session replacement','local keyboard leaves URL/history unchanged','release hello uses the pinned module identity','Monitoring URL preserves sign-in boundary','executable modules retain immutable URLs']};
+    const result={passed:true,checks:['direct app links with refresh','retired Layouts subroutes stay unavailable','portrait Layouts and Home navigation','Back/Forward without page/session replacement','local keyboard leaves URL/history unchanged','release hello uses the pinned module identity','Monitoring URL preserves sign-in boundary','executable modules retain immutable URLs']};
     await writeFile(join(output,'navigation-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
-  }else if(args.includes('--home-reorder')){
-    const a=await page(800,1280,'home'),b=await page(1280,800,'home');
+  }else if(args.includes('--home-reorder')||args.includes('--playground-reorder')){
+    const a=await page(800,1280,'test-playground'),b=await page(1280,800,'test-playground');
     await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
-    const cards=async session=>(await controls(session)).filter(c=>!['Edit cards','Done editing cards'].includes(c.label)).sort((a,b)=>a.bounds[1]-b.bounds[1]||a.bounds[0]-b.bounds[0]);
+    const cards=async session=>(await controls(session)).filter(c=>!['Edit cards','Done editing cards','Home'].includes(c.label)).sort((a,b)=>a.bounds[1]-b.bounds[1]||a.bounds[0]-b.bounds[0]);
     const order=async session=>(await cards(session)).map(c=>c.label);
-    const orderExpression=`[...document.querySelectorAll('#controls button')].filter(b=>!['Edit cards','Done editing cards'].includes(b.getAttribute('aria-label'))).sort((a,b)=>a.getBoundingClientRect().y-b.getBoundingClientRect().y||a.getBoundingClientRect().x-b.getBoundingClientRect().x).map(b=>b.getAttribute('aria-label'))`;
+    const orderExpression=`[...document.querySelectorAll('#controls button')].filter(b=>!['Edit cards','Done editing cards','Home'].includes(b.getAttribute('aria-label'))).sort((a,b)=>a.getBoundingClientRect().y-b.getBoundingClientRect().y||a.getBoundingClientRect().x-b.getBoundingClientRect().x).map(b=>b.getAttribute('aria-label'))`;
     await new Promise(r=>setTimeout(r,500)); const baseline=sentFrames.get(a)||0,baselineBytes=sentBytes.get(a)||0;
     await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Edit cards').click()");
     await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Done editing cards')");
@@ -275,7 +299,7 @@ try{
     await new Promise(r=>setTimeout(r,350));assert.equal(sentFrames.get(a)||0,settled,'same-slot pointer samples send no state');
     assert((await controls(a)).some(c=>c.label==='Done editing cards'));assert((await controls(b)).some(c=>c.label==='Edit cards'));
     await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);await new Promise(r=>setTimeout(r,300));
-    assert.deepEqual(await order(a),await order(b));assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),'home');
+    assert.deepEqual(await order(a),await order(b));assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),'test-playground');
     const ids=(await cards(a)).map(c=>[c.label,c.id]).sort();assert.deepEqual(ids,initial.map(c=>[c.label,c.id]).sort());
     await screenshot(a,'home-edit-portrait');await screenshot(b,'home-reordered-landscape');
     // Arrow movement retains focus and updates the other client's target order.
@@ -287,11 +311,11 @@ try{
     console.log('Checking rotation during touch capture');
     const held=center((await cards(a))[0].bounds);await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:2,...held}]},a);
     console.log('Rotating held touch');
-    await metrics(a,1280,800);await ready(a,'home','1280x800');console.log('Ending rotated touch');await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
+    await metrics(a,1280,800);await ready(a,'test-playground','1280x800');console.log('Ending rotated touch');await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
     await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Done editing cards').click()");
     await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Edit cards')");
-    await new Promise(r=>setTimeout(r,350));assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),'home');assert.deepEqual(await order(a),await order(b));
-    await click(a,'Component Playground','component-playground','1280x800');
+    await new Promise(r=>setTimeout(r,350));assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),'test-playground');assert.deepEqual(await order(a),await order(b));
+    await click(a,'Components','component-playground','1280x800');
     const result={passed:true,checks:['touch drag streams card order before release','local Edit/Done and wiggle send no state','same-slot motion sends no state','portrait and landscape agree on order','stable component IDs and keyboard focus','keyboard reorder shares state','rotation cancels touch capture without navigation','Done restores launching'],binaryFramesDuringOneMove:settled-baseline,binaryBytesDuringOneMove:settledBytes-baselineBytes};
     await writeFile(join(output,'home-reorder-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--wait-behavior-update')){
@@ -312,7 +336,7 @@ try{
     assert.deepEqual([socketCount.get(active),socketCount.get(other)],before.sockets);
     await call('Page.bringToFront',{},active);await drag(active,'Linear slider',0.43);
     await wait(active,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))===40");
-    await screenshot(active,'behavior-after');await click(other,'Component Playground','component-playground','1280x800');
+    await screenshot(active,'behavior-after');await click(other,'Components','component-playground','1280x800');
     await wait(other,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))===40");
     assert.equal((await snapshot(other)).behavior,after.active.behavior);
     const result={passed:true,before,after,checks:['actual loaded guest hash changed','state and UI controls retained across code replacement','same pages, workers and WebSocket sessions','inactive Home mount retained','new slider guest snaps input to 10-percent steps','other client shares the confirmed result']};
@@ -329,7 +353,7 @@ try{
     assert.equal(await evaluate(home,'window.__homeUpdateNonce'),'retained-worker-test');
     assert.equal(await evaluate(home,'performance.timeOrigin'),before.home.time);assert.equal(await evaluate(other,'performance.timeOrigin'),before.other.time);
     const applied=await evaluate(home,"document.querySelector('#revision').dataset.release");
-    assert.equal(await evaluate(home,'location.pathname'),'/');assert.equal(await evaluate(other,'location.pathname'),'/component-playground');
+    assert.equal(await evaluate(home,'location.pathname'),'/');assert.equal(await evaluate(other,'location.pathname'),'/test-playground/components');
     assert.equal(await evaluate(home,'document.activeElement.dataset.sceneNode'),before.home.focus);
     assert.equal(await evaluate(other,"document.querySelector('#revision').dataset.epoch"),before.other.epoch);
     assert.deepEqual([socketCount.get(home),socketCount.get(other)],before.sockets,'same sessions remain connected');
@@ -337,15 +361,15 @@ try{
     console.log('Capturing updated Home');await screenshot(home,'home-after-update');
     console.log('Opening Home on other client');await call('Page.bringToFront',{},other);
     await click(other,'Home','home','1280x800');
-    await wait(other,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
+    await wait(other,"document.querySelector('#view').getAttribute('aria-label').includes('Explore the demos')");
     console.log('Refreshing Home');await call('Page.bringToFront',{},home);await call('Page.reload',{},home);await ready(home,'home','800x1280');
-    await wait(home,"document.querySelector('#view').getAttribute('aria-label').includes('Ready to explore')");
+    await wait(home,"document.querySelector('#view').getAttribute('aria-label').includes('Explore the demos')");
     const result={passed:true,checks:['explicit refresh opens the current release','Home presentation replaced without page reload','other app retains its mount and confirmed state','same WebSocket sessions','compatible keyboard focus retained','later Home navigation uses updated catalog'],release:await evaluate(home,"document.querySelector('#revision').dataset.release")};
     await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else{
   const a=await page(1280,800,'home');await screenshot(a,'home-landscape');
-  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.equal(homeWide.length,6);assert(Math.abs(homeWide[0].bounds[1]-homeWide[2].bounds[1])<1);
-  await click(a,'Component Playground','component-playground','1280x800');
+  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.deepEqual(homeWide.map(c=>c.label),['Test Playground','Monitoring']);
+  await click(a,'Components','component-playground','1280x800');
   const wide=await controls(a);await drag(a,'Linear slider',0.81);
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>75");
   const b=await page(800,1280,'component-playground');
@@ -372,10 +396,10 @@ try{
   await metrics(b,800,1280);await ready(b,'component-playground','800x1280');
   await drag(b,'Linear slider',0.43);await wait(b,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
-  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert(homeTall[2].bounds[1]>homeTall[1].bounds[1]);await screenshot(b,'home-portrait');
-  await click(b,'Layout Lab','layout-lab','800x1280');await screenshot(b,'layout-lab-portrait');
-  await click(a,'Home','home','1280x800');await click(a,'Layout Lab','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
-  const result={passed:true,checks:['landscape and portrait WebGL rendering','Home three/two-column composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layout Lab in both orientations'],screenshots:output,native_hardware:'not tested'};
+  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,2);await screenshot(b,'home-portrait');
+  await click(b,'Layouts','layout-lab','800x1280');await screenshot(b,'layout-lab-portrait');
+  await click(a,'Home','home','1280x800');await click(a,'Layouts','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
+  const result={passed:true,checks:['landscape and portrait WebGL rendering','two-card Home composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layouts in both orientations'],screenshots:output,native_hardware:'not tested'};
   await writeFile(join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
   }
 }finally{

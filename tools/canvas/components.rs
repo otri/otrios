@@ -42,3 +42,118 @@ pub fn keyboard() -> Element {
     }));
     canvas(children).visible(keyboard_visible())
 }
+
+/// Primitive-only icons keep launcher cards identical on both renderers.
+#[derive(Clone, Copy)]
+pub enum LaunchIcon {
+    Playground,
+    Components,
+    Layouts,
+    Document,
+    Panning,
+    Input,
+    Animation2d,
+    Animation3d,
+    Monitoring,
+}
+fn launch_icon(kind: LaunchIcon) -> Element {
+    let bar = |x, y, w, h| {
+        rounded_rect(ACCENT)
+            .frame([x, y, w, h])
+            .corner_radius(1.0.into())
+    };
+    let parts = match kind {
+        LaunchIcon::Playground => vec![
+            bar(0., 0., 20., 20.),
+            circle(TEAL).frame([28., 0., 20., 20.]),
+            bar(0., 28., 20., 20.),
+            bar(28., 28., 20., 20.),
+        ],
+        LaunchIcon::Components => vec![
+            bar(0., 8., 48., 4.),
+            bar(0., 34., 48., 4.),
+            circle(ACCENT).frame([8., 2., 16., 16.]),
+            circle(TEAL).frame([28., 28., 16., 16.]),
+        ],
+        LaunchIcon::Layouts => vec![
+            bar(0., 0., 48., 10.),
+            bar(0., 18., 18., 30.),
+            bar(26., 18., 22., 12.),
+            bar(26., 38., 22., 10.),
+        ],
+        LaunchIcon::Document => vec![
+            bar(6., 0., 36., 48.),
+            rectangle(CARD).frame([10., 4., 28., 40.]),
+            bar(16., 12., 16., 3.),
+            bar(16., 22., 16., 3.),
+            bar(16., 32., 12., 3.),
+        ],
+        LaunchIcon::Panning => vec![
+            bar(22., 0., 4., 48.),
+            bar(0., 22., 48., 4.),
+            bar(14., 0., 20., 4.),
+            bar(14., 44., 20., 4.),
+            bar(0., 14., 4., 20.),
+            bar(44., 14., 4., 20.),
+        ],
+        LaunchIcon::Input => {
+            let mut v = vec![
+                bar(0., 8., 48., 34.),
+                rectangle(CARD).frame([4., 12., 40., 26.]),
+            ];
+            for y in [17., 25.] {
+                for x in [9., 19., 29.] {
+                    v.push(bar(x, y, 6., 4.));
+                }
+            }
+            v.push(bar(12., 33., 24., 3.));
+            v
+        }
+        LaunchIcon::Animation2d => vec![
+            circle(TRACK).frame([0., 12., 24., 24.]),
+            circle(TEAL).frame([12., 12., 24., 24.]),
+            circle(ACCENT).frame([24., 12., 24., 24.]),
+        ],
+        LaunchIcon::Animation3d => vec![
+            bar(14., 0., 34., 34.),
+            rectangle(CARD).frame([18., 4., 26., 26.]),
+            bar(0., 14., 34., 34.),
+            rectangle(CARD).frame([4., 18., 26., 26.]),
+            bar(14., 14., 20., 20.),
+        ],
+        LaunchIcon::Monitoring => vec![
+            bar(0., 36., 10., 12.),
+            bar(19., 20., 10., 28.),
+            bar(38., 0., 10., 48.),
+        ],
+    };
+    component([48., 48.], parts).frame([24., 20., 48., 48.])
+}
+pub fn launch_card(
+    id: &str,
+    route: &str,
+    title: &str,
+    subheading: &str,
+    icon: LaunchIcon,
+) -> Element {
+    component(
+        [384., 176.],
+        vec![
+            rounded_rect(CARD).pin_edges(0.).corner_radius(20.0.into()),
+            launch_icon(icon),
+            text(title)
+                .frame([24., 84., 336., 32.])
+                .font_scale(2.)
+                .pin_left(24.)
+                .pin_right(24.),
+            text(subheading)
+                .frame([24., 128., 336., 24.])
+                .color(MUTED)
+                .pin_left(24.)
+                .pin_right(24.),
+        ],
+    )
+    .key(id)
+    .semantic_label(title)
+    .navigate_to(Destination::app(id).route(route))
+}

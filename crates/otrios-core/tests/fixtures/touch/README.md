@@ -9,3 +9,5 @@ calibration. It contains 20 complete strokes; it is not human finger data.
 
 Run them through the shared runtime with the `touch_replay` example. See
 [the capture/replay guide](../../../../../docs/rfcs/0021-touch-history-and-momentum.md).
+
+Screen routes follow Test Playground; captured sample positions and timestamps are unchanged.
