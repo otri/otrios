@@ -6,14 +6,14 @@ import {prepareUiUpdate} from './ui-update.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
 import {DocumentTransfer} from './document-transfer.mjs';
 const documents=new DocumentTransfer();
-let timings=false,navigationTiming=null,graphicsPaused=false;
+let timings=false,navigationTiming=null,graphicsPaused=false,graphicsGeneration=0;
 const timingNow=()=>performance.timeOrigin+performance.now();
 let viewportRevision=0,lastTextGeneration=0;
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=false,pendingFrame=null,started=false,authenticated=false,lastStall=0;
 function error(e){postMessage({type:'error',message:String(e)});}
-function sendFrame(){if(graphicsPaused||inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;if(f.timing&&navigationTiming?.id===f.timing.id)navigationTiming=null;if(f.vertices)lastTextGeneration=f.textGeneration;f.document=documents.take(id=>app.document_chunk_vertices(id));postMessage({type:'frame',...f},[...(f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer,f.textStyles.buffer,f.overlayVertices.buffer,f.overlayGlyphVertices.buffer,f.overlayDraws.buffer,f.overlayStyles.buffer]:[]),...(f.textViews?[f.textViews.buffer,f.overlayViews.buffer]:[]),...f.document.upserts.map(u=>u.glyphVertices.buffer)]);}
+function sendFrame(){if(graphicsPaused||inFlight||!pendingFrame)return;const f=pendingFrame;pendingFrame=null;inFlight=true;if(f.timing&&navigationTiming?.id===f.timing.id)navigationTiming=null;if(f.vertices)lastTextGeneration=f.textGeneration;f.graphicsGeneration=graphicsGeneration;f.document=documents.take(id=>app.document_chunk_vertices(id));postMessage({type:'frame',...f},[...(f.vertices?[f.vertices.buffer,f.glyphVertices.buffer,f.draws.buffer,f.textStyles.buffer,f.overlayVertices.buffer,f.overlayGlyphVertices.buffer,f.overlayDraws.buffer,f.overlayStyles.buffer]:[]),...(f.textViews?[f.textViews.buffer,f.overlayViews.buffer]:[]),...f.document.upserts.map(u=>u.glyphVertices.buffer)]);}
 function publish(geometry=true){
   syncInk();
   const frame={extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui:app.ui_ref(),state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
@@ -85,8 +85,8 @@ onmessage=async({data:m})=>{try{
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
   if(m.type==='frame-ack'){documents.ack(m.documentToken);inFlight=false;sendFrame();return;}
-  if(m.type==='graphics-lost'){graphicsPaused=true;documents.reset();lastTextGeneration=0;pendingFrame=null;return;}
-  if(m.type==='document-replay'){graphicsPaused=false;documents.reset();lastTextGeneration=0;pendingFrame=null;if(app)publish();return;}
+  if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;documents.reset();lastTextGeneration=0;pendingFrame=null;return;}
+  if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();lastTextGeneration=0;pendingFrame=null;if(app)publish();return;}
   if(!app)return;
   if(m.type==='transport'){
     if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;if(changed){stateSends=0;inkSending=false;}
@@ -100,13 +100,16 @@ onmessage=async({data:m})=>{try{
 
   if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry',entry:m.entry});return;}while(pendingRelease===r&&!reloadReady())await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry',entry:m.entry});return;}stopped=true;transportReady=false;syncInk();postMessage({type:'release',entry:r.web_entry});return;}
   const workerStarted=timings?timingNow():0;
-  app.tick(performance.now(),Date.now()/1000);let changed=false;
-  if(['pointer','activate','adjust'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
+  const pointerCommand=['pointer','pointer-batch'].includes(m.type);
+  if(!pointerCommand)app.tick(performance.now(),Date.now()/1000);let changed=false;
+  const applyPointer=args=>app.pointer(m.epoch??app.epoch(),...args.slice(0,4),Number.isFinite(args[4])?Math.max(0,args[4]-(performance.timeOrigin||0)):performance.now());
+  if(['pointer','pointer-batch','activate','adjust'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
   switch(m.type){
     case 'viewport':app.cancel_input();changed=app.set_viewport(...m.size);viewportRevision++;changed=!!app.ui_ref()||changed;break;
     case 'login':monitoring.login(m.username,m.password);break;
     case 'logout':signOut();changed=true;break;
-    case 'pointer':if(!app.ui_ref())break;changed=app.pointer(m.epoch??app.epoch(),...m.args.slice(0,4));break;
+    case 'pointer':if(!app.ui_ref())break;changed=applyPointer(m.args);break;
+    case 'pointer-batch':if(!app.ui_ref())break;if(!Array.isArray(m.samples)||m.samples.length>64)throw Error('Pointer batch limit');for(const args of m.samples)changed=applyPointer(args)||changed;break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;
     case 'navigate':if(updateBusy&&app.catalog_update_pending())break;navigate(m.screen);changed=true;break;
@@ -116,6 +119,7 @@ onmessage=async({data:m})=>{try{
     case 'cancel':changed=app.cancel_input();break;
     case 'reload':app.open(app.ui_ref(),app.state_ref());changed=true;break;
   }
+  if(pointerCommand)changed=app.tick(performance.now(),Date.now()/1000)||changed;
   if(app.take_sign_out()){signOut();changed=true;}
   if(timings&&m.timing&&app.pending_mount_epoch())navigationTiming={...m.timing,workerStarted};
   if(changed)publish();outgoing();postMessage({type:'command-ack'});

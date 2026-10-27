@@ -597,6 +597,7 @@ dependencies = [
  "otrios-interfaces",
  "ruzstd",
  "serde",
+ "serde_json",
  "sha2",
  "unicode-segmentation",
  "wasmi",

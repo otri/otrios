@@ -1,0 +1,210 @@
+{
+  "format": "otrios-touch-trace-v1",
+  "source": "synthetic-golden",
+  "screen": "component-playground",
+  "control": "Touch pad",
+  "viewport": [
+    1280,
+    800
+  ],
+  "points": [
+    {
+      "at_ms": 0,
+      "phase": 0,
+      "id": 1,
+      "position": [
+        926.4,
+        479.0
+      ]
+    },
+    {
+      "at_ms": 8,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        935.2,
+        474.8
+      ]
+    },
+    {
+      "at_ms": 16,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        944.0,
+        470.6
+      ]
+    },
+    {
+      "at_ms": 24,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        952.8,
+        466.4
+      ]
+    },
+    {
+      "at_ms": 32,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        961.6,
+        462.2
+      ]
+    },
+    {
+      "at_ms": 40,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        970.4,
+        458.0
+      ]
+    },
+    {
+      "at_ms": 48,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        979.2,
+        453.8
+      ]
+    },
+    {
+      "at_ms": 56,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        988.0,
+        449.6
+      ]
+    },
+    {
+      "at_ms": 64,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        996.8,
+        445.4
+      ]
+    },
+    {
+      "at_ms": 72,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1005.6,
+        441.2
+      ]
+    },
+    {
+      "at_ms": 80,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1014.4,
+        437.0
+      ]
+    },
+    {
+      "at_ms": 88,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1023.2,
+        432.8
+      ]
+    },
+    {
+      "at_ms": 96,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1032.0,
+        428.6
+      ]
+    },
+    {
+      "at_ms": 104,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1040.8,
+        424.4
+      ]
+    },
+    {
+      "at_ms": 112,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1049.6,
+        420.2
+      ]
+    },
+    {
+      "at_ms": 120,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1058.4,
+        416.0
+      ]
+    },
+    {
+      "at_ms": 128,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1067.2,
+        411.8
+      ]
+    },
+    {
+      "at_ms": 136,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1076.0,
+        407.6
+      ]
+    },
+    {
+      "at_ms": 144,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1084.8,
+        403.4
+      ]
+    },
+    {
+      "at_ms": 152,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1093.6,
+        399.2
+      ]
+    },
+    {
+      "at_ms": 160,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        1102.4,
+        395.0
+      ]
+    },
+    {
+      "at_ms": 161,
+      "phase": 2,
+      "id": 1,
+      "position": [
+        1172.4,
+        440.0
+      ]
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Mount-local document presentation. The input policy mirrors the existing
-//! text viewport, using f64 offsets; lift-off filtering is a separate follow-up.
+//! text viewport, using f64 offsets and the shared contact-history physics.
 use super::{Frame, Reader, Result, Source, Stats};
+use crate::dashboard::touch::Kinetics;
 use crate::dashboard::{font::Font, scene::Scene};
 use otrios_interfaces::{
     canvas::TextResource,
@@ -9,13 +10,6 @@ use otrios_interfaces::{
 };
 use std::sync::Arc;
 
-struct Contact {
-    id: u32,
-    start: f64,
-    last: f64,
-    time: u64,
-    moving: bool,
-}
 pub(crate) struct Viewport {
     node: u32,
     source: Source,
@@ -27,9 +21,7 @@ pub(crate) struct Viewport {
     reader_epoch: u64,
     origin: [f32; 2],
     clip: [f32; 4],
-    contact: Option<Contact>,
-    velocity: f64,
-    last_tick: u64,
+    motion: Kinetics,
     pub bounds_dirty: bool,
 }
 impl Viewport {
@@ -45,9 +37,7 @@ impl Viewport {
             reader_epoch: 0,
             origin: [0.; 2],
             clip: [0.; 4],
-            contact: None,
-            velocity: 0.,
-            last_tick: 0,
+            motion: Kinetics::default(),
             bounds_dirty: true,
         })
     }
@@ -97,19 +87,19 @@ impl Viewport {
         Ok(())
     }
     pub fn touching(&self) -> bool {
-        self.contact.is_some()
+        self.motion.touching()
     }
     pub fn cancel(&mut self) {
-        self.contact = None;
-        self.velocity = 0.;
+        self.motion.cancel();
     }
     pub fn active(&self) -> bool {
-        self.touching() || self.velocity != 0.
+        self.motion.active()
     }
     pub fn stats(&self) -> Option<Stats> {
         self.reader.as_ref().map(|r| {
             let mut stats = r.stats();
             stats.active = self.active();
+            stats.velocity = self.motion.velocity();
             stats
         })
     }
@@ -180,64 +170,64 @@ impl Viewport {
                     return None;
                 }
             }
-            self.cancel();
-            self.last_tick = now;
-            self.contact = Some(Contact {
-                id: event.id,
-                start: f64::from(y),
-                last: f64::from(y),
-                time: now,
-                moving: false,
-            });
-        } else if self.contact.as_ref().is_none_or(|c| c.id != event.id) {
+            let delta = self.motion.down(event.id, f64::from(y), now);
+            if let Some(r) = &mut self.reader {
+                let wanted = r.offset() + delta;
+                if wanted != r.offset() {
+                    r.scroll_to(wanted);
+                }
+                if r.offset() != wanted {
+                    self.motion.stop_at_bound();
+                }
+            }
+        } else if !self.motion.owns(event.id) {
             return None;
         } else if event.phase == PointerPhase::Cancel {
             self.cancel();
         } else {
-            if let (Some(c), Some(r)) = (&mut self.contact, &mut self.reader) {
-                let y = f64::from(event.position[1]);
-                c.moving |= (y - c.start).abs() > 6.;
-                if c.moving && y != c.last {
-                    let old = r.offset();
-                    r.scroll_to(old + c.last - y);
-                    self.velocity = ((r.offset() - old) / now.saturating_sub(c.time).max(1) as f64)
-                        .clamp(-4., 4.);
-                    if r.offset() == old {
-                        self.velocity = 0.;
-                    }
-                    c.last = y;
-                    c.time = now;
+            let delta = if event.phase == PointerPhase::Up {
+                self.motion.up(f64::from(event.position[1]), now).1
+            } else {
+                self.motion.motion(f64::from(event.position[1]), now)
+            };
+            if let Some(r) = &mut self.reader {
+                let at_bound = r.offset() == 0. || r.offset() == (r.extent().0 - r.height).max(0.);
+                let wanted = r.offset()
+                    + if event.phase == PointerPhase::Up && at_bound {
+                        self.motion.stop_at_bound();
+                        0.
+                    } else {
+                        delta
+                    };
+                if wanted != r.offset() {
+                    r.scroll_to(wanted);
                 }
-            }
-            if event.phase == PointerPhase::Up {
-                if self
-                    .contact
-                    .as_ref()
-                    .is_some_and(|c| now.saturating_sub(c.time) > 100)
+                if r.offset() != wanted {
+                    self.motion.stop_at_bound();
+                }
+                if r.extent().1
+                    && ((r.offset() == 0. && self.motion.velocity() < 0.)
+                        || (r.offset() == (r.extent().0 - r.height).max(0.)
+                            && self.motion.velocity() > 0.))
                 {
-                    self.velocity = 0.;
+                    self.motion.stop_at_bound();
                 }
-                self.contact = None;
-                self.last_tick = now;
             }
         }
         Some(true)
     }
     pub fn tick(&mut self, now: u64) -> Result<bool> {
         let was_active = self.active();
-        let dt = now.saturating_sub(self.last_tick) as f64;
-        self.last_tick = now;
         let Some(r) = &mut self.reader else {
             return Ok(false);
         };
         let old = r.offset();
-        if self.contact.is_none() && self.velocity != 0. {
-            let decay = (-0.006 * dt).exp();
-            r.scroll_to(old + self.velocity * (1. - decay) / 0.006);
-            self.velocity *= decay;
-            if self.velocity.abs() < 0.01 || r.offset() == old {
-                self.velocity = 0.;
-            }
+        let wanted = old + self.motion.tick(now);
+        if wanted != r.offset() {
+            r.scroll_to(wanted);
+        }
+        if r.offset() != wanted {
+            self.motion.stop_at_bound();
         }
         let changed = r.work(16)?;
         let offset_changed = old != r.offset();

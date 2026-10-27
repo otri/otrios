@@ -8,6 +8,7 @@ mod selection;
 mod state;
 pub mod text_scroll;
 mod text_viewport;
+pub mod touch_trace;
 mod transport;
 pub use behavior::Behavior;
 pub use client::{Client, ResourceUsage};

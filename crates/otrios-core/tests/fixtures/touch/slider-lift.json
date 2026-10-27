@@ -1,0 +1,210 @@
+{
+  "format": "otrios-touch-trace-v1",
+  "source": "synthetic-golden",
+  "screen": "component-playground",
+  "control": "Linear slider",
+  "viewport": [
+    1280,
+    800
+  ],
+  "points": [
+    {
+      "at_ms": 0,
+      "phase": 0,
+      "id": 1,
+      "position": [
+        136.4,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 8,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        144.45,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 16,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        152.5,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 24,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        160.55,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 32,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        168.6,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 40,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        176.65,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 48,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        184.7,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 56,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        192.75,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 64,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        200.8,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 72,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        208.85,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 80,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        216.9,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 88,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        224.95,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 96,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        233.0,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 104,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        241.05,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 112,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        249.1,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 120,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        257.15,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 128,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        265.2,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 136,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        273.25,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 144,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        281.3,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 152,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        289.35,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 160,
+      "phase": 1,
+      "id": 1,
+      "position": [
+        297.4,
+        418.0
+      ]
+    },
+    {
+      "at_ms": 161,
+      "phase": 2,
+      "id": 1,
+      "position": [
+        367.4,
+        463.0
+      ]
+    }
+  ]
+}

@@ -39,6 +39,7 @@ struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
     int fd,input,headless,modeset,pending,linear_scene,atlas_scale;
+    clockid_t input_clock;
     uint32_t connector,crtc,width,height,format;
     drmModeModeInfo mode;
     drmModeCrtc *saved;
@@ -136,6 +137,8 @@ static int select_display(ot_display *d) {
 }
 static int input_open(ot_display *d,const char *path) {
     d->input=open(path,O_RDONLY|O_NONBLOCK|O_CLOEXEC); if(d->input<0)return fail(d,"Open configured touch device");
+    d->input_clock=CLOCK_MONOTONIC;
+    if(ioctl(d->input,EVIOCSCLOCKID,&d->input_clock)<0)d->input_clock=CLOCK_REALTIME;
     if(ioctl(d->input,EVIOCGABS(ABS_X),&d->xaxis)<0 || ioctl(d->input,EVIOCGABS(ABS_Y),&d->yaxis)<0)
         return fail(d,"Touch requires ABS_X/ABS_Y");
     if(d->xaxis.maximum<=d->xaxis.minimum || d->yaxis.maximum<=d->yaxis.minimum)return fail(d,"Invalid touch axes");
@@ -889,6 +892,12 @@ int ot_present(ot_display *d,ot_flip *flip) {
     if(d->front)gbm_surface_release_buffer(d->window,d->front);
     d->front=d->next;d->next=NULL;return 0;
 }
+static uint64_t input_age(ot_display *d,const struct input_event *ev) {
+    struct timespec now;clock_gettime(d->input_clock,&now);
+    uint64_t current=(uint64_t)now.tv_sec*1000000ull+(uint64_t)now.tv_nsec/1000;
+    uint64_t sample=(uint64_t)ev->time.tv_sec*1000000ull+(uint64_t)ev->time.tv_usec;
+    return sample<=current?current-sample:0;
+}
 int ot_input(ot_display *d,ot_touch *events,size_t capacity) {
     if(!capacity || d->input<0)return 0;
     size_t count=0;struct input_event ev;
@@ -897,7 +906,7 @@ int ot_input(ot_display *d,ot_touch *events,size_t capacity) {
         if(n<0 && errno==EINTR)continue;
         if(n<0 && (errno==EAGAIN || errno==EWOULDBLOCK))break;
         if(n!=sizeof(ev))return fail(d,"Touch device disconnected/short read");
-        if(ev.type==EV_SYN && ev.code==SYN_DROPPED){d->dropped=1;d->suppressed=1;d->reported=0;events[count++]=(ot_touch){3,0,0};continue;}
+        if(ev.type==EV_SYN && ev.code==SYN_DROPPED){d->dropped=1;d->suppressed=1;d->reported=0;events[count++]=(ot_touch){3,0,0,input_age(d,&ev)};continue;}
         if(d->dropped) {
             if(ev.type==EV_SYN && ev.code==SYN_REPORT) {
                 unsigned long keys[(KEY_MAX+8*sizeof(unsigned long))/(8*sizeof(unsigned long))]={0};
@@ -912,7 +921,7 @@ int ot_input(ot_display *d,ot_touch *events,size_t capacity) {
         if(ev.type==EV_SYN && ev.code==SYN_REPORT) {
             if(d->suppressed){if(!d->down)d->suppressed=0;continue;}
             if(d->down || d->reported) {
-                events[count++]=(ot_touch){d->down?(d->reported?1:0):2,(float)(d->x-d->xaxis.minimum)/(d->xaxis.maximum-d->xaxis.minimum),(float)(d->y-d->yaxis.minimum)/(d->yaxis.maximum-d->yaxis.minimum)};
+                events[count++]=(ot_touch){d->down?(d->reported?1:0):2,(float)(d->x-d->xaxis.minimum)/(d->xaxis.maximum-d->xaxis.minimum),(float)(d->y-d->yaxis.minimum)/(d->yaxis.maximum-d->yaxis.minimum),input_age(d,&ev)};
                 d->reported=d->down;
             }
         }

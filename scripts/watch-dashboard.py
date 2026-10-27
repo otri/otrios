@@ -8,6 +8,7 @@ publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_na
 def inputs(repo):
     exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml']
     files=[repo/x for x in exact]
+    files.extend((repo/'crates/otrios-core/tests/fixtures').rglob('*.json'))
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
             if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt','.service','.timer'):files.append(p)
@@ -37,7 +38,7 @@ def rebuild(config,wanted,activate=True):
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs','scripts/test-document-transfer.mjs'],cwd=source)
+        run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs','scripts/test-document-transfer.mjs','scripts/test-touch-input.mjs'],cwd=source)
         for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/session.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)

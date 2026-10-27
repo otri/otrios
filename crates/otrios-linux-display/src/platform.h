@@ -6,7 +6,7 @@
 typedef struct ot_display ot_display;
 #define OT_MAX_SCENE_SLOTS 131u
 typedef struct { uint64_t usec; uint32_t sequence, crtc; } ot_flip;
-typedef struct { int32_t phase; float x, y; } ot_touch;
+typedef struct { int32_t phase; float x, y; uint64_t age_us; } ot_touch;
 typedef struct { uint32_t width,height,format,stride; int32_t red,green,blue,alpha; } ot_info;
 ot_display *ot_open(const char *card,const char *input,uint32_t width,uint32_t height,int rgb565,int headless,char *error,size_t capacity);
 void ot_close(ot_display *d);

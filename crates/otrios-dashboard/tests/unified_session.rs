@@ -37,13 +37,15 @@ fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     child.app.ui_ref = "app:demo/child/ui".into();
     decoded.apps.push(child);
     let catalog = otrios_core::canvas::encode_catalog(&decoded).unwrap();
+    let touch = include_bytes!("../../../web/canvas/touch-input.mjs");
     let asset = |bytes: &[u8]| serde_json::json!({"bytes":bytes.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(bytes))});
-    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v5","assets":{"web/index.html":asset(content.as_bytes()),"apps/catalog.flex":asset(&catalog)}})).unwrap();
+    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v5","assets":{"web/index.html":asset(content.as_bytes()),"web/touch-input.mjs":asset(touch),"apps/catalog.flex":asset(&catalog)}})).unwrap();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let folder = root.join(&id);
     fs::create_dir_all(folder.join("web")).unwrap();
     fs::write(folder.join("manifest.json"), raw).unwrap();
     fs::write(folder.join("web/index.html"), content).unwrap();
+    fs::write(folder.join("web/touch-input.mjs"), touch).unwrap();
     fs::create_dir_all(folder.join("apps")).unwrap();
     fs::write(folder.join("apps/catalog.flex"), catalog).unwrap();
     let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v5"});
@@ -164,6 +166,15 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     while TcpStream::connect(&rig.public).is_err() {
         assert!(Instant::now() < until);
         std::thread::sleep(Duration::from_millis(10));
+    }
+    for address in [&rig.public, &rig.private] {
+        let path = format!(
+            "/releases/{}/web/touch-input.mjs",
+            a["id"].as_str().unwrap()
+        );
+        let (status, bytes) = request(address, "GET", &path, &[], &[]);
+        assert_eq!(status, 200);
+        assert_eq!(bytes, include_bytes!("../../../web/canvas/touch-input.mjs"));
     }
     assert_eq!(
         request(

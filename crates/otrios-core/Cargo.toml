@@ -47,6 +47,7 @@ optional = true
 
 [dev-dependencies]
 wat = "=1.239.0"
+serde_json = "=1.0.154"
 
 [[example]]
 name = "merkle_tree_cost"

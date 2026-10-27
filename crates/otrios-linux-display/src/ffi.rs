@@ -35,6 +35,8 @@ pub struct Touch {
     pub phase: i32,
     pub x: f32,
     pub y: f32,
+    /// Sample age when read, preserving evdev timing through batched delivery.
+    pub age_us: u64,
 }
 unsafe extern "C" {
     fn ot_open(

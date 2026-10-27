@@ -2,7 +2,7 @@
 // Optional real Chromium/WebGL acceptance against a disposable local authority.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 const args=process.argv.slice(2),argument=(name,fallback)=>{const i=args.indexOf(name);return i<0?fallback:args[i+1];};
@@ -31,7 +31,7 @@ try{
   const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
-  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)+query},sessionId);await ready(sessionId,route==='layout-lab/document'?'layout-document':route,width<height?'800x1280':'1280x800');return sessionId;};
+  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':route)+query},sessionId);await ready(sessionId,route==='layout-lab/document'?'layout-document':route==='layout-lab/text-scroll'?'layout-text-scroll':route,width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds;
@@ -40,7 +40,38 @@ try{
     await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--document')){
+  if(args.includes('--touch-replay')){
+    const a=await page(1280,800,'component-playground'),results=[];
+    const replay=async(session,name)=>{
+      const fixture=JSON.parse(await readFile(new URL('../crates/otrios-core/tests/fixtures/touch/'+name+'.json',import.meta.url),'utf8'));
+      const rect=await evaluate(session,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};})()");
+      await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},session);
+      const start=Date.now()+20;
+      for(const p of fixture.points){
+        const delay=start+p.at_ms-Date.now();if(delay>0)await new Promise(r=>setTimeout(r,delay));
+        const type=['touchStart','touchMove','touchEnd','touchCancel'][p.phase];
+        const touchPoints=p.phase<2?[{id:p.id,x:rect.x+p.position[0]*rect.w/1280,y:rect.y+p.position[1]*rect.h/800}]:[];
+        await call('Input.dispatchTouchEvent',{type,touchPoints,timestamp:(start+p.at_ms)/1000},session);
+      }
+    };
+    for(const [name,label,target]of [['slider-lift','Linear slider',70],['pad-lift','Touch pad',70],['dial-lift','Rotary dial',37.5]]){
+      await replay(a,name);
+      await wait(a,`[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')===${JSON.stringify(label)}&&Math.abs(Number(b.getAttribute('aria-valuenow'))-${target})<2.5)`);
+      const result=(await controls(a)).find(c=>c.label===label);results.push({fixture:name,value:Number(result.value)});
+    }
+    await screenshot(a,'touch-controls');
+    const b=await page(1280,800,'layout-lab/text-scroll');await replay(b,'scroll-slow-lift');
+    await wait(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'{}').offset?.[0]>=16&&!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
+    const slow=await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll)");assert(slow.offset[0]<45);results.push({fixture:'scroll-slow-lift',...slow});
+    const c=await page(1280,800,'layout-lab/document');await wait(c,"document.querySelector('#revision').dataset.documentLoading==='false'");await replay(c,'document-repeat');
+    // CDP itself can deliver after the recorded release, so the published
+    // instantaneous speed may already have decayed. Total travel distinguishes
+    // boost (>3300 px) from five unboosted strokes (<2700 px).
+    await wait(c,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'{}').offset>1600&&!JSON.parse(document.querySelector('#revision').dataset.textScroll).active");
+    const repeated=await evaluate(c,"JSON.parse(document.querySelector('#revision').dataset.textScroll)");assert(repeated.offset>3300&&repeated.offset<3650&&!repeated.loading);results.push({fixture:'document-repeat',...repeated});await screenshot(c,'touch-repeated-strokes');
+    const result={passed:true,checks:['real timed touch replay','slider filtered lift','pad filtered lift','dial filtered lift','slow scroll without release kick','repeated strokes exceed single-stroke velocity'],results};
+    await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--document')){
     const a=await page(1280,800,'layout-lab');
     await click(a,'Long document','layout-document','1280x800');
     const info=()=>evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.textScroll||'null')");
@@ -65,7 +96,7 @@ try{
     assert.equal((await evaluate(b,"JSON.parse(document.querySelector('#revision').dataset.textScroll)")).offset,0,'document viewport is local to its client');
     await metrics(a,800,1280);await ready(a,'layout-document','800x1280');
     await wait(a,"document.querySelector('#revision').dataset.documentLoading==='false'&&!JSON.parse(document.querySelector('#revision').dataset.textScroll).loading");
-    const resized=await info();assert.equal(resized.anchor.block,coast.anchor.block);assert(resized.anchor.source_byte<=coast.anchor.source_byte);assert(coast.anchor.source_byte-resized.anchor.source_byte<400);
+    const resized=await info();assert(Math.abs(resized.anchor.viewport_y-coast.anchor.viewport_y)<0.01,'reflow preserves the anchor’s viewport position');assert.equal(resized.anchor.block,coast.anchor.block);assert(resized.anchor.source_byte<=coast.anchor.source_byte);assert(coast.anchor.source_byte-resized.anchor.source_byte<400);
     await screenshot(a,'document-portrait');
     // Lose and restore the real WebGL context without replacing the authority,
     // source or app state. The resource ACK map must request a complete replay.

@@ -102,6 +102,7 @@ pub struct Stats {
     pub extent: f64,
     pub extent_exact: bool,
     pub active: bool,
+    pub velocity: f64,
     pub loading: bool,
 }
 

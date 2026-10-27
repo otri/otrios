@@ -64,6 +64,11 @@ a 1 MiB momentum reader at `/layout-lab/document`. Source anchors survive width
 changes; rich text and editing remain the second delivery. See the
 [qualification report](docs/experiments/chunked-documents-2026-10-27.md).
 
+[Timestamped touch history and momentum](docs/rfcs/0021-touch-history-and-momentum.md)
+share lift-off filtering across scrolling and captured controls. Repeated scroll
+strokes can add remaining momentum; bounded capture/replay tools qualify the same
+paths through sliders, the dial and the touch pad.
+
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 
 The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home mounts Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and private Monitoring through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
