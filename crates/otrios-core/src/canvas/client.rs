@@ -1335,9 +1335,6 @@ impl Client {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 reader.cancel();
             } else if let Some(changed) = reader.pointer(&scene, event, at) {
-                if changed && m.chat.is_some() {
-                    m.invalidate_presentation();
-                }
                 return Ok(changed);
             }
         }
@@ -1883,8 +1880,6 @@ impl Client {
             | (u8::from(chat_effects) << 2);
         if paint & 1 != 0 {
             m.invalidate_local_scene();
-        } else if paint & 2 != 0 && m.chat.is_some() {
-            m.invalidate_presentation();
         }
         let changed = m.ink.tick(now) || clock || scrolled;
         let edit = m.keyboard.tick(now);
@@ -2546,9 +2541,6 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
 fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     let mut root = scene.root().clone();
     present_text_views(m, scene, &mut root);
-    if let (Some(chat), Some(viewport)) = (&m.chat, &m.text_document) {
-        chat.present_avatars(viewport, &mut root);
-    }
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);
     }

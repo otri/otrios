@@ -29,7 +29,8 @@ struct Run {
 pub struct TextFrame {
     pub mesh: Arc<Mesh>,
     /// Eight floats per draw: visible first/count, translation xy, clip l/t/r/b.
-    /// Geometry entries are ignored by hosts. No glyph vertices change on scrolling.
+    /// Zero geometry entries retain fixed UI placement; nonzero triangle ranges
+    /// opt into the same translation/clip contract. No vertices change on scrolling.
     pub views: Vec<f32>,
     /// Canonical logical em per draw; zero requests legacy inference.
     pub styles: Arc<Vec<f32>>,

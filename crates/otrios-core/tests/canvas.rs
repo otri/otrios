@@ -3498,25 +3498,26 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
     for t in 1000..1500 {
         c.tick(t, 1_700_000_000).unwrap();
     }
-    fn origins(c: &Client) -> BTreeMap<u32, f32> {
-        fn walk(n: &otrios_interfaces::scene::SceneNode, out: &mut Vec<u32>) {
-            if (5_000_000..6_000_000).contains(&n.id) && n.id.is_multiple_of(32) {
-                out.push(n.id);
-                return;
-            }
-            for child in &n.children {
-                walk(child, out);
-            }
-        }
-        let scene = c.scene().unwrap();
-        let mut ids = vec![];
-        walk(scene.root(), &mut ids);
-        ids.into_iter()
-            .map(|id| (id, scene.path(id).unwrap().last().unwrap().origin[1]))
+    fn origins(c: &mut Client) -> BTreeMap<u64, f32> {
+        c.document_frame()
+            .unwrap()
+            .draws
+            .iter()
+            .filter(|d| !d.chunk.mesh.vertices.is_empty())
+            .map(|d| {
+                let views = d.views();
+                assert_eq!(
+                    &views[2..8],
+                    &views[10..16],
+                    "avatar and text must share placement and clipping"
+                );
+                (d.chunk.version, d.view[3] + d.chunk.mesh.vertices[1])
+            })
             .collect()
     }
-    let before = origins(&c);
+    let before = origins(&mut c);
     assert!(!before.is_empty());
+    let retained_ui = c.scene().unwrap();
     let offset = c.resource_usage().text_document.unwrap().offset;
     for (phase, y, t) in [
         (PointerPhase::Down, 200., 2000),
@@ -3537,7 +3538,11 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
     }
     let delta = c.resource_usage().text_document.unwrap().offset - offset;
     assert!(delta.abs() > 1.);
-    let after = origins(&c);
+    let after = origins(&mut c);
+    assert!(
+        Arc::ptr_eq(&retained_ui, &c.scene().unwrap()),
+        "message placement does not invalidate the UI scene for a retired avatar overlay"
+    );
     let mut matched = 0;
     for (id, y) in before {
         if let Some(next) = after.get(&id) {
@@ -3858,6 +3863,56 @@ fn brass_relay_consumes_only_bounded_collection_views_and_receipt_confirmed_send
     assert_eq!(initial.first_sequence, 137);
     assert_eq!(initial.last_sequence, 200);
     assert!(initial.selected_bytes <= 256 * 1024 && initial.replica_bytes < 512 * 1024);
+    for t in 1001..1400 {
+        c.tick(t, (NOW / 1000) as i64).unwrap();
+    }
+    for (phase, y, at) in [
+        (otrios_interfaces::scene::PointerPhase::Down, 200., 1500),
+        (otrios_interfaces::scene::PointerPhase::Move, 7500., 1550),
+    ] {
+        c.pointer_at(
+            c.epoch(),
+            otrios_interfaces::scene::PointerEvent {
+                id: 91,
+                phase,
+                position: [160., y],
+            },
+            at,
+        )
+        .unwrap();
+    }
+    let reading = c.resource_usage().text_document.unwrap();
+    assert_eq!(reading.anchor_identity.unwrap().object, 137);
+    let pinned = c.document_frame().unwrap();
+    c.tick(1560, (NOW / 1000) as i64).unwrap();
+    settle(&mut c, &mut room, &registry, &mut session);
+    c.cancel().unwrap();
+    for t in 1561..1800 {
+        c.tick(t, (NOW / 1000) as i64).unwrap();
+    }
+    let after_drag = c.resource_usage().text_document.unwrap();
+    assert_eq!(after_drag.anchor_identity.unwrap().object, 137);
+    assert!(
+        (after_drag.anchor.unwrap().viewport_y - reading.anchor.unwrap().viewport_y).abs() < 1e-6
+    );
+    let replacement = c.document_frame().unwrap();
+    for old in pinned
+        .draws
+        .iter()
+        .filter(|d| !d.chunk.mesh.vertices.is_empty())
+    {
+        let current = replacement
+            .draws
+            .iter()
+            .find(|d| d.chunk.version == old.chunk.version)
+            .unwrap();
+        assert!(std::sync::Arc::ptr_eq(&old.chunk, &current.chunk));
+        assert!(
+            (old.view[3] - current.view[3]).abs() < 0.01,
+            "automatic older coverage preserves the visible message placement"
+        );
+    }
+    assert!(c.chat_info().unwrap().first_sequence < initial.first_sequence);
     c.activate(c.epoch(), node(&c, "Load older messages"))
         .unwrap();
     settle(&mut c, &mut room, &registry, &mut session);

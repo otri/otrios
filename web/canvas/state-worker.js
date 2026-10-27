@@ -48,8 +48,8 @@ function sendFrame(){
 
   if(timings){frame.timing=geometry&&frame.ui&&navigationTiming?.epoch===frame.epoch?{...navigationTiming,frameReady:timingNow()}:null;}
   if(frame.timing&&navigationTiming?.id===frame.timing.id)navigationTiming=null;
-  frame.graphicsGeneration=graphicsGeneration;frame.document=documents.take(id=>app.document_chunk_vertices(id));
-  const transfer=[...(frame.effects?[frame.effects.buffer]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.map(u=>u.glyphVertices.buffer)];
+  frame.graphicsGeneration=graphicsGeneration;frame.document=documents.take(id=>({glyphVertices:app.document_chunk_vertices(id),vertices:app.document_chunk_geometry(id)}));
+  const transfer=[...(frame.effects?[frame.effects.buffer]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.flatMap(u=>[u.glyphVertices.buffer,u.vertices.buffer])];
   postMessage({type:'frame',...frame},transfer);
 }
 function clearPresentation(){chatLogKey='';composition=null;documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}

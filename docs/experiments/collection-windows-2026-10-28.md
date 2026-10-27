@@ -6,8 +6,9 @@ synthetic-source library, process/scaling and shared-WebSocket qualification on
 macOS and Linux. Chat's authoritative store now uses that collection owner, with
 streaming journal recovery and admission lifetimes. Both host adapters now consume
 bounded message windows and the legacy history read/wire paths are retired.
-Delivery 2 still requires stable structured blocks, large-thread browser and
-physical native acceptance, signed deployment and the final PR. The RFC is not
+Stable message blocks now extend the existing document reader and pass branch
+checks. Delivery 2 still requires large-thread browser and physical native
+acceptance, signed deployment and the final PR. The RFC is not
 complete and these branch changes have not been deployed.
 
 ## Reusable library
@@ -409,17 +410,117 @@ observing the retained old Home scene does not establish that the staged
 handshake finished. It also checks immutable sent profiles rather than expecting
 a roster rename to rewrite history.
 
+## Immutable message blocks and shared inline resources (branch)
+
+The existing chunked document engine accepts bounded `Source::from_blocks`
+windows of shared immutable `Block`s. `BlockId { object, part }` names logical
+content independently of its array index. Each block has a SHA-256 revision of
+its exact text, inset, inline geometry revision and prefix-anchor attachment.
+The ID is separate from that revision. Flat resources retain their original
+bytes/line endings; `original_text()` explicitly returns no whole-document string
+for structured windows. Hard newlines in a message are handled inside its block,
+with grapheme-aligned block-local byte positions. No source flattening is used by
+the live chat consumer.
+
+Chat maps the immutable sent record to one message block: timestamp/sender label,
+body and shared avatar art. Overlapping selections reuse unchanged block Arcs.
+Only the current bounded window's record revisions, blocks and position map
+remain owned by the chat client. The old header-number table, global byte remap,
+prepend reconstruction, append/prepend string queues and scene avatar overlay
+are retired. The fixed 64-avatar catalogue is shared as immutable triangle art;
+all variants pass its per-resource and aggregate allocation bounds.
+
+The reader reconciles `(BlockId, content revision)` against its existing selected
+source. Unchanged height summaries, wrapping checkpoints and chunk Arcs survive
+index changes at the same width. Its font/scale/paint and width are the remaining
+layout-cache keys; width changes invalidate wrapping/geometry while the source
+and width-independent measurements stay shared. Unselected pages are dropped,
+and externally pinned old frames continue counting against the existing core
+working-set cap. The generic reader's one-screen reverse and two-screen forward
+prefetch and bounded CPU/GPU caches remain disposable reserves; evicted content
+is reacquired through the stable-key collection plan.
+
+Reading anchors keep logical identity/revision, local source byte and viewport Y.
+A resolved reading anchor remains pinned while heights above it become exact,
+including when resolution and more layout work happen in the same scheduling
+turn. Explicit scrolling releases the pin. Short day labels and the leading
+spacer attach to the following message's anchor, so prepending older records does
+not replace the reading anchor with a transient paragraph number. Their identity
+uses the following message, which also handles backwards clock/day transitions.
+Diagnostics report `anchor_identity` and `anchor_revision` alongside the source
+position. Existing flat-reader anchor tests continue passing.
+
+Avatar triangles are packed into the first immutable chunk of their message's text.
+Both adapters admit its geometry/glyph payload together, with one version and
+one shared translation/clip. Nonzero geometry ranges opt into the existing
+eight-float placement contract; zero geometry entries retain ordinary UI
+placement. Native C checks integral triangle ranges just as it checks glyph
+ranges. The Rust FFI ABI, unsafe module and platform/driver setup are unchanged.
+Warm scrolling updates only ranges/uniforms. There is no separate avatar update
+clock or cached scene overlay. Document movement no longer invalidates the chat
+UI scene; direct pointer movement retains its scene Arc while the shared
+document frame moves both text and art.
+
+Budgets are distinct: chat still selects <=64 records/256 KiB canonical data;
+structured source admission allows <=256 blocks, <=512 KiB text allocation,
+<=128 KiB per inline allocation and <=4 MiB shared inline allocations. Allocation
+identity is used only to count memory, not as a content hash. Document index
+metadata remains <=8 MiB, core layout/chunk workspace <=8 MiB, with another
+8 MiB reserved for host staging/transfers. GPU residency stays <=8 MiB and cold
+uploads <=512 KiB per display turn. Triangle bytes count alongside glyphs in
+GPU/transfer budgets, and draw plans count in GPU residency. Source records, merge workspace,
+immutable block source, layout workspace and GPU residency are not one combined
+"message count" budget.
+
+Validation on this tree:
+
+```sh
+bash scripts/check.sh
+cargo test -p otrios-core --features canvas --lib canvas::document --locked --offline
+cargo test -p otrios-core --features canvas --test canvas --locked --offline
+cargo test -p otrios-core --features canvas --lib every_avatar --locked --offline
+bash scripts/build-dashboard-web.sh
+node --test scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs scripts/test_gpu_scene.mjs scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs scripts/test-document-transfer.mjs scripts/test-touch-input.mjs scripts/test-text-input.mjs scripts/test-viewport.mjs scripts/test-ui-update.mjs scripts/test-canvas-host-exports.mjs scripts/test-canvas-module-sharing.mjs
+node scripts/test-chat-browser.mjs --url http://127.0.0.1:18965 --chromium '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --output target/rfc0024-blocks/browser
+```
+
+The required check and release Wasm build passed. All 15 document tests and 58
+Canvas tests passed on macOS and Linux; ARMv7 direct-display compilation passed
+in the isolated Linux builder. New checks cover source/revision admission bounds,
+hard breaks, stable chunks and source anchors across prepend/append/reflow,
+prefix-label anchors, targeted revision invalidation and 33 successive 64-block
+windows within memory/GPU bounds. The 200-message real room/Canvas test now drags
+to the beginning of its 64-record view, acquires older coverage automatically,
+and checks that the visible message/inline chunks retain both Arc identity and
+placement. It still verifies outside-window silence, resize, receipts and
+navigation gates. This fixture is in-process; the earlier process suites remain
+the disk/network qualification, not this test's claim.
+
+All 79 Node 24.19.0 checks passed, including shared geometry/glyph admission,
+identical projection and clipping in both shader paths, warm no-upload movement,
+resource retirement and held-credit privacy clearing. Actual Chrome
+156.0.8078.48/WebGL acceptance passed the complete two-guest flow again using an
+isolated browser-only test-signed fixture. The native asset in that fixture is a
+prior test artifact and is not a deployment candidate. Final windows contained
+18 records, 9,720 selected canonical bytes and 12,119 replica canonical bytes,
+with zero private sent-body leaks on the ephemeral lane. Generated results and
+captures are in `target/rfc0024-blocks/browser`; landscape and phone captures were
+visually inspected. An actual 170-pixel transcript drag kept source allocation
+at 31,201 bytes, core working storage at 543,208 bytes and resident pages at 19;
+the sender revision remained unchanged. `message-block-scroll.json` records
+those observations. This is small-thread functional/graphics-recovery evidence,
+not the pending independent pixel comparison, large-thread browser scaling or
+physical page-flip measurement. No dependencies were added.
+
 ## Remaining completion gates
 
 1. Establish the stopped live-data rollback point and qualify the actual
    deployed single-owner journal restart/rollback workflow. The branch consumer
    cutover and old read-path retirement above are not a live deployment.
-2. Map viewport/overscan to bounded stable-key coverage. Keep pending sends
-   separate. Implement stable structured message blocks with one placement and
-   clip for text/profile/avatar, block-revision layout caches, bounded reverse
-   reserve, eviction and explicit expired-anchor adjustment. Preserve source
-   anchors across prepend, append and width changes. Replace the prepend source
-   reconstruction and separate avatar overlay.
+2. Qualify large-thread browser traversal and fixed-window data/merge/layout/GPU
+   working-set measurements with the new block implementation. Add independent
+   text/avatar pixel/clipping comparison fixtures for prepend, append and reflow;
+   the structural implementation above does not establish their pixel results.
 3. Run required checks and browser/native acceptance, pixel/clipping comparisons,
    touch/typist replays and actual native page-flip measurements. Record selected
    data, merge, layout, frame and GPU budgets separately. Verify reconnect,

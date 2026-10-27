@@ -16,7 +16,10 @@ use chunk::{Builder, PAGE_LINES, Page, Templates};
 pub use chunk::{Chunk, ClusterRange, LineRange, MAX_CHUNK_GLYPHS, TARGET_GLYPHS};
 use heights::Heights;
 use layout::{Line, Measure, Scan};
-pub use source::{MAX_BLOCKS, MAX_CLUSTER_BYTES, MAX_SOURCE_BYTES, Source, encode_resource};
+pub use source::{
+    Block, BlockId, Inline, MAX_BLOCKS, MAX_CLUSTER_BYTES, MAX_SOURCE_BYTES,
+    MAX_WINDOW_INLINE_BYTES, Source, encode_resource,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, Weak},
@@ -68,6 +71,26 @@ pub struct Draw {
     /// Same retained view contract as UI text: first,count,x,y,l,t,r,b.
     pub view: [f32; 8],
 }
+impl Draw {
+    /// Every run in a block chunk uses the same placement/clip. Geometry is
+    /// explicitly placed with its full triangle range; ordinary UI geometry
+    /// keeps the pre-existing zero-view contract.
+    pub fn views(&self) -> Vec<f32> {
+        self.chunk
+            .mesh
+            .draws
+            .chunks_exact(3)
+            .flat_map(|run| {
+                let mut view = self.view;
+                if run[0] == 0 {
+                    view[0] = run[1] as f32;
+                    view[1] = run[2] as f32;
+                }
+                view
+            })
+            .collect()
+    }
+}
 #[derive(Clone, Default)]
 pub struct Frame {
     pub epoch: u64,
@@ -78,6 +101,8 @@ pub struct Frame {
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Stats {
     pub anchor: Option<Anchor>,
+    pub anchor_identity: Option<BlockId>,
+    pub anchor_revision: Option<String>,
     /// Opt-in native timings; zero when disabled or on Wasm. Browser task
     /// durations are measured by the JS worker's monotonic clock.
     pub work_ns: u64,
@@ -115,6 +140,7 @@ pub struct Reader {
     width: f64,
     height: f64,
     line_height: f64,
+    font_ink: [f64; 2],
     ink_top: f64,
     ink_bottom: f64,
     heights: Heights,
@@ -125,6 +151,7 @@ pub struct Reader {
     offset: f64,
     direction: f64,
     anchor: Option<Anchor>,
+    reading_anchor: Option<(Anchor, u32)>,
     epoch: u64,
     version: u64,
     stamp: u64,
@@ -135,6 +162,91 @@ pub struct Reader {
     profile: bool,
 }
 impl Reader {
+    fn estimate(&self, source: &Source, block: usize) -> f64 {
+        let average = f64::from(self.measure.font.glyph('n').advance) * self.measure.factor;
+        let width = (self.width - f64::from(source.inset(block))).max(1.);
+        source
+            .block(block as u32)
+            .unwrap()
+            .split_terminator('\n')
+            .map(|line| ((line.len() as f64 * average / width).ceil().max(1.)) * self.line_height)
+            .sum::<f64>()
+            .max(self.line_height)
+    }
+    /// Reconcile bounded keyed source coverage. Unchanged (identity, revision)
+    /// summaries/pages retain their allocations; byte positions are block-local.
+    /// A reader's font, scale, paint and width are implicit layout-cache keys.
+    pub fn replace_blocks(&mut self, source: Source) -> Result<()> {
+        if !self.source.structured() || !source.structured() {
+            return Err("Keyed source replacement requires structured blocks".into());
+        }
+        let ink = source.ink_bounds(self.font_ink);
+        let reserve = self.viewport_budget(self.width, self.height, ink)?;
+        let anchor = self.anchor();
+        let anchor_key = self.source.key(anchor.block as usize);
+        let old_indices: BTreeMap<_, _> = (0..self.source.block_count())
+            .map(|i| (self.source.key(i), i))
+            .collect();
+        let mut old_summaries: Vec<_> = std::mem::take(&mut self.summaries)
+            .into_iter()
+            .map(Some)
+            .collect();
+        let mut mapping = BTreeMap::new();
+        let mut summaries = Vec::with_capacity(source.block_count());
+        let mut heights = Vec::with_capacity(source.block_count());
+        let mut retained_anchor = None;
+        for i in 0..source.block_count() {
+            let key = source.key(i);
+            if key == anchor_key {
+                retained_anchor = Some(Anchor {
+                    block: i as u32,
+                    ..anchor
+                });
+            }
+            if let Some(&old) = old_indices.get(&key) {
+                mapping.insert(old, i);
+                summaries.push(old_summaries[old].take().unwrap());
+                heights.push(self.heights.prefix(old + 1) - self.heights.prefix(old));
+            } else {
+                summaries.push(Summary {
+                    cursor: source.blocks[i].start,
+                    ..Default::default()
+                });
+                heights.push(self.estimate(&source, i));
+            }
+        }
+        self.job = None;
+        self.pages = std::mem::take(&mut self.pages)
+            .into_iter()
+            .filter_map(|((old, line), page)| mapping.get(&old).map(|&new| ((new, line), page)))
+            .collect();
+        self.allocations.retain(|(w, _)| w.strong_count() != 0);
+        self.source = source;
+        self.ink_top = ink[0];
+        self.ink_bottom = ink[1];
+        self.job_reserve = reserve;
+        self.summaries = summaries;
+        self.heights = Heights::new(heights);
+        self.background = self
+            .summaries
+            .iter()
+            .position(|s| !s.exact)
+            .unwrap_or(self.summaries.len());
+        self.checkpoint_bytes = self
+            .summaries
+            .iter()
+            .map(|s| s.checkpoints.capacity() * size_of::<Checkpoint>())
+            .sum();
+        self.counters.exact_blocks = self.summaries.iter().filter(|s| s.exact).count();
+        self.anchor = None;
+        self.reading_anchor = None;
+        if let Some(anchor) = retained_anchor {
+            self.jump_to(anchor)?;
+        } else {
+            self.offset = 0.;
+        }
+        self.check_index()
+    }
     /// Extend only the source/index tail. Existing pages, glyph meshes and
     /// source anchors retain their identity across a chat append.
     pub fn append_blocks(&mut self, blocks: &[String]) -> Result<()> {
@@ -189,6 +301,8 @@ impl Reader {
             .filter(|g| g.curve_count > 0)
             .map(|g| baseline - f64::from(g.ink_bounds[1]) * measure.factor + 1.)
             .fold(line_height, f64::max);
+        let font_ink = [ink_top, ink_bottom];
+        let [ink_top, ink_bottom] = source.ink_bounds(font_ink);
         let mut this = Self {
             source,
             measure,
@@ -198,6 +312,7 @@ impl Reader {
             width: 0.,
             height: 0.,
             line_height,
+            font_ink,
             ink_top,
             ink_bottom,
             heights: Heights::new(vec![1.]),
@@ -208,6 +323,7 @@ impl Reader {
             offset: 0.,
             direction: 1.,
             anchor: None,
+            reading_anchor: None,
             epoch: 0,
             version: 0,
             stamp: 0,
@@ -262,6 +378,7 @@ impl Reader {
     pub fn scroll_to(&mut self, offset: f64) {
         if offset.is_finite() {
             self.anchor = None;
+            self.reading_anchor = None;
             let next = offset.clamp(0., (self.heights.total() - self.height).max(0.));
             if next != self.offset {
                 self.direction = (next - self.offset).signum();
@@ -273,7 +390,20 @@ impl Reader {
         if let Some(anchor) = self.anchor {
             return anchor;
         }
+        if let Some((anchor, _)) = self.reading_anchor {
+            return anchor;
+        }
         let (block, local) = self.heights.locate(self.offset);
+        if let Some(target) = self.source.anchor_target(block) {
+            let viewport_y = self.heights.prefix(target) - self.offset;
+            if viewport_y.abs() <= 8192. {
+                return Anchor {
+                    block: target as u32,
+                    source_byte: self.source.blocks[target].start,
+                    viewport_y,
+                };
+            }
+        }
         let line = (local / self.line_height).floor().max(0.) as u32;
         if let Some(page) = self.pages.get(&(block, line / PAGE_LINES * PAGE_LINES))
             && let Some(range) = page.lines.iter().find(|l| l.line == line)
@@ -301,23 +431,42 @@ impl Reader {
             || anchor.source_byte > range.end
             || !self
                 .source
-                .text
-                .is_char_boundary(anchor.source_byte as usize)
+                .slice(anchor.block as usize, range.clone())
+                .is_char_boundary((anchor.source_byte - range.start) as usize)
             || !anchor.viewport_y.is_finite()
             || anchor.viewport_y.abs() > 8192.
             || (anchor.source_byte < range.end
-                && !self.source.text[range.start as usize..range.end as usize]
+                && !self
+                    .source
+                    .slice(anchor.block as usize, range.clone())
                     .grapheme_indices(true)
                     .any(|(i, _)| range.start + i as u32 == anchor.source_byte))
         {
             return Err("Document anchor must be a source cluster boundary".into());
         }
         self.job = None;
+        self.reading_anchor = None;
         self.offset = self.heights.prefix(anchor.block as usize);
+        if let Some(line) = self
+            .pages
+            .range((anchor.block as usize, 0)..=(anchor.block as usize, u32::MAX))
+            .flat_map(|(_, page)| &page.lines)
+            .find(|line| {
+                line.source.start <= anchor.source_byte
+                    && (anchor.source_byte < line.source.end
+                        || anchor.source_byte == range.end && line.source.end == range.end)
+            })
+        {
+            self.offset =
+                (self.offset + f64::from(line.line) * self.line_height - anchor.viewport_y).max(0.);
+            self.anchor = None;
+            self.reading_anchor = Some((anchor, line.line));
+            return Ok(());
+        }
         self.anchor = Some(anchor);
         Ok(())
     }
-    pub fn resize(&mut self, width: f64, height: f64) -> Result<bool> {
+    fn viewport_budget(&self, width: f64, height: f64, ink: [f64; 2]) -> Result<usize> {
         if [width, height]
             .iter()
             .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
@@ -335,13 +484,11 @@ impl Reader {
             .map(|g| f64::from(g.advance) * self.measure.factor)
             .fold(f64::INFINITY, f64::min);
         let screen_glyph_bound = ((width / smallest).ceil() + 1.)
-            * (((height + self.ink_bottom - self.ink_top) / self.line_height).ceil() + 1.);
+            * (((height + ink[1] - ink[0]) / self.line_height).ceil() + 1.);
         if screen_glyph_bound * GPU_BYTES_PER_GLYPH as f64 > GPU_GEOMETRY_BYTES as f64 {
             return Err("Document viewport exceeds GPU geometry budget at this scale".into());
         }
-        if ((height + self.ink_bottom - self.ink_top) / self.line_height).ceil() + 2.
-            > MAX_WINDOW_PAGES as f64
-        {
+        if ((height + ink[1] - ink[0]) / self.line_height).ceil() + 2. > MAX_WINDOW_PAGES as f64 {
             return Err("Document viewport exceeds visible page bound at this scale".into());
         }
         let zero_ink = self
@@ -356,8 +503,13 @@ impl Reader {
             (width / smallest).ceil() + 2.
         }
         .min(4096.);
-        self.job_reserve = ((f64::from(PAGE_LINES) * line_glyphs * 320.) as usize + 512 * 1024)
-            .clamp(1024 * 1024, JOB_RESERVE);
+        Ok(
+            ((f64::from(PAGE_LINES) * line_glyphs * 320.) as usize + 512 * 1024)
+                .clamp(1024 * 1024, JOB_RESERVE),
+        )
+    }
+    pub fn resize(&mut self, width: f64, height: f64) -> Result<bool> {
+        self.job_reserve = self.viewport_budget(width, height, [self.ink_top, self.ink_bottom])?;
         self.height = height;
         if width == self.width {
             self.offset = self
@@ -377,14 +529,8 @@ impl Reader {
         // display snapshots own only meshes, never old-width layout summaries.
         self.summaries = Vec::new();
         self.heights = Heights::new(vec![1.]);
-        let average = f64::from(self.measure.font.glyph('n').advance) * self.measure.factor;
-        let estimates = self
-            .source
-            .blocks
-            .iter()
-            .map(|r| {
-                (((r.end - r.start) as f64 * average / width).ceil().max(1.)) * self.line_height
-            })
+        let estimates = (0..self.source.block_count())
+            .map(|i| self.estimate(&self.source, i))
             .collect();
         self.heights = Heights::new(estimates);
         self.summaries = self
@@ -398,6 +544,7 @@ impl Reader {
             .collect();
         self.offset = anchor.map_or(0., |a| self.heights.prefix(a.block as usize));
         self.anchor = anchor;
+        self.reading_anchor = None;
         self.check_index()?;
         Ok(true)
     }
@@ -484,7 +631,14 @@ impl Reader {
             scan: Scan::new(cp.byte),
             target,
             packing: None,
-            builder: target.map(|line| Builder::new(line, self.color)),
+            builder: target.map(|line| {
+                Builder::new(
+                    line,
+                    self.color,
+                    self.source.inset(block),
+                    (line == 0).then(|| self.source.inline(block)).flatten(),
+                )
+            }),
         }
     }
     fn remember_line(&mut self, job: &Job, value: &Line) -> Result<()> {
@@ -526,6 +680,7 @@ impl Reader {
                 - a.viewport_y)
                 .max(0.);
             self.anchor = None;
+            self.reading_anchor = Some((a, job.line));
         }
         Ok(())
     }
@@ -539,6 +694,15 @@ impl Reader {
         self.allocations.retain(|(w, _)| w.strong_count() != 0);
         let (anchor_block, anchor_local) = self.heights.locate(self.offset);
         let resolving_anchor = self.anchor.is_some();
+        let mut stable_origin = self
+            .reading_anchor
+            .map(|(a, line)| {
+                (
+                    a.block as usize,
+                    f64::from(line) * self.line_height - a.viewport_y,
+                )
+            })
+            .or_else(|| (!resolving_anchor).then_some((anchor_block, anchor_local)));
         let previous_offset = self.offset;
         let mut changed = false;
         // One bounded viewport plan per scheduling turn. Recomputing/sorting
@@ -549,8 +713,8 @@ impl Reader {
         let prefetch = self.requests(true);
         let wanted: BTreeSet<_> = prefetch.iter().copied().collect();
         for _ in 0..max_steps {
-            if !resolving_anchor {
-                self.offset = self.heights.prefix(anchor_block) + anchor_local;
+            if let Some((block, local)) = stable_origin {
+                self.offset = self.heights.prefix(block) + local;
             }
             let missing = visible
                 .iter()
@@ -629,13 +793,25 @@ impl Reader {
                 }
                 let after = job.builder.as_ref().unwrap().glyphs();
                 self.counters.packed_glyphs += after.saturating_sub(before) as u64;
-            } else if let Some(line) =
-                job.scan
-                    .step(&self.source, end, self.width, &mut self.measure, 64)
-            {
+            } else if let Some(line) = job.scan.step(
+                &self.source,
+                job.block,
+                end,
+                (self.width - f64::from(self.source.inset(job.block))).max(1.),
+                &mut self.measure,
+                64,
+            ) {
                 self.counters.laid_out_lines += 1;
                 self.counters.broken_clusters += line.glyphs.len() as u64;
                 self.remember_line(&job, &line)?;
+                if stable_origin.is_none() && self.anchor.is_none() {
+                    stable_origin = self.reading_anchor.map(|(a, line)| {
+                        (
+                            a.block as usize,
+                            f64::from(line) * self.line_height - a.viewport_y,
+                        )
+                    });
+                }
                 if job.target.is_some_and(|target| job.line >= target) {
                     job.builder.as_mut().unwrap().begin_line(job.line, &line);
                     job.packing = Some((line, 0));
@@ -677,14 +853,21 @@ impl Reader {
                 break;
             }
         }
-        if !resolving_anchor {
+        if let Some((block, local)) = stable_origin {
             // Height discovery above the viewport must not move its text.
             // Explicit jump resolution already supplies a new anchored offset.
-            self.offset = self.heights.prefix(anchor_block) + anchor_local;
+            self.offset = self.heights.prefix(block) + local;
         }
         self.offset = self
             .offset
             .clamp(0., (self.heights.total() - self.height).max(0.));
+        if self.background == self.summaries.len()
+            && let Some((a, line)) = &mut self.reading_anchor
+        {
+            a.viewport_y = self.heights.prefix(a.block as usize)
+                + f64::from(*line) * self.line_height
+                - self.offset;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if self.profile {
             let ns = start.elapsed().as_nanos() as u64;
@@ -779,7 +962,10 @@ impl Reader {
             let y = (self.heights.prefix(block) - self.offset
                 + f64::from(page_line) * self.line_height) as f32;
             for chunk in &page.chunks {
-                if let Some((first, count)) = chunk.range(first_line, end_line) {
+                if let Some((first, count)) = chunk
+                    .range(first_line, end_line)
+                    .or_else(|| (!chunk.mesh.vertices.is_empty()).then_some((0, 0)))
+                {
                     frame.draws.push(Draw {
                         chunk: chunk.clone(),
                         view: [
@@ -801,6 +987,11 @@ impl Reader {
     pub fn stats(&self) -> Stats {
         let mut stats = self.counters.clone();
         stats.anchor = Some(self.anchor());
+        if self.source.structured() {
+            let key = self.source.key(self.anchor().block as usize);
+            stats.anchor_identity = Some(key.0);
+            stats.anchor_revision = Some(super::hex(&key.1));
+        }
         stats.measurement_ns = self.measure.measurement_ns;
         stats.breaking_ns = stats.breaking_ns.saturating_sub(stats.measurement_ns);
         stats.source_bytes = self.source.source_bytes();

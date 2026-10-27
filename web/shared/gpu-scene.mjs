@@ -245,7 +245,7 @@ class SceneLayer {
   setTextViews(views){
     floats(views,8,'text viewport');
     if(views.length&&views.length!==this.draws.length/3*8)throw Error('Text viewport dimensions');
-    for(let i=0;i<this.draws.length/3&&views.length;i++)if(this.draws[i*3]===1){const v=views.subarray(i*8,i*8+8),start=this.draws[i*3+1],end=start+this.draws[i*3+2];if(!Number.isInteger(v[0])||!Number.isInteger(v[1])||v[0]%4||v[1]%4||v[0]<start||v[1]<0||v[0]>end||v[1]>end-v[0])throw Error('Culled text range');}
+    for(let i=0;i<this.draws.length/3&&views.length;i++){const v=views.subarray(i*8,i*8+8);if(this.draws[i*3]===0&&v[0]===0&&v[1]===0)continue;const stride=this.draws[i*3]===0?3:4,start=this.draws[i*3+1],end=start+this.draws[i*3+2];if(!Number.isInteger(v[0])||!Number.isInteger(v[1])||v[0]%stride||v[1]%stride||v[0]<start||v[1]<0||v[0]>end||v[1]>end-v[0])throw Error('Culled text/geometry range');}
     if((this.owner.atlasScale===0||this.owner.stableTextQuads)&&!!views.length!==!!this.textViews.length)this.preparedGeneration=0;
     this.textViews=views;
   }
@@ -255,6 +255,7 @@ class SceneLayer {
     const draws=this.preparedGeneration===owner.cacheGeneration?this.preparedDraws:this.draws;
     for(let i=0;i<draws.length;i+=3){const kind=draws[i];let first=draws[i+1],count=draws[i+2];if(!count)continue;
       let view,sourceVertex=0,sourceDraw=i/3;
+      if(kind===0&&this.textViews.length){const group=this.preparedGeneration===owner.cacheGeneration?this.preparedGroups[i/3*2]:i/3;if(this.textViews[group*8+1]>0){view=this.textViews.subarray(group*8,group*8+8);first=view[0];count=view[1];}}
       if(kind!==0&&this.textViews.length){const prepared=this.preparedGeneration===owner.cacheGeneration,group=prepared?this.preparedGroups[i/3*2]:i/3,source=prepared?this.preparedGroups[i/3*2+1]:first;sourceVertex=source;sourceDraw=group;view=this.textViews.subarray(group*8,group*8+8);const ratio=kind===2?1.5:1,end=Math.min(source+count/ratio,view[0]+view[1]),start=Math.max(source,view[0]);if(end<=start||view[6]<=view[4]||view[7]<=view[5])continue;first+=(start-source)*ratio;count=(end-start)*ratio;}
 
       if(active!==kind){
@@ -263,7 +264,7 @@ class SceneLayer {
         else if(kind===1)owner.bindText(this.text);
         else{gl.useProgram(owner.cacheProgram);gl.uniformMatrix3fv(owner.cacheTransform,false,owner.transform);gl.uniform1i(owner.cacheSampler,2);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,owner.atlas);owner.useAttributes(owner.cacheAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.cached);gl.vertexAttribPointer(owner.cacheAttributes[0],2,gl.FLOAT,false,32,0);gl.vertexAttribPointer(owner.cacheAttributes[1],2,gl.FLOAT,false,32,8);gl.vertexAttribPointer(owner.cacheAttributes[2],4,gl.FLOAT,false,32,16);}
       }
-      if(kind!==0){
+      {
         if(kind===2&&owner.stableTextQuads){
           if(view&&owner.atlasScale){const q=this.glyphVertices.subarray(sourceVertex*16,sourceVertex*16+64),em=this.textStyles[sourceDraw]||Math.abs((q[33]-q[1])/(q[35]-q[3])),sx=Math.round(em*owner.scaleX*256)/256,sy=Math.round(em*owner.scaleY*256)/256;
             gl.uniform2f(owner.cacheSnapViewport,owner.width,owner.height);gl.uniformMatrix2fv(owner.cacheSnapUv,false,new Float32Array([sx/em/owner.scaleX*owner.atlasScale/ATLAS_SIZE,0,0,sy/em/owner.scaleY*owner.atlasScale/ATLAS_SIZE]));
@@ -271,7 +272,7 @@ class SceneLayer {
         }
         const transform=owner.transform.slice();
         if(view){transform[6]+=owner.transform[0]*view[2]+owner.transform[3]*view[3];transform[7]+=owner.transform[1]*view[2]+owner.transform[4]*view[3];const edge=(v,max)=>Math.ceil(Math.max(0,Math.min(max,v))-.5),x0=edge(view[4]*owner.scaleX,owner.width),x1=edge(view[6]*owner.scaleX,owner.width),y0=edge(owner.height-view[7]*owner.scaleY,owner.height),y1=edge(owner.height-view[5]*owner.scaleY,owner.height);if(x1<=x0||y1<=y0)continue;gl.enable(gl.SCISSOR_TEST);gl.scissor(x0,y0,x1-x0,y1-y0);}
-        gl.uniformMatrix3fv(kind===1?owner.textUniforms.transform:owner.cacheTransform,false,transform);
+        gl.uniformMatrix3fv(kind===0?owner.geometryTransform:kind===1?owner.textUniforms.transform:owner.cacheTransform,false,transform);
       }
       if(kind!==1)gl.drawArrays(gl.TRIANGLES,first,count);else gl.drawElements(gl.TRIANGLES,count/4*6,gl.UNSIGNED_SHORT,first/4*12);
       if(view)gl.disable(gl.SCISSOR_TEST);

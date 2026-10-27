@@ -328,12 +328,13 @@ int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats) 
     struct text_mesh *m=&d->text[slot];
     if(!floats){if(m->views){m->alpha_valid=0;if(d->stable_text)m->cached_generation=0;}free(m->views);m->views=NULL;return 0;}
     if(floats!=m->draw_words/3*8)return fail(d,"Invalid text viewport dimensions");
-    for(size_t i=0;i<m->draw_words/3;i++)if(m->draws[i*3]==1){
+    for(size_t i=0;i<m->draw_words/3;i++)if(m->draws[i*3]==1 || views[i*8]!=0 || views[i*8+1]!=0){
         const float *v=views+i*8;
         if(v[0]<0 || v[1]<0 || v[0]>65536 || v[1]>65536)return fail(d,"Invalid culled text range");
         uint32_t first=(uint32_t)v[0],count=(uint32_t)v[1];
         uint32_t begin=m->draws[i*3+1],end=begin+m->draws[i*3+2];
-        if(v[0]<0 || v[1]<0 || v[0]!=(float)first || v[1]!=(float)count || first%4 || count%4 || first<begin || first>end || count>end-first)return fail(d,"Invalid culled text range");
+        uint32_t stride=m->draws[i*3]==0?3:4;
+        if(v[0]<0 || v[1]<0 || v[0]!=(float)first || v[1]!=(float)count || first%stride || count%stride || first<begin || first>end || count>end-first)return fail(d,"Invalid culled scene range");
     }
     if(!m->views){m->alpha_valid=0;m->views=malloc(floats*sizeof(float));if(!m->views)return fail(d,"Text viewport allocation");if(d->stable_text)m->cached_generation=0;}
     memcpy(m->views,views,floats*sizeof(float));return 0;
@@ -423,7 +424,7 @@ static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
     float last_clip[4]={0};int x0=0,y0=0,x1=0,y1=0;
     for(size_t i=0;i<text->draw_words;i+=3) {
         uint32_t *r=text->draws+i;
-        if(r[0]==0){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2]);text_bound=0;}
+        if(r[0]==0 && (!text->views || text->views[i/3*8+1]==0)){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2]);text_bound=0;}
         else if(text->views){
             const float *v=text->views+i/3*8;if(v[1]==0 || v[6]<=v[4] || v[7]<=v[5])continue;
             if(!has_clip || memcmp(last_clip,v+4,sizeof(last_clip))){
@@ -442,7 +443,8 @@ static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
             float moved[9];memcpy(moved,projection,sizeof(moved));
             moved[6]+=projection[0]*v[2]+projection[3]*v[3];moved[7]+=projection[1]*v[2]+projection[4]*v[3];
             if(!scissoring){glEnable(GL_SCISSOR_TEST);scissoring=1;}
-            text_bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],text_bound);
+            if(r[0]==0){draw_geometry(d,&d->meshes[slot],moved,(GLint)v[0],(GLsizei)v[1]);text_bound=0;}
+            else text_bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],text_bound);
         }else{text_bound=draw_text(d,text,projection,r[1],r[2],text_bound);}
     }
     if(scissoring)glDisable(GL_SCISSOR_TEST);

@@ -301,7 +301,7 @@ impl Client {
         );
         let mut viewport = canvas(
             u32::from(VIEWPORT),
-            Rect::new(88., page_y + 16., (page_w - 80.).max(1.), content_h - 24.),
+            Rect::new(24., page_y + 16., (page_w - 16.).max(1.), content_h - 24.),
             vec![],
         );
         viewport.responder = None;

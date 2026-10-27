@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Same-thread GPU resource ownership; wrapping and scheduling live in core.
-use otrios_core::canvas::document::{
-    Frame, GPU_BYTES_PER_GLYPH, GPU_GEOMETRY_BYTES, UPLOAD_BYTES_PER_FRAME,
-};
+use otrios_core::canvas::document::{Frame, GPU_GEOMETRY_BYTES, UPLOAD_BYTES_PER_FRAME};
 use otrios_linux_display::{Display, MAX_SCENE_SLOTS};
 use std::collections::{BTreeMap, BTreeSet};
 struct Entry {
@@ -47,11 +45,7 @@ impl Cache {
         }
         self.stamp += 1;
         let wanted: BTreeSet<_> = frame.draws.iter().map(|d| d.chunk.version).collect();
-        let required: usize = frame
-            .draws
-            .iter()
-            .map(|d| d.chunk.clusters.len() * GPU_BYTES_PER_GLYPH + 12)
-            .sum();
+        let required: usize = frame.draws.iter().map(|d| d.chunk.gpu_bytes()).sum();
         if required > GPU_GEOMETRY_BYTES || wanted.len() > (MAX_SCENE_SLOTS - 3) as usize {
             return Err("Visible document exceeds GPU resource budget".into());
         }
@@ -62,11 +56,13 @@ impl Cache {
             let id = draw.chunk.version;
             if !self.entries.contains_key(&id) {
                 let glyphs = &draw.chunk.mesh.glyph_vertices;
-                if upload_bytes + glyphs.len() * 4 > UPLOAD_BYTES_PER_FRAME {
+                let vertices = &draw.chunk.mesh.vertices;
+                let payload = (glyphs.len() + vertices.len()) * 4;
+                if upload_bytes + payload > UPLOAD_BYTES_PER_FRAME {
                     pending = true;
                     continue;
                 }
-                let bytes = draw.chunk.clusters.len() * GPU_BYTES_PER_GLYPH + 12;
+                let bytes = draw.chunk.gpu_bytes();
                 while self.entries.values().map(|e| e.bytes).sum::<usize>() + bytes
                     > GPU_GEOMETRY_BYTES
                     || self.entries.len() == (MAX_SCENE_SLOTS - 3) as usize
@@ -85,10 +81,19 @@ impl Cache {
                 let slot = (3..MAX_SCENE_SLOTS)
                     .find(|slot| !self.entries.values().any(|e| e.slot == *slot))
                     .ok_or("Document resource slots exhausted")?;
-                display.upload_scene(slot, &[], glyphs, &draw.chunk.mesh.draws)?;
-                display.text_styles(slot, &[frame.em])?;
-                upload_bytes += glyphs.len() * 4;
-                self.uploaded_bytes += (glyphs.len() * 4) as u64;
+                display.upload_scene(slot, vertices, glyphs, &draw.chunk.mesh.draws)?;
+                display.text_styles(
+                    slot,
+                    &draw
+                        .chunk
+                        .mesh
+                        .draws
+                        .chunks_exact(3)
+                        .map(|run| if run[0] == 1 { frame.em } else { 0. })
+                        .collect::<Vec<_>>(),
+                )?;
+                upload_bytes += payload;
+                self.uploaded_bytes += payload as u64;
                 self.uploads += 1;
                 self.entries.insert(
                     id,
@@ -104,7 +109,7 @@ impl Cache {
                 .get_mut(&id)
                 .ok_or("Missing admitted document resource")?;
             entry.used = self.stamp;
-            display.text_views(entry.slot, &draw.view)?;
+            display.text_views(entry.slot, &draw.views())?;
             slots.push(entry.slot);
         }
         Ok((slots, pending))

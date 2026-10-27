@@ -29,8 +29,8 @@ impl Client {
         self.collection.stop();
         self.collection_revoked = true;
         self.messages.clear();
-        self.append.clear();
-        self.prepend.clear();
+        self.message_revisions.clear();
+        self.source_blocks.clear();
         self.reset = true;
         self.older = false;
         self.more_after = false;
@@ -68,10 +68,13 @@ impl Client {
                 self.more_after = window.more_after;
                 self.history_wait = false;
                 if changed {
+                    self.message_revisions = window
+                        .keys
+                        .iter()
+                        .map(|key| Ok((*key, window.record(*key).map_err(err)?.hash())))
+                        .collect::<Result<_>>()?;
                     self.messages = messages;
                     self.reset = true;
-                    self.append.clear();
-                    self.prepend.clear();
                     self.authors_revision = self.authors_revision.saturating_add(1);
                     self.tail |= follow
                         && !self.more_after

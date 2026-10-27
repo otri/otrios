@@ -32,12 +32,18 @@ pub struct Chunk {
 }
 impl Chunk {
     pub fn bytes(&self) -> usize {
-        self.mesh.glyph_vertices.capacity() * 4
+        self.mesh.vertices.capacity() * 4
+            + self.mesh.glyph_vertices.capacity() * 4
             + self.mesh.draws.capacity() * 4
             + self.clusters.capacity() * size_of::<ClusterRange>()
             + self.runs.capacity() * size_of::<Run>()
             + size_of::<Self>()
             + 2 * size_of::<usize>() // Arc allocation control block
+    }
+    pub fn gpu_bytes(&self) -> usize {
+        self.clusters.len() * super::GPU_BYTES_PER_GLYPH
+            + self.mesh.vertices.len() * 4
+            + self.mesh.draws.len() * 4
     }
     /// Complete lines outside the conservative font-ink window produce no draw.
     pub(super) fn range(&self, first_line: u32, end_line: u32) -> Option<(u32, u32)> {
@@ -107,16 +113,28 @@ pub(super) struct Builder {
     current: Chunk,
     page_line: u32,
     color: [f32; 4],
+    inset: f32,
 }
 impl Builder {
-    pub fn new(page_line: u32, color: [u8; 4]) -> Self {
-        Self {
+    pub fn new(
+        page_line: u32,
+        color: [u8; 4],
+        inset: f32,
+        inline: Option<&Arc<super::Inline>>,
+    ) -> Self {
+        let mut this = Self {
             chunks: Vec::new(),
             lines: Vec::new(),
             current: Self::empty(),
             page_line,
             color: color.map(|v| f32::from(v) / 255.),
+            inset,
+        };
+        if let Some(inline) = inline {
+            this.current.mesh.vertices = inline.vertices.clone();
+            this.current.bounds = inline.bounds;
         }
+        this
     }
     fn empty() -> Chunk {
         Chunk {
@@ -164,7 +182,7 @@ impl Builder {
             if !g.drawable || token.tab {
                 continue;
             }
-            let pen = placed.x as f32;
+            let pen = placed.x as f32 + self.inset;
             let [xmin, ymin, xmax, ymax] = g.ink;
             let left = pen + xmin - 1.;
             let right = pen + xmax + 1.;
@@ -215,18 +233,27 @@ impl Builder {
         done
     }
     fn flush(&mut self, version: &mut u64) {
-        if self.current.clusters.is_empty() {
+        if self.current.clusters.is_empty() && self.current.mesh.vertices.is_empty() {
             return;
         }
         let mut chunk = std::mem::replace(&mut self.current, Self::empty());
         *version += 1;
         chunk.version = *version;
-        chunk
-            .mesh
-            .draws
-            .extend([1, 0, (chunk.mesh.glyph_vertices.len() / 16) as u32]);
+        if !chunk.mesh.vertices.is_empty() {
+            chunk
+                .mesh
+                .draws
+                .extend([0, 0, (chunk.mesh.vertices.len() / 6) as u32]);
+        }
+        if !chunk.mesh.glyph_vertices.is_empty() {
+            chunk
+                .mesh
+                .draws
+                .extend([1, 0, (chunk.mesh.glyph_vertices.len() / 16) as u32]);
+        }
         // Vec growth can otherwise double capacity right at the chunk cap.
         chunk.mesh.glyph_vertices.shrink_to_fit();
+        chunk.mesh.vertices.shrink_to_fit();
         chunk.clusters.shrink_to_fit();
         chunk.runs.shrink_to_fit();
         self.chunks.push(Arc::new(chunk));

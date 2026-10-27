@@ -354,7 +354,7 @@ impl CanvasApp {
             "epoch": frame.epoch.to_string(), "em": frame.em, "loading": frame.loading,
             "draws": frame.draws.iter().map(|d| serde_json::json!({
                 "version": d.chunk.version.to_string(), "view": d.view,
-                "glyphs": d.chunk.clusters.len()
+                "glyphs": d.chunk.clusters.len(), "geometry": d.chunk.mesh.vertices.len() / 6
             })).collect::<Vec<_>>()
         }))
         .map_err(|e| e.to_string())
@@ -368,6 +368,17 @@ impl CanvasApp {
             .as_ref()
             .and_then(|f| f.draws.iter().find(|d| d.chunk.version == version))
             .map(|d| d.chunk.mesh.glyph_vertices.clone())
+            .ok_or_else(|| "Document resource is outside the pinned transfer snapshot".into())
+    }
+    pub fn document_chunk_geometry(&self, version: &str) -> Result<Vec<f32>, String> {
+        let version = version
+            .parse::<u64>()
+            .map_err(|_| "Invalid document version")?;
+        self.frame()?
+            .document
+            .as_ref()
+            .and_then(|f| f.draws.iter().find(|d| d.chunk.version == version))
+            .map(|d| d.chunk.mesh.vertices.clone())
             .ok_or_else(|| "Document resource is outside the pinned transfer snapshot".into())
     }
     pub fn overlay_vertices(&self) -> Result<Vec<f32>, String> {

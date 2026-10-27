@@ -5,8 +5,10 @@ Status: implementation in progress. Delivery 1 is qualified with a large synthet
 source over the shared session on macOS/Linux, with bounded process/scaling
 evidence. Chat's authoritative store now uses the shared collection owner, with
 staged journal recovery. Both host adapters now consume message windows through
-the collection lane; the old history wire/read paths are retired. Stable
-structured blocks and browser/native deployed acceptance remain incomplete. See the
+the collection lane; the old history wire/read paths are retired. Stable message
+blocks and shared text/avatar placement pass branch checks on both hosts. Large
+chat traversal, independent pixel/native page-flip evidence and deployed
+acceptance remain incomplete. See the
 [implementation ledger](../experiments/collection-windows-2026-10-28.md).
 Clarifies the user's pervasive-sync objective; not implemented by the chat UI
 fixes. Extends [RFC 0003](0003-module-roots-and-state-selectors.md),
@@ -20,8 +22,8 @@ including scrollback, rather than downloading the full thread or implementing a
 separate application-specific history protocol. Server authority still controls
 admission, ordering and moderation. CRDT replication does not grant permission.
 
-Today Canvas uses covered Merkle synchronization for bounded typed fields. Chat
-instead uses a separate ordered journal and history commands over channel 3.
+The pre-RFC implementation uses covered Merkle synchronization for bounded typed
+Canvas fields. Chat instead uses a separate ordered journal and history commands over channel 3.
 That is a bounded prototype shortcut, not the intended reusable data mechanism.
 Keep its durability and retry guarantees during the cutover, then retire its
 history-specific replication path. Presence, expiring drafts and particle events

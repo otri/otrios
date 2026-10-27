@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Mount-local room state. Keystrokes never become CRDT writes.
+use super::super::document::{Block, BlockId, Inline, Source};
 use super::*;
 use crate::dashboard::{font::Font, keyboard::TextBuffer};
 use otrios_interfaces::{
@@ -7,6 +8,7 @@ use otrios_interfaces::{
     scene::{PointerEvent, PointerPhase},
 };
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 pub const VIEWPORT: u16 = 60_000;
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -65,11 +67,10 @@ pub struct Client {
     pub(crate) collection_revoked: bool,
     pub(crate) more_after: bool,
     pub(super) authors_revision: u64,
-    headers: BTreeMap<u32, u8>,
-    next_block: u32,
-    next_byte: u32,
+    pub(super) source_blocks: BTreeMap<BlockId, ([u8; 32], Arc<Block>)>,
+    pub(super) message_revisions: BTreeMap<u64, [u8; 32]>,
+    avatars: BTreeMap<u8, Arc<Inline>>,
     pub(super) source_messages: BTreeMap<u64, (u32, u32)>,
-    source_day: Option<u64>,
     pub(super) panel: Panel,
     pub(super) focus: Option<Focus>,
     pub(super) compose: TextBuffer,
@@ -109,8 +110,6 @@ pub struct Client {
     disclosed: bool,
     last_effect: u64,
     pub(super) reset: bool,
-    pub(super) append: Vec<String>,
-    pub(super) prepend: Vec<String>,
     pub(super) tail: bool,
     pub(super) font: Option<std::sync::Arc<Font>>,
     pub(super) viewport: [f32; 2],
@@ -146,11 +145,10 @@ impl Default for Client {
             collection_revoked: false,
             more_after: false,
             authors_revision: 0,
-            headers: BTreeMap::new(),
-            next_block: 1,
-            next_byte: 0,
+            source_blocks: BTreeMap::new(),
+            message_revisions: BTreeMap::new(),
+            avatars: BTreeMap::new(),
             source_messages: BTreeMap::new(),
-            source_day: None,
             panel: Panel::None,
             focus: None,
             compose: TextBuffer::multiline(2048),
@@ -190,31 +188,11 @@ impl Default for Client {
             disclosed: false,
             last_effect: 0,
             reset: false,
-            append: vec![],
-            prepend: vec![],
             tail: false,
             font: None,
             viewport: [1280., 800.],
         }
     }
-}
-pub(super) fn blocks(message: &Message) -> Vec<String> {
-    let minutes = message.at / 60_000;
-    let header = format!(
-        "{:02}:{:02}  {}",
-        minutes / 60 % 24,
-        minutes % 60,
-        message.sender.name
-    );
-    let body = if message.kind == Kind::Action {
-        format!("* {} {}", message.sender.name, message.text)
-    } else {
-        message.text.clone()
-    };
-    let mut lines = vec![header];
-    lines.extend(body.split('\n').map(|s| s.replace('\r', "")));
-    lines.push(String::new());
-    lines
 }
 // Gregorian civil date from Unix days. Timestamps and separators use UTC.
 fn day_label(day: u64, today: u64) -> String {
@@ -306,41 +284,10 @@ impl Client {
         &mut self,
         viewport: &mut super::super::document::Viewport,
     ) -> Result<()> {
-        if self.reset || !self.prepend.is_empty() {
-            let old_anchor = viewport.anchor().and_then(|anchor| {
-                self.source_messages
-                    .iter()
-                    .rev()
-                    .find(|(_, (block, _))| *block <= anchor.block)
-                    .map(|(sequence, (block, byte))| (*sequence, anchor, *block, *byte))
-            });
-            let mut source = super::super::document::Source::new(String::new())?;
-            self.headers.clear();
-            self.source_messages.clear();
-            self.next_block = 1;
-            self.next_byte = 0;
-            self.source_day = None;
-            let messages = self.messages.iter().cloned().collect::<Vec<_>>();
-            let mut lines = vec![];
-            for message in &messages {
-                lines.extend(self.message_blocks(message));
-            }
-            let anchor = old_anchor.and_then(|(sequence, mut anchor, block, byte)| {
-                self.source_messages
-                    .get(&sequence)
-                    .map(|(new_block, new_byte)| {
-                        anchor.block = anchor.block - block + new_block;
-                        anchor.source_byte = anchor.source_byte.saturating_sub(byte) + new_byte;
-                        anchor
-                    })
-            });
-            source.append_blocks(&lines)?;
-            viewport.replace_source(source, anchor);
+        if self.reset {
+            let source = self.message_source()?;
+            viewport.replace_blocks(source)?;
             self.reset = false;
-            self.prepend.clear();
-            self.append.clear();
-        } else if !self.append.is_empty() {
-            viewport.append_blocks(&std::mem::take(&mut self.append), self.tail)?;
         }
         if self.tail {
             viewport.follow_tail();
@@ -349,21 +296,131 @@ impl Client {
         }
         Ok(())
     }
-    fn message_blocks(&mut self, message: &Message) -> Vec<String> {
-        self.source_messages
-            .insert(message.sequence, (self.next_block, self.next_byte));
-        let day = message.at / 86_400_000;
-        let mut lines = vec![];
-        if self.source_day != Some(day) {
-            lines.push(day_label(day, self.wall / 86_400_000));
-            self.source_day = Some(day);
+    fn avatar_inline(&mut self, avatar: u8) -> Result<Arc<Inline>> {
+        if avatar >= 64 {
+            return Err("Invalid sent avatar".into());
         }
-        self.headers
-            .insert(self.next_block + lines.len() as u32, message.sender.avatar);
-        lines.extend(blocks(message));
-        self.next_block += lines.len() as u32;
-        self.next_byte += lines.iter().map(|line| line.len() as u32 + 1).sum::<u32>();
-        lines
+        if let Some(inline) = self.avatars.get(&avatar) {
+            return Ok(inline.clone());
+        }
+        let scene = crate::dashboard::scene::Scene::new(super::icons::avatar(avatar, 1, 32.))?;
+        let mesh = crate::dashboard::render_scene(&scene);
+        let inline = Inline::new(mesh.vertices, [12., -4.])?;
+        while self.avatars.values().map(|i| i.bytes()).sum::<usize>() + inline.bytes()
+            > super::super::document::MAX_WINDOW_INLINE_BYTES
+        {
+            let Some(first) = self.avatars.keys().next().copied() else {
+                return Err("Avatar source budget".into());
+            };
+            self.avatars.remove(&first);
+        }
+        self.avatars.insert(avatar, inline.clone());
+        Ok(inline)
+    }
+    fn message_source(&mut self) -> Result<Source> {
+        let mut blocks = Vec::new();
+        let mut cache = BTreeMap::new();
+        let mut positions = BTreeMap::new();
+        if let Some(first) = self.messages.front() {
+            let spacer = BlockId {
+                object: first.sequence,
+                part: 2,
+            };
+            let block = self
+                .source_blocks
+                .get(&spacer)
+                .map(|v| v.1.clone())
+                .map_or_else(
+                    || {
+                        Block::label(
+                            spacer,
+                            String::new(),
+                            64.,
+                            BlockId {
+                                object: first.sequence,
+                                part: 0,
+                            },
+                        )
+                    },
+                    Ok,
+                )?;
+            cache.insert(spacer, ([0; 32], block.clone()));
+            blocks.push(block);
+        }
+        let mut previous_day = None;
+        // The input is already the bounded coherent projection, never a log.
+        for message in self.messages.iter().cloned().collect::<Vec<_>>() {
+            let day = message.at / 86_400_000;
+            if previous_day != Some(day) {
+                let id = BlockId {
+                    object: message.sequence,
+                    part: 1,
+                };
+                let label = day_label(day, self.wall / 86_400_000);
+                let revision: [u8; 32] = super::super::hash(label.as_bytes()).try_into().unwrap();
+                let block = if let Some((_, block)) = self
+                    .source_blocks
+                    .get(&id)
+                    .filter(|(old, _)| *old == revision)
+                {
+                    block.clone()
+                } else {
+                    Block::label(
+                        id,
+                        label,
+                        64.,
+                        BlockId {
+                            object: message.sequence,
+                            part: 0,
+                        },
+                    )?
+                };
+                cache.insert(id, (revision, block.clone()));
+                blocks.push(block);
+                previous_day = Some(day);
+            }
+            let id = BlockId {
+                object: message.sequence,
+                part: 0,
+            };
+            let revision = *self
+                .message_revisions
+                .get(&message.sequence)
+                .ok_or("Missing selected message revision")?;
+            let block = if let Some((_, block)) = self
+                .source_blocks
+                .get(&id)
+                .filter(|(old, _)| *old == revision)
+            {
+                block.clone()
+            } else {
+                let minutes = message.at / 60_000;
+                let header = format!(
+                    "{:02}:{:02}  {}",
+                    minutes / 60 % 24,
+                    minutes % 60,
+                    message.sender.name
+                );
+                let body = if message.kind == Kind::Action {
+                    format!("* {} {}", message.sender.name, message.text)
+                } else {
+                    message.text.clone()
+                };
+                Block::new(
+                    id,
+                    format!("{header}\n{}\n\n", body.replace('\r', "")),
+                    64.,
+                    Some(self.avatar_inline(message.sender.avatar)?),
+                )?
+            };
+            positions.insert(message.sequence, (blocks.len() as u32, 0));
+            cache.insert(id, (revision, block.clone()));
+            blocks.push(block);
+        }
+        let source = Source::from_blocks(blocks)?;
+        self.source_blocks = cache;
+        self.source_messages = positions;
+        Ok(source)
     }
     pub(super) fn say(&mut self, text: impl Into<String>) {
         self.notice = text.into();
@@ -390,42 +447,6 @@ impl Client {
     }
     pub fn confirmed(&self) -> bool {
         self.pending.is_empty()
-    }
-    pub(crate) fn present_avatars(
-        &self,
-        viewport: &super::super::document::Viewport,
-        root: &mut otrios_interfaces::scene::SceneNode,
-    ) {
-        use otrios_interfaces::scene::Rect;
-        let (clip, visible) = viewport.visible_blocks();
-        if clip[3] <= clip[1] || clip[0] < 64. {
-            return;
-        }
-        let mut nodes = vec![];
-        for (block, y) in visible {
-            if y + 28. < clip[1] || y - 4. >= clip[3] {
-                continue;
-            }
-            if let Some(id) = self.headers.get(&block) {
-                let mut icon = super::icons::avatar(*id, 5_000_000 + block * 32, 32.);
-                icon.frame = Rect::new(12., y - clip[1] - 4., 32., 32.);
-                nodes.push(icon);
-            }
-        }
-        if nodes.is_empty() {
-            return;
-        }
-        let layer = crate::dashboard::components::canvas(
-            4_000_000,
-            Rect::new(clip[0] - 64., clip[1], 64., clip[3] - clip[1]),
-            nodes,
-        );
-        let at = root
-            .children
-            .iter()
-            .position(|node| node.id == u32::from(VIEWPORT))
-            .unwrap_or(0);
-        root.children.insert(at, layer);
     }
     pub fn editing(&self) -> bool {
         self.focus.is_some()
@@ -1226,21 +1247,46 @@ mod tests {
             wall: 20 * 86_400_000,
             ..Client::default()
         };
-        let a = client.message_blocks(&message(1, 19));
-        let b = client.message_blocks(&message(2, 19));
-        let c = client.message_blocks(&message(3, 20));
-        assert_eq!(a[0], "Yesterday");
-        assert!(b[0].contains("12:00"));
-        assert_eq!(c[0], "Today");
-        assert_eq!(client.headers.len(), 3);
-        assert_eq!(client.source_messages[&2].0, 1 + a.len() as u32);
-        assert_eq!(
-            client.next_byte as usize,
-            a.iter()
-                .chain(&b)
-                .chain(&c)
-                .map(|s| s.len() + 1)
-                .sum::<usize>()
+        client
+            .messages
+            .extend([message(1, 19), message(2, 19), message(3, 20)]);
+        for message in &client.messages {
+            client.message_revisions.insert(
+                message.sequence,
+                super::super::super::hash(&flexbuffers::to_vec(message).unwrap())
+                    .try_into()
+                    .unwrap(),
+            );
+        }
+        let source = client.message_source().unwrap();
+        assert_eq!(source.block(1), Some("Yesterday"));
+        assert!(source.block(2).unwrap().contains("12:00  Captain Sprocket"));
+        assert_eq!(source.block(4), Some("Today"));
+        assert_eq!(client.source_messages[&2], (3, 0));
+        let id = BlockId { object: 2, part: 0 };
+        let retained = client.source_blocks[&id].1.clone();
+        client.messages.pop_front();
+        client.message_revisions.remove(&1);
+        client.message_source().unwrap();
+        assert!(Arc::ptr_eq(&retained, &client.source_blocks[&id].1));
+        assert!(
+            !client
+                .source_blocks
+                .contains_key(&BlockId { object: 1, part: 0 })
+        );
+        assert!(retained.text().contains("A clockwork pigeon!"));
+    }
+    #[test]
+    fn every_avatar_fits_the_shared_inline_source_budget() {
+        let mut client = Client::default();
+        for avatar in 0..64 {
+            let inline = client.avatar_inline(avatar).unwrap();
+            assert!(inline.bytes() <= 128 * 1024);
+        }
+        assert_eq!(client.avatars.len(), 64);
+        assert!(
+            client.avatars.values().map(|i| i.bytes()).sum::<usize>()
+                <= super::super::super::document::MAX_WINDOW_INLINE_BYTES
         );
     }
     #[test]
