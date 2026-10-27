@@ -480,6 +480,19 @@ fn canonical_empty_collection_has_an_independent_sha256_vector() {
 }
 
 #[test]
+fn authority_compaction_iterator_streams_retained_sparse_rows_in_order() {
+    let old = collection(4096);
+    let retained = old.retain_from(6000);
+    let mut rows = retained.records();
+    assert_eq!(rows.len(), 2097);
+    assert_eq!(rows.next().unwrap().0, 6000);
+    assert_eq!(rows.len(), 2096);
+    let keys = rows.map(|(key, _)| key).collect::<Vec<_>>();
+    assert_eq!(keys, (2001..=4096).map(|key| key * 3).collect::<Vec<_>>());
+    assert_eq!(old.records().len(), 4096);
+}
+
+#[test]
 fn empty_tail_and_before_first_have_coherent_explicit_boundary_metadata() {
     let empty = collection(0)
         .select(71, &grant(), &plan(Anchor::Tail))

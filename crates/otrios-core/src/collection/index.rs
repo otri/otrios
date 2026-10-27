@@ -55,6 +55,44 @@ struct Page {
     bytes: usize,
     items: Items,
 }
+
+/// Authority-side streaming traversal for recovery/compaction. This deliberately
+/// visits the whole retained collection; viewport selection never calls it.
+pub struct Records<'a> {
+    stack: Vec<(&'a Page, usize)>,
+    remaining: usize,
+}
+impl<'a> Iterator for Records<'a> {
+    type Item = (u64, &'a Snapshot);
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let (page, position) = self.stack.last_mut()?;
+            let index = *position;
+            *position += 1;
+            let page = *page;
+            match &page.items {
+                Items::Leaf(records) => {
+                    if let Some(record) = records.get(index) {
+                        self.remaining -= 1;
+                        return Some((record.key, &record.data));
+                    }
+                    self.stack.pop();
+                }
+                Items::Branch(pages) => {
+                    if let Some(page) = pages.get(index) {
+                        self.stack.push((page, 0));
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+            }
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+impl ExactSizeIterator for Records<'_> {}
 impl Page {
     fn new(items: Items) -> Arc<Self> {
         // Each page is its own bounded canonical object; no record bodies here.
@@ -219,6 +257,16 @@ pub struct Collection {
     revision: Hash,
 }
 impl Collection {
+    pub fn records(&self) -> Records<'_> {
+        Records {
+            stack: self
+                .root
+                .as_ref()
+                .map(|page| vec![(page.as_ref(), 0)])
+                .unwrap_or_default(),
+            remaining: self.len(),
+        }
+    }
     pub fn new(id: u64, schema: Schema, budget: Budget) -> Result<Self> {
         if id == 0 || schema.fields.is_empty() || schema.fields.len() > MAX_FIELDS {
             return Err(Error::Schema);

@@ -7,6 +7,10 @@ pub const MAX_COMMAND_BYTES: usize = 8192;
 pub const MAX_EVENT_BYTES: usize = 192 * 1024;
 pub const AVATARS: u8 = 64;
 pub const PAGE_MESSAGES: usize = 64;
+/// Admitted Brass Relay message collection; identity is not permission.
+pub const COLLECTION: u64 = 22;
+pub const MESSAGE_FIELD: u64 = 1;
+pub const MESSAGE_SCHEMA: &[u8] = b"otrios-brass-relay-message-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

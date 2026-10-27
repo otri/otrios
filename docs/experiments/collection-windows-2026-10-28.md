@@ -3,8 +3,10 @@
 
 RFC 0024 is in progress on `feat/0024-viewport-collections`. Delivery 1 has
 synthetic-source library, process/scaling and shared-WebSocket qualification on
-macOS and Linux. Delivery 2 remains required: chat cutover, native/browser app
-consumption, structured blocks, signed deployment and final PR. The RFC is not
+macOS and Linux. Chat's authoritative store now uses that collection owner, with
+streaming journal recovery and admission lifetimes. Delivery 2 still requires
+native/browser app consumption, structured blocks, legacy read-path retirement,
+signed deployment and the final PR. The RFC is not
 complete and these branch changes have not been deployed.
 
 ## Reusable library
@@ -236,13 +238,90 @@ server/driver process tests passed. Linux and macOS produce the same 7,514- and
 WebSocket synchronization; it does not implement the separate shared-memory
 IPC PoC. No native page-flip or live-site acceptance is claimed by delivery 1.
 
+## Chat authoritative collection: intermediate cutover
+
+The room's writable `VecDeque<Message>` and estimated history byte counter are
+retired. Source 22 now owns sent history in the shared collection registry.
+Each stable sequence identifies one independently hashed causal record containing
+the immutable sent message/profile snapshot. The schema is SHA-256 of
+`otrios-brass-relay-message-v1`; field 1 contains its bounded FlexBuffers message.
+Retention is explicit: at most 50,000 messages and 32 MiB canonical index/record
+bytes. Eviction prepares a new immutable root while held snapshots remain valid.
+
+Journal replay streams one checksummed entry at a time into a private staging
+collection. It installs the source only after the entire replay qualifies; a
+later corrupt record exposes no partial collection. A send or moderation notice
+prepares its bounded index update before journal append/fsync, publishes after
+durability, and emits a receipt afterward. Failed append leaves the active root
+unchanged. Unexpected publication failure after durability stops subsequent
+writes for journal recovery. Compaction streams the retained ordered records,
+guests and receipts through the existing atomic replacement workflow instead
+of collecting a second full transcript.
+
+The `OTCHAT01` framing, checksums and entry shapes remain unchanged. Recovery of
+a valid journal leaves its bytes unchanged; receipts survive retry/restart, and
+renaming a guest leaves original sent-profile records and their hashes intact.
+The live-data rollback point and signed-release rollback qualification remain
+deployment work. No live journal has been rewritten or migrated by this branch.
+
+A stable `.journal.owner.lock` sidecar uses the safe standard-library
+[`File::try_lock`](https://doc.rust-lang.org/std/fs/struct.File.html#method.try_lock)
+API. Cooperating room authorities hold it through replay, append and atomic
+data-file replacement. An independent process cannot open a second room owner
+while it is held. The sidecar stays in place across data-file rename; it is not
+unlinked while running. The existing stopped-owner deployment workflow remains
+required, including for rollback to an earlier binary.
+
+Room membership now supplies a host-local admission lifetime. Leaving, dropping
+the room or kicking a participant clears it before notifications; a kick clears
+every tab's lifetime. Collection policy requires this admission even for a
+trusted native socket. Monitoring authentication and room admission are checked
+separately. Queued views are rechecked before sending. Revocation controls are
+idempotent: a send-boundary suppression and lease-worker observation may both
+report the same revocation, and revocation takes priority over in-flight work.
+
+The current UI still uses temporary Welcome/History/Message read replies. Their
+page adapter reads the one collection index and owns no second writable log.
+Those bodies and client paging are removed after the browser/native consumers
+move to collection leases. This intermediate state does not establish bounded
+chat UI traffic or structured-block/display acceptance.
+
+Validation after this store step:
+
+```sh
+bash scripts/check.sh
+cargo test -p otrios-core --features canvas --lib canvas::chat --locked --offline
+cargo test -p otrios-core --features canvas --test chat_journal_process --test collection --locked --offline
+cargo test -p otrios-dashboard --features server,canvas,host-sync \
+  --test chat_process --test collection_session --locked --offline -- --nocapture
+cargo check -p otrios-web-host --target wasm32-unknown-unknown --locked --offline
+```
+
+The required repository check and Wasm compilation passed. All 20 scoped chat
+unit tests passed. They cover private staging, unchanged valid-journal recovery,
+snapshot/profile preservation, failed durable append, retained-window eviction,
+compaction and receipt recovery, exclusive ownership across rename, and
+exhausted sequence rejection before append. The authority-side record iterator
+also passes sparse ordered traversal/pinned-root tests.
+
+The two-test real journal-owner process suite and two server/driver chat tests
+passed on macOS and Linux. Actual collection traffic is denied before Join;
+after Join it qualifies the original sent snapshot. Kicking the participant
+revokes both an acknowledged tab and a tab withholding its first collection ACK.
+Both tabs' later selections are denied. Restart/retry returns the original
+receipt without duplication, and the original record hash survives recovery.
+The three synthetic shared-session regression tests also pass. Linux additionally
+ran the same 20 scoped chat unit tests, using the isolated builder directory
+and pinned environment described above. These checks do not replace the pending
+native/browser consumer cutover, pixel comparison or physical page-flip evidence.
+
 ## Remaining completion gates
 
-1. Replace the room's authoritative VecDeque/history paging with the ordered
-   collection and one journal-recovery publication owner. Preserve sent profile
-   snapshots, guest identity, admission, durable send receipts, moderation and
-   RAM-only drafts/effects. Establish a stopped-data rollback point and restart
-   qualification; retire old history commands/store/client paging after cutover.
+1. Move native/browser chat consumers to admitted collection leases, preserve
+   guest identity, durable send receipts, moderation and RAM-only drafts/effects,
+   and retire old history commands/bodies, temporary page adapters and client
+   paging after cutover. Establish the stopped live-data rollback point and
+   qualify the actual deployed restart/rollback workflow.
 2. Map viewport/overscan to bounded stable-key coverage. Keep pending sends
    separate. Implement stable structured message blocks with one placement and
    clip for text/profile/avatar, block-revision layout caches, bounded reverse

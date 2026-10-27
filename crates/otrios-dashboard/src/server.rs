@@ -721,9 +721,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (changed, _) = watch::channel(0);
     let (state_available, _) = watch::channel(false);
     let (release_changed, _) = watch::channel(release.clone());
+    let collections = collections::Hub::new()?;
+    let chat = chat::Hub::new(
+        app_state.as_ref().map(|p| p.join("brass-relay.journal")),
+        collections.core.clone(),
+    )?;
     let app = Arc::new(App {
-        collections: collections::Hub::new()?,
-        chat: chat::Hub::new(app_state.as_ref().map(|p| p.join("brass-relay.journal")))?,
+        collections,
+        chat,
         ink: ink::Room::new(trusted_peers + public_peers)?,
         auth,
         apps: Mutex::new(None),

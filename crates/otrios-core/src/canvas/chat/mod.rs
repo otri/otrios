@@ -2,6 +2,7 @@
 //! Shared room authority, durable journal and common native/browser presentation.
 mod authority;
 mod client;
+mod history;
 pub mod icons;
 mod journal;
 mod text;
@@ -10,6 +11,7 @@ use super::{Result, err};
 pub use authority::{Delivery, Room};
 pub(crate) use client::{Action as UiAction, VIEWPORT};
 pub use client::{Client, Info};
+pub use history::{message_schema, message_selection, read_message};
 pub use otrios_interfaces::chat::*;
 
 fn check(bytes: &[u8], limit: usize) -> Result<()> {

@@ -8,6 +8,7 @@ use otrios_interfaces::{
         self as wire, ClientControl, MAX_CONTROL_BYTES, STATE_PROTOCOL, ServerControl, VERSION,
     },
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::mpsc;
 pub(super) async fn public(
@@ -186,6 +187,7 @@ async fn peer(
     });
     let mut ink: Option<ink::Subscription> = None;
     let mut collection_peer: Option<collections::Peer> = None;
+    let mut admission = Arc::new(AtomicBool::new(false));
     let mut chat_peer: Option<chat::Peer> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     heartbeat.tick().await;
@@ -267,7 +269,12 @@ async fn peer(
                                     break;
                                 }
                                 let peer = collection_peer.get_or_insert_with(|| {
-                                    collections::subscribe(app.clone(), public, key.clone())
+                                    collections::subscribe(
+                                        app.clone(),
+                                        public,
+                                        key.clone(),
+                                        admission.clone(),
+                                    )
                                 });
                                 if peer.input.try_send(payload.to_vec()).is_err() {
                                     collection_peer = None;
@@ -302,12 +309,16 @@ async fn peer(
                                         guest.clone(),
                                         key.clone(),
                                         app.auth.clone(),
+                                        admission.clone(),
                                     )
                                 });
                                 if peer.input.try_send(payload.to_vec()).is_err() {
                                     // Only the room resynchronizes; release discovery and
                                     // unrelated subscriptions retain their shared socket.
                                     chat_peer = None;
+                                    admission.store(false, Ordering::Release);
+                                    admission = Arc::new(AtomicBool::new(false));
+                                    collection_peer = None;
                                     let bytes = otrios_core::canvas::chat::encode_event(
                                         &otrios_interfaces::chat::Event::Resync,
                                     )
@@ -425,7 +436,10 @@ async fn peer(
             Event::Collection(Some(packet)) => {
                 // Never flush a private view after the admission that produced
                 // it expires, including while renderer/socket work was blocked.
-                let bytes = if packet.private && !apps::private_allowed(&app, public, &key).await {
+                let bytes = if (packet.required.authenticated
+                    && !apps::private_allowed(&app, public, &key).await)
+                    || (packet.required.admitted && !admission.load(Ordering::Acquire))
+                {
                     packet.revoked
                 } else {
                     packet.bytes
@@ -499,6 +513,9 @@ async fn peer(
             }
             Event::Chat(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
                 chat_peer = None;
+                admission.store(false, Ordering::Release);
+                admission = Arc::new(AtomicBool::new(false));
+                collection_peer = None;
                 let bytes = otrios_core::canvas::chat::encode_event(
                     &otrios_interfaces::chat::Event::Resync,
                 )
@@ -514,6 +531,9 @@ async fn peer(
             }
             Event::Chat(Err(_)) => {
                 chat_peer = None;
+                admission.store(false, Ordering::Release);
+                admission = Arc::new(AtomicBool::new(false));
+                collection_peer = None;
             }
         }
     }
@@ -535,9 +555,11 @@ mod tests {
         let (changed, _) = watch::channel(0);
         let (state_available, _) = watch::channel(true);
         let (release_changed, _) = watch::channel(release('a'));
+        let collections = collections::Hub::new().unwrap();
+        let chat = chat::Hub::new(None, collections.core.clone()).unwrap();
         let app = Arc::new(App {
-            collections: collections::Hub::new().unwrap(),
-            chat: chat::Hub::new(None).unwrap(),
+            collections,
+            chat,
             ink: ink::Room::new(8).unwrap(),
             auth: None,
             apps: Mutex::new(None),

@@ -336,3 +336,230 @@ fn framing_and_admission_reject_oversized_or_spoofed_data() {
         .is_err()
     );
 }
+
+#[test]
+fn journal_replay_publishes_one_identical_collection_with_original_sent_profiles() {
+    use std::sync::{Arc, Mutex, atomic::AtomicBool};
+    let p = path();
+    let now = 1_000_000;
+    let channel = Arc::new(Mutex::new(crate::collection::Channel::new(17)));
+    let mut room = Room::open_in(Some(p.clone()), now, channel.clone()).unwrap();
+    let (original, token) = room.identity(None, now).unwrap();
+    room.join(1, Some(&token), false, now, true).unwrap();
+    let admission = Arc::new(AtomicBool::new(false));
+    room.bind_admission(1, admission.clone()).unwrap();
+    assert!(admission.load(Ordering::Acquire));
+    room.handle(1, send("Immutable dispatch", 1, now), now)
+        .unwrap();
+    let snapshot = channel
+        .lock()
+        .unwrap()
+        .collection(COLLECTION)
+        .unwrap()
+        .clone();
+    assert_eq!(snapshot.len(), 1);
+    let row = snapshot.records().next().unwrap().1;
+    assert_eq!(read_message(row).unwrap().sender, original);
+    room.handle(
+        1,
+        Command::Profile {
+            name: "Admiral Newname".into(),
+            avatar: 42,
+        },
+        now + 1,
+    )
+    .unwrap();
+    assert_eq!(
+        channel
+            .lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .revision(),
+        snapshot.revision()
+    );
+    // A second owner is rejected before replay or any append is possible.
+    assert!(Room::open(Some(p.clone()), now + 1).is_err());
+    drop(room);
+    assert!(!admission.load(Ordering::Acquire));
+    let canonical = fs::read(&p).unwrap();
+    let recovered = Arc::new(Mutex::new(crate::collection::Channel::new(18)));
+    let mut room = Room::open_in(Some(p.clone()), now + 2, recovered.clone()).unwrap();
+    assert_eq!(
+        fs::read(&p).unwrap(),
+        canonical,
+        "valid recovery preserves the canonical journal bytes"
+    );
+    assert_eq!(
+        recovered
+            .lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .revision(),
+        snapshot.revision()
+    );
+    room.join(2, Some(&token), false, now + 2, true).unwrap();
+    let retry = room
+        .handle(2, send("Immutable dispatch", 1, now), now + 3)
+        .unwrap();
+    assert!(matches!(
+        retry.as_slice(),
+        [Delivery {
+            event: Event::Receipt { sequence: 1, .. },
+            ..
+        }]
+    ));
+    assert_eq!(
+        recovered
+            .lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(room);
+    let mut corrupt = canonical;
+    *corrupt.last_mut().unwrap() ^= 1;
+    fs::write(&p, corrupt).unwrap();
+    let unavailable = Arc::new(Mutex::new(crate::collection::Channel::new(19)));
+    assert!(Room::open_in(Some(p.clone()), now + 4, unavailable.clone()).is_err());
+    assert!(
+        unavailable.lock().unwrap().collection(COLLECTION).is_err(),
+        "no partial recovered root was installed"
+    );
+    fs::remove_file(p).unwrap();
+}
+
+#[test]
+fn failed_durable_append_publishes_nothing_and_a_recovered_retry_commits_once() {
+    use std::sync::{Arc, Mutex};
+    let p = path();
+    let now = 1_000_000;
+    let channel = Arc::new(Mutex::new(crate::collection::Channel::new(17)));
+    let mut room = Room::open_in(Some(p.clone()), now, channel.clone()).unwrap();
+    let (_, token) = room.identity(None, now).unwrap();
+    room.join(1, Some(&token), false, now, true).unwrap();
+    let root = channel
+        .lock()
+        .unwrap()
+        .collection(COLLECTION)
+        .unwrap()
+        .revision();
+    let journal = fs::read(&p).unwrap();
+    room.fail_journal_writes();
+    assert!(
+        room.handle(1, send("Unconfirmed dispatch", 1, now), now)
+            .is_err()
+    );
+    assert_eq!(
+        channel
+            .lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .revision(),
+        root
+    );
+    assert_eq!(fs::read(&p).unwrap(), journal);
+    drop(room);
+    let channel = Arc::new(Mutex::new(crate::collection::Channel::new(18)));
+    let mut recovered = Room::open_in(Some(p.clone()), now + 1, channel.clone()).unwrap();
+    recovered
+        .join(2, Some(&token), false, now + 1, true)
+        .unwrap();
+    recovered
+        .handle(2, send("Unconfirmed dispatch", 1, now), now + 2)
+        .unwrap();
+    recovered
+        .handle(2, send("Unconfirmed dispatch", 1, now), now + 3)
+        .unwrap();
+    assert_eq!(
+        channel
+            .lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(recovered);
+    fs::remove_file(p).unwrap();
+}
+
+#[test]
+fn streaming_compaction_retains_receipts_profiles_and_exclusive_journal_ownership() {
+    use std::sync::{Arc, Mutex};
+    let p = path();
+    let now = 1_000_000;
+    let channel = Arc::new(Mutex::new(crate::collection::Channel::new(17)));
+    let mut room = Room::open_in(Some(p.clone()), now, channel.clone()).unwrap();
+    let (_, token) = room.identity(None, now).unwrap();
+    room.join(1, Some(&token), false, now, true).unwrap();
+    room.handle(1, send("Retained dispatch", 1, now), now)
+        .unwrap();
+    let before = channel
+        .lock()
+        .unwrap()
+        .collection(COLLECTION)
+        .unwrap()
+        .clone();
+    room.force_compaction();
+    room.handle(
+        1,
+        Command::Profile {
+            name: "Captain Revision".into(),
+            avatar: 12,
+        },
+        now + 1,
+    )
+    .unwrap();
+    assert!(
+        Room::open(Some(p.clone()), now + 1).is_err(),
+        "data-file rename must not release the owner lock"
+    );
+    drop(room);
+    let next = Arc::new(Mutex::new(crate::collection::Channel::new(18)));
+    let mut room = Room::open_in(Some(p.clone()), now + 2, next.clone()).unwrap();
+    room.join(2, Some(&token), false, now + 2, true).unwrap();
+    assert_eq!(room.members()[0].profile.name, "Captain Revision");
+    assert_eq!(
+        next.lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .revision(),
+        before.revision()
+    );
+    let retry = room
+        .handle(2, send("Retained dispatch", 1, now), now + 3)
+        .unwrap();
+    assert!(matches!(
+        retry.as_slice(),
+        [Delivery {
+            event: Event::Receipt { sequence: 1, .. },
+            ..
+        }]
+    ));
+    drop(room);
+    fs::remove_file(p).unwrap();
+}
+
+#[test]
+fn exhausted_recovered_message_sequence_rejects_before_appending() {
+    let p = path();
+    let now = 1_000_000;
+    let (mut journal, _) = super::journal::Journal::open(p.clone()).unwrap();
+    journal
+        .append(&super::journal::Entry::Sequence(u64::MAX))
+        .unwrap();
+    drop(journal);
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    room.join(1, None, false, now, true).unwrap();
+    let before = fs::read(&p).unwrap();
+    assert!(room.handle(1, send("No wrapping", 1, now), now).is_err());
+    assert_eq!(fs::read(&p).unwrap(), before);
+    drop(room);
+    fs::remove_file(p).unwrap();
+}

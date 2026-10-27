@@ -2,7 +2,13 @@
 //! Thin authenticated socket/mailbox adapter for the covered collection lane.
 use super::*;
 use otrios_core::collection as core;
-use std::{collections::VecDeque, sync::Mutex as StdMutex};
+use std::{
+    collections::VecDeque,
+    sync::{
+        Mutex as StdMutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 use tokio::sync::mpsc;
 
 pub(super) struct Hub {
@@ -11,7 +17,7 @@ pub(super) struct Hub {
 }
 pub(super) struct Packet {
     pub bytes: Vec<u8>,
-    pub private: bool,
+    pub required: core::Access,
     pub revoked: Vec<u8>,
 }
 pub(super) struct Peer {
@@ -24,10 +30,15 @@ impl Drop for Peer {
         self.worker.abort();
     }
 }
-pub(super) fn subscribe(app: Arc<App>, public: bool, key: Option<String>) -> Peer {
+pub(super) fn subscribe(
+    app: Arc<App>,
+    public: bool,
+    key: Option<String>,
+    admission: Arc<AtomicBool>,
+) -> Peer {
     let (input, receiver) = mpsc::channel(8);
     let (sender, output) = mpsc::channel(1);
-    let worker = tokio::spawn(worker(app, public, key, receiver, sender));
+    let worker = tokio::spawn(worker(app, public, key, admission, receiver, sender));
     Peer {
         input,
         output,
@@ -113,8 +124,11 @@ impl Hub {
             };
             event
                 .map(|event| {
-                    let private =
-                        matches!(event, core::Event::View(_)) && channel.private_view(&session);
+                    let required = if matches!(event, core::Event::View(_)) {
+                        channel.required_access(&session, access)
+                    } else {
+                        core::Access::default()
+                    };
                     let revoked = if let core::Event::View(offer) = &event {
                         core::Event::Revoked {
                             epoch: offer.epoch,
@@ -128,7 +142,7 @@ impl Hub {
                     };
                     Ok(Packet {
                         bytes: event.to_bytes().map_err(|e| e.to_string())?,
-                        private,
+                        required,
                         revoked,
                     })
                 })
@@ -143,6 +157,7 @@ pub(super) async fn worker(
     app: Arc<App>,
     public: bool,
     key: Option<String>,
+    admission: Arc<AtomicBool>,
     mut input: mpsc::Receiver<Vec<u8>>,
     output: mpsc::Sender<Packet>,
 ) {
@@ -164,7 +179,7 @@ pub(super) async fn worker(
         };
         let access = core::Access {
             authenticated: apps::private_allowed(&app, public, &key).await,
-            admitted: false,
+            admitted: admission.load(Ordering::Acquire),
         };
         let command = if let Some(bytes) = incoming {
             if window.elapsed() >= Duration::from_secs(1) {
@@ -187,7 +202,7 @@ pub(super) async fn worker(
                     if output
                         .send(Packet {
                             bytes,
-                            private: false,
+                            required: core::Access::default(),
                             revoked: vec![],
                         })
                         .await

@@ -3,7 +3,9 @@
 
 Status: implementation in progress. Delivery 1 is qualified with a large synthetic
 source over the shared session on macOS/Linux, with bounded process/scaling
-evidence. The live chat/block cutover remains incomplete. See the
+evidence. Chat's authoritative store now uses the shared collection owner, with
+staged journal recovery. Native/browser consumption, old read-path retirement,
+structured blocks and deployed acceptance remain incomplete. See the
 [implementation ledger](../experiments/collection-windows-2026-10-28.md).
 Clarifies the user's pervasive-sync objective; not implemented by the chat UI
 fixes. Extends [RFC 0003](0003-module-roots-and-state-selectors.md),

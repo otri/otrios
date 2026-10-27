@@ -144,15 +144,24 @@ impl Channel {
             .map(|source| source.authority.collection())
             .ok_or(Error::Invalid)
     }
-    pub fn private_view(&self, session: &ChannelSession) -> bool {
+    pub fn required_access(&self, session: &ChannelSession, access: Access) -> Access {
         let Some(plan) = session.session.plan() else {
-            return false;
+            return Access::default();
         };
-        self.sources.get(&plan.collection).is_some_and(|source| {
-            plan.fields
-                .iter()
-                .any(|f| !source.policy.public_fields.contains(f))
-        })
+        let mut required = Access::default();
+        if let Some(source) = self.sources.get(&plan.collection) {
+            for field in &plan.fields {
+                if source.policy.public_fields.contains(field) {
+                    continue;
+                }
+                if access.authenticated && source.policy.authenticated_fields.contains(field) {
+                    required.authenticated = true;
+                } else if access.admitted && source.policy.admitted_fields.contains(field) {
+                    required.admitted = true;
+                }
+            }
+        }
+        required
     }
     pub fn publish(&mut self, id: u64, expected: Hash, next: Collection) -> Result<()> {
         self.sources
