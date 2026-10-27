@@ -448,6 +448,15 @@ impl Client {
         }
     }
     pub fn title(&self) -> String {
+        if self.auth_required
+            && let Some(request) = &self.requested
+            && let Some(entry) = self
+                .catalog
+                .as_ref()
+                .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == request.pair.0))
+        {
+            return entry.app.title.clone();
+        }
         self.active
             .as_ref()
             .map_or_else(|| "Opening app".into(), |m| m.ui.title.clone())

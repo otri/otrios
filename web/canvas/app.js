@@ -22,7 +22,7 @@ const screenFromPath=()=>location.pathname.replace(/\/$/,'')||'/';
 const screenUrl=()=>screenFromPath()+location.search;
 let followingHistory=true,requestedScreen=screenFromPath(),routedScreen=null,routedUi=null;
 function restoreScreen(){followingHistory=true;requestedScreen=screenFromPath();return requestedScreen;}
-function reflectScreen(screen,ready,ui){
+function reflectScreen(screen,ready,ui,title){
   if(!ready||!screen)return;
   const url=`${screen}${location.search}`;
   if(followingHistory){
@@ -30,6 +30,10 @@ function reflectScreen(screen,ready,ui){
     routedScreen=screen;followingHistory=false;history.replaceState(null,'',url);
   }else if(screen!==routedScreen){routedScreen=screen;history[ui===routedUi?'replaceState':'pushState'](null,'',url);}
   routedUi=ui;
+  const name=screen==='/'?'OTriOS':title||'OTriOS';
+  const pageTitle=name==='OTriOS'?'OTriOS':`OTriOS · ${name}`,meta=document.querySelector('meta[property="og:title"]');
+  if(document.title!==pageTitle)document.title=pageTitle;
+  if(meta.content!==name)meta.content=name;
 }
 // Start before Wasm initialization. An unopened app has no user edits to lose.
 let offerRelease=r=>{if(initialRelease&&r.id!==initialRelease)location.replace(screenUrl());};
@@ -127,7 +131,7 @@ try{
     revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!model.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
     if(f.resources?.chat)revision.dataset.chat=JSON.stringify(f.resources.chat);else delete revision.dataset.chat;
     if(f.resources?.text_scroll||f.resources?.text_document)revision.dataset.textScroll=JSON.stringify(f.resources.text_scroll||f.resources.text_document);else{delete revision.dataset.textScroll;scrollLabel='';scrollSamples=[];scrollLast=null;}
-    reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui);
+    reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui,model.title);
     pump();pendingFrameAck={type:'frame-ack',serial:f.serial,documentToken:f.document?.token};
   }
   transportBridge=bridgeWorker(session,(message,transfer=[])=>{if(timings&&message.type==='state-frame')message.receivedAt=timingTools.timestamp(performance);worker.postMessage(message,transfer);});

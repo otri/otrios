@@ -36,7 +36,7 @@ function sendFrame(){
   const frame={inputRevision,serial,order:plan.order,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
-  if(frame.authRequired)frame.path="/"+app.pending_path();
+  if(frame.authRequired){frame.path="/"+app.pending_path();frame.title=app.title();}
   if(geometry&&ui){
     frame.textGeneration=revisions.content;
     if(revisions.content!==lastTextGeneration){frame.vertices=app.vertices();frame.glyphVertices=app.glyph_vertices();frame.draws=app.draws();frame.textStyles=app.text_styles();frame.overlayVertices=app.overlay_vertices();frame.overlayGlyphVertices=app.overlay_glyph_vertices();frame.overlayDraws=app.overlay_draws();frame.overlayStyles=app.overlay_styles();}

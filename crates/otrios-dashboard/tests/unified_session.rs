@@ -27,7 +27,7 @@ impl Drop for Rig {
 }
 fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     let content = format!(
-        r#"<link rel="stylesheet" href="./style.css"><script type="module" src="./app.js"></script><p>signed-store fixture {nonce}</p>"#
+        r#"<title>OTriOS</title><meta property="og:title" content="OTriOS"><meta property="og:site_name" content="OTriOS"><link rel="stylesheet" href="./style.css"><script type="module" src="./app.js"></script><p>signed-store fixture {nonce}</p>"#
     );
     let (catalog, _) = common::fixture(&root.join("catalog-source"));
     let mut decoded = otrios_core::canvas::decode_catalog(&catalog).unwrap();
@@ -35,6 +35,7 @@ fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     child.app.id = "demo/child".into();
     child.path = "demo/child".into();
     child.app.ui_ref = "app:demo/child/ui".into();
+    child.app.title = "Steam & \"Tea\" <Relay>".into();
     decoded.apps.push(child);
     let catalog = otrios_core::canvas::encode_catalog(&decoded).unwrap();
     let touch = include_bytes!("../../../web/canvas/touch-input.mjs");
@@ -196,6 +197,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
             .contains("cache-control: no-store")
     );
     let entry_text = String::from_utf8(entry.clone()).unwrap();
+    assert!(entry_text.contains("<title>OTriOS</title>"));
     assert!(entry_text.contains(&format!(
         "src=\"/releases/{}/web/app.js\"",
         a["id"].as_str().unwrap()
@@ -205,14 +207,19 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
         a["id"].as_str().unwrap()
     )));
     for screen in ["demo", "demo/child", "monitoring"] {
-        assert_eq!(
-            request(&rig.public, "GET", &format!("/{screen}"), &[], &[]),
-            (200, entry.clone())
-        );
-        assert_eq!(
-            request(&rig.private, "GET", &format!("/{screen}"), &[], &[]),
-            (200, entry.clone())
-        );
+        let name = if screen == "demo/child" {
+            "Steam &amp; &quot;Tea&quot; &lt;Relay&gt;"
+        } else {
+            screen
+        };
+        for address in [&rig.public, &rig.private] {
+            let (status, bytes) = request(address, "GET", &format!("/{screen}"), &[], &[]);
+            assert_eq!(status, 200);
+            let text = String::from_utf8(bytes).unwrap();
+            assert!(text.contains(&format!("<title>OTriOS · {name}</title>")));
+            assert!(text.contains(&format!("property=\"og:title\" content=\"{name}\"")));
+            assert!(text.contains("property=\"og:site_name\" content=\"OTriOS\""));
+        }
         assert_eq!(
             request(&rig.public, "HEAD", &format!("/{screen}"), &[], &[]),
             (200, vec![])

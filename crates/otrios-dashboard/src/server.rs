@@ -351,7 +351,7 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             "/".into(),
         )
     };
-    if let Some(path) = route {
+    let title = if let Some(path) = route {
         let screen = path.trim_end_matches('/');
         if !otrios_interfaces::canvas::valid_destination(screen) {
             return failure(StatusCode::NOT_FOUND, "Not found");
@@ -364,10 +364,13 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             Ok(catalog) => catalog,
             Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
         };
-        if !catalog.apps.iter().any(|e| e.path == screen) {
+        let Some(entry) = catalog.apps.iter().find(|e| e.path == screen) else {
             return failure(StatusCode::NOT_FOUND, "Not found");
-        }
-    }
+        };
+        entry.app.title.clone()
+    } else {
+        "OTriOS".into()
+    };
     let bytes = match tokio::fs::read(index).await {
         Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
         _ => return failure(StatusCode::SERVICE_UNAVAILABLE, "App entry unavailable"),
@@ -376,6 +379,28 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
         Ok(html) => html,
         Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App entry unavailable"),
     };
+    // Link preview fetchers do not run JavaScript. Use only the public catalog
+    // title, independent of private UI/state admission or recovery.
+    let escaped = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;");
+    let page_title = if route.is_some() {
+        format!("OTriOS · {escaped}")
+    } else {
+        escaped.clone()
+    };
+    html = html
+        .replace(
+            "<title>OTriOS</title>",
+            &format!("<title>{page_title}</title>"),
+        )
+        .replace(
+            "property=\"og:title\" content=\"OTriOS\"",
+            &format!("property=\"og:title\" content=\"{escaped}\""),
+        );
     for (attribute, asset) in [("href", "style.css"), ("src", "app.js")] {
         for source in [format!("/{asset}"), format!("./{asset}")] {
             html = html.replace(

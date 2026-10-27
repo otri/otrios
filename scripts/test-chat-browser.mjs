@@ -34,7 +34,7 @@ try{
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
   const routes={'component-playground':'test-playground/components','layout-lab':'test-playground/layouts','layout-document':'test-playground/long-document','layout-text-scroll':'test-playground/text-panning','input-lab':'test-playground/text-input','animation-lab':'test-playground/animations-two-d','three-d-lab':'test-playground/animations-three-d'};
   const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,route==='brass-relay'?chatViewport(width,height).join('x'):['input-lab','animation-lab','three-d-lab'].includes(route)?'1280x800':width<height?'800x1280':'1280x800');return sessionId;};
-  const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
+  const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);const name={home:'OTriOS','brass-relay':'The Brass Relay'}[screen];if(name)assert.deepEqual(await evaluate(session,"[document.title,document.querySelector('meta[property=\"og:title\"]').content,document.querySelector('meta[property=\"og:site_name\"]').content]"),[name==='OTriOS'?name:`OTriOS · ${name}`,name,'OTriOS']);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{let control=(await controls(session)).find(c=>c.label===label);if(!control&&(await controls(session)).some(c=>c.label==='Test Playground')){await click(session,'Test Playground','test-playground',extent);control=(await controls(session)).find(c=>c.label===label);}assert(control,label);const [x,y,w,h]=control.bounds;
     await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:x+w/2,y:y+h/2},session);
@@ -49,6 +49,12 @@ try{
   const control=async(s,label)=>{await click(s,label,'brass-relay');await new Promise(r=>setTimeout(r,100));};
   const dispatch=async(s,text)=>{await control(s,'Message composer');await paste(s,text);await press(s,'Enter');};
   const draft='A pigeon '+Date.now()+' is composing',nickname='Captain '+Date.now().toString(36);
+  for(const [path,name] of [['/','OTriOS'],['/brass-relay','The Brass Relay'],['/test-playground','Test Playground'],['/monitoring','Monitoring']]){
+    const response=await fetch(origin+path);assert(response.ok);const html=await response.text();
+    assert(html.includes(`<title>${name==='OTriOS'?name:`OTriOS · ${name}`}</title>`));
+    assert(html.includes(`property="og:title" content="${name}"`));
+    assert(html.includes('property="og:site_name" content="OTriOS"'));
+  }
   const a=await page(1280,800,'home');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
   await screenshot(a,'home-landscape');await click(a,'The Brass Relay','brass-relay');await online(a);
@@ -120,6 +126,10 @@ try{
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Dispatch after graphics recovery '+nickname)})`);
   await control(a,'Back to OTriOS');await ready(a,'home','800x1280');await screenshot(a,'home-portrait');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
+  await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Monitoring').click();true");
+  await wait(a,"document.querySelector('#monitoring-login').open&&document.title==='OTriOS · Monitoring'");
+  assert.equal(await evaluate(a,"document.querySelector('meta[property=\"og:title\"]').content"),'Monitoring');
+  await evaluate(a,"document.querySelector('#login-back').click();true");await wait(a,"document.title==='OTriOS'");await ready(a,'home','800x1280');
   const phone=a;await metrics(phone,390,844);await ready(phone,'home','800x1280');
   await click(phone,'The Brass Relay','brass-relay',chatViewport(390,844).join('x'));await online(phone);
   await control(phone,'Message composer');await paste(phone,'The viewport keeps its width.');

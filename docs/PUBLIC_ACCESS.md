@@ -6,6 +6,26 @@ Lab, Input Lab, Animation Lab and 3D Lab are public apps. Their durable controls
 share the photo frame's per-app Merkle state. Navigation, text entry and animation
 phase remain local. Monitoring alone requires browser sign-in.
 
+Navigation entries serve app-specific page titles and Open Graph metadata in
+the initial HTML. Home uses `OTriOS`; `/brass-relay` uses the browser title
+`OTriOS · The Brass Relay`, `og:title` of `The Brass Relay`, and `og:site_name`
+of `OTriOS`. Other routes use their public catalog titles, including Monitoring
+before sign-in. Client navigation updates the same title metadata. Server title
+values are HTML-escaped, while immutable release assets remain unchanged.
+This follows [Apple's link-preview guidance](https://developer.apple.com/documentation/technotes/tn3156-create-rich-previews-for-messages):
+preview metadata must be present without running JavaScript.
+
+The 2026-10-27 metadata update was qualified with `bash scripts/check.sh`, the
+server's `unified_session` process test (including unavailable state and escaped
+titles), all 69 signed-builder Node tests, and `scripts/test-chat-browser.mjs`
+against the exact signed candidate. Browser checks cover raw route metadata,
+navigation titles and Monitoring before sign-in. Public GETs verified titles on
+Home, Brass Relay, Test Playground and Monitoring after deployment, together with
+signed HTML/JS/Wasm hashes and native readiness. Active release:
+`f8cacaa81ae3a748dd853b4357403077f1d48735a4fcd2fa28c02dc4b36b9e00`.
+Code rollback is retained at
+`/var/lib/otrios-authority/rollback/2026-10-27-open-graph`.
+
 One Rust service on the Rockchip photo frame serves code and state. Cloudflare Tunnel reaches its public
 loopback listener on 8877; the local display and collector use trusted 8876.
 Remote administration uses pinned SSH over Tailscale. Public
