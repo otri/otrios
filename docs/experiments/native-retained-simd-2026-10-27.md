@@ -184,3 +184,15 @@ and browser captures are retained under ignored `target/native-retained-fixed/`.
 `cpu-final.json`, `gpu.json`, `native-control-parity.json` and the interactive
 acceptance records distinguish controls and experimental paths. Trials hold an
 exclusive display lock and restore the prior console mode and dashboard service.
+
+## Deployment
+
+Qualified source commit `0e73043316b464031401b1f6d14c0423904776c4` is deployed as
+signed release `e1ec066f12b2deb14c3ada24ee1401190026d89301879d045a27e95c9d3acfce`.
+The running native executable matches the exact measured signed-build hash.
+Authority, native dashboard and tunnel are active, state is confirmed, release
+identities agree, and calibration/rotation remain intact. The public conformance
+check passes all 99 anonymous/isolation checks; real Chromium passes the deployed
+demo's momentum, cancellation, client-local state, portrait and navigation checks.
+See the [deployment record](data/native-retained-deployment-2026-10-27.json).
+Operational rollback files are preserved; canonical state was not restored.
