@@ -469,6 +469,9 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/pkg/otrios_dashboard.js"
         | "app-catalog.mjs"
         | "web/app-catalog.mjs" => Some("text/javascript"),
+        "text-input.mjs" | "web/text-input.mjs" => Some("text/javascript"),
+        "fonts/Roboto.ttf" | "web/fonts/Roboto.ttf" => Some("font/ttf"),
+        "fonts/OFL.txt" | "web/fonts/OFL.txt" => Some("text/plain; charset=utf-8"),
         "style.css" | "web/style.css" => Some("text/css"),
         "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
         "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
@@ -519,6 +522,7 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                         | "monitoring-session.mjs"
                         | "document-transfer.mjs"
                         | "touch-input.mjs"
+                        | "text-input.mjs"
                         | "app-catalog.mjs"
                         | "Slug-LICENSE.txt"
                         | "navigation-timings.mjs"
@@ -534,6 +538,12 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
             }
             if !file.exists() && path == "fonts/Roboto-Regular.otq.zst" {
                 file = app.web.join("../shared").join(&path);
+            }
+            if !file.exists() && matches!(path.as_str(), "fonts/Roboto.ttf" | "fonts/OFL.txt") {
+                file = app
+                    .web
+                    .join("../../assets/fonts/roboto")
+                    .join(Path::new(&path).file_name().unwrap_or_default());
             }
             serve_file(file, kind, false).await
         }

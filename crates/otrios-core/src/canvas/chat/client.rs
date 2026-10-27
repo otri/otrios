@@ -748,6 +748,40 @@ impl Client {
             _ => &self.compose,
         }
     }
+    pub(crate) fn host_input(
+        &self,
+        command: u16,
+        id: u32,
+    ) -> Option<otrios_interfaces::keyboard::TextInput> {
+        let (buffer, focus) = match (self.panel, command) {
+            (Panel::None, 1) => (&self.compose, Focus::Compose),
+            (Panel::Profile, 8) => (&self.nickname, Focus::Name),
+            (Panel::Auth, 15) => (&self.username, Focus::Username),
+            (Panel::Auth, 16) => (&self.password, Focus::Password),
+            _ => return None,
+        };
+        let mut input = buffer.host_input(id, self.focus == Some(focus));
+        input.secret = focus == Focus::Password;
+        input.inset = if focus == Focus::Compose {
+            [12.; 4]
+        } else {
+            [12., 20., 12., 4.]
+        };
+        Some(input)
+    }
+    pub(crate) fn blur_input(&mut self) {
+        self.focus = None;
+    }
+    pub(crate) fn host_scroll(&mut self, offset: f32) -> bool {
+        if self.focus != Some(Focus::Compose) || !offset.is_finite() {
+            return false;
+        }
+        let offset = offset.clamp(0., self.input_view.limit());
+        let changed = self.input_view.offset != offset || self.input_view.animating();
+        self.input_view.cancel();
+        self.input_view.offset = offset;
+        changed
+    }
     pub fn edit(&mut self, edit: &Edit) -> Result<bool> {
         if edit == &Edit::Enter {
             if self.focus == Some(Focus::Compose) {
@@ -1246,6 +1280,33 @@ mod tests {
 #[cfg(test)]
 mod anchor_tests {
     use super::*;
+    #[test]
+    fn browser_scroll_drives_spark_anchor_without_a_second_follow_animation() {
+        let mut c = Client {
+            focus: Some(Focus::Compose),
+            ..Client::default()
+        };
+        c.compose
+            .replace(&"Clockwork text in a long browser composer. ".repeat(20));
+        c.prepare(
+            [800., 1280.],
+            false,
+            Some(std::sync::Arc::new(crate::dashboard::font::test_font())),
+        );
+        let cursor = c.compose_layout.lines[2].start;
+        c.compose.place_cursor(cursor);
+        c.host_scroll(0.);
+        let before = c.spark_origin(&Spark::Compose(cursor)).unwrap();
+        assert!(c.host_scroll(c.line_height()));
+        let after = c.spark_origin(&Spark::Compose(cursor)).unwrap();
+        assert!((before[1] - after[1] - c.line_height()).abs() < 0.01);
+        assert!(!c.input_view.animating());
+        assert!(!c.host_scroll(f32::NAN));
+        c.host_scroll(f32::MAX);
+        assert_eq!(c.input_view.offset, c.input_view.limit());
+        c.focus = None;
+        assert!(!c.host_scroll(0.));
+    }
     #[test]
     fn replacement_sparks_follow_wrapped_local_and_remote_source_positions() {
         let font = std::sync::Arc::new(crate::dashboard::font::test_font());

@@ -1,0 +1,15 @@
+{
+  "release": "35d47b1a06a8635cc1159782e9414531893d94a7125e4feaa6158082c0a0ed42",
+  "assets": [
+    {
+      "name": "text-input.mjs",
+      "bytes": 6141,
+      "sha256": "14d0d0bc942a0424d54d730b599f1112178c1f4a2cf892e02da95b35715b02f6"
+    },
+    {
+      "name": "fonts/Roboto.ttf",
+      "bytes": 488584,
+      "sha256": "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134"
+    }
+  ]
+}

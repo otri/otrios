@@ -1,0 +1,29 @@
+{
+  "renderer": "gles2-direct",
+  "video": "DRM",
+  "rotation": 90,
+  "output": [
+    800,
+    1280
+  ],
+  "color_bits": [
+    5,
+    6,
+    5,
+    0
+  ],
+  "ui_ref": "app:brass-relay/ui",
+  "state_ref": "app:brass-relay/state",
+  "state_confirmed": true,
+  "stream_ready": true,
+  "reload_ready": true,
+  "pending_commands": 0,
+  "release": "35d47b1a06a8635cc1159782e9414531893d94a7125e4feaa6158082c0a0ed42",
+  "native_sha256": "295b2e34b2e0c2c5c9fbe3b878f11442691037b2d1d67335680b139a96764c9a",
+  "calibration_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e",
+  "services": [
+    "active",
+    "active",
+    "active"
+  ]
+}

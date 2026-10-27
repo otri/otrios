@@ -107,6 +107,43 @@ impl CanvasApp {
     pub fn editing(&self) -> bool {
         self.inner.editing()
     }
+    pub fn text_inputs(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.text_inputs()?).map_err(|e| e.to_string())
+    }
+    pub fn replace_text_input(
+        &mut self,
+        epoch: u32,
+        id: u32,
+        text: String,
+        cursor: u32,
+        anchor: u32,
+        selection_only: bool,
+    ) -> Result<bool, String> {
+        self.inner.edit_text_input(
+            epoch,
+            id,
+            &otrios_interfaces::keyboard::Edit::Replace {
+                text,
+                cursor,
+                anchor,
+                selection_only,
+            },
+        )
+    }
+    pub fn text_input_key(&mut self, epoch: u32, id: u32, key: &str) -> Result<bool, String> {
+        if key == "Enter" {
+            self.inner
+                .edit_text_input(epoch, id, &otrios_interfaces::keyboard::Edit::Enter)
+        } else {
+            Ok(false)
+        }
+    }
+    pub fn blur_text_input(&mut self, epoch: u32, id: u32) -> Result<bool, String> {
+        self.inner.blur_text_input(epoch, id)
+    }
+    pub fn scroll_text_input(&mut self, epoch: u32, id: u32, offset: f32) -> Result<bool, String> {
+        self.inner.scroll_text_input(epoch, id, offset)
+    }
     pub fn show_keyboard(&mut self) -> Result<bool, String> {
         self.inner.show_keyboard()
     }

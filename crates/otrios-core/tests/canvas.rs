@@ -3558,3 +3558,67 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
         "Compare an avatar retained across both visible windows"
     );
 }
+
+#[test]
+fn browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits() {
+    use otrios_interfaces::keyboard::Edit;
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut c = Client::default();
+    c.set_font(font.clone());
+    c.set_software_keyboard(false);
+    activate(&mut c, brass_relay::ui(&[]), "browser-fields", vec![]);
+    let initial = c.text_inputs().unwrap();
+    assert_eq!(initial.len(), 1);
+    let id = initial[0].id;
+    let epoch = c.epoch();
+    let replace = Edit::Replace {
+        text: "a😀é".into(),
+        cursor: 4,
+        anchor: 1,
+        selection_only: false,
+    };
+    assert!(
+        !c.edit_text_input(epoch, id, &replace).unwrap(),
+        "unfocused input rejects late edits"
+    );
+    c.activate(epoch, id).unwrap();
+    assert!(c.edit_text_input(epoch, id, &replace).unwrap());
+    let updated = c.text_inputs().unwrap();
+    assert_eq!(updated[0].value, "a😀é");
+    assert_eq!((updated[0].cursor, updated[0].anchor), (4, 1));
+    assert!(!c.keyboard_visible());
+    c.activate(epoch, node(&c, "Edit profile")).unwrap();
+    let profile = c.text_inputs().unwrap();
+    assert_eq!(profile.len(), 1);
+    assert_ne!(profile[0].id, id);
+    assert!(
+        !c.edit_text_input(epoch, id, &replace).unwrap(),
+        "background composer is not editable through a modal"
+    );
+    assert!(
+        !c.edit_text_input(epoch + 1, profile[0].id, &replace)
+            .unwrap()
+    );
+    c.activate(epoch, profile[0].id).unwrap();
+    assert!(c.blur_text_input(epoch, profile[0].id).unwrap());
+    assert!(!c.edit_text_input(epoch, profile[0].id, &replace).unwrap());
+    let mut c = Client::default();
+    c.set_font(font);
+    c.set_software_keyboard(false);
+    activate(&mut c, input_lab::ui(&[]), "browser-shared-fields", vec![]);
+    assert_eq!(c.text_inputs().unwrap().len(), 2);
+    let field = c.text_inputs().unwrap()[0].id;
+    c.activate(c.epoch(), field).unwrap();
+    assert!(c.edit_text_input(c.epoch(), field, &replace).unwrap());
+    assert_eq!(c.text_inputs().unwrap()[0].value, "a😀é");
+    assert!(
+        !c.edit_text_input(epoch, id, &replace).unwrap(),
+        "unrelated control cannot edit the new app"
+    );
+}

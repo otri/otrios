@@ -20,12 +20,13 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
     if catalog.is_symlink():raise ValueError('Catalog symlink rejected')
     with tempfile.TemporaryDirectory(prefix='.staging-',dir=out) as tmp:
         stage=pathlib.Path(tmp)
-        names=['index.html','style.css','app.js','state-worker.js','document-transfer.mjs','touch-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
-        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','Slug-LICENSE.txt']
+        names=['index.html','style.css','app.js','state-worker.js','document-transfer.mjs','touch-input.mjs','text-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','pkg/otrios_dashboard.js','pkg/otrios_dashboard_bg.wasm']
+        names += ['app-catalog.mjs','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs','fonts/Roboto-Regular.otq.zst','fonts/Roboto.ttf','fonts/OFL.txt','Slug-LICENSE.txt']
         for name in names:
             source=web/name
             if not source.exists() and (name.endswith('.mjs') or name.endswith('.js') or name=='Slug-LICENSE.txt'):source=web.parent/'shared'/name
             if not source.exists() and name.startswith('fonts/'):source=web.parent/'shared'/name
+            if not source.exists() and name in ('fonts/Roboto.ttf','fonts/OFL.txt'):source=web.parent.parent/'assets/fonts/roboto'/pathlib.Path(name).name
             data=source.read_bytes()
             if name.endswith('.wasm') and data[:8]!=b'\0asm\x01\0\0\0':raise ValueError('Invalid Wasm artifact')
             if name=='index.html':data=data.replace(b'href="/style.css"',b'href="./style.css"').replace(b'src="/app.js"',b'src="./app.js"')
@@ -33,7 +34,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
             assets['web/'+name]={'bytes':len(data),'sha256':digest(data)}
             # Compress once on the build host, not on every slow frame/tunnel read.
             # Sidecars belong to the signed closure and retain deterministic bytes.
-            if name.endswith(('.html','.css','.js','.mjs','.wasm','.txt')) and len(data)>=512:
+            if name.endswith(('.html','.css','.js','.mjs','.wasm','.txt','.ttf')) and len(data)>=512:
                 packed=gzip.compress(data,compresslevel=9,mtime=0)
                 packed=packed[:9]+b'\xff'+packed[10:] # Stable gzip OS byte across build platforms.
                 if len(packed)+64<len(data):

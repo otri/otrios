@@ -43,8 +43,8 @@ try{
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
   const info=s=>evaluate(s,"JSON.parse(document.querySelector('#revision').dataset.chat||'null')");
   const online=s=>wait(s,"JSON.parse(document.querySelector('#revision').dataset.chat||'{}').online");
-  const press=(s,key,modifiers=0)=>call('Input.dispatchKeyEvent',{type:'keyDown',key,modifiers},s);
-  const paste=async(s,text)=>{await new Promise(r=>setTimeout(r,150));return evaluate(s,`(()=>{const event=new Event('paste',{cancelable:true});Object.defineProperty(event,'clipboardData',{value:{getData:()=>${JSON.stringify(text)}}});window.dispatchEvent(event);})()`);};
+  const press=async(s,key,modifiers=0)=>{const keyCode={Backspace:8,Tab:9,Enter:13,ArrowLeft:37,ArrowRight:39,a:65}[key];await call('Input.dispatchKeyEvent',{type:'keyDown',key,modifiers,windowsVirtualKeyCode:keyCode,...(key==='Enter'?{text:'\r'}:{}),...(key==='a'&&modifiers?{commands:['selectAll']}:{})},s);await call('Input.dispatchKeyEvent',{type:'keyUp',key,modifiers,windowsVirtualKeyCode:keyCode},s);};
+  const paste=async(s,text)=>{await new Promise(r=>setTimeout(r,150));return call('Input.insertText',{text},s);};
   const control=async(s,label)=>{await click(s,label,'brass-relay');await new Promise(r=>setTimeout(r,100));};
   const dispatch=async(s,text)=>{await control(s,'Message composer');await paste(s,text);await press(s,'Enter');};
   const draft='A pigeon '+Date.now()+' is composing',nickname='Captain '+Date.now().toString(36);
@@ -52,6 +52,20 @@ try{
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
   await screenshot(a,'home-landscape');await click(a,'The Brass Relay','brass-relay');await online(a);
   const b=await page(800,1280,'brass-relay');await online(b);console.log('guests online');
+  await control(a,'Message composer');
+  assert.equal(await evaluate(a,"document.activeElement?.tagName"),'TEXTAREA');
+  await paste(a,'teh engine');
+  await evaluate(a,"(()=>{const e=document.activeElement;e.setSelectionRange(0,3);return true;})()");
+  await call('Input.insertText',{text:'the'},a);
+  await wait(a,"document.querySelector('.canvas-editor').value==='the engine'");
+  // Genuine composition protocol events; no intermediate text enters chat drafts.
+  await press(a,'a',4);await call('Input.imeSetComposition',{text:'日本',selectionStart:2,selectionEnd:2},a);
+  await new Promise(r=>setTimeout(r,300));
+  assert.equal(await evaluate(a,"document.querySelector('.canvas-editor').value"),'日本');
+  await call('Input.insertText',{text:'日本語'},a);
+  await wait(a,"document.querySelector('.canvas-editor').value==='日本語'");
+  await press(a,'a',4);await press(a,'Backspace');
+
   assert.notEqual((await info(a)).participant,(await info(b)).participant);
   await control(a,'Message composer');assert(!(await evaluate(a,"document.querySelector('#view').getAttribute('aria-label')")).includes('BKSP'),'browser input must not show the app keyboard');await paste(a,draft);
   await wait(b,"JSON.parse(document.querySelector('#revision').dataset.chat).drafts===1");
@@ -67,7 +81,7 @@ try{
   console.log('messages exchanged');await control(a,'Edit profile');await screenshot(a,'profile-icons');
   await control(a,'Next avatars');await control(a,'Next avatars');await control(a,'Next avatars');
   const avatar=(await controls(a)).find(c=>c.label.includes('Pocket watch'));assert(avatar);await control(a,avatar.label);
-  await control(a,'Edit room name');await press(a,'a',2);await paste(a,nickname);await control(a,'Save profile');
+  await control(a,'Edit room name');await press(a,'a',4);await paste(a,nickname);await control(a,'Save profile');
   await wait(a,`JSON.parse(document.querySelector('#revision').dataset.chat).name===${JSON.stringify(nickname)}`);
   assert((await info(a)).avatar>=56);
   const shortComposerHeight=(await controls(a)).find(c=>c.label==='Message composer').bounds[3];
@@ -81,6 +95,9 @@ try{
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify(tail)})`);
   await dispatch(a,'A multiline dispatch.\nSecond line preserved.');
   await wait(b,"document.querySelector('#chat-log').textContent.includes('Second line preserved.')");
+  await control(a,'Message composer');await paste(a,'Shift Enter first');await press(a,'Enter',8);await paste(a,'second line');await press(a,'Enter');
+  await call('Page.bringToFront',{},b);
+  await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Shift Enter first\nsecond line')})`);
   const identity=(await info(a)).participant;
   await call('Page.reload',{},a);await ready(a,'brass-relay');await online(a);assert.equal((await info(a)).participant,identity);assert.equal((await info(a)).name,nickname);
   await dispatch(a,'/roll 2d6');await wait(b,"document.querySelector('#chat-log').textContent.includes('rolls 2d6')");
@@ -101,7 +118,7 @@ try{
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Dispatch after graphics recovery '+nickname)})`);
   await control(a,'Back to OTriOS');await ready(a,'home','800x1280');await screenshot(a,'home-portrait');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
-  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
+  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','native textarea focus, selection replacement and IME composition','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{
   socket?.close();if(browser.pid&&browser.exitCode===null&&browser.signalCode===null){browser.kill('SIGTERM');await new Promise(resolve=>browser.once('exit',resolve));}await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});

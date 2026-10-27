@@ -1519,6 +1519,105 @@ impl Client {
             m.focus.is_some() || m.chat.as_ref().is_some_and(super::chat::Client::editing)
         })
     }
+    /// Native browser fields mirror only visible, editable controls in this
+    /// mount. A modal never exposes a background composer to the host.
+    pub fn text_inputs(&self) -> Result<Vec<otrios_interfaces::keyboard::TextInput>> {
+        let Some(m) = &self.active else {
+            return Ok(vec![]);
+        };
+        let Some(font) = &m.font else {
+            return Ok(vec![]);
+        };
+        let scene = self.scene()?;
+        let frames = editor_frames(m, &scene);
+        let mut inputs = vec![];
+        for owner in scene.controls() {
+            let Some(TouchResponder::Activate(Action::AppEvent(control))) = owner.node.responder
+            else {
+                continue;
+            };
+            let Some(handler) = m.ui.handlers.iter().find(|h| h.control == control) else {
+                continue;
+            };
+            let mut input = match (&handler.operation, &m.chat) {
+                (Operation::Chat(command), Some(chat)) => {
+                    let Some(input) = chat.host_input(*command, owner.node.id) else {
+                        continue;
+                    };
+                    input
+                }
+                (Operation::Focus, _) => {
+                    let Some(frame) = frames.iter().find(|f| f.responder == owner.node.id) else {
+                        continue;
+                    };
+                    let mut input = m.editors[&frame.field]
+                        .host_input(owner.node.id, m.focus == Some(frame.field));
+                    input.inset = [
+                        frame.origin[0] - owner.origin[0],
+                        frame.origin[1] - owner.origin[1],
+                        owner.node.frame.width * owner.scale
+                            - (frame.origin[0] - owner.origin[0])
+                            - frame.width * frame.factor,
+                        0.,
+                    ];
+                    input
+                }
+                _ => continue,
+            };
+            input.bounds = [
+                owner.origin[0],
+                owner.origin[1],
+                owner.node.frame.width * owner.scale,
+                owner.node.frame.height * owner.scale,
+            ];
+            input.font_size = font.metrics().cache_em(2.) * owner.scale;
+            input.line_height = font.metrics().line_height(2.) * owner.scale;
+            if let Some(frame) = frames.iter().find(|f| f.responder == owner.node.id) {
+                input.font_size = font.metrics().cache_em(frame.scale) * frame.factor;
+                input.line_height = font.metrics().line_height(frame.scale) * frame.factor;
+            }
+            inputs.push(input);
+        }
+        Ok(inputs)
+    }
+    /// Reject stale host events after navigation, a modal change or focus loss.
+    pub fn edit_text_input(&mut self, epoch: u32, id: u32, edit: &Edit) -> Result<bool> {
+        if epoch != self.epoch() || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused) {
+            return Ok(false);
+        }
+        self.hardware_edit(edit)
+    }
+    pub fn blur_text_input(&mut self, epoch: u32, id: u32) -> Result<bool> {
+        if epoch != self.epoch() || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused) {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        m.focus = None;
+        if let Some(chat) = &mut m.chat {
+            chat.blur_input();
+        }
+        m.keyboard.hide();
+        m.invalidate();
+        Ok(true)
+    }
+    /// HTML owns its scroll offset. Keep canvas edit sparks in that same local
+    /// viewport, rather than running a second caret-follow animation underneath.
+    pub fn scroll_text_input(&mut self, epoch: u32, id: u32, offset: f32) -> Result<bool> {
+        if epoch != self.epoch()
+            || !self
+                .text_inputs()?
+                .iter()
+                .any(|i| i.id == id && i.focused && i.multiline)
+        {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        let changed = m.chat.as_mut().is_some_and(|chat| chat.host_scroll(offset));
+        if changed {
+            m.invalidate();
+        }
+        Ok(changed)
+    }
     pub fn show_keyboard(&mut self) -> Result<bool> {
         let m = self.active.as_mut().ok_or("No Canvas")?;
         if let Some(chat) = &mut m.chat {
@@ -1578,6 +1677,7 @@ impl Client {
                     view.cancel();
                 }
                 m.keyboard.hide();
+                m.focus = None;
                 m.keyboard_pointer = None;
                 m.input.cancel_all();
                 m.invalidate();
@@ -1597,6 +1697,7 @@ impl Client {
         if matches!(
             edit,
             Edit::Commit(_)
+                | Edit::Replace { .. }
                 | Edit::Backspace
                 | Edit::Left { .. }
                 | Edit::Right { .. }

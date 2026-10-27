@@ -25,9 +25,12 @@ latest page. Older history loads in pages of at most 64 messages. The local
 window holds at most 1,024 messages. Day separators show Today, Yesterday or the
 date; this first version uses UTC for dates and timestamps. The composer supports
 wrapped text, caret following, hardware editing and multiline paste. It grows to
-four lines, then supports vertical drag/coast preview. Live drafts wrap too.
-Browsers keep editor focus without displaying OTriOS's software keyboard; the
-native frame retains that keyboard. Typing sparks originate at the visible edit
+four lines. The native frame supports vertical drag/coast preview and retains
+its primitive keyboard. Browsers use a real textarea with native scrolling,
+selection and the system keyboard on iPhone; Shift+Enter inserts a newline and
+Enter sends after composition finishes. Profile names use native input fields.
+Intermediate IME text stays private until committed. Live drafts wrap too. See
+[browser input](HOME_AND_INPUT.md) for the host/editor boundary. Typing sparks originate at the visible edit
 position, including replacements inside a remote draft; lease renewals do not
 emit sparks.
 
