@@ -51,13 +51,13 @@ pub fn description() -> Ui {
     };
     AppUi::new(
         "layout-text-scroll",
-        "Text scrolling",
+        "Text Panning",
         schema("layout-text-scroll-state-v1", &[]),
     )
     .with_composition(composition(), composition())
     .with_text_scroll("page", [width + 16., 64. * 27. + 16.])
     .build(
-        "Text scrolling",
+        "Text Panning",
         vec![
             button("Back").on_press(Event::back()).key("back"),
             button("Home")

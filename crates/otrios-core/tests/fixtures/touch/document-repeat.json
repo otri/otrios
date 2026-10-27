@@ -1,7 +1,7 @@
 {
   "format": "otrios-touch-trace-v1",
   "source": "synthetic-golden",
-  "screen": "layout-lab/document",
+  "screen": "test-playground/long-document",
   "control": "vertical repeat",
   "viewport": [
     1280,

@@ -1,38 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-#[path = "../../../apps/animation-lab/app.rs"]
-mod animation;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
 #[path = "../../../tools/canvas/components.rs"]
 pub mod components;
 #[path = "../../../apps/home/app.rs"]
 mod home;
-#[path = "../../../apps/input-lab/app.rs"]
-mod input;
-#[path = "../../../apps/layout-lab/app.rs"]
-mod layout;
 #[path = "../../../apps/monitoring/app.rs"]
 mod monitoring;
-#[path = "../../../apps/component-playground/app.rs"]
-mod playground;
-#[path = "../../../apps/three-d-lab/app.rs"]
-mod three_d;
+#[path = "../../../apps/test-playground/app.rs"]
+mod test_playground;
 use otrios_core::canvas::*;
 use std::{fs, path::Path};
 type Factory = fn(&[u8]) -> otrios_interfaces::canvas::Ui;
 fn sources() -> Vec<authoring::AppScreen> {
-    [
-        home::screens,
-        playground::screens,
-        layout::screens,
-        input::screens,
-        animation::screens,
-        three_d::screens,
-        monitoring::screens,
-    ]
-    .into_iter()
-    .flat_map(|screens| screens())
-    .collect()
+    [home::screens, test_playground::screens, monitoring::screens]
+        .into_iter()
+        .flat_map(|screens| screens())
+        .collect()
 }
 fn write_changed(path: &Path, bytes: &[u8]) -> Result<()> {
     if fs::read(path).ok().as_deref() == Some(bytes) {

@@ -129,7 +129,8 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     .semantic_label("Toggle")
     .on_press(Event::press(ENABLED).reduced_by(TOGGLE));
 
-    let home = || place("home", [200., 80.]);
+    let home = || place("home", [140., 80.]);
+    let back = || place("back", [140., 80.]);
     let intro = || place("intro", [752., 60.]).flex_width();
     let linear = || place("linear", [370., 410.]);
     let rotary = || place("rotary", [370., 410.]);
@@ -138,7 +139,7 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     let wide = column(
         24.,
         vec![
-            row(16., vec![heading(), home()]),
+            row(16., vec![heading(), back(), home()]),
             intro(),
             row(22., vec![linear(), rotary(), pad_slot()]),
             accent(),
@@ -147,20 +148,23 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     let tall = column(
         16.,
         vec![
-            column(12., vec![heading(), home()]),
+            column(12., vec![heading(), row(16., vec![back(), home()])]),
             intro(),
             row(12., vec![linear(), rotary()]),
             pad_slot(),
             accent(),
         ],
     );
-    AppUi::new("component-playground", "Component Playground", state_schema)
+    AppUi::new("component-playground", "Components", state_schema)
         .with_composition(wide, tall)
         .with_touch_pad("pad-control")
         .with_behavior(code, &state::FIELDS)
         .build(
-            "Component Playground",
+            "Components",
             vec![
+                button("Back")
+                    .navigate_to(Destination::app("test-playground"))
+                    .key("back"),
                 button("Home")
                     .navigate_to(Destination::app("home"))
                     .frame([1020., 35., 200., 80.])

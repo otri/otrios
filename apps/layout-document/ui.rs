@@ -42,13 +42,13 @@ pub fn description() -> Ui {
     };
     AppUi::new(
         "layout-document",
-        "Long document",
+        "Long Document",
         schema("layout-document-state-v1", &[]),
     )
     .with_composition(composition(), composition())
     .with_text_document("page", resource, 2, WHITE)
     .build(
-        "Long document",
+        "Long Document",
         vec![
             button("Back").on_press(Event::back()).key("back"),
             button("Home")

@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 mod components;
-#[path = "../layout-document/app.rs"]
-mod document;
 #[path = "state/schema.rs"]
 mod state;
-#[path = "../layout-text-scroll/app.rs"]
-mod text_scroll;
 mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "layout-lab",
-        "Layout Lab",
+        "Layouts",
         "canvas-app",
         &[
             "ui.rs",
@@ -25,9 +21,5 @@ pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {
 }
 
 pub fn screens() -> Vec<crate::authoring::AppScreen> {
-    vec![
-        (manifest(), ui),
-        (text_scroll::manifest(), text_scroll::ui),
-        (document::manifest(), document::ui),
-    ]
+    vec![(manifest(), ui)]
 }

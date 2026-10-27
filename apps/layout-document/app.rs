@@ -3,7 +3,7 @@ mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "layout-document",
-        "Long document",
+        "Long Document",
         "experimental",
         &[
             "ui.rs",

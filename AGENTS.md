@@ -12,6 +12,7 @@ Read README.md, docs/POC.md, docs/ARCHITECTURE.md, and LICENSE.md before changin
 - Use a feature branch for follow-up work. Open a pull request only after all scoped branch work and required validation are complete and the final commits are ready. Do not open draft or progress PRs while work is ongoing. Batch completed changes before pushing updates to an existing PR to minimize notification emails.
 - Report actual commands and results; distinguish scaffold checks from PoC acceptance tests.
 - Do not assign work to Tess, install integrations, add collaborators, change visibility, publish packages, or deploy services without user authorization for that action.
+- The user has given standing authorization to deploy completed, validated OTriOS changes to the existing frame/web environment as part of finishing each task, unless they explicitly defer deployment. Follow the established signed-release verification and rollback workflow.
 
 ## Release control and client state
 

@@ -1,7 +1,7 @@
 {
   "format": "otrios-touch-trace-v1",
   "source": "synthetic-golden",
-  "screen": "layout-lab/text-scroll",
+  "screen": "test-playground/text-panning",
   "control": "horizontal scroll",
   "viewport": [
     1280,

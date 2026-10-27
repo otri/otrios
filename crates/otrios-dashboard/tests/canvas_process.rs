@@ -33,6 +33,9 @@ impl Server {
         // Isolated package outputs: never race the user's package builder/live source watcher.
         for app in [
             "home",
+            "test-playground",
+            "layout-document",
+            "layout-text-scroll",
             "component-playground",
             "layout-lab",
             "input-lab",
@@ -56,15 +59,25 @@ impl Server {
         // shipped read-only scroll demo has no State fields to exercise here.
         let mut catalog =
             decode_catalog(&std::fs::read(root.join("apps/catalog.flex")).unwrap()).unwrap();
-        assert_eq!(catalog.apps.len(), 9);
+        assert_eq!(catalog.apps.len(), 10);
         assert_eq!(
             catalog
                 .apps
                 .iter()
                 .filter(|entry| entry.path.contains('/'))
                 .map(|entry| entry.path.as_str())
-                .collect::<Vec<_>>(),
-            ["layout-lab/text-scroll", "layout-lab/document"]
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "test-playground/components",
+                "test-playground/layouts",
+                "test-playground/text-input",
+                "test-playground/animations-two-d",
+                "test-playground/animations-three-d",
+                "test-playground/long-document",
+                "test-playground/text-panning"
+            ]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
         );
         let parent = catalog
             .apps
@@ -86,7 +99,7 @@ impl Server {
         std::fs::write(folder.join("app.flex"), encode_app(&app).unwrap()).unwrap();
         catalog.apps.push(CatalogEntry {
             app,
-            path: "layout-lab/test-detail".into(),
+            path: "test-playground/layouts/test-detail".into(),
             ui_hash: hash(&bytes),
             private: false,
         });
@@ -287,14 +300,14 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
 
     // Nested screens mount their own UI against the same admitted durable State.
     let mut cards = server.peer("app:layout-lab/test-detail/ui", "app:layout-lab/state");
-    assert_eq!(cards.c.path(), "layout-lab/test-detail");
+    assert_eq!(cards.c.path(), "test-playground/layouts/test-detail");
     edit(&mut cards.c, "Panel width", 720);
     cards.settle();
     layout.settle();
     assert_eq!(layout.c.value(1).unwrap(), 720);
     cards.c.back().unwrap();
     cards.settle();
-    assert_eq!(cards.c.path(), "layout-lab");
+    assert_eq!(cards.c.path(), "test-playground/layouts");
     assert_eq!(cards.c.value(1).unwrap(), 720);
     drop(cards);
 

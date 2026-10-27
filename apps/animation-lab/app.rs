@@ -6,7 +6,7 @@ mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "animation-lab",
-        "Animation Lab",
+        "2D Animations",
         "canvas-app",
         &[
             "ui.rs",

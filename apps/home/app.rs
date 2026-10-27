@@ -9,7 +9,7 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
         "canvas-app",
         &["ui.rs", "state/schema.rs", "sdk:canvas-authoring-v3"],
     );
-    app.state_ref = "app:home/state-v3".into();
+    app.state_ref = "app:home/state-v4".into();
     app
 }
 pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {

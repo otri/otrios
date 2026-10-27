@@ -40,7 +40,7 @@ Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), an
 
 The runtime uses LGPLv3 only; interfaces, SDK, documentation, and tooling use Apache 2.0. These are path-specific licenses, not a choice of either license for all files. Separate proprietary hardware, firmware, and accelerator implementations are an intended integration model, subject to the applicable licenses. See [the license boundary](LICENSE.md).
 
-Live Controls now includes a [primitive component playground](docs/COMPONENT_PLAYGROUND.md): captured slider/dial/pad gestures, independent shared values and local feedback. The earlier editable dashboard remains under Layout Lab.
+Live Controls now includes a [primitive component playground](docs/COMPONENT_PLAYGROUND.md): captured slider/dial/pad gestures, independent shared values and local feedback. The editable layout demo lives in Test Playground.
 
 Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](docs/ANIMATION.md). The [direct KMS display path](docs/DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](docs/experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](docs/rfcs/0001-direct-linux-gles2.md).
 
@@ -49,7 +49,7 @@ and [adaptive alpha coverage storage](docs/experiments/native-retained-simd-2026
 reach 56.4–56.6 kernel-presented fps for dense scrolling text on the Mali-400 frame.
 The full Layout Lab demo measures about 42 fps; these averages do not imply a
 60 fps lock. Its **Text scroll demo** opens a full-page, two-axis momentum workload
-at `/layout-lab/text-scroll`, with retained geometry and viewport culling.
+at `/test-playground/text-panning`, with retained geometry and viewport culling.
 
 The [fixed point/SIMD evaluation](docs/rfcs/0018-fixed-point-layout-simd.md)
 found a faster isolated integer SIMD kernel, but no complete scrolling gain over
@@ -59,8 +59,8 @@ records the outcome and evidence required for any future float SIMD batches.
 
 [The chunked document reader](docs/rfcs/0020-chunked-text-documents.md) adds
 paragraph reflow and bounded retained chunks through shared Rust layout and
-native/WebGL resource adapters. Layout Lab’s **Long document** experiment opens
-a 1 MiB momentum reader at `/layout-lab/document`. Source anchors survive width
+native/WebGL resource adapters. Test Playground’s **Long Document** experiment opens
+a 1 MiB momentum reader at `/test-playground/long-document`. Source anchors survive width
 changes; rich text and editing remain the second delivery. See the
 [qualification report](docs/experiments/chunked-documents-2026-10-27.md).
 
@@ -71,7 +71,7 @@ paths through sliders, the dial and the touch pad.
 
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 
-The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home mounts Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and private Monitoring through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
+The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home opens Test Playground and private Monitoring. Test Playground groups Components, Layouts, Long Document, Text Panning, Text Input, 2D Animations and 3D Animations through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
 
 The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines the target ownership model, current implementation limits and concrete gates for deleting the earlier dashboard paths.
 

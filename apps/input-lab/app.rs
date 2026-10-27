@@ -5,7 +5,7 @@ mod ui;
 pub fn manifest() -> otrios_interfaces::canvas::App {
     crate::authoring::app(
         "input-lab",
-        "Input Lab",
+        "Text Input",
         "canvas-app",
         &[
             "ui.rs",
