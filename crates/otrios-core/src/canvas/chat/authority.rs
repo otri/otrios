@@ -174,7 +174,7 @@ impl Room {
         }
         self.sequence = message.sequence;
         if let Some(guest) = self.guests.get_mut(&message.sender.id) {
-            guest.seen = guest.seen.max(message.at);
+            guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(message.at);
         }
         self.history_bytes += message.text.len() + message.sender.name.len() + 256;
         self.messages.push_back(message);
@@ -187,7 +187,7 @@ impl Room {
     fn prune(&mut self, now: u64) {
         self.guests.retain(|id, g| {
             g.cooldown > now
-                || now.saturating_sub(g.seen) < 30 * DAY
+                || now.saturating_sub(g.last_seen_unix_ms) < 30 * DAY
                 || self.memberships.contains_key(id)
         });
         self.receipts
@@ -230,7 +230,7 @@ impl Room {
                 .find(|g| g.digest == hash)
                 .ok_or("Guest credential expired")?;
             let mut guest = old.clone();
-            guest.seen = now;
+            guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
             self.persist(&Entry::Guest(guest.clone()), now)?;
             self.guests.insert(guest.profile.id.clone(), guest.clone());
             return Ok((guest.profile, token.to_owned()));
@@ -302,7 +302,7 @@ impl Room {
         let guest = Guest {
             profile: profile.clone(),
             digest: digest(&token),
-            seen: now,
+            last_seen_unix_ms: now,
             cooldown: 0,
         };
         self.persist(&Entry::Guest(guest.clone()), now)?;
@@ -372,7 +372,7 @@ impl Room {
                 },
             )]);
         }
-        let mut events = self.leave(connection, now);
+        let mut events = self.leave(connection, now)?;
         self.memberships
             .entry(profile.id.clone())
             .or_insert(generation()?);
@@ -406,9 +406,25 @@ impl Room {
         events.extend(self.claim(connection, now)?);
         Ok(events)
     }
-    pub fn leave(&mut self, connection: u64, now: u64) -> Vec<Delivery> {
+    fn record_seen(&mut self, id: &str, now: u64) -> Result<()> {
+        let Some(current) = self.guests.get(id) else {
+            return Ok(());
+        };
+        if now <= current.last_seen_unix_ms {
+            return Ok(());
+        }
+        let mut guest = current.clone();
+        guest.last_seen_unix_ms = now;
+        self.persist(&Entry::Guest(guest.clone()), now)?;
+        self.guests.insert(id.to_owned(), guest);
+        Ok(())
+    }
+    pub fn leave(&mut self, connection: u64, now: u64) -> Result<Vec<Delivery>> {
+        if let Some(c) = self.connections.get(&connection) {
+            self.record_seen(&c.id.clone(), now)?;
+        }
         let Some(c) = self.connections.remove(&connection) else {
-            return vec![];
+            return Ok(vec![]);
         };
         let mut events = vec![];
         if let Some(d) = self.drafts.get_mut(&c.id)
@@ -429,7 +445,7 @@ impl Room {
             self.drafts.remove(&c.id);
         }
         events.push(self.roster());
-        events
+        Ok(events)
     }
     pub fn set_admin(&mut self, connection: u64, admin: bool) -> Vec<Delivery> {
         let Some(c) = self.connections.get_mut(&connection) else {
@@ -456,11 +472,17 @@ impl Room {
             .messages
             .partition_point(|message| message.sequence < before);
         for message in self.messages.range(..end).rev().take(super::PAGE_MESSAGES) {
+            // History records retain their original sender snapshot; presentation
+            // resolves the stable ID to the current profile without rewriting the log.
+            let mut message = message.clone();
+            if let Some(guest) = self.guests.get(&message.sender.id) {
+                message.sender = guest.profile.clone();
+            }
             size += message.text.len() + message.sender.name.len() + 256;
             if size > 128 * 1024 {
                 break;
             }
-            page.push(message.clone());
+            page.push(message);
         }
         page.reverse();
         page
@@ -490,7 +512,22 @@ impl Room {
             }),
         ])
     }
-    pub fn tick(&mut self, now: u64) -> Vec<Delivery> {
+    pub fn tick(&mut self, now: u64) -> Result<Vec<Delivery>> {
+        // A quiet connected reader is still present. Checkpoint at most once
+        // per minute per profile, rather than syncing on every 500ms host tick.
+        let due = self
+            .memberships
+            .keys()
+            .filter(|id| {
+                self.guests
+                    .get(*id)
+                    .is_some_and(|g| now.saturating_sub(g.last_seen_unix_ms) >= 60_000)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in due {
+            self.record_seen(&id, now)?;
+        }
         let mut events = vec![];
         for (id, d) in &mut self.drafts {
             if !d.text.is_empty() && now.saturating_sub(d.at) >= 3000 {
@@ -505,7 +542,7 @@ impl Room {
                 }));
             }
         }
-        events
+        Ok(events)
     }
     pub fn handle(&mut self, connection: u64, command: Command, now: u64) -> Result<Vec<Delivery>> {
         let c = self
@@ -517,7 +554,7 @@ impl Room {
         match command {
             Command::Leave => {
                 let mut events = vec![Delivery::one(connection, Event::Left)];
-                events.extend(self.leave(connection, now));
+                events.extend(self.leave(connection, now)?);
                 Ok(events)
             }
             Command::History { before } => Ok(vec![Delivery::one(
@@ -546,7 +583,7 @@ impl Room {
                 let mut guest = self.guests[&id].clone();
                 guest.profile.name = display;
                 guest.profile.avatar = avatar;
-                guest.seen = now;
+                guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
                 self.persist(&Entry::Guest(guest.clone()), now)?;
                 self.guests.insert(id, guest);
                 Ok(vec![self.roster()])
@@ -617,6 +654,7 @@ impl Room {
                     .ok_or("Unknown member")?
                     .clone();
                 guest.cooldown = now + 60_000;
+                guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
                 let message = Message {
                     sequence: self.sequence + 1,
                     at: now,

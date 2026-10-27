@@ -61,6 +61,7 @@ pub struct Client {
     pub(super) members: Vec<Member>,
     pub(super) drafts: BTreeMap<String, RemoteDraft>,
     pub(super) messages: VecDeque<Message>,
+    authors_revision: u64,
     headers: BTreeMap<u32, u8>,
     next_block: u32,
     next_byte: u32,
@@ -119,6 +120,7 @@ pub struct Info {
     pub admin: bool,
     pub online: bool,
     pub messages: usize,
+    pub authors_revision: u64,
     pub first_sequence: u64,
     pub last_sequence: u64,
     pub pending: usize,
@@ -133,6 +135,7 @@ impl Default for Client {
             members: vec![],
             drafts: BTreeMap::new(),
             messages: VecDeque::new(),
+            authors_revision: 0,
             headers: BTreeMap::new(),
             next_block: 1,
             next_byte: 0,
@@ -251,6 +254,7 @@ impl Client {
             admin: self.you.as_ref().is_some_and(|y| y.admin),
             online: self.online,
             messages: self.messages.len(),
+            authors_revision: self.authors_revision,
             first_sequence: self.messages.front().map_or(0, |m| m.sequence),
             last_sequence: self.messages.back().map_or(0, |m| m.sequence),
             pending: self.pending.len(),
@@ -465,7 +469,16 @@ impl Client {
         Ok(None)
     }
     fn receive_message(&mut self, message: Message, follow: bool) {
-        if self.messages.iter().any(|m| m.sequence == message.sequence) {
+        if let Some(existing) = self
+            .messages
+            .iter_mut()
+            .find(|m| m.sequence == message.sequence)
+        {
+            if existing.sender != message.sender {
+                existing.sender = message.sender;
+                self.authors_revision = self.authors_revision.saturating_add(1);
+                self.reset = true;
+            }
             return;
         }
         if self.messages.len() >= HISTORY_WINDOW {
@@ -484,6 +497,32 @@ impl Client {
         self.tail |= follow;
         if !follow {
             self.new_messages += 1;
+        }
+    }
+    fn refresh_authors(&mut self) {
+        let mut changed = false;
+        for message in &mut self.messages {
+            if let Some(member) = self
+                .members
+                .iter()
+                .find(|m| m.profile.id == message.sender.id)
+                && message.sender != member.profile
+            {
+                message.sender = member.profile.clone();
+                self.reset = true;
+                changed = true;
+            }
+        }
+        if changed {
+            self.authors_revision = self.authors_revision.saturating_add(1);
+        }
+        if let Some(selected) = &mut self.selected
+            && let Some(member) = self
+                .members
+                .iter()
+                .find(|m| m.profile.id == selected.profile.id)
+        {
+            *selected = member.clone();
         }
     }
     pub fn receive(&mut self, event: Event, follow: bool) -> Result<Option<String>> {
@@ -517,6 +556,7 @@ impl Client {
                 for message in messages {
                     self.receive_message(message, follow || self.reset);
                 }
+                self.refresh_authors();
                 self.older = self.messages.front().is_some_and(|m| m.sequence > oldest);
                 self.history_wait = false;
             }
@@ -532,6 +572,7 @@ impl Client {
                     self.you = Some(member);
                 }
                 self.members = members;
+                self.refresh_authors();
                 self.drafts
                     .retain(|id, _| self.members.iter().any(|m| m.profile.id == *id));
             }
@@ -1262,6 +1303,46 @@ mod tests {
                 .map(|s| s.len() + 1)
                 .sum::<usize>()
         );
+    }
+    #[test]
+    fn roster_rename_refreshes_loaded_authors_by_id_without_changing_message_content() {
+        let mut client = Client::default();
+        let original = message(1, 20);
+        let mut other = message(2, 20);
+        other.sender.id = "b".repeat(32);
+        // Names alone never identify an author.
+        client.receive_message(original.clone(), false);
+        client.receive_message(other.clone(), false);
+        let mut profile = original.sender.clone();
+        profile.name = "Admiral Newname".into();
+        profile.avatar = 42;
+        let members = vec![Member {
+            profile: profile.clone(),
+            generation: 1,
+            admin: false,
+        }];
+        client.reset = false;
+        client
+            .receive(
+                Event::Members {
+                    members: members.clone(),
+                },
+                false,
+            )
+            .unwrap();
+        assert!(client.reset);
+        assert_eq!(client.messages[0].sender, profile);
+        assert_eq!(client.messages[0].sequence, original.sequence);
+        assert_eq!(client.messages[0].text, original.text);
+        assert_eq!(client.messages[1], other);
+        client.reset = false;
+        client.receive(Event::Members { members }, false).unwrap();
+        assert!(!client.reset, "unchanged rosters do not rebuild text");
+        let mut refreshed = other;
+        refreshed.sender.name = "Recovered profile".into();
+        client.receive_message(refreshed.clone(), false);
+        assert!(client.reset);
+        assert_eq!(client.messages[1], refreshed);
     }
     #[test]
     fn new_sends_refresh_epoch_and_pending_retries_keep_original_nonce() {

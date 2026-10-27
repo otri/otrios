@@ -8,7 +8,8 @@ export function layoutViewport(width,height){
 // select a landscape design or reduce the horizontal UI scale.
 export function chatViewport(width,height){
   layoutViewport(width,height); // Validate the available CSS dimensions.
-  const logicalWidth=width>=1100?1280:800;
+  // Phones need a readable density: 800 / 534 is approximately 1.5x.
+  const logicalWidth=width<600?534:width>=1100?1280:800;
   return [logicalWidth,Math.max(300,Math.min(8192,Math.floor(logicalWidth*height/width)))];
 }
 export function pointerPosition(x,y,bounds,extent){

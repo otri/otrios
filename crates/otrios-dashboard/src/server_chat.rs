@@ -125,7 +125,7 @@ impl Hub {
                 let events = hub
                     .run(move |room| {
                         let mut events = room.set_admin(id, admin);
-                        events.extend(room.tick(now()));
+                        events.extend(room.tick(now())?);
                         Ok(events)
                     })
                     .await;
@@ -169,7 +169,7 @@ impl Hub {
                     }]),
                 }
             }
-            if let Ok(events) = hub.run(move |room| Ok(room.leave(id, now()))).await {
+            if let Ok(events) = hub.run(move |room| room.leave(id, now())).await {
                 hub.publish(events);
             }
         });

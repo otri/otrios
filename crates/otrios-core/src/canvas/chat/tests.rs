@@ -21,6 +21,103 @@ fn send(text: &str, nonce: u64, now: u64) -> Command {
     }
 }
 #[test]
+fn renamed_authors_resolve_in_old_pages_welcome_and_recovered_history() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    let (original, token) = room.identity(None, now).unwrap();
+    room.join(1, Some(&token), false, now, true).unwrap();
+    for i in 1..=70 {
+        let at = now + i * 1000;
+        room.handle(1, send("Unchanged dispatch", i, at), at)
+            .unwrap();
+    }
+    let prior_log = fs::read(&p).unwrap();
+    room.handle(
+        1,
+        Command::Profile {
+            name: "Admiral Newname".into(),
+            avatar: 42,
+        },
+        now + 71_000,
+    )
+    .unwrap();
+    assert!(
+        fs::read(&p).unwrap().starts_with(&prior_log),
+        "rename appends a profile update without rewriting message records"
+    );
+    room.leave(1, now + 72_000).unwrap();
+    drop(room);
+    let mut room = Room::open(Some(p.clone()), now + 73_000).unwrap();
+    let joined = room.join(2, None, false, now + 73_000, true).unwrap();
+    let welcome = joined
+        .iter()
+        .find_map(|d| match &d.event {
+            Event::Welcome { messages, .. } => Some(messages),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(welcome.len(), PAGE_MESSAGES);
+    let history = room
+        .handle(2, Command::History { before: 7 }, now + 74_000)
+        .unwrap();
+    let Event::History { messages, .. } = &history[0].event else {
+        panic!("history")
+    };
+    assert_eq!(messages.len(), 6);
+    for message in welcome.iter().chain(messages) {
+        assert_eq!(message.sender.id, original.id);
+        assert_eq!(message.sender.name, "Admiral Newname");
+        assert_eq!(message.sender.avatar, 42);
+        assert_eq!(message.text, "Unchanged dispatch");
+    }
+    fs::remove_file(p).unwrap();
+}
+#[test]
+fn quiet_presence_and_departure_persist_utc_last_seen_and_profiles_expire_after_absence() {
+    let p = path();
+    let now = 1_700_000_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    let (_, token) = room.identity(None, now).unwrap();
+    room.join(1, Some(&token), false, now, true).unwrap();
+    let initial_bytes = fs::metadata(&p).unwrap().len();
+    room.tick(now + 59_999).unwrap();
+    assert_eq!(fs::metadata(&p).unwrap().len(), initial_bytes);
+    room.tick(now + 60_000).unwrap();
+    let checkpoint_bytes = fs::metadata(&p).unwrap().len();
+    assert!(checkpoint_bytes > initial_bytes);
+    room.tick(now + 60_001).unwrap();
+    assert_eq!(fs::metadata(&p).unwrap().len(), checkpoint_bytes);
+    let departure = now + 120_000;
+    room.leave(1, departure).unwrap();
+    assert!(room.members().is_empty());
+    assert!(
+        room.valid_identity(&token),
+        "leaving removes presence, not the profile"
+    );
+    // A backwards wall-clock adjustment must not move last-seen backwards.
+    room.identity(Some(&token), now).unwrap();
+    drop(room);
+    let (_, entries) = super::journal::Journal::open(p.clone()).unwrap();
+    let seen = entries
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            super::journal::Entry::Guest(g) => Some(g.last_seen_unix_ms),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(seen, departure);
+    let day = 86_400_000;
+    let retained = Room::open(Some(p.clone()), departure + 29 * day).unwrap();
+    assert!(retained.valid_identity(&token));
+    drop(retained);
+    let expired = Room::open(Some(p.clone()), departure + 30 * day).unwrap();
+    assert!(!expired.valid_identity(&token));
+    drop(expired);
+    fs::remove_file(p).unwrap();
+}
+#[test]
 fn durable_receipts_survive_lost_ack_restart_and_conflicting_retries() {
     let p = path();
     let now = 1_000_000;
@@ -136,7 +233,7 @@ fn draft_generations_reject_stale_tabs_revisions_and_expire_without_history() {
             .unwrap()
             .is_empty()
     );
-    let events = room.tick(now + 3101);
+    let events = room.tick(now + 3101).unwrap();
     assert!(
         events
             .iter()

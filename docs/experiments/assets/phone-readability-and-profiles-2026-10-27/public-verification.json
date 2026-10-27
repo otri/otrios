@@ -1,0 +1,25 @@
+{
+  "release": "efbe386e30d5b81084a6b789978a1edde9d4b7acbdeb7f08bd5e87ac764490da",
+  "assets": [
+    {
+      "name": "web/app.js",
+      "bytes": 26347,
+      "sha256": "98aa98340679736ded8a5937859edfb18ddd1aede05b34da4800975727fcbe55"
+    },
+    {
+      "name": "web/state-worker.js",
+      "bytes": 16516,
+      "sha256": "d845f70147e9a954ddcfa5e1293391b559f6fbfd0807d6ff2f9b50aee0d8ff5b"
+    },
+    {
+      "name": "web/viewport.mjs",
+      "bytes": 1181,
+      "sha256": "2f63b24c65c38e71edc4d31a31c857fc0d07b12ed7a9d589431e2f3cdc699c88"
+    },
+    {
+      "name": "web/pkg/otrios_dashboard_bg.wasm",
+      "bytes": 3610508,
+      "sha256": "8b18cd0d926ea8dce0a9ed860a9b87bea2376ae707996d96ca16bfc5a11f9b5c"
+    }
+  ]
+}

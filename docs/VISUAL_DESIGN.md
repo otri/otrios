@@ -56,3 +56,9 @@ scene into a shorter rectangle or switch its design just because the keyboard
 reduced the height. Preserve editor identity, value, selection and focus through
 that reflow. Short views reduce the composer's visible rows and use a compact
 calling card. Browser pinch zoom remains available.
+
+For chat browser widths below 600 CSS pixels, use a 534-unit logical width instead
+of 800. This gives approximately 1.5× larger text and controls at the same screen
+width. The member/profile actions move below the heading to preserve its shared
+baseline. Tablet, desktop and native densities retain their existing sizes.
+Device pixel ratio controls raster sharpness, independently of this layout scale.

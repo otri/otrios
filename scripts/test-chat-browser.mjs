@@ -84,6 +84,7 @@ try{
   const avatar=(await controls(a)).find(c=>c.label.includes('Pocket watch'));assert(avatar);await control(a,avatar.label);
   await control(a,'Edit room name');await press(a,'a',4);await paste(a,nickname);await control(a,'Save profile');
   await wait(a,`JSON.parse(document.querySelector('#revision').dataset.chat).name===${JSON.stringify(nickname)}`);
+  for(const session of [a,b])await wait(session,`(()=>{const log=document.querySelector('#chat-log').textContent;return log.includes(${JSON.stringify(nickname)})&&log.includes(${JSON.stringify(draft)});})()`);
   assert((await info(a)).avatar>=56);
   const shortComposerHeight=(await controls(a)).find(c=>c.label==='Message composer').bounds[3];
   const tail='TAIL'+Date.now();
@@ -122,6 +123,8 @@ try{
   const phone=a;await metrics(phone,390,844);await ready(phone,'home','800x1280');
   await click(phone,'The Brass Relay','brass-relay',chatViewport(390,844).join('x'));await online(phone);
   await control(phone,'Message composer');await paste(phone,'The viewport keeps its width.');
+  const phoneFont=await evaluate(phone,"(()=>{const e=document.activeElement,s=getComputedStyle(e);return parseFloat(s.fontSize)*new DOMMatrix(s.transform).a;})()");
+  assert(phoneFont>=16&&phoneFont<=19,`phone body text has a readable CSS size: ${phoneFont}`);
   await evaluate(phone,`(()=>{const v=window.visualViewport;window.__nativeViewport=v;window.__availableViewport={width:390,height:844,offsetTop:0,offsetLeft:0,scale:1};Object.defineProperty(window,'visualViewport',{configurable:true,get:()=>window.__availableViewport});window.__editor=document.activeElement;window.__editor.setSelectionRange(4,8);window.__editor.dispatchEvent(new Event('select'));return true;})()`);
   await new Promise(r=>setTimeout(r,150));
   const phoneBefore=await evaluate(phone,"({width:document.querySelector('#view').getBoundingClientRect().width,value:window.__editor.value,selection:[window.__editor.selectionStart,window.__editor.selectionEnd]})");
@@ -130,7 +133,7 @@ try{
   // A mocked VisualViewport has no native compositor resize. Present once to
   // return the held renderer credit before waiting for the reflowed scene.
   await call('Page.bringToFront',{},phone);await call('Page.captureScreenshot',{format:'png'},phone);
-  await ready(phone,'brass-relay','800x861');
+  await ready(phone,'brass-relay',chatViewport(390,420).join('x'));
   const phoneAfter=await evaluate(phone,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {width:r.width,top:r.top,bottom:r.bottom,value:window.__editor.value,selection:[window.__editor.selectionStart,window.__editor.selectionEnd],focused:document.activeElement===window.__editor,layoutHeight:innerHeight};})()");
   assert(Math.abs(phoneAfter.width-390)<1);assert(Math.abs(phoneAfter.width-phoneBefore.width)<1);
   assert(phoneAfter.top>=49&&phoneAfter.bottom<=471);assert.equal(phoneAfter.layoutHeight,844,'only the visual viewport changed');
@@ -138,9 +141,9 @@ try{
   await screenshot(phone,'phone-keyboard-reflow');
   await evaluate(phone,"Object.assign(window.__availableViewport,{height:844,offsetTop:0});window.__nativeViewport.dispatchEvent(new Event('resize'));true");
   await call('Page.captureScreenshot',{format:'png'},phone);
-  await ready(phone,'brass-relay','800x1731');
+  await ready(phone,'brass-relay',chatViewport(390,844).join('x'));
   await screenshot(phone,'phone-full-height');
-  await writeFile(join(output,'mobile-reflow.json'),JSON.stringify({passed:true,immediateWidth,before:phoneBefore,after:phoneAfter},null,2));
+  await writeFile(join(output,'mobile-reflow.json'),JSON.stringify({passed:true,fontSizeCss:phoneFont,immediateWidth,before:phoneBefore,after:phoneAfter},null,2));
   const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','native textarea focus, selection replacement and IME composition','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','visual viewport-only keyboard reflow preserves width, focus, text and selection','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{

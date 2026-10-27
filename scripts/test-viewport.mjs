@@ -17,9 +17,12 @@ test('portrait pointer and accessibility bounds describe the same rendered recta
 });
 
 test('chat preserves full width and UI scale as the visual keyboard changes height',()=>{
-  assert.deepEqual(chatViewport(390,844),[800,1731]);
-  assert.deepEqual(chatViewport(390,420),[800,861]);
-  assert.deepEqual(chatViewport(390,300),[800,615]);
+  assert.deepEqual(chatViewport(390,844),[534,1155]);
+  assert.deepEqual(chatViewport(390,420),[534,575]);
+  assert.deepEqual(chatViewport(390,300),[534,410]);
+  assert.deepEqual(chatViewport(320,568),[534,947]);
+  assert.deepEqual(chatViewport(599,900),[534,802]);
+  assert.deepEqual(chatViewport(600,900),[800,1200]);
   assert.deepEqual(chatViewport(844,390),[800,369]);
   assert.deepEqual(chatViewport(1280,800),[1280,800]);
   assert.deepEqual(chatViewport(800,1280),[800,1280]);

@@ -29,7 +29,7 @@ function sendFrame(){
   inFlight=serial;
   const geometry=pendingGeometry;pendingGeometry=false;
   syncInk();
-  const chat=JSON.parse(app.chat_info());const logKey=chat?`${chat.first_sequence}:${chat.last_sequence}:${chat.messages}`:'';if(logKey!==chatLogKey){chatLogKey=logKey;postMessage({type:'chat-log',messages:chat?JSON.parse(app.chat_messages()):[]});}
+  const chat=JSON.parse(app.chat_info());const logKey=chat?`${chat.first_sequence}:${chat.last_sequence}:${chat.messages}:${chat.authors_revision}`:'';if(logKey!==chatLogKey){chatLogKey=logKey;postMessage({type:'chat-log',messages:chat?JSON.parse(app.chat_messages()):[]});}
   const ui=app.ui_ref();
   const plan=ui?JSON.parse(app.prepare_frame()):{revisions:{content:0,placement:0,semantics:0,effects:0},order:[]};
   const revisions=plan.revisions;

@@ -14,7 +14,9 @@ pub(super) const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
 pub(super) struct Guest {
     pub profile: Profile,
     pub digest: String,
-    pub seen: u64,
+    /// Authority-clock milliseconds since the Unix epoch. Preserve the journal key.
+    #[serde(rename = "seen")]
+    pub last_seen_unix_ms: u64,
     pub cooldown: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]

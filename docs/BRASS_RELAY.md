@@ -7,11 +7,17 @@ Home shares its neutral charcoal surfaces, OTriOS headings and restrained brass
 and copper accents. The Lunar design preview remains preserved for comparison.
 See the shared [visual language](VISUAL_DESIGN.md) and
 [visual refresh qualification](experiments/visual-refresh-2026-10-27.md).
+[Phone readability and retained profiles](experiments/phone-readability-and-profiles-2026-10-27.md)
+records the subsequent density, author-resolution and last-seen changes.
 
 You join with a random funny name. **You** opens your calling card: rename yourself,
 pick from 64 distinct copper-line avatars and choose Off, Quiet or Playful effects. **Members**
 opens the operator list; wide screens also have a member rail. `@` marks a member
 with an authenticated administrator connection. Member rows have no subtitles.
+Name and avatar changes refresh loaded message authors by stable participant ID.
+History pages resolve the current profile, including after an authority restart;
+the journal retains the original sender snapshot. If the retained guest identity
+has expired, that snapshot is the fallback. Message text remains as written.
 
 The composer stays compact. **Live** shares a temporary draft before sending;
 the first focus discloses that behavior. Switch to **Private** to clear the shared
@@ -31,6 +37,8 @@ four lines. The native frame supports vertical drag/coast preview and retains
 its primitive keyboard. Browsers use a real textarea with native scrolling,
 selection and the system keyboard on iPhone; Shift+Enter inserts a newline and
 Enter sends after composition finishes. Profile names use native input fields.
+Phone browser widths below 600 CSS pixels use approximately 1.5× larger text and
+controls, with the member/profile actions below the heading.
 Intermediate IME text stays private until committed. Live drafts wrap too. See
 [browser input](HOME_AND_INPUT.md) for the host/editor boundary. Typing sparks originate at the visible edit
 position, including replacements inside a remote draft; lease renewals do not
@@ -84,6 +92,13 @@ records fail closed. Atomic compaction bounds the journal at 64 MiB. Retained
 history is capped at 50,000 messages and 32 MiB; inactive identities expire after
 30 days, with a 4,096-identity ceiling. Message, draft, command and connection
 limits are enforced by the authority rather than trusted to the UI.
+Leaving the room removes online membership while retaining the profile. The
+private guest record's `last_seen_unix_ms` is authority-clock Unix milliseconds;
+it keeps the existing journal key `seen`. Quiet connected readers checkpoint
+presence at most once per minute, and departure records the final timestamp.
+Joins, sends and profile changes also refresh it. Clock corrections cannot move
+the stored value backwards. This wall-clock value supports retention and dates;
+message ordering continues to use sequence numbers.
 
 The first version retains the document reader's single-font LTR typography and
 whole-grapheme fallback. It does not add general shaping, bidirectional layout,

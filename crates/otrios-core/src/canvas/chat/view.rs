@@ -214,6 +214,9 @@ impl Client {
         let [w, full_h] = size;
         let h = room_height(size, keyboard);
         let side = if w >= 1100. { 288. } else { 0. };
+        let phone = w < 700.;
+        let header_bottom = if phone { 168. } else { 96. };
+        let actions_y = if phone { 96. } else { 24. };
         let page_w = w - 48. - side;
         let mut p = Paint {
             nodes: vec![],
@@ -262,21 +265,27 @@ impl Client {
         p.text(
             title_x,
             heading_y,
-            (w - 224. - title_x - 16.).max(1.),
+            (w - if phone { 24. } else { 240. } - title_x).max(1.),
             "The Brass Relay",
             heading_scale,
             TEXT,
         );
-        p.rect([24., 96., w - 48., 1.], LINE, 0.);
+        p.rect([24., header_bottom, w - 48., 1.], LINE, 0.);
         p.button(
             3,
-            [w - 224., 24., 96., 60.],
+            [w - 224., actions_y, 96., 60.],
             "Members",
             &format!("{} users", self.members.len()),
             false,
         );
-        p.button(4, [w - 116., 24., 92., 60.], "Edit profile", "You", false);
-        let page_y = 108.;
+        p.button(
+            4,
+            [w - 116., actions_y, 92., 60.],
+            "Edit profile",
+            "You",
+            false,
+        );
+        let page_y = header_bottom + 12.;
         let draft_h = self.draft_height();
         let content_h = self.draft_y() - page_y;
         p.surface(

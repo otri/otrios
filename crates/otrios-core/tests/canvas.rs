@@ -3633,17 +3633,26 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         )
         .unwrap(),
     );
-    for height in [861., 615., 369.] {
+    for (width, height) in [
+        (800., 861.),
+        (800., 615.),
+        (800., 369.),
+        (534., 1155.),
+        (534., 575.),
+        (534., 410.),
+    ] {
         let mut c = Client::default();
         c.set_font(font.clone());
         c.set_software_keyboard(false);
         activate(&mut c, brass_relay::ui(&[]), "phone-height", vec![]);
-        c.set_viewport([800., height]).unwrap();
+        c.set_viewport([width, height]).unwrap();
         let check = |c: &Client| {
             let scene = c.scene().unwrap();
             for control in scene.controls() {
                 assert!(control.origin[0] >= 0. && control.origin[1] >= 0.);
-                assert!(control.origin[0] + control.node.frame.width * control.scale <= 800.1);
+                assert!(
+                    control.origin[0] + control.node.frame.width * control.scale <= width + 0.1
+                );
                 assert!(
                     control.origin[1] + control.node.frame.height * control.scale <= height + 0.1,
                     "{} at height {height}",
@@ -3680,6 +3689,11 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         };
         assert_eq!(back_scale, title_scale);
         assert!((back.origin[1] + label.frame.y - title.frame.y).abs() < 0.01);
+        assert!(font.text_width("The Brass Relay", title_scale as f32) <= title.frame.width);
+        if width < 700. {
+            let members = scene.path(node(&c, "Members")).unwrap();
+            assert!(members.last().unwrap().origin[1] >= title.frame.y + title.frame.height);
+        }
         check(&c);
         c.activate(c.epoch(), node(&c, "Message composer")).unwrap();
         c.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
