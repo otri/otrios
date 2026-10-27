@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
+#[path = "../../../apps/brass-relay/app.rs"]
+mod brass_relay;
 #[path = "../../../tools/canvas/components.rs"]
 pub mod components;
 #[path = "../../../apps/home/app.rs"]
@@ -13,10 +15,15 @@ use otrios_core::canvas::*;
 use std::{fs, path::Path};
 type Factory = fn(&[u8]) -> otrios_interfaces::canvas::Ui;
 fn sources() -> Vec<authoring::AppScreen> {
-    [home::screens, test_playground::screens, monitoring::screens]
-        .into_iter()
-        .flat_map(|screens| screens())
-        .collect()
+    [
+        home::screens,
+        brass_relay::screens,
+        test_playground::screens,
+        monitoring::screens,
+    ]
+    .into_iter()
+    .flat_map(|screens| screens())
+    .collect()
 }
 fn write_changed(path: &Path, bytes: &[u8]) -> Result<()> {
     if fs::read(path).ok().as_deref() == Some(bytes) {

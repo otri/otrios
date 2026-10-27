@@ -239,12 +239,15 @@ pub(super) fn run() -> Result<(), String> {
                             hud = bucket;
                         }
                     }
-                    let scrolling = f
-                        .resources
-                        .text_scroll
-                        .as_ref()
-                        .map(|s| s.active)
-                        .or_else(|| f.resources.text_document.as_ref().map(|s| s.active));
+                    let scrolling = if f.resources.chat.is_some() {
+                        None
+                    } else {
+                        f.resources
+                            .text_scroll
+                            .as_ref()
+                            .map(|s| s.active)
+                            .or_else(|| f.resources.text_document.as_ref().map(|s| s.active))
+                    };
                     let (document_slots, uploading) =
                         document_gpu.update(&mut display, f.document.as_ref())?;
                     if let Some(overlay) = &f.overlay {
@@ -283,10 +286,19 @@ pub(super) fn run() -> Result<(), String> {
                             scroll_active = active;
                         }
                     }
+                    if f.resources.chat.is_some() {
+                        display.upload(2, &f.effects)?;
+                    }
                     let mut slots = vec![0];
                     slots.extend(document_slots);
-                    if animated || scrolling.is_some() {
-                        slots.extend([1, 2]);
+                    if animated || f.overlay.is_some() {
+                        slots.push(1);
+                    }
+                    if animated
+                        || scrolling.is_some()
+                        || (f.resources.chat.is_some() && !f.effects.is_empty())
+                    {
+                        slots.push(2);
                     }
                     display.draw_slots(surface.projection_for(f.viewport), &slots)?;
                     if drawn >= capture_after

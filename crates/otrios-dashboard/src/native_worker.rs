@@ -26,8 +26,10 @@ mod session_client;
 enum NetworkEvent {
     Connected(u64),
     Packet(u64, Instant, Vec<u8>),
+    Chat(u64, Vec<u8>),
 }
 struct NetworkSend {
+    channel: u8,
     epoch: u64,
     bytes: Vec<u8>,
 }
@@ -38,6 +40,7 @@ pub(super) struct Frame {
     pub(super) reflow: Option<otrios_core::canvas::reflow::Frame>,
     pub(super) document: Option<otrios_core::canvas::document::Frame>,
     pub(super) overlay: Option<otrios_core::dashboard::retained_text::TextFrame>,
+    pub(super) effects: Arc<Vec<f32>>,
     pub(super) vertices: Arc<Vec<f32>>,
     pub(super) glyph_vertices: Arc<Vec<f32>>,
     pub(super) draws: Arc<Vec<u32>>,
@@ -71,6 +74,7 @@ impl Frame {
             reflow: None,
             document: None,
             overlay: None,
+            effects: Arc::new(vec![]),
             vertices: Arc::new(vec![]),
             glyph_vertices: Arc::new(vec![]),
             draws: Arc::new(vec![]),
@@ -119,6 +123,7 @@ pub(super) enum Input {
 }
 #[derive(Clone, Default)]
 pub(super) struct Options {
+    pub(super) chat_identity: Option<String>,
     pub(super) font: Option<Arc<otrios_core::dashboard::font::Font>>,
     pub(super) url: Option<String>,
     pub(super) state: Option<String>,
@@ -148,6 +153,7 @@ pub(super) fn options() -> Result<Options, String> {
     while let Some(arg) = args.next() {
         let value = args.next().ok_or("Missing argument value")?;
         match arg.as_str() {
+            "--chat-identity" => o.chat_identity = Some(value),
             "--layout" => {
                 o.portrait = match value.as_str() {
                     "portrait" => true,
@@ -224,6 +230,33 @@ fn app_stream(url: &str) -> String {
         .unwrap_or(url.trim_end_matches('/'));
     format!("{root}/session")
 }
+fn save_identity(path: &std::path::Path, token: &str) -> Result<(), String> {
+    use std::io::Write;
+    let parent = path.parent().ok_or("Invalid guest identity path")?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let next = path.with_extension(format!("{}.tmp", std::process::id()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&next).map_err(|e| e.to_string())?;
+    let result = (|| {
+        file.write_all(token.as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
+        fs::rename(&next, path).map_err(|e| e.to_string())?;
+        fs::File::open(parent)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| e.to_string())
+    })(); // Secrets never enter presentation snapshots or logs.
+    if result.is_err() {
+        let _ = fs::remove_file(next);
+    }
+    result
+}
 fn app_resources(o: &Options) -> Result<(std::path::PathBuf, Vec<u8>), String> {
     let adjacent = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -270,6 +303,38 @@ pub(super) fn state_worker(
     }
     let (resources, catalog) = app_resources(&o)?;
     let mut client = Client::default();
+    client.set_chat_native(true);
+    let identity_path = o
+        .chat_identity
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("OTRIOS_CHAT_IDENTITY").map(std::path::PathBuf::from))
+        .or_else(|| {
+            std::env::var_os("XDG_STATE_HOME")
+                .map(|p| std::path::PathBuf::from(p).join("otrios/guest.identity"))
+        })
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|p| std::path::PathBuf::from(p).join(".local/state/otrios/guest.identity"))
+        });
+    if let Some(path) = &identity_path
+        && path.exists()
+    {
+        let metadata =
+            fs::symlink_metadata(path).map_err(|_| "Cannot inspect native guest identity")?;
+        if !metadata.is_file() || metadata.len() != 64 {
+            return Err("Invalid native guest identity file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err("Native guest identity must be private (mode 0600)".into());
+            }
+        }
+        let token = fs::read_to_string(path).map_err(|_| "Cannot read native guest identity")?;
+        client.set_chat_credential(token.trim())?;
+    }
     client.set_viewport(if o.portrait {
         [800., 1280.]
     } else {
@@ -355,6 +420,7 @@ pub(super) fn state_worker(
     let mut bench_present = bench_telemetry::Recorder::from_env()?;
     let mut sync_to_present_ms = None;
     let mut last_status = None;
+    let mut last_online = false;
     let mut scene_cache = None;
     let mut mesh_cache = Arc::new(Vec::new());
     let mut glyph_cache = Arc::new(Vec::new());
@@ -468,6 +534,16 @@ pub(super) fn state_worker(
                         }
                     }
                     NetworkEvent::Packet(..) => {}
+                    NetworkEvent::Chat(id, bytes) if epoch == Some(id) => {
+                        dirty |= client.receive_chat(&bytes)?;
+                        if let Some(token) = client.take_chat_credential() {
+                            let path = identity_path
+                                .as_ref()
+                                .ok_or("Native guest identity path is unavailable")?;
+                            save_identity(path, &token)?;
+                        }
+                    }
+                    NetworkEvent::Chat(..) => {}
                 }
             }
         }
@@ -567,9 +643,17 @@ pub(super) fn state_worker(
         if connected {
             if outgoing.is_none() {
                 outgoing = client.outgoing()?.map(|bytes| NetworkSend {
+                    channel: otrios_interfaces::session::STATE,
                     epoch: epoch.expect("connected epoch"),
                     bytes,
                 });
+                if outgoing.is_none() {
+                    outgoing = client.chat_outgoing()?.map(|bytes| NetworkSend {
+                        epoch: epoch.expect("connected epoch"),
+                        bytes,
+                        channel: otrios_interfaces::chat::CHANNEL,
+                    });
+                }
             }
             if let Some(packet) = outgoing.take() {
                 match tx.try_send(packet) {
@@ -595,6 +679,10 @@ pub(super) fn state_worker(
             }
         }
         let online = o.url.is_none() || (connected && stream_ready.load(Ordering::Acquire));
+        if !online && last_online {
+            client.chat_disconnected();
+        }
+        last_online = online;
         let confirmed = o.url.is_none() || (online && client.confirmed());
         if !client.ui_ref().is_empty() && stress_epoch != Some(client.epoch()) {
             if o.load > 0 {
@@ -675,6 +763,7 @@ pub(super) fn state_worker(
                 reflow: client.reflow_frame()?,
                 document: client.document_frame(),
                 overlay: overlay_cache.clone(),
+                effects: Arc::new(client.effect_vertices()?),
                 vertices: mesh_cache.clone(),
                 glyph_vertices: glyph_cache.clone(),
                 draws: draws_cache.clone(),
@@ -810,7 +899,7 @@ fn network(
                     Ok(packet) if greeted && compatible && available && packet.epoch == epoch => {
                         if socket
                             .send(Message::Binary(
-                                wire::frame(wire::STATE, packet.bytes).into(),
+                                wire::frame(packet.channel, packet.bytes).into(),
                             ))
                             .is_err()
                         {
@@ -904,6 +993,16 @@ fn network(
                         break;
                     }
                     match bytes.split_first() {
+                        Some((&otrios_interfaces::chat::CHANNEL, payload))
+                            if payload.len() <= otrios_interfaces::chat::MAX_EVENT_BYTES =>
+                        {
+                            if reply
+                                .try_send(NetworkEvent::Chat(epoch, payload.to_vec()))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                         Some((&wire::STATE, payload))
                             if !payload.is_empty()
                                 && payload.len() <= otrios_core::canvas::MAX_BYTES =>

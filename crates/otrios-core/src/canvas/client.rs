@@ -46,6 +46,7 @@ struct Mount {
     text_bounds_dirty: bool,
     text_scroll: Option<super::text_scroll::Scroll>,
     text_document: Option<super::document::Viewport>,
+    chat: Option<super::chat::Client>,
     font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
     ink: crate::dashboard::ink::Ink,
@@ -122,6 +123,7 @@ impl StressWorkload {
 /// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
+    pub chat: Option<super::chat::Info>,
     pub sampled_monotonic_ms: u64,
     pub dispatch: DispatchUsage,
     pub state: StateUsage,
@@ -139,6 +141,11 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    chat_credential: Option<String>,
+    chat_new_credential: Option<String>,
+    chat_enabled: bool,
+    chat_native: bool,
+    chat_reduced_motion: bool,
     viewport: Option<[f32; 2]>,
     wire_clock: u64,
     decode_budget: DecodeBudget,
@@ -163,6 +170,92 @@ pub struct Client {
     dispatch: DispatchPolicy,
 }
 impl Client {
+    pub fn chat_info(&self) -> Option<super::chat::Info> {
+        self.active
+            .as_ref()?
+            .chat
+            .as_ref()
+            .map(super::chat::Client::info)
+    }
+    pub fn chat_messages(&self) -> Vec<otrios_interfaces::chat::Message> {
+        self.active
+            .as_ref()
+            .and_then(|m| m.chat.as_ref())
+            .map_or_else(Vec::new, super::chat::Client::recent_messages)
+    }
+    pub fn set_chat_native(&mut self, native: bool) {
+        self.chat_native = native;
+    }
+    pub fn set_chat_credential(&mut self, credential: &str) -> Result<()> {
+        if !credential.is_empty() && !super::chat::valid_hex(credential, 32) {
+            return Err("Invalid guest credential".into());
+        }
+        self.chat_credential = (!credential.is_empty()).then(|| credential.into());
+        Ok(())
+    }
+    pub fn take_chat_credential(&mut self) -> Option<String> {
+        self.chat_new_credential.take()
+    }
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.chat_reduced_motion = reduced;
+        if let Some(chat) = self.active.as_mut().and_then(|m| m.chat.as_mut()) {
+            chat.quiet(reduced);
+        }
+    }
+    pub fn chat_disconnected(&mut self) {
+        if let Some(m) = &mut self.active
+            && let Some(chat) = &mut m.chat
+        {
+            chat.disconnected();
+            m.invalidate();
+        }
+    }
+    pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        if let Some(m) = &mut self.active
+            && let Some(chat) = &mut m.chat
+        {
+            self.chat_enabled = true;
+            chat.native(self.chat_native);
+            chat.quiet(self.chat_reduced_motion);
+            return chat.outgoing(self.chat_credential.clone());
+        }
+        if self.chat_enabled {
+            self.chat_enabled = false;
+            return super::chat::encode_command(&otrios_interfaces::chat::Command::Leave).map(Some);
+        }
+        Ok(None)
+    }
+    pub fn receive_chat(&mut self, bytes: &[u8]) -> Result<bool> {
+        let event = super::chat::decode_event(bytes)?;
+        let cosmetic = matches!(event, otrios_interfaces::chat::Event::Effect { .. });
+        let Some(m) = &mut self.active else {
+            return Ok(false);
+        };
+        let follow = m.text_document.as_ref().is_none_or(|v| v.at_tail());
+        let Some(chat) = &mut m.chat else {
+            return Ok(false);
+        };
+        let had_drafts = chat.has_drafts();
+        if let Some(token) = chat.receive(event, follow)? {
+            self.chat_credential = Some(token.clone());
+            self.chat_new_credential = Some(token);
+        }
+        if let Some(viewport) = &mut m.text_document {
+            chat.synchronize_document(viewport)?;
+        }
+        if had_drafts != chat.has_drafts() {
+            m.invalidate();
+        } else if !cosmetic {
+            m.invalidate_local_scene();
+        }
+        Ok(true)
+    }
+    pub fn effect_vertices(&self) -> Result<Vec<f32>> {
+        self.active
+            .as_ref()
+            .and_then(|m| m.chat.as_ref())
+            .map_or_else(|| Ok(vec![]), |chat| chat.effect_vertices())
+    }
     /// Local presentation only. A rejected size retains the old scene and state.
     pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
         if viewport
@@ -420,12 +513,21 @@ impl Client {
         if self.requested.is_some() || self.decision.is_some() {
             return false;
         }
-        self.local || self.active.as_mut().is_none_or(|m| m.doc.confirmed())
+        (self.local || self.active.as_mut().is_none_or(|m| m.doc.confirmed()))
+            && self
+                .active
+                .as_ref()
+                .is_none_or(|m| m.chat.as_ref().is_none_or(super::chat::Client::confirmed))
     }
     /// A reconnect/mount handshake must not strand an idle old runtime. Only
     /// unconfirmed user intent and active input prevent code replacement.
     pub fn reload_ready(&self) -> bool {
-        !self.input_busy() && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
+        !self.input_busy()
+            && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
+            && self
+                .active
+                .as_ref()
+                .is_none_or(|m| m.chat.as_ref().is_none_or(super::chat::Client::confirmed))
     }
     pub fn presentation(&self) -> Option<&Presentation> {
         self.active
@@ -504,6 +606,7 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
+            chat: self.chat_info(),
             sampled_monotonic_ms: self.wire_clock,
             dispatch: self.dispatch_usage(),
             state: self
@@ -564,6 +667,7 @@ impl Client {
         self.navigation = Some((ui_ref.into(), state_ref.into()));
     }
     pub fn reset_connection(&mut self) {
+        self.chat_disconnected();
         self.decision = None;
         self.auth_required = false;
         if let Some(r) = &mut self.requested {
@@ -1014,6 +1118,23 @@ impl Client {
             return Ok(false);
         }
         match h.operation {
+            Operation::Chat(command) => {
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let chat = m.chat.as_mut().ok_or("No chat presentation")?;
+                let action = chat.action(command)?;
+                if chat.editing() {
+                    m.keyboard.focus();
+                } else {
+                    m.keyboard.hide();
+                }
+                m.invalidate();
+                match action {
+                    super::chat::UiAction::Home => self.navigate("")?,
+                    super::chat::UiAction::BrowserLogin => self.navigate("monitoring")?,
+                    super::chat::UiAction::Changed => {}
+                };
+                return Ok(true);
+            }
             Operation::EditOrder => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 if !matches!(m.ui.presentation, Some(Presentation::Reorder { .. })) {
@@ -1149,6 +1270,15 @@ impl Client {
             } else if let Some(changed) = reader.pointer(&scene, event, at) {
                 return Ok(changed);
             }
+        }
+        if let Some(chat) = &mut m.chat
+            && let Some(changed) = chat.pointer(event, at)
+        {
+            if chat.editing() {
+                m.keyboard.focus();
+            }
+            m.invalidate();
+            return Ok(changed);
         }
         if let Some(scroll) = &mut m.text_scroll {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
@@ -1362,6 +1492,9 @@ impl Client {
             Some(Presentation::TextDocument { viewport, .. }) => {
                 super::document::scene::split(scene, u32::from(*viewport)).map(Some)
             }
+            Some(Presentation::Chat) => {
+                super::document::scene::split(scene, u32::from(super::chat::VIEWPORT)).map(Some)
+            }
             _ => Ok(None),
         }
     }
@@ -1369,10 +1502,18 @@ impl Client {
         self.active.as_ref().is_some_and(|m| m.keyboard.visible)
     }
     pub fn editing(&self) -> bool {
-        self.active.as_ref().is_some_and(|m| m.focus.is_some())
+        self.active.as_ref().is_some_and(|m| {
+            m.focus.is_some() || m.chat.as_ref().is_some_and(super::chat::Client::editing)
+        })
     }
     pub fn show_keyboard(&mut self) -> Result<bool> {
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        if let Some(chat) = &mut m.chat {
+            chat.action(1)?;
+            m.keyboard.focus();
+            m.invalidate();
+            return Ok(true);
+        }
         if let Some(Presentation::Editor { fields }) = &m.ui.presentation {
             for view in m.text_views.values_mut() {
                 view.cancel();
@@ -1391,6 +1532,14 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        if let Some(chat) = &mut m.chat {
+            let changed = chat.edit(edit)?;
+            if !chat.editing() {
+                m.keyboard.hide();
+            }
+            m.invalidate();
+            return Ok(changed);
+        }
         let Some(field) = m.focus else {
             return Ok(false);
         };
@@ -1472,6 +1621,14 @@ impl Client {
     }
     pub fn back(&mut self) -> Result<bool> {
         if let Some(m) = &mut self.active
+            && let Some(chat) = &mut m.chat
+            && chat.close_modal()
+        {
+            m.keyboard.hide();
+            m.invalidate();
+            return Ok(true);
+        }
+        if let Some(m) = &mut self.active
             && m.keyboard.visible
         {
             for view in m.text_views.values_mut() {
@@ -1495,6 +1652,23 @@ impl Client {
             return Ok(false);
         };
         m.now = now;
+        let (chat_changed, chat_bounds_changed, chat_effects) = if let Some(chat) = &mut m.chat {
+            chat.prepare(m.viewport, m.keyboard.visible, m.font.clone());
+            let had_drafts = chat.has_drafts();
+            let (changed, effects) = chat.tick(now, (wall.max(0) as u64).saturating_mul(1000));
+            if let Some(doc) = &mut m.text_document {
+                if doc.at_top() {
+                    chat.older();
+                }
+                chat.synchronize_document(doc)?;
+            }
+            (changed, had_drafts != chat.has_drafts(), effects)
+        } else {
+            (false, false, false)
+        };
+        if chat_bounds_changed {
+            m.invalidate();
+        }
         m.doc.set_wall_time(wall);
         m.doc.advance(now);
         let clock = m.wall != wall
@@ -1529,6 +1703,17 @@ impl Client {
         } else {
             false
         };
+        let paint = m
+            .chat
+            .as_mut()
+            .map_or(if document_changed { 2 } else { 0 }, |chat| {
+                chat.paint(now, chat_changed, document_changed, chat_effects)
+            });
+        if paint & 1 != 0 {
+            m.invalidate_local_scene();
+        } else if paint & 2 != 0 && m.chat.is_some() {
+            m.invalidate_presentation();
+        }
         let changed = m.ink.tick(now) || clock || scrolled;
         let edit = m.keyboard.tick(now);
         if changed {
@@ -1541,7 +1726,7 @@ impl Client {
         if let Some(edit) = edit {
             return self.hardware_edit(&edit);
         }
-        Ok(changed || document_changed)
+        Ok(changed || paint != 0)
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
         self.active
@@ -1658,6 +1843,11 @@ impl Client {
     }
 }
 impl Mount {
+    /// Local paint changed within the same layout and document clipping bounds.
+    fn invalidate_local_scene(&mut self) {
+        self.layout_scene.take();
+        self.invalidate_presentation();
+    }
     fn number(&self, id: u16) -> Result<u16> {
         match self.read(id)? {
             Value::Number(n) => Ok(n as u16),
@@ -1672,6 +1862,9 @@ impl Mount {
             .unwrap_or_else(|| self.doc.typed_value(id))
     }
     fn invalidate(&mut self) {
+        if let Some(chat) = &mut self.chat {
+            chat.prepare(self.viewport, self.keyboard.visible, self.font.clone());
+        }
         self.layout_scene.take();
         if let Some(s) = &mut self.text_document {
             s.bounds_dirty = true;
@@ -1720,7 +1913,12 @@ fn qualify(
     validate_ui_format(&ui)?;
     if ui.title.len() > 96
         || ui.selectors.len() > 128
-        || ui.handlers.len() > 128
+        || ui.handlers.len()
+            > if matches!(ui.presentation, Some(Presentation::Chat)) {
+                240
+            } else {
+                128
+            }
         || ui.navigation.len() > 32
     {
         return Err("Canvas format/limits invalid".into());
@@ -1769,6 +1967,11 @@ fn qualify(
             return Err("Gesture does not match its typed fields".into());
         }
         let valid = match &h.operation {
+            Operation::Chat(command) => {
+                h.fields.is_empty()
+                    && *command <= 200
+                    && matches!(ui.presentation, Some(Presentation::Chat))
+            }
             Operation::Back | Operation::Stress | Operation::SignOut => h.fields.is_empty(),
             Operation::EditOrder => {
                 h.fields.is_empty() && matches!(ui.presentation, Some(Presentation::Reorder { .. }))
@@ -1794,6 +1997,13 @@ fn qualify(
     }
     if let Some(p) = &ui.presentation {
         match p {
+            Presentation::Chat => {
+                if !ui.state_schema.fields.is_empty() || ui.behavior.is_some() {
+                    return Err(
+                        "Chat presentation has no replicated composer fields or guest code".into(),
+                    );
+                }
+            }
             Presentation::TextDocument {
                 viewport,
                 source,
@@ -2000,6 +2210,8 @@ fn qualify(
         None
     };
     let mut m = Mount {
+        chat: matches!(ui.presentation, Some(Presentation::Chat))
+            .then(super::chat::Client::default),
         text_document: if let Some(Presentation::TextDocument {
             viewport,
             source,
@@ -2009,6 +2221,13 @@ fn qualify(
         {
             Some(super::document::Viewport::new(
                 *viewport, source, *scale, *color,
+            )?)
+        } else if matches!(ui.presentation, Some(Presentation::Chat)) {
+            Some(super::document::Viewport::new(
+                super::chat::VIEWPORT,
+                &super::document::encode_resource("")?,
+                2,
+                super::chat::icons::TEXT,
             )?)
         } else {
             None
@@ -2140,7 +2359,12 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
         bindings.insert(s.local, value);
     }
     let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
-    m.layout.resolve_ordered(&bindings, m.viewport, &order)
+    let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
+    if let Some(chat) = &m.chat {
+        chat.scene(&scene, m.viewport, m.keyboard.visible)
+    } else {
+        Ok(scene)
+    }
 }
 fn resolve_scene(m: &Mount) -> Result<Scene> {
     // Candidate admission and tentative resize validation must always resolve
@@ -2150,6 +2374,9 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
 fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     let mut root = scene.root().clone();
     present_text_views(m, scene, &mut root);
+    if let (Some(chat), Some(viewport)) = (&m.chat, &m.text_document) {
+        chat.present_avatars(viewport, &mut root);
+    }
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);
     }

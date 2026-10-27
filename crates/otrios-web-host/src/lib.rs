@@ -132,6 +132,24 @@ impl CanvasApp {
     pub fn ink_outgoing(&mut self, now: f64) -> Vec<u8> {
         self.inner.ink_outgoing(now.max(0.) as u64)
     }
+    pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
+        self.inner.chat_outgoing()
+    }
+    pub fn chat_info(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.chat_info()).map_err(|e| e.to_string())
+    }
+    pub fn chat_messages(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.chat_messages()).map_err(|e| e.to_string())
+    }
+    pub fn receive_chat(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        self.inner.receive_chat(bytes)
+    }
+    pub fn chat_disconnected(&mut self) {
+        self.inner.chat_disconnected();
+    }
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.inner.set_reduced_motion(reduced);
+    }
     pub fn receive_ink(&mut self, bytes: &[u8], now: f64) -> Result<bool, String> {
         self.inner.receive_ink(bytes, now.max(0.) as u64)
     }
@@ -158,6 +176,7 @@ impl CanvasApp {
             Some(Presentation::Motion { .. }) => "motion",
             Some(Presentation::TextScroll { .. }) => "text-scroll",
             Some(Presentation::TextDocument { .. }) => "text-document",
+            Some(Presentation::Chat) => "chat",
             Some(Presentation::Editor { .. }) => "input",
             Some(Presentation::TouchPad { .. }) => "touch-pad",
             _ => "none",
@@ -244,6 +263,9 @@ impl CanvasApp {
     }
     pub fn reload_ready(&self) -> bool {
         self.inner.reload_ready()
+    }
+    pub fn effect_vertices(&self) -> Result<Vec<f32>, String> {
+        self.inner.effect_vertices()
     }
     pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
         Ok(self.compose()?.vertices.clone())

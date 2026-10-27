@@ -28,6 +28,8 @@ use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 mod apps;
 #[path = "server_auth.rs"]
 mod auth;
+#[path = "server_chat.rs"]
+mod chat;
 #[path = "server_ink.rs"]
 mod ink;
 #[path = "server_session.rs"]
@@ -42,6 +44,7 @@ struct StateConfig {
     presentation: Option<PathBuf>,
 }
 struct App {
+    chat: Arc<chat::Hub>,
     ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
     apps: Mutex<Option<apps::Hub>>,
@@ -679,6 +682,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (state_available, _) = watch::channel(false);
     let (release_changed, _) = watch::channel(release.clone());
     let app = Arc::new(App {
+        chat: chat::Hub::new(app_state.as_ref().map(|p| p.join("brass-relay.journal")))?,
         ink: ink::Room::new(trusted_peers + public_peers)?,
         auth,
         apps: Mutex::new(None),
@@ -733,6 +737,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     .delete(auth::logout)
                     .layer(DefaultBodyLimit::max(2048)),
             )
+            .route("/chat/identity", axum::routing::post(chat::identity))
             .route("/monitoring/presentation", get(auth::presentation))
             .route("/health", get(public_health))
             .fallback(navigation_entry)
@@ -774,6 +779,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .delete(auth::logout)
                 .layer(DefaultBodyLimit::max(2048)),
         )
+        .route("/chat/identity", axum::routing::post(chat::identity))
         .route("/monitoring/presentation", get(auth::presentation))
         .route("/releases/{id}/{*path}", get(release_asset))
         .route("/{*path}", get(source_asset))

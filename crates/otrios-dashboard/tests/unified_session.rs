@@ -39,7 +39,7 @@ fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     let catalog = otrios_core::canvas::encode_catalog(&decoded).unwrap();
     let touch = include_bytes!("../../../web/canvas/touch-input.mjs");
     let asset = |bytes: &[u8]| serde_json::json!({"bytes":bytes.len(),"sha256":otrios_core::canvas::hex(&otrios_core::canvas::hash(bytes))});
-    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v5","assets":{"web/index.html":asset(content.as_bytes()),"web/touch-input.mjs":asset(touch),"apps/catalog.flex":asset(&catalog)}})).unwrap();
+    let raw=serde_json::to_vec(&serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v6","assets":{"web/index.html":asset(content.as_bytes()),"web/touch-input.mjs":asset(touch),"apps/catalog.flex":asset(&catalog)}})).unwrap();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let folder = root.join(&id);
     fs::create_dir_all(folder.join("web")).unwrap();
@@ -48,7 +48,7 @@ fn publish(root: &Path, nonce: u8) -> serde_json::Value {
     fs::write(folder.join("web/touch-input.mjs"), touch).unwrap();
     fs::create_dir_all(folder.join("apps")).unwrap();
     fs::write(folder.join("apps/catalog.flex"), catalog).unwrap();
-    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v5"});
+    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v6"});
     let mut f = fs::File::create(root.join("pending.json")).unwrap();
     f.write_all(r.to_string().as_bytes()).unwrap();
     drop(f);
@@ -79,7 +79,7 @@ fn complete_release(root: &Path) -> Vec<u8> {
             assets.insert(name.clone(), item);
         }
     }
-    let raw=serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v5","assets":assets,"authority":authority}).to_string().into_bytes();
+    let raw=serde_json::json!({"format":"otrios-release-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v6","assets":assets,"authority":authority}).to_string().into_bytes();
     let id = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let folder = root.join(&id);
     fs::create_dir_all(&folder).unwrap();
@@ -89,7 +89,7 @@ fn complete_release(root: &Path) -> Vec<u8> {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, bytes).unwrap();
     }
-    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v5"});
+    let r = serde_json::json!({"id":id,"web_entry":format!("/releases/{id}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v6"});
     fs::write(root.join("pending.json"), r.to_string()).unwrap();
     fs::rename(root.join("pending.json"), root.join("current.json")).unwrap();
     catalog
@@ -311,7 +311,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     }
     // Stable alias is metadata only even when a caller asks for state.
     let mut alias = socket(&rig.public, "/release/events");
-    hello(&mut alias, 1, "otrios-canvas-sync-v5", true);
+    hello(&mut alias, 1, "otrios-canvas-sync-v6", true);
     assert!(matches!(
         event(&mut alias),
         ServerControl::Hello {
@@ -326,7 +326,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
     assert!(!matches!(early.read(), Ok(Message::Binary(_))));
     // A later complete publication recovers state without replacing the process/socket.
     let mut waiting = socket(&rig.public, "/session");
-    hello(&mut waiting, 1, "otrios-canvas-sync-v5", true);
+    hello(&mut waiting, 1, "otrios-canvas-sync-v6", true);
     assert!(matches!(
         event(&mut waiting),
         ServerControl::Hello {

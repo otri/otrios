@@ -7,7 +7,8 @@ it does not import another app's document or executable instance.
 
 ```text
 apps/
-  home/                         # Test Playground and Monitoring launcher
+  home/                         # Brass Relay, Test Playground and Monitoring
+  brass-relay/                  # Shared lounge; local composer and room channel
   test-playground/              # Seven demo destinations and editable card order
   component-playground/         # Controls, bounded Wasm reducer, ephemeral trails
   layout-lab/                   # Reusable components and five-minute signal
@@ -42,7 +43,9 @@ bind app identities and UI/State references to UI hashes; the UI binds optional
 behavior bytes and permitted field writes. Status/dependency strings do not grant
 capabilities. UI v2 supports typed, bounded fields and declared operations;
 custom reducers still use the small, separately versioned Wasm ABI v1.
-The text scrolling presentation uses UI v3; other shipped screens remain v2.
+Text panning uses UI v3, the document reader uses v4, and Brass Relay uses v5.
+Other shipped screens remain v2. Chat adds channel 3 under state protocol v6;
+the opening release-control envelope remains v1.
 Open Test Playground's **Text Panning** (`/test-playground/text-panning`) to inspect the
 retained full-page workload. Its offsets, velocity and FPS meter stay local.
 

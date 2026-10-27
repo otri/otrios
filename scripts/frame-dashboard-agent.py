@@ -193,6 +193,7 @@ class Host:
         self.a=a;self.release=release;self.stop=a.runtime_dir/('stop-'+uuid.uuid4().hex);self.ready=a.runtime_dir/('ready-'+uuid.uuid4().hex+'.json');self.ui_socket=a.runtime_dir/('ui-'+uuid.uuid4().hex+'.sock');self.offered_ui=None
         env=dict(os.environ,OTRIOS_RELEASE_ID=release)
         env['OTRIOS_RELEASE_SOCKET']=str(a.runtime_dir/'release.sock')
+        env.setdefault('OTRIOS_CHAT_IDENTITY',str(a.cache/'guest.identity'))
         command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
         if screen and screen!='locked':command+=['--screen',screen]
         command+=['--catalog-update-socket',str(self.ui_socket)]

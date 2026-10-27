@@ -16,6 +16,35 @@ pub struct Source {
     pub(super) blocks: Arc<Vec<Range<u32>>>,
 }
 impl Source {
+    /// Append immutable paragraph blocks without touching existing source ranges.
+    /// Each string is one block; callers split explicit newlines themselves.
+    pub fn append_blocks(&mut self, blocks: &[String]) -> Result<()> {
+        let extra = blocks.iter().try_fold(0usize, |sum, line| {
+            if line.contains(['\n', '\r'])
+                || !super::clusters::valid_context(line, MAX_CLUSTER_BYTES)
+            {
+                return Err("Invalid appended paragraph".to_string());
+            }
+            sum.checked_add(line.len() + 1)
+                .ok_or("Document size overflow".into())
+        })?;
+        if self.text.len() + extra > MAX_SOURCE_BYTES
+            || self.blocks.len() + blocks.len() > MAX_BLOCKS
+        {
+            return Err("Appended document exceeds source limits".into());
+        }
+        let text = Arc::make_mut(&mut self.text);
+        text.reserve_exact(extra);
+        let ranges = Arc::make_mut(&mut self.blocks);
+        ranges.reserve_exact(blocks.len());
+        for line in blocks {
+            text.push('\n');
+            let start = text.len() as u32;
+            text.push_str(line);
+            ranges.push(start..text.len() as u32);
+        }
+        Ok(())
+    }
     pub fn admit(resource: &TextResource) -> Result<Self> {
         let size = resource.decoded_bytes as usize;
         if size > MAX_SOURCE_BYTES

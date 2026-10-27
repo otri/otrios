@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Home and reusable input
 
-Home is an admitted Canvas launcher with two compact cards: **Test Playground**
-and **Monitoring**. Each card contains an icon, title and subheading. Test
+Home is an admitted Canvas launcher with three compact cards: **The Brass Relay**,
+**Test Playground** and **Monitoring**. Home and the lounge share neutral charcoal
+surfaces, restrained brass accents and the standard OTriOS heading. Each card contains an icon, title and subheading. Test
 Playground owns the seven demo destinations: Components, Layouts, Long Document,
 Text Panning, Text Input, 2D Animations and 3D Animations. Layouts has no extra
 links to the document or panning demos. Demo headers provide Back to their parent

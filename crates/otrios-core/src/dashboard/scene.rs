@@ -27,7 +27,11 @@ impl Scene {
         }
         fn validate(n: &SceneNode, depth: usize, ids: &mut BTreeSet<NodeId>) -> Result<()> {
             if depth > MAX_DEPTH || ids.len() >= MAX_NODES || !ids.insert(n.id) {
-                return Err("Scene depth/count/identity invalid".into());
+                return Err(format!(
+                    "Scene depth/count/identity invalid at node {} (depth {depth}, count {})",
+                    n.id,
+                    ids.len()
+                ));
             }
             let r = n.frame;
             if ![r.x, r.y, r.width, r.height]

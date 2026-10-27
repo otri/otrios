@@ -1,12 +1,12 @@
 # RFC 0022: A playful shared chat room
 
-Status: proposed for design review, 2026-10-27. This document and the interactive
-mockup are planning work only; implementation and deployment are deferred until
-the design is agreed. Native and browser ship the same room and behavior.
+Status: design approved and implementation qualified on the feature branch,
+2026-10-27. Native and browser use the same covered room runtime and presentation.
+Deployment evidence is recorded separately from the earlier mockup checks.
 
 ## Experience
 
-Add **Chat Room** to Home alongside Test Playground and Monitoring. The current
+Add **The Brass Relay** to Home alongside Test Playground and Monitoring. The current
 design direction is **The Brass Relay**: a Steampunk telegraph room. Use one
 standard OTriOS sans-serif heading with **OTriOS** as the back-navigation
 breadcrumb and **The Brass Relay** as the title. Omit the separate “Chat Room”
@@ -58,8 +58,8 @@ preview shows the current direction without overwriting the Lunar source.
   airships, diving helmets, automatons and peculiar inventions. Palette choices
   are additional, not counted
   as different icons. Cache their masks; require no downloaded images or emoji
-  font support. The mockup currently uses temporary stock symbols; the custom
-  collection has not yet been drawn. Use a consistent 24px outline family with
+  font support. The runtime now provides procedural clockwork emblems in a
+  consistent 24px outline family with
   readable small silhouettes, limited interior detail and optional brass/copper
   accents. Start the art direction with a clockwork raven, airship, diving helmet,
   brass goggles, pocket-watch automaton, piston teapot and winding-key beetle.
@@ -177,7 +177,8 @@ public ID as proof of ownership. Public events expose the ID, never the secret.
   connection, not every tab carrying the same guest cookie; the public Admin
   badge means that member has at least one currently authenticated connection.
 
-Normalize names and check collisions atomically. Start with 24 grapheme clusters
+Trim names and check lowercase collisions atomically. General Unicode
+normalization remains outside the reader's current typography support. Start with 24 grapheme clusters
 and 96 UTF-8 bytes, reject controls and misleading operator prefixes, and append
 a short stable discriminator to colliding display names. Render all names as
 text. Message records snapshot the sender's display name/avatar at send time;
@@ -190,8 +191,8 @@ must be tested rather than inferred from a browser mockup.
 Reuse one `/session` WebSocket and its stable v1 opening hello/upgrade envelope
 ([RFC 0009](0009-unified-server-session.md)). Add a separately framed chat message
 family after compatible negotiation; do not overload ephemeral ink channel 2.
-Allocate a currently unused channel during implementation. Bump the declared
-state protocol from sync v5 in browser, native and server together. Release
+The implementation allocates channel 3 and bumps the declared state protocol
+from sync v5 to v6 in browser, native and server together. Release
 discovery must continue to work with obsolete chat/state clients.
 
 Keep three bounded lanes with independent budgets:
@@ -204,11 +205,12 @@ Keep three bounded lanes with independent budgets:
 
 Reuse existing app mount and receipt infrastructure where it fits, but do not
 put every keystroke or the whole growing transcript into a repeatedly replicated
-app document. A small room state references bounded immutable history pages.
+app document. The implementation uses a separate authority-ordered journal and
+bounded sequence-page queries, with ephemeral events on the room channel.
 The authority serializes appends; this does not require implementing general
 transactions or a new CRDT engine. Runtime logic/tests belong in LGPL core;
 public packet contracts remain Apache interfaces. Exact packet schemas and
-storage adapter changes are part of the approved implementation, not this mockup.
+storage adapter live in the approved implementation; see [the room guide](../BRASS_RELAY.md).
 
 Each sent message includes a random client nonce. Within an identity, retries of
 that nonce return the original receipt/sequence; a changed payload conflicts.
@@ -288,8 +290,8 @@ retaining readable drafts and command results. Effects never force scrolling.
    signed release to existing native/web hosts with rollback evidence.
 
 No progress PRs. Open a PR only when its scoped delivery and required validation
-are complete, in accordance with AGENTS.md. This proposed plan does not authorize
-production implementation before the user's review.
+are complete, in accordance with AGENTS.md. The user approved implementation after the final Lounge review; deployment
+is covered by the standing existing-environment authorization.
 
 ## Acceptance evidence
 

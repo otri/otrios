@@ -46,6 +46,7 @@ pub fn keyboard() -> Element {
 /// Primitive-only icons keep launcher cards identical on both renderers.
 #[derive(Clone, Copy)]
 pub enum LaunchIcon {
+    Chat,
     Playground,
     Components,
     Layouts,
@@ -63,6 +64,14 @@ fn launch_icon(kind: LaunchIcon) -> Element {
             .corner_radius(1.0.into())
     };
     let parts = match kind {
+        LaunchIcon::Chat => vec![
+            bar(4., 8., 40., 28.),
+            rectangle(CARD).frame([8., 12., 32., 20.]),
+            bar(10., 34., 5., 10.),
+            bar(18., 18., 4., 4.),
+            bar(28., 18., 4., 4.),
+            bar(18., 27., 14., 3.),
+        ],
         LaunchIcon::Playground => vec![
             bar(0., 0., 20., 20.),
             circle(TEAL).frame([28., 0., 20., 20.]),

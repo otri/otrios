@@ -251,13 +251,38 @@ pub fn ascii_key(name: &str, shift: bool, caps: bool) -> Option<String> {
 }
 
 /// Example application-side editor, independent of the keyboard. Bounded UTF-8, grapheme boundaries.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TextBuffer {
     text: String,
     cursor: usize,
     anchor: usize,
+    max_bytes: usize,
+    multiline: bool,
+}
+impl Default for TextBuffer {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            cursor: 0,
+            anchor: 0,
+            max_bytes: 256,
+            multiline: false,
+        }
+    }
 }
 impl TextBuffer {
+    pub fn with_limit(max_bytes: usize) -> Self {
+        Self {
+            max_bytes: max_bytes.min(4096),
+            ..Self::default()
+        }
+    }
+    pub fn multiline(max_bytes: usize) -> Self {
+        Self {
+            multiline: true,
+            ..Self::with_limit(max_bytes)
+        }
+    }
     /// Replace a remote/shared value while preserving a valid local caret.
     pub fn replace(&mut self, text: &str) {
         self.text = text.into();
@@ -365,8 +390,10 @@ impl TextBuffer {
         match edit {
             Edit::Commit(s)
                 if !s.contains('\0')
-                    && !s.chars().any(char::is_control)
-                    && self.text.len() - (end - start) + s.len() <= 256 =>
+                    && !s.chars().any(|c| {
+                        c.is_control() && !(self.multiline && matches!(c, '\n' | '\t'))
+                    })
+                    && self.text.len() - (end - start) + s.len() <= self.max_bytes =>
             {
                 self.text.replace_range(start..end, s);
                 self.cursor = start + s.len();

@@ -6,6 +6,14 @@ pub(super) struct Heights {
     tree: Vec<f64>,
 }
 impl Heights {
+    pub fn push(&mut self, height: f64) {
+        let n = self.values.len();
+        let i = n + 1;
+        let low = i & i.wrapping_neg();
+        let sum = self.prefix(n) - self.prefix(i - low);
+        self.values.push(height);
+        self.tree.push(sum + height);
+    }
     pub fn new(values: Vec<f64>) -> Self {
         let mut this = Self {
             tree: vec![0.; values.len() + 1],

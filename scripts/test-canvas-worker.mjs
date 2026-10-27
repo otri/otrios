@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import {DocumentTransfer} from '../web/canvas/document-transfer.mjs';
-function workerContext(fields){if(fields.fake){fields.fake.document_frame??=()=> 'null';for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])fields.fake[key]??=()=>new Float32Array();fields.fake.overlay_draws??=()=>new Uint32Array();}return vm.createContext({DocumentTransfer,...fields});}
+function workerContext(fields){if(fields.fake){fields.fake.effect_vertices??=()=>new Float32Array();fields.fake.chat_info??=()=> 'null';fields.fake.chat_messages??=()=> '[]';fields.fake.chat_outgoing??=()=>null;fields.fake.chat_disconnected??=()=>{};fields.fake.screen??=()=> 'home';fields.fake.document_frame??=()=> 'null';for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])fields.fake[key]??=()=>new Float32Array();fields.fake.overlay_draws??=()=>new Uint32Array();}return vm.createContext({DocumentTransfer,...fields});}
 test('context loss pauses transfers and replay resends complete current resource dependencies',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const messages=[],fake={viewport_size:()=>[1280,800],path:()=> 'layout-lab/document',screen:()=> 'layout-document',epoch:()=>7,ui_ref:()=> 'app:layout-document/ui',state_ref:()=> 'app:layout-document/state',

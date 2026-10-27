@@ -82,6 +82,8 @@ pub enum GestureKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Operation {
+    /// Local shared-room UI command. The server independently authorizes wire commands.
+    Chat(u16),
     Set,
     Toggle,
     Cycle(Vec<u16>),
@@ -141,6 +143,8 @@ pub struct TextResource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Presentation {
+    /// Dynamic shared-room blocks and local composer, backed by session channel 3.
+    Chat,
     /// Read-only, wrapped document; source is not stored in scene text nodes.
     TextDocument {
         viewport: u16,

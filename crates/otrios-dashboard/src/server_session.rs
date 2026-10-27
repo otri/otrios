@@ -72,6 +72,7 @@ async fn open(
     } else {
         None
     };
+    let guest = chat::cookie(&headers);
     // Most session frames are small. Avoid reserving the library's 128 KiB
     // read buffer for every idle peer; complete messages retain the same bounds.
     ws.read_buffer_size(4096)
@@ -79,7 +80,7 @@ async fn open(
         .max_frame_size(otrios_core::canvas::MAX_BYTES + 1)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            peer(app, socket, public, key, control_only).await
+            peer(app, socket, public, key, control_only, guest).await
         })
 }
 async fn send(output: &mut SplitSink<WebSocket, Message>, message: Message) -> bool {
@@ -115,6 +116,7 @@ enum Event {
     Wire(Option<Result<Message, axum::Error>>),
     State(Option<apps::Packet>),
     Ink(Result<Vec<ink::Event>, tokio::sync::broadcast::error::RecvError>),
+    Chat(Result<Arc<chat::Packet>, tokio::sync::broadcast::error::RecvError>),
     Heartbeat,
 }
 async fn peer(
@@ -123,6 +125,7 @@ async fn peer(
     public: bool,
     key: Option<String>,
     control_only: bool,
+    guest: Option<String>,
 ) {
     let (mut output, mut input) = socket.split();
     let Ok(Some(Ok(Message::Text(bytes)))) =
@@ -181,6 +184,7 @@ async fn peer(
         ))
     });
     let mut ink: Option<ink::Subscription> = None;
+    let mut chat_peer: Option<chat::Peer> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     heartbeat.tick().await;
     let mut heard = Instant::now();
@@ -196,6 +200,7 @@ async fn peer(
             value=input.next()=>Event::Wire(value),
             value=state_rx.recv(),if state_enabled=>Event::State(value),
             value=async{match ink.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Ink(value),
+            value=async{match chat_peer.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Chat(value),
         };
         match event {
             Event::Release => {
@@ -245,6 +250,38 @@ async fn peer(
                             break;
                         }
                         match bytes.split_first() {
+                            Some((&otrios_interfaces::chat::CHANNEL, payload))
+                                if payload.len() <= otrios_interfaces::chat::MAX_COMMAND_BYTES =>
+                            {
+                                let peer = chat_peer.get_or_insert_with(|| {
+                                    app.chat.subscribe(
+                                        public,
+                                        guest.clone(),
+                                        key.clone(),
+                                        app.auth.clone(),
+                                    )
+                                });
+                                if peer.input.try_send(payload.to_vec()).is_err() {
+                                    // Only the room resynchronizes; release discovery and
+                                    // unrelated subscriptions retain their shared socket.
+                                    chat_peer = None;
+                                    let bytes = otrios_core::canvas::chat::encode_event(
+                                        &otrios_interfaces::chat::Event::Resync,
+                                    )
+                                    .unwrap();
+                                    if !send(
+                                        &mut output,
+                                        Message::Binary(
+                                            wire::frame(otrios_interfaces::chat::CHANNEL, bytes)
+                                                .into(),
+                                        ),
+                                    )
+                                    .await
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
                             Some((&wire::STATE, payload)) if !payload.is_empty() => {
                                 if decode_budget
                                     .admit(payload, decode_started.elapsed().as_millis() as u64)
@@ -356,6 +393,47 @@ async fn peer(
             }
             Event::Ink(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
             Event::Ink(Err(_)) => break,
+            Event::Chat(Ok(packet)) => {
+                let Some(peer) = chat_peer.as_mut() else {
+                    continue;
+                };
+                if packet.target.is_some_and(|id| id != peer.id)
+                    || (packet.target.is_none() && !peer.joined)
+                {
+                    continue;
+                }
+                if let Some(joined) = packet.joined {
+                    peer.joined = joined;
+                }
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(otrios_interfaces::chat::CHANNEL, packet.bytes.clone()).into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+            }
+            Event::Chat(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
+                chat_peer = None;
+                let bytes = otrios_core::canvas::chat::encode_event(
+                    &otrios_interfaces::chat::Event::Resync,
+                )
+                .expect("bounded event");
+                if !send(
+                    &mut output,
+                    Message::Binary(wire::frame(otrios_interfaces::chat::CHANNEL, bytes).into()),
+                )
+                .await
+                {
+                    break;
+                }
+            }
+            Event::Chat(Err(_)) => {
+                chat_peer = None;
+            }
         }
     }
     if let Some(worker) = worker {
@@ -377,6 +455,7 @@ mod tests {
         let (state_available, _) = watch::channel(true);
         let (release_changed, _) = watch::channel(release('a'));
         let app = Arc::new(App {
+            chat: chat::Hub::new(None).unwrap(),
             ink: ink::Room::new(8).unwrap(),
             auth: None,
             apps: Mutex::new(None),

@@ -135,6 +135,26 @@ pub struct Reader {
     profile: bool,
 }
 impl Reader {
+    /// Extend only the source/index tail. Existing pages, glyph meshes and
+    /// source anchors retain their identity across a chat append.
+    pub fn append_blocks(&mut self, blocks: &[String]) -> Result<()> {
+        let old = self.source.block_count();
+        self.source.append_blocks(blocks)?;
+        let average = f64::from(self.measure.font.glyph('n').advance) * self.measure.factor;
+        for range in &self.source.blocks[old..] {
+            self.heights.push(
+                (((range.end - range.start) as f64 * average / self.width)
+                    .ceil()
+                    .max(1.))
+                    * self.line_height,
+            );
+            self.summaries.push(Summary {
+                cursor: range.start,
+                ..Summary::default()
+            });
+        }
+        self.check_index()
+    }
     pub fn new(
         source: Source,
         font: Arc<Font>,
@@ -225,6 +245,19 @@ impl Reader {
         self.pages
             .iter()
             .flat_map(|((block, _), page)| page.lines.iter().map(|line| (*block as u32, *line)))
+    }
+    pub fn visible_block_origins(&self) -> Vec<(u32, f64)> {
+        let (start, _) = self.heights.locate(self.offset);
+        let mut result = Vec::new();
+        let mut y = self.heights.prefix(start);
+        for i in start..self.summaries.len() {
+            if y > self.offset + self.height {
+                break;
+            }
+            result.push((i as u32, y - self.offset));
+            y = self.heights.prefix(i + 1);
+        }
+        result
     }
     pub fn scroll_to(&mut self, offset: f64) {
         if offset.is_finite() {

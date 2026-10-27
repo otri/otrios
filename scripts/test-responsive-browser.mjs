@@ -46,7 +46,7 @@ try{
     const a=await page(1280,800,'home');
     for(const [width,height]of [[1280,800],[800,1280]]){
       await metrics(a,width,height);await ready(a,'home',width+'x'+height);
-      assert.deepEqual((await controls(a)).map(c=>c.label),['Test Playground','Monitoring']);
+      assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
       assert(!await evaluate(a,"document.querySelector('#view').getAttribute('aria-label').includes('OPEN')"));
       await screenshot(a,'home-'+width);
       await click(a,'Test Playground','test-playground',width+'x'+height);
@@ -62,7 +62,7 @@ try{
       }
       await click(a,'Home','home',width+'x'+height);
     }
-    const result={passed:true,checks:['Home has only Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and parent Back','Layouts has no extra demo links','Edit belongs to Test Playground']};
+    const result={passed:true,checks:['Home has Brass Relay, Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and parent Back','Layouts has no extra demo links','Edit belongs to Test Playground']};
     await writeFile(join(output,'playground-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--touch-replay')){
     const a=await page(1280,800,'component-playground'),results=[];
@@ -368,7 +368,7 @@ try{
     await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else{
   const a=await page(1280,800,'home');await screenshot(a,'home-landscape');
-  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.deepEqual(homeWide.map(c=>c.label),['Test Playground','Monitoring']);
+  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.deepEqual(homeWide.map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
   await click(a,'Components','component-playground','1280x800');
   const wide=await controls(a);await drag(a,'Linear slider',0.81);
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>75");
@@ -396,10 +396,10 @@ try{
   await metrics(b,800,1280);await ready(b,'component-playground','800x1280');
   await drag(b,'Linear slider',0.43);await wait(b,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
-  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,2);await screenshot(b,'home-portrait');
+  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,3);await screenshot(b,'home-portrait');
   await click(b,'Layouts','layout-lab','800x1280');await screenshot(b,'layout-lab-portrait');
   await click(a,'Home','home','1280x800');await click(a,'Layouts','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
-  const result={passed:true,checks:['landscape and portrait WebGL rendering','two-card Home composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layouts in both orientations'],screenshots:output,native_hardware:'not tested'};
+  const result={passed:true,checks:['landscape and portrait WebGL rendering','three-card Home composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layouts in both orientations'],screenshots:output,native_hardware:'not tested'};
   await writeFile(join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
   }
 }finally{

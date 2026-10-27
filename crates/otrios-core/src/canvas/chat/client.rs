@@ -1,0 +1,1142 @@
+// SPDX-License-Identifier: LGPL-3.0-only
+//! Mount-local room state. Keystrokes never become CRDT writes.
+use super::*;
+use crate::dashboard::{font::Font, keyboard::TextBuffer};
+use otrios_interfaces::{
+    keyboard::Edit,
+    scene::{PointerEvent, PointerPhase},
+};
+use std::collections::{BTreeMap, VecDeque};
+use unicode_segmentation::UnicodeSegmentation;
+pub const VIEWPORT: u16 = 60_000;
+pub(super) const HISTORY_WINDOW: usize = 1024;
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Panel {
+    None,
+    Members,
+    Profile,
+    Person,
+    Kick,
+    Help,
+    Auth,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Focus {
+    Compose,
+    Name,
+    Username,
+    Password,
+}
+pub(super) struct RemoteDraft {
+    pub text: String,
+    pub expires: u64,
+    pub generation: u64,
+    pub revision: u64,
+}
+pub(super) struct Particle {
+    pub at: u64,
+    pub origin: [f32; 2],
+    pub velocity: [f32; 2],
+    pub steam: bool,
+}
+pub(super) struct Pending {
+    nonce: String,
+    epoch: u64,
+    text: String,
+    sent: bool,
+}
+pub(crate) enum Action {
+    Changed,
+    Home,
+    BrowserLogin,
+}
+pub struct Client {
+    pub(super) you: Option<Member>,
+    pub(super) members: Vec<Member>,
+    pub(super) drafts: BTreeMap<String, RemoteDraft>,
+    pub(super) messages: VecDeque<Message>,
+    headers: BTreeMap<u32, u8>,
+    next_block: u32,
+    next_byte: u32,
+    source_messages: BTreeMap<u64, (u32, u32)>,
+    source_day: Option<u64>,
+    paint_at: u64,
+    paint_flags: u8,
+    pub(super) panel: Panel,
+    pub(super) focus: Option<Focus>,
+    pub(super) compose: TextBuffer,
+    pub(super) nickname: TextBuffer,
+    pub(super) username: TextBuffer,
+    pub(super) password: TextBuffer,
+    pub(super) avatar: u8,
+    pub(super) avatar_page: u8,
+    pub(super) member_page: usize,
+    pub(super) selected: Option<Member>,
+    pub(super) private: bool,
+    pub(super) effects: u8,
+    pub(super) native: bool,
+    pub(super) online: bool,
+    pub(super) temporary: bool,
+    pub(super) kicked: Option<(String, u64)>,
+    pub(super) notice: String,
+    notice_until: u64,
+    pub(super) now: u64,
+    pub(super) wall: u64,
+    pub(super) particles: Vec<Particle>,
+    pub(super) input_view: super::super::text_viewport::TextViewport,
+    pub(super) new_messages: usize,
+    pub(super) older: bool,
+    pub(super) history_wait: bool,
+    pub(super) pending: VecDeque<Pending>,
+    queue: VecDeque<Command>,
+    joining: bool,
+    epoch: u64,
+    draft_generation: u64,
+    draft_revision: u64,
+    draft_sent: String,
+    draft_at: u64,
+    draft_dirty: bool,
+    disclosed: bool,
+    last_effect: u64,
+    pub(super) reset: bool,
+    pub(super) append: Vec<String>,
+    pub(super) prepend: Vec<String>,
+    pub(super) tail: bool,
+    pub(super) font: Option<std::sync::Arc<Font>>,
+    pub(super) viewport: [f32; 2],
+}
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Info {
+    pub participant: String,
+    pub name: String,
+    pub avatar: u8,
+    pub admin: bool,
+    pub online: bool,
+    pub messages: usize,
+    pub first_sequence: u64,
+    pub last_sequence: u64,
+    pub pending: usize,
+    pub drafts: usize,
+    pub history_loading: bool,
+    pub kicked: bool,
+}
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            you: None,
+            members: vec![],
+            drafts: BTreeMap::new(),
+            messages: VecDeque::new(),
+            headers: BTreeMap::new(),
+            next_block: 1,
+            next_byte: 0,
+            source_messages: BTreeMap::new(),
+            source_day: None,
+            paint_at: 0,
+            paint_flags: 0,
+            panel: Panel::None,
+            focus: None,
+            compose: TextBuffer::multiline(2048),
+            nickname: TextBuffer::with_limit(96),
+            username: TextBuffer::with_limit(320),
+            password: TextBuffer::with_limit(1024),
+            avatar: 0,
+            avatar_page: 0,
+            member_page: 0,
+            selected: None,
+            private: false,
+            effects: 2,
+            native: false,
+            online: false,
+            temporary: false,
+            kicked: None,
+            notice: String::new(),
+            notice_until: 0,
+            now: 0,
+            wall: 0,
+            particles: vec![],
+            input_view: Default::default(),
+            new_messages: 0,
+            older: false,
+            history_wait: false,
+            pending: VecDeque::new(),
+            queue: VecDeque::new(),
+            joining: false,
+            epoch: 0,
+            draft_generation: 0,
+            draft_revision: 0,
+            draft_sent: String::new(),
+            draft_at: 0,
+            draft_dirty: false,
+            disclosed: false,
+            last_effect: 0,
+            reset: false,
+            append: vec![],
+            prepend: vec![],
+            tail: false,
+            font: None,
+            viewport: [1280., 800.],
+        }
+    }
+}
+pub(super) fn blocks(message: &Message) -> Vec<String> {
+    let minutes = message.at / 60_000;
+    let header = format!(
+        "{:02}:{:02}  {}",
+        minutes / 60 % 24,
+        minutes % 60,
+        message.sender.name
+    );
+    let body = if message.kind == Kind::Action {
+        format!("* {} {}", message.sender.name, message.text)
+    } else {
+        message.text.clone()
+    };
+    let mut lines = vec![header];
+    lines.extend(body.split('\n').map(|s| s.replace('\r', "")));
+    lines.push(String::new());
+    lines
+}
+// Gregorian civil date from Unix days. Timestamps and separators use UTC.
+fn day_label(day: u64, today: u64) -> String {
+    if day == today {
+        return "Today".into();
+    }
+    if day.checked_add(1) == Some(today) {
+        return "Yesterday".into();
+    }
+    let z = day.min(3_000_000) as i64 + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(m <= 2);
+    format!("{year:04}-{m:02}-{d:02}")
+}
+impl Client {
+    pub(crate) fn has_drafts(&self) -> bool {
+        !self.drafts.is_empty()
+    }
+    /// Sample input/physics at host cadence, but compose animation at most 60 Hz.
+    /// Latch the final turn so an effect or coast ending between frames is painted.
+    pub(crate) fn paint(&mut self, now: u64, layout: bool, document: bool, effects: bool) -> u8 {
+        self.paint_flags |= u8::from(layout) | (u8::from(document) << 1) | (u8::from(effects) << 2);
+        if self.paint_flags == 0 || now.saturating_sub(self.paint_at) < 16 {
+            return 0;
+        }
+        self.paint_at = now;
+        std::mem::take(&mut self.paint_flags)
+    }
+    pub(crate) fn prepare(
+        &mut self,
+        size: [f32; 2],
+        keyboard: bool,
+        font: Option<std::sync::Arc<Font>>,
+    ) {
+        self.viewport = [size[0], super::view::room_height(size, keyboard)];
+        self.font = font;
+    }
+    pub(crate) fn native(&mut self, native: bool) {
+        self.native = native;
+    }
+    pub fn info(&self) -> Info {
+        Info {
+            participant: self
+                .you
+                .as_ref()
+                .map_or_else(String::new, |y| y.profile.id.clone()),
+            name: self
+                .you
+                .as_ref()
+                .map_or_else(String::new, |y| y.profile.name.clone()),
+            avatar: self.avatar,
+            admin: self.you.as_ref().is_some_and(|y| y.admin),
+            online: self.online,
+            messages: self.messages.len(),
+            first_sequence: self.messages.front().map_or(0, |m| m.sequence),
+            last_sequence: self.messages.back().map_or(0, |m| m.sequence),
+            pending: self.pending.len(),
+            drafts: self.drafts.len(),
+            history_loading: self.history_wait,
+            kicked: self.kicked.is_some(),
+        }
+    }
+    pub fn recent_messages(&self) -> Vec<Message> {
+        self.messages
+            .iter()
+            .rev()
+            .take(64)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+    pub(crate) fn close_modal(&mut self) -> bool {
+        if self.panel == Panel::None {
+            return false;
+        }
+        self.panel = Panel::None;
+        self.focus = None;
+        self.password.replace("");
+        true
+    }
+    pub(crate) fn synchronize_document(
+        &mut self,
+        viewport: &mut super::super::document::Viewport,
+    ) -> Result<()> {
+        if self.reset || !self.prepend.is_empty() {
+            let old_anchor = viewport.anchor().and_then(|anchor| {
+                self.source_messages
+                    .iter()
+                    .rev()
+                    .find(|(_, (block, _))| *block <= anchor.block)
+                    .map(|(sequence, (block, byte))| (*sequence, anchor, *block, *byte))
+            });
+            let mut source = super::super::document::Source::new(String::new())?;
+            self.headers.clear();
+            self.source_messages.clear();
+            self.next_block = 1;
+            self.next_byte = 0;
+            self.source_day = None;
+            let messages = self.messages.iter().cloned().collect::<Vec<_>>();
+            let mut lines = vec![];
+            for message in &messages {
+                lines.extend(self.message_blocks(message));
+            }
+            let anchor = old_anchor.and_then(|(sequence, mut anchor, block, byte)| {
+                self.source_messages
+                    .get(&sequence)
+                    .map(|(new_block, new_byte)| {
+                        anchor.block = anchor.block - block + new_block;
+                        anchor.source_byte = anchor.source_byte.saturating_sub(byte) + new_byte;
+                        anchor
+                    })
+            });
+            source.append_blocks(&lines)?;
+            viewport.replace_source(source, anchor);
+            self.reset = false;
+            self.prepend.clear();
+            self.append.clear();
+        } else if !self.append.is_empty() {
+            viewport.append_blocks(&std::mem::take(&mut self.append), self.tail)?;
+        }
+        if self.tail {
+            viewport.follow_tail();
+            self.tail = false;
+            self.new_messages = 0;
+        }
+        Ok(())
+    }
+    fn message_blocks(&mut self, message: &Message) -> Vec<String> {
+        self.source_messages
+            .insert(message.sequence, (self.next_block, self.next_byte));
+        let day = message.at / 86_400_000;
+        let mut lines = vec![];
+        if self.source_day != Some(day) {
+            lines.push(day_label(day, self.wall / 86_400_000));
+            self.source_day = Some(day);
+        }
+        self.headers
+            .insert(self.next_block + lines.len() as u32, message.sender.avatar);
+        lines.extend(blocks(message));
+        self.next_block += lines.len() as u32;
+        self.next_byte += lines.iter().map(|line| line.len() as u32 + 1).sum::<u32>();
+        lines
+    }
+    fn say(&mut self, text: impl Into<String>) {
+        self.notice = text.into();
+        self.notice_until = self.now + 4000;
+    }
+    fn queue(&mut self, command: Command) {
+        if self.queue.len() < 16 {
+            self.queue.push_back(command);
+        } else {
+            self.say("Room command queue is full; please wait");
+        }
+    }
+    pub fn disconnected(&mut self) {
+        self.online = false;
+        self.joining = false;
+        self.drafts.clear();
+        self.draft_generation = 0;
+        self.queue.clear();
+        for pending in &mut self.pending {
+            pending.sent = false;
+        }
+        self.draft_dirty = true;
+    }
+    pub fn confirmed(&self) -> bool {
+        self.pending.is_empty()
+    }
+    pub(crate) fn present_avatars(
+        &self,
+        viewport: &super::super::document::Viewport,
+        root: &mut otrios_interfaces::scene::SceneNode,
+    ) {
+        use otrios_interfaces::scene::Rect;
+        let (clip, visible) = viewport.visible_blocks();
+        if clip[3] <= clip[1] || clip[0] < 64. {
+            return;
+        }
+        let mut nodes = vec![];
+        for (block, y) in visible {
+            if y + 28. < clip[1] || y - 4. >= clip[3] {
+                continue;
+            }
+            if let Some(id) = self.headers.get(&block) {
+                let mut icon = super::icons::avatar(*id, 5_000_000 + block * 32, 32.);
+                icon.frame = Rect::new(12., y - clip[1] - 4., 32., 32.);
+                nodes.push(icon);
+            }
+        }
+        if nodes.is_empty() {
+            return;
+        }
+        let layer = crate::dashboard::components::canvas(
+            4_000_000,
+            Rect::new(clip[0] - 64., clip[1], 64., clip[3] - clip[1]),
+            nodes,
+        );
+        let at = root
+            .children
+            .iter()
+            .position(|node| node.id == u32::from(VIEWPORT))
+            .unwrap_or(0);
+        root.children.insert(at, layer);
+    }
+    pub fn editing(&self) -> bool {
+        self.focus.is_some()
+    }
+    pub fn quiet(&mut self, reduced: bool) {
+        if reduced {
+            self.effects = 0;
+            self.particles.clear();
+        }
+    }
+    pub fn outgoing(&mut self, credential: Option<String>) -> Result<Option<Vec<u8>>> {
+        if !self.online && !self.joining && self.kicked.is_none() {
+            self.joining = true;
+            return encode_command(&Command::Join { credential }).map(Some);
+        }
+        if !self.online {
+            return Ok(None);
+        }
+        if let Some(command) = self.queue.pop_front() {
+            return encode_command(&command).map(Some);
+        }
+        if let Some(pending) = self.pending.iter_mut().find(|p| !p.sent) {
+            pending.sent = true;
+            return encode_command(&Command::Send {
+                epoch: pending.epoch,
+                nonce: pending.nonce.clone(),
+                text: pending.text.clone(),
+            })
+            .map(Some);
+        }
+        let wanted = if self.private
+            || self.compose.text().starts_with('/') && !self.compose.text().starts_with("//")
+        {
+            String::new()
+        } else {
+            let mut result = String::new();
+            for cluster in self.compose.text().graphemes(true).take(256) {
+                if result.len() + cluster.len() > 1024 {
+                    break;
+                }
+                result.push_str(cluster);
+            }
+            result
+        };
+        if self.draft_generation != 0
+            && ((self.draft_dirty && self.now.saturating_sub(self.draft_at) >= 100)
+                || (wanted.is_empty() && !self.draft_sent.is_empty())
+                || (!wanted.is_empty() && self.now.saturating_sub(self.draft_at) >= 1000))
+        {
+            self.draft_revision = self.draft_revision.saturating_add(1);
+            self.draft_at = self.now;
+            self.draft_dirty = false;
+            self.draft_sent = wanted.clone();
+            return encode_command(&Command::Draft {
+                generation: self.draft_generation,
+                revision: self.draft_revision,
+                text: wanted,
+            })
+            .map(Some);
+        }
+        Ok(None)
+    }
+    fn receive_message(&mut self, message: Message, follow: bool) {
+        if self.messages.iter().any(|m| m.sequence == message.sequence) {
+            return;
+        }
+        if self.messages.len() >= HISTORY_WINDOW {
+            if !follow {
+                self.new_messages += 1;
+                return;
+            }
+            for _ in 0..super::PAGE_MESSAGES.min(self.messages.len()) {
+                self.messages.pop_front();
+            }
+            self.reset = true;
+        }
+        let lines = self.message_blocks(&message);
+        self.append.extend(lines);
+        self.messages.push_back(message);
+        self.tail |= follow;
+        if !follow {
+            self.new_messages += 1;
+        }
+    }
+    pub fn receive(&mut self, event: Event, follow: bool) -> Result<Option<String>> {
+        let mut credential = None;
+        match event {
+            Event::Left => self.disconnected(),
+            Event::Welcome {
+                you,
+                temporary,
+                credential: token,
+                epoch,
+                members,
+                messages,
+                oldest,
+                ..
+            } => {
+                self.temporary = temporary;
+                self.epoch = epoch;
+                self.avatar = you.profile.avatar;
+                self.nickname.replace(&you.profile.name);
+                self.you = Some(you);
+                self.members = members;
+                self.online = true;
+                self.joining = true;
+                self.kicked = None;
+                credential = token;
+                if self.messages.is_empty() {
+                    self.reset = true;
+                    self.tail = true;
+                }
+                for message in messages {
+                    self.receive_message(message, follow || self.reset);
+                }
+                self.older = self.messages.front().is_some_and(|m| m.sequence > oldest);
+                self.history_wait = false;
+            }
+            Event::Members { members } => {
+                if members.len() > 68 {
+                    return Err("Roster exceeds room capacity".into());
+                }
+                if let Some(you) = &self.you
+                    && let Some(member) = members.iter().find(|m| m.profile.id == you.profile.id)
+                {
+                    let mut member = member.clone();
+                    member.admin = you.admin;
+                    self.you = Some(member);
+                }
+                self.members = members;
+                self.drafts
+                    .retain(|id, _| self.members.iter().any(|m| m.profile.id == *id));
+            }
+            Event::Message { message } => {
+                let mine = self
+                    .you
+                    .as_ref()
+                    .is_some_and(|you| you.profile.id == message.sender.id);
+                self.receive_message(message, follow || mine);
+            }
+            Event::Receipt { nonce, .. } => {
+                self.pending.retain(|p| p.nonce != nonce);
+            }
+            Event::History {
+                messages,
+                oldest,
+                before,
+            } => {
+                self.history_wait = false;
+                if before == u64::MAX {
+                    self.messages.clear();
+                    self.append.clear();
+                    self.reset = true;
+                    self.tail = true;
+                    for message in messages {
+                        self.receive_message(message, true);
+                    }
+                } else {
+                    let incoming = messages
+                        .into_iter()
+                        .filter(|m| !self.messages.iter().any(|old| old.sequence == m.sequence))
+                        .collect::<Vec<_>>();
+                    for message in &incoming {
+                        self.prepend.extend(blocks(message));
+                    }
+                    for message in incoming.into_iter().rev() {
+                        self.messages.push_front(message);
+                    }
+                    if self.messages.len() > HISTORY_WINDOW {
+                        self.messages.truncate(HISTORY_WINDOW);
+                        self.reset = true;
+                    }
+                }
+                self.older = self.messages.front().is_some_and(|m| m.sequence > oldest);
+            }
+            Event::DraftLease { generation } => {
+                self.draft_generation = generation;
+                self.draft_revision = 0;
+                self.draft_dirty = true;
+            }
+            Event::Draft {
+                participant,
+                generation,
+                revision,
+                text,
+                expires,
+            } => {
+                if self
+                    .you
+                    .as_ref()
+                    .is_some_and(|you| you.profile.id == participant)
+                {
+                    if generation == self.draft_generation {
+                        self.draft_revision = self.draft_revision.max(revision);
+                    }
+                    return Ok(credential);
+                }
+                if text.len() > 1024 {
+                    return Err("Draft byte limit".into());
+                }
+                if let Some(old) = self.drafts.get(&participant)
+                    && old.generation == generation
+                    && old.revision >= revision
+                {
+                    return Ok(credential);
+                }
+                if !text.is_empty()
+                    && self.drafts.len() < 68
+                    && self.members.iter().any(|m| m.profile.id == participant)
+                {
+                    let deadline = self.now + expires.saturating_sub(self.wall).min(3000);
+                    self.drafts.insert(
+                        participant,
+                        RemoteDraft {
+                            text,
+                            expires: deadline,
+                            generation,
+                            revision,
+                        },
+                    );
+                    self.emit(
+                        false,
+                        [self.viewport[0].min(1000.) * 0.5, self.viewport[1] - 136.],
+                    );
+                } else {
+                    self.drafts.remove(&participant);
+                }
+            }
+            Event::Effect { kind, .. } => self.emit(
+                kind == "steam",
+                [self.viewport[0] * 0.5, self.viewport[1] - 100.],
+            ),
+            Event::Permissions { admin } => {
+                if let Some(you) = &mut self.you {
+                    you.admin = admin;
+                }
+                self.password.replace("");
+                self.panel = Panel::None;
+                self.focus = None;
+                self.say(if admin {
+                    "Monitoring admin signed in"
+                } else {
+                    "Admin signed out"
+                });
+            }
+            Event::Kicked { reason, rejoin_at } => {
+                self.online = false;
+                self.joining = false;
+                self.kicked = Some((reason, rejoin_at));
+                self.drafts.clear();
+                self.particles.clear();
+                self.queue.clear();
+                self.panel = Panel::None;
+                self.focus = None;
+                self.pending.clear();
+            }
+            Event::Error { message, nonce } => {
+                if let Some(nonce) = nonce.as_ref()
+                    && let Some(p) = self.pending.iter().find(|p| p.nonce == *nonce)
+                    && self.compose.text().is_empty()
+                {
+                    self.compose.replace(&p.text);
+                    self.compose.place_cursor(p.text.len());
+                }
+                self.pending.retain(|p| Some(&p.nonce) != nonce.as_ref());
+                self.joining = true;
+                self.say(message);
+            }
+            Event::Resync => self.disconnected(),
+        }
+        Ok(credential)
+    }
+    pub fn tick(&mut self, now: u64, wall: u64) -> (bool, bool) {
+        let date_changed = self.wall != 0 && self.wall / 86_400_000 != wall / 86_400_000;
+        if date_changed && !self.messages.is_empty() {
+            self.reset = true;
+        }
+        self.now = now;
+        self.wall = wall;
+        let old = self.particles.len();
+        self.particles.retain(|p| now.saturating_sub(p.at) < 900);
+        let drafts = self.drafts.len();
+        self.drafts.retain(|_, d| d.expires > now);
+        let clear = !self.notice.is_empty() && now >= self.notice_until;
+        if clear {
+            self.notice.clear();
+        }
+        let moving = self.input_view.tick(now);
+        (
+            date_changed || drafts != self.drafts.len() || clear || moving,
+            old != 0,
+        )
+    }
+    fn emit(&mut self, steam: bool, position: [f32; 2]) {
+        if self.effects == 0 || self.now.saturating_sub(self.last_effect) < 40 {
+            return;
+        }
+        self.last_effect = self.now;
+        for i in 0..if self.effects == 1 { 1 } else { 3 } {
+            if self.particles.len() >= 128 {
+                break;
+            }
+            let angle = (self.now % 127) as f32 * 0.07 + i as f32 * 1.9;
+            self.particles.push(Particle {
+                at: self.now,
+                origin: position,
+                velocity: [angle.sin() * 45., -35. - angle.cos().abs() * 45.],
+                steam,
+            });
+        }
+    }
+    fn editor(&self) -> &TextBuffer {
+        match self.focus {
+            Some(Focus::Name) => &self.nickname,
+            Some(Focus::Username) => &self.username,
+            Some(Focus::Password) => &self.password,
+            _ => &self.compose,
+        }
+    }
+    pub fn edit(&mut self, edit: &Edit) -> Result<bool> {
+        if edit == &Edit::Enter {
+            if self.focus == Some(Focus::Compose) {
+                self.send()?;
+            } else {
+                self.focus = None;
+            }
+            return Ok(true);
+        }
+        if let Edit::Tab { .. } = edit {
+            self.focus = Some(match self.focus {
+                Some(Focus::Username) => Focus::Password,
+                Some(Focus::Password) => Focus::Username,
+                _ => Focus::Compose,
+            });
+            return Ok(true);
+        }
+        let buffer = match self.focus {
+            Some(Focus::Compose) => &mut self.compose,
+            Some(Focus::Name) => &mut self.nickname,
+            Some(Focus::Username) => &mut self.username,
+            Some(Focus::Password) => &mut self.password,
+            None => return Ok(false),
+        };
+        let changed = buffer.edit(edit);
+        self.draft_dirty |= self.focus == Some(Focus::Compose) && changed;
+        if let Some(font) = &self.font {
+            let width = self.input_width();
+            let content = font.text_width(&self.compose.display(true), 2.);
+            self.input_view.bounds(content, width);
+            self.input_view.follow(
+                self.compose.caret_x(font, 2.),
+                font.text_width("|", 2.),
+                width,
+                self.now,
+            );
+        }
+        if changed && self.focus == Some(Focus::Compose) {
+            self.emit(false, [self.input_left() + 32., self.compose_y() + 12.]);
+        }
+        Ok(changed)
+    }
+    fn send(&mut self) -> Result<()> {
+        let text = self.compose.text().trim().to_owned();
+        if text.is_empty() {
+            return Ok(());
+        }
+        if text == "/help" {
+            self.panel = Panel::Help;
+            self.compose.replace("");
+            return Ok(());
+        }
+        if text == "/who" {
+            self.panel = Panel::Members;
+            self.compose.replace("");
+            return Ok(());
+        }
+        if text == "/avatar" {
+            self.open_profile();
+            self.compose.replace("");
+            return Ok(());
+        }
+        if let Some(name) = text.strip_prefix("/nick ") {
+            self.queue(Command::Profile {
+                name: name.into(),
+                avatar: self.avatar,
+            });
+            self.compose.replace("");
+            return Ok(());
+        }
+        if let Some(who) = text.strip_prefix("/kick ") {
+            let selected = self
+                .members
+                .iter()
+                .find(|m| m.profile.name.to_lowercase() == who.to_lowercase())
+                .cloned();
+            if let Some(selected) = selected {
+                self.selected = Some(selected);
+                self.panel = Panel::Kick;
+                self.compose.replace("");
+            } else {
+                self.say("Use a full member name, or select them in Members");
+            }
+            return Ok(());
+        }
+        if !self.online {
+            self.say("Reconnect before sending");
+            return Ok(());
+        }
+        if self.pending.len() >= 8 {
+            self.say("Wait for the pending dispatches");
+            return Ok(());
+        }
+        self.pending.push_back(Pending {
+            nonce: random(16)?,
+            epoch: (self.wall / 600_000).max(self.epoch),
+            text,
+            sent: false,
+        });
+        self.compose.replace("");
+        self.input_view = Default::default();
+        self.draft_dirty = true;
+        self.tail = true;
+        Ok(())
+    }
+    fn open_profile(&mut self) {
+        if let Some(you) = &self.you {
+            self.nickname.replace(&you.profile.name);
+            self.nickname.place_cursor(you.profile.name.len());
+            self.avatar = you.profile.avatar;
+            self.avatar_page = self.avatar / 16;
+        }
+        self.panel = Panel::Profile;
+        self.focus = None;
+    }
+    pub(crate) fn action(&mut self, command: u16) -> Result<Action> {
+        match command {
+            0 => return Ok(Action::Home),
+            1 => {
+                self.focus = Some(Focus::Compose);
+                self.queue(Command::ClaimDraft);
+                if !self.disclosed && !self.private {
+                    self.say("Live drafts are visible before sending");
+                    self.disclosed = true;
+                }
+            }
+            2 => self.send()?,
+            3 => {
+                self.panel = Panel::Members;
+                self.focus = None;
+            }
+            4 => self.open_profile(),
+            5 => {
+                self.private = !self.private;
+                self.draft_dirty = true;
+                self.notice.clear();
+            }
+            6 => {
+                self.panel = Panel::None;
+                self.focus = None;
+                self.password.replace("");
+            }
+            7 => {
+                self.queue(Command::Profile {
+                    name: self.nickname.text().into(),
+                    avatar: self.avatar,
+                });
+                self.panel = Panel::None;
+                self.focus = None;
+            }
+            8 => {
+                self.focus = Some(Focus::Name);
+            }
+            9 => {
+                self.avatar_page = self.avatar_page.saturating_sub(1);
+            }
+            10 => {
+                self.avatar_page = (self.avatar_page + 1).min(3);
+            }
+            11 => {
+                if self.kicked.as_ref().is_none_or(|(_, at)| self.wall >= *at) {
+                    self.kicked = None;
+                    self.joining = false;
+                }
+            }
+            12 => {
+                self.new_messages = 0;
+                self.tail = true;
+                self.history_wait = true;
+                self.queue(Command::History { before: u64::MAX });
+            }
+            13 => self.older(),
+            14 => {
+                if self.you.as_ref().is_some_and(|y| y.admin) {
+                    self.queue(Command::SignOut);
+                } else if self.native {
+                    self.panel = Panel::Auth;
+                    self.focus = Some(Focus::Username);
+                } else {
+                    return Ok(Action::BrowserLogin);
+                }
+            }
+            15 => self.focus = Some(Focus::Username),
+            16 => self.focus = Some(Focus::Password),
+            17 => {
+                self.queue(Command::Authenticate {
+                    username: self.username.text().into(),
+                    password: self.password.text().into(),
+                });
+                self.password.replace("");
+                self.focus = None;
+            }
+            18 => {
+                self.effects = (self.effects + 1) % 3;
+                if self.effects == 0 {
+                    self.particles.clear();
+                }
+            }
+            19 => {
+                self.panel = Panel::Help;
+                self.focus = None;
+            }
+            20..=83 => self.avatar = (command - 20) as u8,
+            100..=167 => {
+                self.selected = self.members.get((command - 100) as usize).cloned();
+                self.panel = Panel::Person;
+                self.focus = None;
+            }
+            180 => {
+                if let Some(target) = self.selected.clone() {
+                    self.queue(Command::Kick {
+                        participant: target.profile.id,
+                        generation: target.generation,
+                        reason: String::new(),
+                    });
+                    self.panel = Panel::None;
+                }
+            }
+            181 => self.panel = Panel::Kick,
+            182 => {
+                if self.pending.len() >= 8 {
+                    self.say("Wait for the pending dispatches");
+                } else if let Some(target) = &self.selected {
+                    let text = format!("/salute {}", target.profile.name);
+                    self.pending.push_back(Pending {
+                        nonce: random(16)?,
+                        epoch: (self.wall / 600_000).max(self.epoch),
+                        text,
+                        sent: false,
+                    });
+                    self.panel = Panel::None;
+                }
+            }
+            190 => self.member_page = self.member_page.saturating_sub(1),
+            191 => {
+                self.member_page =
+                    (self.member_page + 1).min(self.members.len().saturating_sub(1) / 8)
+            }
+            _ => return Err("Unknown room UI action".into()),
+        }
+        Ok(Action::Changed)
+    }
+    pub fn older(&mut self) {
+        if self.older
+            && !self.history_wait
+            && self.messages.len() < HISTORY_WINDOW
+            && let Some(first) = self.messages.front()
+        {
+            self.history_wait = true;
+            self.queue(Command::History {
+                before: first.sequence,
+            });
+        }
+    }
+    pub fn pointer(&mut self, event: PointerEvent, now: u64) -> Option<bool> {
+        let [x, y] = event.position;
+        if self.panel != Panel::None {
+            return None;
+        }
+        if event.phase == PointerPhase::Down {
+            if x < self.input_left()
+                || x >= self.input_left() + self.input_width()
+                || y < self.compose_y()
+                || y > self.compose_y() + 60.
+            {
+                return None;
+            }
+            self.input_view.down(event.id, x, now);
+            return Some(true);
+        }
+        if !self.input_view.owns(event.id) {
+            return None;
+        }
+        match event.phase {
+            PointerPhase::Move => self.input_view.motion(x, now),
+            PointerPhase::Up => {
+                let dragged = self.input_view.up(x, now);
+                if !dragged {
+                    self.focus = Some(Focus::Compose);
+                    if let Some(font) = &self.font {
+                        let at = self.compose.hit_test(
+                            x - self.input_left() + self.input_view.offset,
+                            font,
+                            2.,
+                            true,
+                        );
+                        self.compose.place_cursor(at);
+                    }
+                    self.queue(Command::ClaimDraft);
+                }
+            }
+            PointerPhase::Cancel => self.input_view.cancel(),
+            _ => {}
+        }
+        Some(true)
+    }
+    pub(super) fn page_width(&self) -> f32 {
+        self.viewport[0] - 48. - if self.viewport[0] >= 1100. { 288. } else { 0. }
+    }
+    pub(super) fn input_left(&self) -> f32 {
+        96.
+    }
+    pub(super) fn input_width(&self) -> f32 {
+        self.page_width() - 284.
+    }
+    pub(super) fn compose_y(&self) -> f32 {
+        self.viewport[1] - 88.
+    }
+    pub(super) fn input_display(&self, font: Option<&Font>) -> String {
+        let editor = self.editor();
+        if self.focus == Some(Focus::Password) {
+            return "*".repeat(editor.text().graphemes(true).count().min(36));
+        }
+        let value = if let Some(font) = font {
+            let width = if self.focus == Some(Focus::Compose) {
+                self.input_width()
+            } else {
+                500.
+            };
+            let offset = if self.focus == Some(Focus::Compose) {
+                self.input_view.offset
+            } else {
+                (editor.caret_x(font, 2.) - width + 32.).max(0.)
+            };
+            editor
+                .window(offset, width, font, 2., self.focus.is_some())
+                .0
+        } else {
+            editor.display(self.focus.is_some())
+        };
+        let mut result = String::new();
+        for cluster in value.graphemes(true) {
+            if result.len() + cluster.len() > 256 {
+                break;
+            }
+            result.push_str(cluster);
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn message(sequence: u64, day: u64) -> Message {
+        Message {
+            sequence,
+            at: day * 86_400_000 + 12 * 3_600_000,
+            sender: Profile {
+                id: "a".repeat(32),
+                name: "Captain Sprocket".into(),
+                avatar: 7,
+            },
+            kind: Kind::Message,
+            text: "A clockwork pigeon!".into(),
+            nonce: format!("{sequence:032x}"),
+        }
+    }
+    #[test]
+    fn day_groups_and_headers_remain_stable_across_append_and_history_rebuild() {
+        assert_eq!(day_label(0, 20), "1970-01-01");
+        assert_eq!(day_label(19675, 20000), "2023-11-14");
+        let mut client = Client {
+            wall: 20 * 86_400_000,
+            ..Client::default()
+        };
+        let a = client.message_blocks(&message(1, 19));
+        let b = client.message_blocks(&message(2, 19));
+        let c = client.message_blocks(&message(3, 20));
+        assert_eq!(a[0], "Yesterday");
+        assert!(b[0].contains("12:00"));
+        assert_eq!(c[0], "Today");
+        assert_eq!(client.headers.len(), 3);
+        assert_eq!(client.source_messages[&2].0, 1 + a.len() as u32);
+        assert_eq!(
+            client.next_byte as usize,
+            a.iter()
+                .chain(&b)
+                .chain(&c)
+                .map(|s| s.len() + 1)
+                .sum::<usize>()
+        );
+    }
+    #[test]
+    fn paint_cadence_preserves_the_final_animation_and_document_turn() {
+        let mut client = Client::default();
+        assert_eq!(client.paint(1, true, false, false), 0);
+        assert_eq!(client.paint(16, false, false, false), 1);
+        assert_eq!(client.paint(20, false, true, true), 0);
+        assert_eq!(client.paint(32, false, false, false), 6);
+        assert_eq!(client.paint(64, false, false, false), 0);
+    }
+    #[test]
+    fn new_sends_refresh_epoch_and_pending_retries_keep_original_nonce() {
+        let mut client = Client {
+            epoch: 1,
+            wall: 10 * 600_000,
+            online: true,
+            ..Client::default()
+        };
+        client.focus = Some(Focus::Compose);
+        client
+            .edit(&Edit::Commit("First line\nsecond line".into()))
+            .unwrap();
+        client.send().unwrap();
+        let sent = decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap();
+        assert!(matches!(&sent, Command::Send {epoch:10,text,..} if text.contains('\n')));
+        client.disconnected();
+        client.online = true;
+        let retry = decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap();
+        assert_eq!(sent, retry);
+    }
+}

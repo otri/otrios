@@ -317,7 +317,7 @@ class DirectHostContract(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
-            args=SimpleNamespace(runtime_dir=pathlib.Path(tmp),rotation=90,touch_matrix='0,1,0,-1,0,1',url='https://state.example',capture_first_frame=False)
+            args=SimpleNamespace(cache=pathlib.Path(tmp)/"cache",runtime_dir=pathlib.Path(tmp),rotation=90,touch_matrix='0,1,0,-1,0,1',url='https://state.example',capture_first_frame=False)
             with patch.object(agent.subprocess,'Popen')as launch:
                 agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='locked')
                 self.assertNotIn('--screen',launch.call_args.args[0])

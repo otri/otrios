@@ -41,6 +41,8 @@ pub mod keyboard;
 
 #[cfg(feature = "layout")]
 pub mod canvas;
+#[cfg(feature = "layout")]
+pub mod chat;
 
 pub mod merkle;
 

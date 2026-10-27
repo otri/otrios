@@ -154,6 +154,21 @@ impl Display {
         info
     }
     pub fn upload(&mut self, slot: u32, vertices: &[f32]) -> Result<(), String> {
+        self.upload_geometry(slot, vertices)?;
+        // SAFETY: a live same-thread owner and zero-length slices; C does not
+        // dereference either pointer. Geometry-only uploads retire prior text.
+        self.result(unsafe {
+            ot_upload_text(
+                self.owner.as_ptr(),
+                slot,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+            )
+        })
+    }
+    fn upload_geometry(&mut self, slot: u32, vertices: &[f32]) -> Result<(), String> {
         if slot >= crate::MAX_SCENE_SLOTS {
             return Err("Invalid VBO slot".into());
         }
@@ -212,7 +227,7 @@ impl Display {
         draws: &[u32],
     ) -> Result<(), String> {
         crate::validate_text_mesh(glyphs, draws, vertices.len() / 6)?;
-        self.upload(slot, vertices)?;
+        self.upload_geometry(slot, vertices)?;
         // SAFETY: complete bounded quads and validated ranges; C copies the
         // arrays synchronously and creates its own vertex/index buffers.
         self.result(unsafe {

@@ -2,6 +2,8 @@
 #![cfg(feature = "canvas")]
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
+#[path = "../../../apps/brass-relay/app.rs"]
+mod brass_relay;
 #[path = "../../../tools/canvas/components.rs"]
 pub mod components;
 #[path = "../../../apps/home/app.rs"]
@@ -3185,4 +3187,133 @@ fn text_viewport_fills_inner_margins_and_pans_locally_until_an_edit_recovers_car
     c.tick(6000, 0).unwrap();
     assert_eq!(window(&c).1, "short|");
     assert_eq!(window(&c).2, 0.);
+}
+
+#[test]
+fn brass_relay_qualifies_crowded_roster_avatar_pages_and_native_keyboard_in_both_orientations() {
+    assert_eq!(brass_relay::screens()[0].0.id, "brass-relay");
+    use otrios_interfaces::chat::{Event, Member, Profile};
+    let members = (0..68)
+        .map(|i| Member {
+            profile: Profile {
+                id: format!("{i:032x}"),
+                name: format!("Captain {i}"),
+                avatar: i % 64,
+            },
+            generation: 1,
+            admin: i == 0,
+        })
+        .collect::<Vec<_>>();
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        let mut client = Client::default();
+        client.set_chat_native(true);
+        activate(&mut client, brass_relay::ui(&[]), "brass-relay", vec![]);
+        client.set_viewport(viewport).unwrap();
+        client.set_font(std::sync::Arc::new(
+            otrios_core::dashboard::font::Font::from_zstd(
+                include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        ));
+        client
+            .receive_chat(
+                &chat::encode_event(&Event::Welcome {
+                    you: members[0].clone(),
+                    temporary: false,
+                    credential: None,
+                    epoch: 1,
+                    members: members.clone(),
+                    messages: vec![],
+                    oldest: 0,
+                    newest: 0,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        for label in [
+            "Members",
+            "Close dialog",
+            "Edit profile",
+            "Next avatars",
+            "Next avatars",
+            "Next avatars",
+            "Edit room name",
+            "Save profile",
+            "Message composer",
+            "Commands",
+            "Close dialog",
+        ] {
+            edit(&mut client, label, 0, 0);
+            let scene = client.scene().unwrap();
+            for control in scene.controls() {
+                assert!(
+                    control.origin[0] >= 0. && control.origin[1] >= 0.,
+                    "{label}"
+                );
+                assert!(
+                    control.origin[0] + control.node.frame.width * control.scale
+                        <= viewport[0] + 0.1,
+                    "{label}"
+                );
+                assert!(
+                    control.origin[1] + control.node.frame.height * control.scale
+                        <= viewport[1] + 0.1,
+                    "{label}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
+    use otrios_interfaces::chat::{Event, Member, Profile};
+    let mut client = Client::default();
+    activate(&mut client, brass_relay::ui(&[]), "brass-particles", vec![]);
+    let member = Member {
+        profile: Profile {
+            id: "1".repeat(32),
+            name: "Captain Cache".into(),
+            avatar: 1,
+        },
+        generation: 1,
+        admin: false,
+    };
+    client
+        .receive_chat(
+            &chat::encode_event(&Event::Welcome {
+                you: member.clone(),
+                temporary: false,
+                credential: None,
+                epoch: 1,
+                members: vec![member],
+                messages: vec![],
+                oldest: 0,
+                newest: 0,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client.tick(1000, 1_700_000_000).unwrap();
+    let scene = client.scene().unwrap();
+    client
+        .receive_chat(
+            &chat::encode_event(&Event::Effect {
+                participant: "1".repeat(32),
+                kind: "steam".into(),
+                target: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let first = client.effect_vertices().unwrap();
+    assert!(!first.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    client.tick(1100, 1_700_000_000).unwrap();
+    assert_ne!(first, client.effect_vertices().unwrap());
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    client.tick(2100, 1_700_000_000).unwrap();
+    assert!(client.effect_vertices().unwrap().is_empty());
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
 }
