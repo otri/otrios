@@ -4016,3 +4016,127 @@ fn brass_relay_consumes_only_bounded_collection_views_and_receipt_confirmed_send
         col::Command::Cancel { .. }
     ));
 }
+
+#[test]
+fn native_keyboard_short_taps_have_local_feedback_without_rebuilding_the_scene() {
+    use otrios_core::canvas::presentation::Composer;
+    use otrios_core::dashboard::{font::Font, font_reference};
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    use std::sync::Arc;
+    let mut client = Client::default();
+    client.set_chat_native(true);
+    activate(
+        &mut client,
+        brass_relay::ui(&[]),
+        "keyboard-feedback",
+        vec![],
+    );
+    client.set_reduced_motion(true);
+    let font = Arc::new(
+        Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    client.set_font(font.clone());
+    client.show_keyboard().unwrap();
+    client.tick(100, 0).unwrap();
+    let scene = client.scene().unwrap();
+    let key = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == "q"))
+        .unwrap();
+    let position = [
+        key.origin[0] + key.node.frame.width * key.scale / 2.,
+        key.origin[1] + key.node.frame.height * key.scale / 2.,
+    ];
+    let mut composer = Composer::default();
+    let before = composer.compose(&mut client, &font).unwrap().clone();
+    client
+        .pointer_at(
+            client.epoch(),
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Down,
+                position,
+            },
+            101,
+        )
+        .unwrap();
+    let pressed = composer.compose(&mut client, &font).unwrap().clone();
+    assert!(
+        !pressed.effects.is_empty(),
+        "a held software key must visibly depress"
+    );
+    assert!(
+        Arc::ptr_eq(&scene, &client.scene().unwrap()),
+        "key feedback must retain the authored scene"
+    );
+    assert!(Arc::ptr_eq(&before.base.mesh, &pressed.base.mesh));
+    assert!(Arc::ptr_eq(
+        &before.overlay.as_ref().unwrap().mesh,
+        &pressed.overlay.as_ref().unwrap().mesh
+    ));
+    client
+        .pointer_at(
+            client.epoch(),
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Up,
+                position,
+            },
+            121,
+        )
+        .unwrap();
+    client.tick(122, 0).unwrap();
+    // A renderer holding its previous frame cannot erase an unseen short tap.
+    client.tick(1000, 0).unwrap();
+    assert_eq!(
+        client
+            .text_inputs()
+            .unwrap()
+            .into_iter()
+            .find(|i| i.focused)
+            .unwrap()
+            .value,
+        "q"
+    );
+    assert!(
+        !composer
+            .compose(&mut client, &font)
+            .unwrap()
+            .effects
+            .is_empty(),
+        "short down/up batches retain a visible key pulse"
+    );
+    client.tick(1200, 0).unwrap();
+    assert!(
+        composer
+            .compose(&mut client, &font)
+            .unwrap()
+            .effects
+            .is_empty()
+    );
+    client
+        .pointer_at(
+            client.epoch(),
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Down,
+                position,
+            },
+            1201,
+        )
+        .unwrap();
+    client.cancel().unwrap();
+    assert!(
+        composer
+            .compose(&mut client, &font)
+            .unwrap()
+            .effects
+            .is_empty(),
+        "cancel clears keyboard feedback"
+    );
+}

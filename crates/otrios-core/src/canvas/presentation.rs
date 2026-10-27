@@ -96,6 +96,7 @@ impl Composer {
             (old.base.clone(), old.overlay.clone())
         };
         let effects = client.effect_vertices()?;
+        client.feedback_prepared();
         let effects = if let Some(old) = &self.frame
             && old.effects.as_ref() == &effects
         {

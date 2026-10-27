@@ -29,6 +29,15 @@ idle frames and remote updates do not pull a manually previewed viewport back to
 the caret. Focus changes, cancellation and UI replacement stop active gestures.
 Viewport position and momentum remain local in RAM.
 
+Native evdev collection and dispatch have a dedicated input thread, independent
+of the graphics thread's uploads, drawing and page flips. Samples retain their
+kernel timing and capture the presented activation/viewport until release;
+replacement, revocation or a dropped evdev stream cancels the old contact.
+The state owner applies edits locally without waiting for a network receipt.
+Held software keys have a brass highlight, with a short release pulse so taps
+collected between display frames still get feedback. This uses the effects
+layer and retains keyboard geometry and text buffers on contact changes.
+
 Browsers use real HTML inputs/textarea over the authored field bounds. A tap
 focuses the element directly in the user gesture, allowing the iPhone system
 keyboard and native selection, cut/copy/paste, autocorrect replacement and IME.

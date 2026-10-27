@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
+use crate::native_input::{self, Sample, Target};
 use crate::native_worker::{DisplayInfo, Frame, Input, options, state_worker};
 use otrios_core::dashboard::{
     display::Surface,
     motion::{Presenter, render_hud_with_font},
 };
-use otrios_interfaces::scene::{PointerEvent, PointerPhase};
-use otrios_linux_display::Display;
+use otrios_linux_display::{Display, TouchInput};
 #[path = "document_gpu.rs"]
 mod document_gpu;
 use std::{
     fs,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -49,7 +53,7 @@ pub(super) fn run() -> Result<(), String> {
     let touch = std::env::var("OTRIOS_TOUCH_DEVICE")
         .unwrap_or_else(|_| "/dev/input/by-path/platform-2005a000.i2c-event".into());
     let card = std::env::var("OTRIOS_DRM_DEVICE").unwrap_or_else(|_| "/dev/dri/card0".into());
-    let mut display = Display::open(&card, &touch, surface.extent(), rgb565)?;
+    let mut display = Display::open_graphics(&card, surface.extent(), rgb565)?;
     let atlas = font.atlas();
     display.set_font(
         atlas.curve_width,
@@ -73,6 +77,35 @@ pub(super) fn run() -> Result<(), String> {
     let (input_tx, input_rx) = mpsc::sync_channel(128);
     let (frame_tx, frame_rx) = mpsc::sync_channel(1);
     let worker = thread::spawn(move || state_worker(o, input_rx, frame_tx));
+    let input_target = Arc::new(Mutex::new(None));
+    let input_stop = Arc::new(AtomicBool::new(false));
+    let target = input_target.clone();
+    let stop = input_stop.clone();
+    let dispatch = input_tx.clone();
+    let input_worker = thread::spawn(move || {
+        let mut input = TouchInput::open(&touch)?;
+        native_input::run(
+            || {
+                input.read().map(|events| {
+                    events
+                        .into_iter()
+                        .map(|e| Sample {
+                            phase: e.phase,
+                            position: [e.x, e.y],
+                            sampled: Instant::now()
+                                .checked_sub(Duration::from_micros(e.age_us))
+                                .unwrap_or_else(Instant::now),
+                        })
+                        .collect()
+                })
+            },
+            target,
+            stop,
+            dispatch,
+            surface,
+            calibration,
+        )
+    });
     let send = |e| {
         input_tx
             .try_send(e)
@@ -114,6 +147,9 @@ pub(super) fn run() -> Result<(), String> {
     let mut flips = Vec::new();
     let result = (|| -> Result<(), String> {
         loop {
+            if input_worker.is_finished() {
+                return Err("Touch input worker stopped unexpectedly".into());
+            }
             if worker.is_finished() {
                 return Err("State worker stopped unexpectedly".into());
             }
@@ -123,44 +159,6 @@ pub(super) fn run() -> Result<(), String> {
                     .is_some_and(|p| std::path::Path::new(p).exists())
             {
                 break;
-            }
-            for e in display.input()? {
-                if e.phase == 3 {
-                    send(Input::CanvasCancel(
-                        model.as_ref().map(|f| f.epoch).unwrap_or(0),
-                    ))?;
-                    continue;
-                }
-                let phase = match e.phase {
-                    0 => PointerPhase::Down,
-                    1 => PointerPhase::Move,
-                    2 => PointerPhase::Up,
-                    _ => return Err("Invalid input phase".into()),
-                };
-                if let Some(position) = surface.touch_for(
-                    calibration,
-                    [e.x, e.y],
-                    model
-                        .as_ref()
-                        .map(|f| f.paint.viewport)
-                        .unwrap_or([1280., 800.]),
-                ) {
-                    send(Input::CanvasPointer(
-                        model.as_ref().map(|f| f.epoch).unwrap_or(0),
-                        PointerEvent {
-                            id: 1,
-                            phase,
-                            position,
-                        },
-                        Instant::now()
-                            .checked_sub(Duration::from_micros(e.age_us))
-                            .unwrap_or_else(Instant::now),
-                    ))?;
-                } else {
-                    send(Input::CanvasCancel(
-                        model.as_ref().map(|f| f.epoch).unwrap_or(0),
-                    ))?;
-                }
             }
             let mut revoked = model.as_mut().is_some_and(Frame::redact_if_revoked);
             while let Ok(mut next) = frame_rx.try_recv() {
@@ -366,6 +364,12 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     let before = Instant::now();
                     let flip = display.present()?;
+                    *input_target.lock().map_err(|_| "Touch target poisoned")? =
+                        (!f.ui_ref.is_empty()).then(|| Target {
+                            epoch: f.epoch,
+                            viewport: f.paint.viewport,
+                            access: f.access.clone(),
+                        });
                     if scrolling == Some(true) {
                         scroll_meter.record(if flip.usec > 0 {
                             flip.usec as f64 / 1000.
@@ -411,12 +415,17 @@ pub(super) fn run() -> Result<(), String> {
         }
         Ok(())
     })();
+    input_stop.store(true, Ordering::Release);
+    let input_result = input_worker
+        .join()
+        .map_err(|_| "Touch input worker panicked");
     drop(hud_tx);
     hud_worker
         .join()
         .map_err(|_| "Presentation telemetry worker panicked")?;
     let _ = input_tx.send(Input::Stop);
     let worker_result = worker.join().map_err(|_| "State worker panicked")?;
+    input_result??;
     result?;
     worker_result?;
     if let Some(path) = report {

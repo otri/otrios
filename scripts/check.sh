@@ -14,3 +14,7 @@ python3 scripts/test_frame_hosting.py
 python3 scripts/test-canvas-benchmark-counter.py
 
 python3 scripts/test_app_publish.py
+
+if [[ "$(uname -s)" == Linux ]]; then
+  bash scripts/test-linux-touch.sh
+fi

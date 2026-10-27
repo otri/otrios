@@ -38,8 +38,8 @@ struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; si
 struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
-    int fd,input,headless,modeset,pending,linear_scene,atlas_scale;
-    clockid_t input_clock;
+    int fd,headless,modeset,pending,linear_scene,atlas_scale;
+    ot_touch_source *touch;
     uint32_t connector,crtc,width,height,format;
     drmModeModeInfo mode;
     drmModeCrtc *saved;
@@ -66,8 +66,6 @@ struct ot_display {
     int glyph_recent[CACHE_ENTRIES];
     int cache_x,cache_y,cache_row,cache_ready,cache_dirty;
     ot_info info; ot_flip flip;
-    struct input_absinfo xaxis,yaxis;
-    int x,y,down,reported,slot,dropped,suppressed,contact;
     char error[512];
 };
 static int fail(ot_display *d,const char *what) { snprintf(d->error,sizeof(d->error),"%s (errno=%d, EGL=0x%x)",what,errno,eglGetError()); return -1; }
@@ -135,22 +133,10 @@ static int select_display(ot_display *d) {
     if(!d->connector || !d->saved)return fail(d,"No matching connected display mode");
     return 0;
 }
-static int input_open(ot_display *d,const char *path) {
-    d->input=open(path,O_RDONLY|O_NONBLOCK|O_CLOEXEC); if(d->input<0)return fail(d,"Open configured touch device");
-    d->input_clock=CLOCK_MONOTONIC;
-    if(ioctl(d->input,EVIOCSCLOCKID,&d->input_clock)<0)d->input_clock=CLOCK_REALTIME;
-    if(ioctl(d->input,EVIOCGABS(ABS_X),&d->xaxis)<0 || ioctl(d->input,EVIOCGABS(ABS_Y),&d->yaxis)<0)
-        return fail(d,"Touch requires ABS_X/ABS_Y");
-    if(d->xaxis.maximum<=d->xaxis.minimum || d->yaxis.maximum<=d->yaxis.minimum)return fail(d,"Invalid touch axes");
-    unsigned long keys[(KEY_MAX+8*sizeof(unsigned long))/(8*sizeof(unsigned long))]={0};
-    if(ioctl(d->input,EVIOCGKEY(sizeof(keys)),keys)<0)return fail(d,"Read current touch contact");
-    d->suppressed=(keys[BTN_TOUCH/(8*sizeof(unsigned long))]>>(BTN_TOUCH%(8*sizeof(unsigned long))))&1;
-    return 0;
-}
 ot_display *ot_open(const char *card,const char *input,uint32_t width,uint32_t height,int rgb565,int headless,char *error,size_t capacity) {
     ot_display *d=calloc(1,sizeof(*d)); if(!d){snprintf(error,capacity,"Display allocation failed");return NULL;}
     const char *linear=getenv("OTRIOS_LINEAR_SCENE");d->linear_scene=linear && !strcmp(linear,"1");
-    d->fd=d->input=-1;d->egl=EGL_NO_DISPLAY;d->context=EGL_NO_CONTEXT;d->surface=EGL_NO_SURFACE;
+    d->fd=-1;d->egl=EGL_NO_DISPLAY;d->context=EGL_NO_CONTEXT;d->surface=EGL_NO_SURFACE;
     d->profile_text=getenv("OTRIOS_TEXT_PROFILE")!=NULL;
     const char *stable=getenv("OTRIOS_TEXT_STABLE_QUADS");d->stable_text=stable && !strcmp(stable,"1");
     const char *alpha=getenv("OTRIOS_TEXT_ALPHA_ATLAS");
@@ -166,7 +152,11 @@ ot_display *ot_open(const char *card,const char *input,uint32_t width,uint32_t h
     if(!headless) {
         d->fd=open(card,O_RDWR|O_CLOEXEC);if(d->fd<0){fail(d,"Open DRM device");goto bad;}
         if(drmSetMaster(d->fd)<0 || !drmIsMaster(d->fd)){fail(d,"Acquire DRM master");goto bad;}
-        if(select_display(d)<0 || input_open(d,input)<0)goto bad;
+        if(select_display(d)<0)goto bad;
+        if(input && *input) {
+            d->touch=ot_touch_open(input,d->error,sizeof(d->error));
+            if(!d->touch)goto bad;
+        }
         d->gbm=gbm_create_device(d->fd);if(!d->gbm){fail(d,"Create GBM device");goto bad;}
         d->window=gbm_surface_create(d->gbm,width,height,d->format,GBM_BO_USE_SCANOUT|GBM_BO_USE_RENDERING);
         if(!d->window){fail(d,"Create scanout GBM surface");goto bad;}
@@ -899,40 +889,11 @@ int ot_present(ot_display *d,ot_flip *flip) {
     if(d->front)gbm_surface_release_buffer(d->window,d->front);
     d->front=d->next;d->next=NULL;return 0;
 }
-static uint64_t input_age(ot_display *d,const struct input_event *ev) {
-    struct timespec now;clock_gettime(d->input_clock,&now);
-    uint64_t current=(uint64_t)now.tv_sec*1000000ull+(uint64_t)now.tv_nsec/1000;
-    uint64_t sample=(uint64_t)ev->time.tv_sec*1000000ull+(uint64_t)ev->time.tv_usec;
-    return sample<=current?current-sample:0;
-}
 int ot_input(ot_display *d,ot_touch *events,size_t capacity) {
-    if(!capacity || d->input<0)return 0;
-    size_t count=0;struct input_event ev;
-    while(count<capacity) {
-        ssize_t n=read(d->input,&ev,sizeof(ev));
-        if(n<0 && errno==EINTR)continue;
-        if(n<0 && (errno==EAGAIN || errno==EWOULDBLOCK))break;
-        if(n!=sizeof(ev))return fail(d,"Touch device disconnected/short read");
-        if(ev.type==EV_SYN && ev.code==SYN_DROPPED){d->dropped=1;d->suppressed=1;d->reported=0;events[count++]=(ot_touch){3,0,0,input_age(d,&ev)};continue;}
-        if(d->dropped) {
-            if(ev.type==EV_SYN && ev.code==SYN_REPORT) {
-                unsigned long keys[(KEY_MAX+8*sizeof(unsigned long))/(8*sizeof(unsigned long))]={0};
-                if(ioctl(d->input,EVIOCGKEY(sizeof(keys)),keys)<0)return fail(d,"Resync touch contact");
-                d->down=(keys[BTN_TOUCH/(8*sizeof(unsigned long))]>>(BTN_TOUCH%(8*sizeof(unsigned long))))&1;
-                d->suppressed=d->down;d->dropped=0;
-            }continue;
-        }
-        if(ev.type==EV_ABS && ev.code==ABS_X)d->x=ev.value;
-        if(ev.type==EV_ABS && ev.code==ABS_Y)d->y=ev.value;
-        if(ev.type==EV_KEY && ev.code==BTN_TOUCH)d->down=ev.value!=0;
-        if(ev.type==EV_SYN && ev.code==SYN_REPORT) {
-            if(d->suppressed){if(!d->down)d->suppressed=0;continue;}
-            if(d->down || d->reported) {
-                events[count++]=(ot_touch){d->down?(d->reported?1:0):2,(float)(d->x-d->xaxis.minimum)/(d->xaxis.maximum-d->xaxis.minimum),(float)(d->y-d->yaxis.minimum)/(d->yaxis.maximum-d->yaxis.minimum),input_age(d,&ev)};
-                d->reported=d->down;
-            }
-        }
-    }return (int)count;
+    if(!d->touch)return 0;
+    int count=ot_touch_read(d->touch,events,capacity);
+    if(count<0)snprintf(d->error,sizeof(d->error),"%s",ot_touch_error(d->touch));
+    return count;
 }
 int ot_pixels(ot_display *d,uint8_t *rgba,size_t length) {
     if(length!=(size_t)d->width*d->height*4)return fail(d,"Readback size mismatch");
@@ -979,7 +940,7 @@ void ot_close(ot_display *d) {
     if(d->gbm)gbm_device_destroy(d->gbm);
     if(d->saved)drmModeFreeCrtc(d->saved);
     free(d->saved_connectors);
-    if(d->input>=0)close(d->input);
+    ot_touch_close(d->touch);
     if(d->fd>=0){drmDropMaster(d->fd);close(d->fd);}
     for(uint32_t i=0;i<OT_MAX_SCENE_SLOTS;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
     free(d->glyph_cache);

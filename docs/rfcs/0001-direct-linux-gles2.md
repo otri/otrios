@@ -49,3 +49,22 @@ and builds an owned per-quad scale table before replacing the previous one.
 Zero retains inference for older callers. Geometry replacement and destruction
 free the table. No Rust pointer is retained and the owner stays on its EGL thread.
 This extends the graphics adapter, not shared-memory IPC or the state protocol.
+
+## Independent input ownership — 2026-10-28
+
+The keyboard regression follow-up separates evdev ownership from graphics
+ownership within this existing platform adapter. The display continues to own
+DRM/GBM/EGL/GLES on one thread. A separate opaque input owner is created, read and
+destroyed on the input thread; it never owns or calls EGL/GL. The existing evdev
+axis validation, monotonic sample ages, initial-contact suppression and
+SYN_DROPPED cancellation/release rules remain shared by both entry points.
+
+The safe wrapper for that owner uses the same reviewed FFI invariants: !Send and
+!Sync, synchronous bounded event slices, no callbacks or retained Rust pointers,
+one destructor and complete cleanup on initialization failure. No unsafe lint
+scope changes and no driver/ABI structure copies are introduced. The host uses a
+bounded input queue and copies a small calibration/epoch/viewport target under a
+short mutex; no GL/display owner crosses threads. Input collection and dispatch
+must continue while graphics upload or a page flip is blocked. Event overload or
+device failure must be explicit, and mount replacement/revocation must suppress
+stale input rather than directing an old contact into a new UI.

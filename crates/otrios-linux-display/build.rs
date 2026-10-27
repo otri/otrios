@@ -2,6 +2,7 @@
 use std::{env, fs, path::PathBuf, process::Command};
 fn main() {
     println!("cargo:rerun-if-changed=src/platform.c");
+    println!("cargo:rerun-if-changed=src/touch.c");
     println!("cargo:rerun-if-changed=src/platform.h");
     for path in ["shaders/slug.vert", "shaders/slug.frag"] {
         println!("cargo:rerun-if-changed={path}");
@@ -37,33 +38,36 @@ fn main() {
         shaders.push_str(";\n");
     }
     fs::write(out.join("slug_shaders.h"), shaders).unwrap();
-    assert!(
-        Command::new(compiler)
-            .args([
-                "-std=c11",
-                "-O2",
-                "-fPIC",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-I/usr/include/libdrm",
-                "-c",
-                "src/platform.c",
-                "-o"
-            ])
-            .arg(out.join("platform.o"))
-            .arg("-I")
-            .arg(&out)
-            .status()
-            .unwrap()
-            .success(),
-        "Linux graphics adapter compilation failed"
-    );
+    for source in ["platform", "touch"] {
+        assert!(
+            Command::new(&compiler)
+                .args([
+                    "-std=c11",
+                    "-O2",
+                    "-fPIC",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-I/usr/include/libdrm",
+                    "-c",
+                ])
+                .arg(format!("src/{source}.c"))
+                .arg("-o")
+                .arg(out.join(format!("{source}.o")))
+                .arg("-I")
+                .arg(&out)
+                .status()
+                .unwrap()
+                .success(),
+            "Linux platform adapter compilation failed"
+        );
+    }
     assert!(
         Command::new(archiver)
             .arg("crs")
             .arg(out.join("libotrios_display.a"))
             .arg(out.join("platform.o"))
+            .arg(out.join("touch.o"))
             .status()
             .unwrap()
             .success()

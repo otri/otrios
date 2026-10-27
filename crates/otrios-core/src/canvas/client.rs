@@ -302,10 +302,50 @@ impl Client {
         std::mem::take(&mut self.collection_revoked)
     }
     pub fn effect_vertices(&self) -> Result<Vec<f32>> {
-        self.active
+        let mut vertices = self
+            .active
             .as_ref()
             .and_then(|m| m.chat.as_ref())
-            .map_or_else(|| Ok(vec![]), |chat| chat.effect_vertices())
+            .map_or_else(|| Ok(vec![]), |chat| chat.effect_vertices())?;
+        if let Some(m) = &self.active
+            && m.keyboard.visible
+            && let Some(key) = m.keyboard.feedback_key()
+        {
+            let scene = self.scene()?;
+            if let Some(owner) = scene.controls().into_iter().find(|owner| {
+                let Some(TouchResponder::Activate(Action::AppEvent(control))) =
+                    owner.node.responder
+                else {
+                    return false;
+                };
+                m.ui.handlers
+                    .iter()
+                    .any(|h| h.control == control && h.operation == Operation::Key(key))
+            }) {
+                let [x, y] = owner.origin;
+                let w = owner.node.frame.width * owner.scale;
+                let h = owner.node.frame.height * owner.scale;
+                let inset = 2. * owner.scale;
+                let color = [1., 0.86, 0.55, 0.28];
+                for [x, y] in [
+                    [x + inset, y + inset],
+                    [x + w - inset, y + inset],
+                    [x + w - inset, y + h - inset],
+                    [x + inset, y + inset],
+                    [x + w - inset, y + h - inset],
+                    [x + inset, y + h - inset],
+                ] {
+                    vertices.extend([x, y]);
+                    vertices.extend(color);
+                }
+            }
+        }
+        Ok(vertices)
+    }
+    pub(super) fn feedback_prepared(&mut self) {
+        if let Some(m) = &mut self.active {
+            m.keyboard.feedback_prepared(m.now);
+        }
     }
     /// Local presentation only. A rejected size retains the old scene and state.
     pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
@@ -1399,6 +1439,7 @@ impl Client {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 return Ok(false);
             }
+            let labels = (m.keyboard.page, m.keyboard.shift, m.keyboard.visible);
             let edit = match event.phase {
                 PointerPhase::Down => key.and_then(|key| m.keyboard.down(event.id, key, m.now)),
                 PointerPhase::Move => {
@@ -1423,7 +1464,11 @@ impl Client {
             } else if owned {
                 m.keyboard_pointer = None;
             }
-            m.invalidate();
+            // Contact feedback uses the cheap effects layer. Only a keyboard
+            // page/shift/visibility change alters its authored scene/labels.
+            if labels != (m.keyboard.page, m.keyboard.shift, m.keyboard.visible) {
+                m.invalidate();
+            }
             if let Some(edit) = edit {
                 self.hardware_edit(&edit)?;
             }
@@ -1882,7 +1927,9 @@ impl Client {
             m.invalidate_local_scene();
         }
         let changed = m.ink.tick(now) || clock || scrolled;
+        let keyboard_feedback = m.keyboard.feedback_key();
         let edit = m.keyboard.tick(now);
+        let feedback_changed = keyboard_feedback != m.keyboard.feedback_key();
         if changed {
             if clock {
                 m.invalidate();
@@ -1893,7 +1940,7 @@ impl Client {
         if let Some(edit) = edit {
             return self.hardware_edit(&edit);
         }
-        Ok(changed || paint != 0)
+        Ok(changed || feedback_changed || paint != 0)
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
         self.active

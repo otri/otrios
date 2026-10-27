@@ -1,0 +1,264 @@
+{
+  "date": "2026-10-28",
+  "branch": "fix/frame-keyboard-latency",
+  "base_commit": "7eca23d0ceb25ccf205aa35c8bd8623d8b127aac",
+  "release": {
+    "id": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2",
+    "web_entry": "/releases/35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2/web/index.html",
+    "manifest": "/releases/35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2/manifest.json",
+    "signature": "/releases/35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2/manifest.sig",
+    "state_schema": "otrios-canvas-merkle-state-v1",
+    "sync_protocol": "otrios-canvas-sync-v8"
+  },
+  "native_sha256": "9d9bb4e67aae97bd876fa200f96683f400b3bcac1192308df36860fae01ad31e",
+  "tests": {
+    "required_check": "bash scripts/check.sh: passed",
+    "native_worker_input": "11 passed",
+    "javascript": "79 passed",
+    "linux_evdev_fixtures": "passed",
+    "arm_clippy": "all dashboard targets, direct/server/canvas, warnings denied: passed",
+    "wasm_arm_locked_builds": "passed",
+    "real_chromium_disposable_authority": "passed",
+    "final_signed_wasm_disposable_authority": "passed"
+  },
+  "baseline": {
+    "hashes": {
+      "probe": "9852fc2e84411129df32b0fac508564e2d5dde6b192d33f05d7ee64d8216ccf9",
+      "apps/catalog.flex": "3356dcb7f336c8ee1acd750012849fe3eeb29168370cf5c804892f28a1719539",
+      "apps/brass-relay/ui.flex": "66a4e5e676e1e7dcf4c9b86d5ee3cd2e4e40e9aeb5af090cd051d07c5c819e8c"
+    },
+    "runs": [
+      {
+        "characters": 52,
+        "compose_p95_us": 8745,
+        "dispatch_p95_us": 2114,
+        "draw_present_p95_us": 36583,
+        "edges": 104,
+        "feedback_frames": 0,
+        "feedback_pixels": false,
+        "frames": 106,
+        "kernel_flips": 105,
+        "keys_per_second": 8.333333,
+        "release_to_present_max_us": 51870,
+        "release_to_present_p50_us": 41045,
+        "release_to_present_p95_us": 48593,
+        "rotation": 90,
+        "scene_uploads": 55,
+        "synthetic": true,
+        "tap_ms": 60
+      },
+      {
+        "characters": 52,
+        "compose_p95_us": 8645,
+        "dispatch_p95_us": 2156,
+        "draw_present_p95_us": 37311,
+        "edges": 104,
+        "feedback_frames": 0,
+        "feedback_pixels": false,
+        "frames": 106,
+        "kernel_flips": 105,
+        "keys_per_second": 8.333333,
+        "release_to_present_max_us": 50757,
+        "release_to_present_p50_us": 41278,
+        "release_to_present_p95_us": 50093,
+        "rotation": 90,
+        "scene_uploads": 55,
+        "synthetic": true,
+        "tap_ms": 60
+      }
+    ],
+    "services_restored": true
+  },
+  "candidate": {
+    "hashes": {
+      "probe": "e1817eb1b1c9adcaa06cdfccef38c805411c388a3103fd16bd8ead335e2e638a",
+      "apps/catalog.flex": "3356dcb7f336c8ee1acd750012849fe3eeb29168370cf5c804892f28a1719539",
+      "apps/brass-relay/ui.flex": "66a4e5e676e1e7dcf4c9b86d5ee3cd2e4e40e9aeb5af090cd051d07c5c819e8c"
+    },
+    "runs": [
+      {
+        "characters": 52,
+        "compose_p95_us": 8781,
+        "dispatch_p95_us": 2089,
+        "draw_present_p95_us": 36611,
+        "edges": 104,
+        "feedback_frames": 102,
+        "feedback_pixels": true,
+        "frames": 104,
+        "kernel_flips": 103,
+        "keys_per_second": 8.333333,
+        "release_to_present_max_us": 244402,
+        "release_to_present_p50_us": 43293,
+        "release_to_present_p95_us": 51459,
+        "rotation": 90,
+        "scene_uploads": 54,
+        "synthetic": true,
+        "tap_ms": 60
+      },
+      {
+        "characters": 52,
+        "compose_p95_us": 8484,
+        "dispatch_p95_us": 2197,
+        "draw_present_p95_us": 36256,
+        "edges": 104,
+        "feedback_frames": 102,
+        "feedback_pixels": true,
+        "frames": 104,
+        "kernel_flips": 103,
+        "keys_per_second": 8.333333,
+        "release_to_present_max_us": 228020,
+        "release_to_present_p50_us": 41025,
+        "release_to_present_p95_us": 48994,
+        "rotation": 90,
+        "scene_uploads": 54,
+        "synthetic": true,
+        "tap_ms": 60
+      },
+      {
+        "characters": 52,
+        "compose_p95_us": 8458,
+        "dispatch_p95_us": 2024,
+        "draw_present_p95_us": 40267,
+        "edges": 104,
+        "feedback_frames": 102,
+        "feedback_pixels": true,
+        "frames": 104,
+        "kernel_flips": 103,
+        "keys_per_second": 8.333333,
+        "release_to_present_max_us": 262637,
+        "release_to_present_p50_us": 44513,
+        "release_to_present_p95_us": 54993,
+        "rotation": 0,
+        "scene_uploads": 54,
+        "synthetic": true,
+        "tap_ms": 60
+      }
+    ],
+    "services_restored": true
+  },
+  "limits": [
+    "Synthetic source dispatches directly to the state owner; the GLES probe excludes physical sensor/evdev collection and network RTT. It does not establish a physical typing latency speedup.",
+    "Readback of the first depressed key stalls that frame; maxima include this instrumentation and cold glyph preparation. Baseline has no depressed-key readback.",
+    "No human typing or long-term soak claimed."
+  ],
+  "deployed": true,
+  "deployment": {
+    "command": "python3 scripts/deploy-dashboard-frame.py --config /tmp/otrios-keyboard-deploy-config.json --pointer target/keyboard-qualification/staged-release.json --server target/keyboard-qualification/arm/dashboard-server --monitoring target/keyboard-qualification/arm/dashboard-monitoring --bootstrap target/keyboard-qualification/arm/session-bootstrap",
+    "passed": true,
+    "rollback": {
+      "backup": "/var/lib/otrios-authority/rollback/2026-10-28-keyboard",
+      "files": 120,
+      "journal": {
+        "bytes": 159716,
+        "sha256": "9b34de2d85007ba7046bbd7117498a5bf3bfec6f063f1267c9690a3ab4efeec9"
+      },
+      "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "active": {
+        "otrios-authority": true,
+        "otrios-dashboard-direct": true,
+        "otrios-monitoring.timer": true
+      }
+    },
+    "live": {
+      "authority": {
+        "id": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2",
+        "web_entry": "/releases/35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2/web/index.html",
+        "manifest": "/releases/35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2/manifest.json",
+        "signature": "/releases/35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2/manifest.sig",
+        "state_schema": "otrios-canvas-merkle-state-v1",
+        "sync_protocol": "otrios-canvas-sync-v8"
+      },
+      "native": {
+        "id": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2"
+      },
+      "services": {
+        "otrios-authority": true,
+        "otrios-dashboard-direct": true,
+        "otrios-tunnel": true,
+        "otrios-monitoring.timer": true
+      },
+      "calibration_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+    },
+    "native": {
+      "ready_path": "/run/otrios-direct-console/otrios/ready-05da30f736584db1b9327093be02c30b.json",
+      "ready": {
+        "pid": 17649,
+        "screen": "",
+        "renderer": "gles2-direct",
+        "stream_ready": true,
+        "state_confirmed": true,
+        "pending_commands": 0,
+        "runtime_release": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2",
+        "ui_release": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_calibrated": true,
+        "touch_devices": 1,
+        "scanout_format": "RGB565",
+        "input_busy": false
+      },
+      "native_sha256": "9d9bb4e67aae97bd876fa200f96683f400b3bcac1192308df36860fae01ad31e",
+      "native_threads": 6,
+      "input_fds": [
+        "/dev/input/event0"
+      ],
+      "cleaned": [
+        "/tmp/otrios-keyboard-qualification-20261028",
+        "/tmp/otrios-keyboard-baseline-20261028"
+      ],
+      "services": {
+        "otrios-authority": true,
+        "otrios-dashboard-direct": true,
+        "otrios-tunnel": true,
+        "otrios-monitoring.timer": true
+      },
+      "mount": {
+        "ui_ref": "app:home/ui",
+        "state_ref": "app:home/state-v4",
+        "epoch": 1,
+        "layout": "app:home/ui",
+        "screen": "",
+        "runtime_release": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2"
+      }
+    },
+    "public_checks": 120,
+    "history_before": {
+      "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "tail_sha256": "46d217869c7043560e90d1e64fe0dff465bc818a5c779bdb355739bf45007335",
+      "tail_sequences": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ]
+    },
+    "history_after": {
+      "release": "35b71e2488fb2125d1b27bd58861733e6566e70bc702cbaf237debdcbd99efb2",
+      "tail_sha256": "46d217869c7043560e90d1e64fe0dff465bc818a5c779bdb355739bf45007335",
+      "tail_sequences": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ],
+      "sent_message_commands": 0
+    },
+    "local_authority_stopped": true,
+    "transient_check": "An initial public check overlapped activation and saw different release IDs across requests. The post-activation 120 checks passed."
+  }
+}
