@@ -73,7 +73,6 @@ unsafe extern "C" {
     ) -> c_int;
     fn ot_linear_scene(d: *mut c_void) -> c_int;
     fn ot_text_stats(d: *mut c_void, stats: *mut u64);
-    fn ot_text_position_format(d: *mut c_void, format: c_int) -> c_int;
     fn ot_text_styles(d: *mut c_void, slot: u32, styles: *const f32, floats: usize) -> c_int;
     fn ot_text_views(d: *mut c_void, slot: u32, views: *const f32, floats: usize) -> c_int;
     fn ot_present(d: *mut c_void, flip: *mut Flip) -> c_int;
@@ -229,16 +228,6 @@ impl Display {
         // SAFETY: fixed ABI writes exactly three u64 counters, no retention.
         unsafe { ot_text_stats(self.owner.as_ptr(), stats.as_mut_ptr()) };
         stats
-    }
-    /// Change only cached vertex encoding; coverage, ordering and bounds remain
-    /// unchanged. The next draw repacks retained geometry once.
-    pub fn text_position_format(
-        &mut self,
-        format: crate::TextPositionFormat,
-    ) -> Result<(), String> {
-        // SAFETY: live same-thread owner, bounded enum scalar, no borrowed data
-        // retained and no change to the RFC 0001 ownership/lifetime invariants.
-        self.result(unsafe { ot_text_position_format(self.owner.as_ptr(), format as c_int) })
     }
     /// Update only culled draw ranges, translations and clipping rectangles.
     pub fn text_views(&mut self, slot: u32, views: &[f32]) -> Result<(), String> {
@@ -594,108 +583,6 @@ mod tests {
                 invalid[1] = 100_000.;
                 assert!(d.text_views(0, &invalid).is_err());
             }
-        }
-    }
-    #[test]
-    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
-    fn mesa_position_format_switch_keeps_coverage_and_whole_mesh_range_fallback() {
-        if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
-            return;
-        }
-        let _display_owner = mesa_display_owner();
-        use crate::TextPositionFormat::{Fixed, Float, Short};
-        use otrios_core::dashboard::{
-            components::{WHITE, canvas, text},
-            font::Font,
-            font_reference::RESOURCE_SHA256,
-            render_scene_with_font,
-            scene::Scene,
-        };
-        let font = Font::from_zstd(
-            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
-            RESOURCE_SHA256,
-        )
-        .unwrap();
-        let atlas = font.atlas();
-        let frame = otrios_core::dashboard::components::background(0, 64., 64., WHITE, 0.).frame;
-        let mut bounds = frame;
-        bounds.x = 8.;
-        bounds.y = 8.;
-        bounds.width = 48.;
-        bounds.height = 32.;
-        let base = render_scene_with_font(
-            &Scene::new(canvas(0, frame, vec![text(1, bounds, "H", 2, WHITE)])).unwrap(),
-            &font,
-        )
-        .glyph_vertices;
-        assert_eq!(base.len(), 64);
-        let mut d = Display::headless([64, 64], false).unwrap();
-        d.set_font(
-            atlas.curve_width,
-            atlas.curve_height,
-            &atlas.curves,
-            atlas.band_width,
-            atlas.band_height,
-            &atlas.bands,
-        )
-        .unwrap();
-        let projection = [2. / 64., 0., 0., 0., -2. / 64., 0., -1., 1., 1.];
-        d.upload_scene(0, &[], &base, &[1, 0, 4]).unwrap();
-        d.text_styles(0, &[font.metrics().cache_em(2.)]).unwrap();
-        d.text_views(0, &[0., 4., 0., 0., 0., 0., 64., 64.])
-            .unwrap();
-        d.text_position_format(Float).unwrap();
-        d.draw(projection, false).unwrap();
-        let reference = d.pixels().unwrap();
-        let misses = d.glyph_cache_stats()[1];
-        assert!(misses > 0);
-        for format in [Fixed, Short, Float] {
-            d.text_position_format(format).unwrap();
-            d.draw(projection, false).unwrap();
-            let actual = d.pixels().unwrap();
-            assert!(
-                actual
-                    .iter()
-                    .zip(&reference)
-                    .all(|(a, b)| a.abs_diff(*b) <= 8)
-            );
-            assert_eq!(
-                d.glyph_cache_stats()[1],
-                misses,
-                "Encoding changes must not rerasterize coverage"
-            );
-        }
-        // Three individually cacheable glyphs span a range neither integer
-        // format can represent. A wrapping conversion would move the red/blue
-        // offscreen glyphs into the visible white glyph's pane.
-        let mut wide = Vec::new();
-        for (shift, tint) in [
-            (-65536., [1., 0., 0., 1.]),
-            (0., [1.; 4]),
-            (65536., [0., 0., 1., 1.]),
-        ] {
-            let mut glyph = base.clone();
-            for v in glyph.chunks_exact_mut(16) {
-                v[0] += shift;
-                v[4..8].copy_from_slice(&tint);
-            }
-            wide.extend(glyph);
-        }
-        d.upload_scene(0, &[], &wide, &[1, 0, 12]).unwrap();
-        d.text_styles(0, &[font.metrics().cache_em(2.)]).unwrap();
-        d.text_views(0, &[0., 12., 0., 0., 0., 0., 64., 64.])
-            .unwrap();
-        d.text_position_format(Float).unwrap();
-        d.draw(projection, false).unwrap();
-        let reference = d.pixels().unwrap();
-        for format in [Fixed, Short] {
-            d.text_position_format(format).unwrap();
-            d.draw(projection, false).unwrap();
-            assert_eq!(
-                d.pixels().unwrap(),
-                reference,
-                "Unsupported ranges fall back without wrapping or changing pixels"
-            );
         }
     }
     #[test]

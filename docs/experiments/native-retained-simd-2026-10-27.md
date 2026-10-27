@@ -1,5 +1,10 @@
 # Native retained coordinates, SIMD packing and coverage storage
 
+Historical experiment record. The fixed-point pilot and alternate GPU position
+formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
+Commands and feature names below refer to the evaluated revision, not the current
+checkout. Retained float rendering and adaptive coverage storage remain selected.
+
 This implements the native work in [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
 The Wasm SIMD module selection milestone remains separate. Measurements use the
 actual Cortex-A7/Mali-400 frame, Rust 1.90.0 and the existing font, text density,
@@ -180,10 +185,12 @@ hierarchy case. The original dense v3 float mesh remains SHA-256
 `fe0798d1bb16d0abea9b68c14166cb2b6c4d8d349f8860b88c039503cebccce6`.
 
 Raw binaries, per-phase timing, reports, PPM reference/output/difference captures
-and browser captures are retained under ignored `target/native-retained-fixed/`.
-`cpu-final.json`, `gpu.json`, `native-control-parity.json` and the interactive
-acceptance records distinguish controls and experimental paths. Trials hold an
-exclusive display lock and restore the prior console mode and dashboard service.
+and browser captures were originally kept under ignored `target/native-retained-fixed/`.
+After retirement they are preserved in the verified compressed
+`target/renderer-cleanup/qualification-evidence.tar.gz`, with a per-file hash
+manifest; the independent original baseline remains in place. A separate verified
+archive preserves the completed remote trial files. Trials hold an exclusive
+display lock and restore the prior console mode and dashboard service.
 
 ## Deployment
 
@@ -196,3 +203,49 @@ check passes all 99 anonymous/isolation checks; real Chromium passes the deploye
 demo's momentum, cancellation, client-local state, portrait and navigation checks.
 See the [deployment record](data/native-retained-deployment-2026-10-27.json).
 Operational rollback files are preserved; canonical state was not restored.
+
+
+## Pilot retirement and cleanup
+
+The user requested removal of the fixed-point pilot after comparing complete
+frame costs. The fixed coordinate, hierarchy, glyph packing and composition
+modules, feature/check mode, dedicated benchmark and alternate GLES position
+formats are removed. The selected float renderer retains viewport scrolling,
+range culling, layout/editor retention, canonical font scale caching, immutable
+snapshots and adaptive alpha coverage storage. Generic profiling and native
+pixel probes remain; the browser comparator is now `compare-text-browser.mjs`.
+Canonical scale uses cached f64 intermediate arithmetic and a final f32 result,
+without depending on the retired fixed module.
+
+All six original float mesh streams and font packets remain byte-identical on
+both the host and Cortex-A7. The cleaned renderer passes 54 native dashboard
+runtime tests, seven GPU cases in seven storage/sampling/color configurations,
+and 60 native same-fixture frame pairs. Twelve sampled native captures at both
+rotations are byte-identical to the previously qualified alpha-reference
+captures. Real Chromium passes 90 pixel pairs at DPR 1/2/3.2 with zero error.
+`bash scripts/check.sh`, native platform Clippy and the staged browser/native
+build pass. The sandbox initially blocked local sockets in the process-boundary
+tests; the complete required checks pass with local socket access.
+
+Three dense native replays measure 56.647 / 56.411 / 56.647 kernel-presented fps.
+The selected default ARM CPU probe measures coasting p50 740–751 us and p95
+796–1038 us; rebuild p50 is 10.684–10.727 ms and p95 11.230–11.994 ms. This is
+cleanup verification, not a new SIMD speedup or a 60 fps lock.
+The exact signed full-screen build first measured 37.647 fps. A subsequent paired
+run measured 41.432 fps for the preserved deployed executable and 42.070 fps for
+the cleaned executable, with the same momentum gesture controller and RGB565
+scanout. The slower first run is retained in the evidence; its cause is not
+established. Both cleaned runs pass the 30 fps gate, and the paired result does
+not reproduce a cleanup regression. Native dragging and coasting on both axes
+remain functional with no pending state edits.
+
+
+The original baseline directories are untouched. Old generated trial files are
+preserved in compressed archives with verified per-file SHA-256 manifests;
+148 completed remote files (121,725,440 bytes) were removed individually only
+after verification. Local unpacked evidence was reduced by 343,073,224 bytes
+net of its archive. No canonical state or operational rollback was removed.
+The [cleanup evidence record](data/native-renderer-cleanup-2026-10-27.json)
+records the selected artifacts and acceptance results. Future SIMD work can
+operate on float data; adoption requires a measured batch and complete-frame
+benefit under the same pixel gates.

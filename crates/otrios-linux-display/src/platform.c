@@ -28,15 +28,13 @@
 #define MAX_BO 16
 struct vertex { float x,y; uint8_t rgba[4]; };
 struct cached_vertex { float x,y,u,v; uint8_t rgba[4]; };
-struct fixed_cached_vertex { int32_t x,y; float u,v; uint8_t rgba[4]; };
-struct short_cached_vertex { int16_t x,y; float u,v; uint8_t rgba[4]; };
 struct mesh { GLuint vbo; GLsizei count; int opaque; };
 #define CACHE_SIZE 1024
 #define CACHE_SCRATCH_SIZE 512
 #define CACHE_ALPHA_ENTRY_LIMIT 256
 #define CACHE_ENTRIES 4096
 #define CACHE_BUCKETS 8192
-struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; int raw_dirty,cache_all,packed_kind; void *packed_vertices; size_t packed_capacity; float position_scale,position_origin[2]; };
+struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; int raw_dirty,cache_all; };
 struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
@@ -57,7 +55,7 @@ struct ot_display {
     GLint text_transform,text_curve_size,text_band_size;
     uint32_t curve_width,curve_height,band_width,band_height;
     uint64_t text_hits,text_misses,cache_generation;
-    int profile_text,stable_text,position_format,alpha_atlas,alpha_enabled;uint64_t position_fallbacks,cached_upload_bytes;uint64_t profile_keys_ns,profile_upload_ns,profile_recent;
+    int profile_text,stable_text,alpha_atlas,alpha_enabled;uint64_t cached_upload_bytes;uint64_t profile_keys_ns,profile_upload_ns,profile_recent;
     GLuint scene_fbo,scene_texture,resolve_program,resolve_vbo,encode_texture;
     GLuint cache_fbo,cache_texture,cache_scratch,cache_program,cache_upload;
     GLint cache_sampler,cache_transform;
@@ -157,11 +155,6 @@ ot_display *ot_open(const char *card,const char *input,uint32_t width,uint32_t h
     else if(!strcmp(alpha,"0"))d->alpha_atlas=0;
     else {snprintf(error,capacity,"Text alpha atlas must be 0 or 1");free(d);return NULL;}
     d->alpha_enabled=d->alpha_atlas;
-    const char *positions=getenv("OTRIOS_TEXT_POSITION_FORMAT");
-    if(!positions || !strcmp(positions,"float"))d->position_format=0;
-    else if(!strcmp(positions,"fixed"))d->position_format=1;
-    else if(!strcmp(positions,"short"))d->position_format=2;
-    else {snprintf(error,capacity,"Text position format must be float, fixed or short");free(d);return NULL;}
     const char *sampling=getenv("OTRIOS_TEXT_ATLAS_SCALE");
     d->atlas_scale=sampling?atoi(sampling):2;
     if(d->atlas_scale!=0 && d->atlas_scale!=2 && d->atlas_scale!=3){snprintf(error,capacity,"Text atlas scale must be 0 (exact reference), 2 or 3");free(d);return NULL;}
@@ -344,11 +337,6 @@ int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count)
     free(m->ems);m->ems=ems;m->cached_generation=0;return 0;
 }
 void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }
-int ot_text_position_format(ot_display *d,int format) {
-    if(format<0 || format>2)return fail(d,"Invalid text position format");
-    if(format!=d->position_format){d->position_format=format;for(int i=0;i<3;i++)d->text[i].cached_generation=0;}
-    return 0;
-}
 static void draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count) {
     if(!count)return;
     glUseProgram(d->program);glUniformMatrix3fv(d->transform,1,GL_FALSE,projection);
@@ -369,24 +357,13 @@ static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projec
         glBindBuffer(GL_ARRAY_BUFFER,m->cached_vbo);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);
         for(GLuint i=0;i<3;i++)glEnableVertexAttribArray(i);
         glDisableVertexAttribArray(3);glDisableVertexAttribArray(4);
-        GLsizei stride=(GLsizei)(m->packed_kind==2?sizeof(struct short_cached_vertex):sizeof(struct cached_vertex));
-        size_t uv=m->packed_kind==2?offsetof(struct short_cached_vertex,u):offsetof(struct cached_vertex,u);
-        size_t rgba=m->packed_kind==2?offsetof(struct short_cached_vertex,rgba):offsetof(struct cached_vertex,rgba);
-        glVertexAttribPointer(0,2,m->packed_kind==1?GL_FIXED:m->packed_kind==2?GL_SHORT:GL_FLOAT,GL_FALSE,stride,(void*)0);
-        glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,stride,(void*)uv);
-        glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_TRUE,stride,(void*)rgba);
+        GLsizei stride=(GLsizei)sizeof(struct cached_vertex);
+        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,stride,(void*)0);
+        glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,stride,(void*)offsetof(struct cached_vertex,u));
+        glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_TRUE,stride,(void*)offsetof(struct cached_vertex,rgba));
         }
         const float identity[]={1,0,0,0,1,0,0,0,1};
         const float *base=d->atlas_scale?projection:identity;
-        float packed_projection[9];
-        if(m->packed_kind){
-            memcpy(packed_projection,base,sizeof(packed_projection));
-            packed_projection[6]+=base[0]*m->position_origin[0]+base[3]*m->position_origin[1];
-            packed_projection[7]+=base[1]*m->position_origin[0]+base[4]*m->position_origin[1];
-            packed_projection[0]*=m->position_scale;packed_projection[1]*=m->position_scale;
-            packed_projection[3]*=m->position_scale;packed_projection[4]*=m->position_scale;
-            base=packed_projection;
-        }
         glUniformMatrix3fv(d->cache_transform,1,GL_FALSE,base);
         glDrawElements(GL_TRIANGLES,(GLsizei)(count/4*6),GL_UNSIGNED_SHORT,(void*)((size_t)first/4*6*sizeof(uint16_t)));
         return;
@@ -739,47 +716,12 @@ static int cache_quad(ot_display *d,const float *q,const float *projection,struc
     return d->atlas_scale?cache_quad_sampled(d,q,out,retained,declared_em):cache_quad_exact(d,q,projection,out);
 }
 static uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;}
-// Experimental vertex fetch formats. This adapter packs an immutable mesh only
-// when coverage/geometry changes; viewport scrolling never repacks positions.
-// Prove a complete mesh range before writing integer attributes. An unsupported
-// range falls back as a whole mesh, preserving source ordering and draw count.
+// Upload immutable cached geometry only
+// when coverage/geometry changes; viewport scrolling never uploads positions.
 static int upload_cached_vertices(ot_display *d,struct text_mesh *m) {
-    m->packed_kind=d->position_format;m->position_scale=1.f;
-    m->position_origin[0]=m->position_origin[1]=0.f;
-    double scale=65536.;
-    if(m->packed_kind && m->count){
-        double lo[2]={m->cached_vertices[0].x,m->cached_vertices[0].y},hi[2]={lo[0],lo[1]};
-        for(int i=0;i<m->count;i++){
-            double p[2]={m->cached_vertices[i].x,m->cached_vertices[i].y};
-            for(int axis=0;axis<2;axis++){lo[axis]=fmin(lo[axis],p[axis]);hi[axis]=fmax(hi[axis],p[axis]);}
-        }
-        if(m->packed_kind==2){
-            for(int axis=0;axis<2;axis++)m->position_origin[axis]=(float)round((lo[axis]+hi[axis])*.5);
-            scale=16384.;
-            while(scale>1. && ((hi[0]-m->position_origin[0])*scale>32767. || (lo[0]-m->position_origin[0])*scale< -32768. || (hi[1]-m->position_origin[1])*scale>32767. || (lo[1]-m->position_origin[1])*scale< -32768.))scale*=.5;
-            m->position_scale=(float)(1./scale);
-        }else if(lo[0]< -32768. || hi[0]>32767.999 || lo[1]< -32768. || hi[1]>32767.999){
-            for(int axis=0;axis<2;axis++)m->position_origin[axis]=(float)round((lo[axis]+hi[axis])*.5);
-        }
-        double lower=m->packed_kind==2?-32768.:-2147483648.;
-        double upper=m->packed_kind==2?32767.:2147483647.;
-        for(int axis=0;axis<2;axis++)if(round((lo[axis]-m->position_origin[axis])*scale)<lower || round((hi[axis]-m->position_origin[axis])*scale)>upper){m->packed_kind=0;d->position_fallbacks++;break;}
-    }
-    size_t stride=m->packed_kind==2?sizeof(struct short_cached_vertex):sizeof(struct cached_vertex);
-    size_t bytes=(size_t)m->count*stride;
-    const void *vertices=m->cached_vertices;
-    if(m->packed_kind){
-        if(bytes>m->packed_capacity){void *next=realloc(m->packed_vertices,bytes);if(!next)return fail(d,"Packed glyph staging allocation");m->packed_vertices=next;m->packed_capacity=bytes;}
-        for(int i=0;i<m->count;i++){
-            const struct cached_vertex *v=m->cached_vertices+i;
-            int32_t x=(int32_t)round(((double)v->x-m->position_origin[0])*scale);
-            int32_t y=(int32_t)round(((double)v->y-m->position_origin[1])*scale);
-            if(m->packed_kind==1){struct fixed_cached_vertex *p=(struct fixed_cached_vertex*)m->packed_vertices+i;p->x=x;p->y=y;p->u=v->u;p->v=v->v;memcpy(p->rgba,v->rgba,4);}
-            else {struct short_cached_vertex *p=(struct short_cached_vertex*)m->packed_vertices+i;p->x=(int16_t)x;p->y=(int16_t)y;p->u=v->u;p->v=v->v;memcpy(p->rgba,v->rgba,4);}
-        }
-        vertices=m->packed_vertices;
-    }
-    glBindBuffer(GL_ARRAY_BUFFER,m->cached_vbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)bytes,vertices,GL_STATIC_DRAW);
+    size_t bytes=(size_t)m->count*sizeof(struct cached_vertex);
+    glBindBuffer(GL_ARRAY_BUFFER,m->cached_vbo);
+    glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)bytes,m->cached_vertices,GL_STATIC_DRAW);
     d->cached_upload_bytes+=bytes;return 0;
 }
 // Inspect only dirty geometry/projections. Retain RGBA for large entries: the
@@ -959,7 +901,7 @@ int ot_pixels(ot_display *d,uint8_t *rgba,size_t length) {
 }
 void ot_close(ot_display *d) {
     if(!d)return;
-    if(d->profile_text)fprintf(stderr,"Text position format %d; cached upload bytes %llu; whole-mesh format fallbacks %llu\n",d->position_format,(unsigned long long)d->cached_upload_bytes,(unsigned long long)d->position_fallbacks);
+    if(d->profile_text)fprintf(stderr,"Cached text upload bytes %llu\n",(unsigned long long)d->cached_upload_bytes);
     if(d->profile_text)fprintf(stderr,"Text cache key preparation %.3f ms; cached vertex packing/upload %.3f ms total; recent hits %llu\n",d->profile_keys_ns/1e6,d->profile_upload_ns/1e6,(unsigned long long)d->profile_recent);
     if(d->fd>=0 && d->modeset) {
         if(d->pending)(void)wait_flip(d);
@@ -999,7 +941,7 @@ void ot_close(ot_display *d) {
     free(d->saved_connectors);
     if(d->input>=0)close(d->input);
     if(d->fd>=0){drmDropMaster(d->fd);close(d->fd);}
-    for(int i=0;i<3;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);free(d->text[i].packed_vertices);}
+    for(int i=0;i<3;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
     free(d->glyph_cache);
     free(d);
 }

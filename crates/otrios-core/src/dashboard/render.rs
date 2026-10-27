@@ -3,8 +3,6 @@ use super::{font::Font, scene::Scene};
 use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
 pub(super) struct RetainedPaint<'a> {
     pub runs: &'a mut Vec<(usize, u32)>,
-    pub fixed: Option<&'a mut super::fixed_text::GlyphMathCache>,
-    pub placements: Option<&'a std::collections::BTreeMap<u32, super::fixed_space::Placement>>,
 }
 /// Ordered geometry and Slug glyph runs, retained by both GPU hosts.
 #[derive(Default)]
@@ -261,21 +259,12 @@ impl Mesh {
         mut retained: Option<&mut RetainedPaint<'_>>,
     ) {
         let f = node.frame;
-        let mut r = Rect::new(
+        let r = Rect::new(
             parent[0] + f.x * factor,
             parent[1] + f.y * factor,
             f.width * factor,
             f.height * factor,
         );
-        let mut clip = clip;
-        if let Some(p) = retained
-            .as_ref()
-            .and_then(|p| p.placements)
-            .and_then(|p| p.get(&node.id))
-        {
-            r = p.rect();
-            clip = p.clip();
-        }
         match &node.primitive {
             Primitive::Canvas { clip: enabled } => {
                 let clip = if *enabled { clip.intersect(r) } else { clip };
@@ -317,32 +306,19 @@ impl Mesh {
                         let first = self.glyph_vertices.len() / 16;
                         let before = self.draws.len();
                         let previous = self.draws.last().copied();
-                        let fixed = paint.fixed.as_deref_mut().is_some_and(|cache| {
-                            super::fixed_text::append(
-                                font,
-                                cache,
-                                value,
-                                *scale as f32 * factor,
-                                *color,
-                                &mut self.glyph_vertices,
-                            )
-                            .is_ok()
-                        });
-                        if !fixed {
-                            self.text(
-                                Rect::new(0., 0., 100_000., 100_000.),
-                                value,
-                                *scale as f32 * factor,
-                                *color,
-                                Clip {
-                                    left: -100_000.,
-                                    top: -100_000.,
-                                    right: 100_000.,
-                                    bottom: 100_000.,
-                                },
-                                font,
-                            );
-                        }
+                        self.text(
+                            Rect::new(0., 0., 100_000., 100_000.),
+                            value,
+                            *scale as f32 * factor,
+                            *color,
+                            Clip {
+                                left: -100_000.,
+                                top: -100_000.,
+                                right: 100_000.,
+                                bottom: 100_000.,
+                            },
+                            font,
+                        );
                         let count = self.glyph_vertices.len() / 16 - first;
                         self.draws.truncate(before);
                         if let Some(old) = previous {

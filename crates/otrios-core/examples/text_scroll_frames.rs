@@ -54,12 +54,7 @@ fn main() -> Result<()> {
     }
     let with_styles = args.iter().any(|a| a == "--styles");
     let retained = std::env::args().any(|a| a == "--retained");
-    let math = if std::env::args().any(|a| a == "--fixed") {
-        otrios_core::dashboard::retained_text::TextMath::Fixed
-    } else {
-        otrios_core::dashboard::retained_text::TextMath::Float32
-    };
-    let mut presentation = otrios_core::dashboard::retained_text::TextPresentation::with_math(math);
+    let mut presentation = otrios_core::dashboard::retained_text::TextPresentation::default();
     let mut generation = 0;
     let frame_count = if dense { 120_u32 } else { 240_u32 };
     let font = Arc::new(Font::from_zstd(
@@ -341,20 +336,11 @@ fn main() -> Result<()> {
     }
     let cold = times[0];
     times.sort_unstable();
-    println!(
-        "Fixed text runs / fallback runs: {:?}",
-        presentation.math_counts()
-    );
     if profile {
         for (i, (scene, p)) in profiles.iter().enumerate() {
             println!(
-                "PROFILE frame={i} source_us={scene} placement_us={} rebuild_us={} cull_us={} changed_placements={} geometry_bytes={} viewport_bytes={}",
-                p.placement_us,
-                p.rebuild_us,
-                p.cull_us,
-                p.changed_placements,
-                p.mesh_payload_bytes,
-                p.viewport_bytes
+                "PROFILE frame={i} source_us={scene} placement_us={} rebuild_us={} cull_us={} geometry_bytes={} viewport_bytes={}",
+                p.placement_us, p.rebuild_us, p.cull_us, p.mesh_payload_bytes, p.viewport_bytes
             );
         }
     }

@@ -1,5 +1,10 @@
 # Canonical glyph scale and raster comparison — 2026-10-27
 
+Historical experiment record. The fixed-point pilot and alternate GPU position
+formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
+Commands and feature names below refer to the evaluated revision, not the current
+checkout. Retained float rendering and adaptive coverage storage remain selected.
+
 The raster and 30 fps gates now pass in the opt-in experimental path. The full
 fixed point milestone remains open: hierarchy transforms, viewport clipping and
 culling, and flow composition still need migration and qualification. No default

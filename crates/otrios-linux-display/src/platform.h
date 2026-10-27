@@ -18,7 +18,6 @@ int ot_set_font(ot_display *d,uint32_t cw,uint32_t ch,const float *curves,size_t
 int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floats,const uint32_t *draws,size_t draw_words);
 int ot_linear_scene(ot_display *d);
 void ot_text_stats(ot_display *d,uint64_t *stats);
-int ot_text_position_format(ot_display *d,int format);
 int ot_draw(ot_display *d,const float *projection,int animated);
 int ot_present(ot_display *d,ot_flip *flip);
 int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t floats);

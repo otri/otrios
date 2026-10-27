@@ -6,11 +6,7 @@ pub mod authoring;
 mod demo;
 use otrios_core::{
     canvas::*,
-    dashboard::{
-        font::Font,
-        font_reference,
-        retained_text::{TextMath, TextPresentation},
-    },
+    dashboard::{font::Font, font_reference, retained_text::TextPresentation},
 };
 use otrios_interfaces::{
     canvas::Presentation,
@@ -58,7 +54,7 @@ fn full_page_drag_coasts_culls_and_keeps_geometry_and_state_immutable() {
         p.origin[0] + p.node.frame.width * 0.8,
         p.origin[1] + p.node.frame.height * 0.8,
     ];
-    let mut presentation = TextPresentation::with_math(TextMath::Float32);
+    let mut presentation = TextPresentation::default();
     let first = presentation.compose(&scene, &font);
     let original = first.mesh.glyph_vertices.clone();
     let total = first.mesh.glyph_vertices.len() / 64;
