@@ -17,7 +17,11 @@ test('inline geometry and glyphs share retained resource admission, placement an
   transfer.ack(packet.token);d.view[3]=17.25;d.view[5]=10;transfer.update(meta([d]),'chat');
   const warm=transfer.take(()=>assert.fail('scroll copied inline or text geometry'));layers.accept(warm);
   assert.equal(views[3],17.25);assert.equal(views[11],17.25);
+  assert.equal(layers.stats().raw_uploaded_bytes,64*4+18*4);
+  assert.equal(layers.stats().resource_uploads,1);
+  assert.equal(layers.stats().budgeted_geometry_bytes,512+18*4+24);
   layers.clear();assert(disposed);
+  assert.equal(layers.stats().budgeted_geometry_bytes,0);assert.equal(layers.stats().resource_evictions,1);
   transfer.reset();transfer.update(meta([{...d,geometry:5463}]),'chat');assert.throws(()=>transfer.take(()=>payload),/chunk size/);
 });
 test('coalesced viewports keep acknowledged resource dependencies and upload only incoming chunks',()=>{

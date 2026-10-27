@@ -99,3 +99,11 @@ required-features = ["canvas"]
 [[example]]
 name = "collection_cost"
 required-features = ["merkle"]
+
+[[example]]
+name = "chat_window_fixture"
+required-features = ["canvas"]
+
+[[example]]
+name = "message_frames"
+required-features = ["canvas"]

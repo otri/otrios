@@ -49,17 +49,20 @@ export class DocumentTransfer {
 
 // Display-owned buffers. Resources never contain source text or mutable layout.
 export class DocumentLayers {
-  constructor(renderer){this.renderer=renderer;this.key=null;this.layers=new Map();this.draws=[];this.loading=false;}
-  clear(){for(const layer of this.layers.values())layer.dispose();this.layers.clear();this.draws=[];this.key=null;this.loading=false;}
+  constructor(renderer){this.renderer=renderer;this.key=null;this.layers=new Map();this.sizes=new Map();this.draws=[];this.loading=false;this.uploadedBytes=0;this.uploads=0;this.evictions=0;}
+  clear(){for(const layer of this.layers.values())layer.dispose();this.evictions+=this.layers.size;this.layers.clear();this.sizes.clear();this.draws=[];this.key=null;this.loading=false;}
+  stats(){return {resident_versions:this.layers.size,budgeted_geometry_bytes:[...this.sizes.values()].reduce((a,b)=>a+b,0),raw_uploaded_bytes:this.uploadedBytes,resource_uploads:this.uploads,resource_evictions:this.evictions};}
   accept(packet){
     if(packet.key!==this.key){this.clear();this.key=packet.key;}
-    for(const id of packet.retire){this.layers.get(id)?.dispose();this.layers.delete(id);}
+    for(const id of packet.retire){if(this.layers.has(id))this.evictions++;this.layers.get(id)?.dispose();this.layers.delete(id);this.sizes.delete(id);}
     for(const {version,glyphVertices,vertices} of packet.upserts){
       if(this.layers.has(version))throw Error('Duplicate document resource version');
       const layer=this.renderer.createLayer();
       const geometry=vertices.length/6,glyphs=glyphVertices.length/16;
       layer.setFrame({vertices,glyphVertices,draws:new Uint32Array([...(geometry?[0,0,geometry]:[]),...(glyphs?[1,0,glyphs]:[])]),textStyles:new Float32Array([...(geometry?[0]:[]),...(glyphs?[packet.em]:[])])});
       this.layers.set(version,layer);
+      this.sizes.set(version,glyphVertices.length/64*512+vertices.byteLength+12*((geometry?1:0)+(glyphs?1:0)));
+      this.uploadedBytes+=vertices.byteLength+glyphVertices.byteLength;this.uploads++;
     }
     this.draws=packet.draws.map(d=>{const layer=this.layers.get(d.version);if(!layer)throw Error('Document frame references an unadmitted version');const geometry=d.geometry||0;layer.setTextViews(new Float32Array([...(geometry?[0,geometry,...d.view.slice(2)]:[]),...(d.glyphs?d.view:[])]));return layer;});
     this.loading=packet.loading;

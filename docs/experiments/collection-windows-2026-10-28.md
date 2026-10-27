@@ -512,20 +512,114 @@ those observations. This is small-thread functional/graphics-recovery evidence,
 not the pending independent pixel comparison, large-thread browser scaling or
 physical page-flip measurement. No dependencies were added.
 
+## Large durable chat and independent message pixels
+
+Two fresh fixture journals were populated through the real room's single owner,
+with a durable receipt checked for every send. They retain 2,000 and 25,000
+messages (1,158,074 / 14,475,080 canonical bytes; 1,224,596 / 15,300,596 journal
+bytes). The closed seeds were copied into disposable authority directories.
+No fixture dispatches were written into the live room.
+
+```sh
+cargo run -p otrios-core --features canvas --example chat_window_fixture --release --locked --offline -- NEW_DIRECTORY 25000
+node scripts/test-chat-collections-browser.mjs --url http://127.0.0.1:18965 --records 25000 --chromium '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --output target/rfc0024-qualification/large/browser-25000
+```
+
+Chrome 156.0.8078.48 / Node 24.19.0 passed both runs. Each initial tail selected
+64 rows, transferred **40,783 bytes in one collection frame**, retained 33,792
+selected canonical bytes and 39,999 replica canonical bytes. Each held 24,769
+source-allocation bytes, 3,440 index bytes, five GPU resource versions and
+285,880 budgeted GPU geometry bytes. Core layout workspace was 473,896 / 433,492
+bytes at the sampled settled viewport; background height discovery can continue
+outside the visible window, so these are observations rather than identical
+scheduling states. Setup including first room recovery was 3.720 / 9.278 seconds;
+recovery still scales with authoritative journal size.
+
+After explicit garbage collection, worker JS used heap was 841,188 / 881,524
+bytes and backing storage 125,847 / 128,518 bytes. Main isolate used heap was
+1,601,844 / 1,616,648 bytes, backing storage 410,134 / 418,887 bytes. These are
+[CDP per-isolate heap/backing-storage measurements](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-getHeapUsage),
+not browser/process RSS or a measurement of all Wasm/native allocations. The
+separate-process collection measurements earlier in this report retain their
+own scope. Full snapshots, traffic and counters are committed in
+[data/collection-chat-browser-2026-10-28.json](data/collection-chat-browser-2026-10-28.json).
+
+Actual transcript drags acquired older ranges 1919..1982 and 24919..24982. An
+append from a second guest transferred zero collection bytes to each anchored
+reader and repacked no glyphs. Portrait resize retained the lease generation and
+message anchor; Latest reacquired the tail and reload preserved guest identity.
+Both opening hellos remained control v1 / state v8. Selected/replica, layout,
+index and GPU budgets were asserted at every sample. A newly exposed adapter
+bug skipped alternate evicted DOM rows while iterating a live HTMLCollection;
+removal now uses a snapshot and the test enforces <=64 accessible rows after
+replacement. This correction is independent of GPU retention.
+
+The LGPL `message_frames` fixture compares the retained block reader with an
+independent unpaged full-prefix line-breaking oracle. It checks 8,575 resident
+line/source ranges and complete heights across 80 frames, including a clipped
+avatar/header, fractional pan, prepend, selection eviction/append and width
+reflow. The oracle constructs local row scenes and places them from its complete
+layout; it does not use Reader pages, checkpoints or chunk placement. Both use
+the admitted font, avatar artwork and host view/clip contract. Qualification
+mesh flattening is confined to the fixture serializer.
+
+```sh
+cargo run -p otrios-core --features canvas --example message_frames --release --locked --offline -- target/rfc0024-qualification/pixels/messages
+node scripts/compare-text-browser.mjs --reference target/rfc0024-qualification/pixels/messages-reference.mesh --candidate target/rfc0024-qualification/pixels/messages-blocks.mesh --dpr 1,2 --chromium '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --output target/rfc0024-qualification/pixels/browser-default
+# Additional high-DPR qualification uses the existing opt-in stable-quad mode:
+node scripts/compare-text-browser.mjs --reference target/rfc0024-qualification/pixels/messages-reference.mesh --candidate target/rfc0024-qualification/pixels/messages-blocks.mesh --dpr 3.2 --stable-quads --chromium '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --output target/rfc0024-qualification/pixels/browser-stable
+```
+
+The existing eight-byte/channel gate passes: default DPR 1/2 and stable DPR 3.2
+all have maximum error 1. Default DPR 3.2 has a known 14-byte maximum on 217
+pixels of one glyph, where scalar scene and retained local coordinates differ
+by a few f32 units near a hardware subpixel boundary. The stable-quad mode
+reduces that comparison to maximum 1. No comparison threshold was relaxed and
+no renderer mode/default changed. Diagnostic worst-pixel coordinates and error
+bounds are now recorded. An earlier world-space CPU-clipped avatar oracle also
+introduced triangle-edge arithmetic differences; the local-coordinate oracle
+uses the common placement contract to compare the independent layout itself.
+
+On the physical RK3126/Mali400, stable-mode comparison passed all five sampled
+frames at rotations 0 and 90, with maximum errors 4..7. Three 20-second
+landscape runs of the 64-message structured source measured 56.547 / 56.397 /
+56.497 kernel-presented fps at 400 logical units/second forward/reverse. Working
+storage peaked at 2,617,420 bytes and index at 3,856 bytes, with zero loading
+frames. The portrait run measured 55.147 fps and a 2,682,376-byte workspace peak.
+These run the real Reader and production GPU adapter, excluding authority,
+network, complete chat UI, physical touch and typist load. Kernel timestamps
+are required; headless pixel capture is not the FPS evidence. Asset digests and
+metrics are in the committed device qualification JSON. The exclusive-display
+controller restored the console and native service in `finally`. Production (default renderer) repetition also passed all ten native pixel
+comparisons (maximum 4..7) and three landscape scroll runs at 56.547 fps each.
+Two intermediate runs failed while saving PPMs after the task's temporary
+artifacts filled `/tmp`; their metrics are not counted as successful runs. The
+controller restored the service, useful captures were retrieved, and only this
+task's reproducible remote meshes/captures were removed. The two repetitions
+then passed without capture output. The committed default-mode JSON records the
+failed attempts and successful reruns. Temporary storage returned from 100% to
+61% usage. No kernel/display/calibration setting changed.
+
+The complete publisher-signed release candidate
+`37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16`
+passed graph/signature verification and the full two-guest Chrome/WebGL suite
+against fresh disposable state. It includes the actual new ARM executable;
+this final test is not the earlier browser-only fixture. Live recovery/cutover
+is recorded below.
+
+`bash scripts/check.sh` passed after granting the IPC permission required by its
+process tests; the sandbox-only attempt failed to bind its local socket. All 79
+Node worker/session/cache/GPU/input checks passed. The final Wasm build and ARMv7
+probes/direct host/authority/helper builds passed with Rust 1.90.0 and the locked
+offline dependency cache. No dependency was added.
+
 ## Remaining completion gates
 
-1. Establish the stopped live-data rollback point and qualify the actual
-   deployed single-owner journal restart/rollback workflow. The branch consumer
-   cutover and old read-path retirement above are not a live deployment.
-2. Qualify large-thread browser traversal and fixed-window data/merge/layout/GPU
-   working-set measurements with the new block implementation. Add independent
-   text/avatar pixel/clipping comparison fixtures for prepend, append and reflow;
-   the structural implementation above does not establish their pixel results.
-3. Run required checks and browser/native acceptance, pixel/clipping comparisons,
-   touch/typist replays and actual native page-flip measurements. Record selected
-   data, merge, layout, frame and GPU budgets separately. Verify reconnect,
-   revocation and renderer backpressure on both hosts.
-4. Build/sign/verify the complete release, deploy to the existing frame/web
-   environment with established rollback checks and make it available to test.
-   Finish final branch commits, then open a non-draft PR. No PR or deployment has
-   occurred for this partial implementation.
+1. Establish the stopped live-data rollback point and qualify actual journal
+   restart/rollback with the signed candidate and prior authority.
+2. Finish production-mode physical measurements and complete browser/native
+   acceptance against the final release, recording the scope of synthetic
+   gestures/typists separately from physical touch or network evidence.
+3. Deploy the verified complete signed release to the existing frame/web
+   environment, verify native readiness and public/reconnect/private boundaries,
+   and make it available to test. Finish final commits, then open a non-draft PR.
