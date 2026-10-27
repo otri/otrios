@@ -8,6 +8,19 @@ def module(name,file):
 publisher=module('publisher','publish-dashboard.py');agent=module('frame_agent','frame-dashboard-agent.py')
 activation=module('activation','activate-dashboard-release.py')
 OPENSSL=os.environ.get('OTRIOS_TEST_OPENSSL','/opt/homebrew/opt/openssl@3/bin/openssl' if pathlib.Path('/opt/homebrew/opt/openssl@3/bin/openssl').exists() else 'openssl')
+class FrozenSources(unittest.TestCase):
+    def test_runtime_json_fixtures_are_frozen_and_fingerprinted(self):
+        watcher=module('watcher','watch-dashboard.py')
+        with tempfile.TemporaryDirectory() as tmp:
+            repo=pathlib.Path(tmp)
+            for name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml']:(repo/name).write_text('test')
+            fixture=repo/'crates/otrios-core/tests/fixtures/touch/trace.json'
+            fixture.parent.mkdir(parents=True);fixture.write_text('{"points":[]}')
+            (repo/'private.json').write_text('excluded')
+            self.assertIn(fixture,watcher.inputs(repo))
+            self.assertNotIn(repo/'private.json',watcher.inputs(repo))
+            before=watcher.fingerprint(repo);fixture.write_text('{"points":[1]}')
+            self.assertNotEqual(before,watcher.fingerprint(repo))
 class SignedReleases(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=pathlib.Path(self.temp.name)

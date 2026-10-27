@@ -8,6 +8,7 @@ publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_na
 def inputs(repo):
     exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml']
     files=[repo/x for x in exact]
+    files.extend((repo/'crates/otrios-core/tests/fixtures').rglob('*.json'))
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
             if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt','.service','.timer'):files.append(p)
