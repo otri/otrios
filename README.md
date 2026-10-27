@@ -73,6 +73,10 @@ A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a v
 
 The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home opens Test Playground and private Monitoring. Test Playground groups Components, Layouts, Long Document, Text Panning, Text Input, 2D Animations and 3D Animations through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
 
+[RFC 0022](docs/rfcs/0022-playful-shared-chat-room.md) proposes a shared Chat Room
+with retained history, live drafts, playful commands and Monitoring-backed
+moderation. It is a plan for review; the app is not implemented or deployed.
+
 The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines the target ownership model, current implementation limits and concrete gates for deleting the earlier dashboard paths.
 
 The [bounded Merkle hierarchy and subtree transport](docs/rfcs/0005-merkle-subtree-prototype.md)
