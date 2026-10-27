@@ -6,6 +6,7 @@ use crate::merkle;
 
 const COMMAND: &[u8] = b"OTriOS\0collection-command\0v1\0";
 const OFFER: &[u8] = b"OTriOS\0collection-offer\0v1\0";
+const EVENT: &[u8] = b"OTriOS\0collection-event\0v1\0";
 const MAX_COMMAND: usize = 1024;
 const MAX_OFFER: usize = window::MAX_VIEW_BYTES + 256;
 
@@ -234,5 +235,77 @@ impl Offer {
             more_after,
             transfer,
         })
+    }
+}
+
+impl Event {
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut out = EVENT.to_vec();
+        match self {
+            Self::View(offer) => {
+                out.push(0);
+                let bytes = offer.to_bytes()?;
+                out.extend((bytes.len() as u32).to_le_bytes());
+                out.extend(bytes);
+            }
+            Self::Rejected { generation, status } => {
+                out.push(1);
+                out.extend(generation.to_le_bytes());
+                out.push(*status as u8);
+            }
+            Self::Revoked {
+                epoch,
+                generation,
+                collection,
+            } => {
+                out.push(2);
+                out.extend(epoch.to_le_bytes());
+                out.extend(generation.to_le_bytes());
+                out.extend(collection.to_le_bytes());
+            }
+        }
+        if out.len() > MAX_EVENT_BYTES {
+            return Err(Error::Limit);
+        }
+        Ok(out)
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > MAX_EVENT_BYTES {
+            return Err(Error::Limit);
+        }
+        let mut r = Reader(bytes);
+        if r.take(EVENT.len())? != EVENT {
+            return Err(Error::Invalid);
+        }
+        let result = match r.u8()? {
+            0 => {
+                let size = r.u32()? as usize;
+                Self::View(Offer::from_bytes(r.take(size)?)?)
+            }
+            1 => {
+                let generation = r.u64()?;
+                let status = match r.u8()? {
+                    0 => Status::Invalid,
+                    1 => Status::Limit,
+                    2 => Status::Schema,
+                    3 => Status::Forbidden,
+                    4 => Status::Stale,
+                    5 => Status::AnchorExpired,
+                    6 => Status::Backpressure,
+                    7 => Status::ResyncRequired,
+                    8 => Status::Unavailable,
+                    _ => return Err(Error::Invalid),
+                };
+                Self::Rejected { generation, status }
+            }
+            2 => Self::Revoked {
+                epoch: r.u64()?,
+                generation: r.u64()?,
+                collection: r.u64()?,
+            },
+            _ => return Err(Error::Invalid),
+        };
+        r.end()?;
+        Ok(result)
     }
 }

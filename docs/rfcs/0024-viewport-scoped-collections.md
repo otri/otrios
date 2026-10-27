@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0024: Viewport-scoped collection synchronization
 
-Status: implementation in progress. The reusable collection library has local
-process/scaling evidence; shared-session integration and the live chat/block
-cutover remain incomplete. See the [implementation ledger](../experiments/collection-windows-2026-10-28.md).
+Status: implementation in progress. Delivery 1 is qualified with a large synthetic
+source over the shared session on macOS/Linux, with bounded process/scaling
+evidence. The live chat/block cutover remains incomplete. See the
+[implementation ledger](../experiments/collection-windows-2026-10-28.md).
 Clarifies the user's pervasive-sync objective; not implemented by the chat UI
 fixes. Extends [RFC 0003](0003-module-roots-and-state-selectors.md),
 the existing partial Merkle replica, and [RFC 0023](0023-retained-presentation-foundation.md).

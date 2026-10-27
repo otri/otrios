@@ -72,6 +72,12 @@ pub struct Session {
     pending: Option<Lease>,
 }
 impl Session {
+    pub fn plan(&self) -> Option<&Selection> {
+        self.pending
+            .as_ref()
+            .or(self.active.as_ref())
+            .map(Lease::plan)
+    }
     pub fn generation(&self) -> u64 {
         self.generation
     }

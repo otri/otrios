@@ -99,6 +99,9 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
     (bytes, schema)
 }
 pub fn room(auth: bool, seconds: u64) -> Room {
+    room_with_collection(auth, seconds, None)
+}
+pub fn room_with_collection(auth: bool, seconds: u64, records: Option<u32>) -> Room {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
         "otrios-app-test-{}-{}-{}",
@@ -129,6 +132,15 @@ pub fn room(auth: bool, seconds: u64) -> Room {
         "--origin",
         ORIGIN,
     ]);
+    if let Some(records) = records {
+        let path = root.join("collection-fixture.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({"records":records,"retain_from":1}).to_string(),
+        )
+        .unwrap();
+        command.args(["--collection-fixture", path.to_str().unwrap()]);
+    }
     if auth {
         use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
         let salt = SaltString::encode_b64(b"test-only-otrios-salt").unwrap();

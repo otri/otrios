@@ -6,6 +6,25 @@ use crate::merkle::Hash;
 pub const MAX_WINDOW_RECORDS: usize = 64;
 pub const MAX_WINDOW_BYTES: usize = 512 * 1024;
 pub const MAX_FIELDS: usize = 32;
+pub const CHANNEL: u8 = 4;
+pub const MAX_COMMAND_BYTES: usize = 1024;
+pub const MAX_EVENT_BYTES: usize = 1024 * 1024 + 512;
+
+/// Explicit bounded outcomes. State failures do not change the release-control
+/// hello/upgrade envelope or confer admission to any collection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Status {
+    Invalid = 0,
+    Limit = 1,
+    Schema = 2,
+    Forbidden = 3,
+    Stale = 4,
+    AnchorExpired = 5,
+    Backpressure = 6,
+    ResyncRequired = 7,
+    Unavailable = 8,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "layout", derive(serde::Serialize, serde::Deserialize))]
@@ -58,4 +77,14 @@ pub enum Command {
     Cancel {
         generation: u64,
     },
+}
+impl Command {
+    pub fn generation(&self) -> u64 {
+        match self {
+            Self::Select { generation, .. }
+            | Self::Acknowledge { generation, .. }
+            | Self::Resync { generation }
+            | Self::Cancel { generation } => *generation,
+        }
+    }
 }

@@ -115,6 +115,7 @@ enum Event {
     Availability,
     Wire(Option<Result<Message, axum::Error>>),
     State(Option<apps::Packet>),
+    Collection(Option<collections::Packet>),
     Ink(Result<Vec<ink::Event>, tokio::sync::broadcast::error::RecvError>),
     Chat(Result<Arc<chat::Packet>, tokio::sync::broadcast::error::RecvError>),
     Heartbeat,
@@ -184,12 +185,14 @@ async fn peer(
         ))
     });
     let mut ink: Option<ink::Subscription> = None;
+    let mut collection_peer: Option<collections::Peer> = None;
     let mut chat_peer: Option<chat::Peer> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     heartbeat.tick().await;
     let mut heard = Instant::now();
     let mut window = Instant::now();
     let mut commands = 0_u16;
+    let mut collection_rate = (Instant::now(), 0_u16);
     let mut decode_budget = otrios_core::canvas::DecodeBudget::default();
     let decode_started = Instant::now();
     loop {
@@ -199,6 +202,7 @@ async fn peer(
             _=heartbeat.tick()=>Event::Heartbeat,
             value=input.next()=>Event::Wire(value),
             value=state_rx.recv(),if state_enabled=>Event::State(value),
+            value=async{match collection_peer.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::Collection(value),
             value=async{match ink.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Ink(value),
             value=async{match chat_peer.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Chat(value),
         };
@@ -250,6 +254,45 @@ async fn peer(
                             break;
                         }
                         match bytes.split_first() {
+                            Some((&otrios_interfaces::collection::CHANNEL, payload))
+                                if !payload.is_empty()
+                                    && payload.len()
+                                        <= otrios_interfaces::collection::MAX_COMMAND_BYTES =>
+                            {
+                                if collection_rate.0.elapsed() >= Duration::from_secs(1) {
+                                    collection_rate = (Instant::now(), 0);
+                                }
+                                collection_rate.1 += 1;
+                                if collection_rate.1 > 192 {
+                                    break;
+                                }
+                                let peer = collection_peer.get_or_insert_with(|| {
+                                    collections::subscribe(app.clone(), public, key.clone())
+                                });
+                                if peer.input.try_send(payload.to_vec()).is_err() {
+                                    collection_peer = None;
+                                    let bytes = otrios_core::collection::Event::Rejected {
+                                        generation: 0,
+                                        status: otrios_core::collection::Status::ResyncRequired,
+                                    }
+                                    .to_bytes()
+                                    .expect("bounded status");
+                                    if !send(
+                                        &mut output,
+                                        Message::Binary(
+                                            wire::frame(
+                                                otrios_interfaces::collection::CHANNEL,
+                                                bytes,
+                                            )
+                                            .into(),
+                                        ),
+                                    )
+                                    .await
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
                             Some((&otrios_interfaces::chat::CHANNEL, payload))
                                 if payload.len() <= otrios_interfaces::chat::MAX_COMMAND_BYTES =>
                             {
@@ -379,6 +422,44 @@ async fn peer(
                 }
             }
             Event::State(None) => break,
+            Event::Collection(Some(packet)) => {
+                // Never flush a private view after the admission that produced
+                // it expires, including while renderer/socket work was blocked.
+                let bytes = if packet.private && !apps::private_allowed(&app, public, &key).await {
+                    packet.revoked
+                } else {
+                    packet.bytes
+                };
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(otrios_interfaces::collection::CHANNEL, bytes).into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+            }
+            Event::Collection(None) => {
+                collection_peer = None;
+                let bytes = otrios_core::collection::Event::Rejected {
+                    generation: 0,
+                    status: otrios_core::collection::Status::Unavailable,
+                }
+                .to_bytes()
+                .expect("bounded status");
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(otrios_interfaces::collection::CHANNEL, bytes).into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+            }
             Event::Ink(Ok(events)) => {
                 let bytes = ink::encode(&events);
                 if !bytes.is_empty()
@@ -455,6 +536,7 @@ mod tests {
         let (state_available, _) = watch::channel(true);
         let (release_changed, _) = watch::channel(release('a'));
         let app = Arc::new(App {
+            collections: collections::Hub::new().unwrap(),
             chat: chat::Hub::new(None).unwrap(),
             ink: ink::Room::new(8).unwrap(),
             auth: None,

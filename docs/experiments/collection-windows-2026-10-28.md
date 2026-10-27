@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0024 implementation and qualification ledger
 
-RFC 0024 is in progress on `feat/0024-viewport-collections`. The reusable
-collection library has automated and local process/scaling evidence. The shared
-WebSocket adapter, Linux qualification, chat cutover, structured blocks, signed
-deployment and final PR remain required. This report does not mark either RFC
-delivery complete.
+RFC 0024 is in progress on `feat/0024-viewport-collections`. Delivery 1 has
+synthetic-source library, process/scaling and shared-WebSocket qualification on
+macOS and Linux. Delivery 2 remains required: chat cutover, native/browser app
+consumption, structured blocks, signed deployment and final PR. The RFC is not
+complete and these branch changes have not been deployed.
 
 ## Reusable library
 
@@ -75,11 +75,11 @@ The empty-root digest test has a separately generated Python hashlib vector.
 
 Window command/offer domains are `OTriOS\0collection-command\0v1\0` and
 `OTriOS\0collection-offer\0v1\0`. The codecs reject truncated, extra, oversized
-and invalid-tag frames before publication. These codecs are currently library
-code, **not routed on the live session**. Existing deployed sync v6 remains
-unchanged at this step. The eventual session integration must bump the browser,
-native, authority and release-manifest protocol together while preserving the
-stable v1 release-control opening envelope.
+and invalid-tag frames before publication. The shared-session integration below
+routes these bytes on the existing WebSocket. The branch declares sync v7 on
+the authority, browser, shared Rust native-client constant and release publisher.
+The deployed environment remains on its earlier release until the full RFC
+cutover is qualified. The stable v1 release-control opening envelope is unchanged.
 
 ## Local evidence
 
@@ -145,28 +145,115 @@ records, selected canonical bytes and transferred bytes stay fixed. Small child
 RSS changes include allocator warm-up. This is not a long-duration memory test,
 network latency benchmark, claimed speedup or frame capacity measurement.
 
+## Shared-session qualification
+
+The covered `collection::Channel` owns a bounded registry (at most 16 sources),
+server-authored field policy and per-peer collection sessions. One lane binds one
+collection until Cancel; changing its window retains the active/replacement
+lease contract. Authentication/admission inputs come from trusted host policy.
+The thin host adapter creates a worker only after the first negotiated collection
+command. Publication sends a coalesced watch hint; unchanged data is not
+reselected on an app timer. A 100 ms admission check revokes expired coverage
+even with an ACK pending. Private queued views are checked again before sending.
+
+Channel 4 carries generic collection commands/events alongside Canvas fields,
+ink and ephemeral room commands on the same socket. Negotiation gates all state
+bytes. v7 is declared consistently in authority admission, browser and shared
+Rust native bootstrap, release manifests, catalog verification and host tooling.
+Old state negotiation still receives the v1 code hello/upgrade. Browser transport
+has collection callbacks and a bounded worker bridge. Chat/native app consumers
+are delivery-2 work after this synthetic-source gate.
+
+`collection-event` v1 wraps a View, explicit generation/status rejection, or
+epoch/generation/collection revocation. Outcomes include AnchorExpired, Stale,
+Forbidden, Backpressure, ResyncRequired and Unavailable. Generation zero denotes
+lane-level errors such as a lost mailbox baseline; it is not an ACK of a valid
+selection. Truncated, extra and oversized envelopes are rejected. A failed data
+lane reports resync/unavailable while retaining release and unrelated lanes.
+
+Transport budgets are separate: eight commands of at most 1,024 bytes in the
+server input mailbox; one queued response plus one being handed off, each at
+most 1 MiB + 512 bytes; two browser worker response credits; 192 collection
+commands/second per socket. Adjacent queued Selects coalesce before transfer
+assembly without reordering ACK/Cancel. Core retains at most two leases, each
+with an ACK baseline and one in-flight view. Layout, transferable presentation
+snapshots and GPU budgets remain delivery-2 work.
+
+`--collection-fixture FILE` is an explicit local qualification option, disabled
+by default. It admits no network writes. A <=1,024-byte JSON file, for example
+`{"records":65536,"retain_from":1}`, controls deterministic source 24. Distinct
+records use sparse keys `3 * ordinal`, a public field and a private canary field.
+Trusted fixture counts/retention advance monotonically; source construction and
+index work remain in covered core. The file observer publishes complete prepared
+revisions. Normal servers install no synthetic data.
+
+Actual commands, in addition to the library/scaling commands above:
+
+```sh
+bash scripts/check.sh
+cargo test -p otrios-dashboard --features server,canvas,host-sync \
+  --test collection_session --locked --offline -- --nocapture
+node --test scripts/test-dashboard-session.mjs \
+  scripts/test-app-catalog.mjs scripts/test-ui-update.mjs
+```
+
+The repository check passed, as did the three real authority-process collection
+tests on macOS and all 18 scoped browser session/catalog/update tests. The large
+source starts with 65,536 records and grows to 65,540. An independent fast reader
+confirms four separate publications while the slow reader withholds its first
+ACK. The fixed 16-record sparse window around key 192 uses a 7,514-byte **offer**;
+the event envelope and multiplexing tag add constant overhead. After ACK, the
+slow tail reader receives the latest four appends with a 3,590-byte offer. The
+anchored reader receives no outside message bodies. These are byte counts, not
+latency or rendering performance claims.
+
+The process suite also checks superseded generations, retention expiry,
+fresh-RAM reconnect with canonical view convergence, and authority restart with
+an explicit old-epoch cursor rejection after a new hello. A private view is
+revoked when Monitoring admission expires with its offer still unacknowledged;
+the same socket remains usable for public selections/control. Malformed bytes
+receive explicit rejection. Core channel tests revoke policy without publishing
+new data and check bounded event codecs.
+
+The same tests ran in an isolated source directory in the existing pinned
+Linux builder, leaving its live `/src` build tree untouched:
+
+```sh
+docker exec -w /tmp/otrios-rfc0024/src otrios-dashboard-live-builder \
+  cargo test --target aarch64-unknown-linux-gnu -p otrios-core --features merkle \
+  --test collection --test collection_channel --test collection_process --locked --offline
+docker exec -w /tmp/otrios-rfc0024/src otrios-dashboard-live-builder \
+  cargo test --target aarch64-unknown-linux-gnu -p otrios-dashboard \
+  --features server,canvas,host-sync --test collection_session \
+  --locked --offline -- --nocapture
+```
+
+Linux environment: aarch64, kernel
+`7.2.12-orbstack-00394-gbecdd6130068`, Rust 1.90.0. All 17 collection tests,
+two channel tests, the two-test real child-process suite and all three actual
+server/driver process tests passed. Linux and macOS produce the same 7,514- and
+3,590-byte offers. This demonstrates independent Linux processes and scoped
+WebSocket synchronization; it does not implement the separate shared-memory
+IPC PoC. No native page-flip or live-site acceptance is claimed by delivery 1.
+
 ## Remaining completion gates
 
-1. Route reusable collection commands/offers and explicit errors/revocation
-   through the negotiated shared synchronization transport, with a coordinated
-   protocol bump and stable v1 release hello. Qualify the synthetic thread there
-   and in separate Linux processes before changing the live chat store.
-2. Replace the room's authoritative VecDeque/history paging with the ordered
+1. Replace the room's authoritative VecDeque/history paging with the ordered
    collection and one journal-recovery publication owner. Preserve sent profile
    snapshots, guest identity, admission, durable send receipts, moderation and
    RAM-only drafts/effects. Establish a stopped-data rollback point and restart
    qualification; retire old history commands/store/client paging after cutover.
-3. Map viewport/overscan to bounded stable-key coverage. Keep pending sends
+2. Map viewport/overscan to bounded stable-key coverage. Keep pending sends
    separate. Implement stable structured message blocks with one placement and
    clip for text/profile/avatar, block-revision layout caches, bounded reverse
    reserve, eviction and explicit expired-anchor adjustment. Preserve source
    anchors across prepend, append and width changes. Replace the prepend source
    reconstruction and separate avatar overlay.
-4. Run required checks and browser/native acceptance, pixel/clipping comparisons,
+3. Run required checks and browser/native acceptance, pixel/clipping comparisons,
    touch/typist replays and actual native page-flip measurements. Record selected
    data, merge, layout, frame and GPU budgets separately. Verify reconnect,
    revocation and renderer backpressure on both hosts.
-5. Build/sign/verify the complete release, deploy to the existing frame/web
+4. Build/sign/verify the complete release, deploy to the existing frame/web
    environment with established rollback checks and make it available to test.
    Finish final branch commits, then open a non-draft PR. No PR or deployment has
    occurred for this partial implementation.

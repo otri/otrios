@@ -30,6 +30,8 @@ mod apps;
 mod auth;
 #[path = "server_chat.rs"]
 mod chat;
+#[path = "server_collection.rs"]
+mod collections;
 #[path = "server_ink.rs"]
 mod ink;
 #[path = "server_session.rs"]
@@ -44,6 +46,7 @@ struct StateConfig {
     presentation: Option<PathBuf>,
 }
 struct App {
+    collections: Arc<collections::Hub>,
     chat: Arc<chat::Hub>,
     ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
@@ -664,6 +667,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut public_peers = 32;
     let mut state_file: Option<PathBuf> = None;
     let mut app_state = None;
+    let mut collection_fixture = None;
     let mut explicit_presentation = None;
     let mut releases = None;
     let mut origins = vec![];
@@ -676,6 +680,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--state"=>state_file=Some(PathBuf::from(args.next().ok_or("Missing state file")?)),
         "--presentation-file"=>explicit_presentation=Some(PathBuf::from(args.next().ok_or("Missing presentation file")?)),
         "--app-state"=>app_state=Some(PathBuf::from(args.next().ok_or("Missing app state directory")?)),
+        "--collection-fixture"=>collection_fixture=Some(PathBuf::from(args.next().ok_or("Missing collection fixture file")?)),
         "--apps"=>source=PathBuf::from(args.next().ok_or("Missing app source directory")?),
         "--auth-file"=>auth_file=Some(PathBuf::from(args.next().ok_or("Missing auth file")?)),
         "--session-seconds"=>session_seconds=args.next().ok_or("Missing session duration")?.parse::<u64>()?,
@@ -717,6 +722,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (state_available, _) = watch::channel(false);
     let (release_changed, _) = watch::channel(release.clone());
     let app = Arc::new(App {
+        collections: collections::Hub::new()?,
         chat: chat::Hub::new(app_state.as_ref().map(|p| p.join("brass-relay.journal")))?,
         ink: ink::Room::new(trusted_peers + public_peers)?,
         auth,
@@ -740,6 +746,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         peer_limits: [trusted_peers, public_peers],
     });
     tokio::spawn(recover_state(app.clone()));
+    if let Some(path) = collection_fixture {
+        app.collections.fixture(path);
+    }
     let observer = app.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(500));

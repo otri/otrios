@@ -117,7 +117,7 @@ impl Hub {
                 let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
                 if manifest["format"] != "otrios-release-v1"
                     || manifest["state_schema"] != "otrios-canvas-merkle-state-v1"
-                    || manifest["sync_protocol"] != "otrios-canvas-sync-v6"
+                    || manifest["sync_protocol"] != "otrios-canvas-sync-v7"
                 {
                     return Err("Installed release app protocol mismatch".into());
                 }
