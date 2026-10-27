@@ -1,5 +1,10 @@
 # Retained glyph raster follow-up — 2026-10-27
 
+Historical experiment record. The fixed-point pilot and alternate GPU position
+formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
+Commands and feature names below refer to the evaluated revision, not the current
+checkout. Retained float rendering and adaptive coverage storage remain selected.
+
 This revision improves the pixel comparisons but is **not accepted**. The
 experimental corrected-quads mode passes the original DPR 1/2 comparisons, but
 fails the new DPR 3.2 control and the 30 fps scanout gate. It remains disabled by

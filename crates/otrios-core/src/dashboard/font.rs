@@ -26,20 +26,15 @@ pub struct Metrics {
 }
 impl Metrics {
     /// Canonical cache scale from the admitted text contract, independent of
-    /// rounded quad bounds. A failed fixed admission keeps the legacy fallback.
+    /// rounded quad bounds. Zero requests legacy inference for invalid scales.
     pub fn cache_em(self, text_scale: f32) -> f32 {
-        use super::fixed::{Scalar, rounded_ratio};
-        Scalar::from_f32(text_scale)
-            .and_then(|scale| {
-                rounded_ratio(
-                    i128::from(scale.raw()) * 8 * i128::from(self.units_per_em),
-                    i128::from(self.cap_height),
-                )
-            })
-            .map(|raw| raw as f32 / 4294967296.)
-            .ok()
-            .filter(|v| v.is_finite() && *v > 0. && *v <= 1000000.)
-            .unwrap_or(0.)
+        let em = (f64::from(text_scale) * 8. * f64::from(self.units_per_em)
+            / f64::from(self.cap_height)) as f32;
+        if em.is_finite() && em > 0. && em <= 1_000_000. {
+            em
+        } else {
+            0.
+        }
     }
     /// Existing UI text scale means an eight-logical-unit capital height.
     pub fn scale(self, text_scale: f32) -> f32 {
@@ -546,23 +541,19 @@ impl<'a> Reader<'a> {
 }
 
 #[cfg(test)]
+const TEST_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../web/shared/fonts/Roboto-Regular.otq.zst");
+#[cfg(test)]
 pub(crate) fn test_font() -> Font {
-    let bytes = std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../web/shared/fonts/Roboto-Regular.otq.zst"),
-    )
-    .unwrap();
-    Font::from_zstd(&bytes, super::font_reference::RESOURCE_SHA256).unwrap()
+    // Keep cross-compiled unit tests runnable on the frame without the build
+    // machine's checkout path. Production resource lookup remains host-owned.
+    Font::from_zstd(TEST_FONT_BYTES, super::font_reference::RESOURCE_SHA256).unwrap()
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     fn compressed() -> Vec<u8> {
-        std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../web/shared/fonts/Roboto-Regular.otq.zst"),
-        )
-        .unwrap()
+        TEST_FONT_BYTES.to_vec()
     }
     fn decoded() -> Vec<u8> {
         let bytes = compressed();

@@ -1,5 +1,10 @@
 # Fixed hierarchy, culling and flow evaluation — 2026-10-27
 
+Historical experiment record. The fixed-point pilot and alternate GPU position
+formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
+Commands and feature names below refer to the evaluated revision, not the current
+checkout. Retained float rendering and adaptive coverage storage remain selected.
+
 The bounded coordinate experiment is qualified for review behind `fixed-ui-math`.
 Pixel comparisons pass the unchanged error gate, actual glyph packing contains
 NEON integer instructions, and dense scanout stays above 30 fps. **Float32 remains

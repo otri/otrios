@@ -155,24 +155,7 @@ fn measure(flow: &Flow) -> ([f32; 2], [f32; 2]) {
     }
 }
 
-/// Preserve the scalar float implementation as an independently callable control.
 pub fn resolve(composition: &Composition, size: [f32; 2]) -> Result<BTreeMap<u16, [f32; 4]>> {
-    if cfg!(feature = "fixed-ui-math") {
-        resolve_fixed(composition, size)
-    } else {
-        resolve_float32(composition, size)
-    }
-}
-/// Checked fixed allocation; unsupported intermediate values fall back for the
-/// whole plan, preserving public admission and preventing partial publication.
-pub fn resolve_fixed(composition: &Composition, size: [f32; 2]) -> Result<BTreeMap<u16, [f32; 4]>> {
-    super::fixed_composition::resolve(composition, size)
-        .or_else(|_| resolve_float32(composition, size))
-}
-pub fn resolve_float32(
-    composition: &Composition,
-    size: [f32; 2],
-) -> Result<BTreeMap<u16, [f32; 4]>> {
     if size
         .iter()
         .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
@@ -403,62 +386,5 @@ mod tests {
         p = plan();
         root.children[1].id = 3;
         assert!(validate(&p, &root).is_err());
-    }
-    #[test]
-    fn checked_flow_matches_float_allocations_across_nested_wraps_and_boundaries() {
-        for gap in [0., 0.1, 10.125] {
-            for alignment in [Alignment::Start, Alignment::Center, Alignment::End] {
-                let mut p = plan();
-                let wrap = Flow {
-                    flexible: [true, false],
-                    kind: FlowKind::Wrap {
-                        nodes: vec![3, 4, 5, 6, 7],
-                        preferred: [150.25, 40.125],
-                        minimum: [90.125, 40.125],
-                        gap: [gap, gap],
-                    },
-                };
-                p.wide.content = Flow {
-                    flexible: [true, true],
-                    kind: FlowKind::Group {
-                        axis: 1,
-                        gap,
-                        alignment,
-                        children: vec![p.wide.content.clone(), wrap],
-                    },
-                };
-                p.wide.insets = [0.125, 0.25, 0.375, 0.5];
-                p.tall = p.wide.clone();
-                for width in [160., 200., 300.25, 600., 800., 1280., 4096., 8192.] {
-                    for height in [100., 240., 800., 4096.] {
-                        let a = resolve_float32(&p, [width, height]);
-                        let b = super::super::fixed_composition::resolve(&p, [width, height]);
-                        match (a, b) {
-                            (Ok(a), Ok(b)) => {
-                                for (id, f) in a {
-                                    for (i, x) in f.into_iter().enumerate() {
-                                        assert!(
-                                            (x - b[&id][i]).abs() <= 0.001,
-                                            "{id} {i}: {x} vs {}",
-                                            b[&id][i]
-                                        );
-                                    }
-                                }
-                            }
-                            (Err(_), Err(_)) => {}
-                            pair => panic!("Different admission: {pair:?}"),
-                        }
-                    }
-                }
-            }
-        }
-        let mut p = plan();
-        p.wide.insets[0] = 1e-30;
-        p.tall = p.wide.clone();
-        assert!(super::super::fixed_composition::resolve(&p, [800., 200.]).is_err());
-        assert_eq!(
-            resolve_fixed(&p, [800., 200.]),
-            resolve_float32(&p, [800., 200.])
-        );
     }
 }

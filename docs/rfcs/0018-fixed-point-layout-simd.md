@@ -1,7 +1,9 @@
 # RFC 0018: Fixed point layout and SIMD stretch milestone
 
-Status: bounded implementation and evaluation complete; qualified opt-in candidate.
-Float32 remains the default because full checked layout is slower on Cortex-A7.
+Status: evaluation complete; fixed-point pilot retired at the user’s request.
+Float32 remains the selected path because fixed math gave no scrolling gain and
+rebuilds were slower on Cortex-A7. Implementation and feature switches have been
+removed; the reports below describe the historical experiment.
 Requested 2026-10-26, measured 2026-10-27.
 [Final coordinate, pixel and performance evaluation](../experiments/fixed-point-hierarchy-2026-10-27.md).
 [Canonical-scale raster correction](../experiments/fixed-point-canonical-scale-2026-10-27.md).
@@ -22,7 +24,7 @@ Changing filtering and coordinate representation together would hide regressions
 
 ## Representation to evaluate
 
-The opt-in implementation uses i64 Q48.16 for resize coordinates, i64 Q32.32
+The retired implementation used i64 Q48.16 for resize coordinates, i64 Q32.32
 for numeric expressions, accumulated glyph advances, hierarchy transforms,
 viewport clipping and flow allocation, and admitted local i32 Q16 lanes for
 glyph packing. Culling compares integer bounds corresponding to final GPU
@@ -67,10 +69,11 @@ hardware arithmetic limits or make nonlinear shader operations exact.
   Sign-off requires both performance and pixel comparisons; scaffold checks alone
   do not qualify.
 
-The implementation and comparison tools remain behind `fixed-ui-math`.
-The isolated admitted integer SIMD kernel is faster; complete checked layout is
-slower. The six-workload native/browser pixel matrix and repeated 30 fps scanout
-gates pass without loosening thresholds. The final report preserves independent
-float32 baselines, scalar/NEON stream identity, instruction evidence and all CPU
-costs. No default enablement, deployment or wholesale conversion of hit testing,
-physics or nonlinear geometry/shader evaluation is implied by this bounded RFC.
+The isolated admitted integer SIMD kernel was faster, but complete checked layout
+was slower. Pixel and repeated 30 fps scanout gates passed without loosening
+thresholds. The reports preserve independent float32 baselines, scalar/NEON
+stream identity, instruction evidence and complete CPU costs. The pilot modules,
+`fixed-ui-math` feature, fixed-specific probes and check mode have been removed.
+The generic mesh generators and native/browser pixel comparators remain.
+Any future SIMD work can operate on float data and must demonstrate a measured
+complete-frame benefit before adoption; see [RFC 0019](0019-native-fixed-simd-pipeline.md).

@@ -303,6 +303,16 @@ impl Drop for Display {
 }
 #[cfg(test)]
 mod tests {
+    fn expected_coverage_bytes() -> u64 {
+        if std::env::var("OTRIOS_TEXT_ALPHA_ATLAS").as_deref() == Ok("0")
+            || std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0")
+        {
+            4 * 1024 * 1024
+        } else {
+            2 * 1024 * 1024 // ALPHA atlas plus bounded RGBA8 scratch
+        }
+    }
+
     use super::*;
     fn mesa_display_owner() -> std::sync::MutexGuard<'static, ()> {
         // Mesa returns the same surfaceless EGLDisplay for these tests. Each
@@ -577,6 +587,86 @@ mod tests {
     }
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
+    fn mesa_coverage_storage_switches_for_large_entries_and_recovers_small_text() {
+        let scale = std::env::var("OTRIOS_TEXT_ATLAS_SCALE")
+            .unwrap_or("2".into())
+            .parse::<f32>()
+            .unwrap();
+        if scale == 0. {
+            return;
+        }
+        let _display_owner = mesa_display_owner();
+        use otrios_core::dashboard::{
+            components::{WHITE, background, canvas, text},
+            font::Font,
+            font_reference::RESOURCE_SHA256,
+            render_scene_with_font,
+            scene::Scene,
+        };
+        let font = Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            RESOURCE_SHA256,
+        )
+        .unwrap();
+        let bounds = background(0, 256., 256., WHITE, 0.).frame;
+        let base = render_scene_with_font(
+            &Scene::new(canvas(0, bounds, vec![text(1, bounds, "H", 2, WHITE)])).unwrap(),
+            &font,
+        )
+        .glyph_vertices;
+        let atlas = font.atlas();
+        let mut display = Display::headless([256, 256], false).unwrap();
+        display
+            .set_font(
+                atlas.curve_width,
+                atlas.curve_height,
+                &atlas.curves,
+                atlas.band_width,
+                atlas.band_height,
+                &atlas.bands,
+            )
+            .unwrap();
+        let projection = [2. / 256., 0., 0., 0., -2. / 256., 0., -1., 1., 1.];
+        let mut initial = None;
+        for (index, factor) in [1., 16. / scale, 1., 32. / scale, 1.]
+            .into_iter()
+            .enumerate()
+        {
+            let mut glyph = base.clone();
+            for vertex in glyph.chunks_exact_mut(16) {
+                vertex[0] *= factor;
+                vertex[1] *= factor;
+            }
+            display.upload_scene(0, &[], &glyph, &[1, 0, 4]).unwrap();
+            display
+                .text_styles(0, &[font.metrics().cache_em(2.) * factor])
+                .unwrap();
+            display
+                .text_views(0, &[0., 4., 0., 0., 0., 0., 256., 256.])
+                .unwrap();
+            display.draw(projection, false).unwrap();
+            let pixels = display.pixels().unwrap();
+            assert_eq!(
+                display.glyph_cache_stats()[2],
+                if index % 2 == 1 {
+                    4 * 1024 * 1024
+                } else {
+                    expected_coverage_bytes()
+                }
+            );
+            if index == 0 {
+                initial = Some(pixels);
+            } else if index % 2 == 0 {
+                assert_eq!(
+                    pixels.as_slice(),
+                    initial.as_ref().unwrap().as_slice(),
+                    "Storage changes retain small glyph pixels"
+                );
+            }
+        }
+    }
+    #[test]
+    #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
     fn mesa_partial_text_cache_preserves_fallback_order_and_viewport_clips() {
         if std::env::var("OTRIOS_TEXT_ATLAS_SCALE").as_deref() == Ok("0") {
             return;
@@ -705,7 +795,7 @@ mod tests {
             "rejected style metadata does not change the frame"
         );
         assert!(display.glyph_cache_stats()[1] > 0);
-        assert_eq!(display.glyph_cache_stats()[2], 4 * 1024 * 1024);
+        assert_eq!(display.glyph_cache_stats()[2], expected_coverage_bytes());
     }
     #[test]
     #[ignore = "Requires Mesa EGL surfaceless platform; exercised by Linux CI"]
@@ -763,6 +853,8 @@ mod tests {
         d.draw(projection, false).unwrap();
         let first = d.pixels().unwrap();
         let stats = d.glyph_cache_stats();
+        // This 128-pixel synthetic glyph exceeds the conservative alpha
+        // entry limit at both sampled scales; keep its original RGBA raster.
         assert_eq!(stats[1..], [1, 4 * 1024 * 1024]);
         assert!(first[(64 * 128 + 64) * 4] < 25); // central hole
         assert!(first[(24 * 128 + 64) * 4] > 240); // opaque ring

@@ -30,6 +30,8 @@ struct vertex { float x,y; uint8_t rgba[4]; };
 struct cached_vertex { float x,y,u,v; uint8_t rgba[4]; };
 struct mesh { GLuint vbo; GLsizei count; int opaque; };
 #define CACHE_SIZE 1024
+#define CACHE_SCRATCH_SIZE 512
+#define CACHE_ALPHA_ENTRY_LIMIT 256
 #define CACHE_ENTRIES 4096
 #define CACHE_BUCKETS 8192
 struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; int raw_dirty,cache_all; };
@@ -53,9 +55,9 @@ struct ot_display {
     GLint text_transform,text_curve_size,text_band_size;
     uint32_t curve_width,curve_height,band_width,band_height;
     uint64_t text_hits,text_misses,cache_generation;
-    int profile_text,stable_text;uint64_t profile_keys_ns,profile_upload_ns,profile_recent;
+    int profile_text,stable_text,alpha_atlas,alpha_enabled;uint64_t cached_upload_bytes;uint64_t profile_keys_ns,profile_upload_ns,profile_recent;
     GLuint scene_fbo,scene_texture,resolve_program,resolve_vbo,encode_texture;
-    GLuint cache_fbo,cache_texture,cache_program,cache_upload;
+    GLuint cache_fbo,cache_texture,cache_scratch,cache_program,cache_upload;
     GLint cache_sampler,cache_transform;
     float sampled_pixel_transform[4];
     struct glyph_entry *glyph_cache;size_t glyph_cache_count;
@@ -148,6 +150,11 @@ ot_display *ot_open(const char *card,const char *input,uint32_t width,uint32_t h
     d->fd=d->input=-1;d->egl=EGL_NO_DISPLAY;d->context=EGL_NO_CONTEXT;d->surface=EGL_NO_SURFACE;
     d->profile_text=getenv("OTRIOS_TEXT_PROFILE")!=NULL;
     const char *stable=getenv("OTRIOS_TEXT_STABLE_QUADS");d->stable_text=stable && !strcmp(stable,"1");
+    const char *alpha=getenv("OTRIOS_TEXT_ALPHA_ATLAS");
+    if(!alpha || !strcmp(alpha,"1"))d->alpha_atlas=1;
+    else if(!strcmp(alpha,"0"))d->alpha_atlas=0;
+    else {snprintf(error,capacity,"Text alpha atlas must be 0 or 1");free(d);return NULL;}
+    d->alpha_enabled=d->alpha_atlas;
     const char *sampling=getenv("OTRIOS_TEXT_ATLAS_SCALE");
     d->atlas_scale=sampling?atoi(sampling):2;
     if(d->atlas_scale!=0 && d->atlas_scale!=2 && d->atlas_scale!=3){snprintf(error,capacity,"Text atlas scale must be 0 (exact reference), 2 or 3");free(d);return NULL;}
@@ -329,7 +336,7 @@ int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count)
     }
     free(m->ems);m->ems=ems;m->cached_generation=0;return 0;
 }
-void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*4:0; }
+void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }
 static void draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count) {
     if(!count)return;
     glUseProgram(d->program);glUniformMatrix3fv(d->transform,1,GL_FALSE,projection);
@@ -350,12 +357,14 @@ static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projec
         glBindBuffer(GL_ARRAY_BUFFER,m->cached_vbo);glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);
         for(GLuint i=0;i<3;i++)glEnableVertexAttribArray(i);
         glDisableVertexAttribArray(3);glDisableVertexAttribArray(4);
-        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(struct cached_vertex),(void*)offsetof(struct cached_vertex,x));
-        glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(struct cached_vertex),(void*)offsetof(struct cached_vertex,u));
-        glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_TRUE,sizeof(struct cached_vertex),(void*)offsetof(struct cached_vertex,rgba));
+        GLsizei stride=(GLsizei)sizeof(struct cached_vertex);
+        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,stride,(void*)0);
+        glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,stride,(void*)offsetof(struct cached_vertex,u));
+        glVertexAttribPointer(2,4,GL_UNSIGNED_BYTE,GL_TRUE,stride,(void*)offsetof(struct cached_vertex,rgba));
         }
         const float identity[]={1,0,0,0,1,0,0,0,1};
-        glUniformMatrix3fv(d->cache_transform,1,GL_FALSE,d->atlas_scale?projection:identity);
+        const float *base=d->atlas_scale?projection:identity;
+        glUniformMatrix3fv(d->cache_transform,1,GL_FALSE,base);
         glDrawElements(GL_TRIANGLES,(GLsizei)(count/4*6),GL_UNSIGNED_SHORT,(void*)((size_t)first/4*6*sizeof(uint16_t)));
         return;
     }
@@ -391,27 +400,33 @@ static int draw_text(ot_display *d,struct text_mesh *m,const float *projection,u
 static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
     struct text_mesh *text=&d->text[slot];
     if(!text->draw_words){draw_geometry(d,&d->meshes[slot],projection,0,d->meshes[slot].count);return;}
-    int text_bound=0;
+    int text_bound=0,scissoring=0,has_clip=0;
+    float last_clip[4]={0};int x0=0,y0=0,x1=0,y1=0;
     for(size_t i=0;i<text->draw_words;i+=3) {
         uint32_t *r=text->draws+i;
-        if(r[0]==0){draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2]);text_bound=0;}
+        if(r[0]==0){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2]);text_bound=0;}
         else if(text->views){
             const float *v=text->views+i/3*8;if(v[1]==0 || v[6]<=v[4] || v[7]<=v[5])continue;
+            if(!has_clip || memcmp(last_clip,v+4,sizeof(last_clip))){
+            memcpy(last_clip,v+4,sizeof(last_clip));has_clip=1;
             float lo[2]={1e20f,1e20f},hi[2]={-1e20f,-1e20f};
             for(int corner=0;corner<4;corner++){
                 float x=v[4+(corner&1)*2],y=v[5+(corner>>1)*2];
                 float p[2]={(projection[0]*x+projection[3]*y+projection[6]+1.f)*(float)d->width*.5f,(projection[1]*x+projection[4]*y+projection[7]+1.f)*(float)d->height*.5f};
                 for(int axis=0;axis<2;axis++){lo[axis]=fminf(lo[axis],p[axis]);hi[axis]=fmaxf(hi[axis],p[axis]);}
             }
-            int x0=(int)ceilf(fmaxf(0.f,fminf((float)d->width,lo[0]))-.5f),y0=(int)ceilf(fmaxf(0.f,fminf((float)d->height,lo[1]))-.5f);
-            int x1=(int)ceilf(fmaxf(0.f,fminf((float)d->width,hi[0]))-.5f),y1=(int)ceilf(fmaxf(0.f,fminf((float)d->height,hi[1]))-.5f);
+            x0=(int)ceilf(fmaxf(0.f,fminf((float)d->width,lo[0]))-.5f),y0=(int)ceilf(fmaxf(0.f,fminf((float)d->height,lo[1]))-.5f);
+            x1=(int)ceilf(fmaxf(0.f,fminf((float)d->width,hi[0]))-.5f),y1=(int)ceilf(fmaxf(0.f,fminf((float)d->height,hi[1]))-.5f);
+            if(x1>x0 && y1>y0)glScissor(x0,y0,x1-x0,y1-y0);
+            }
             if(x1<=x0 || y1<=y0)continue;
             float moved[9];memcpy(moved,projection,sizeof(moved));
             moved[6]+=projection[0]*v[2]+projection[3]*v[3];moved[7]+=projection[1]*v[2]+projection[4]*v[3];
-            glEnable(GL_SCISSOR_TEST);glScissor(x0,y0,x1-x0,y1-y0);
-            text_bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],text_bound);glDisable(GL_SCISSOR_TEST);
+            if(!scissoring){glEnable(GL_SCISSOR_TEST);scissoring=1;}
+            text_bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],text_bound);
         }else{text_bound=draw_text(d,text,projection,r[1],r[2],text_bound);}
     }
+    if(scissoring)glDisable(GL_SCISSOR_TEST);
 }
 static int prepare_glyph_cache(ot_display *d,const float *projection,int animated);
 int ot_draw(ot_display *d,const float *projection,int animated) {
@@ -477,16 +492,33 @@ static void clear_glyph_cache(ot_display *d) {
     memset(d->glyph_recent,0,sizeof(d->glyph_recent));
     d->glyph_cache_count=0;d->cache_x=d->cache_y=1;d->cache_row=0;d->cache_generation++;d->cache_dirty=0;
     glBindFramebuffer(GL_FRAMEBUFFER,d->cache_fbo);glViewport(0,0,CACHE_SIZE,CACHE_SIZE);
-    glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);glBindFramebuffer(GL_FRAMEBUFFER,0);
+    glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);
+    if(d->alpha_atlas){
+        // Initialize the gaps as well as entries: bilinear fetches may touch a
+        // neighbouring texel. RGBA8 scratch is renderable; ALPHA is copy-only.
+        glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->cache_texture);
+        for(int y=0;y<CACHE_SIZE;y+=CACHE_SCRATCH_SIZE)
+            for(int x=0;x<CACHE_SIZE;x+=CACHE_SCRATCH_SIZE)
+                glCopyTexSubImage2D(GL_TEXTURE_2D,0,x,y,0,0,CACHE_SCRATCH_SIZE,CACHE_SCRATCH_SIZE);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER,0);
 }
 static int init_glyph_cache(ot_display *d) {
     if(d->cache_texture)return 0;
     const char *vs="attribute vec2 position;attribute vec2 texcoord;attribute vec4 color;uniform mat3 transform;uniform float linearTint;varying highp vec2 uv;varying mediump vec4 rgba;void main(){gl_Position=vec4((transform*vec3(position,1.0)).xy,0.0,1.0);uv=texcoord;vec3 c=color.rgb;if(linearTint>0.5)c=mix(pow((color.rgb+0.055)/1.055,vec3(2.4)),color.rgb/12.92,step(color.rgb,vec3(0.04045)));rgba=vec4(c*color.a,color.a);}";
     const char *fs="precision mediump float;uniform sampler2D image;varying highp vec2 uv;varying mediump vec4 rgba;void main(){gl_FragColor=rgba*texture2D(image,uv);}";
+    if(d->alpha_atlas)fs="precision mediump float;uniform sampler2D image;varying highp vec2 uv;varying mediump vec4 rgba;void main(){gl_FragColor=rgba*texture2D(image,uv).a;}";
     d->cache_program=simple_program(d,vs,fs,1);if(!d->cache_program)return -1;
     d->cache_transform=glGetUniformLocation(d->cache_program,"transform");
     glUseProgram(d->cache_program);glUniform1f(glGetUniformLocation(d->cache_program,"linearTint"),d->linear_scene?1.f:0.f);d->cache_sampler=glGetUniformLocation(d->cache_program,"image");glUniform1i(d->cache_sampler,0);
-    if(rgba_target(d,CACHE_SIZE,CACHE_SIZE,&d->cache_texture,&d->cache_fbo)<0)return -1;
+    // Store one coverage byte per texel. A bounded RGBA8 scratch preserves
+    // the existing rasterizer and eight-bit coverage before a GPU-side copy.
+    // Larger glyphs use the existing analytic fallback in painter order.
+    if(d->alpha_atlas){
+        if(rgba_target(d,CACHE_SCRATCH_SIZE,CACHE_SCRATCH_SIZE,&d->cache_scratch,&d->cache_fbo)<0)return -1;
+        glGenTextures(1,&d->cache_texture);glBindTexture(GL_TEXTURE_2D,d->cache_texture);texture_parameters();
+        glTexImage2D(GL_TEXTURE_2D,0,GL_ALPHA,CACHE_SIZE,CACHE_SIZE,0,GL_ALPHA,GL_UNSIGNED_BYTE,NULL);
+    }else if(rgba_target(d,CACHE_SIZE,CACHE_SIZE,&d->cache_texture,&d->cache_fbo)<0)return -1;
     if(d->atlas_scale){glBindTexture(GL_TEXTURE_2D,d->cache_texture);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);}
     d->glyph_cache=calloc(CACHE_ENTRIES,sizeof(*d->glyph_cache));if(!d->glyph_cache)return fail(d,"Glyph cache metadata allocation");
     glGenBuffers(1,&d->cache_upload);clear_glyph_cache(d);return 0;
@@ -519,6 +551,7 @@ static int cache_quad_exact(ot_display *d,const float *q,const float *projection
     }
     float ox=floorf(minx)-1,oy=floorf(miny)-1,fw=ceilf(maxx)-ox+1,fh=ceilf(maxy)-oy+1;
     if(!isfinite(fw) || !isfinite(fh) || fw<1 || fh<1 || fw>CACHE_SIZE-2 || fh>CACHE_SIZE-2 || fabsf(ox)>1e8f || fabsf(oy)>1e8f)return 1;
+    if(d->alpha_atlas && (fw>CACHE_SCRATCH_SIZE || fh>CACHE_SCRATCH_SIZE))return 1;
     int w=(int)fw,h=(int)fh;float key[24];
     for(int i=0;i<4;i++) {
         // Preserve exact physical phase; the atlas remains bounded by eviction.
@@ -540,6 +573,12 @@ static int cache_quad_exact(ot_display *d,const float *q,const float *projection
         }
         const float matrix[]={2.f/CACHE_SIZE,0,0,0,2.f/CACHE_SIZE,0,-1,-1,1};
         glBindFramebuffer(GL_FRAMEBUFFER,d->cache_fbo);glViewport(0,0,CACHE_SIZE,CACHE_SIZE);glDisable(GL_BLEND);
+        if(d->alpha_atlas){
+            // Preserve the original atlas-space vertex arithmetic. Move its
+            // integer window origin instead of readjusting glyph coordinates.
+            glViewport(-entry->x,-entry->y,CACHE_SIZE,CACHE_SIZE);
+            glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);
+        }
         glUseProgram(d->text_program);glUniformMatrix3fv(d->text_transform,1,GL_FALSE,matrix);
         glUniform1f(glGetUniformLocation(d->text_program,"coverageScale"),1.f);
     glUniform2f(d->text_curve_size,(float)d->curve_width,(float)d->curve_height);glUniform2f(d->text_band_size,(float)d->band_width,(float)d->band_height);
@@ -548,6 +587,7 @@ static int cache_quad_exact(ot_display *d,const float *q,const float *projection
         const GLint size[]={2,2,4,4,4};const size_t offset[]={0,2,4,8,12};
         for(GLuint i=0;i<5;i++){glEnableVertexAttribArray(i);glVertexAttribPointer(i,size[i],GL_FLOAT,GL_FALSE,16*sizeof(float),(void*)(offset[i]*sizeof(float)));}
         const uint16_t ix[]={0,1,2,2,1,3};glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_SHORT,ix);d->text_misses++;
+        if(d->alpha_atlas){glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->cache_texture);glCopyTexSubImage2D(GL_TEXTURE_2D,0,entry->x,entry->y,0,0,w,h);}
     }
     const float corner[]={0,0,1,0,0,1,1,1};
     uint8_t tint[4];for(int j=0;j<4;j++)tint[j]=(uint8_t)(q[j+4]*255.f+0.5f);
@@ -622,6 +662,7 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
     float ss=(float)d->atlas_scale,pad=(d->stable_text?3.f:2.f)*ss;
     float fw=(x1-x0)*sx*ss+2.f*pad,fh=(y1-y0)*sy*ss+2.f*pad;
     if(!isfinite(fw)||!isfinite(fh)||fw<1||fh<1||fw>CACHE_SIZE-2||fh>CACHE_SIZE-2)return 1;
+    if(d->alpha_atlas && (fw>CACHE_SCRATCH_SIZE || fh>CACHE_SCRATCH_SIZE))return 1;
     int w=(int)fw,h=(int)fh;w+=((float)w<fw);h+=((float)h<fh);
     float key[24]={sx,sy};memcpy(key+2,q+8,8*sizeof(float));
     entry=find_glyph(d,key,w,h);
@@ -644,6 +685,12 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
         }
         const float matrix[]={2.f/CACHE_SIZE,0,0,0,2.f/CACHE_SIZE,0,-1,-1,1};
         glBindFramebuffer(GL_FRAMEBUFFER,d->cache_fbo);glViewport(0,0,CACHE_SIZE,CACHE_SIZE);glDisable(GL_BLEND);
+        if(d->alpha_atlas){
+            // Preserve the original atlas-space vertex arithmetic. Move its
+            // integer window origin instead of readjusting glyph coordinates.
+            glViewport(-entry->x,-entry->y,CACHE_SIZE,CACHE_SIZE);
+            glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);
+        }
         glUseProgram(d->text_program);glUniformMatrix3fv(d->text_transform,1,GL_FALSE,matrix);
         glUniform1f(glGetUniformLocation(d->text_program,"coverageScale"),ss);
         glUniform2f(d->text_curve_size,(float)d->curve_width,(float)d->curve_height);glUniform2f(d->text_band_size,(float)d->band_width,(float)d->band_height);
@@ -652,6 +699,7 @@ static int cache_quad_sampled(ot_display *d,const float *q,struct cached_vertex 
         const GLint size[]={2,2,4,4,4};const size_t offset[]={0,2,4,8,12};
         for(GLuint i=0;i<5;i++){glEnableVertexAttribArray(i);glVertexAttribPointer(i,size[i],GL_FLOAT,GL_FALSE,16*sizeof(float),(void*)(offset[i]*sizeof(float)));}
         const uint16_t ix[]={0,1,2,2,1,3};glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_SHORT,ix);d->text_misses++;
+        if(d->alpha_atlas){glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,d->cache_texture);glCopyTexSubImage2D(GL_TEXTURE_2D,0,entry->x,entry->y,0,0,w,h);}
     }
     d->glyph_recent[recent]=(int)(entry-d->glyph_cache)+1;
 emit_sampled:
@@ -668,6 +716,51 @@ static int cache_quad(ot_display *d,const float *q,const float *projection,struc
     return d->atlas_scale?cache_quad_sampled(d,q,out,retained,declared_em):cache_quad_exact(d,q,projection,out);
 }
 static uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000ull+(uint64_t)t.tv_nsec;}
+// Upload immutable cached geometry only
+// when coverage/geometry changes; viewport scrolling never uploads positions.
+static int upload_cached_vertices(ot_display *d,struct text_mesh *m) {
+    size_t bytes=(size_t)m->count*sizeof(struct cached_vertex);
+    glBindBuffer(GL_ARRAY_BUFFER,m->cached_vbo);
+    glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)bytes,m->cached_vertices,GL_STATIC_DRAW);
+    d->cached_upload_bytes+=bytes;return 0;
+}
+// Inspect only dirty geometry/projections. Retain RGBA for large entries: the
+// alpha copy path loses both cold performance and raster parity at large sizes
+// on Mali-400, even within scratch capacity. Oversized entries remain raw either
+// way. Coasting does not scan glyphs or change atlas storage.
+static int wants_alpha_cache(ot_display *d,int slots) {
+    if(!d->alpha_enabled || !d->atlas_scale)return 0;
+    const float *p=d->sampled_pixel_transform;
+    for(int slot=0;slot<slots;slot++){
+        const struct text_mesh *m=&d->text[slot];
+        for(int glyph=0;glyph<m->count/4;glyph++){
+            const float *q=m->vertices+glyph*64;
+            float du=q[18]-q[2],dv=q[35]-q[3];
+            if(du==0 || dv==0 || q[8]==0 || q[9]==0)continue;
+            float dx=q[16]-q[0],dy=q[17]-q[1];
+            float ux=p[0]*dx+p[2]*dy,uy=p[1]*dx+p[3]*dy;
+            dx=q[32]-q[0];dy=q[33]-q[1];
+            float vx=p[0]*dx+p[2]*dy,vy=p[1]*dx+p[3]*dy;
+            float sx=(fabsf(ux)+fabsf(uy))/fabsf(du),sy=(fabsf(vx)+fabsf(vy))/fabsf(dv);
+            if(m->views && d->stable_text){
+                float em=m->ems && m->ems[glyph]>0?m->ems[glyph]:fabsf((q[33]-q[1])/dv);
+                sx=em*(fabsf(p[0])+fabsf(p[1]));sy=em*(fabsf(p[2])+fabsf(p[3]));
+            }
+            sx=roundf(sx*256.f)/256.f;sy=roundf(sy*256.f)/256.f;
+            float pad=(d->stable_text?3.f:2.f)*(float)d->atlas_scale;
+            float w=fabsf((q[14]+1.f)/q[8])*sx*(float)d->atlas_scale+2.f*pad;
+            float h=fabsf((q[15]+1.f)/q[9])*sy*(float)d->atlas_scale+2.f*pad;
+            if(w<=CACHE_SIZE-2 && h<=CACHE_SIZE-2 && (w>CACHE_ALPHA_ENTRY_LIMIT || h>CACHE_ALPHA_ENTRY_LIMIT))return 0;
+        }
+    }
+    return 1;
+}
+static void discard_glyph_target(ot_display *d) {
+    glDeleteTextures(1,&d->cache_texture);glDeleteTextures(1,&d->cache_scratch);
+    glDeleteFramebuffers(1,&d->cache_fbo);glDeleteProgram(d->cache_program);glDeleteBuffers(1,&d->cache_upload);
+    d->cache_texture=d->cache_scratch=d->cache_fbo=d->cache_program=d->cache_upload=0;
+    free(d->glyph_cache);d->glyph_cache=NULL;
+}
 static int prepare_glyph_cache(ot_display *d,const float *projection,int animated) {
     d->sampled_pixel_transform[0]=projection[0]*(float)d->width*.5f;
     d->sampled_pixel_transform[1]=projection[1]*(float)d->height*.5f;
@@ -678,6 +771,13 @@ static int prepare_glyph_cache(ot_display *d,const float *projection,int animate
     if(!has_text)return 0;
     if(!d->atlas_scale)for(int i=0;i<slots;i++)if(d->text[i].views)return 0;
     if(!d->curve_texture || !d->text_program)return fail(d,"Glyph scene has no admitted font resource");
+    int dirty=!d->cache_texture || d->cache_dirty;
+    for(int slot=0;slot<slots;slot++)if(d->text[slot].count &&
+        (d->text[slot].cached_generation!=d->cache_generation || memcmp(d->text[slot].cached_projection,projection,9*sizeof(float))))dirty=1;
+    if(dirty){
+        int alpha=wants_alpha_cache(d,slots);
+        if(alpha!=d->alpha_atlas){discard_glyph_target(d);d->alpha_atlas=alpha;}
+    }
     if(init_glyph_cache(d)<0)return -1;
     if(d->cache_dirty)clear_glyph_cache(d);
     for(int attempt=0;attempt<2;attempt++) {
@@ -708,7 +808,7 @@ static int prepare_glyph_cache(ot_display *d,const float *projection,int animate
             if(d->profile_text)d->profile_keys_ns+=monotonic_ns()-profile_start;
             profile_start=d->profile_text?monotonic_ns():0;
             if(status){clear_glyph_cache(d);restart=1;break;}
-            glBindBuffer(GL_ARRAY_BUFFER,m->cached_vbo);glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)((size_t)m->count*sizeof(*cached)),cached,GL_STATIC_DRAW);
+            if(upload_cached_vertices(d,m)<0)return -1;
             if(d->profile_text)d->profile_upload_ns+=monotonic_ns()-profile_start;
             m->cached_generation=d->cache_generation;memcpy(m->cached_projection,projection,9*sizeof(float));
         }
@@ -801,7 +901,8 @@ int ot_pixels(ot_display *d,uint8_t *rgba,size_t length) {
 }
 void ot_close(ot_display *d) {
     if(!d)return;
-    if(d->profile_text)fprintf(stderr,"Text cache key preparation %.3f ms; GPU buffer upload %.3f ms total; recent hits %llu\n",d->profile_keys_ns/1e6,d->profile_upload_ns/1e6,(unsigned long long)d->profile_recent);
+    if(d->profile_text)fprintf(stderr,"Cached text upload bytes %llu\n",(unsigned long long)d->cached_upload_bytes);
+    if(d->profile_text)fprintf(stderr,"Text cache key preparation %.3f ms; cached vertex packing/upload %.3f ms total; recent hits %llu\n",d->profile_keys_ns/1e6,d->profile_upload_ns/1e6,(unsigned long long)d->profile_recent);
     if(d->fd>=0 && d->modeset) {
         if(d->pending)(void)wait_flip(d);
         int ok=-1;
@@ -821,7 +922,7 @@ void ot_close(ot_display *d) {
             if(d->resolve_program)glDeleteProgram(d->resolve_program);
             if(d->cache_program)glDeleteProgram(d->cache_program);
             glDeleteBuffers(1,&d->resolve_vbo);glDeleteBuffers(1,&d->cache_upload);
-            glDeleteTextures(1,&d->scene_texture);glDeleteTextures(1,&d->cache_texture);glDeleteTextures(1,&d->encode_texture);
+            glDeleteTextures(1,&d->scene_texture);glDeleteTextures(1,&d->cache_texture);glDeleteTextures(1,&d->cache_scratch);glDeleteTextures(1,&d->encode_texture);
             glDeleteFramebuffers(1,&d->scene_fbo);glDeleteFramebuffers(1,&d->cache_fbo);
         }
         eglMakeCurrent(d->egl,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);

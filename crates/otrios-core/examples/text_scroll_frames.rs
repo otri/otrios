@@ -45,6 +45,7 @@ fn main() -> Result<()> {
         .map_err(|e| e.to_string())?;
     let measure_only = args.iter().any(|a| a == "--measure-only");
     let rebuild = args.iter().any(|a| a == "--rebuild");
+    let profile = args.iter().any(|a| a == "--profile");
     if !(1..=8).contains(&text_scale)
         || !(0.1..=4.).contains(&viewport_scale)
         || !(0. ..=32.).contains(&origin)
@@ -53,12 +54,7 @@ fn main() -> Result<()> {
     }
     let with_styles = args.iter().any(|a| a == "--styles");
     let retained = std::env::args().any(|a| a == "--retained");
-    let math = if std::env::args().any(|a| a == "--fixed") {
-        otrios_core::dashboard::retained_text::TextMath::Fixed
-    } else {
-        otrios_core::dashboard::retained_text::TextMath::Float32
-    };
-    let mut presentation = otrios_core::dashboard::retained_text::TextPresentation::with_math(math);
+    let mut presentation = otrios_core::dashboard::retained_text::TextPresentation::default();
     let mut generation = 0;
     let frame_count = if dense { 120_u32 } else { 240_u32 };
     let font = Arc::new(Font::from_zstd(
@@ -147,6 +143,7 @@ fn main() -> Result<()> {
         .write_all(&frame_count.to_le_bytes())
         .map_err(|e| e.to_string())?;
     let mut times = vec![];
+    let mut profiles = vec![];
     let mut glyph_count = 0;
     for i in 0..u64::from(frame_count) {
         let start = Instant::now();
@@ -243,7 +240,18 @@ fn main() -> Result<()> {
         } else {
             client.scene()?
         };
-        let frame = retained.then(|| presentation.compose(&scene, &font));
+        let scene_us = start.elapsed().as_micros();
+        let mut detail = otrios_core::dashboard::retained_text::ComposeProfile::default();
+        let frame = retained.then(|| {
+            if profile {
+                presentation.compose_profiled(&scene, &font, &mut detail)
+            } else {
+                presentation.compose(&scene, &font)
+            }
+        });
+        if profile {
+            profiles.push((scene_us, detail));
+        }
         let flat;
         let mesh = if let Some(frame) = &frame {
             frame.mesh.as_ref()
@@ -328,10 +336,14 @@ fn main() -> Result<()> {
     }
     let cold = times[0];
     times.sort_unstable();
-    println!(
-        "Fixed text runs / fallback runs: {:?}",
-        presentation.math_counts()
-    );
+    if profile {
+        for (i, (scene, p)) in profiles.iter().enumerate() {
+            println!(
+                "PROFILE frame={i} source_us={scene} placement_us={} rebuild_us={} cull_us={} geometry_bytes={} viewport_bytes={}",
+                p.placement_us, p.rebuild_us, p.cull_us, p.mesh_payload_bytes, p.viewport_bytes
+            );
+        }
+    }
     println!("Cold layout/mesh microseconds: {cold}");
     println!(
         "Synthetic layout/mesh microseconds: p50={} p95={} max={}",

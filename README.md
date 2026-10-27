@@ -45,19 +45,17 @@ Live Controls now includes a [primitive component playground](docs/COMPONENT_PLA
 Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](docs/ANIMATION.md). The [direct KMS display path](docs/DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](docs/experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](docs/rfcs/0001-direct-linux-gles2.md).
 
 [Retained text viewports and culling](docs/rfcs/0017-retained-text-viewports.md)
-reach [35–36 kernel-presented fps for a dense scrolling text page](docs/experiments/text-rendering-performance.md)
-on the Mali-400 frame. The float32 captures and measurements establish the baseline
-for the [fixed point/SIMD stretch milestone](docs/rfcs/0018-fixed-point-layout-simd.md).
-Its [coordinate and pixel evaluation](docs/experiments/fixed-point-hierarchy-2026-10-27.md)
-records verified NEON packing, passing raster/scanout gates, and the CPU cost of
-checked layout; fixed math remains opt-in.
+and [adaptive alpha coverage storage](docs/experiments/native-retained-simd-2026-10-27.md)
+reach 56.4–56.6 kernel-presented fps for dense scrolling text on the Mali-400 frame.
+The full Layout Lab demo measures about 42 fps; these averages do not imply a
+60 fps lock. Its **Text scroll demo** opens a full-page, two-axis momentum workload
+at `/layout-lab/text-scroll`, with retained geometry and viewport culling.
 
-Layout Lab's **Text scroll demo** opens a full-page, two-axis momentum workload
-at `/layout-lab/text-scroll`. It keeps text geometry and culls to the viewport;
-the footer counts actual native presentations or browser drawn frames. The
-[native-first fixed/SIMD pipeline plan](docs/rfcs/0019-native-fixed-simd-pipeline.md)
-defines the next measured experiments, including GLES2 vertex formats and Wasm
-SIMD, without enabling the slower experimental fixed layout path by default.
+The [fixed point/SIMD evaluation](docs/rfcs/0018-fixed-point-layout-simd.md)
+found a faster isolated integer SIMD kernel, but no complete scrolling gain over
+the optimized float path and slower rebuilds. The pilot and unsuccessful GPU
+position formats are retired. [RFC 0019](docs/rfcs/0019-native-fixed-simd-pipeline.md)
+records the outcome and evidence required for any future float SIMD batches.
 
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 

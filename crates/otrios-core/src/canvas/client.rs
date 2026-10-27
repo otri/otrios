@@ -38,10 +38,12 @@ struct Mount {
     private: bool,
     session_controls: bool,
     scene: OnceLock<Arc<Scene>>,
+    layout_scene: OnceLock<Arc<Scene>>,
     visible: BTreeMap<u16, Value>,
     keyboard: Keyboard,
     editors: BTreeMap<u16, TextBuffer>,
     text_views: BTreeMap<u16, TextViewport>,
+    text_bounds_dirty: bool,
     text_scroll: Option<super::text_scroll::Scroll>,
     font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
@@ -1105,13 +1107,24 @@ impl Client {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
-        let scene = self.scene()?;
+        // Captured text pans use layout coordinates, which do not move with the
+        // text. Avoid constructing a second presented tree between physics and
+        // the next render; uncaptured hit tests still use the visible scene.
+        let captured_text = self.active.as_ref().is_some_and(|m| {
+            m.text_views.values().any(|v| v.owns(event.id))
+                || m.text_scroll.as_ref().is_some_and(|s| s.touching())
+        });
+        let scene = if captured_text && event.phase != PointerPhase::Down {
+            cached_layout(self.active.as_ref().ok_or("No Canvas")?)?
+        } else {
+            self.scene()?
+        };
         let m = self.active.as_mut().ok_or("No Canvas")?;
         if let Some(scroll) = &mut m.text_scroll {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 scroll.cancel();
             } else if let Some(changed) = scroll.pointer(&scene, event, m.now)? {
-                m.invalidate();
+                m.invalidate_presentation();
                 return Ok(changed);
             }
         }
@@ -1464,7 +1477,11 @@ impl Client {
         let changed = m.ink.tick(now) || clock || scrolled;
         let edit = m.keyboard.tick(now);
         if changed {
-            m.invalidate();
+            if clock {
+                m.invalidate();
+            } else {
+                m.invalidate_presentation();
+            }
         }
         if let Some(edit) = edit {
             return self.hardware_edit(&edit);
@@ -1600,6 +1617,11 @@ impl Mount {
             .unwrap_or_else(|| self.doc.typed_value(id))
     }
     fn invalidate(&mut self) {
+        self.layout_scene.take();
+        self.text_bounds_dirty = true;
+        self.invalidate_presentation();
+    }
+    fn invalidate_presentation(&mut self) {
         self.scene.take();
     }
     fn refresh(&mut self) -> Result<bool> {
@@ -1894,12 +1916,14 @@ fn qualify(
         private,
         session_controls: false,
         scene: OnceLock::new(),
+        layout_scene: OnceLock::new(),
         visible: BTreeMap::new(),
         keyboard: Keyboard::default(),
         text_views: editors
             .keys()
             .map(|id| (*id, TextViewport::default()))
             .collect(),
+        text_bounds_dirty: true,
         editors,
         font: None,
         focus: None,
@@ -1932,7 +1956,7 @@ fn selected_values(m: &Mount) -> Result<BTreeMap<u16, Value>> {
     }
     Ok(values)
 }
-fn resolve_scene(m: &Mount) -> Result<Scene> {
+fn resolve_layout(m: &Mount) -> Result<Scene> {
     let mut bindings = BTreeMap::new();
     for s in &m.ui.selectors {
         let value = if let Projection::KeyboardLabel { key } = s.projection {
@@ -2007,9 +2031,16 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
         bindings.insert(s.local, value);
     }
     let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
-    let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
+    m.layout.resolve_ordered(&bindings, m.viewport, &order)
+}
+fn resolve_scene(m: &Mount) -> Result<Scene> {
+    // Candidate admission and tentative resize validation must always resolve
+    // current inputs, even while an older visible scene is still retained.
+    present_scene(m, &resolve_layout(m)?)
+}
+fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     let mut root = scene.root().clone();
-    present_text_views(m, &scene, &mut root);
+    present_text_views(m, scene, &mut root);
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);
     }
@@ -2050,7 +2081,7 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
         // AppUi reserves the first root child for its backdrop.
         root.children.insert(root.children.len().min(1), viewport);
     }
-    if !order.is_empty() {
+    if !order_items(m).is_empty() {
         fn local_labels(n: &mut SceneNode, editing: bool, ui: &Ui) {
             if let Some(TouchResponder::Activate(Action::AppEvent(c))) = n.responder
                 && ui
@@ -2217,9 +2248,19 @@ fn cached_scene(m: &Mount) -> Result<Arc<Scene>> {
     if let Some(scene) = m.scene.get() {
         return Ok(scene.clone());
     }
-    let scene = Arc::new(resolve_scene(m)?);
+    let layout = cached_layout(m)?;
+    let scene = Arc::new(present_scene(m, &layout)?);
     let _ = m.scene.set(scene.clone());
     Ok(scene)
+}
+fn cached_layout(m: &Mount) -> Result<Arc<Scene>> {
+    Ok(if let Some(scene) = m.layout_scene.get() {
+        scene.clone()
+    } else {
+        let scene = Arc::new(resolve_layout(m)?);
+        let _ = m.layout_scene.set(scene.clone());
+        scene
+    })
 }
 fn validate_responders(ui: &Ui, blueprint: &otrios_interfaces::layout::Blueprint) -> Result<()> {
     use otrios_interfaces::layout::{Responder, TemplateNode};
@@ -2310,6 +2351,11 @@ fn update_text_views(m: &mut Mount, follow: Option<u16>) -> Result<()> {
     if m.editors.is_empty() {
         return Ok(());
     }
+    // Panning changes presentation only. Font advances and resolved editor
+    // frames remain valid until content, focus, font or layout invalidation.
+    if !m.text_bounds_dirty && follow.is_none() {
+        return Ok(());
+    }
     let Some(font) = m.font.clone() else {
         return Ok(());
     };
@@ -2341,8 +2387,9 @@ fn update_text_views(m: &mut Mount, follow: Option<u16>) -> Result<()> {
             );
         }
     }
+    m.text_bounds_dirty = false;
     if clamped {
-        m.invalidate();
+        m.invalidate_presentation();
     }
     Ok(())
 }
@@ -2404,6 +2451,7 @@ fn text_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Opt
         .get_mut(&frame.field)
         .ok_or("Missing text viewport")?;
     let x = (event.position[0] - frame.origin[0]) / frame.factor;
+    let mut changed_layout = false;
     match event.phase {
         PointerPhase::Down => view.down(event.id, x, m.now),
         PointerPhase::Move => view.motion(x, m.now),
@@ -2437,9 +2485,14 @@ fn text_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Opt
                 m.keyboard.focus();
                 m.keyboard_pointer = None;
                 m.input.cancel_all();
+                changed_layout = true;
             }
         }
     }
-    m.invalidate();
+    if changed_layout {
+        m.invalidate();
+    } else {
+        m.invalidate_presentation();
+    }
     Ok(Some(true))
 }

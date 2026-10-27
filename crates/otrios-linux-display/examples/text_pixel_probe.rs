@@ -170,6 +170,6 @@ fn main() -> Result<(), String> {
     if passed {
         Ok(())
     } else {
-        Err("Fixed/reference exceeds 8-byte comparison gate".into())
+        Err("Candidate/reference exceeds 8-byte comparison gate".into())
     }
 }

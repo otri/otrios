@@ -9,7 +9,8 @@ Read README.md, docs/POC.md, docs/ARCHITECTURE.md, and LICENSE.md before changin
 - Prefer safe Rust. Shared-memory FFI may require a narrowly scoped unsafe module or separate crate; document invariants and amend the lint locally with a reviewed RFC before introducing it.
 - Hash canonical bytes with a standard SHA-256 implementation. Never substitute process-dependent hashing or treat a content hash as a signature or capability.
 - Test snapshot isolation, publication conflicts, slow-reader backpressure, and process boundaries. Do not claim Linux IPC works based on in-process tests.
-- Use a feature branch and a pull request for follow-up work. Report actual commands and results; distinguish scaffold checks from PoC acceptance tests.
+- Use a feature branch for follow-up work. Open a pull request only after all scoped branch work and required validation are complete and the final commits are ready. Do not open draft or progress PRs while work is ongoing. Batch completed changes before pushing updates to an existing PR to minimize notification emails.
+- Report actual commands and results; distinguish scaffold checks from PoC acceptance tests.
 - Do not assign work to Tess, install integrations, add collaborators, change visibility, publish packages, or deploy services without user authorization for that action.
 
 ## Release control and client state

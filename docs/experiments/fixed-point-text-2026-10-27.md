@@ -1,5 +1,10 @@
 # Fixed point and SIMD evaluation — 2026-10-27
 
+Historical experiment record. The fixed-point pilot and alternate GPU position
+formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
+Commands and feature names below refer to the evaluated revision, not the current
+checkout. Retained float rendering and adaptive coverage storage remain selected.
+
 This records the initial `fbd3ff9` candidate. A [raster follow-up](fixed-point-raster-followup-2026-10-27.md) improves the DPR 1/2 comparisons but exposes a performance regression and a DPR-limit failure.
 
 The candidate is **experimental and disabled by default**. Dense Mali scrolling
