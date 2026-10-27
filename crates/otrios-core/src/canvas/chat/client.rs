@@ -9,7 +9,6 @@ use otrios_interfaces::{
 use std::collections::{BTreeMap, VecDeque};
 use unicode_segmentation::UnicodeSegmentation;
 pub const VIEWPORT: u16 = 60_000;
-pub(super) const HISTORY_WINDOW: usize = 1024;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Panel {
     None,
@@ -61,11 +60,15 @@ pub struct Client {
     pub(super) members: Vec<Member>,
     pub(super) drafts: BTreeMap<String, RemoteDraft>,
     pub(super) messages: VecDeque<Message>,
-    authors_revision: u64,
+    pub(super) collection: crate::collection::Client,
+    pub(super) collection_anchor: crate::collection::Anchor,
+    pub(crate) collection_revoked: bool,
+    pub(crate) more_after: bool,
+    pub(super) authors_revision: u64,
     headers: BTreeMap<u32, u8>,
     next_block: u32,
     next_byte: u32,
-    source_messages: BTreeMap<u64, (u32, u32)>,
+    pub(super) source_messages: BTreeMap<u64, (u32, u32)>,
     source_day: Option<u64>,
     pub(super) panel: Panel,
     pub(super) focus: Option<Focus>,
@@ -96,7 +99,7 @@ pub struct Client {
     pub(super) history_wait: bool,
     pub(super) pending: VecDeque<Pending>,
     queue: VecDeque<Command>,
-    joining: bool,
+    pub(super) joining: bool,
     epoch: u64,
     draft_generation: u64,
     draft_revision: u64,
@@ -126,6 +129,9 @@ pub struct Info {
     pub pending: usize,
     pub drafts: usize,
     pub history_loading: bool,
+    pub selected_bytes: usize,
+    pub replica_bytes: usize,
+    pub lease_generation: u64,
     pub kicked: bool,
 }
 impl Default for Client {
@@ -135,6 +141,10 @@ impl Default for Client {
             members: vec![],
             drafts: BTreeMap::new(),
             messages: VecDeque::new(),
+            collection: crate::collection::Client::new(COLLECTION, super::message_schema()),
+            collection_anchor: crate::collection::Anchor::Tail,
+            collection_revoked: false,
+            more_after: false,
             authors_revision: 0,
             headers: BTreeMap::new(),
             next_block: 1,
@@ -260,6 +270,15 @@ impl Client {
             pending: self.pending.len(),
             drafts: self.drafts.len(),
             history_loading: self.history_wait,
+            selected_bytes: self
+                .collection
+                .window()
+                .map_or(0, |window| window.selected_bytes),
+            replica_bytes: self
+                .collection
+                .window()
+                .map_or(0, |window| window.snapshot().canonical_bytes()),
+            lease_generation: self.collection.generation(),
             kicked: self.kicked.is_some(),
         }
     }
@@ -346,7 +365,7 @@ impl Client {
         self.next_byte += lines.iter().map(|line| line.len() as u32 + 1).sum::<u32>();
         lines
     }
-    fn say(&mut self, text: impl Into<String>) {
+    pub(super) fn say(&mut self, text: impl Into<String>) {
         self.notice = text.into();
         self.notice_until = self.now + 4000;
     }
@@ -358,6 +377,7 @@ impl Client {
         }
     }
     pub fn disconnected(&mut self) {
+        self.collection.disconnected();
         self.online = false;
         self.joining = false;
         self.drafts.clear();
@@ -468,54 +488,7 @@ impl Client {
         }
         Ok(None)
     }
-    fn receive_message(&mut self, message: Message, follow: bool) {
-        if let Some(existing) = self
-            .messages
-            .iter_mut()
-            .find(|m| m.sequence == message.sequence)
-        {
-            if existing.sender != message.sender {
-                existing.sender = message.sender;
-                self.authors_revision = self.authors_revision.saturating_add(1);
-                self.reset = true;
-            }
-            return;
-        }
-        if self.messages.len() >= HISTORY_WINDOW {
-            if !follow {
-                self.new_messages += 1;
-                return;
-            }
-            for _ in 0..super::PAGE_MESSAGES.min(self.messages.len()) {
-                self.messages.pop_front();
-            }
-            self.reset = true;
-        }
-        let lines = self.message_blocks(&message);
-        self.append.extend(lines);
-        self.messages.push_back(message);
-        self.tail |= follow;
-        if !follow {
-            self.new_messages += 1;
-        }
-    }
     fn refresh_authors(&mut self) {
-        let mut changed = false;
-        for message in &mut self.messages {
-            if let Some(member) = self
-                .members
-                .iter()
-                .find(|m| m.profile.id == message.sender.id)
-                && message.sender != member.profile
-            {
-                message.sender = member.profile.clone();
-                self.reset = true;
-                changed = true;
-            }
-        }
-        if changed {
-            self.authors_revision = self.authors_revision.saturating_add(1);
-        }
         if let Some(selected) = &mut self.selected
             && let Some(member) = self
                 .members
@@ -528,15 +501,16 @@ impl Client {
     pub fn receive(&mut self, event: Event, follow: bool) -> Result<Option<String>> {
         let mut credential = None;
         match event {
-            Event::Left => self.disconnected(),
+            Event::Left => {
+                self.clear_collection();
+                self.disconnected();
+            }
             Event::Welcome {
                 you,
                 temporary,
                 credential: token,
                 epoch,
                 members,
-                messages,
-                oldest,
                 ..
             } => {
                 self.temporary = temporary;
@@ -549,16 +523,14 @@ impl Client {
                 self.joining = true;
                 self.kicked = None;
                 credential = token;
-                if self.messages.is_empty() {
-                    self.reset = true;
+                self.collection_revoked = false;
+                let anchor = if self.messages.is_empty() || follow {
                     self.tail = true;
-                }
-                for message in messages {
-                    self.receive_message(message, follow || self.reset);
-                }
-                self.refresh_authors();
-                self.older = self.messages.front().is_some_and(|m| m.sequence > oldest);
-                self.history_wait = false;
+                    crate::collection::Anchor::Tail
+                } else {
+                    crate::collection::Anchor::Around(self.messages.front().unwrap().sequence)
+                };
+                self.select_window(anchor)?;
             }
             Event::Members { members } => {
                 if members.len() > 68 {
@@ -576,47 +548,15 @@ impl Client {
                 self.drafts
                     .retain(|id, _| self.members.iter().any(|m| m.profile.id == *id));
             }
-            Event::Message { message } => {
-                let mine = self
-                    .you
-                    .as_ref()
-                    .is_some_and(|you| you.profile.id == message.sender.id);
-                self.receive_message(message, follow || mine);
-            }
             Event::Receipt { nonce, .. } => {
+                let mine = self.pending.iter().any(|p| p.nonce == nonce);
                 self.pending.retain(|p| p.nonce != nonce);
-            }
-            Event::History {
-                messages,
-                oldest,
-                before,
-            } => {
-                self.history_wait = false;
-                if before == u64::MAX {
-                    self.messages.clear();
-                    self.append.clear();
-                    self.reset = true;
+                if mine {
                     self.tail = true;
-                    for message in messages {
-                        self.receive_message(message, true);
-                    }
-                } else {
-                    let incoming = messages
-                        .into_iter()
-                        .filter(|m| !self.messages.iter().any(|old| old.sequence == m.sequence))
-                        .collect::<Vec<_>>();
-                    for message in &incoming {
-                        self.prepend.extend(blocks(message));
-                    }
-                    for message in incoming.into_iter().rev() {
-                        self.messages.push_front(message);
-                    }
-                    if self.messages.len() > HISTORY_WINDOW {
-                        self.messages.truncate(HISTORY_WINDOW);
-                        self.reset = true;
+                    if !matches!(self.collection_anchor, crate::collection::Anchor::Tail) {
+                        self.select_window(crate::collection::Anchor::Tail)?;
                     }
                 }
-                self.older = self.messages.front().is_some_and(|m| m.sequence > oldest);
             }
             Event::DraftLease { generation } => {
                 self.draft_generation = generation;
@@ -706,6 +646,7 @@ impl Client {
                 });
             }
             Event::Kicked { reason, rejoin_at } => {
+                self.clear_collection();
                 self.online = false;
                 self.joining = false;
                 self.kicked = Some((reason, rejoin_at));
@@ -993,9 +934,9 @@ impl Client {
                 self.new_messages = 0;
                 self.tail = true;
                 self.history_wait = true;
-                self.queue(Command::History { before: u64::MAX });
+                self.select_window(crate::collection::Anchor::Tail)?;
             }
-            13 => self.older(),
+            13 => self.older()?,
             14 => {
                 if self.you.as_ref().is_some_and(|y| y.admin) {
                     self.queue(Command::SignOut);
@@ -1066,17 +1007,15 @@ impl Client {
         }
         Ok(Action::Changed)
     }
-    pub fn older(&mut self) {
+    pub fn older(&mut self) -> Result<()> {
         if self.older
-            && !self.history_wait
-            && self.messages.len() < HISTORY_WINDOW
+            && !self.collection.waiting()
             && let Some(first) = self.messages.front()
         {
-            self.history_wait = true;
-            self.queue(Command::History {
-                before: first.sequence,
-            });
+            self.tail = false;
+            self.select_window(crate::collection::Anchor::Around(first.sequence))?;
         }
+        Ok(())
     }
     pub fn pointer(&mut self, event: PointerEvent, now: u64) -> Option<bool> {
         let [x, y] = event.position;
@@ -1305,14 +1244,13 @@ mod tests {
         );
     }
     #[test]
-    fn roster_rename_refreshes_loaded_authors_by_id_without_changing_message_content() {
+    fn roster_rename_leaves_loaded_sent_profiles_immutable() {
         let mut client = Client::default();
         let original = message(1, 20);
         let mut other = message(2, 20);
         other.sender.id = "b".repeat(32);
         // Names alone never identify an author.
-        client.receive_message(original.clone(), false);
-        client.receive_message(other.clone(), false);
+        client.messages.extend([original.clone(), other.clone()]);
         let mut profile = original.sender.clone();
         profile.name = "Admiral Newname".into();
         profile.avatar = 42;
@@ -1330,19 +1268,14 @@ mod tests {
                 false,
             )
             .unwrap();
-        assert!(client.reset);
-        assert_eq!(client.messages[0].sender, profile);
+        assert!(!client.reset);
+        assert_eq!(client.messages[0].sender, original.sender);
         assert_eq!(client.messages[0].sequence, original.sequence);
         assert_eq!(client.messages[0].text, original.text);
         assert_eq!(client.messages[1], other);
         client.reset = false;
         client.receive(Event::Members { members }, false).unwrap();
         assert!(!client.reset, "unchanged rosters do not rebuild text");
-        let mut refreshed = other;
-        refreshed.sender.name = "Recovered profile".into();
-        client.receive_message(refreshed.clone(), false);
-        assert!(client.reset);
-        assert_eq!(client.messages[1], refreshed);
     }
     #[test]
     fn new_sends_refresh_epoch_and_pending_retries_keep_original_nonce() {

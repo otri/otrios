@@ -146,6 +146,9 @@ pub struct Client {
     chat_enabled: bool,
     chat_native: bool,
     chat_reduced_motion: bool,
+    collection_generation: u64,
+    collection_cancel: Option<crate::collection::Command>,
+    collection_revoked: bool,
     external_keyboard: bool,
     viewport: Option<[f32; 2]>,
     wire_clock: u64,
@@ -249,6 +252,7 @@ impl Client {
             self.chat_credential = Some(token.clone());
             self.chat_new_credential = Some(token);
         }
+        self.collection_revoked |= std::mem::take(&mut chat.collection_revoked);
         if let Some(viewport) = &mut m.text_document {
             chat.synchronize_document(viewport)?;
         }
@@ -258,6 +262,44 @@ impl Client {
             m.invalidate_local_scene();
         }
         Ok(true)
+    }
+    pub fn collection_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        if let Some(command) = self.collection_cancel.take() {
+            return crate::collection::encode_command(&command)
+                .map(Some)
+                .map_err(err);
+        }
+        self.active
+            .as_mut()
+            .and_then(|mount| mount.chat.as_mut())
+            .map_or(Ok(None), |chat| {
+                chat.collection_outgoing(&mut self.collection_generation)
+            })
+    }
+    pub fn receive_collection(&mut self, bytes: &[u8]) -> Result<bool> {
+        let Some(mount) = &mut self.active else {
+            return Ok(false);
+        };
+        let Some(chat) = &mut mount.chat else {
+            return Ok(false);
+        };
+        let follow = mount
+            .text_document
+            .as_ref()
+            .is_none_or(|viewport| viewport.at_tail())
+            && !chat.more_after;
+        let changed = chat.receive_collection(bytes, follow)?;
+        self.collection_revoked |= std::mem::take(&mut chat.collection_revoked);
+        if let Some(viewport) = &mut mount.text_document {
+            chat.synchronize_document(viewport)?;
+        }
+        if changed {
+            mount.invalidate_local_scene();
+        }
+        Ok(changed)
+    }
+    pub fn take_collection_revoked(&mut self) -> bool {
+        std::mem::take(&mut self.collection_revoked)
     }
     pub fn effect_vertices(&self) -> Result<Vec<f32>> {
         self.active
@@ -1042,6 +1084,12 @@ impl Client {
                                 self.cache.pop_front();
                             }
                         }
+                        if let Some(old) = &mut self.active
+                            && let Some(chat) = &mut old.chat
+                        {
+                            self.collection_cancel = chat.cancel_collection();
+                            self.collection_revoked = true;
+                        }
                         self.active = Some(candidate);
                         self.decision = Some(MountDecision::Accept(epoch));
                         self.local = false;
@@ -1780,9 +1828,7 @@ impl Client {
             let old_bounds = (chat.input_height(), chat.draft_height());
             let (changed, effects) = chat.tick(now, (wall.max(0) as u64).saturating_mul(1000));
             if let Some(doc) = &mut m.text_document {
-                if doc.at_top() {
-                    chat.older();
-                }
+                chat.update_window(doc)?;
                 chat.synchronize_document(doc)?;
             }
             (

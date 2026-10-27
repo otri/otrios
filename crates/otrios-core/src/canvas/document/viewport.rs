@@ -125,9 +125,6 @@ impl Viewport {
                 .as_ref()
                 .is_none_or(|r| r.offset() + r.height >= r.extent().0 - 2. * r.line_height())
     }
-    pub fn at_top(&self) -> bool {
-        self.reader.as_ref().is_some_and(|r| r.offset() < r.height)
-    }
     pub fn anchor(&self) -> Option<super::Anchor> {
         self.reader.as_ref().map(Reader::anchor)
     }

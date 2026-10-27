@@ -471,9 +471,6 @@ impl Room {
                 credential: native.then_some(token),
                 epoch: now / EPOCH,
                 members: self.members(),
-                messages: self.page(u64::MAX)?,
-                oldest: self.oldest(),
-                newest: self.sequence,
             },
         ));
         events.push(self.roster());
@@ -533,24 +530,6 @@ impl Room {
             Delivery::one(connection, Event::Permissions { admin }),
             self.roster(),
         ]
-    }
-    fn oldest(&self) -> u64 {
-        self.history
-            .snapshot()
-            .ok()
-            .and_then(|snapshot| snapshot.first_key())
-            .unwrap_or(self.sequence.saturating_add(1))
-    }
-    fn page(&self, before: u64) -> Result<Vec<Message>> {
-        let mut page = self.history.page(before)?;
-        for message in &mut page {
-            // History records retain their original sender snapshot; presentation
-            // resolves the stable ID to the current profile without rewriting the log.
-            if let Some(guest) = self.guests.get(&message.sender.id) {
-                message.sender = guest.profile.clone();
-            }
-        }
-        Ok(page)
     }
     fn claim(&mut self, connection: u64, now: u64) -> Result<Vec<Delivery>> {
         let c = self
@@ -625,14 +604,6 @@ impl Room {
                 events.extend(self.leave(connection, now)?);
                 Ok(events)
             }
-            Command::History { before } => Ok(vec![Delivery::one(
-                connection,
-                Event::History {
-                    messages: self.page(before)?,
-                    oldest: self.oldest(),
-                    before,
-                },
-            )]),
             Command::ClaimDraft => self.claim(connection, now),
             Command::Profile {
                 name: requested,
@@ -771,7 +742,6 @@ impl Room {
                 self.memberships.remove(&participant);
                 self.drafts.remove(&participant);
                 events.push(self.roster());
-                events.push(Delivery::all(Event::Message { message }));
                 Ok(events)
             }
             Command::Send {
@@ -858,18 +828,13 @@ impl Room {
                     now,
                 )?;
                 self.receipts.insert(receipt_key, receipt);
-                let mut events = vec![
-                    Delivery::all(Event::Message {
-                        message: message.clone(),
-                    }),
-                    Delivery::one(
-                        connection,
-                        Event::Receipt {
-                            nonce,
-                            sequence: message.sequence,
-                        },
-                    ),
-                ];
+                let mut events = vec![Delivery::one(
+                    connection,
+                    Event::Receipt {
+                        nonce,
+                        sequence: message.sequence,
+                    },
+                )];
                 if let Some(d) = self.drafts.get_mut(&id) {
                     d.text.clear();
                     d.revision = d.revision.saturating_add(1);

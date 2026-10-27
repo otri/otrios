@@ -242,6 +242,21 @@ impl Event {
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut out = EVENT.to_vec();
         match self {
+            Self::AnchorExpired {
+                epoch,
+                generation,
+                collection,
+                neighbor,
+            } => {
+                out.push(3);
+                out.extend(epoch.to_le_bytes());
+                out.extend(generation.to_le_bytes());
+                out.extend(collection.to_le_bytes());
+                out.push(u8::from(neighbor.is_some()));
+                if let Some(key) = neighbor {
+                    out.extend(key.to_le_bytes());
+                }
+            }
             Self::View(offer) => {
                 out.push(0);
                 let bytes = offer.to_bytes()?;
@@ -278,6 +293,18 @@ impl Event {
             return Err(Error::Invalid);
         }
         let result = match r.u8()? {
+            3 => {
+                let epoch = r.u64()?;
+                let generation = r.u64()?;
+                let collection = r.u64()?;
+                let neighbor = if r.flag()? { Some(r.u64()?) } else { None };
+                Self::AnchorExpired {
+                    epoch,
+                    generation,
+                    collection,
+                    neighbor,
+                }
+            }
             0 => {
                 let size = r.u32()? as usize;
                 Self::View(Offer::from_bytes(r.take(size)?)?)

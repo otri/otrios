@@ -3224,9 +3224,6 @@ fn brass_relay_qualifies_crowded_roster_avatar_pages_and_native_keyboard_in_both
                     credential: None,
                     epoch: 1,
                     members: members.clone(),
-                    messages: vec![],
-                    oldest: 0,
-                    newest: 0,
                 })
                 .unwrap(),
             )
@@ -3299,9 +3296,6 @@ fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
                 credential: None,
                 epoch: 1,
                 members: vec![member],
-                messages: vec![],
-                oldest: 0,
-                newest: 0,
             })
             .unwrap(),
         )
@@ -3496,13 +3490,11 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
             credential: None,
             epoch: 1,
             members: vec![member],
-            messages,
-            oldest: 1,
-            newest: 40,
         })
         .unwrap(),
     )
     .unwrap();
+    deliver_chat_collection(&mut c, messages);
     for t in 1000..1500 {
         c.tick(t, 1_700_000_000).unwrap();
     }
@@ -3705,4 +3697,267 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         check(&c);
         assert_eq!(c.text_inputs().unwrap().len(), 1);
     }
+}
+
+fn deliver_chat_collection(client: &mut Client, messages: Vec<otrios_interfaces::chat::Message>) {
+    use otrios_core::{
+        canvas::chat,
+        collection as col,
+        merkle::{Edit, Snapshot},
+    };
+    let mut source = col::Collection::new(
+        otrios_interfaces::chat::COLLECTION,
+        chat::message_schema(),
+        col::Budget::default(),
+    )
+    .unwrap();
+    for message in messages {
+        let row = Snapshot::empty()
+            .edit(
+                [22; 16],
+                &[Edit {
+                    path: vec![otrios_interfaces::chat::MESSAGE_FIELD],
+                    schema: chat::message_schema().id,
+                    value: Some(flexbuffers::to_vec(&message).unwrap()),
+                }],
+            )
+            .unwrap()
+            .0;
+        source = source.append(message.sequence, row).unwrap();
+    }
+    let mut channel = col::Channel::new(42);
+    channel
+        .install(
+            source,
+            col::Policy {
+                admitted_fields: vec![otrios_interfaces::chat::MESSAGE_FIELD],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut session = col::ChannelSession::default();
+    for _ in 0..8 {
+        let Some(bytes) = client.collection_outgoing().unwrap() else {
+            break;
+        };
+        if let Some(event) = channel.handle(
+            &mut session,
+            col::Access {
+                admitted: true,
+                authenticated: false,
+            },
+            col::decode_command(&bytes).unwrap(),
+        ) {
+            client
+                .receive_collection(&event.to_bytes().unwrap())
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn brass_relay_consumes_only_bounded_collection_views_and_receipt_confirmed_sends() {
+    use otrios_core::{canvas::chat, collection as col};
+    use otrios_interfaces::keyboard::Edit;
+    use std::sync::{Arc, Mutex};
+    const NOW: u64 = 1_700_000_201_000;
+    let registry = Arc::new(Mutex::new(col::Channel::new(42)));
+    let mut room = chat::Room::open_in(None, NOW - 201_000, registry.clone()).unwrap();
+    room.join(9, None, false, NOW - 201_000, true).unwrap();
+    for sequence in 1..=200 {
+        let at = NOW - 201_000 + sequence * 1000;
+        room.handle(
+            9,
+            chat::Command::Send {
+                epoch: at / 600_000,
+                nonce: format!("{sequence:032x}"),
+                text: format!("Dispatch {sequence}"),
+            },
+            at,
+        )
+        .unwrap();
+    }
+    let mut c = Client::default();
+    c.set_chat_native(true);
+    c.set_font(std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    ));
+    c.set_software_keyboard(false);
+    activate(&mut c, brass_relay::ui(&[]), "collection-reader", vec![]);
+    let mut state = Document::new(brass_relay::ui(&[]).state_schema, "collection-reader").unwrap();
+    pump(&mut c, &mut state, &mut Session::default());
+    assert!(c.confirmed());
+    c.tick(1000, (NOW / 1000) as i64).unwrap();
+    let mut session = col::ChannelSession::default();
+    fn settle(
+        c: &mut Client,
+        room: &mut chat::Room,
+        registry: &Arc<Mutex<col::Channel>>,
+        session: &mut col::ChannelSession,
+    ) -> Vec<Vec<u8>> {
+        let mut transfers = Vec::new();
+        for _ in 0..32 {
+            let mut work = false;
+            if let Some(bytes) = c.chat_outgoing().unwrap() {
+                work = true;
+                let events = match chat::decode_command(&bytes).unwrap() {
+                    chat::Command::Join { credential } => room
+                        .join(1, credential.as_deref(), false, NOW, true)
+                        .unwrap(),
+                    command => room.handle(1, command, NOW).unwrap(),
+                };
+                for delivery in events {
+                    if delivery.target.is_none_or(|target| target == 1) {
+                        c.receive_chat(&chat::encode_event(&delivery.event).unwrap())
+                            .unwrap();
+                    }
+                }
+            }
+            if let Some(bytes) = c.collection_outgoing().unwrap() {
+                work = true;
+                let event = registry.lock().unwrap().handle(
+                    session,
+                    col::Access {
+                        admitted: room.active(1),
+                        authenticated: false,
+                    },
+                    col::decode_command(&bytes).unwrap(),
+                );
+                if let Some(event) = event {
+                    let bytes = event.to_bytes().unwrap();
+                    c.receive_collection(&bytes).unwrap();
+                    transfers.push(bytes);
+                }
+            }
+            let event = registry.lock().unwrap().poll(
+                session,
+                col::Access {
+                    admitted: room.active(1),
+                    authenticated: false,
+                },
+            );
+            if let Some(event) = event {
+                work = true;
+                let bytes = event.to_bytes().unwrap();
+                c.receive_collection(&bytes).unwrap();
+                transfers.push(bytes);
+            }
+            if !work {
+                return transfers;
+            }
+        }
+        panic!("collection consumer failed to settle");
+    }
+    settle(&mut c, &mut room, &registry, &mut session);
+    let initial = c.chat_info().unwrap();
+    assert_eq!(initial.messages, 64);
+    assert_eq!(initial.first_sequence, 137);
+    assert_eq!(initial.last_sequence, 200);
+    assert!(initial.selected_bytes <= 256 * 1024 && initial.replica_bytes < 512 * 1024);
+    c.activate(c.epoch(), node(&c, "Load older messages"))
+        .unwrap();
+    settle(&mut c, &mut room, &registry, &mut session);
+    let older = c.chat_info().unwrap();
+    assert_eq!(older.messages, 64);
+    assert!(older.first_sequence < initial.first_sequence);
+    assert!(older.last_sequence < 200);
+    let outside = "OUTSIDE_SELECTED_WINDOW_CANARY";
+    let events = room
+        .handle(
+            9,
+            chat::Command::Send {
+                epoch: NOW / 600_000,
+                nonce: "f".repeat(32),
+                text: outside.into(),
+            },
+            NOW,
+        )
+        .unwrap();
+    for delivery in events {
+        let bytes = chat::encode_event(&delivery.event).unwrap();
+        assert!(
+            !bytes
+                .windows(outside.len())
+                .any(|bytes| bytes == outside.as_bytes())
+        );
+        if delivery.target.is_none_or(|target| target == 1) {
+            c.receive_chat(&bytes).unwrap();
+        }
+    }
+    assert!(
+        settle(&mut c, &mut room, &registry, &mut session).is_empty(),
+        "an outside append must not send a body or advance the anchored view"
+    );
+    assert_eq!(
+        c.chat_info().unwrap().authors_revision,
+        older.authors_revision
+    );
+    c.activate(c.epoch(), node(&c, "Show new messages"))
+        .unwrap();
+    settle(&mut c, &mut room, &registry, &mut session);
+    assert_eq!(c.chat_info().unwrap().last_sequence, 201);
+    let before = c.chat_info().unwrap().lease_generation;
+    c.set_viewport([800., 1280.]).unwrap();
+    assert!(c.collection_outgoing().unwrap().is_none());
+    assert_eq!(c.chat_info().unwrap().lease_generation, before);
+    let input = c.text_inputs().unwrap()[0].id;
+    c.activate(c.epoch(), input).unwrap();
+    c.edit_text_input(
+        c.epoch(),
+        input,
+        &Edit::Commit("A receipt-confirmed dispatch".into()),
+    )
+    .unwrap();
+    c.activate(c.epoch(), node(&c, "Send message")).unwrap();
+    assert_eq!(c.chat_info().unwrap().pending, 1);
+    assert!(
+        !c.reload_ready(),
+        "pending sends block a connected code upgrade"
+    );
+    c.blur_text_input(c.epoch(), input).unwrap();
+    c.open("app:brass-relay/ui", "collection-reader");
+    while let Some(bytes) = c.outgoing().unwrap() {
+        assert!(
+            !matches!(decode_client(&bytes).unwrap(), ClientMessage::Mount { .. }),
+            "navigation cannot drop a send before its durable receipt"
+        );
+    }
+    settle(&mut c, &mut room, &registry, &mut session);
+    assert_eq!(c.chat_info().unwrap().pending, 0);
+    assert_eq!(c.chat_info().unwrap().last_sequence, 202);
+    assert!(
+        c.chat_messages()
+            .iter()
+            .any(|message| message.text == "A receipt-confirmed dispatch")
+    );
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("navigation did not resume after the receipt");
+    };
+    let ui = encode_ui(&brass_relay::ui(&[])).unwrap();
+    c.receive(
+        &encode_server(&ServerMessage::Mounted {
+            epoch,
+            ui_hash: hash(&ui),
+            ui,
+            code: vec![],
+            state: vec![],
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        c.take_collection_revoked(),
+        "leaving an activation clears handed-off private history without renderer credit"
+    );
+    assert_eq!(c.chat_info().unwrap().messages, 0);
+    assert!(matches!(
+        col::decode_command(&c.collection_outgoing().unwrap().unwrap()).unwrap(),
+        col::Command::Cancel { .. }
+    ));
 }

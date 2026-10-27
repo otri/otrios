@@ -29,6 +29,7 @@ enum NetworkEvent {
     Connected(u64),
     Packet(u64, Instant, Vec<u8>),
     Chat(u64, Vec<u8>),
+    Collection(u64, Vec<u8>),
 }
 struct NetworkSend {
     channel: u8,
@@ -37,6 +38,8 @@ struct NetworkSend {
 }
 #[derive(Clone)]
 pub(super) struct Frame {
+    // Shared with the state owner. Revocation does not need renderer credit.
+    access: Arc<AtomicBool>,
     pub(super) ui_release: String,
     pub(super) paint: otrios_core::canvas::presentation::Frame,
     pub(super) snapshot: String,
@@ -60,8 +63,20 @@ pub(super) struct Frame {
     pub(super) ui_ref: String,
 }
 impl Frame {
+    /// Called by the display each turn, including while no new frame arrives.
+    /// Drop handed-off RAM resources before retiring their GPU counterparts.
+    pub(super) fn redact_if_revoked(&mut self) -> bool {
+        if self.access.load(Ordering::Acquire) {
+            return false;
+        }
+        let viewport = self.paint.viewport;
+        *self = Self::blank(self.serial, self.online);
+        self.paint.viewport = viewport;
+        true
+    }
     fn blank(serial: u64, online: bool) -> Self {
         Self {
+            access: Arc::new(AtomicBool::new(true)),
             ui_release: String::new(),
             paint: otrios_core::canvas::presentation::Frame {
                 viewport: [1280., 800.],
@@ -88,6 +103,11 @@ impl Frame {
             ui_ref: String::new(),
         }
     }
+}
+fn revoke_display(access: &mut Arc<AtomicBool>, composer: &mut Composer) {
+    access.store(false, Ordering::Release);
+    *access = Arc::new(AtomicBool::new(true));
+    composer.clear();
 }
 #[derive(Clone, Copy)]
 pub(super) struct DisplayInfo {
@@ -410,6 +430,7 @@ pub(super) fn state_worker(
     let mut last_status = None;
     let mut last_online = false;
     let mut composer = Composer::default();
+    let mut display_access = Arc::new(AtomicBool::new(true));
     let mut stopping: Option<Instant> = None;
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
@@ -495,6 +516,7 @@ pub(super) fn state_worker(
                     NetworkEvent::Packet(id, received_at, bytes)
                         if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
                     {
+                        let was_private = client.private();
                         match client.receive(&bytes) {
                             Ok(changed) => {
                                 stream_ready.store(true, Ordering::Release);
@@ -516,10 +538,18 @@ pub(super) fn state_worker(
                                 stream_ready.store(false, Ordering::Release);
                             }
                         }
+                        if client.take_collection_revoked() || was_private && !client.private() {
+                            revoke_display(&mut display_access, &mut composer);
+                        }
                     }
                     NetworkEvent::Packet(..) => {}
-                    NetworkEvent::Chat(id, bytes) if epoch == Some(id) => {
+                    NetworkEvent::Chat(id, bytes)
+                        if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
+                    {
                         dirty |= client.receive_chat(&bytes)?;
+                        if client.take_collection_revoked() {
+                            revoke_display(&mut display_access, &mut composer);
+                        }
                         if let Some(token) = client.take_chat_credential() {
                             let path = identity_path
                                 .as_ref()
@@ -528,6 +558,15 @@ pub(super) fn state_worker(
                         }
                     }
                     NetworkEvent::Chat(..) => {}
+                    NetworkEvent::Collection(id, bytes)
+                        if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
+                    {
+                        dirty |= client.receive_collection(&bytes)?;
+                        if client.take_collection_revoked() {
+                            revoke_display(&mut display_access, &mut composer);
+                        }
+                    }
+                    NetworkEvent::Collection(..) => {}
                 }
             }
         }
@@ -638,6 +677,13 @@ pub(super) fn state_worker(
                         channel: otrios_interfaces::chat::CHANNEL,
                     });
                 }
+                if outgoing.is_none() {
+                    outgoing = client.collection_outgoing()?.map(|bytes| NetworkSend {
+                        epoch: epoch.expect("connected epoch"),
+                        bytes,
+                        channel: otrios_interfaces::collection::CHANNEL,
+                    });
+                }
             }
             if let Some(packet) = outgoing.take() {
                 match tx.try_send(packet) {
@@ -696,6 +742,7 @@ pub(super) fn state_worker(
         if let Some(serial) = demand.begin() {
             if client.ui_ref().is_empty() {
                 let mut frame = Frame::blank(serial, online);
+                frame.access = display_access.clone();
                 frame.reload_ready = reload_ready;
                 frame.pending_commands = client.pending_count();
                 frames
@@ -712,6 +759,7 @@ pub(super) fn state_worker(
                 let ui_ref = client.ui_ref();
                 let state_ref = client.state_ref();
                 let frame = Frame {
+                    access: display_access.clone(),
                     ui_release: ui_release.clone(),
                     paint,
                     // These telemetry fields now identify logical app roots, not old
@@ -794,8 +842,8 @@ fn network(
             url.as_str(),
             Some(
                 tungstenite::protocol::WebSocketConfig::default()
-                    .max_message_size(Some(otrios_core::canvas::MAX_BYTES + 1))
-                    .max_frame_size(Some(otrios_core::canvas::MAX_BYTES + 1)),
+                    .max_message_size(Some(otrios_interfaces::collection::MAX_EVENT_BYTES + 1))
+                    .max_frame_size(Some(otrios_interfaces::collection::MAX_EVENT_BYTES + 1)),
             ),
             0,
         ) {
@@ -934,6 +982,16 @@ fn network(
                         break;
                     }
                     match bytes.split_first() {
+                        Some((&otrios_interfaces::collection::CHANNEL, payload))
+                            if payload.len() <= otrios_interfaces::collection::MAX_EVENT_BYTES =>
+                        {
+                            if reply
+                                .try_send(NetworkEvent::Collection(epoch, payload.to_vec()))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                         Some((&otrios_interfaces::chat::CHANNEL, payload))
                             if payload.len() <= otrios_interfaces::chat::MAX_EVENT_BYTES =>
                         {
@@ -1315,15 +1373,30 @@ mod tests {
         assert!(!fixture.root.join("three-d-lab.automerge").exists());
     }
     #[test]
-    fn app_transport_receives_remote_edits_and_resynchronizes_after_reconnect() {
+    fn app_transport_receives_remote_edits_reconnects_and_revokes_a_held_frame() {
         use otrios_core::canvas::{Document, Session, decode_client, encode_server};
         use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
         use tungstenite::Message;
         enum ServerAction {
             Count(u16),
             Disconnect,
+            Revoke,
         }
         let fixture = fixture();
+        let catalog_path = fixture.root.join("catalog.flex");
+        let mut catalog =
+            otrios_core::canvas::decode_catalog(&fs::read(&catalog_path).unwrap()).unwrap();
+        catalog
+            .apps
+            .iter_mut()
+            .find(|entry| entry.app.id == "three-d-lab")
+            .unwrap()
+            .private = true;
+        fs::write(
+            &catalog_path,
+            otrios_core::canvas::encode_catalog(&catalog).unwrap(),
+        )
+        .unwrap();
         let schema = fixture.schema.clone();
         let ui = fixture.ui.clone();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1383,6 +1456,21 @@ mod tests {
                             ServerAction::Disconnect => {
                                 let _ = socket.close(None);
                                 continue 'accept;
+                            }
+                            ServerAction::Revoke => {
+                                socket
+                                    .send(Message::Binary(
+                                        otrios_interfaces::session::frame(
+                                            1,
+                                            encode_server(&ServerMessage::AccessRequired {
+                                                epoch: epoch.unwrap(),
+                                            })
+                                            .unwrap(),
+                                        )
+                                        .into(),
+                                    ))
+                                    .unwrap();
+                                epoch = None;
                             }
                         }
                     }
@@ -1488,6 +1576,32 @@ mod tests {
         actions.send(ServerAction::Disconnect).unwrap();
         actions.send(ServerAction::Count(0)).unwrap();
         wait(1);
+        // Keep the display's only credit occupied. Wire revocation must still
+        // invalidate this handed-off frame before a replacement can be built.
+        actions.send(ServerAction::Count(500)).unwrap();
+        let mut held = loop {
+            let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+            if frame.intent.count == 33 && frame.state_confirmed {
+                break frame;
+            }
+            tx.send(Input::RenderReady(frame.serial)).unwrap();
+        };
+        assert!(!held.paint.base.mesh.vertices.is_empty());
+        actions.send(ServerAction::Revoke).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while held.access.load(Ordering::Acquire) {
+            assert!(
+                Instant::now() < deadline,
+                "Revocation waited for renderer credit"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(matches!(fr.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(held.redact_if_revoked());
+        assert!(held.ui_ref.is_empty() && held.paint.base.mesh.vertices.is_empty());
+        assert!(held.paint.document.is_none() && held.paint.overlay.is_none());
+        assert!(!held.redact_if_revoked());
+        tx.send(Input::RenderReady(held.serial)).unwrap();
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
         stop.store(true, Ordering::Release);

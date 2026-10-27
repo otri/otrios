@@ -94,6 +94,17 @@ impl<'a> Iterator for Records<'a> {
 }
 impl ExactSizeIterator for Records<'_> {}
 impl Page {
+    fn at_or_after(&self, key: u64) -> Option<u64> {
+        if key > self.last {
+            return None;
+        }
+        match &self.items {
+            Items::Leaf(records) => records
+                .get(records.partition_point(|r| r.key < key))
+                .map(|r| r.key),
+            Items::Branch(pages) => pages.iter().find(|p| p.last >= key)?.at_or_after(key),
+        }
+    }
     fn new(items: Items) -> Arc<Self> {
         // Each page is its own bounded canonical object; no record bodies here.
         // Child bounds/counts/byte totals participate in the hash, as do every
@@ -257,6 +268,13 @@ pub struct Collection {
     revision: Hash,
 }
 impl Collection {
+    /// First retained key >= the missing anchor, or the last retained key if
+    /// the anchor is beyond the tail. Bounded page descent, never a log scan.
+    pub fn neighbor(&self, key: u64) -> Option<u64> {
+        self.root
+            .as_ref()
+            .and_then(|page| page.at_or_after(key).or(Some(page.last)))
+    }
     pub fn records(&self) -> Records<'_> {
         Records {
             stack: self

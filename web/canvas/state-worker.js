@@ -13,12 +13,13 @@ let viewportRevision=0,lastTextGeneration=0,lastPlacement=0,lastSemantics=0,last
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
-let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false;
+let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
 let chatLogKey='';
 function pumpChat(){
   if(app?.screen()==='brass-relay'&&!chatIdentityReady){if(!chatIdentityRequested){chatIdentityRequested=true;postMessage({type:'chat-identity'});}return;}
   if(transportReady&&!chatSending){const bytes=app?.chat_outgoing();if(bytes){chatSending=true;postMessage({type:'chat-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 }
+function pumpCollection(){if(transportReady&&!collectionSending){const bytes=app?.collection_outgoing();if(bytes){collectionSending=true;postMessage({type:'collection-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function error(e){postMessage({type:'error',message:String(e)});}
 // Input and network work continue while the renderer holds its single credit.
 // Coalesce dirty requests before crossing Wasm or assembling transferable arrays.
@@ -51,10 +52,10 @@ function sendFrame(){
   const transfer=[...(frame.effects?[frame.effects.buffer]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.map(u=>u.glyphVertices.buffer)];
   postMessage({type:'frame',...frame},transfer);
 }
-function clearPresentation(){composition=null;documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
+function clearPresentation(){chatLogKey='';composition=null;documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
 function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('');monitoring.logout();}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
-function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();}
+function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();}
 function reloadReady(){return !composition&&!app.input_busy()&&(!stateOnline||app.reload_ready());}
 function release(message){
   const r=message.release;if(!validRelease(r))return;
@@ -82,7 +83,7 @@ function release(message){
 function connect(){stateOnline=false;transportReady=false;postMessage({type:'transport-ready'});}
 function receiveState(bytes,receivedAt){try{
   const workerReceived=timings?timingNow():0;
-  const changed=app.receive(bytes);if(navigationTiming?.epoch===app.epoch()&&!navigationTiming.qualified){Object.assign(navigationTiming,{receivedAt,workerReceived,qualified:timingNow(),responseBytes:bytes.length});}if(changed&&!app.ui_ref())clearPresentation();
+  const changed=app.receive(bytes);if(navigationTiming?.epoch===app.epoch()&&!navigationTiming.qualified){Object.assign(navigationTiming,{receivedAt,workerReceived,qualified:timingNow(),responseBytes:bytes.length});}if(app.take_collection_revoked()||changed&&!app.ui_ref())clearPresentation();
   if(app.auth_required()){dropPrivate();monitoring.refresh().catch(()=>{});publish(false);}else publish(changed);
   stateOnline=true;outgoing();postMessage({type:'online',online:true});
 }catch(e){
@@ -118,13 +119,15 @@ onmessage=async({data:m})=>{try{
   if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
   if(!app)return;
   if(m.type==='transport'){
-    if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;if(changed){stateSends=0;inkSending=false;chatSending=false;}
+    if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;if(changed){stateSends=0;inkSending=false;chatSending=false;collectionSending=false;}
     if(transportReady&&(!was||changed)){app.reset_connection();outgoing();syncInk();}
     if(!transportReady){app.chat_disconnected();chatSending=false;stateOnline=false;postMessage({type:'online',online:false});}return;
   }
   if(m.type==='state-frame'){try{if(!stopped&&transportReady&&m.epoch===transportEpoch)receiveState(m.bytes,m.receivedAt);}finally{postMessage({type:'state-frame-ack',epoch:m.epoch});}return;}
   if(m.type==='ink-frame'){try{if(transportReady&&m.epoch===transportEpoch&&wantsInk()&&app.receive_ink(m.bytes,performance.now()))publish();}finally{postMessage({type:'ink-frame-ack',epoch:m.epoch});}return;}
-  if(m.type==='chat-frame'){try{if(transportReady&&m.epoch===transportEpoch&&app.receive_chat(m.bytes))publish();}finally{postMessage({type:'chat-frame-ack',epoch:m.epoch});}outgoing();return;}
+  if(m.type==='chat-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_chat(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish();}}finally{postMessage({type:'chat-frame-ack',epoch:m.epoch});}outgoing();return;}
+  if(m.type==='collection-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_collection(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish();}}finally{postMessage({type:'collection-frame-ack',epoch:m.epoch});}outgoing();return;}
+  if(m.type==='collection-send-ack'){if(m.epoch===transportEpoch){collectionSending=false;pumpCollection();}return;}
   if(m.type==='chat-send-ack'){if(m.epoch===transportEpoch){chatSending=false;pumpChat();}return;}
   if(m.type==='chat-identity-ready'){chatIdentityReady=true;outgoing();return;}
   if(m.type==='state-send-ack'){if(m.epoch===transportEpoch){stateSends=Math.max(0,stateSends-1);outgoing();}return;}

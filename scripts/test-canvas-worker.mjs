@@ -12,7 +12,7 @@ function workerContext(fields){
     app.begin_frame??=()=>{if(!dirty||inFlight!==null)return;dirty=false;return inFlight=++serial;};
     app.frame_presented??=s=>{if(s!==inFlight)return false;inFlight=null;return true;};
     app.prepare_frame??=()=>JSON.stringify({revisions:{content:app.text_generation?.()||1,placement:1,semantics:app.text_generation?.()||1,effects:1},order:['base']});
-    app.scroll_text_input??=()=>false;app.text_inputs??=()=> '[]';app.effect_vertices??=()=>new Float32Array();app.chat_info??=()=> 'null';app.chat_messages??=()=> '[]';app.chat_outgoing??=()=>null;app.chat_disconnected??=()=>{};app.screen??=()=> 'home';app.document_frame??=()=> 'null';
+    app.scroll_text_input??=()=>false;app.text_inputs??=()=> '[]';app.effect_vertices??=()=>new Float32Array();app.chat_info??=()=> 'null';app.chat_messages??=()=> '[]';app.chat_outgoing??=()=>null;app.chat_disconnected??=()=>{};app.collection_outgoing??=()=>null;app.take_collection_revoked??=()=>false;app.screen??=()=> 'home';app.document_frame??=()=> 'null';
     for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])app[key]??=()=>new Float32Array();app.overlay_draws??=()=>new Uint32Array();
   }
   return vm.createContext({DocumentTransfer,...fields});
@@ -128,6 +128,36 @@ test('worker state output uses a bounded credit window and ignores stale acknowl
  assert.equal(messages.filter(m=>m.type==='state-send').length,4);
  await context.onmessage({data:{type:'state-send-ack',epoch:1}});assert.equal(messages.filter(m=>m.type==='state-send').length,4);
  await context.onmessage({data:{type:'state-send-ack',epoch:2}});assert.equal(messages.filter(m=>m.type==='state-send').length,5);
+});
+
+test('collection input revokes presentation while renderer credit is held and bounds outgoing handoff',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const messages=[];let packets=3,received=0,revoked=false;
+  const fake={viewport_size:()=>[1280,800],outgoing:()=>null,collection_outgoing:()=>packets-->0?new Uint8Array([4]):null,
+    receive_collection(){received++;revoked=true;return true;},take_collection_revoked(){const value=revoked;revoked=false;return value;},
+    receive(){revoked=true;return true;},
+    ui_ref:()=>'',state_ref:()=>'',path:()=>'',epoch:()=>7,keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,
+    presentation_kind:()=> 'none',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}'};
+  const context=workerContext({fake,postMessage:m=>messages.push(m)});
+  vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;transportEpoch=2;publish();outgoing();outgoing()',context);
+  const first=messages.find(m=>m.type==='frame');
+  assert.equal(messages.filter(m=>m.type==='collection-send').length,1);
+  await context.onmessage({data:{type:'collection-send-ack',epoch:1}});
+  assert.equal(messages.filter(m=>m.type==='collection-send').length,1);
+  await context.onmessage({data:{type:'collection-frame',epoch:1,bytes:new Uint8Array([1])}});
+  assert.equal(received,0);assert(!messages.some(m=>m.type==='clear-private'));
+  await context.onmessage({data:{type:'collection-frame',epoch:2,bytes:new Uint8Array([1])}});
+  assert.equal(received,1);assert(messages.some(m=>m.type==='clear-private'));
+  assert.equal(messages.filter(m=>m.type==='frame').length,1,'revocation bypasses held renderer credit');
+  assert(messages.some(m=>m.type==='collection-frame-ack'&&m.epoch===2));
+  await context.onmessage({data:{type:'collection-send-ack',epoch:2}});
+  assert.equal(messages.filter(m=>m.type==='collection-send').length,2);
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token}});
+  assert.equal(messages.filter(m=>m.type==='frame').length,2);
+  await context.onmessage({data:{type:'state-frame',epoch:2,bytes:new Uint8Array([1])}});
+  assert.equal(messages.filter(m=>m.type==='clear-private').length,2,'leaving a chat mount also clears its handed-off presentation');
+  assert.equal(messages.filter(m=>m.type==='frame').length,2);
+  assert(!messages.some(m=>m.type==='error'));
 });
 
 test('navigation delegates destination paths to the shared runtime',async()=>{

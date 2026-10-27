@@ -403,10 +403,64 @@ fn room_adapter_handles_identity_live_drafts_native_auth_all_tab_kick_and_recove
         Event::Receipt { sequence, .. } => sequence,
         _ => unreachable!(),
     };
-    until(
-        &mut browser,
-        |e| matches!(e,Event::Message{message} if message.sequence==sequence),
-    );
+    // Bodies are obtained only through the generic collection lane.
+    use otrios_core::collection as col;
+    browser
+        .send(Wire::Binary(
+            frame(
+                col::CHANNEL,
+                col::encode_command(&col::Command::Select {
+                    generation: 1,
+                    plan: otrios_core::canvas::chat::message_selection(col::Anchor::Tail),
+                })
+                .unwrap(),
+            )
+            .into(),
+        ))
+        .unwrap();
+    loop {
+        match browser.read().unwrap() {
+            Wire::Binary(bytes) if bytes.first() == Some(&col::CHANNEL) => {
+                let col::Event::View(offer) = col::Event::from_bytes(&bytes[1..]).unwrap() else {
+                    panic!("view");
+                };
+                let mut replica = col::Replica::new(
+                    offer.epoch,
+                    COLLECTION,
+                    otrios_core::canvas::chat::message_schema(),
+                );
+                replica
+                    .begin_request(
+                        1,
+                        otrios_core::canvas::chat::message_selection(col::Anchor::Tail),
+                    )
+                    .unwrap();
+                replica.apply(&offer).unwrap();
+                let message = otrios_core::canvas::chat::read_message(
+                    &replica.window().unwrap().record(sequence).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(message.text, "A durable dispatch");
+                browser
+                    .send(Wire::Binary(
+                        frame(
+                            col::CHANNEL,
+                            col::encode_command(&col::Command::Acknowledge {
+                                generation: 1,
+                                cursor: offer.transfer.cursor,
+                                root: offer.transfer.root,
+                            })
+                            .unwrap(),
+                        )
+                        .into(),
+                    ))
+                    .unwrap();
+                break;
+            }
+            Wire::Ping(_) => browser.flush().unwrap(),
+            _ => (),
+        }
+    }
     send_chat(
         &mut native,
         Command::Kick {

@@ -141,35 +141,6 @@ impl History {
                 .map_err(err),
         }
     }
-    /// Temporary read adapter until all consumers switch to collection leases.
-    /// It stores no rows and has no independent publication owner.
-    pub fn page(&self, before: u64) -> Result<Vec<Message>> {
-        let current = self.snapshot()?;
-        let anchor = if before == u64::MAX {
-            collections::Anchor::Tail
-        } else {
-            collections::Anchor::Before(collections::Cursor {
-                epoch: 0,
-                collection: COLLECTION,
-                key: before,
-            })
-        };
-        let window = current
-            .select(
-                0,
-                &collections::Grant {
-                    collection: COLLECTION,
-                    fields: vec![MESSAGE_FIELD],
-                },
-                &message_selection(anchor),
-            )
-            .map_err(err)?;
-        window
-            .keys
-            .iter()
-            .map(|key| read_message(&window.record(*key).map_err(err)?))
-            .collect()
-    }
 }
 
 #[cfg(test)]

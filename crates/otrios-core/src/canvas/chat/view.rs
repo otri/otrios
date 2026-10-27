@@ -334,12 +334,12 @@ impl Client {
             );
         }
         let dy = page_y + content_h;
-        if self.new_messages > 0 {
+        if self.new_messages > 0 || self.more_after {
             p.button(
                 12,
                 [48., dy - 48., 260., 44.],
                 "Show new messages",
-                &format!("{} new dispatches", self.new_messages),
+                "Latest dispatches",
                 true,
             );
         }

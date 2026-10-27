@@ -4,9 +4,10 @@
 RFC 0024 is in progress on `feat/0024-viewport-collections`. Delivery 1 has
 synthetic-source library, process/scaling and shared-WebSocket qualification on
 macOS and Linux. Chat's authoritative store now uses that collection owner, with
-streaming journal recovery and admission lifetimes. Delivery 2 still requires
-native/browser app consumption, structured blocks, legacy read-path retirement,
-signed deployment and the final PR. The RFC is not
+streaming journal recovery and admission lifetimes. Both host adapters now consume
+bounded message windows and the legacy history read/wire paths are retired.
+Delivery 2 still requires stable structured blocks, large-thread browser and
+physical native acceptance, signed deployment and the final PR. The RFC is not
 complete and these branch changes have not been deployed.
 
 ## Reusable library
@@ -78,8 +79,8 @@ The empty-root digest test has a separately generated Python hashlib vector.
 Window command/offer domains are `OTriOS\0collection-command\0v1\0` and
 `OTriOS\0collection-offer\0v1\0`. The codecs reject truncated, extra, oversized
 and invalid-tag frames before publication. The shared-session integration below
-routes these bytes on the existing WebSocket. The branch declares sync v7 on
-the authority, browser, shared Rust native-client constant and release publisher.
+routes these bytes on the existing WebSocket. The synthetic gate used sync v7;
+the consumer cutover below advances the branch consistently to v8.
 The deployed environment remains on its earlier release until the full RFC
 cutover is qualified. The stable v1 release-control opening envelope is unchanged.
 
@@ -160,7 +161,7 @@ even with an ACK pending. Private queued views are checked again before sending.
 
 Channel 4 carries generic collection commands/events alongside Canvas fields,
 ink and ephemeral room commands on the same socket. Negotiation gates all state
-bytes. v7 is declared consistently in authority admission, browser and shared
+bytes. At this synthetic gate, v7 was declared in authority admission, browser and shared
 Rust native bootstrap, release manifests, catalog verification and host tooling.
 Old state negotiation still receives the v1 code hello/upgrade. Browser transport
 has collection callbacks and a bounded worker bridge. Chat/native app consumers
@@ -315,13 +316,104 @@ ran the same 20 scoped chat unit tests, using the isolated builder directory
 and pinned environment described above. These checks do not replace the pending
 native/browser consumer cutover, pixel comparison or physical page-flip evidence.
 
+## Native/browser consumer cutover (branch, not deployed)
+
+The generic RAM client now owns request generations, coherent qualification,
+ACK/resync, revocation and cancelled/superseded reply rejection. Its request
+counter belongs to the host shell, so reopening an app cannot accept an earlier
+activation's response. A rejected replacement retains the old qualified pin and
+re-establishes its live coverage using a new monotonic generation. An expired
+anchor carries an explicit neighboring key: first retained key at or after it,
+or the retained tail if none follows. Neighbor lookup descends the bounded index;
+it does not scan history. Empty collections report no neighboring key.
+
+Brass Relay selects source 22 after room admission. It retains at most 64
+projected messages and 256 KiB of selected canonical bytes, replacing its local
+window rather than appending fetched pages. Visible source anchors and a
+16-record edge reserve drive `Around` replacement; the actual tail uses `Tail`.
+Resize does not issue a new request for unchanged coverage. An older anchored
+view receives no message body or authors/layout invalidation for an outside
+append; the Latest control explicitly returns to tail coverage. Optional unread
+head metadata is not implemented.
+
+The old `History` command, `History`/`Message` events, welcome message bodies,
+temporary authority page adapter, 1,024-message client accumulator and roster
+rewrites of sent profiles are removed. Channel 3 retains admission, guest/profile
+identity, durable send receipts, moderation and ephemeral drafts/effects. Sends
+remain in the separate bounded eight-intent queue. The existing shell waits for
+confirmation before navigation or connected code replacement; the end-to-end
+consumer test now verifies that gate and navigation resumes after the receipt.
+
+The state wire identifier is now `otrios-canvas-sync-v8` on authority, browser,
+native/shared contracts, release publisher and verification tooling. It accounts
+for both the removed chat wire variants and the generic explicit expired-anchor
+event. The stable v1 opening code/control envelope is unchanged. Collection
+events retain the 1 MiB + 512 byte codec cap. The native inbound mailbox has eight
+shared events; the browser bridge allows two collection events and one outgoing
+worker handoff. These transfer bounds are separate from the selected-view cap.
+
+Collection revocation, room removal and leaving a chat activation clear the owned
+replica/projection and composer. Browser clearing also removes the accessibility
+transcript and presentation resources without waiting for renderer credit.
+Native handed-off frames share a revocable atomic access marker. The display
+checks it every turn, drops invalid RAM resources and retires UI/document/effect
+GPU slots before drawing again, independently of replacement-frame credit.
+The state-worker test holds its only frame credit while the WebSocket authority
+revokes access, verifies invalidation, and only then acknowledges that frame.
+This tests the actual worker/network boundary; physical display timing remains
+a later acceptance gate.
+
+Validation commands (Rust 1.90.0, locked dependencies, offline Cargo):
+
+```sh
+bash scripts/check.sh
+cargo test -p otrios-core --features canvas --test canvas --test collection_client --locked --offline
+cargo clippy -p otrios-dashboard --features direct --bin dashboard-direct --all-targets --locked --offline -- -D warnings
+cargo test -p otrios-dashboard --features direct --bin dashboard-direct --locked --offline
+bash scripts/build-dashboard-web.sh
+node --test scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs scripts/test-dashboard-artifact-cache.mjs scripts/test_gpu_scene.mjs scripts/test-app-catalog.mjs scripts/test-canvas-worker.mjs scripts/test-document-transfer.mjs scripts/test-touch-input.mjs scripts/test-text-input.mjs scripts/test-viewport.mjs scripts/test-ui-update.mjs scripts/test-canvas-host-exports.mjs scripts/test-canvas-module-sharing.mjs
+node scripts/test-chat-browser.mjs --url http://127.0.0.1:18965 --chromium '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --output target/rfc0024-client/browser
+```
+
+Required checks, Wasm release build and all eight direct-worker tests passed.
+The 58 Canvas and five collection-client tests passed on macOS and Linux. The
+200-message real room/Canvas integration selects 137..200 initially, replaces
+older coverage without accumulation, observes no body/invalidation on an outside
+append, returns to latest, resizes without a new selection, and receives the
+authority's send receipt before permitting navigation. That in-process consumer
+fixture has no journal; the disk/restart guarantees are qualified separately by
+the process tests. Process tests on both OSes
+passed the two chat and three shared-collection suites. The final ARMv7 direct
+display host also compiles in the isolated Linux builder. No new dependencies.
+
+Node 24.19.0 passed all 77 host/worker/session/cache/input checks, including actual
+Wasm module cloning with separate memories, stale transport epochs, bounded
+outgoing collection handoff and clearing while renderer credit is held.
+Chrome 156.0.8078.48/WebGL acceptance passed using isolated local state and a test-signed
+browser fixture. Its native asset is a prior test fixture; it is not a deployable
+release candidate. The run covers two independent guests, durable exchange,
+immutable old sender snapshots/new sender profiles on later sends, reload
+identity/history, commands, responsive controls, IME/multiline editing, visual
+keyboard reflow and WebGL loss/recovery. It also asserts actual channel-4 traffic
+on both tabs, v1 hello/v8 negotiation, selected/replica bounds, and zero sent-body
+canary leaks on the incoming ephemeral room lane. Final windows each contained
+28 records, 14,976 selected canonical bytes and 18,175 replica canonical bytes.
+Those small-window figures are acceptance evidence, not large-history scaling
+or performance measurements. Screenshots and `collection-transport.json` are in
+`target/rfc0024-client/browser`; landscape and phone captures were visually
+inspected. These generated artifacts are not committed.
+
+The browser acceptance test now waits for the completed Home activation after
+leaving the Monitoring sign-in sheet before issuing its next navigation; merely
+observing the retained old Home scene does not establish that the staged
+handshake finished. It also checks immutable sent profiles rather than expecting
+a roster rename to rewrite history.
+
 ## Remaining completion gates
 
-1. Move native/browser chat consumers to admitted collection leases, preserve
-   guest identity, durable send receipts, moderation and RAM-only drafts/effects,
-   and retire old history commands/bodies, temporary page adapters and client
-   paging after cutover. Establish the stopped live-data rollback point and
-   qualify the actual deployed restart/rollback workflow.
+1. Establish the stopped live-data rollback point and qualify the actual
+   deployed single-owner journal restart/rollback workflow. The branch consumer
+   cutover and old read-path retirement above are not a live deployment.
 2. Map viewport/overscan to bounded stable-key coverage. Keep pending sends
    separate. Implement stable structured message blocks with one placement and
    clip for text/profile/avatar, block-revision layout caches, bounded reverse

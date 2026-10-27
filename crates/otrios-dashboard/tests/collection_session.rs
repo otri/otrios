@@ -236,8 +236,8 @@ fn shared_session_qualifies_large_sparse_windows_coalesces_slow_readers_and_reco
             },
         );
         match event(&mut anchored) {
-            Event::Rejected {
-                status: Status::AnchorExpired,
+            Event::AnchorExpired {
+                neighbor: Some(1002),
                 ..
             } => break,
             Event::View(offer) => {

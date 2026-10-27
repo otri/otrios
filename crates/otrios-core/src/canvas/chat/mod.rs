@@ -2,6 +2,7 @@
 //! Shared room authority, durable journal and common native/browser presentation.
 mod authority;
 mod client;
+mod collections;
 mod history;
 pub mod icons;
 mod journal;

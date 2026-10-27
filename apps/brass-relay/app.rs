@@ -9,7 +9,8 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
             "ui.rs",
             "sdk:canvas-authoring-v5",
             "presentation:chat-v1",
-            "session:chat-v1",
+            "session:chat-v2",
+            "collection:window-v1",
         ],
     )
 }

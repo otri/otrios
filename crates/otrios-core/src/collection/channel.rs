@@ -57,6 +57,12 @@ impl ChannelSession {
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    AnchorExpired {
+        epoch: u64,
+        generation: u64,
+        collection: u64,
+        neighbor: Option<u64>,
+    },
     View(Offer),
     Rejected {
         generation: u64,
@@ -67,6 +73,29 @@ pub enum Event {
         generation: u64,
         collection: u64,
     },
+}
+fn anchor(plan: &Selection) -> Option<u64> {
+    match plan.anchor {
+        Anchor::Tail => None,
+        Anchor::Before(cursor) => Some(cursor.key),
+        Anchor::Around(key) => Some(key),
+    }
+}
+fn failure(source: &Source, generation: u64, key: Option<u64>, error: Error) -> Event {
+    if error == Error::AnchorExpired {
+        let collection = source.authority.collection();
+        Event::AnchorExpired {
+            epoch: source.authority.epoch(),
+            generation,
+            collection: collection.id,
+            neighbor: key.and_then(|key| collection.neighbor(key)),
+        }
+    } else {
+        Event::Rejected {
+            generation,
+            status: error.into(),
+        }
+    }
 }
 impl From<Error> for Status {
     fn from(error: Error) -> Self {
@@ -244,6 +273,10 @@ impl Channel {
             });
         };
         let cancel = matches!(command, Command::Cancel { .. });
+        let key = match &command {
+            Command::Select { plan, .. } => anchor(plan),
+            _ => session.session.plan().and_then(anchor),
+        };
         match source.authority.handle(
             &mut session.session,
             source.policy.grant(id, access),
@@ -257,10 +290,7 @@ impl Channel {
                 }
                 offer.map(Event::View)
             }
-            Err(error) => Some(Event::Rejected {
-                generation,
-                status: error.into(),
-            }),
+            Err(error) => Some(failure(source, generation, key, error)),
         }
     }
     pub fn poll(&self, session: &mut ChannelSession, access: Access) -> Option<Event> {
@@ -269,13 +299,11 @@ impl Channel {
         }
         let id = session.collection?;
         let source = self.sources.get(&id)?;
+        let key = session.session.plan().and_then(anchor);
         match source.authority.poll(&mut session.session) {
             Ok(offer) => offer.map(Event::View),
             Err(Error::Backpressure) => None, // ACK credit explicitly remains outstanding.
-            Err(error) => Some(Event::Rejected {
-                generation: session.generation(),
-                status: error.into(),
-            }),
+            Err(error) => Some(failure(source, session.generation(), key, error)),
         }
     }
 }

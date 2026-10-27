@@ -21,7 +21,9 @@ fn send(text: &str, nonce: u64, now: u64) -> Command {
     }
 }
 #[test]
-fn renamed_authors_resolve_in_old_pages_welcome_and_recovered_history() {
+fn sent_profiles_remain_immutable_across_collection_windows_and_journal_recovery() {
+    use crate::collection as col;
+    use std::sync::{Arc, Mutex};
     let p = path();
     let now = 1_000_000;
     let mut room = Room::open(Some(p.clone()), now).unwrap();
@@ -32,7 +34,7 @@ fn renamed_authors_resolve_in_old_pages_welcome_and_recovered_history() {
         room.handle(1, send("Unchanged dispatch", i, at), at)
             .unwrap();
     }
-    let prior_log = fs::read(&p).unwrap();
+    let prior = fs::read(&p).unwrap();
     room.handle(
         1,
         Command::Profile {
@@ -42,35 +44,59 @@ fn renamed_authors_resolve_in_old_pages_welcome_and_recovered_history() {
         now + 71_000,
     )
     .unwrap();
-    assert!(
-        fs::read(&p).unwrap().starts_with(&prior_log),
-        "rename appends a profile update without rewriting message records"
-    );
-    room.leave(1, now + 72_000).unwrap();
+    assert!(fs::read(&p).unwrap().starts_with(&prior));
     drop(room);
-    let mut room = Room::open(Some(p.clone()), now + 73_000).unwrap();
-    let joined = room.join(2, None, false, now + 73_000, true).unwrap();
-    let welcome = joined
-        .iter()
-        .find_map(|d| match &d.event {
-            Event::Welcome { messages, .. } => Some(messages),
-            _ => None,
-        })
+    let registry = Arc::new(Mutex::new(col::Channel::new(42)));
+    let mut room = Room::open_in(Some(p.clone()), now + 73_000, registry.clone()).unwrap();
+    assert_eq!(
+        room.identity(Some(&token), now + 73_000).unwrap().0.name,
+        "Admiral Newname"
+    );
+    room.join(2, Some(&token), false, now + 73_000, true)
         .unwrap();
-    assert_eq!(welcome.len(), PAGE_MESSAGES);
-    let history = room
-        .handle(2, Command::History { before: 7 }, now + 74_000)
-        .unwrap();
-    let Event::History { messages, .. } = &history[0].event else {
-        panic!("history")
-    };
-    assert_eq!(messages.len(), 6);
-    for message in welcome.iter().chain(messages) {
-        assert_eq!(message.sender.id, original.id);
-        assert_eq!(message.sender.name, "Admiral Newname");
-        assert_eq!(message.sender.avatar, 42);
-        assert_eq!(message.text, "Unchanged dispatch");
+    for (anchor, count) in [
+        (col::Anchor::Tail, 64),
+        (
+            col::Anchor::Before(col::Cursor {
+                epoch: 42,
+                collection: COLLECTION,
+                key: 7,
+            }),
+            6,
+        ),
+    ] {
+        let plan = message_selection(anchor);
+        let mut session = col::ChannelSession::default();
+        let event = registry
+            .lock()
+            .unwrap()
+            .handle(
+                &mut session,
+                col::Access {
+                    admitted: true,
+                    authenticated: false,
+                },
+                col::Command::Select {
+                    generation: 1,
+                    plan: plan.clone(),
+                },
+            )
+            .unwrap();
+        let col::Event::View(offer) = event else {
+            panic!("view");
+        };
+        let mut replica = col::Replica::new(42, COLLECTION, message_schema());
+        replica.begin_request(1, plan).unwrap();
+        replica.apply(&offer).unwrap();
+        let window = replica.window().unwrap();
+        assert_eq!(window.keys.len(), count);
+        for key in &window.keys {
+            let message = read_message(&window.record(*key).unwrap()).unwrap();
+            assert_eq!(message.sender, original);
+            assert_eq!(message.text, "Unchanged dispatch");
+        }
     }
+    drop(room);
     fs::remove_file(p).unwrap();
 }
 #[test]
@@ -206,7 +232,8 @@ fn kick_requires_live_connection_permission_removes_all_tabs_and_persists_cooldo
 #[test]
 fn draft_generations_reject_stale_tabs_revisions_and_expire_without_history() {
     let now = 1_000_000;
-    let mut room = Room::open(None, now).unwrap();
+    let channel = std::sync::Arc::new(std::sync::Mutex::new(crate::collection::Channel::new(42)));
+    let mut room = Room::open_in(None, now, channel.clone()).unwrap();
     let (_, token) = room.identity(None, now).unwrap();
     let joined = room.join(1, Some(&token), false, now, true).unwrap();
     let generation = joined
@@ -250,10 +277,14 @@ fn draft_generations_reject_stale_tabs_revisions_and_expire_without_history() {
             .unwrap()
             .is_empty()
     );
-    let history = room
-        .handle(2, Command::History { before: u64::MAX }, now + 3400)
-        .unwrap();
-    assert!(matches!(&history[0].event,Event::History{messages,..}if messages.is_empty()));
+    assert!(
+        channel
+            .lock()
+            .unwrap()
+            .collection(COLLECTION)
+            .unwrap()
+            .is_empty()
+    );
 }
 #[test]
 fn unknown_ids_do_not_resume_identity_and_copied_ids_never_grant_admin() {

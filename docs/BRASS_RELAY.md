@@ -29,8 +29,10 @@ them. Privacy toggles add no confirmation paragraph.
 
 Drag the transcript to read older dispatches, with momentum on release. New
 messages preserve your reading position; the new-dispatch control returns to the
-latest page. Older history loads in pages of at most 64 messages. The local
-window holds at most 1,024 messages. Day separators show Today, Yesterday or the
+latest dispatches. The transcript selects a coherent collection window of at
+most 64 messages and 256 KiB of canonical message bytes. Moving near a window
+edge replaces its coverage instead of accumulating pages. Resizing reflows
+the selected records locally. Day separators show Today, Yesterday or the
 date; this first version uses UTC for dates and timestamps. The composer supports
 wrapped text, caret following, hardware editing and multiline paste. It grows to
 four lines. The native frame supports vertical drag/coast preview and retains
@@ -74,15 +76,20 @@ grant administrator privileges or enter presentation snapshots.
 
 The covered authority lives in `otrios-core::canvas::chat`; the dashboard host
 only adapts cookies, authentication, bounded queues and the shared WebSocket.
-Chat uses channel 3 under state protocol v6. Release discovery keeps its stable
+Room commands, receipts and ephemeral events use channel 3; coherent message
+windows use the reusable collection channel 4 under state protocol v8.
+Release discovery keeps its stable
 v1 opening envelope. A failed chat journal closes the room while release/control
 and other apps remain available. Slow room queues explicitly resynchronize.
 
-The separate chat history channel is a prototype shortcut. The intended shared
-data model uses coherent viewport-scoped collection leases, so long threads can
-use OTriOS partial synchronization without replicating the full log. See
-[RFC 0024](rfcs/0024-viewport-scoped-collections.md); that migration is proposed,
-not implemented by these UI corrections.
+The legacy History command, welcome bodies and per-message broadcasts are
+retired. The same authoritative collection feeds both hosts; pending sends stay
+in their separate eight-intent queue until a durable receipt. Connected code
+replacement and navigation wait for those receipts. A retention-expired anchor
+moves to the first retained key at or after it, or the last retained key if it
+is beyond the tail, with an explicit notice. The stable structured-block and
+deployed acceptance gates of [RFC 0024](rfcs/0024-viewport-scoped-collections.md)
+remain in progress; see the [qualification ledger](experiments/collection-windows-2026-10-28.md).
 
 The mode-0600 `brass-relay.journal` lives beside the authority's app state. Records
 have lengths and SHA-256 checksums; writes sync before receipt publication. A

@@ -162,7 +162,10 @@ pub(super) fn run() -> Result<(), String> {
                     ))?;
                 }
             }
-            while let Ok(next) = frame_rx.try_recv() {
+            let mut revoked = model.as_mut().is_some_and(Frame::redact_if_revoked);
+            while let Ok(mut next) = frame_rx.try_recv() {
+                revoked |= next.redact_if_revoked();
+                revoked |= model.as_mut().is_some_and(Frame::redact_if_revoked);
                 if model
                     .as_ref()
                     .is_some_and(|old| old.paint.viewport != next.paint.viewport)
@@ -185,6 +188,23 @@ pub(super) fn run() -> Result<(), String> {
                     document_gpu.clear(&mut display)?;
                 }
                 model = Some(next);
+                dirty = true;
+            }
+            revoked |= model.as_mut().is_some_and(Frame::redact_if_revoked);
+            if revoked {
+                for slot in 0..=2 {
+                    display.retire_slot(slot)?;
+                }
+                document_gpu.clear(&mut display)?;
+                retained = None;
+                retained_overlay = None;
+                effect_revision = None;
+                reflow = Default::default();
+                reflow_serial = None;
+                presenter = Presenter::default();
+                scroll_meter = Default::default();
+                scroll_active = false;
+                hud = u64::MAX;
                 dirty = true;
             }
             if let Some(f) = &model {
