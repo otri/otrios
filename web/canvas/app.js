@@ -3,6 +3,7 @@
 import init,{CanvasPresentation} from './pkg/otrios_dashboard.js';
 import {SceneRenderer} from './gpu-scene.mjs';
 import {DocumentLayers} from './document-transfer.mjs';
+import {PointerSamples,sampleTime} from './touch-input.mjs';
 import {layoutViewport,pointerPosition,semanticBounds} from './viewport.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppRelease} from './app-catalog.mjs';
@@ -63,7 +64,7 @@ try{
   window.addEventListener('popstate',()=>command({type:'navigate',screen:restoreScreen()}));
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
   const query=new URL(location.href).searchParams;
-  let renderer,staticLayer,motionLayer,hudLayer,documentLayers,graphicsLost=false;
+  let renderer,staticLayer,motionLayer,hudLayer,documentLayers,graphicsLost=false,graphicsGeneration=0;
   function createGraphics(){
     renderer=new SceneRenderer(gl,{stableTextQuads:query.get('stable-quads')==='1',atlasScale:query.has('font-probe')?0:2,linearLight:query.get('linear-light')==='1'||query.get('font-probe')==='1'});
     staticLayer=renderer.createLayer();motionLayer=renderer.createLayer();hudLayer=renderer.createLayer();documentLayers=new DocumentLayers(renderer);
@@ -82,7 +83,7 @@ try{
     }
   });
   function accept(f){
-    if(graphicsLost||gl.isContextLost()){worker.postMessage({type:'frame-ack',documentToken:f.document?.token});return;}
+    if(graphicsLost||gl.isContextLost()||f.graphicsGeneration!==graphicsGeneration){worker.postMessage({type:'frame-ack',documentToken:f.document?.token});return;}
     const wasReflow=!!model?.reflow;if(model?.screen!==f.screen)presenter.suspend();timings?.accept(f);
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){for(const b of controls.values())b.remove();controls.clear();}
@@ -120,13 +121,13 @@ try{
     if(error.name!=='DataCloneError')throw error;
     delete start.wasmModule;worker.postMessage(start);
   }
-  const pointers=new Set(),moves=new Map(),pointerStarts=new Map();
-  function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,performance.now()]};}
+  const pointers=new Set(),moves=new PointerSamples(),pointerStarts=new Map();
+  function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,sampleTime(e,performance)]};}
   canvas.addEventListener('pointerdown',e=>{if(graphicsLost)return;e.preventDefault();canvas.focus({preventScroll:true});pointers.add(e.pointerId);if(timings)pointerStarts.set(e.pointerId,timingTools.eventTimestamp(e,performance));canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
-  canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.set(e.pointerId,pointer(e,1));});
-  function finish(e,phase){if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.get(e.pointerId));moves.delete(e.pointerId);}command(pointer(e,phase),e,pointerStarts.get(e.pointerId));pointerStarts.delete(e.pointerId);pointers.delete(e.pointerId);}
+  canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.add(e,s=>pointer(s,1));});
+  function finish(e,phase){if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.take(e.pointerId));}command(pointer(e,phase),e,pointerStarts.get(e.pointerId));pointerStarts.delete(e.pointerId);pointers.delete(e.pointerId);}
   canvas.addEventListener('pointerup',e=>finish(e,2));canvas.addEventListener('pointercancel',e=>finish(e,3));canvas.addEventListener('lostpointercapture',e=>finish(e,3));
-  window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
+  window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.timeOrigin+performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
   window.addEventListener('keydown',e=>{if(graphicsLost||e.isComposing||e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(e.key==='Escape'){e.preventDefault();command({type:'back'},e);return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
   window.addEventListener('paste',e=>{if(graphicsLost)return;if(e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(model?.editing){e.preventDefault();command({type:'text',text:e.clipboardData.getData('text/plain')});}});
   let lastMetric=0,scrollSamples=[],scrollLast=null,scrollLabel='',scrollHudAt=0,scrollWasActive=false,scrollHudExtent='';
@@ -169,6 +170,6 @@ try{
     }catch(e){if(!gl.isContextLost()){fatal(e);return;}}
     requestAnimationFrame(frame);
   }
-  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();graphicsLost=true;renderer.contextLost();documentLayers.clear();staticLayer.dispose();motionLayer.dispose();hudLayer.dispose();if(model)model.document=null;revision.dataset.graphics='lost';controlsLayer.inert=true;moves.clear();for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});worker.postMessage({type:'graphics-lost'});connection.textContent='Restoring graphics...';});
-  canvas.addEventListener('webglcontextrestored',()=>{try{documentLayers.clear();createGraphics();graphicsLost=false;if(model?.extent)renderer.setLogicalSize(...model.extent);resize();if(model?.vertices&&!model.reflow)staticLayer.setFrame(model);scrollLabel='';hudRevision=-1;dirty=true;revision.dataset.graphics='ready';controlsLayer.inert=false;connection.textContent=dot.classList.contains('online')?'Live shared space':'Offline · unconfirmed changes held in memory';worker.postMessage({type:'document-replay'});}catch(e){fatal(e);}});requestAnimationFrame(frame);
+  document.addEventListener('visibilitychange',()=>{presenter.suspend();dirty=true;});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();graphicsLost=true;graphicsGeneration++;renderer.contextLost();documentLayers.clear();staticLayer.dispose();motionLayer.dispose();hudLayer.dispose();if(model)model.document=null;revision.dataset.graphics='lost';revision.dataset.documentLoading='true';revision.dataset.documentResources='0';controlsLayer.inert=true;moves.clear();for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});worker.postMessage({type:'graphics-lost',generation:graphicsGeneration});connection.textContent='Restoring graphics...';});
+  canvas.addEventListener('webglcontextrestored',()=>{try{documentLayers.clear();createGraphics();graphicsLost=false;if(model?.extent)renderer.setLogicalSize(...model.extent);resize();if(model?.vertices&&!model.reflow)staticLayer.setFrame(model);scrollLabel='';hudRevision=-1;dirty=true;revision.dataset.graphics='ready';controlsLayer.inert=false;connection.textContent=dot.classList.contains('online')?'Live shared space':'Offline · unconfirmed changes held in memory';worker.postMessage({type:'document-replay',generation:graphicsGeneration});}catch(e){fatal(e);}});requestAnimationFrame(frame);
 }catch(e){fatal(e);}

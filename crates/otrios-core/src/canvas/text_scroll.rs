@@ -17,6 +17,7 @@ pub struct Info {
     pub offset: [f32; 2],
     pub limit: [f32; 2],
     pub active: bool,
+    pub velocity: [f64; 2],
 }
 impl Scroll {
     pub fn new(node: u16, content: [f32; 2]) -> Self {
@@ -33,6 +34,7 @@ impl Scroll {
             offset: self.axes.each_ref().map(|a| a.offset),
             limit: self.axes.each_ref().map(|a| a.limit()),
             active: self.axes.iter().any(TextViewport::animating),
+            velocity: self.axes.each_ref().map(|a| a.velocity()),
         }
     }
     pub fn touching(&self) -> bool {
@@ -100,8 +102,7 @@ impl Scroll {
                 }
                 PointerPhase::Up => {
                     for i in 0..2 {
-                        self.axes[i].motion(event.position[i] / self.scale, now);
-                        self.axes[i].up(now);
+                        self.axes[i].up(event.position[i] / self.scale, now);
                     }
                 }
                 PointerPhase::Cancel => self.cancel(),

@@ -14,6 +14,7 @@ pub mod layout;
 pub mod motion;
 mod render;
 pub mod scene;
+pub mod touch;
 pub use render::{Mesh, render_scene, render_scene_with_font};
 pub mod retained_text;
 

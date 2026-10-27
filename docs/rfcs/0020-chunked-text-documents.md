@@ -152,13 +152,11 @@ can show an explicit loading region; do not silently omit text or display a
 different source range. Normal continuous scrolling must prefetch fast enough
 to avoid such regions in the qualified workload. No bounce past known ends.
 
-Deferred UI input follow-up (requested 2026-10-27): slow releases currently
-can produce an unwanted velocity kick. Keep up to 200 ms of timestamped touch
-history at the shared input layer; estimate position, velocity and acceleration
-from the trajectory before lift-off and box-filter the final sample against
-that recent trajectory. Qualify slow releases, pauses, acceleration, reversal,
-irregular sampling and noisy final contacts before selecting the filter. This
-is a later input task, separate from the document reader delivery below.
+The UI input follow-up requested 2026-10-27 is implemented separately in
+[RFC 0021](0021-touch-history-and-momentum.md): bounded timestamped history,
+filtered lift-off, shared momentum and repeated-stroke acceleration, with
+capture/replay fixtures across scrolling, sliders, dial and pad. Deployment is
+tracked separately from this reader's accepted release.
 
 ## Host buffers, publication and resource lifetime
 

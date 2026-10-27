@@ -1117,6 +1117,15 @@ impl Client {
         }
     }
     pub fn pointer(&mut self, epoch: u32, event: PointerEvent) -> Result<bool> {
+        let at = self.active.as_ref().map_or(0, |m| m.now);
+        self.pointer_at(epoch, event, at)
+    }
+    /// Preserve source sample time independently of worker delivery/animation time.
+    pub fn pointer_at(&mut self, epoch: u32, mut event: PointerEvent, at: u64) -> Result<bool> {
+        if event.position.iter().any(|v| !v.is_finite()) {
+            event.phase = PointerPhase::Cancel;
+            event.position = [0., 0.];
+        }
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
@@ -1137,14 +1146,14 @@ impl Client {
         if let Some(reader) = &mut m.text_document {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 reader.cancel();
-            } else if let Some(changed) = reader.pointer(&scene, event, m.now) {
+            } else if let Some(changed) = reader.pointer(&scene, event, at) {
                 return Ok(changed);
             }
         }
         if let Some(scroll) = &mut m.text_scroll {
             if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
                 scroll.cancel();
-            } else if let Some(changed) = scroll.pointer(&scene, event, m.now)? {
+            } else if let Some(changed) = scroll.pointer(&scene, event, at)? {
                 m.invalidate_presentation();
                 return Ok(changed);
             }
@@ -1164,7 +1173,7 @@ impl Client {
             }
         }
         if self.requested.as_ref().is_none_or(|r| r.reconnecting)
-            && let Some(changed) = text_pointer(m, &scene, event)?
+            && let Some(changed) = text_pointer(m, &scene, event, at)?
         {
             return Ok(changed);
         }
@@ -1223,7 +1232,7 @@ impl Client {
             }
             return Ok(true);
         }
-        let delivery = m.input.dispatch(scene.clone(), event);
+        let delivery = m.input.dispatch_at(scene.clone(), event, at);
         let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
         if pad && self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
@@ -2521,7 +2530,12 @@ fn present_text_views(m: &Mount, scene: &Scene, root: &mut SceneNode) {
         wrap(root, &frame, m);
     }
 }
-fn text_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Option<bool>> {
+fn text_pointer(
+    m: &mut Mount,
+    scene: &Scene,
+    event: PointerEvent,
+    at: u64,
+) -> Result<Option<bool>> {
     let frames = editor_frames(m, scene);
     let owner = m
         .text_views
@@ -2553,12 +2567,11 @@ fn text_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Opt
     let x = (event.position[0] - frame.origin[0]) / frame.factor;
     let mut changed_layout = false;
     match event.phase {
-        PointerPhase::Down => view.down(event.id, x, m.now),
-        PointerPhase::Move => view.motion(x, m.now),
+        PointerPhase::Down => view.down(event.id, x, at),
+        PointerPhase::Move => view.motion(x, at),
         PointerPhase::Cancel => view.cancel(),
         PointerPhase::Up => {
-            view.motion(x, m.now);
-            let dragged = view.up(m.now);
+            let dragged = view.up(x, at);
             if !dragged
                 && scene
                     .hit_path(event.position)

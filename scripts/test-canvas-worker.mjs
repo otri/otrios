@@ -19,7 +19,7 @@ test('context loss pauses transfers and replay resends complete current resource
   vm.runInContext('publish();publish()',context);assert.equal(messages.filter(m=>m.type==='frame').length,1);
   await context.onmessage({data:{type:'document-replay'}});
   const replay=messages.filter(m=>m.type==='frame').at(-1);
-  assert.equal(replay.document.upserts.length,1);assert(replay.vertices);assert(replay.document.token>first.document.token);
+  assert.equal(replay.graphicsGeneration,1);assert.equal(first.graphicsGeneration,0);assert.equal(replay.document.upserts.length,1);assert(replay.vertices);assert(replay.document.token>first.document.token);
 });
 
 test('app worker owns no sockets and scopes ink to the active app/transport epoch',async()=>{
@@ -143,4 +143,15 @@ test('timing traces follow the mount generation and ignore earlier control packe
   await context.onmessage({data:{type:'frame-ack'}});
   await context.onmessage({data:{type:'state-frame',epoch:1,bytes:new Uint8Array([1,2,3]),receivedAt:1700000000110}});
   const frame=messages.filter(m=>m.type==='frame').at(-1);assert.equal(frame.epoch,2);assert.equal(frame.timing.id,7);assert.equal(frame.timing.responseBytes,3);assert(!messages.some(m=>m.type==='error'));
+});
+
+test('pointer batches preserve sample spacing across worker clocks and reject stale viewport batches',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const seen=[],messages=[],fake={ui_ref:()=> 'app:input/ui',epoch:()=>7,tick:()=>false,take_sign_out:()=>false,pointer:(...args)=>{seen.push(args);return false;}};
+  const context=workerContext({fake,performance:{timeOrigin:1000,now:()=>500},postMessage:m=>messages.push(m)});
+  vm.runInContext(source,context);vm.runInContext('app=fake',context);
+  await context.onmessage({data:{type:'pointer-batch',epoch:7,viewportRevision:0,samples:[[1,9,10,20,1100],[1,9,12,23,1120]]}});
+  assert.deepEqual(seen.map(p=>p.at(-1)),[100,120]);
+  await context.onmessage({data:{type:'pointer-batch',epoch:7,viewportRevision:3,samples:[[1,9,15,25,1140]]}});
+  assert.equal(seen.length,2);assert(!messages.some(m=>m.type==='error'));
 });

@@ -110,7 +110,7 @@ pub(super) struct DisplayInfo {
     pub(super) stride: u32,
 }
 pub(super) enum Input {
-    CanvasPointer(u32, PointerEvent),
+    CanvasPointer(u32, PointerEvent, Instant),
     CanvasCancel(u32),
     #[cfg(test)]
     Back,
@@ -385,7 +385,13 @@ pub(super) fn state_worker(
                 Input::Stop => {
                     stopping.get_or_insert_with(Instant::now);
                 }
-                Input::CanvasPointer(generation, e) => dirty |= client.pointer(generation, e)?,
+                Input::CanvasPointer(generation, e, sampled) => {
+                    let at = sampled
+                        .checked_duration_since(started)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    dirty |= client.pointer_at(generation, e, at)?;
+                }
                 Input::CanvasCancel(generation) => {
                     if generation == client.epoch() {
                         dirty |= client.cancel()?;
@@ -1195,6 +1201,7 @@ mod tests {
                     phase,
                     position: [x, 400.],
                 },
+                Instant::now(),
             ))
             .unwrap();
         }

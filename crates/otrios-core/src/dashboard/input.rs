@@ -29,6 +29,7 @@ struct Capture {
     target: NodeId,
     owner: NodeId,
     responder: TouchResponder,
+    history: super::touch::History<2>,
 }
 #[derive(Default)]
 pub struct InputRouter {
@@ -72,7 +73,10 @@ impl InputRouter {
     pub fn cancel_all(&mut self) {
         self.captures.clear();
     }
-    pub fn dispatch(&mut self, scene: Arc<Scene>, mut event: PointerEvent) -> Delivery {
+    pub fn dispatch(&mut self, scene: Arc<Scene>, event: PointerEvent) -> Delivery {
+        self.dispatch_at(scene, event, 0)
+    }
+    pub fn dispatch_at(&mut self, scene: Arc<Scene>, mut event: PointerEvent, at: u64) -> Delivery {
         if event.position.iter().any(|v| !v.is_finite()) {
             event.phase = PointerPhase::Cancel;
             event.position = [0., 0.];
@@ -86,6 +90,8 @@ impl InputRouter {
             if let (Some(target), Some(owner), Some(responder)) =
                 (result.target, result.responder, responder)
             {
+                let mut history = super::touch::History::default();
+                history.push(at, event.position.map(f64::from));
                 self.captures.insert(
                     event.id,
                     Capture {
@@ -93,12 +99,13 @@ impl InputRouter {
                         target,
                         owner,
                         responder,
+                        history,
                     },
                 );
             }
             return result;
         }
-        let Some(capture) = self.captures.remove(&event.id) else {
+        let Some(mut capture) = self.captures.remove(&event.id) else {
             return Delivery::default();
         };
         // A removed/rebound responder cannot receive an action from an old gesture.
@@ -106,8 +113,19 @@ impl InputRouter {
             .path(capture.owner)
             .and_then(|p| p.last().and_then(|v| v.node.responder))
             == Some(capture.responder);
-        if !valid {
+        if !valid || capture.history.last().is_some_and(|s| at < s.time_ms) {
             event.phase = PointerPhase::Cancel;
+        }
+        if event.phase == PointerPhase::Move {
+            if !capture.history.push(at, event.position.map(f64::from)) {
+                self.captures.insert(event.id, capture);
+                return Delivery::default();
+            }
+        } else if event.phase == PointerPhase::Up
+            && matches!(capture.responder, TouchResponder::Drag(_))
+            && let Some(sample) = capture.history.release(event.position.map(f64::from), at)
+        {
+            event.position = sample.position.map(|v| v as f32);
         }
         let path = capture.scene.path(capture.target).unwrap_or_default();
         let (mut result, _) = bubble(&path, event);

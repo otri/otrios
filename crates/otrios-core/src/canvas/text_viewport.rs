@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Local single-line panning. Neither the viewport nor its animation is replicated.
+use crate::dashboard::touch::Kinetics;
 #[derive(Clone, Default)]
 pub(super) struct TextViewport {
     pub offset: f32,
     limit: f32,
     target: Option<f32>,
-    velocity: f32, // logical pixels per millisecond
+    motion: Kinetics,
     last_tick: u64,
-    contact: Option<Contact>,
-}
-#[derive(Clone)]
-struct Contact {
-    id: u32,
-    start: f32,
-    last: f32,
-    time: u64,
-    moving: bool,
 }
 impl TextViewport {
     pub fn bounds(&mut self, content: f32, width: f32) {
         self.limit = (content - width).max(0.);
         self.offset = self.offset.clamp(0., self.limit);
         self.target = self.target.map(|t| t.clamp(0., self.limit));
+        if self.limit == 0.
+            || (self.offset == 0. && self.motion.velocity() < 0.)
+            || (self.offset == self.limit && self.motion.velocity() > 0.)
+        {
+            self.motion.stop_at_bound();
+        }
     }
     pub fn follow(&mut self, caret: f32, marker: f32, width: f32, now: u64) {
         self.cancel();
@@ -40,88 +38,67 @@ impl TextViewport {
         self.last_tick = now;
     }
     pub fn animating(&self) -> bool {
-        self.contact.is_some() || self.target.is_some() || self.velocity != 0.
+        self.motion.active() || self.target.is_some()
+    }
+    pub fn velocity(&self) -> f64 {
+        self.motion.velocity()
     }
     pub fn limit(&self) -> f32 {
         self.limit
     }
     pub fn active(&self) -> bool {
-        self.contact.is_some()
+        self.motion.touching()
     }
     pub fn owns(&self, id: u32) -> bool {
-        self.contact.as_ref().is_some_and(|c| c.id == id)
+        self.motion.owns(id)
     }
     pub fn down(&mut self, id: u32, x: f32, now: u64) {
-        self.cancel();
+        self.target = None;
+        let delta = self.motion.down(id, f64::from(x), now);
+        self.shift(delta);
         self.last_tick = now;
-        self.contact = Some(Contact {
-            id,
-            start: x,
-            last: x,
-            time: now,
-            moving: false,
-        });
+    }
+    fn shift(&mut self, delta: f64) {
+        let next = self.offset + delta as f32;
+        self.offset = next.clamp(0., self.limit);
+        if next != self.offset || self.limit == 0. {
+            self.motion.stop_at_bound();
+        }
     }
     pub fn motion(&mut self, x: f32, now: u64) {
-        let Some(c) = &mut self.contact else { return };
-        if (x - c.start).abs() > 6. {
-            c.moving = true;
-        }
-        if c.moving {
-            let next = (self.offset + c.last - x).clamp(0., self.limit);
-            if x != c.last {
-                let dt = now.saturating_sub(c.time).max(1) as f32;
-                self.velocity = ((next - self.offset) / dt).clamp(-4., 4.);
-                c.last = x;
-                c.time = now;
-            }
-            self.offset = next;
-            if self.offset == 0. || self.offset == self.limit {
-                self.velocity = 0.;
-            }
-        }
+        let delta = self.motion.motion(f64::from(x), now);
+        self.shift(delta);
     }
     /// True means a drag, so release must not move or focus the caret.
-    pub fn up(&mut self, now: u64) -> bool {
-        let Some(c) = self.contact.take() else {
-            return false;
-        };
-        if now.saturating_sub(c.time) > 100 {
-            self.velocity = 0.;
+    pub fn up(&mut self, x: f32, now: u64) -> bool {
+        let (dragged, correction) = self.motion.up(f64::from(x), now);
+        if self.offset == 0. || self.offset == self.limit {
+            self.motion.stop_at_bound();
+        } else {
+            self.shift(correction);
         }
-        self.last_tick = now;
-        c.moving
+        dragged
     }
     pub fn cancel(&mut self) {
-        self.contact = None;
-        self.velocity = 0.;
+        self.motion.cancel();
         self.target = None;
     }
     pub fn tick(&mut self, now: u64) -> bool {
+        let was_active = self.animating();
         let dt = now.saturating_sub(self.last_tick) as f32;
-        self.last_tick = now;
+        self.last_tick = self.last_tick.max(now);
         let old = self.offset;
-        if self.contact.is_none() {
-            if let Some(target) = self.target {
-                self.offset = target + (self.offset - target) * (-0.03 * dt).exp();
-                if (self.offset - target).abs() < 0.25 {
-                    self.offset = target;
-                    self.target = None;
-                }
-            } else if self.velocity != 0. {
-                let decay = (-0.006 * dt).exp();
-                self.offset += self.velocity * (1. - decay) / 0.006;
-                self.velocity *= decay;
-                if self.velocity.abs() < 0.01 {
-                    self.velocity = 0.;
-                }
+        if let Some(target) = self.target {
+            self.offset = target + (self.offset - target) * (-0.03 * dt).exp();
+            if (self.offset - target).abs() < 0.25 {
+                self.offset = target;
+                self.target = None;
             }
-            self.offset = self.offset.clamp(0., self.limit);
-            if self.offset == 0. || self.offset == self.limit {
-                self.velocity = 0.;
-            }
+        } else {
+            let delta = self.motion.tick(now);
+            self.shift(delta);
         }
-        old != self.offset
+        old != self.offset || was_active != self.animating()
     }
 }
 
@@ -135,7 +112,7 @@ mod tests {
         v.down(7, 200., 0);
         v.motion(100., 50);
         assert_eq!(v.offset, 100.);
-        assert!(v.up(50));
+        assert!(v.up(100., 50));
         assert!(v.tick(100));
         assert!(v.offset > 100. && v.offset < 800.);
         v.down(7, 200., 100);
@@ -148,7 +125,7 @@ mod tests {
         );
         v.motion(2000., 200);
         assert_eq!(v.offset, 0.);
-        v.up(200);
+        v.up(2000., 200);
         assert!(!v.tick(500));
         assert_eq!(v.offset, 0.);
     }
@@ -158,7 +135,7 @@ mod tests {
         v.bounds(1000., 200.);
         v.down(1, 200., 0);
         v.motion(-200., 200);
-        v.up(400); // A paused release has no momentum.
+        v.up(-200., 400); // A paused release has no momentum.
         assert_eq!(v.offset, 400.);
         assert!(!v.tick(900));
         v.follow(20., 5., 200., 900);
@@ -177,7 +154,7 @@ mod tests {
         v.bounds(1000., 200.);
         v.down(1, 200., 0);
         v.motion(100., 50);
-        v.up(50);
+        v.up(100., 50);
         v.cancel();
         assert!(!v.tick(500));
         assert_eq!(v.offset, 100.);
@@ -185,7 +162,7 @@ mod tests {
         assert_eq!(v.offset, 0.);
         v.down(1, 200., 500);
         v.motion(-100., 550);
-        v.up(550);
+        v.up(-100., 550);
         assert!(!v.tick(1000));
         assert_eq!(v.offset, 0.);
     }

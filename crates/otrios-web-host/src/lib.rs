@@ -439,7 +439,11 @@ impl CanvasApp {
         id: u32,
         x: f32,
         y: f32,
+        at: f64,
     ) -> Result<bool, String> {
+        if !at.is_finite() || at < 0. {
+            return Err("Invalid pointer sample time".into());
+        }
         let phase = match phase {
             0 => PointerPhase::Down,
             1 => PointerPhase::Move,
@@ -447,13 +451,14 @@ impl CanvasApp {
             3 => PointerPhase::Cancel,
             _ => return Err("Invalid pointer phase".into()),
         };
-        self.inner.pointer(
+        self.inner.pointer_at(
             epoch,
             PointerEvent {
                 id,
                 phase,
                 position: [x, y],
             },
+            at as u64,
         )
     }
 }

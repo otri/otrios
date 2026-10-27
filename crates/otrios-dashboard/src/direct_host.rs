@@ -148,6 +148,9 @@ pub(super) fn run() -> Result<(), String> {
                             phase,
                             position,
                         },
+                        Instant::now()
+                            .checked_sub(Duration::from_micros(e.age_us))
+                            .unwrap_or_else(Instant::now),
                     ))?;
                 } else {
                     send(Input::CanvasCancel(

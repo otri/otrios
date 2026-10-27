@@ -86,3 +86,7 @@ required-features = ["canvas", "host-sync"]
 name = "canvas-burst-stress"
 path = "src/canvas_burst_stress.rs"
 required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "touch_replay"
+required-features = ["canvas", "host-sync"]
