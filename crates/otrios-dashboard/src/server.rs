@@ -440,6 +440,7 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/state-worker.js"
         | "document-transfer.mjs"
         | "touch-input.mjs"
+        | "web/touch-input.mjs"
         | "web/document-transfer.mjs"
         | "monitoring-session.mjs"
         | "web/monitoring-session.mjs"
