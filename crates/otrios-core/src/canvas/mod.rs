@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Opt-in app-scoped Canvas runtime. No filesystem or network access in guest code.
 mod behavior;
+pub mod chat;
 mod client;
 pub mod document;
+pub mod presentation;
 pub mod reflow;
 mod selection;
 mod state;
@@ -31,11 +33,12 @@ pub const MAX_BYTES: usize = 512 * 1024;
 pub fn validate_ui_format(ui: &Ui) -> Result<()> {
     if !matches!(
         ui.format.as_str(),
-        "otrios-canvas-v2" | "otrios-canvas-v3" | "otrios-canvas-v4"
+        "otrios-canvas-v2" | "otrios-canvas-v3" | "otrios-canvas-v4" | "otrios-canvas-v5"
     ) || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
         && !matches!(ui.format.as_str(), "otrios-canvas-v3" | "otrios-canvas-v4"))
         || (matches!(ui.presentation, Some(Presentation::TextDocument { .. }))
             && ui.format != "otrios-canvas-v4")
+        || (matches!(ui.presentation, Some(Presentation::Chat)) && ui.format != "otrios-canvas-v5")
     {
         return Err("Unsupported Canvas UI format".into());
     }

@@ -748,6 +748,7 @@ impl Arrangement {
     }
 }
 pub struct AppUi {
+    brass_theme: bool,
     id: String,
     title: String,
     schema: StateSchema,
@@ -762,6 +763,7 @@ pub struct AppUi {
 impl AppUi {
     pub fn new(id: &str, title: &str, schema: StateSchema) -> Self {
         Self {
+            brass_theme: false,
             id: id.into(),
             title: title.into(),
             schema,
@@ -776,6 +778,10 @@ impl AppUi {
     }
     pub fn with_composition(mut self, wide: Arrangement, tall: Arrangement) -> Self {
         self.composition = Some((wide, tall));
+        self
+    }
+    pub fn with_brass_theme(mut self) -> Self {
+        self.brass_theme = true;
         self
     }
     pub fn with_reorder(mut self, items: &[(&str, u16)]) -> Self {
@@ -825,6 +831,7 @@ impl AppUi {
         ];
         body.append(&mut children);
         let mut compiler = Compiler {
+            brass_theme: self.brass_theme,
             next_node: 0,
             named_nodes: Default::default(),
             named_controls: Default::default(),
@@ -914,7 +921,9 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: if matches!(presentation, Some(Presentation::TextDocument { .. })) {
+            format: if matches!(presentation, Some(Presentation::Chat)) {
+                "otrios-canvas-v5"
+            } else if matches!(presentation, Some(Presentation::TextDocument { .. })) {
                 "otrios-canvas-v4"
             } else if matches!(presentation, Some(Presentation::TextScroll { .. })) {
                 "otrios-canvas-v3"
@@ -935,6 +944,7 @@ impl AppUi {
     }
 }
 struct Compiler {
+    brass_theme: bool,
     next_node: u16,
     named_nodes: std::collections::BTreeMap<String, u16>,
     named_controls: std::collections::BTreeMap<String, u8>,
@@ -946,7 +956,24 @@ struct Compiler {
 impl Compiler {
     fn value(&mut self, value: ValueExpr) -> Expr {
         match value {
-            ValueExpr::Literal(e) => e,
+            ValueExpr::Literal(mut e) => {
+                if self.brass_theme
+                    && let Expr::Literal(Value::Color(color)) = &mut e
+                {
+                    use otrios_core::canvas::chat::icons as theme;
+                    *color = match *color {
+                        BG => theme::BG,
+                        CARD => theme::CARD,
+                        WHITE => theme::TEXT,
+                        MUTED => theme::MUTED,
+                        ACCENT => theme::BRASS,
+                        TEAL => theme::COPPER,
+                        TRACK => theme::LINE,
+                        other => other,
+                    };
+                }
+                e
+            }
             ValueExpr::State(field, projection) => {
                 let local = if let Some(s) = self
                     .selectors

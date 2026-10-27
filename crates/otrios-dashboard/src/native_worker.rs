@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Safe app/state/network owner for the direct Linux presentation host.
 use otrios_core::{
-    canvas::{Client, hash, hex},
+    canvas::{
+        Client, hash, hex,
+        presentation::{Composer, Demand},
+    },
     dashboard::{
         display::{Calibration, Surface},
         motion::Intent,
-        retained_text::TextPresentation,
     },
 };
 use otrios_interfaces::scene::PointerEvent;
@@ -26,23 +28,17 @@ mod session_client;
 enum NetworkEvent {
     Connected(u64),
     Packet(u64, Instant, Vec<u8>),
+    Chat(u64, Vec<u8>),
 }
 struct NetworkSend {
+    channel: u8,
     epoch: u64,
     bytes: Vec<u8>,
 }
 #[derive(Clone)]
 pub(super) struct Frame {
     pub(super) ui_release: String,
-    pub(super) viewport: [f32; 2],
-    pub(super) reflow: Option<otrios_core::canvas::reflow::Frame>,
-    pub(super) document: Option<otrios_core::canvas::document::Frame>,
-    pub(super) overlay: Option<otrios_core::dashboard::retained_text::TextFrame>,
-    pub(super) vertices: Arc<Vec<f32>>,
-    pub(super) glyph_vertices: Arc<Vec<f32>>,
-    pub(super) draws: Arc<Vec<u32>>,
-    pub(super) text_views: Vec<f32>,
-    pub(super) text_styles: Arc<Vec<f32>>,
+    pub(super) paint: otrios_core::canvas::presentation::Frame,
     pub(super) snapshot: String,
     pub(super) layout: String,
     pub(super) screen: String,
@@ -67,15 +63,10 @@ impl Frame {
     fn blank(serial: u64, online: bool) -> Self {
         Self {
             ui_release: String::new(),
-            viewport: [1280., 800.],
-            reflow: None,
-            document: None,
-            overlay: None,
-            vertices: Arc::new(vec![]),
-            glyph_vertices: Arc::new(vec![]),
-            draws: Arc::new(vec![]),
-            text_views: vec![],
-            text_styles: Arc::new(vec![]),
+            paint: otrios_core::canvas::presentation::Frame {
+                viewport: [1280., 800.],
+                ..Default::default()
+            },
             snapshot: String::new(),
             layout: String::new(),
             screen: "locked".into(),
@@ -114,11 +105,14 @@ pub(super) enum Input {
     CanvasCancel(u32),
     #[cfg(test)]
     Back,
+    #[cfg(test)]
+    RenderReady(u64),
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
 }
 #[derive(Clone, Default)]
 pub(super) struct Options {
+    pub(super) chat_identity: Option<String>,
     pub(super) font: Option<Arc<otrios_core::dashboard::font::Font>>,
     pub(super) url: Option<String>,
     pub(super) state: Option<String>,
@@ -148,6 +142,7 @@ pub(super) fn options() -> Result<Options, String> {
     while let Some(arg) = args.next() {
         let value = args.next().ok_or("Missing argument value")?;
         match arg.as_str() {
+            "--chat-identity" => o.chat_identity = Some(value),
             "--layout" => {
                 o.portrait = match value.as_str() {
                     "portrait" => true,
@@ -224,6 +219,33 @@ fn app_stream(url: &str) -> String {
         .unwrap_or(url.trim_end_matches('/'));
     format!("{root}/session")
 }
+fn save_identity(path: &std::path::Path, token: &str) -> Result<(), String> {
+    use std::io::Write;
+    let parent = path.parent().ok_or("Invalid guest identity path")?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let next = path.with_extension(format!("{}.tmp", std::process::id()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&next).map_err(|e| e.to_string())?;
+    let result = (|| {
+        file.write_all(token.as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
+        fs::rename(&next, path).map_err(|e| e.to_string())?;
+        fs::File::open(parent)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| e.to_string())
+    })(); // Secrets never enter presentation snapshots or logs.
+    if result.is_err() {
+        let _ = fs::remove_file(next);
+    }
+    result
+}
 fn app_resources(o: &Options) -> Result<(std::path::PathBuf, Vec<u8>), String> {
     let adjacent = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -270,6 +292,38 @@ pub(super) fn state_worker(
     }
     let (resources, catalog) = app_resources(&o)?;
     let mut client = Client::default();
+    client.set_chat_native(true);
+    let identity_path = o
+        .chat_identity
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("OTRIOS_CHAT_IDENTITY").map(std::path::PathBuf::from))
+        .or_else(|| {
+            std::env::var_os("XDG_STATE_HOME")
+                .map(|p| std::path::PathBuf::from(p).join("otrios/guest.identity"))
+        })
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|p| std::path::PathBuf::from(p).join(".local/state/otrios/guest.identity"))
+        });
+    if let Some(path) = &identity_path
+        && path.exists()
+    {
+        let metadata =
+            fs::symlink_metadata(path).map_err(|_| "Cannot inspect native guest identity")?;
+        if !metadata.is_file() || metadata.len() != 64 {
+            return Err("Invalid native guest identity file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err("Native guest identity must be private (mode 0600)".into());
+            }
+        }
+        let token = fs::read_to_string(path).map_err(|_| "Cannot read native guest identity")?;
+        client.set_chat_credential(token.trim())?;
+    }
     client.set_viewport(if o.portrait {
         [800., 1280.]
     } else {
@@ -346,25 +400,16 @@ pub(super) fn state_worker(
     let mut epoch = None;
     let mut outgoing = None;
     let mut ink_pending = None;
-    let mut pending = None;
+    let mut demand = Demand::default();
     let mut dirty = true;
-    let mut serial = 0;
     let mut received_updates = 0;
     let mut remote_sample = None;
     let mut measured_sample = 0;
     let mut bench_present = bench_telemetry::Recorder::from_env()?;
     let mut sync_to_present_ms = None;
     let mut last_status = None;
-    let mut scene_cache = None;
-    let mut mesh_cache = Arc::new(Vec::new());
-    let mut glyph_cache = Arc::new(Vec::new());
-    let mut draws_cache = Arc::new(Vec::new());
-    let mut text_presentation = TextPresentation::default();
-    let mut overlay_presentation = TextPresentation::default();
-    let mut overlay_cache = None;
-    let mut text_generation = 0;
-    let mut text_views = vec![];
-    let mut style_cache = Arc::new(vec![]);
+    let mut last_online = false;
+    let mut composer = Composer::default();
     let mut stopping: Option<Instant> = None;
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
@@ -399,7 +444,12 @@ pub(super) fn state_worker(
                 }
                 #[cfg(test)]
                 Input::Back => dirty |= client.back()?,
+                #[cfg(test)]
+                Input::RenderReady(serial) => {
+                    demand.presented(serial);
+                }
                 Input::Presented(frame, renderer, display) => {
+                    demand.presented(frame.serial);
                     if let Some((id, at)) = frame.remote_sample
                         && id > measured_sample
                     {
@@ -468,6 +518,16 @@ pub(super) fn state_worker(
                         }
                     }
                     NetworkEvent::Packet(..) => {}
+                    NetworkEvent::Chat(id, bytes) if epoch == Some(id) => {
+                        dirty |= client.receive_chat(&bytes)?;
+                        if let Some(token) = client.take_chat_credential() {
+                            let path = identity_path
+                                .as_ref()
+                                .ok_or("Native guest identity path is unavailable")?;
+                            save_identity(path, &token)?;
+                        }
+                    }
+                    NetworkEvent::Chat(..) => {}
                 }
             }
         }
@@ -567,9 +627,17 @@ pub(super) fn state_worker(
         if connected {
             if outgoing.is_none() {
                 outgoing = client.outgoing()?.map(|bytes| NetworkSend {
+                    channel: otrios_interfaces::session::STATE,
                     epoch: epoch.expect("connected epoch"),
                     bytes,
                 });
+                if outgoing.is_none() {
+                    outgoing = client.chat_outgoing()?.map(|bytes| NetworkSend {
+                        epoch: epoch.expect("connected epoch"),
+                        bytes,
+                        channel: otrios_interfaces::chat::CHANNEL,
+                    });
+                }
             }
             if let Some(packet) = outgoing.take() {
                 match tx.try_send(packet) {
@@ -595,6 +663,10 @@ pub(super) fn state_worker(
             }
         }
         let online = o.url.is_none() || (connected && stream_ready.load(Ordering::Acquire));
+        if !online && last_online {
+            client.chat_disconnected();
+        }
+        last_online = online;
         let confirmed = o.url.is_none() || (online && client.confirmed());
         if !client.ui_ref().is_empty() && stress_epoch != Some(client.epoch()) {
             if o.load > 0 {
@@ -617,98 +689,56 @@ pub(super) fn state_worker(
         if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
             return Ok(());
         }
-        if dirty && client.ui_ref().is_empty() {
-            serial += 1;
-            let mut frame = Frame::blank(serial, online);
-            frame.reload_ready = reload_ready;
-            frame.pending_commands = client.pending_count();
-            pending = Some(frame);
-            scene_cache = None;
-            text_presentation = TextPresentation::default();
-            overlay_presentation = TextPresentation::default();
-            overlay_cache = None;
-            text_generation = 0;
-            text_views.clear();
-            style_cache = Arc::new(vec![]);
-            mesh_cache = Arc::new(vec![]);
-            glyph_cache = Arc::new(vec![]);
-            draws_cache = Arc::new(vec![]);
+        if dirty {
+            demand.request();
             dirty = false;
         }
-        if dirty && !client.ui_ref().is_empty() {
-            let scene = client.scene()?;
-            if scene_cache
-                .as_ref()
-                .is_none_or(|old| !Arc::ptr_eq(old, &scene))
-            {
-                let frame = if let Some((before, after)) = client.document_scene_parts(&scene)? {
-                    overlay_cache = Some(overlay_presentation.compose(&after, &font));
-                    text_presentation.compose(&before, &font)
-                } else {
-                    overlay_cache = None;
-                    text_presentation.compose(&scene, &font)
-                };
-                if text_generation != frame.generation {
-                    mesh_cache = Arc::new(frame.mesh.vertices.clone());
-                    glyph_cache = Arc::new(frame.mesh.glyph_vertices.clone());
-                    draws_cache = Arc::new(frame.mesh.draws.clone());
-                    style_cache = frame.styles.clone();
-                    text_generation = frame.generation;
+        if let Some(serial) = demand.begin() {
+            if client.ui_ref().is_empty() {
+                let mut frame = Frame::blank(serial, online);
+                frame.reload_ready = reload_ready;
+                frame.pending_commands = client.pending_count();
+                frames
+                    .try_send(frame)
+                    .map_err(|e| format!("Render credit violated: {e}"))?;
+                composer.clear();
+            } else {
+                let paint = composer.compose(&mut client, &font)?.clone();
+                let motion = client.motion_intent()?;
+                let mut intent = motion.map(|v| v.1).unwrap_or_default();
+                if o.objects > 0 {
+                    intent.count = o.objects;
                 }
-                text_views = frame.views;
-                scene_cache = Some(scene);
-            }
-            let motion = client.motion_intent()?;
-            let mut intent = motion.map(|v| v.1).unwrap_or_default();
-            if o.objects > 0 {
-                intent.count = o.objects;
-            }
-            let ui_ref = client.ui_ref();
-            let state_ref = client.state_ref();
-            serial += 1;
-            pending = Some(Frame {
-                ui_release: ui_release.clone(),
-                viewport: {
-                    let scene = client.scene()?;
-                    [scene.root().frame.width, scene.root().frame.height]
-                },
-                reflow: client.reflow_frame()?,
-                document: client.document_frame(),
-                overlay: overlay_cache.clone(),
-                vertices: mesh_cache.clone(),
-                glyph_vertices: glyph_cache.clone(),
-                draws: draws_cache.clone(),
-                text_views: text_views.clone(),
-                text_styles: style_cache.clone(),
-                // These telemetry fields now identify logical app roots, not old
-                // dashboard snapshot/layout hashes.
-                snapshot: state_ref.clone(),
-                layout: ui_ref.clone(),
-                screen: client.path(),
-                keyboard: client.keyboard_visible(),
-                online,
-                state_confirmed: confirmed,
-                reload_ready,
-                pending_commands: client.pending_count(),
-                resources: client.resource_usage(),
-                input_busy: client.input_busy(),
-                intent,
-                updates,
-                received_updates,
-                remote_sample,
-                serial,
-                epoch: client.epoch(),
-                motion_kind: motion.map(|v| v.0),
-                state_ref,
-                ui_ref,
-            });
-            dirty = false;
-        }
-        if let Some(frame) = pending.take() {
-            match frames.try_send(frame) {
-                Ok(()) => {}
-                Err(mpsc::TrySendError::Full(frame)) => pending = Some(frame),
-                Err(_) => return Ok(()),
+                let ui_ref = client.ui_ref();
+                let state_ref = client.state_ref();
+                let frame = Frame {
+                    ui_release: ui_release.clone(),
+                    paint,
+                    // These telemetry fields now identify logical app roots, not old
+                    // dashboard snapshot/layout hashes.
+                    snapshot: state_ref.clone(),
+                    layout: ui_ref.clone(),
+                    screen: client.path(),
+                    keyboard: client.keyboard_visible(),
+                    online,
+                    state_confirmed: confirmed,
+                    reload_ready,
+                    pending_commands: client.pending_count(),
+                    resources: client.resource_usage(),
+                    input_busy: client.input_busy(),
+                    intent,
+                    updates,
+                    received_updates,
+                    remote_sample,
+                    serial,
+                    epoch: client.epoch(),
+                    motion_kind: motion.map(|v| v.0),
+                    state_ref,
+                    ui_ref,
+                };
+                frames
+                    .try_send(frame)
+                    .map_err(|e| format!("Render credit violated: {e}"))?;
             }
         }
         thread::sleep(Duration::from_millis(2));
@@ -810,7 +840,7 @@ fn network(
                     Ok(packet) if greeted && compatible && available && packet.epoch == epoch => {
                         if socket
                             .send(Message::Binary(
-                                wire::frame(wire::STATE, packet.bytes).into(),
+                                wire::frame(packet.channel, packet.bytes).into(),
                             ))
                             .is_err()
                         {
@@ -904,6 +934,16 @@ fn network(
                         break;
                     }
                     match bytes.split_first() {
+                        Some((&otrios_interfaces::chat::CHANNEL, payload))
+                            if payload.len() <= otrios_interfaces::chat::MAX_EVENT_BYTES =>
+                        {
+                            if reply
+                                .try_send(NetworkEvent::Chat(epoch, payload.to_vec()))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                         Some((&wire::STATE, payload))
                             if !payload.is_empty()
                                 && payload.len() <= otrios_core::canvas::MAX_BYTES =>
@@ -1125,6 +1165,45 @@ mod tests {
             schema,
         }
     }
+    fn receive_frame(
+        fr: &mpsc::Receiver<Frame>,
+        tx: &mpsc::SyncSender<Input>,
+        timeout: Duration,
+    ) -> Frame {
+        let frame = fr.recv_timeout(timeout).unwrap();
+        tx.send(Input::RenderReady(frame.serial)).unwrap();
+        frame
+    }
+    #[test]
+    fn renderer_credit_defers_composition_but_not_navigation() {
+        let fixture = fixture();
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("three-d-lab".into()),
+            ..Options::default()
+        };
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        tx.send(Input::Back).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            matches!(fr.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "No second frame may be packed without renderer capacity"
+        );
+        tx.send(Input::RenderReady(first.serial + 1)).unwrap();
+        assert!(
+            fr.recv_timeout(Duration::from_millis(50)).is_err(),
+            "Stale credit must not release another frame"
+        );
+        tx.send(Input::RenderReady(first.serial)).unwrap();
+        let latest = receive_frame(&fr, &tx, Duration::from_secs(3));
+        assert_eq!(latest.screen, "launcher");
+        assert_eq!(latest.serial, first.serial + 1);
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
     #[test]
     fn native_nested_entry_and_back_follow_the_app_owned_path() {
         use otrios_core::canvas::{decode_catalog, decode_ui, encode_catalog, encode_ui, hash};
@@ -1157,12 +1236,12 @@ mod tests {
             ..Options::default()
         };
         let worker = thread::spawn(move || state_worker(options, rx, ft));
-        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let first = receive_frame(&fr, &tx, Duration::from_secs(3));
         assert_eq!(first.screen, "launcher/details");
         tx.send(Input::Back).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let frame = fr.recv_timeout(Duration::from_secs(2)).unwrap();
+            let frame = receive_frame(&fr, &tx, Duration::from_secs(2));
             if frame.screen == "launcher" {
                 assert_eq!(frame.state_ref, first.state_ref);
                 break;
@@ -1186,7 +1265,7 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel(128);
         let (ft, fr) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || state_worker(options, rx, ft));
-        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let first = receive_frame(&fr, &tx, Duration::from_secs(3));
         assert_eq!(first.motion_kind, Some(true));
         assert_eq!(first.intent.count, 12);
         for (phase, x) in [
@@ -1207,7 +1286,7 @@ mod tests {
         }
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let next = fr.recv_timeout(Duration::from_secs(2)).unwrap();
+            let next = receive_frame(&fr, &tx, Duration::from_secs(2));
             if next.intent.count == 64 && !next.input_busy {
                 break;
             }
@@ -1221,7 +1300,7 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let next = fr.recv_timeout(Duration::from_secs(2)).unwrap();
+            let next = receive_frame(&fr, &tx, Duration::from_secs(2));
             if next.ui_ref == "app:launcher/ui" {
                 assert!(next.serial > first.serial);
                 break;
@@ -1393,7 +1472,7 @@ mod tests {
         let wait = |count| {
             let deadline = Instant::now() + Duration::from_secs(6);
             loop {
-                let next = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+                let next = receive_frame(&fr, &tx, Duration::from_secs(3));
                 if next.state_confirmed && next.online && next.intent.count == count {
                     return next;
                 }
@@ -1451,7 +1530,7 @@ mod tests {
         let n = notice.recv(&mut bytes).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes[..n]).unwrap();
         assert_eq!(value["release"]["id"], "c".repeat(64));
-        let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let frame = receive_frame(&fr, &tx, Duration::from_secs(3));
         assert!(!frame.online);
         assert!(frame.ui_ref.is_empty());
         tx.send(Input::Stop).unwrap();
@@ -1480,7 +1559,7 @@ mod tests {
         let (tx, rx) = mpsc::sync_channel(8);
         let (ft, fr) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || state_worker(options, rx, ft));
-        let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let frame = receive_frame(&fr, &tx, Duration::from_secs(3));
         assert!(frame.ui_ref.is_empty());
         assert!(!frame.online && !frame.state_confirmed);
         assert!(frame.reload_ready);

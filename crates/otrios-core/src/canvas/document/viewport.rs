@@ -23,6 +23,8 @@ pub(crate) struct Viewport {
     clip: [f32; 4],
     motion: Kinetics,
     pub bounds_dirty: bool,
+    follow_tail: bool,
+    pending_anchor: Option<super::Anchor>,
 }
 impl Viewport {
     pub fn new(node: u16, source: &TextResource, scale: u8, color: [u8; 4]) -> Result<Self> {
@@ -39,6 +41,8 @@ impl Viewport {
             clip: [0.; 4],
             motion: Kinetics::default(),
             bounds_dirty: true,
+            follow_tail: false,
+            pending_anchor: None,
         })
     }
     pub fn sync(&mut self, scene: &Scene, font: Option<&Arc<Font>>) -> Result<()> {
@@ -65,9 +69,14 @@ impl Viewport {
         let scale = f32::from(self.scale) * p.scale;
         let key = (font.hash().to_owned(), scale.to_bits());
         if self.font_key.as_ref() != Some(&key) {
-            let anchor = self.reader.as_ref().map(Reader::anchor);
+            let anchor = self
+                .pending_anchor
+                .take()
+                .or_else(|| self.reader.as_ref().map(Reader::anchor));
             let mut reader = Reader::new(
-                self.source.clone(),
+                self.reader
+                    .as_ref()
+                    .map_or_else(|| self.source.clone(), |r| r.source().clone()),
                 font.clone(),
                 scale,
                 self.color,
@@ -88,6 +97,50 @@ impl Viewport {
     }
     pub fn touching(&self) -> bool {
         self.motion.touching()
+    }
+    pub fn append_blocks(&mut self, blocks: &[String], follow: bool) -> Result<()> {
+        if let Some(reader) = &mut self.reader {
+            reader.append_blocks(blocks)?;
+        } else {
+            self.source.append_blocks(blocks)?;
+        }
+        self.follow_tail |= follow;
+        Ok(())
+    }
+    pub fn replace_source(&mut self, source: Source, anchor: Option<super::Anchor>) {
+        self.source = source;
+        self.reader = None;
+        self.font_key = None;
+        self.bounds_dirty = true;
+        self.pending_anchor = anchor;
+    }
+    pub fn follow_tail(&mut self) {
+        self.follow_tail = true;
+        self.motion.cancel();
+    }
+    pub fn at_tail(&self) -> bool {
+        self.follow_tail
+            || self
+                .reader
+                .as_ref()
+                .is_none_or(|r| r.offset() + r.height >= r.extent().0 - 2. * r.line_height())
+    }
+    pub fn at_top(&self) -> bool {
+        self.reader.as_ref().is_some_and(|r| r.offset() < r.height)
+    }
+    pub fn anchor(&self) -> Option<super::Anchor> {
+        self.reader.as_ref().map(Reader::anchor)
+    }
+    pub fn visible_blocks(&self) -> ([f32; 4], Vec<(u32, f32)>) {
+        (
+            self.clip,
+            self.reader.as_ref().map_or_else(Vec::new, |r| {
+                r.visible_block_origins()
+                    .into_iter()
+                    .map(|(block, y)| (block, y as f32 + self.origin[1]))
+                    .collect()
+            }),
+        )
     }
     pub fn cancel(&mut self) {
         self.motion.cancel();
@@ -142,6 +195,7 @@ impl Viewport {
             if x < self.clip[0] || y < self.clip[1] || x >= self.clip[2] || y >= self.clip[3] {
                 return None;
             }
+            self.follow_tail = false;
             // An empty external viewport has no primitive hit in Scene. It
             // replaces earlier background hits, but must respect later paint
             // and controls. Do this bounded UI walk only at contact capture.
@@ -222,6 +276,9 @@ impl Viewport {
             return Ok(false);
         };
         let old = r.offset();
+        if self.follow_tail {
+            r.scroll_to(f64::MAX);
+        }
         let wanted = old + self.motion.tick(now);
         if wanted != r.offset() {
             r.scroll_to(wanted);
@@ -230,6 +287,9 @@ impl Viewport {
             self.motion.stop_at_bound();
         }
         let changed = r.work(16)?;
+        if self.follow_tail {
+            r.scroll_to(f64::MAX);
+        }
         let offset_changed = old != r.offset();
         Ok(changed || offset_changed || was_active != self.active())
     }

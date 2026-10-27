@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Home and reusable input
 
-Home is an admitted Canvas launcher with two compact cards: **Test Playground**
-and **Monitoring**. Each card contains an icon, title and subheading. Test
+Home is an admitted Canvas launcher with three compact cards: **The Brass Relay**,
+**Test Playground** and **Monitoring**. Home and the lounge share neutral charcoal
+surfaces, restrained brass accents and the standard OTriOS heading. Each card contains an icon, title and subheading. Test
 Playground owns the seven demo destinations: Components, Layouts, Long Document,
 Text Panning, Text Input, 2D Animations and 3D Animations. Layouts has no extra
 links to the document or panning demos. Demo headers provide Back to their parent
@@ -19,7 +20,7 @@ repeat timing and previews stay local in RAM. A tap chooses the caret from actua
 font advances, grapheme boundaries and the displayed text window. Switching fields
 and repeated keys use the same responder/input implementation on both hosts.
 
-Text uses the full width between the field's 24-unit inner margins, with measured
+On the native frame, text uses the full width between the field's 24-unit inner margins, with measured
 font advances and a clipped pixel viewport. Dragging pans independently of the
 caret, coasts on release and stops at either text boundary without overscroll.
 A tap places the caret in the panned text. Typing, deletion and left/right arrows
@@ -28,12 +29,32 @@ idle frames and remote updates do not pull a manually previewed viewport back to
 the caret. Focus changes, cancellation and UI replacement stop active gestures.
 Viewport position and momentum remain local in RAM.
 
-The browser also forwards ordinary keyboard/text input and exposes invisible
-semantic controls for accessibility. It does not draw a second DOM text field.
-Physical touch uses the frame's existing accepted calibration and the same logical
-scene coordinates. A code reload retains confirmed text through server state but
-restarts local focus and editing presentation. This is register-level shared text,
-not a sequence CRDT or full IME/shaping engine.
+Browsers use real HTML inputs/textarea over the authored field bounds. A tap
+focuses the element directly in the user gesture, allowing the iPhone system
+keyboard and native selection, cut/copy/paste, autocorrect replacement and IME.
+Browser fields own their visible text, caret, selection and scrolling; the native
+frame retains the shared primitive keyboard and momentum preview behavior above.
+The browser face is the same licensed Roboto source, with shared logical metrics,
+kerning and ligatures disabled to match the current renderer. The viewport fits
+the visible area above a mobile keyboard without flipping the scene orientation
+just because the keyboard reduced its height. Pinch zoom remains enabled.
+
+Full browser value/selection snapshots pass through the same bounded Rust editor.
+UTF-16 offsets are converted to complete UTF-8 grapheme boundaries. Invalid control
+characters, split surrogates and over-budget replacements are rejected atomically;
+the acknowledged editor value restores the DOM. Intermediate IME text stays local
+to the browser until composition ends. Local revision acknowledgements prevent old
+worker frames from overwriting newer typing or selection. Selection-only messages
+are rejected if their base text is obsolete, so moving a caret cannot undo another
+client's text edit. Mount, visible field
+and focus checks reject late input after navigation or a modal change. Composition
+also blocks hot replacement until committed or discarded on unmount.
+
+Text Input still uses shared atomic registers, rather than a sequence CRDT.
+Selection, composition and field viewport state remain local. The native frame
+uses its existing accepted touch calibration. A code reload retains confirmed text
+through server state and restarts local focus. Accepting Unicode input does not
+extend the canvas renderer's glyph subset, shaping or bidirectional support.
 
 See [app sources](../apps/README.md), [scene routing](SCENE_TREE.md),
 [storage](CLIENT_STORAGE.md) and [current acceptance](experiments/canvas-packed-wire.md).

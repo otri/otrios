@@ -25,7 +25,7 @@ struct Run {
     top: f32,
     bottom: f32,
 }
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TextFrame {
     pub mesh: Arc<Mesh>,
     /// Eight floats per draw: visible first/count, translation xy, clip l/t/r/b.

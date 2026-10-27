@@ -9,7 +9,7 @@ pub fn description() -> Ui {
             vec![
                 heading(),
                 wrap_cards(
-                    &["test-playground", "monitoring"],
+                    &["brass-relay", "test-playground", "monitoring"],
                     [384., 176.],
                     [336., 176.],
                     [16., 24.],
@@ -18,10 +18,18 @@ pub fn description() -> Ui {
         )
     };
     AppUi::new("home", "Home", super::state::schema())
+        .with_brass_theme()
         .with_composition(arrangement(), arrangement())
         .build(
             "OTriOS",
             vec![
+                launch_card(
+                    "brass-relay",
+                    "brass-relay",
+                    "The Brass Relay",
+                    "A shared room on the wire",
+                    LaunchIcon::Chat,
+                ),
                 launch_card(
                     "test-playground",
                     "test-playground",

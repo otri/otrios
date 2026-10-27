@@ -28,7 +28,7 @@ try{
   });
   const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout: ${method}`));},30000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
   const evaluate=async(session,expression)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-  const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
+  const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value,inputs:[...document.querySelectorAll('.canvas-editor')].filter(e=>e.type!=='password').map(e=>({label:e.getAttribute('aria-label'),value:e.value,id:e.dataset.sceneNode}))})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
   const routes={'component-playground':'test-playground/components','layout-lab':'test-playground/layouts','layout-document':'test-playground/long-document','layout-text-scroll':'test-playground/text-panning','input-lab':'test-playground/text-input','animation-lab':'test-playground/animations-two-d','three-d-lab':'test-playground/animations-three-d'};
@@ -46,7 +46,7 @@ try{
     const a=await page(1280,800,'home');
     for(const [width,height]of [[1280,800],[800,1280]]){
       await metrics(a,width,height);await ready(a,'home',width+'x'+height);
-      assert.deepEqual((await controls(a)).map(c=>c.label),['Test Playground','Monitoring']);
+      assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
       assert(!await evaluate(a,"document.querySelector('#view').getAttribute('aria-label').includes('OPEN')"));
       await screenshot(a,'home-'+width);
       await click(a,'Test Playground','test-playground',width+'x'+height);
@@ -62,7 +62,7 @@ try{
       }
       await click(a,'Home','home',width+'x'+height);
     }
-    const result={passed:true,checks:['Home has only Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and parent Back','Layouts has no extra demo links','Edit belongs to Test Playground']};
+    const result={passed:true,checks:['Home has Brass Relay, Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and parent Back','Layouts has no extra demo links','Edit belongs to Test Playground']};
     await writeFile(join(output,'playground-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--touch-replay')){
     const a=await page(1280,800,'component-playground'),results=[];
@@ -173,39 +173,38 @@ try{
     const result={passed:true,checks:['Test Playground owns demo routes','full text page uses real WebGL','two-axis touch drag and release momentum','cancel stops coasting','panning is client-local','portrait reflow and bounds','Back and Home navigation'],initial,dragged,coast,portrait,fps,cache};
     await writeFile(join(output,'text-scroll-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--input-viewport')){
-    const a=await page(1280,800,'input-lab');
+    const a=await page(1280,800,'input-lab'),b=await page(800,1280,'input-lab');
+    const visibleWait=async(s,expression)=>{await call('Page.bringToFront',{},s);return wait(s,expression);};
+    const input="document.querySelector('.canvas-editor[aria-label=\"First text field\"]')";
+    await call('Page.bringToFront',{},a);
     await click(a,'First text field','input-lab','1280x800');
-    await wait(a,"[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')==='SPACE')");
-    const label=()=>evaluate(a,"document.querySelector('#view').getAttribute('aria-label')");
-    const pixels=async()=>{const x=await call('Page.captureScreenshot',{format:'png'},a);return x.data;};
-    const key=async(key,ctrl=false)=>{await evaluate(a,`(()=>{document.activeElement?.blur();window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(key)},ctrlKey:${ctrl},bubbles:true,cancelable:true}));})()`);await new Promise(r=>setTimeout(r,100));};
-    await key('a',true);await key('Backspace');
+    await visibleWait(a,"document.activeElement?.classList.contains('canvas-editor')");
+    assert(!await evaluate(a,"[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')==='SPACE')"));
+    const key=async(key,modifiers=0)=>{await call('Page.bringToFront',{},a);await call('Input.dispatchKeyEvent',{type:'keyDown',key,modifiers,windowsVirtualKeyCode:{Backspace:8,Tab:9,a:65}[key],...(key==='a'&&modifiers?{commands:['selectAll']}:{})},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key,modifiers},a);};
+    await key('a',4);await key('Backspace');
     const source=Array.from({length:60},(_,i)=>`W${String(i).padStart(2,'0')} `).join('');
-    await evaluate(a,`(()=>{const d=new DataTransfer();d.setData('text/plain',${JSON.stringify(source)});window.dispatchEvent(new ClipboardEvent('paste',{clipboardData:d,bubbles:true,cancelable:true}));})()`);
-    await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('W59 |')");
+    await call('Input.insertText',{text:source},a);
+    await visibleWait(a,`${input}.selectionStart===${source.length}&&${input}.scrollLeft>0`);
+    await visibleWait(b,`${input}.value===${JSON.stringify(source)}`);
     await screenshot(a,'input-caret-end');
-    await key('a',true);await key('ArrowLeft');
-    await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('|W00')");
-    const atStart=await label();assert(atStart.includes('W20'),'wide field draws beyond the former 38-grapheme cap');
-    await screenshot(a,'input-full-width');
-    await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
-    const field=(await controls(a)).find(c=>c.label==='First text field');assert(field);
-    const [x,y,w,h]=field.bounds,sy=y+h/2,sx=x+w*.75;
-    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:sx,y:sy}]},a);
-    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:sx-100,y:sy}]},a);
-    await new Promise(r=>setTimeout(r,50));
-    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:sx-200,y:sy}]},a);
-    await new Promise(r=>setTimeout(r,30));const moving=await pixels();
-    await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
-    await new Promise(r=>setTimeout(r,100));const coasting=await pixels();assert.notEqual(coasting,moving,'text coasts after touch release');
-    await new Promise(r=>setTimeout(r,1200));const preview=await pixels();assert((await label()).includes('|W00'),'panning preserves the original caret');
-    await new Promise(r=>setTimeout(r,400));assert.equal(await pixels(),preview,'settled viewport stays at preview');
-    await screenshot(a,'input-touch-preview');
-    await key('ArrowLeft');await new Promise(r=>setTimeout(r,250));assert.notEqual(await pixels(),preview,'left recovers panned caret');await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('|W00')");
-    await screenshot(a,'input-arrow-recovery');
-    await key('!');await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('!|W00')");
-    assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true);
-    const result={passed:true,release:await evaluate(a,"document.querySelector('#revision').dataset.release"),checks:['real Chromium WebGL and worker mount','long pasted text follows caret to end','wide field displays beyond old character cap','physical touch panning and release momentum','idle preview stays independent of caret','left at unchanged beginning recovers hidden caret','typing edits original caret after panning']};
+    const geometry=await evaluate(a,`(()=>{const e=${input},r=e.getBoundingClientRect(),b=document.querySelector('#controls button[aria-label="First text field"]').getBoundingClientRect();return {delta:Math.abs(r.width-b.width),font:parseFloat(getComputedStyle(e).fontSize)};})()`);
+    assert(geometry.delta<1);assert(geometry.font>=16,'computed font avoids iOS focus auto-zoom');
+    await call('Page.bringToFront',{},a);
+    await evaluate(a,`(()=>{const e=${input};e.setSelectionRange(4,7);e.dispatchEvent(new Event('select'));})()`);
+    await call('Input.insertText',{text:'ABC'},a);
+    const expected=source.slice(0,4)+'ABC'+source.slice(7);
+    await visibleWait(b,`${input}.value===${JSON.stringify(expected)}`);
+    await key('a',4);await call('Input.insertText',{text:'é'.repeat(200)},a);
+    await visibleWait(a,`${input}.value===${JSON.stringify(expected)}`);
+    await key('Tab');await visibleWait(a,"document.activeElement?.getAttribute('aria-label')==='Second text field'");
+    await call('Input.insertText',{text:'Second field'},a);
+    await visibleWait(b,"document.querySelector('.canvas-editor[aria-label=\"Second text field\"]').value.includes('Second field')");
+    await screenshot(a,'input-native-selection');
+    await metrics(a,390,844);await ready(a,'input-lab','1280x800');
+    await click(a,'First text field','input-lab','1280x800');await metrics(a,390,420);
+    await visibleWait(a,`(()=>{const r=${input}.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight+1;})()`);
+    await screenshot(a,'input-mobile-keyboard-space');
+    const result={passed:true,checks:['real native input focus and selection replacement','long text uses native horizontal viewport','field fills its authored bounds','bounded UTF-8 rejection reconciles the DOM','two fields sync committed text between clients','native Tab focus','no app keyboard','field remains inside reduced mobile viewport'],geometry};
     await writeFile(join(output,'input-viewport-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--timings')){
     const a=await page(800,1280,'home');
@@ -368,7 +367,7 @@ try{
     await writeFile(join(output,'home-update-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else{
   const a=await page(1280,800,'home');await screenshot(a,'home-landscape');
-  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.deepEqual(homeWide.map(c=>c.label),['Test Playground','Monitoring']);
+  const homeWide=(await controls(a)).filter(c=>c.label!=='Edit cards');assert.deepEqual(homeWide.map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
   await click(a,'Components','component-playground','1280x800');
   const wide=await controls(a);await drag(a,'Linear slider',0.81);
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))>75");
@@ -396,10 +395,10 @@ try{
   await metrics(b,800,1280);await ready(b,'component-playground','800x1280');
   await drag(b,'Linear slider',0.43);await wait(b,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
-  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,2);await screenshot(b,'home-portrait');
+  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,3);await screenshot(b,'home-portrait');
   await click(b,'Layouts','layout-lab','800x1280');await screenshot(b,'layout-lab-portrait');
   await click(a,'Home','home','1280x800');await click(a,'Layouts','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
-  const result={passed:true,checks:['landscape and portrait WebGL rendering','two-card Home composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layouts in both orientations'],screenshots:output,native_hardware:'not tested'};
+  const result={passed:true,checks:['landscape and portrait WebGL rendering','three-card Home composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layouts in both orientations'],screenshots:output,native_hardware:'not tested'};
   await writeFile(join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
   }
 }finally{

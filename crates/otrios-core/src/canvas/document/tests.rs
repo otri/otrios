@@ -241,3 +241,30 @@ fn far_document_offsets_keep_subpixel_precision_after_local_rebasing() {
     assert!(Arc::ptr_eq(&first.draws[0].chunk, &next.draws[0].chunk));
     assert_eq!(first.draws[0].view[3] - next.draws[0].view[3], 0.125);
 }
+
+#[test]
+fn appended_paragraphs_preserve_existing_geometry_and_anchor() {
+    let mut r = reader("first paragraph\nsecond paragraph", 600., 120.);
+    settle(&mut r);
+    let before = r.frame();
+    let anchor = r.anchor();
+    let original = r.source.text().to_owned();
+    r.append_blocks(&["third paragraph".into(), "fourth paragraph".into()])
+        .unwrap();
+    settle(&mut r);
+    assert_eq!(r.anchor(), anchor);
+    assert!(r.source.text().starts_with(&original));
+    assert_eq!(r.source.block(2), Some("third paragraph"));
+    for old in before.draws {
+        let retained = r
+            .frame()
+            .draws
+            .into_iter()
+            .find(|d| d.chunk.version == old.chunk.version)
+            .unwrap();
+        assert!(Arc::ptr_eq(&retained.chunk, &old.chunk));
+    }
+    let snapshot = r.source.text().to_owned();
+    assert!(r.append_blocks(&["bad\nparagraph".into()]).is_err());
+    assert_eq!(r.source.text(), snapshot);
+}

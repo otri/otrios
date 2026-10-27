@@ -108,6 +108,14 @@ receipt, within the app State scope. Durable state stays on the authority and
 pending intents stay in one RAM queue ([foundation rollout](experiments/canvas-foundation.md)).
 General collection/item/cursor selectors from RFC 0003 remain unimplemented.
 
+The shared retained presentation composer assembles base UI, document, overlay
+and effect layers for both hosts. Explicit content, placement, semantic and
+effect revisions govern browser transfers. One outstanding renderer credit
+coalesces dirty requests before frame assembly; input and ordered network work
+continue independently. Native returns credit after KMS presentation, browser
+after an animation-frame submission. See [RFC 0023](rfcs/0023-retained-presentation-foundation.md)
+for the bounded contract and the subsequent stable document-block delivery.
+
 Current bounds include 64 schema fields, 4 KiB text values, 2,016 series points
 and 512 KiB Canvas messages/artifacts. The durable adapter bounds writer receipts
 to 1,024 per app with a 24-hour resume window, rotates its journal at 4 MiB

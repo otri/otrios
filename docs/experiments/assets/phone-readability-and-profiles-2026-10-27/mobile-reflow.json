@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "fontSizeCss": 16.4365993535,
+  "immediateWidth": 390,
+  "before": {
+    "width": 390,
+    "value": "The viewport keeps its width.",
+    "selection": [
+      4,
+      8
+    ]
+  },
+  "after": {
+    "width": 390,
+    "top": 50,
+    "bottom": 469.9375,
+    "value": "The viewport keeps its width.",
+    "selection": [
+      4,
+      8
+    ],
+    "focused": true,
+    "layoutHeight": 844
+  }
+}

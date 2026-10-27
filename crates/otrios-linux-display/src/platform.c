@@ -212,7 +212,8 @@ int ot_upload(ot_display *d,uint32_t slot,const float *vertices,size_t floats) {
     }
     glBindBuffer(GL_ARRAY_BUFFER,d->meshes[slot].vbo);
     glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(count*sizeof(*packed)),packed,slot==1?GL_STREAM_DRAW:GL_STATIC_DRAW);
-    free(d->text[slot].views);d->text[slot].views=NULL;free(d->text[slot].ems);d->text[slot].ems=NULL;free(d->text[slot].draws);d->text[slot].draws=NULL;d->text[slot].draw_words=0;d->text[slot].count=0;
+    // Mixed-scene uploads replace geometry and text separately. Preserve text
+    // until ot_upload_text can compare bytes and retain unchanged GPU coverage.
     free(packed);d->meshes[slot].count=(GLsizei)count;d->meshes[slot].opaque=opaque;
     return gl_ok(d,"Upload retained vertex buffer");
 }
@@ -285,6 +286,7 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
         if(kind>1 || first>limit || length>limit-first || (kind==1 && (first%4 || length%4)) || (kind==0 && (first%3 || length%3)))return fail(d,"Invalid ordered scene draw range");
     }
     struct text_mesh *m=&d->text[slot];
+    int same_vertices=count==(size_t)m->count && (!floats || !memcmp(m->vertices,vertices,floats*sizeof(*vertices)));
     int grow=count>m->index_capacity;
     if(floats>m->vertex_capacity){
         float *next=realloc(m->vertices,floats*sizeof(*next));
@@ -302,9 +304,11 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
     if(words)memcpy(plan,draws,words*sizeof(*plan));
     // Cached draws consume only their compact UV buffer. Defer uploading the
     // larger analytic stream until a fallback actually needs it; indices grow once.
-    m->raw_dirty=1;m->alpha_valid=0;
+    if(!same_vertices){m->raw_dirty=1;m->alpha_valid=0;m->cached_generation=0;free(m->ems);m->ems=NULL;}
+    // View storage is indexed by the ordered draw plan, not glyph count.
+    if(words!=m->draw_words || count!=(size_t)m->count){free(m->views);m->views=NULL;if(d->stable_text)m->cached_generation=0;}
     if(grow){glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)(count/4*6*sizeof(*indices)),indices,GL_STATIC_DRAW);m->index_capacity=count;}
-    free(indices);free(m->ems);m->ems=NULL;m->cached_generation=0;free(m->draws);m->draws=plan;m->draw_words=words;m->count=(GLsizei)count;
+    free(indices);free(m->draws);m->draws=plan;m->draw_words=words;m->count=(GLsizei)count;
     return gl_ok(d,"Upload retained glyph quads");
 }
 int ot_linear_scene(ot_display *d) { return d->linear_scene; }
@@ -348,6 +352,7 @@ int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count)
             if(ems[q]!=0 && ems[q]!=em){free(ems);return fail(d,"Conflicting text style ranges");}ems[q]=em;
         }
     }
+    if(m->ems && (!m->count || !memcmp(m->ems,ems,(size_t)m->count/4*sizeof(*ems)))){free(ems);return 0;}
     free(m->ems);m->ems=ems;m->cached_generation=0;m->alpha_valid=0;return 0;
 }
 void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }

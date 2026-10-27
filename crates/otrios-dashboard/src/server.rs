@@ -28,6 +28,8 @@ use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 mod apps;
 #[path = "server_auth.rs"]
 mod auth;
+#[path = "server_chat.rs"]
+mod chat;
 #[path = "server_ink.rs"]
 mod ink;
 #[path = "server_session.rs"]
@@ -42,6 +44,7 @@ struct StateConfig {
     presentation: Option<PathBuf>,
 }
 struct App {
+    chat: Arc<chat::Hub>,
     ink: ink::Room,
     auth: Option<Arc<auth::Sessions>>,
     apps: Mutex<Option<apps::Hub>>,
@@ -348,7 +351,7 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             "/".into(),
         )
     };
-    if let Some(path) = route {
+    let title = if let Some(path) = route {
         let screen = path.trim_end_matches('/');
         if !otrios_interfaces::canvas::valid_destination(screen) {
             return failure(StatusCode::NOT_FOUND, "Not found");
@@ -361,10 +364,13 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
             Ok(catalog) => catalog,
             Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App catalog unavailable"),
         };
-        if !catalog.apps.iter().any(|e| e.path == screen) {
+        let Some(entry) = catalog.apps.iter().find(|e| e.path == screen) else {
             return failure(StatusCode::NOT_FOUND, "Not found");
-        }
-    }
+        };
+        entry.app.title.clone()
+    } else {
+        "OTriOS".into()
+    };
     let bytes = match tokio::fs::read(index).await {
         Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
         _ => return failure(StatusCode::SERVICE_UNAVAILABLE, "App entry unavailable"),
@@ -373,6 +379,28 @@ async fn app_entry(app: &App, route: Option<&str>) -> Response {
         Ok(html) => html,
         Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "App entry unavailable"),
     };
+    // Link preview fetchers do not run JavaScript. Use only the public catalog
+    // title, independent of private UI/state admission or recovery.
+    let escaped = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;");
+    let page_title = if route.is_some() {
+        format!("OTriOS · {escaped}")
+    } else {
+        escaped.clone()
+    };
+    html = html
+        .replace(
+            "<title>OTriOS</title>",
+            &format!("<title>{page_title}</title>"),
+        )
+        .replace(
+            "property=\"og:title\" content=\"OTriOS\"",
+            &format!("property=\"og:title\" content=\"{escaped}\""),
+        );
     for (attribute, asset) in [("href", "style.css"), ("src", "app.js")] {
         for source in [format!("/{asset}"), format!("./{asset}")] {
             html = html.replace(
@@ -466,6 +494,9 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/pkg/otrios_dashboard.js"
         | "app-catalog.mjs"
         | "web/app-catalog.mjs" => Some("text/javascript"),
+        "text-input.mjs" | "web/text-input.mjs" => Some("text/javascript"),
+        "fonts/Roboto.ttf" | "web/fonts/Roboto.ttf" => Some("font/ttf"),
+        "fonts/OFL.txt" | "web/fonts/OFL.txt" => Some("text/plain; charset=utf-8"),
         "style.css" | "web/style.css" => Some("text/css"),
         "Slug-LICENSE.txt" | "web/Slug-LICENSE.txt" => Some("text/plain; charset=utf-8"),
         "fonts/Roboto-Regular.otq.zst" | "web/fonts/Roboto-Regular.otq.zst" => {
@@ -516,6 +547,7 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
                         | "monitoring-session.mjs"
                         | "document-transfer.mjs"
                         | "touch-input.mjs"
+                        | "text-input.mjs"
                         | "app-catalog.mjs"
                         | "Slug-LICENSE.txt"
                         | "navigation-timings.mjs"
@@ -531,6 +563,12 @@ async fn source_asset(State(app): State<Arc<App>>, RoutePath(path): RoutePath<St
             }
             if !file.exists() && path == "fonts/Roboto-Regular.otq.zst" {
                 file = app.web.join("../shared").join(&path);
+            }
+            if !file.exists() && matches!(path.as_str(), "fonts/Roboto.ttf" | "fonts/OFL.txt") {
+                file = app
+                    .web
+                    .join("../../assets/fonts/roboto")
+                    .join(Path::new(&path).file_name().unwrap_or_default());
             }
             serve_file(file, kind, false).await
         }
@@ -679,6 +717,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (state_available, _) = watch::channel(false);
     let (release_changed, _) = watch::channel(release.clone());
     let app = Arc::new(App {
+        chat: chat::Hub::new(app_state.as_ref().map(|p| p.join("brass-relay.journal")))?,
         ink: ink::Room::new(trusted_peers + public_peers)?,
         auth,
         apps: Mutex::new(None),
@@ -733,6 +772,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     .delete(auth::logout)
                     .layer(DefaultBodyLimit::max(2048)),
             )
+            .route("/chat/identity", axum::routing::post(chat::identity))
             .route("/monitoring/presentation", get(auth::presentation))
             .route("/health", get(public_health))
             .fallback(navigation_entry)
@@ -774,6 +814,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .delete(auth::logout)
                 .layer(DefaultBodyLimit::max(2048)),
         )
+        .route("/chat/identity", axum::routing::post(chat::identity))
         .route("/monitoring/presentation", get(auth::presentation))
         .route("/releases/{id}/{*path}", get(release_asset))
         .route("/{*path}", get(source_asset))

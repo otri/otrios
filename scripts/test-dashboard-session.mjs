@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';import assert from 'node:assert/strict';
 import {connectSession,validRelease} from '../web/shared/session.mjs';
-const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v5'});
+const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v6'});
 function rig({failOpen=false}={}){
  const peers=[],timers=new Map(),seen=[],state=[],ink=[],status=[],errors=[];let serial=0;
  class Peer {constructor(url){this.url=String(url);this.sent=[];this.bufferedAmount=0;peers.push(this);}send(data){this.sent.push(typeof data==='string'?JSON.parse(data):[...data]);}close(){this.closed=true;this.onclose?.();}event(type='hello',r=release('a'),extra={}){this.onmessage({data:JSON.stringify({type,version:1,release:r,compatible:true,state_available:true,...extra})});}binary(bytes){this.onmessage({data:new Uint8Array(bytes).buffer});}}
@@ -10,7 +10,7 @@ function rig({failOpen=false}={}){
 }
 test('one socket negotiates before binary traffic and multiplexes subscribed ink',()=>{
  const r=rig(),p=r.peers[0];p.onopen();assert.equal(p.url,'wss://otrios.example/session');
- assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v5',state:true}]);
+ assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v6',state:true}]);
  assert(!r.session.sendState(new Uint8Array([9])));p.event();assert(r.session.ready);
  assert(r.session.sendState(new Uint8Array([8,9])));assert.deepEqual(p.sent[1],[1,8,9]);p.binary([1,7]);assert.deepEqual(r.state,[[[7],1]]);
  r.session.subscribeInk(true);assert.deepEqual(p.sent[2],{type:'ink',enabled:true});r.session.sendInk(new Uint8Array([6]));assert.deepEqual(p.sent[3],[2,6]);p.binary([2,5]);assert.deepEqual(r.ink,[[[5],1]]);
@@ -31,7 +31,7 @@ test('reconnect hello recovers missed release; stale peers and queued writes can
  assert.deepEqual(r.seen,[release('a'),release('b')]);assert.equal(r.state.length,0);assert(!r.session.sendState(new Uint8Array([9]),epoch));assert(r.session.sendState(new Uint8Array([9]),r.session.epoch));r.session.stop();
 });
 test('invalid control/channel frames are rejected before CRDT delivery',()=>{
- for(const trigger of [p=>p.binary([1,0]),p=>p.event('upgrade'),p=>p.event('hello',{...release('a'),web_entry:'https://other.example/code'}),p=>p.event('hello',release('a'),{version:9}),p=>p.onmessage({data:' '.repeat(8193)}),p=>{p.event();p.binary([3,0]);},p=>{p.event('hello',release('a'),{compatible:false});p.binary([1,0]);}]){
+ for(const trigger of [p=>p.binary([1,0]),p=>p.event('upgrade'),p=>p.event('hello',{...release('a'),web_entry:'https://other.example/code'}),p=>p.event('hello',release('a'),{version:9}),p=>p.onmessage({data:' '.repeat(8193)}),p=>{p.event();p.binary([4,0]);},p=>{p.event('hello',release('a'),{compatible:false});p.binary([1,0]);}]){
   const r=rig();trigger(r.peers[0]);assert(r.peers[0].closed);assert.equal(r.state.length,0);r.session.stop();
  }
  assert(!validRelease({id:'a'.repeat(64),web_entry:'/bad'}));
@@ -61,4 +61,15 @@ test('browser and native/server share the same declared codec version',async()=>
  const source=await readFile(new URL('../crates/otrios-interfaces/src/session.rs',import.meta.url),'utf8');
  assert.equal(CONTROL_VERSION,1);assert.match(source,/VERSION: u32 = 1/);
  assert.equal(STATE_PROTOCOL,source.match(/STATE_PROTOCOL: &str = "([^"]+)"/)[1]);
+});
+
+test('chat has its own bounded channel and mailbox credit',async()=>{
+ const {bridgeWorker}=await import('../web/shared/session.mjs');
+ const r=rig();r.peers[0].event();assert(r.session.sendChat(new Uint8Array([8,9])));assert.deepEqual(r.peers[0].sent[0],[3,8,9]);
+ assert.throws(()=>r.session.sendChat(new Uint8Array(8193)),/exceeds limit/);r.session.stop();
+ let resets=0;const messages=[],session={epoch:1,ready:true,reconnect(){resets++;},sendChat(){}};
+ const bridge=bridgeWorker(session,m=>messages.push(m));bridge.status(true,1);
+ for(let i=0;i<8;i++)bridge.receive('chat',new Uint8Array([i]),1);
+ bridge.handle({type:'chat-frame-ack',epoch:0});bridge.receive('chat',new Uint8Array([9]),1);assert.equal(resets,1);
+ bridge.handle({type:'chat-frame-ack',epoch:1});bridge.receive('chat',new Uint8Array([10]),1);assert.equal(messages.filter(m=>m.type==='chat-frame').length,9);
 });

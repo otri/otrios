@@ -2,10 +2,12 @@
 # RFC 0003: Module roots, typed selectors and scoped subscriptions
 
 Status: module isolation is implemented by the live Canvas apps with independent
-Automerge documents, flat typed field selectors and bounded Wasm reducers (RFC
+Merkle documents, flat typed field selectors and bounded Wasm reducers (RFC
 0004). [RFC 0005](0005-merkle-subtree-prototype.md) adds a bounded research library
 for arbitrary stable-key subtree leases and joins. Wiring those leases into
 Canvas and the general collection selectors below remain future work.
+[RFC 0024](0024-viewport-scoped-collections.md) specifies the proposed bounded
+collection-window contract for long threads and viewport-driven scrollback.
 
 ## Decision proposed
 

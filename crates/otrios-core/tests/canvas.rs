@@ -2,6 +2,8 @@
 #![cfg(feature = "canvas")]
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
+#[path = "../../../apps/brass-relay/app.rs"]
+mod brass_relay;
 #[path = "../../../tools/canvas/components.rs"]
 pub mod components;
 #[path = "../../../apps/home/app.rs"]
@@ -3185,4 +3187,522 @@ fn text_viewport_fills_inner_margins_and_pans_locally_until_an_edit_recovers_car
     c.tick(6000, 0).unwrap();
     assert_eq!(window(&c).1, "short|");
     assert_eq!(window(&c).2, 0.);
+}
+
+#[test]
+fn brass_relay_qualifies_crowded_roster_avatar_pages_and_native_keyboard_in_both_orientations() {
+    assert_eq!(brass_relay::screens()[0].0.id, "brass-relay");
+    use otrios_interfaces::chat::{Event, Member, Profile};
+    let members = (0..68)
+        .map(|i| Member {
+            profile: Profile {
+                id: format!("{i:032x}"),
+                name: format!("Captain {i}"),
+                avatar: i % 64,
+            },
+            generation: 1,
+            admin: i == 0,
+        })
+        .collect::<Vec<_>>();
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        let mut client = Client::default();
+        client.set_chat_native(true);
+        activate(&mut client, brass_relay::ui(&[]), "brass-relay", vec![]);
+        client.set_viewport(viewport).unwrap();
+        client.set_font(std::sync::Arc::new(
+            otrios_core::dashboard::font::Font::from_zstd(
+                include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        ));
+        client
+            .receive_chat(
+                &chat::encode_event(&Event::Welcome {
+                    you: members[0].clone(),
+                    temporary: false,
+                    credential: None,
+                    epoch: 1,
+                    members: members.clone(),
+                    messages: vec![],
+                    oldest: 0,
+                    newest: 0,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        for label in [
+            "Members",
+            "Close dialog",
+            "Edit profile",
+            "Next avatars",
+            "Next avatars",
+            "Next avatars",
+            "Edit room name",
+            "Save profile",
+            "Message composer",
+            "Commands",
+            "Close dialog",
+        ] {
+            edit(&mut client, label, 0, 0);
+            let scene = client.scene().unwrap();
+            for control in scene.controls() {
+                assert!(
+                    control.origin[0] >= 0. && control.origin[1] >= 0.,
+                    "{label}"
+                );
+                assert!(
+                    control.origin[0] + control.node.frame.width * control.scale
+                        <= viewport[0] + 0.1,
+                    "{label}"
+                );
+                assert!(
+                    control.origin[1] + control.node.frame.height * control.scale
+                        <= viewport[1] + 0.1,
+                    "{label}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn brass_relay_particles_do_not_rebuild_the_retained_ui_scene() {
+    use otrios_interfaces::chat::{Event, Member, Profile};
+    use presentation::{Composer, Layer};
+    use std::sync::Arc;
+    let font = Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut composer = Composer::default();
+    let mut client = Client::default();
+    client.set_font(font.clone());
+    activate(&mut client, brass_relay::ui(&[]), "brass-particles", vec![]);
+    let member = Member {
+        profile: Profile {
+            id: "1".repeat(32),
+            name: "Captain Cache".into(),
+            avatar: 1,
+        },
+        generation: 1,
+        admin: false,
+    };
+    client
+        .receive_chat(
+            &chat::encode_event(&Event::Welcome {
+                you: member.clone(),
+                temporary: false,
+                credential: None,
+                epoch: 1,
+                members: vec![member],
+                messages: vec![],
+                oldest: 0,
+                newest: 0,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client.tick(1000, 1_700_000_000).unwrap();
+    let scene = client.scene().unwrap();
+    let idle = composer.compose(&mut client, &font).unwrap().clone();
+    client
+        .receive_chat(
+            &chat::encode_event(&Event::Effect {
+                participant: "1".repeat(32),
+                kind: "steam".into(),
+                target: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let start = composer.compose(&mut client, &font).unwrap().clone();
+    assert_eq!(start.revisions.content, idle.revisions.content);
+    assert_eq!(start.revisions.semantics, idle.revisions.semantics);
+    assert!(Arc::ptr_eq(&start.base.mesh, &idle.base.mesh));
+    assert_eq!(start.order.last(), Some(&Layer::Effects));
+    let first = client.effect_vertices().unwrap();
+    assert!(!first.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    client.tick(1100, 1_700_000_000).unwrap();
+    let moving = composer.compose(&mut client, &font).unwrap().clone();
+    assert_ne!(moving.revisions.effects, start.revisions.effects);
+    assert_eq!(moving.revisions.content, start.revisions.content);
+    assert_eq!(moving.revisions.placement, start.revisions.placement);
+    assert_eq!(moving.revisions.semantics, start.revisions.semantics);
+    assert!(Arc::ptr_eq(&moving.base.mesh, &start.base.mesh));
+    assert_eq!(
+        start.effects.as_ref(),
+        &first,
+        "Held effect snapshots stay immutable"
+    );
+    assert_ne!(first, client.effect_vertices().unwrap());
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+    client.tick(2100, 1_700_000_000).unwrap();
+    let ended = composer.compose(&mut client, &font).unwrap().clone();
+    assert!(!ended.order.contains(&Layer::Effects));
+    assert_ne!(ended.revisions.effects, moving.revisions.effects);
+    assert_eq!(ended.revisions.content, idle.revisions.content);
+    assert_eq!(ended.order, idle.order);
+    let unchanged = composer.compose(&mut client, &font).unwrap();
+    assert!(Arc::ptr_eq(&unchanged.effects, &ended.effects));
+    assert!(client.effect_vertices().unwrap().is_empty());
+    assert!(std::sync::Arc::ptr_eq(&scene, &client.scene().unwrap()));
+}
+
+#[test]
+fn shared_presentation_preserves_existing_geometry_views_and_paint_order() {
+    use otrios_core::dashboard::{font::Font, retained_text::TextPresentation};
+    use presentation::{Composer, Layer};
+    use std::sync::Arc;
+    let font = Arc::new(
+        Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut composer = Composer::default();
+    for ui in [home::ui(&[]), layout::ui(&[]), brass_relay::ui(&[])] {
+        let mut client = Client::default();
+        client.set_font(font.clone());
+        activate(&mut client, ui, "presentation-parity", vec![]);
+        client.tick(1000, 1_700_000_000).unwrap();
+        let scene = client.scene().unwrap();
+        let (before, after) = client
+            .document_scene_parts(&scene)
+            .unwrap()
+            .map_or((scene.as_ref().clone(), None), |(a, b)| (a, Some(b)));
+        let reference = TextPresentation::default().compose(&before, &font);
+        let frame = composer.compose(&mut client, &font).unwrap().clone();
+        assert_eq!(frame.base.mesh.vertices, reference.mesh.vertices);
+        assert_eq!(
+            frame.base.mesh.glyph_vertices,
+            reference.mesh.glyph_vertices
+        );
+        assert_eq!(frame.base.mesh.draws, reference.mesh.draws);
+        assert_eq!(frame.base.views, reference.views);
+        assert_eq!(frame.base.styles, reference.styles);
+        assert_eq!(frame.order[0], Layer::Base);
+        if let Some(after) = after {
+            let overlay = TextPresentation::default().compose(&after, &font);
+            let actual = frame.overlay.as_ref().unwrap();
+            assert_eq!(actual.mesh.vertices, overlay.mesh.vertices);
+            assert_eq!(actual.mesh.glyph_vertices, overlay.mesh.glyph_vertices);
+            assert_eq!(actual.mesh.draws, overlay.mesh.draws);
+            assert_eq!(actual.views, overlay.views);
+            assert_eq!(actual.styles, overlay.styles);
+            assert_eq!(
+                frame.order,
+                vec![Layer::Base, Layer::Document, Layer::Overlay]
+            );
+        } else {
+            assert_eq!(frame.order, vec![Layer::Base]);
+        }
+        let next = composer.compose(&mut client, &font).unwrap();
+        assert_eq!(next.revisions.content, frame.revisions.content);
+        assert_eq!(next.revisions.placement, frame.revisions.placement);
+        assert_eq!(next.revisions.semantics, frame.revisions.semantics);
+        assert!(Arc::ptr_eq(&next.base.mesh, &frame.base.mesh));
+        composer.clear();
+        let replay = composer.compose(&mut client, &font).unwrap();
+        assert_ne!(replay.revisions.content, frame.revisions.content);
+        assert_eq!(replay.base.mesh.vertices, frame.base.mesh.vertices);
+    }
+}
+
+#[test]
+fn host_keyboard_policy_keeps_focus_and_wrapped_composition_without_software_keys() {
+    use otrios_interfaces::keyboard::Edit;
+    use std::sync::Arc;
+    let font = Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut c = Client::default();
+    c.set_software_keyboard(false);
+    c.set_font(font);
+    activate(&mut c, brass_relay::ui(&[]), "browser-keyboard", vec![]);
+    let id = node(&c, "Message composer");
+    c.activate(c.epoch(), id).unwrap();
+    assert!(c.editing());
+    assert!(!c.keyboard_visible());
+    c.hardware_edit(&Edit::Commit(
+        "Clockwork words that must wrap rather than disappear. ".repeat(14),
+    ))
+    .unwrap();
+    for t in (1000..1400).step_by(20) {
+        c.tick(t, 1_700_000_000).unwrap();
+    }
+    let scene = c.scene().unwrap();
+    let field = scene.path(id).unwrap();
+    let bounds = field.last().unwrap().node.frame;
+    assert!(bounds.height > 60. && bounds.height < 160.);
+    assert!(!c.keyboard_visible());
+    let viewport = scene.path(60_000).unwrap();
+    let viewport = viewport.last().unwrap();
+    assert!(viewport.origin[1] + viewport.node.frame.height < field.last().unwrap().origin[1]);
+    c.set_software_keyboard(true);
+    c.show_keyboard().unwrap();
+    assert!(c.keyboard_visible());
+}
+
+#[test]
+fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
+    use otrios_interfaces::{
+        chat::{Event, Kind, Member, Message, Profile},
+        scene::{PointerEvent, PointerPhase},
+    };
+    use std::{collections::BTreeMap, sync::Arc};
+    let mut c = Client::default();
+    c.set_font(Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    ));
+    activate(&mut c, brass_relay::ui(&[]), "avatar-scroll", vec![]);
+    let member = Member {
+        profile: Profile {
+            id: "a".repeat(32),
+            name: "Captain Anchor".into(),
+            avatar: 3,
+        },
+        generation: 1,
+        admin: false,
+    };
+    let messages = (1..=40)
+        .map(|i| Message {
+            sequence: i,
+            at: 1_700_000_000_000,
+            sender: member.profile.clone(),
+            kind: Kind::Message,
+            text: format!("Dispatch {i}: ")
+                + &"A long paragraph wraps across the viewport. ".repeat(4),
+            nonce: format!("{i:032x}"),
+        })
+        .collect();
+    c.receive_chat(
+        &chat::encode_event(&Event::Welcome {
+            you: member.clone(),
+            temporary: false,
+            credential: None,
+            epoch: 1,
+            members: vec![member],
+            messages,
+            oldest: 1,
+            newest: 40,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    for t in 1000..1500 {
+        c.tick(t, 1_700_000_000).unwrap();
+    }
+    fn origins(c: &Client) -> BTreeMap<u32, f32> {
+        fn walk(n: &otrios_interfaces::scene::SceneNode, out: &mut Vec<u32>) {
+            if (5_000_000..6_000_000).contains(&n.id) && n.id.is_multiple_of(32) {
+                out.push(n.id);
+                return;
+            }
+            for child in &n.children {
+                walk(child, out);
+            }
+        }
+        let scene = c.scene().unwrap();
+        let mut ids = vec![];
+        walk(scene.root(), &mut ids);
+        ids.into_iter()
+            .map(|id| (id, scene.path(id).unwrap().last().unwrap().origin[1]))
+            .collect()
+    }
+    let before = origins(&c);
+    assert!(!before.is_empty());
+    let offset = c.resource_usage().text_document.unwrap().offset;
+    for (phase, y, t) in [
+        (PointerPhase::Down, 200., 2000),
+        (PointerPhase::Move, 250., 2050),
+    ] {
+        assert!(
+            c.pointer_at(
+                c.epoch(),
+                PointerEvent {
+                    id: 7,
+                    phase,
+                    position: [160., y]
+                },
+                t
+            )
+            .unwrap()
+        );
+    }
+    let delta = c.resource_usage().text_document.unwrap().offset - offset;
+    assert!(delta.abs() > 1.);
+    let after = origins(&c);
+    let mut matched = 0;
+    for (id, y) in before {
+        if let Some(next) = after.get(&id) {
+            assert!((f64::from(*next - y) + delta).abs() < 0.01);
+            matched += 1;
+        }
+    }
+    assert!(
+        matched > 0,
+        "Compare an avatar retained across both visible windows"
+    );
+}
+
+#[test]
+fn browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits() {
+    use otrios_interfaces::keyboard::Edit;
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let mut c = Client::default();
+    c.set_font(font.clone());
+    c.set_software_keyboard(false);
+    activate(&mut c, brass_relay::ui(&[]), "browser-fields", vec![]);
+    let initial = c.text_inputs().unwrap();
+    assert_eq!(initial.len(), 1);
+    let id = initial[0].id;
+    let epoch = c.epoch();
+    let replace = Edit::Replace {
+        text: "a😀é".into(),
+        cursor: 4,
+        anchor: 1,
+        selection_only: false,
+    };
+    assert!(
+        !c.edit_text_input(epoch, id, &replace).unwrap(),
+        "unfocused input rejects late edits"
+    );
+    c.activate(epoch, id).unwrap();
+    assert!(c.edit_text_input(epoch, id, &replace).unwrap());
+    let updated = c.text_inputs().unwrap();
+    assert_eq!(updated[0].value, "a😀é");
+    assert_eq!((updated[0].cursor, updated[0].anchor), (4, 1));
+    assert!(!c.keyboard_visible());
+    c.activate(epoch, node(&c, "Edit profile")).unwrap();
+    let profile = c.text_inputs().unwrap();
+    assert_eq!(profile.len(), 1);
+    assert_ne!(profile[0].id, id);
+    assert!(
+        !c.edit_text_input(epoch, id, &replace).unwrap(),
+        "background composer is not editable through a modal"
+    );
+    assert!(
+        !c.edit_text_input(epoch + 1, profile[0].id, &replace)
+            .unwrap()
+    );
+    c.activate(epoch, profile[0].id).unwrap();
+    assert!(c.blur_text_input(epoch, profile[0].id).unwrap());
+    assert!(!c.edit_text_input(epoch, profile[0].id, &replace).unwrap());
+    let mut c = Client::default();
+    c.set_font(font);
+    c.set_software_keyboard(false);
+    activate(&mut c, input_lab::ui(&[]), "browser-shared-fields", vec![]);
+    assert_eq!(c.text_inputs().unwrap().len(), 2);
+    let field = c.text_inputs().unwrap()[0].id;
+    c.activate(c.epoch(), field).unwrap();
+    assert!(c.edit_text_input(c.epoch(), field, &replace).unwrap());
+    assert_eq!(c.text_inputs().unwrap()[0].value, "a😀é");
+    assert!(
+        !c.edit_text_input(epoch, id, &replace).unwrap(),
+        "unrelated control cannot edit the new app"
+    );
+}
+
+#[test]
+fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_controls() {
+    use otrios_interfaces::scene::Primitive;
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    for (width, height) in [
+        (800., 861.),
+        (800., 615.),
+        (800., 369.),
+        (534., 1155.),
+        (534., 575.),
+        (534., 410.),
+    ] {
+        let mut c = Client::default();
+        c.set_font(font.clone());
+        c.set_software_keyboard(false);
+        activate(&mut c, brass_relay::ui(&[]), "phone-height", vec![]);
+        c.set_viewport([width, height]).unwrap();
+        let check = |c: &Client| {
+            let scene = c.scene().unwrap();
+            for control in scene.controls() {
+                assert!(control.origin[0] >= 0. && control.origin[1] >= 0.);
+                assert!(
+                    control.origin[0] + control.node.frame.width * control.scale <= width + 0.1
+                );
+                assert!(
+                    control.origin[1] + control.node.frame.height * control.scale <= height + 0.1,
+                    "{} at height {height}",
+                    control.node.id
+                );
+            }
+        };
+        let scene = c.scene().unwrap();
+        let back = scene.path(node(&c, "Back to OTriOS")).unwrap();
+        let back = back.last().unwrap();
+        let label = back
+            .node
+            .children
+            .iter()
+            .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="< OTriOS"))
+            .unwrap();
+        let title = scene
+            .root()
+            .children
+            .iter()
+            .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="The Brass Relay"))
+            .unwrap();
+        let Primitive::Text {
+            scale: back_scale, ..
+        } = label.primitive
+        else {
+            unreachable!()
+        };
+        let Primitive::Text {
+            scale: title_scale, ..
+        } = title.primitive
+        else {
+            unreachable!()
+        };
+        assert_eq!(back_scale, title_scale);
+        assert!((back.origin[1] + label.frame.y - title.frame.y).abs() < 0.01);
+        assert!(font.text_width("The Brass Relay", title_scale as f32) <= title.frame.width);
+        if width < 700. {
+            let members = scene.path(node(&c, "Members")).unwrap();
+            assert!(members.last().unwrap().origin[1] >= title.frame.y + title.frame.height);
+        }
+        check(&c);
+        c.activate(c.epoch(), node(&c, "Message composer")).unwrap();
+        c.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
+            "A long wrapped line for a short visual viewport. ".repeat(12),
+        ))
+        .unwrap();
+        check(&c);
+        c.activate(c.epoch(), node(&c, "Edit profile")).unwrap();
+        check(&c);
+        assert_eq!(c.text_inputs().unwrap().len(), 1);
+    }
 }

@@ -15,6 +15,69 @@ pub struct Sessions {
     verifier: Arc<Semaphore>,
 }
 impl Sessions {
+    /// Shared verifier for browser sign-in and explicitly authenticated native
+    /// room connections. Trusted-listener admission alone never calls this.
+    pub(super) async fn authenticate(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<(String, String), StatusCode> {
+        if username.len() > 320 || password.len() > 1024 || password.is_empty() {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        {
+            let mut window = self.attempts.lock().await;
+            if window.0.elapsed() >= Duration::from_secs(60) {
+                *window = (Instant::now(), 0);
+            }
+            if window.1 >= 20 {
+                return Err(StatusCode::TOO_MANY_REQUESTS);
+            }
+            window.1 += 1;
+        }
+        let permit = self
+            .verifier
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
+        let (hash, expected, user, password) = (
+            self.hash.clone(),
+            self.username.clone(),
+            username.to_owned(),
+            password.to_owned(),
+        );
+        let verified = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let parsed = PasswordHash::new(&hash).expect("validated hash");
+            let matches = Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .is_ok();
+            matches && user == expected
+        })
+        .await
+        .unwrap_or(false);
+        if !verified {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        let mut random = [0; 32];
+        getrandom::fill(&mut random).map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        let token = random
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let key = digest(&token);
+        let mut sessions = self.sessions.lock().await;
+        let now = Instant::now();
+        sessions.retain(|_, expires| *expires > now);
+        if sessions.len() >= MAX_SESSIONS {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        sessions.insert(key.clone(), now + self.ttl);
+        Ok((token, key))
+    }
+    pub(super) async fn revoke(&self, key: &str) {
+        self.sessions.lock().await.remove(key);
+    }
     pub fn load(
         path: &Path,
         ttl: Duration,
@@ -157,66 +220,20 @@ pub async fn login(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes
     else {
         return denied();
     };
-    if username.len() > 320 || password.len() > 1024 || password.is_empty() {
-        return denied();
-    }
-    {
-        let mut window = auth.attempts.lock().await;
-        if window.0.elapsed() >= Duration::from_secs(60) {
-            *window = (Instant::now(), 0);
-        }
-        if window.1 >= 20 {
+    let (token, _) = match auth.authenticate(username, password).await {
+        Ok(value) => value,
+        Err(StatusCode::TOO_MANY_REQUESTS) => {
             return response(
                 StatusCode::TOO_MANY_REQUESTS,
                 json!({"error":"Please wait before trying again"}),
             );
         }
-        window.1 += 1;
-    }
-    let Ok(permit) = auth.verifier.clone().try_acquire_owned() else {
-        return response(
-            StatusCode::TOO_MANY_REQUESTS,
-            json!({"error":"Please wait before trying again"}),
-        );
+        Err(StatusCode::UNAUTHORIZED) => return denied(),
+        Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "Session unavailable"),
     };
-    let (hash, expected, user, password) = (
-        auth.hash.clone(),
-        auth.username.clone(),
-        username.to_string(),
-        password.to_string(),
-    );
-    let verified = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        let parsed = PasswordHash::new(&hash).expect("validated at startup");
-        let matches = Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok();
-        matches && user == expected
-    })
-    .await
-    .unwrap_or(false);
-    if !verified {
-        return denied();
-    }
-    let mut random = [0u8; 32];
-    if getrandom::fill(&mut random).is_err() {
-        return failure(StatusCode::SERVICE_UNAVAILABLE, "Session unavailable");
-    }
-    let token = random
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    let mut sessions = auth.sessions.lock().await;
-    let now = Instant::now();
-    sessions.retain(|_, expires| *expires > now);
     if let Some(old) = cookie(&headers) {
-        sessions.remove(&digest(&old));
+        auth.revoke(&digest(&old)).await;
     }
-    if sessions.len() >= MAX_SESSIONS {
-        return failure(StatusCode::SERVICE_UNAVAILABLE, "Session capacity reached");
-    }
-    sessions.insert(digest(&token), now + auth.ttl);
-    drop(sessions);
     let mut result = response(StatusCode::OK, json!({"monitoring":true}));
     result.headers_mut().insert(
         header::SET_COOKIE,

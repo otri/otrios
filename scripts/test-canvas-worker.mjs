@@ -4,7 +4,19 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import {DocumentTransfer} from '../web/canvas/document-transfer.mjs';
-function workerContext(fields){if(fields.fake){fields.fake.document_frame??=()=> 'null';for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])fields.fake[key]??=()=>new Float32Array();fields.fake.overlay_draws??=()=>new Uint32Array();}return vm.createContext({DocumentTransfer,...fields});}
+function workerContext(fields){
+  if(fields.fake){
+    const app=fields.fake;
+    let dirty=false,inFlight=null,serial=0n;
+    app.request_frame??=()=>{dirty=true;};
+    app.begin_frame??=()=>{if(!dirty||inFlight!==null)return;dirty=false;return inFlight=++serial;};
+    app.frame_presented??=s=>{if(s!==inFlight)return false;inFlight=null;return true;};
+    app.prepare_frame??=()=>JSON.stringify({revisions:{content:app.text_generation?.()||1,placement:1,semantics:app.text_generation?.()||1,effects:1},order:['base']});
+    app.scroll_text_input??=()=>false;app.text_inputs??=()=> '[]';app.effect_vertices??=()=>new Float32Array();app.chat_info??=()=> 'null';app.chat_messages??=()=> '[]';app.chat_outgoing??=()=>null;app.chat_disconnected??=()=>{};app.screen??=()=> 'home';app.document_frame??=()=> 'null';
+    for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])app[key]??=()=>new Float32Array();app.overlay_draws??=()=>new Uint32Array();
+  }
+  return vm.createContext({DocumentTransfer,...fields});
+}
 test('context loss pauses transfers and replay resends complete current resource dependencies',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const messages=[],fake={viewport_size:()=>[1280,800],path:()=> 'layout-lab/document',screen:()=> 'layout-document',epoch:()=>7,ui_ref:()=> 'app:layout-document/ui',state_ref:()=> 'app:layout-document/state',
@@ -15,7 +27,7 @@ test('context loss pauses transfers and replay resends complete current resource
   vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
   const first=messages.find(m=>m.type==='frame');assert.equal(first.document.upserts.length,1);
   await context.onmessage({data:{type:'graphics-lost'}});
-  await context.onmessage({data:{type:'frame-ack',documentToken:first.document.token}});
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token}});
   vm.runInContext('publish();publish()',context);assert.equal(messages.filter(m=>m.type==='frame').length,1);
   await context.onmessage({data:{type:'document-replay'}});
   const replay=messages.filter(m=>m.type==='frame').at(-1);
@@ -140,7 +152,7 @@ test('timing traces follow the mount generation and ignore earlier control packe
   vm.runInContext(source,context);vm.runInContext('app=fake;timings=true;transportReady=true;transportEpoch=1',context);
   await context.onmessage({data:{type:'activate',id:12,timing:{id:7}}});
   const sent=messages.filter(m=>m.type==='state-send');assert.equal(sent.length,2);assert.equal(sent[0].timing,undefined);assert.equal(sent[1].timing.id,7);assert.equal(sent[1].timing.epoch,2);
-  await context.onmessage({data:{type:'frame-ack'}});
+  await context.onmessage({data:{type:'frame-ack',serial:messages.filter(m=>m.type==='frame').at(-1).serial}});
   await context.onmessage({data:{type:'state-frame',epoch:1,bytes:new Uint8Array([1,2,3]),receivedAt:1700000000110}});
   const frame=messages.filter(m=>m.type==='frame').at(-1);assert.equal(frame.epoch,2);assert.equal(frame.timing.id,7);assert.equal(frame.timing.responseBytes,3);assert(!messages.some(m=>m.type==='error'));
 });
@@ -154,4 +166,44 @@ test('pointer batches preserve sample spacing across worker clocks and reject st
   assert.deepEqual(seen.map(p=>p.at(-1)),[100,120]);
   await context.onmessage({data:{type:'pointer-batch',epoch:7,viewportRevision:3,samples:[[1,9,15,25,1140]]}});
   assert.equal(seen.length,2);assert(!messages.some(m=>m.type==='error'));
+});
+
+test('renderer credit coalesces before Wasm assembly and effects do not recopy UI or semantics',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const messages=[];let prepared=0,meshes=0,semantics=0,effect=1;
+  const fake={ui_ref:()=> 'app:chat/ui',screen:()=> 'chat',path:()=> 'chat',epoch:()=>1,state_ref:()=> 'state',viewport_size:()=>[1280,800],
+    keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'chat',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
+    prepare_frame(){prepared++;return JSON.stringify({revisions:{content:1,placement:1,semantics:1,effects:effect},order:['base','effects']});},
+    text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),
+    vertices(){meshes++;return new Float32Array();},glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Chat',title:()=> 'Chat',controls(){semantics++;return [];}};
+  const context=workerContext({fake,postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
+  const first=messages.find(m=>m.type==='frame');
+  for(let i=0;i<100;i++){effect++;vm.runInContext('publish()',context);}
+  assert.equal(prepared,1);assert.equal(meshes,1);assert.equal(semantics,1);
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial+1n,documentToken:first.document.token}});
+  assert.equal(prepared,1);
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token}});
+  const latest=messages.filter(m=>m.type==='frame').at(-1);
+  assert.equal(prepared,2);assert.equal(meshes,1);assert.equal(semantics,1);
+  assert(latest.effects);assert.equal(latest.vertices,undefined);assert.equal(latest.controls,undefined);assert.equal(latest.textViews,undefined);
+  assert.equal(messages.filter(m=>m.type==='frame').length,2);
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token}});
+  assert.equal(prepared,2);
+});
+
+test('browser input acknowledgement reconciles rejected edits even when scene semantics stay unchanged',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const messages=[],fake={ui_ref:()=> 'app:chat/ui',screen:()=> 'chat',path:()=> 'chat',epoch:()=>1,state_ref:()=> 'state',viewport_size:()=>[1280,800],
+    keyboard_visible:()=>false,editing:()=>true,auth_required:()=>false,presentation_kind:()=> 'chat',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
+    text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),vertices:()=>new Float32Array(),glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Chat',title:()=> 'Chat',controls:()=>[],tick:()=>false,take_sign_out:()=>false,
+    text_inputs:()=>JSON.stringify([{id:42,value:'bounded'}]),replace_text_input:()=>false,input_busy:()=>false,reload_ready:()=>true};
+  const context=workerContext({fake,performance:{now:()=>100},postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
+  const first=messages.find(m=>m.type==='frame');
+  await context.onmessage({data:{type:'text-input',epoch:1,id:42,text:'invalid',cursor:7,anchor:7,inputRevision:9}});
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token}});
+  const latest=messages.filter(m=>m.type==='frame').at(-1);assert.equal(latest.inputRevision,9);assert.equal(latest.inputs[0].value,'bounded');assert.equal(latest.vertices,undefined);
+  await context.onmessage({data:{type:'text-composition',epoch:1,id:42,active:true,inputRevision:10}});
+  assert.equal(vm.runInContext('reloadReady()',context),false,'unfinished native IME blocks hot replacement');
+  await context.onmessage({data:{type:'text-composition',epoch:1,id:42,active:false,inputRevision:11}});
+  assert.equal(vm.runInContext('reloadReady()',context),true);assert(!messages.some(m=>m.type==='error'));
 });

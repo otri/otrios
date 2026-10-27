@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "checks": [
+    "unified Home in both orientations",
+    "independent persistent guest cookies",
+    "live draft visibility and private clearing",
+    "bidirectional durable messages",
+    "64-avatar paging and profile rename",
+    "wrapped composer grows and scrolls its caret into view",
+    "native textarea focus, selection replacement and IME composition",
+    "no app keyboard in browsers",
+    "multiline paste",
+    "identity and history survive reload",
+    "commands and particles",
+    "member dialog close control",
+    "responsive retained transcript",
+    "WebGL loss/recovery replays resources and preserves identity"
+  ],
+  "release": "35d47b1a06a8635cc1159782e9414531893d94a7125e4feaa6158082c0a0ed42"
+}

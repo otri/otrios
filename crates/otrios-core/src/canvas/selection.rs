@@ -21,7 +21,15 @@ impl StateSelection {
     pub fn from_ui(ui: &Ui) -> Result<Self> {
         validate_schema(&ui.state_schema)?;
         if ui.selectors.len() > 128
-            || ui.handlers.len() > 128
+            || ui.handlers.len()
+                > if matches!(
+                    ui.presentation,
+                    Some(otrios_interfaces::canvas::Presentation::Chat)
+                ) {
+                    240
+                } else {
+                    128
+                }
             || ui.navigation.len() > 32
             || ui
                 .behavior

@@ -31,15 +31,25 @@ pub struct Keyboard {
     pub shift: Shift,
     pub page: u8,
     pub visible: bool,
+    disabled: bool,
     contact: Option<(u32, Option<u16>)>,
     repeat_at: Option<u64>,
 }
 impl Keyboard {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.disabled = !enabled;
+        if !enabled {
+            self.hide();
+        }
+    }
     pub fn cancel(&mut self) {
         self.contact = None;
         self.repeat_at = None;
     }
     pub fn focus(&mut self) {
+        if self.disabled {
+            return;
+        }
         self.cancel();
         if self.shift != Shift::Locked {
             self.shift = Shift::Off;
@@ -251,13 +261,38 @@ pub fn ascii_key(name: &str, shift: bool, caps: bool) -> Option<String> {
 }
 
 /// Example application-side editor, independent of the keyboard. Bounded UTF-8, grapheme boundaries.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TextBuffer {
     text: String,
     cursor: usize,
     anchor: usize,
+    max_bytes: usize,
+    multiline: bool,
+}
+impl Default for TextBuffer {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            cursor: 0,
+            anchor: 0,
+            max_bytes: 256,
+            multiline: false,
+        }
+    }
 }
 impl TextBuffer {
+    pub fn with_limit(max_bytes: usize) -> Self {
+        Self {
+            max_bytes: max_bytes.min(4096),
+            ..Self::default()
+        }
+    }
+    pub fn multiline(max_bytes: usize) -> Self {
+        Self {
+            multiline: true,
+            ..Self::with_limit(max_bytes)
+        }
+    }
     /// Replace a remote/shared value while preserving a valid local caret.
     pub fn replace(&mut self, text: &str) {
         self.text = text.into();
@@ -274,6 +309,25 @@ impl TextBuffer {
     }
     pub fn text(&self) -> &str {
         &self.text
+    }
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+    pub fn host_input(&self, id: u32, focused: bool) -> otrios_interfaces::keyboard::TextInput {
+        otrios_interfaces::keyboard::TextInput {
+            id,
+            value: self.text.clone(),
+            cursor: self.text[..self.cursor].encode_utf16().count() as u32,
+            anchor: self.text[..self.anchor].encode_utf16().count() as u32,
+            focused,
+            multiline: self.multiline,
+            secret: false,
+            max_bytes: self.max_bytes,
+            bounds: [0.; 4],
+            inset: [0.; 4],
+            font_size: 0.,
+            line_height: 0.,
+        }
     }
     /// Each rendered run maps back to source byte boundaries. The local caret
     /// marker occupies glyph width, but maps both sides to the same text boundary.
@@ -363,10 +417,53 @@ impl TextBuffer {
         let start = self.cursor.min(self.anchor);
         let end = self.cursor.max(self.anchor);
         match edit {
+            Edit::Replace {
+                text,
+                cursor,
+                anchor,
+                selection_only,
+            } => {
+                if (*selection_only && text != &self.text)
+                    || text.len() > self.max_bytes
+                    || text
+                        .chars()
+                        .any(|c| c.is_control() && !(self.multiline && matches!(c, '\n' | '\t')))
+                {
+                    return false;
+                }
+                // Reject split surrogate pairs and out-of-range offsets. Snap
+                // valid scalar boundaries back to complete graphemes.
+                let byte_at = |offset: u32| {
+                    let mut units = 0;
+                    for (byte, c) in text.char_indices() {
+                        if units == offset {
+                            return Some(byte);
+                        }
+                        units += c.len_utf16() as u32;
+                    }
+                    (units == offset).then_some(text.len())
+                };
+                let (Some(cursor), Some(anchor)) = (byte_at(*cursor), byte_at(*anchor)) else {
+                    return false;
+                };
+                let boundary = |byte| {
+                    text.grapheme_indices(true)
+                        .map(|(i, _)| i)
+                        .chain([text.len()])
+                        .take_while(|i| *i <= byte)
+                        .last()
+                        .unwrap_or(0)
+                };
+                self.cursor = boundary(cursor);
+                self.anchor = boundary(anchor);
+                self.text.clone_from(text);
+            }
             Edit::Commit(s)
                 if !s.contains('\0')
-                    && !s.chars().any(char::is_control)
-                    && self.text.len() - (end - start) + s.len() <= 256 =>
+                    && !s.chars().any(|c| {
+                        c.is_control() && !(self.multiline && matches!(c, '\n' | '\t'))
+                    })
+                    && self.text.len() - (end - start) + s.len() <= self.max_bytes =>
             {
                 self.text.replace_range(start..end, s);
                 self.cursor = start + s.len();
@@ -512,5 +609,45 @@ mod tests {
         t.edit(&Edit::Backspace);
         assert_eq!(t.text(), "");
         assert!(!t.edit(&Edit::Commit("x".repeat(257))));
+    }
+    #[test]
+    fn browser_replacement_validates_utf16_limits_and_complete_graphemes_atomically() {
+        let mut t = TextBuffer::multiline(24);
+        let replacement = |text: &str, cursor, anchor| Edit::Replace {
+            text: text.into(),
+            cursor,
+            anchor,
+            selection_only: false,
+        };
+        assert!(t.edit(&replacement("a😀e\u{301}\n", 1, 5)));
+        let host = t.host_input(1, true);
+        assert_eq!((host.cursor, host.anchor), (1, 5));
+        assert!(t.edit(&Edit::Commit("X".into())));
+        assert_eq!(
+            t.text(),
+            "aX\n",
+            "backward selection replaces the whole range"
+        );
+        for invalid in [
+            replacement("😀", 1, 1),
+            replacement("abc", 9, 9),
+            replacement(&"é".repeat(13), 0, 0),
+            replacement("a\0b", 0, 0),
+        ] {
+            assert!(!t.edit(&invalid));
+            assert_eq!(t.text(), "aX\n");
+        }
+        assert!(t.edit(&replacement("e\u{301}", 1, 1)));
+        assert_eq!(t.cursor(), 0, "scalar offsets snap to a grapheme boundary");
+        let mut single = TextBuffer::default();
+        assert!(!single.edit(&replacement("line\nbreak", 0, 0)));
+        single.replace("Remote edit");
+        assert!(!single.edit(&Edit::Replace {
+            text: "Obsolete value".into(),
+            cursor: 1,
+            anchor: 0,
+            selection_only: true
+        }));
+        assert_eq!(single.text(), "Remote edit");
     }
 }

@@ -90,3 +90,7 @@ required-features = ["canvas", "host-sync"]
 [[example]]
 name = "touch_replay"
 required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "cache_reuse_probe"
+required-features = ["direct"]

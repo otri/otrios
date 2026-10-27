@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Local single-line panning. Neither the viewport nor its animation is replicated.
+//! Local one-axis text panning. Neither the viewport nor its animation is replicated.
 use crate::dashboard::touch::Kinetics;
 #[derive(Clone, Default)]
 pub(super) struct TextViewport {

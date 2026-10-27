@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Browser adapter; Canvas state/guest memory live only in the worker's RAM.
-use otrios_core::canvas::Client;
-use otrios_core::dashboard::{
-    Mesh,
-    font::Font,
-    retained_text::{TextFrame, TextPresentation},
-    scene::Scene,
+use otrios_core::canvas::{
+    Client,
+    presentation::{Composer, Demand, Frame},
 };
+use otrios_core::dashboard::{Mesh, font::Font};
 use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
 use otrios_interfaces::{canvas::Presentation, keyboard::Edit};
 use std::sync::Arc;
@@ -15,20 +13,17 @@ use wasm_bindgen::prelude::*;
 #[derive(Default)]
 pub struct CanvasApp {
     font: Option<Arc<Font>>,
-    rendered: Option<(Arc<Scene>, TextFrame)>,
-    text_presentation: TextPresentation,
-    overlay_presentation: TextPresentation,
-    overlay: Option<TextFrame>,
-    geometry_versions: (u32, u32),
-    geometry_generation: u32,
-    document: Option<otrios_core::canvas::document::Frame>,
+    composer: Composer,
+    demand: Demand,
     inner: Client,
 }
 #[wasm_bindgen]
 impl CanvasApp {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self::default()
+        let mut app = Self::default();
+        app.inner.set_software_keyboard(false);
+        app
     }
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<bool, String> {
         self.inner.set_viewport([width, height])
@@ -101,12 +96,7 @@ impl CanvasApp {
     }
     pub fn clear_private(&mut self) {
         self.inner.clear_private();
-        self.rendered = None;
-        self.text_presentation = TextPresentation::default();
-        self.overlay_presentation = TextPresentation::default();
-        self.overlay = None;
-        self.geometry_versions = (0, 0);
-        self.document = None;
+        self.composer.clear();
     }
     pub fn input_busy(&self) -> bool {
         self.inner.input_busy()
@@ -116,6 +106,43 @@ impl CanvasApp {
     }
     pub fn editing(&self) -> bool {
         self.inner.editing()
+    }
+    pub fn text_inputs(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.text_inputs()?).map_err(|e| e.to_string())
+    }
+    pub fn replace_text_input(
+        &mut self,
+        epoch: u32,
+        id: u32,
+        text: String,
+        cursor: u32,
+        anchor: u32,
+        selection_only: bool,
+    ) -> Result<bool, String> {
+        self.inner.edit_text_input(
+            epoch,
+            id,
+            &otrios_interfaces::keyboard::Edit::Replace {
+                text,
+                cursor,
+                anchor,
+                selection_only,
+            },
+        )
+    }
+    pub fn text_input_key(&mut self, epoch: u32, id: u32, key: &str) -> Result<bool, String> {
+        if key == "Enter" {
+            self.inner
+                .edit_text_input(epoch, id, &otrios_interfaces::keyboard::Edit::Enter)
+        } else {
+            Ok(false)
+        }
+    }
+    pub fn blur_text_input(&mut self, epoch: u32, id: u32) -> Result<bool, String> {
+        self.inner.blur_text_input(epoch, id)
+    }
+    pub fn scroll_text_input(&mut self, epoch: u32, id: u32, offset: f32) -> Result<bool, String> {
+        self.inner.scroll_text_input(epoch, id, offset)
     }
     pub fn show_keyboard(&mut self) -> Result<bool, String> {
         self.inner.show_keyboard()
@@ -131,6 +158,24 @@ impl CanvasApp {
     }
     pub fn ink_outgoing(&mut self, now: f64) -> Vec<u8> {
         self.inner.ink_outgoing(now.max(0.) as u64)
+    }
+    pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
+        self.inner.chat_outgoing()
+    }
+    pub fn chat_info(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.chat_info()).map_err(|e| e.to_string())
+    }
+    pub fn chat_messages(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.chat_messages()).map_err(|e| e.to_string())
+    }
+    pub fn receive_chat(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        self.inner.receive_chat(bytes)
+    }
+    pub fn chat_disconnected(&mut self) {
+        self.inner.chat_disconnected();
+    }
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.inner.set_reduced_motion(reduced);
     }
     pub fn receive_ink(&mut self, bytes: &[u8], now: f64) -> Result<bool, String> {
         self.inner.receive_ink(bytes, now.max(0.) as u64)
@@ -158,6 +203,7 @@ impl CanvasApp {
             Some(Presentation::Motion { .. }) => "motion",
             Some(Presentation::TextScroll { .. }) => "text-scroll",
             Some(Presentation::TextDocument { .. }) => "text-document",
+            Some(Presentation::Chat) => "chat",
             Some(Presentation::Editor { .. }) => "input",
             Some(Presentation::TouchPad { .. }) => "touch-pad",
             _ => "none",
@@ -165,8 +211,9 @@ impl CanvasApp {
         .into()
     }
     pub fn reflow_frame(&self) -> Result<Vec<u8>, String> {
-        self.inner
-            .reflow_frame()?
+        self.frame()?
+            .reflow
+            .as_ref()
             .map(|f| f.encode())
             .transpose()
             .map(|f| f.unwrap_or_default())
@@ -245,45 +292,49 @@ impl CanvasApp {
     pub fn reload_ready(&self) -> bool {
         self.inner.reload_ready()
     }
-    pub fn vertices(&mut self) -> Result<Vec<f32>, String> {
-        Ok(self.compose()?.vertices.clone())
+    pub fn request_frame(&mut self) {
+        self.demand.request();
     }
-    pub fn glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
-        Ok(self.compose()?.glyph_vertices.clone())
+    pub fn begin_frame(&mut self) -> Option<u64> {
+        self.demand.begin()
     }
-    pub fn draws(&mut self) -> Result<Vec<u32>, String> {
-        Ok(self.compose()?.draws.clone())
+    pub fn frame_presented(&mut self, serial: u64) -> bool {
+        self.demand.presented(serial)
     }
-    pub fn text_generation(&mut self) -> Result<u32, String> {
-        self.compose()?;
-        Ok(self.geometry_generation)
+    /// Assemble once per renderer credit. All following getters read this snapshot.
+    pub fn prepare_frame(&mut self) -> Result<String, String> {
+        let font = self.font.as_ref().ok_or("Font resource not loaded")?;
+        let frame = self.composer.compose(&mut self.inner, font)?;
+        serde_json::to_string(
+            &serde_json::json!({"revisions": frame.revisions, "order": frame.order}),
+        )
+        .map_err(|e| e.to_string())
     }
-    pub fn text_styles(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
-        Ok(self
-            .rendered
-            .as_ref()
-            .ok_or("No rendered scene")?
-            .1
-            .styles
-            .as_ref()
-            .clone())
+    pub fn effect_vertices(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.effects.as_ref().clone())
     }
-    pub fn text_views(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
-        Ok(self
-            .rendered
-            .as_ref()
-            .ok_or("No rendered scene")?
-            .1
-            .views
-            .clone())
+    pub fn vertices(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.mesh.vertices.clone())
+    }
+    pub fn glyph_vertices(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.mesh.glyph_vertices.clone())
+    }
+    pub fn draws(&self) -> Result<Vec<u32>, String> {
+        Ok(self.frame()?.base.mesh.draws.clone())
+    }
+    pub fn text_generation(&self) -> Result<u32, String> {
+        Ok(self.frame()?.revisions.content)
+    }
+    pub fn text_styles(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.styles.as_ref().clone())
+    }
+    pub fn text_views(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.views.clone())
     }
     /// Metadata only on warm scrolls. This pins exactly the immutable resources
     /// named by the current transfer snapshot until the next metadata request.
     pub fn document_frame(&mut self) -> Result<String, String> {
-        self.document = self.inner.document_frame();
-        let Some(frame) = &self.document else {
+        let Some(frame) = &self.frame()?.document else {
             return Ok("null".into());
         };
         serde_json::to_string(&serde_json::json!({
@@ -299,43 +350,44 @@ impl CanvasApp {
         let version = version
             .parse::<u64>()
             .map_err(|_| "Invalid document version")?;
-        self.document
+        self.frame()?
+            .document
             .as_ref()
             .and_then(|f| f.draws.iter().find(|d| d.chunk.version == version))
             .map(|d| d.chunk.mesh.glyph_vertices.clone())
             .ok_or_else(|| "Document resource is outside the pinned transfer snapshot".into())
     }
-    pub fn overlay_vertices(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_vertices(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.mesh.vertices.clone()))
     }
-    pub fn overlay_glyph_vertices(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_glyph_vertices(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.mesh.glyph_vertices.clone()))
     }
-    pub fn overlay_draws(&mut self) -> Result<Vec<u32>, String> {
-        self.compose()?;
+    pub fn overlay_draws(&self) -> Result<Vec<u32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.mesh.draws.clone()))
     }
-    pub fn overlay_styles(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_styles(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.styles.as_ref().clone()))
     }
-    pub fn overlay_views(&mut self) -> Result<Vec<f32>, String> {
-        self.compose()?;
+    pub fn overlay_views(&self) -> Result<Vec<f32>, String> {
         Ok(self
+            .frame()?
             .overlay
             .as_ref()
             .map_or_else(Vec::new, |f| f.views.clone()))
@@ -344,7 +396,7 @@ impl CanvasApp {
         let font = Arc::new(Font::from_zstd(bytes, hash)?);
         self.inner.set_font(font.clone());
         self.font = Some(font);
-        self.rendered = None;
+        self.composer.clear();
         Ok(())
     }
     pub fn font_dimensions(&self) -> Result<Vec<u32>, String> {
@@ -464,33 +516,10 @@ impl CanvasApp {
 }
 
 impl CanvasApp {
-    fn compose(&mut self) -> Result<&Mesh, String> {
-        let scene = self.inner.scene()?;
-        if self
-            .rendered
-            .as_ref()
-            .is_none_or(|(old, _)| !Arc::ptr_eq(old, &scene))
-        {
-            self.rendered = None;
-            let font = self.font.as_ref().ok_or("Font resource not loaded")?;
-            let mesh = if let Some((before, after)) = self.inner.document_scene_parts(&scene)? {
-                self.overlay = Some(self.overlay_presentation.compose(&after, font));
-                self.text_presentation.compose(&before, font)
-            } else {
-                self.overlay = None;
-                self.text_presentation.compose(&scene, font)
-            };
-            let versions = (
-                mesh.generation,
-                self.overlay.as_ref().map_or(0, |f| f.generation),
-            );
-            if versions != self.geometry_versions {
-                self.geometry_generation = self.geometry_generation.wrapping_add(1).max(1);
-                self.geometry_versions = versions;
-            }
-            self.rendered = Some((scene, mesh));
-        }
-        Ok(&self.rendered.as_ref().ok_or("No rendered scene")?.1.mesh)
+    fn frame(&self) -> Result<&Frame, String> {
+        self.composer
+            .frame()
+            .ok_or_else(|| "Frame has not been prepared".into())
     }
 }
 

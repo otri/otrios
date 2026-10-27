@@ -71,7 +71,12 @@ paths through sliders, the dial and the touch pad.
 
 A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 
-The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home opens Test Playground and private Monitoring. Test Playground groups Components, Layouts, Long Document, Text Panning, Text Input, 2D Animations and 3D Animations through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
+The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home opens The Brass Relay, Test Playground and private Monitoring. Test Playground groups Components, Layouts, Long Document, Text Panning, Text Input, 2D Animations and 3D Animations through independently admitted UI/State references. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
+
+[The Brass Relay](docs/BRASS_RELAY.md) adds a shared native/browser lounge with
+retained history, live drafts, clockwork avatars, playful commands and
+Monitoring-backed moderation. [RFC 0022](docs/rfcs/0022-playful-shared-chat-room.md)
+records the design and qualification requirements.
 
 The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines the target ownership model, current implementation limits and concrete gates for deleting the earlier dashboard paths.
 

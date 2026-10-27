@@ -59,7 +59,7 @@ impl Server {
         // shipped read-only scroll demo has no State fields to exercise here.
         let mut catalog =
             decode_catalog(&std::fs::read(root.join("apps/catalog.flex")).unwrap()).unwrap();
-        assert_eq!(catalog.apps.len(), 10);
+        assert_eq!(catalog.apps.len(), 11);
         assert_eq!(
             catalog
                 .apps

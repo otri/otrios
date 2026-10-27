@@ -14,6 +14,8 @@ class FrozenSources(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo=pathlib.Path(tmp)
             for name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml']:(repo/name).write_text('test')
+            (repo/'assets/fonts/roboto').mkdir(parents=True)
+            for name in ['Roboto.ttf','OFL.txt']:(repo/'assets/fonts/roboto'/name).write_bytes(b'font')
             fixture=repo/'crates/otrios-core/tests/fixtures/touch/trace.json'
             fixture.parent.mkdir(parents=True);fixture.write_text('{"points":[]}')
             (repo/'private.json').write_text('excluded')
@@ -28,12 +30,12 @@ class SignedReleases(unittest.TestCase):
         subprocess.run([OPENSSL,'genpkey','-algorithm','ED25519','-out',str(self.key)],check=True,capture_output=True)
         subprocess.run([OPENSSL,'pkey','-in',str(self.key),'-pubout','-out',str(self.public)],check=True,capture_output=True)
         self.web=self.root/'web';(self.web/'pkg').mkdir(parents=True)
-        for file in ['index.html','app.js','state-worker.js','document-transfer.mjs','touch-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
+        for file in ['index.html','app.js','state-worker.js','document-transfer.mjs','touch-input.mjs','text-input.mjs','session.mjs','monitoring-session.mjs','artifact-cache.mjs','artifact-cache-worker.js','style.css','pkg/otrios_dashboard.js']:(self.web/file).write_text('test')
         (self.web/'pkg/otrios_dashboard_bg.wasm').write_bytes(b'\0asm\x01\0\0\0')
         elf=bytearray(52);elf[:6]=b'\x7fELF\x01\x01';elf[18:20]=(40).to_bytes(2,'little')
         self.native=self.root/'native';self.native.write_bytes(elf)
         (self.web/'fonts').mkdir();(self.web/'fonts/Roboto-Regular.otq.zst').write_bytes(b'font-test-resource')
-        for name in ['app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
+        for name in ['fonts/Roboto.ttf','fonts/OFL.txt','app-catalog.mjs','Slug-LICENSE.txt','gpu-scene.mjs','viewport.mjs','ui-update.mjs','navigation-timings.mjs','slug-shaders.mjs','font-resource.mjs','font-reference.mjs']:(self.web/name).write_text('test')
         (self.root/'apps').mkdir();(self.root/'apps/catalog.flex').write_bytes(b'test-catalog')
         self.out=self.root/'releases';self.cache=self.root/'cache';self.cache.mkdir()
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
@@ -317,7 +319,7 @@ class DirectHostContract(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
-            args=SimpleNamespace(runtime_dir=pathlib.Path(tmp),rotation=90,touch_matrix='0,1,0,-1,0,1',url='https://state.example',capture_first_frame=False)
+            args=SimpleNamespace(cache=pathlib.Path(tmp)/"cache",runtime_dir=pathlib.Path(tmp),rotation=90,touch_matrix='0,1,0,-1,0,1',url='https://state.example',capture_first_frame=False)
             with patch.object(agent.subprocess,'Popen')as launch:
                 agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='locked')
                 self.assertNotIn('--screen',launch.call_args.args[0])
