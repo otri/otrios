@@ -7,9 +7,11 @@ the design is agreed. Native and browser ship the same room and behavior.
 ## Experience
 
 Add **Chat Room** to Home alongside Test Playground and Monitoring. The current
-design direction is **The Brass Relay**: a Steampunk telegraph room with the topic
-“Good company. Questionable engineering.” Keep Home's compact icon, title and
-subheading cards. This is a shared app, rather than another Playground demo.
+design direction is **The Brass Relay**: a Steampunk telegraph room. Use one
+standard OTriOS sans-serif heading with **OTriOS** as the back-navigation
+breadcrumb and **The Brass Relay** as the title. Omit the separate “Chat Room”
+banner and room tagline. Keep Home's existing compact cards. This is a shared
+app, rather than another Playground demo.
 
 The user prefers the **Lounge** layout: a roomy message stream, an IRC-style
 member rail, a small live-draft stage and a compact composer. On narrow displays,
@@ -26,12 +28,12 @@ does not change the shared room mechanics. The original **Moon Lounge** Lunar
 mockup remains available for comparison.
 
 The Steampunk direction is **The Brass Relay**, `#brass-relay`: a shared telegraph
-room with brass fittings, copper accents, dark enamel and warm paper. Keep the
-chosen Lounge layout, using an engraved serif nameplate, restrained brass bevels,
-clockwork emblems and a telegraph-style incoming draft strip. Keep ornament sparse,
-touch targets large and timestamps readable; the genre must not make navigation
-or moderation cryptic. A separate Terminal/Telegraph Office variant is no longer
-needed for the Steampunk preview.
+room with brass fittings and copper accents on neutral charcoal/enamel surfaces.
+Keep the chosen Lounge layout and OTriOS heading typography; omit the green wash,
+serif nameplate and ornamental heading frame. Let restrained brass controls,
+fresh clockwork emblems and the incoming telegraph strip carry the theme. Keep
+touch targets large and timestamps readable. A separate Terminal/Telegraph Office
+variant is no longer needed for the Steampunk preview.
 
 Possible elements to compare with Lunar:
 
@@ -40,7 +42,7 @@ Possible elements to compare with Lunar:
 | Avatars | Space oddities, snacks, animals, tiny machines | Clockwork animals, airships, diving helmets, automatons, peculiar inventions |
 | Live drafts | Incoming transmissions with small caret sparks | Telegraph transmissions with copper sparks and an optional brief steam wisp |
 | Member list | On the moon; standard `@` Admin markers | Operators on the wire; the same `@` markers and explicit Admin labels |
-| Ambient character | Low gravity, snack jokes, confetti | Engraved headings, restrained mechanical details, dispatch-style notices |
+| Ambient character | Low gravity, snack jokes, confetti | OTriOS headings, restrained brass mechanical details, dispatch-style notices |
 | Command flavor | `/boop`, `/confetti` | `/salute` and `/steam` as bounded cosmetic alternatives |
 
 Avoid full-screen moving gears, permanent steam, physical dial controls for
@@ -56,10 +58,18 @@ preview shows the current direction without overwriting the Lunar source.
   airships, diving helmets, automatons and peculiar inventions. Palette choices
   are additional, not counted
   as different icons. Cache their masks; require no downloaded images or emoji
-  font support. The mockup previews a subset of this proposed collection.
-- Show avatar, name, timestamp and wrapped body for each message. Use `@` plus
-  an explicit Admin label for operators. Sort admins first, then normalized name;
-  do not reorder the roster on every keystroke. Tapping a member opens actions.
+  font support. The mockup currently uses temporary stock symbols; the custom
+  collection has not yet been drawn. Use a consistent 24px outline family with
+  readable small silhouettes, limited interior detail and optional brass/copper
+  accents. Start the art direction with a clockwork raven, airship, diving helmet,
+  brass goggles, pocket-watch automaton, piston teapot and winding-key beetle.
+  These must become reusable vector assets on both native and web, rather than
+  theme-dependent emoji or a remote icon-library requirement.
+- Show avatar, name, timestamp and wrapped body for each message. Member rows
+  show only the avatar and name, with `@` identifying an admin; remove all user
+  subtitles, invented occupations, statuses and separate “You / Edit” lines.
+  Explain `@` in Members and expose roles in accessible labels. Sort admins first,
+  then normalized name; do not reorder on every keystroke. Tapping opens actions.
 - Clearly disclose **Live drafts on — everyone can see what you type** before
   the first keystroke. A composer toggle permits private composition. Shared
   drafts are temporary, visually distinct from sent messages, and never history.
@@ -328,3 +338,18 @@ transport, authentication, persistence or native performance.
 The revised Steampunk preview keeps Lounge as the sole layout, with a compact
 composer and date-only separators. Its browser checks cover light/dark appearance,
 desktop/phone widths, profiles, private drafts, commands, effects and kick cleanup.
+
+The first standalone preview depended on a remote icon bundle; earlier checks
+injected that bundle and missed the user's blank avatars/close button. The local
+exports now embed their icon/tooltip dependencies. Verify them with remote
+requests blocked and without injecting icons. Keep the close button icon-only,
+with its existing accessible name. The current revision also checks the unified
+OTriOS heading/back breadcrumb and the absence of room/user subtitles. These
+preview dependencies are not a proposed dependency of the native app.
+
+The standalone Brass Relay export passed eight real Chrome responsive/theme
+cases and ten interactions with all HTTP(S) requests blocked, zero remote
+requests and no test-supplied icon injection. Verified actual avatar icons,
+the icon-only Close action, back/return navigation and empty privacy-toggle
+feedback. The empty composer remains 61px high at desktop size. Both local
+Lunar and Steampunk exports now carry their preview dependencies inline.
