@@ -95,3 +95,7 @@ required-features = ["canvas"]
 [[example]]
 name = "document_frames"
 required-features = ["canvas"]
+
+[[example]]
+name = "collection_cost"
+required-features = ["merkle"]
