@@ -18,6 +18,15 @@ repeat timing and previews stay local in RAM. A tap chooses the caret from actua
 font advances, grapheme boundaries and the displayed text window. Switching fields
 and repeated keys use the same responder/input implementation on both hosts.
 
+Text uses the full width between the field's 24-unit inner margins, with measured
+font advances and a clipped pixel viewport. Dragging pans independently of the
+caret, coasts on release and stops at either text boundary without overscroll.
+A tap places the caret in the panned text. Typing, deletion and left/right arrows
+quickly bring the caret back into view with up to 48 logical units of side context;
+idle frames and remote updates do not pull a manually previewed viewport back to
+the caret. Focus changes, cancellation and UI replacement stop active gestures.
+Viewport position and momentum remain local in RAM.
+
 The browser also forwards ordinary keyboard/text input and exposes invisible
 semantic controls for accessibility. It does not draw a second DOM text field.
 Physical touch uses the frame's existing accepted calibration and the same logical

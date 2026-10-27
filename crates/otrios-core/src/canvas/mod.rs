@@ -5,6 +5,7 @@ mod client;
 pub mod reflow;
 mod selection;
 mod state;
+mod text_viewport;
 mod transport;
 pub use behavior::Behavior;
 pub use client::{Client, ResourceUsage};

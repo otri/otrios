@@ -1641,7 +1641,7 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
     use otrios_interfaces::{
         keyboard::Edit,
         layout::Value,
-        scene::{PointerEvent, PointerPhase, Primitive},
+        scene::{PointerEvent, PointerPhase},
     };
     use std::sync::Arc;
     let font = Arc::new(
@@ -1682,7 +1682,7 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
             .node
             .children
             .iter()
-            .find(|n| matches!(n.primitive, Primitive::Text { .. }))
+            .find(|n| !n.children.is_empty())
             .unwrap();
         let position = [field.origin[0] + text.frame.x + x, field.origin[1] + 35.];
         for phase in [PointerPhase::Down, PointerPhase::Up] {
@@ -1728,7 +1728,7 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
 }
 
 #[test]
-fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
+fn text_hit_testing_preserves_graphemes_and_pixel_window_offsets() {
     use otrios_core::dashboard::{font::Font, keyboard::TextBuffer};
     use otrios_interfaces::keyboard::Edit;
     let font = Font::from_zstd(
@@ -1750,8 +1750,13 @@ fn text_hit_testing_preserves_graphemes_and_the_displayed_window_offset() {
     let long = "W".repeat(60);
     text.replace(&long);
     text.place_cursor(long.len());
-    assert_eq!(text.display(false).len(), 36);
-    text.place_cursor(text.hit_test(0., &font, 2., false));
+    // The complete run fills wide fields; no fixed character-count window.
+    assert_eq!(text.display(false).len(), 60);
+    let offset = font.text_width(&"W".repeat(24), 2.);
+    let (window, x) = text.window(offset + 0.5, 300., &font, 2., false);
+    assert!(window.len() > 10);
+    assert!(x < 0. && x > -font.text_width("W", 2.));
+    text.place_cursor(text.hit_test(offset, &font, 2., false));
     text.edit(&Edit::Commit("!".into()));
     assert_eq!(
         text.text(),
@@ -2973,4 +2978,198 @@ fn ui_cache_excludes_private_documents_and_is_bounded_across_revisions() {
         known_ui, None,
         "an admitted new hash cannot reuse a different revision"
     );
+}
+
+#[test]
+fn text_viewport_fills_inner_margins_and_pans_locally_until_an_edit_recovers_caret() {
+    use otrios_core::dashboard::{font::Font, render_scene_with_font};
+    use otrios_interfaces::{
+        keyboard::Edit,
+        layout::Value,
+        scene::{PointerEvent, PointerPhase, Primitive, Rect},
+    };
+    use std::sync::Arc;
+    let font = Arc::new(
+        Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let source: String = (0..60).map(|i| format!("W{i:02} ")).collect();
+    let ui = input_lab::ui(&[]);
+    let mut authority = Document::new(ui.state_schema.clone(), "text-viewport").unwrap();
+    authority
+        .set_typed(&[(1, Value::Text(source.clone()))])
+        .unwrap();
+    let mut c = Client::default();
+    c.set_font(font.clone());
+    activate_snapshot(
+        &mut c,
+        ui,
+        "text-viewport",
+        vec![],
+        false,
+        authority.save().unwrap(),
+    );
+    let mut session = Session::default();
+    pump(&mut c, &mut authority, &mut session);
+    c.activate(c.epoch(), node(&c, "First text field")).unwrap();
+    fn window(c: &Client) -> (Rect, String, f32) {
+        let scene = c.scene().unwrap();
+        let fields = scene.controls();
+        let field = fields
+            .iter()
+            .find(|n| {
+                n.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "First text field")
+            })
+            .unwrap();
+        let view = field
+            .node
+            .children
+            .iter()
+            .find(|n| !n.children.is_empty())
+            .unwrap();
+        assert_eq!(view.frame.x, 24.);
+        assert_eq!(view.frame.width, field.node.frame.width - 48.);
+        assert!(matches!(view.primitive, Primitive::Canvas { clip: true }));
+        let run = &view.children[0];
+        let Primitive::Text { value, .. } = &run.primitive else {
+            panic!("missing text run")
+        };
+        (
+            Rect::new(
+                field.origin[0] + view.frame.x,
+                field.origin[1] + view.frame.y,
+                view.frame.width,
+                view.frame.height,
+            ),
+            value.clone(),
+            run.frame.x,
+        )
+    }
+    fn offset(c: &Client, display: &str, font: &Font) -> f32 {
+        let (_, visible, x) = window(c);
+        let start = display
+            .find(&visible)
+            .expect("visible run belongs to full text");
+        font.text_width(&display[..start], 2.) - x
+    }
+    fn pointer(c: &mut Client, phase: PointerPhase, x: f32, y: f32) {
+        c.pointer(
+            c.epoch(),
+            PointerEvent {
+                id: 77,
+                phase,
+                position: [x, y],
+            },
+        )
+        .unwrap();
+    }
+    let display = format!("|{source}");
+    let (rect, visible, _) = window(&c);
+    assert!(
+        visible.len() > 38,
+        "long fields use more than the former fixed window"
+    );
+    let mesh = render_scene_with_font(&c.scene().unwrap(), &font);
+    let xs: Vec<_> = mesh
+        .glyph_vertices
+        .chunks_exact(16)
+        .filter(|v| v[1] >= rect.y && v[1] <= rect.y + rect.height)
+        .map(|v| v[0])
+        .collect();
+    assert!(xs.iter().all(|x| *x >= rect.x && *x <= rect.x + rect.width));
+    assert!(
+        xs.iter().any(|x| *x > rect.x + rect.width - 20.),
+        "text reaches the inner right margin"
+    );
+    let y = rect.y + 15.;
+    c.tick(100, 0).unwrap();
+    pointer(&mut c, PointerPhase::Down, rect.x + 500., y);
+    assert!(c.input_busy());
+    c.tick(150, 0).unwrap();
+    pointer(&mut c, PointerPhase::Move, rect.x + 400., y);
+    let dragged = offset(&c, &display, &font);
+    assert!((dragged - 100.).abs() < 0.1);
+    // A second pointer cannot steal capture or move the caret.
+    c.pointer(
+        c.epoch(),
+        PointerEvent {
+            id: 78,
+            phase: PointerPhase::Down,
+            position: [rect.x, y],
+        },
+    )
+    .unwrap();
+    assert!((offset(&c, &display, &font) - dragged).abs() < 0.1);
+    pointer(&mut c, PointerPhase::Up, rect.x + 400., y);
+    assert!(!c.input_busy());
+    c.tick(200, 0).unwrap();
+    assert!(
+        offset(&c, &display, &font) > dragged,
+        "release has momentum"
+    );
+    c.tick(2000, 0).unwrap();
+    let preview = offset(&c, &display, &font);
+    c.tick(4000, 0).unwrap();
+    assert!(
+        (offset(&c, &display, &font) - preview).abs() < 0.1,
+        "idle never snaps to caret"
+    );
+    assert!(
+        c.outgoing().unwrap().is_none(),
+        "panning emits no shared edits"
+    );
+    // Left at the unchanged beginning still recovers a manually hidden caret.
+    c.hardware_edit(&Edit::Left { select: false }).unwrap();
+    c.tick(4200, 0).unwrap();
+    assert!(
+        offset(&c, &display, &font) < 3.,
+        "caret recovered within 200ms: {}",
+        offset(&c, &display, &font)
+    );
+    c.tick(4500, 0).unwrap();
+    assert_eq!(offset(&c, &display, &font), 0.);
+    // Touch capture survives leaving the field and crossing the keyboard.
+    pointer(&mut c, PointerPhase::Down, rect.x + 500., y);
+    c.tick(4550, 0).unwrap();
+    pointer(&mut c, PointerPhase::Move, rect.x - 5000., 700.);
+    pointer(&mut c, PointerPhase::Up, rect.x - 5000., 700.);
+    c.tick(5000, 0).unwrap();
+    let end = font.text_width(&display, 2.) - rect.width;
+    assert!(
+        (offset(&c, &display, &font) - end).abs() < 0.1,
+        "hard stop at text end"
+    );
+    // A tap hit-tests the panned run; a drag never moved the original caret.
+    let tap = rect.x + 150.;
+    let mut expected = otrios_core::dashboard::keyboard::TextBuffer::default();
+    expected.replace(&source);
+    let at = expected.hit_test(150. + end, &font, 2., true);
+    expected.place_cursor(at);
+    expected.edit(&Edit::Commit("!".into()));
+    pointer(&mut c, PointerPhase::Down, tap, y);
+    pointer(&mut c, PointerPhase::Up, tap, y);
+    c.hardware_edit(&Edit::Commit("!".into())).unwrap();
+    assert_eq!(
+        c.typed_value(1).unwrap(),
+        Value::Text(expected.text().into())
+    );
+    pump(&mut c, &mut authority, &mut session);
+    assert_eq!(
+        authority.typed_value(1).unwrap(),
+        Value::Text(expected.text().into())
+    );
+    // A remote shorter value clamps presentation without following the caret.
+    authority
+        .set_typed(&[(1, Value::Text("short".into()))])
+        .unwrap();
+    pump(&mut c, &mut authority, &mut session);
+    c.tick(6000, 0).unwrap();
+    assert_eq!(window(&c).1, "short|");
+    assert_eq!(window(&c).2, 0.);
 }

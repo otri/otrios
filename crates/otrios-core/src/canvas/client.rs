@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! One admitted app activation. Durable state is authoritative; all client state is RAM only.
+use super::text_viewport::TextViewport;
 use super::*;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
@@ -40,6 +41,8 @@ struct Mount {
     visible: BTreeMap<u16, Value>,
     keyboard: Keyboard,
     editors: BTreeMap<u16, TextBuffer>,
+    text_views: BTreeMap<u16, TextViewport>,
+    font: Option<Arc<crate::dashboard::font::Font>>,
     focus: Option<u16>,
     ink: crate::dashboard::ink::Ink,
     now: u64,
@@ -190,7 +193,11 @@ impl Client {
         }
     }
     pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
-        self.font = Some(font);
+        self.font = Some(font.clone());
+        if let Some(m) = &mut self.active {
+            m.font = Some(font);
+            m.invalidate();
+        }
     }
     /// Controls presentation only; the host still verifies and revokes its cookie session.
     pub fn set_session_controls(&mut self, enabled: bool) -> bool {
@@ -377,7 +384,10 @@ impl Client {
     }
     pub fn input_busy(&self) -> bool {
         self.active.as_ref().is_some_and(|m| {
-            m.input.active() || m.keyboard_pointer.is_some() || m.order_drag.is_some()
+            m.input.active()
+                || m.keyboard_pointer.is_some()
+                || m.order_drag.is_some()
+                || m.text_views.values().any(TextViewport::active)
         })
     }
     pub fn value(&self, id: u16) -> Result<u16> {
@@ -792,6 +802,7 @@ impl Client {
                             writer: self.writer.ok_or("Missing writer nonce")?,
                         },
                     )?;
+                    candidate.font = self.font.clone();
                     candidate.viewport = self.viewport.unwrap_or([1280., 800.]);
                     resolve_scene(&candidate)?;
                     candidate.invalidate();
@@ -811,6 +822,10 @@ impl Client {
                         candidate.view = old.view.clone();
                         candidate.keyboard = old.keyboard.clone();
                         candidate.editors = old.editors.clone();
+                        candidate.text_views = old.text_views.clone();
+                        for view in candidate.text_views.values_mut() {
+                            view.cancel();
+                        }
                         candidate.focus = old.focus;
                         candidate.ink = old.ink.clone();
                         candidate.pad_preview = old.pad_preview.clone();
@@ -998,6 +1013,9 @@ impl Client {
             Operation::Back => return self.back(),
             Operation::Focus => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
+                for view in m.text_views.values_mut() {
+                    view.cancel();
+                }
                 m.focus = h.fields.first().copied();
                 m.keyboard.focus();
                 m.keyboard_pointer = None;
@@ -1088,6 +1106,19 @@ impl Client {
         {
             return Ok(changed);
         }
+        if self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
+            for view in m.text_views.values_mut() {
+                if view.owns(event.id) {
+                    view.cancel();
+                    return Ok(true);
+                }
+            }
+        }
+        if self.requested.as_ref().is_none_or(|r| r.reconnecting)
+            && let Some(changed) = text_pointer(m, &scene, event)?
+        {
+            return Ok(changed);
+        }
         let key = scene
             .hit_path(event.position)
             .iter()
@@ -1144,54 +1175,6 @@ impl Client {
             return Ok(true);
         }
         let delivery = m.input.dispatch(scene.clone(), event);
-        // Activate responders retain release-inside/cancellation semantics. Resolve
-        // the caret against the displayed field before focus adds its local marker.
-        let caret = if self.requested.is_none()
-            && let Some(Action::AppEvent(control)) = delivery.action
-            && let Some(handler) =
-                m.ui.handlers
-                    .iter()
-                    .find(|h| h.control == control && h.operation == Operation::Focus)
-            && let Some(field) = handler.fields.first()
-            && let Some(editor) = m.editors.get(field)
-            && let Some(responder) = delivery.responder
-            && let Some(path) = scene.path(responder)
-        {
-            fn bound_text(n: &SceneNode, value: &str) -> Option<u32> {
-                if matches!(&n.primitive, otrios_interfaces::scene::Primitive::Text { value: v, .. } if v == value)
-                {
-                    return Some(n.id);
-                }
-                n.children.iter().find_map(|n| bound_text(n, value))
-            }
-            let focused = m.focus == Some(*field);
-            let text = editor.display(focused);
-            let located = path
-                .last()
-                .and_then(|owner| bound_text(owner.node, &text))
-                .and_then(|id| scene.path(id));
-            if let Some(text) = located.as_ref().and_then(|p| p.last())
-                && let otrios_interfaces::scene::Primitive::Text { scale, .. } = text.node.primitive
-            {
-                let font = self
-                    .font
-                    .as_ref()
-                    .ok_or("Font resource required for caret placement")?;
-                Some((
-                    *field,
-                    editor.hit_test(
-                        (event.position[0] - text.origin[0]) / text.scale,
-                        font,
-                        scale as f32,
-                        focused,
-                    ),
-                ))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
         let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
         if pad && self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
@@ -1234,15 +1217,6 @@ impl Client {
             m.pad_preview.clear();
         }
         let changed = self.deliver(delivery)? || pad;
-        if changed
-            && let Some((field, cursor)) = caret
-            && let Some(m) = &mut self.active
-            && m.focus == Some(field)
-            && let Some(editor) = m.editors.get_mut(&field)
-        {
-            editor.place_cursor(cursor);
-            m.invalidate();
-        }
         if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel)
             && let Some(m) = &mut self.active
         {
@@ -1325,6 +1299,9 @@ impl Client {
     pub fn show_keyboard(&mut self) -> Result<bool> {
         let m = self.active.as_mut().ok_or("No Canvas")?;
         if let Some(Presentation::Editor { fields }) = &m.ui.presentation {
+            for view in m.text_views.values_mut() {
+                view.cancel();
+            }
             m.focus = m.focus.or_else(|| fields.first().copied());
             m.keyboard.focus();
             m.keyboard_pointer = None;
@@ -1349,6 +1326,9 @@ impl Client {
                     m.focus = Some(
                         fields[(i + if *backward { fields.len() - 1 } else { 1 }) % fields.len()],
                     );
+                    for view in m.text_views.values_mut() {
+                        view.cancel();
+                    }
                     m.keyboard.focus();
                     m.keyboard_pointer = None;
                     m.input.cancel_all();
@@ -1357,6 +1337,9 @@ impl Client {
                 }
             }
             Edit::Enter => {
+                for view in m.text_views.values_mut() {
+                    view.cancel();
+                }
                 m.keyboard.hide();
                 m.keyboard_pointer = None;
                 m.input.cancel_all();
@@ -1366,18 +1349,34 @@ impl Client {
             _ => {}
         }
         let editor = m.editors.get_mut(&field).ok_or("Undeclared editor")?;
-        if !editor.edit(edit) {
-            return Ok(false);
+        let changed = editor.edit(edit);
+        if changed {
+            m.doc
+                .set_typed(&[(field, Value::Text(editor.text().into()))])?;
+            m.refresh()?;
+            m.invalidate();
         }
-        m.doc
-            .set_typed(&[(field, Value::Text(editor.text().into()))])?;
-        m.refresh()?;
-        m.invalidate();
-        Ok(true)
+        // Even an arrow at a text boundary must recover a manually panned caret.
+        if matches!(
+            edit,
+            Edit::Commit(_)
+                | Edit::Backspace
+                | Edit::Left { .. }
+                | Edit::Right { .. }
+                | Edit::SelectAll
+        ) {
+            update_text_views(m, Some(field))?;
+            m.invalidate();
+            return Ok(true);
+        }
+        Ok(changed)
     }
     pub fn cancel(&mut self) -> Result<bool> {
         if let Some(m) = &mut self.active {
             m.input.cancel_all();
+            for view in m.text_views.values_mut() {
+                view.cancel();
+            }
             m.order_drag = None;
             m.doc.flush_pending();
             m.keyboard.cancel();
@@ -1394,6 +1393,9 @@ impl Client {
         if let Some(m) = &mut self.active
             && m.keyboard.visible
         {
+            for view in m.text_views.values_mut() {
+                view.cancel();
+            }
             m.keyboard.hide();
             m.keyboard_pointer = None;
             m.input.cancel_all();
@@ -1420,7 +1422,12 @@ impl Client {
                 .iter()
                 .any(|s| matches!(s.projection, Projection::WindowSignal { .. }));
         m.wall = wall;
-        let changed = m.ink.tick(now) || clock;
+        update_text_views(m, None)?;
+        let mut scrolled = false;
+        for view in m.text_views.values_mut() {
+            scrolled |= view.tick(now);
+        }
+        let changed = m.ink.tick(now) || clock || scrolled;
         let edit = m.keyboard.tick(now);
         if changed {
             m.invalidate();
@@ -1809,7 +1816,12 @@ fn qualify(
         scene: OnceLock::new(),
         visible: BTreeMap::new(),
         keyboard: Keyboard::default(),
+        text_views: editors
+            .keys()
+            .map(|id| (*id, TextViewport::default()))
+            .collect(),
         editors,
+        font: None,
         focus: None,
         ink: Default::default(),
         now: 0,
@@ -1917,6 +1929,7 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
     let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
     let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
     let mut root = scene.root().clone();
+    present_text_views(m, &scene, &mut root);
     if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
@@ -2148,4 +2161,211 @@ fn validate_responders(ui: &Ui, blueprint: &otrios_interfaces::layout::Blueprint
         node(&t.root, ui)?
     }
     Ok(())
+}
+
+// Keep the authored text node's identity as the viewport. Its rendered child
+// uses a reserved local presentation ID, and never becomes a new responder.
+const TEXT_RUN_ID: u32 = 4_100_000_000;
+struct EditorFrame {
+    field: u16,
+    node: u32,
+    origin: [f32; 2],
+    factor: f32,
+    width: f32,
+    scale: f32,
+    responder: u32,
+}
+fn editor_frames(m: &Mount, scene: &Scene) -> Vec<EditorFrame> {
+    fn text_node(n: &SceneNode, value: &str) -> Option<u32> {
+        if matches!(&n.primitive, otrios_interfaces::scene::Primitive::Text { value: v, .. } if v == value || n.id >= TEXT_RUN_ID)
+        {
+            return Some(n.id);
+        }
+        n.children.iter().find_map(|n| text_node(n, value))
+    }
+    scene
+        .controls()
+        .into_iter()
+        .filter_map(|owner| {
+            let Some(TouchResponder::Activate(Action::AppEvent(control))) = owner.node.responder
+            else {
+                return None;
+            };
+            let field = *m
+                .ui
+                .handlers
+                .iter()
+                .find(|h| h.control == control && h.operation == Operation::Focus)?
+                .fields
+                .first()?;
+            let editor = m.editors.get(&field)?;
+            let id = text_node(owner.node, &editor.display(m.focus == Some(field)))?;
+            let path = scene.path(id)?;
+            let text = path.last()?;
+            let otrios_interfaces::scene::Primitive::Text { scale, .. } = text.node.primitive
+            else {
+                return None;
+            };
+            let viewport = if id >= TEXT_RUN_ID {
+                path.get(path.len() - 2)?
+            } else {
+                text
+            };
+            Some(EditorFrame {
+                field,
+                node: viewport.node.id,
+                origin: viewport.origin,
+                factor: viewport.scale,
+                width: viewport.node.frame.width,
+                scale: scale as f32,
+                responder: owner.node.id,
+            })
+        })
+        .collect()
+}
+fn update_text_views(m: &mut Mount, follow: Option<u16>) -> Result<()> {
+    if m.editors.is_empty() {
+        return Ok(());
+    }
+    let Some(font) = m.font.clone() else {
+        return Ok(());
+    };
+    let scene = cached_scene(m)?;
+    let mut clamped = false;
+    for frame in editor_frames(m, &scene) {
+        let editor = &m.editors[&frame.field];
+        let view = m
+            .text_views
+            .get_mut(&frame.field)
+            .ok_or("Missing text viewport")?;
+        let marker = if m.focus == Some(frame.field) {
+            font.text_width("|", frame.scale)
+        } else {
+            0.
+        };
+        let old = view.offset;
+        view.bounds(
+            font.text_width(editor.text(), frame.scale) + marker,
+            frame.width,
+        );
+        clamped |= old != view.offset;
+        if follow == Some(frame.field) {
+            view.follow(
+                editor.caret_x(&font, frame.scale),
+                marker,
+                frame.width,
+                m.now,
+            );
+        }
+    }
+    if clamped {
+        m.invalidate();
+    }
+    Ok(())
+}
+fn present_text_views(m: &Mount, scene: &Scene, root: &mut SceneNode) {
+    fn wrap(n: &mut SceneNode, frame: &EditorFrame, m: &Mount) {
+        if n.id == frame.node {
+            let editor = &m.editors[&frame.field];
+            let offset = m.text_views.get(&frame.field).map_or(0., |v| v.offset);
+            let (value, x) = if let Some(font) = &m.font {
+                editor.window(
+                    offset,
+                    frame.width,
+                    font,
+                    frame.scale,
+                    m.focus == Some(frame.field),
+                )
+            } else {
+                (editor.display(m.focus == Some(frame.field)), 0.)
+            };
+            let mut text = n.clone();
+            text.id = TEXT_RUN_ID + u32::from(frame.field);
+            text.frame.x = x;
+            text.frame.y = 0.;
+            text.frame.width = (frame.width - x + 1.).clamp(1., 8192.);
+            if let otrios_interfaces::scene::Primitive::Text { value: v, .. } = &mut text.primitive
+            {
+                *v = value;
+            }
+            n.primitive = otrios_interfaces::scene::Primitive::Canvas { clip: true };
+            n.children = vec![text];
+        } else {
+            for c in &mut n.children {
+                wrap(c, frame, m);
+            }
+        }
+    }
+    for frame in editor_frames(m, scene) {
+        wrap(root, &frame, m);
+    }
+}
+fn text_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Option<bool>> {
+    let frames = editor_frames(m, scene);
+    let owner = m
+        .text_views
+        .iter()
+        .find(|(_, v)| v.owns(event.id))
+        .map(|(id, _)| *id);
+    let frame = if let Some(field) = owner {
+        frames.into_iter().find(|f| f.field == field)
+    } else if event.phase == PointerPhase::Down {
+        let path = scene.hit_path(event.position);
+        frames
+            .into_iter()
+            .find(|f| path.iter().any(|n| n.node.id == f.responder))
+    } else {
+        None
+    };
+    let Some(frame) = frame else { return Ok(None) };
+    // A second contact must never steal an existing text or keyboard gesture.
+    if owner.is_none()
+        && (m.text_views.values().any(TextViewport::active) || m.keyboard_pointer.is_some())
+    {
+        return Ok(Some(false));
+    }
+    update_text_views(m, None)?;
+    let view = m
+        .text_views
+        .get_mut(&frame.field)
+        .ok_or("Missing text viewport")?;
+    let x = (event.position[0] - frame.origin[0]) / frame.factor;
+    match event.phase {
+        PointerPhase::Down => view.down(event.id, x, m.now),
+        PointerPhase::Move => view.motion(x, m.now),
+        PointerPhase::Cancel => view.cancel(),
+        PointerPhase::Up => {
+            view.motion(x, m.now);
+            let dragged = view.up(m.now);
+            if !dragged
+                && scene
+                    .hit_path(event.position)
+                    .iter()
+                    .any(|n| n.node.id == frame.responder)
+            {
+                let font = m
+                    .font
+                    .as_ref()
+                    .ok_or("Font resource required for caret placement")?;
+                let editor = m.editors.get_mut(&frame.field).ok_or("Missing editor")?;
+                let cursor = editor.hit_test(
+                    x + view.offset,
+                    font,
+                    frame.scale,
+                    m.focus == Some(frame.field),
+                );
+                editor.place_cursor(cursor);
+                // Focus changes stop other pans but do not request caret following.
+                for v in m.text_views.values_mut() {
+                    v.cancel();
+                }
+                m.focus = Some(frame.field);
+                m.keyboard.focus();
+                m.keyboard_pointer = None;
+                m.input.cancel_all();
+            }
+        }
+    }
+    m.invalidate();
+    Ok(Some(true))
 }
