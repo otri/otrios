@@ -148,7 +148,8 @@ pub fn launch_card(
     component(
         [384., 176.],
         vec![
-            rounded_rect(CARD).pin_edges(0.).corner_radius(20.0.into()),
+            rounded_rect(TRACK).pin_edges(0.).corner_radius(20.0.into()),
+            rounded_rect(CARD).pin_edges(1.5).corner_radius(18.5.into()),
             launch_icon(icon),
             text(title)
                 .frame([24., 84., 336., 32.])

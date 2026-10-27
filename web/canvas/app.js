@@ -5,13 +5,13 @@ import {SceneRenderer} from './gpu-scene.mjs';
 import {DocumentLayers} from './document-transfer.mjs';
 import {TextInputs} from './text-input.mjs';
 import {PointerSamples,sampleTime} from './touch-input.mjs';
-import {layoutViewport,pointerPosition,semanticBounds} from './viewport.mjs';
+import {layoutViewport,chatViewport,pointerPosition,semanticBounds} from './viewport.mjs';
 import {loadFontResource} from './font-resource.mjs';
 import {loadAppRelease} from './app-catalog.mjs';
 import {connectSession,bridgeWorker} from './session.mjs';
 const timingToolsReady=new URL(location.href).searchParams.get('timings')==='1'?import('./navigation-timings.mjs'):null;
 let timingTools=null,timings=null;
-const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls');
+const canvas=document.querySelector('#view'),controlsLayer=document.querySelector('#controls'),stageElement=document.querySelector('.screen');
 const login=document.querySelector('#monitoring-login'),form=document.querySelector('#monitoring-form'),loginError=document.querySelector('#login-error');
 let monitoringAuth={authenticated:false},modelAuthRequired=false;
 function showAuth(){const needed=modelAuthRequired&&!monitoringAuth.authenticated;if(needed&&!login.open)login.showModal();else if(!needed&&login.open)login.close();document.querySelector('#login-submit').disabled=!!monitoringAuth.pending;loginError.textContent=monitoringAuth.error||'';}
@@ -78,16 +78,24 @@ try{
   let pendingFrameAck=null;
   let hudRevision=-1,dirty=true,lastFontCache='',fontProbed=false;const fontProbeRequested=['1','direct'].includes(query.get('font-probe'));const controls=new Map();
   function resize(){if(graphicsLost||gl.isContextLost())return;try{dirty=renderer.fitCanvas(canvas)||dirty;}catch(error){fatal(error);}}
-  let layoutWidth=innerWidth;
-  const fitVisibleViewport=()=>{const v=window.visualViewport;if(v&&v.scale>1.01)return;document.documentElement.style.setProperty('--visible-height',`${v?.height||innerHeight}px`);document.documentElement.style.setProperty('--visible-width',`${v?.width||innerWidth}px`);document.documentElement.style.setProperty('--visible-top',`${v?.offsetTop||0}px`);document.documentElement.style.setProperty('--visible-left',`${v?.offsetLeft||0}px`);resize();};
+  let layoutWidth=innerWidth,baseViewport=desiredViewport;
+  function requestViewport(next){
+    if(next.every((n,i)=>n===desiredViewport[i]))return;
+    desiredViewport=next;moves.clear();
+    for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();
+    command({type:'viewport',size:next});
+  }
+  const fitVisibleViewport=()=>{
+    const v=window.visualViewport;if(v&&v.scale>1.01)return;
+    const width=v?.width||innerWidth,height=v?.height||innerHeight;
+    document.documentElement.style.setProperty('--visible-height',`${height}px`);document.documentElement.style.setProperty('--visible-width',`${width}px`);document.documentElement.style.setProperty('--visible-top',`${v?.offsetTop||0}px`);document.documentElement.style.setProperty('--visible-left',`${v?.offsetLeft||0}px`);
+    if(model)requestViewport(model.presentation==='chat'?chatViewport(width,height):baseViewport);
+    resize();
+  };
   window.visualViewport?.addEventListener('resize',fitVisibleViewport);window.visualViewport?.addEventListener('scroll',fitVisibleViewport);fitVisibleViewport();
   resize();new ResizeObserver(resize).observe(canvas);window.addEventListener('resize',()=>{
-    resize();const next=document.activeElement?.matches('.canvas-editor')&&innerWidth===layoutWidth?desiredViewport:layoutViewport(innerWidth,innerHeight);layoutWidth=innerWidth;
-    if(next.some((n,i)=>n!==desiredViewport[i])){
-      desiredViewport=next;moves.clear();
-      for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();
-      command({type:'viewport',size:next});
-    }
+    if(!document.activeElement?.matches('.canvas-editor')||innerWidth!==layoutWidth)baseViewport=layoutViewport(innerWidth,innerHeight);
+    layoutWidth=innerWidth;fitVisibleViewport();
   });
   function accept(f){
     if(graphicsLost||gl.isContextLost()||f.graphicsGeneration!==graphicsGeneration){worker.postMessage({type:'frame-ack',serial:f.serial,documentToken:f.document?.token});return;}
@@ -95,7 +103,7 @@ try{
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){textInputs.clear();for(const b of controls.values())b.remove();controls.clear();}
     if(f.document){documentLayers.accept(f.document);revision.dataset.documentLoading=String(documentLayers.loading);revision.dataset.documentResources=String(documentLayers.layers.size);}
-    model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();
+    model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();stageElement.dataset.presentation=f.presentation;fitVisibleViewport();
     if(f.effects)hudLayer.setFrame({vertices:f.effects});
     if(f.reflow)model.reflow=!!f.reflow.length;
     if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);
@@ -103,7 +111,7 @@ try{
     if(f.overlayVertices)motionLayer.setFrame({vertices:f.overlayVertices,glyphVertices:f.overlayGlyphVertices,draws:f.overlayDraws,textStyles:f.overlayStyles});
     if(f.overlayViews)motionLayer.setTextViews(f.overlayViews);
     if(f.controls){
-      renderer.setLogicalSize(...f.extent);document.querySelector('.screen').style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
+      renderer.setLogicalSize(...f.extent);stageElement.style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));
       canvas.dataset.logicalSize=f.extent.join('x');resize();
       presenter.set_reflow(f.reflow||new Uint8Array(),performance.now());
 

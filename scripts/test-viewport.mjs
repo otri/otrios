@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {layoutViewport,pointerPosition,semanticBounds} from '../web/shared/viewport.mjs';
+import {layoutViewport,chatViewport,pointerPosition,semanticBounds} from '../web/shared/viewport.mjs';
 test('available orientation selects a supported logical viewport independently of DPR',()=>{
   assert.deepEqual(layoutViewport(1440,900),[1280,800]);
   assert.deepEqual(layoutViewport(768,1024),[800,1280]);
@@ -14,4 +14,14 @@ test('portrait pointer and accessibility bounds describe the same rendered recta
   assert.deepEqual(semanticBounds([200,320,400,640],extent),{left:'25%',top:'25%',width:'50%',height:'50%'});
   assert.deepEqual(pointerPosition(10,660,screen,extent),[-20,1300], 'captured pointers preserve positions outside the canvas');
   assert.deepEqual(pointerPosition(220,330,screen,[1280,800]),[640,400], 'legacy scene extent remains authoritative');
+});
+
+test('chat preserves full width and UI scale as the visual keyboard changes height',()=>{
+  assert.deepEqual(chatViewport(390,844),[800,1731]);
+  assert.deepEqual(chatViewport(390,420),[800,861]);
+  assert.deepEqual(chatViewport(390,300),[800,615]);
+  assert.deepEqual(chatViewport(844,390),[800,369]);
+  assert.deepEqual(chatViewport(1280,800),[1280,800]);
+  assert.deepEqual(chatViewport(800,1280),[800,1280]);
+  assert.throws(()=>chatViewport(NaN,420));
 });

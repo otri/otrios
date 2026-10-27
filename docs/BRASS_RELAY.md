@@ -5,9 +5,11 @@ Open **The Brass Relay** on Home, or `/brass-relay`, to join the shared lounge.
 Browser and native use the same Rust presentation, text reader and touch physics.
 Home shares its neutral charcoal surfaces, OTriOS headings and restrained brass
 and copper accents. The Lunar design preview remains preserved for comparison.
+See the shared [visual language](VISUAL_DESIGN.md) and
+[visual refresh qualification](experiments/visual-refresh-2026-10-27.md).
 
 You join with a random funny name. **You** opens your calling card: rename yourself,
-pick from 64 clockwork emblems and choose Off, Quiet or Playful effects. **Members**
+pick from 64 distinct copper-line avatars and choose Off, Quiet or Playful effects. **Members**
 opens the operator list; wide screens also have a member rail. `@` marks a member
 with an authenticated administrator connection. Member rows have no subtitles.
 

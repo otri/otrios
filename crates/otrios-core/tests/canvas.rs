@@ -3622,3 +3622,73 @@ fn browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits() 
         "unrelated control cannot edit the new app"
     );
 }
+
+#[test]
+fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_controls() {
+    use otrios_interfaces::scene::Primitive;
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    for height in [861., 615., 369.] {
+        let mut c = Client::default();
+        c.set_font(font.clone());
+        c.set_software_keyboard(false);
+        activate(&mut c, brass_relay::ui(&[]), "phone-height", vec![]);
+        c.set_viewport([800., height]).unwrap();
+        let check = |c: &Client| {
+            let scene = c.scene().unwrap();
+            for control in scene.controls() {
+                assert!(control.origin[0] >= 0. && control.origin[1] >= 0.);
+                assert!(control.origin[0] + control.node.frame.width * control.scale <= 800.1);
+                assert!(
+                    control.origin[1] + control.node.frame.height * control.scale <= height + 0.1,
+                    "{} at height {height}",
+                    control.node.id
+                );
+            }
+        };
+        let scene = c.scene().unwrap();
+        let back = scene.path(node(&c, "Back to OTriOS")).unwrap();
+        let back = back.last().unwrap();
+        let label = back
+            .node
+            .children
+            .iter()
+            .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="< OTriOS"))
+            .unwrap();
+        let title = scene
+            .root()
+            .children
+            .iter()
+            .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="The Brass Relay"))
+            .unwrap();
+        let Primitive::Text {
+            scale: back_scale, ..
+        } = label.primitive
+        else {
+            unreachable!()
+        };
+        let Primitive::Text {
+            scale: title_scale, ..
+        } = title.primitive
+        else {
+            unreachable!()
+        };
+        assert_eq!(back_scale, title_scale);
+        assert!((back.origin[1] + label.frame.y - title.frame.y).abs() < 0.01);
+        check(&c);
+        c.activate(c.epoch(), node(&c, "Message composer")).unwrap();
+        c.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
+            "A long wrapped line for a short visual viewport. ".repeat(12),
+        ))
+        .unwrap();
+        check(&c);
+        c.activate(c.epoch(), node(&c, "Edit profile")).unwrap();
+        check(&c);
+        assert_eq!(c.text_inputs().unwrap().len(), 1);
+    }
+}

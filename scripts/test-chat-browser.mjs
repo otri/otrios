@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Optional real Chromium/WebGL acceptance against a disposable local authority.
 import assert from 'node:assert/strict';
+import {chatViewport} from '../web/shared/viewport.mjs';
 import {spawn} from 'node:child_process';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -28,11 +29,11 @@ try{
   });
   const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout: ${method}`));},30000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
   const evaluate=async(session,expression)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-  const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
+  const wait=async(session,expression)=>{for(let i=0;i<200;i++){if(await evaluate(session,expression))return;await new Promise(r=>setTimeout(r,100));}const shot=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,'timeout.png'),Buffer.from(shot.data,'base64'));await writeFile(join(output,'timeout.json'),JSON.stringify(await evaluate(session,"({path:location.pathname,revision:{...document.querySelector('#revision')?.dataset},timings:document.querySelector('#timing-report')?.value,extent:document.querySelector('#view')?.dataset.logicalSize})"),null,2));throw Error('Browser condition timed out: '+expression+'; '+await evaluate(session,"document.querySelector('#error')?.textContent"));};
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
   const routes={'component-playground':'test-playground/components','layout-lab':'test-playground/layouts','layout-document':'test-playground/long-document','layout-text-scroll':'test-playground/text-panning','input-lab':'test-playground/text-input','animation-lab':'test-playground/animations-two-d','three-d-lab':'test-playground/animations-three-d'};
-  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,['input-lab','animation-lab','three-d-lab'].includes(route)?'1280x800':width<height?'800x1280':'1280x800');return sessionId;};
+  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,route==='brass-relay'?chatViewport(width,height).join('x'):['input-lab','animation-lab','three-d-lab'].includes(route)?'1280x800':width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{let control=(await controls(session)).find(c=>c.label===label);if(!control&&(await controls(session)).some(c=>c.label==='Test Playground')){await click(session,'Test Playground','test-playground',extent);control=(await controls(session)).find(c=>c.label===label);}assert(control,label);const [x,y,w,h]=control.bounds;
@@ -118,7 +119,29 @@ try{
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Dispatch after graphics recovery '+nickname)})`);
   await control(a,'Back to OTriOS');await ready(a,'home','800x1280');await screenshot(a,'home-portrait');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
-  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','native textarea focus, selection replacement and IME composition','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
+  const phone=a;await metrics(phone,390,844);await ready(phone,'home','800x1280');
+  await click(phone,'The Brass Relay','brass-relay',chatViewport(390,844).join('x'));await online(phone);
+  await control(phone,'Message composer');await paste(phone,'The viewport keeps its width.');
+  await evaluate(phone,`(()=>{const v=window.visualViewport;window.__nativeViewport=v;window.__availableViewport={width:390,height:844,offsetTop:0,offsetLeft:0,scale:1};Object.defineProperty(window,'visualViewport',{configurable:true,get:()=>window.__availableViewport});window.__editor=document.activeElement;window.__editor.setSelectionRange(4,8);window.__editor.dispatchEvent(new Event('select'));return true;})()`);
+  await new Promise(r=>setTimeout(r,150));
+  const phoneBefore=await evaluate(phone,"({width:document.querySelector('#view').getBoundingClientRect().width,value:window.__editor.value,selection:[window.__editor.selectionStart,window.__editor.selectionEnd]})");
+  const immediateWidth=await evaluate(phone,"Object.assign(window.__availableViewport,{height:420,offsetTop:50});window.__nativeViewport.dispatchEvent(new Event('resize'));document.querySelector('#view').getBoundingClientRect().width");
+  assert(Math.abs(immediateWidth-390)<1,'horizontal scale remains steady before the worker acknowledges reflow');
+  // A mocked VisualViewport has no native compositor resize. Present once to
+  // return the held renderer credit before waiting for the reflowed scene.
+  await call('Page.bringToFront',{},phone);await call('Page.captureScreenshot',{format:'png'},phone);
+  await ready(phone,'brass-relay','800x861');
+  const phoneAfter=await evaluate(phone,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {width:r.width,top:r.top,bottom:r.bottom,value:window.__editor.value,selection:[window.__editor.selectionStart,window.__editor.selectionEnd],focused:document.activeElement===window.__editor,layoutHeight:innerHeight};})()");
+  assert(Math.abs(phoneAfter.width-390)<1);assert(Math.abs(phoneAfter.width-phoneBefore.width)<1);
+  assert(phoneAfter.top>=49&&phoneAfter.bottom<=471);assert.equal(phoneAfter.layoutHeight,844,'only the visual viewport changed');
+  assert.equal(phoneAfter.value,phoneBefore.value);assert.deepEqual(phoneAfter.selection,phoneBefore.selection);assert(phoneAfter.focused);
+  await screenshot(phone,'phone-keyboard-reflow');
+  await evaluate(phone,"Object.assign(window.__availableViewport,{height:844,offsetTop:0});window.__nativeViewport.dispatchEvent(new Event('resize'));true");
+  await call('Page.captureScreenshot',{format:'png'},phone);
+  await ready(phone,'brass-relay','800x1731');
+  await screenshot(phone,'phone-full-height');
+  await writeFile(join(output,'mobile-reflow.json'),JSON.stringify({passed:true,immediateWidth,before:phoneBefore,after:phoneAfter},null,2));
+  const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','native textarea focus, selection replacement and IME composition','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','visual viewport-only keyboard reflow preserves width, focus, text and selection','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{
   socket?.close();if(browser.pid&&browser.exitCode===null&&browser.signalCode===null){browser.kill('SIGTERM');await new Promise(resolve=>browser.once('exit',resolve));}await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});

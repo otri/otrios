@@ -12,6 +12,7 @@ struct Paint {
     nodes: Vec<SceneNode>,
     next: u32,
     buttons: [u8; 201],
+    line_height: f32,
 }
 impl Paint {
     fn id(&mut self) -> u32 {
@@ -30,6 +31,14 @@ impl Paint {
             },
         ));
     }
+    fn surface(&mut self, r: [f32; 4], fill: Color, border: Color, radius: f32) {
+        self.rect(r, border, radius);
+        self.rect(
+            [r[0] + 1.5, r[1] + 1.5, r[2] - 3., r[3] - 3.],
+            fill,
+            (radius - 1.5).max(0.),
+        );
+    }
     fn text(&mut self, x: f32, y: f32, w: f32, value: &str, scale: u32, color: Color) {
         let id = self.id();
         let mut s = String::new();
@@ -41,7 +50,7 @@ impl Paint {
         }
         self.nodes.push(text(
             id,
-            Rect::new(x, y, w.max(1.), (8. * scale as f32 + 12.).max(20.)),
+            Rect::new(x, y, w.max(1.), (14. * scale as f32).max(20.)),
             &s,
             scale,
             color,
@@ -53,20 +62,42 @@ impl Paint {
         let occurrence = &mut self.buttons[usize::from(command)];
         let id = 3_000_000 + u32::from(command) * 2048 + u32::from(*occurrence) * 8;
         *occurrence += 1;
-        let color = if primary { BRASS } else { CARD };
-        let mut children = vec![node(
-            id + 1,
-            Rect::new(0., 0., r[2], r[3]),
-            Primitive::Superellipse {
-                radius: 8.,
-                exponent: 4.,
-                color,
-            },
-        )];
+        let color = if primary {
+            BRASS
+        } else if matches!(command, 1 | 8 | 15 | 16) {
+            BG
+        } else {
+            CARD
+        };
+        let mut children = vec![
+            node(
+                id + 1,
+                Rect::new(0., 0., r[2], r[3]),
+                Primitive::Superellipse {
+                    radius: 12.,
+                    exponent: 4.,
+                    color: if primary { [235, 204, 148, 255] } else { LINE },
+                },
+            ),
+            node(
+                id + 2,
+                Rect::new(1.5, 1.5, r[2] - 3., r[3] - 3.),
+                Primitive::Superellipse {
+                    radius: 10.5,
+                    exponent: 4.,
+                    color,
+                },
+            ),
+        ];
         if !caption.is_empty() {
             children.push(text(
-                id + 2,
-                Rect::new(14., (r[3] - 20.) / 2., (r[2] - 20.).max(1.), 28.),
+                id + 3,
+                Rect::new(
+                    14.,
+                    (r[3] - self.line_height) / 2.,
+                    (r[2] - 28.).max(1.),
+                    self.line_height,
+                ),
                 caption,
                 2,
                 if primary { BG } else { TEXT },
@@ -90,11 +121,21 @@ impl Paint {
         label: &str,
         selected: bool,
     ) {
-        self.button(command, r, label, "", selected);
+        self.button(command, r, label, "", false);
+        if selected {
+            let button = self.nodes.last_mut().unwrap();
+            if let Primitive::Superellipse { color, .. } = &mut button.children[0].primitive {
+                *color = BRASS;
+            }
+            if let Primitive::Superellipse { color, .. } = &mut button.children[1].primitive {
+                *color = [54, 47, 37, 255];
+            }
+            button.semantics.as_mut().unwrap().checked = true;
+        }
         let id = self.id();
         let mut icon = avatar(avatar_id, id, r[2].min(r[3]) - 12.);
-        icon.frame.x = 6.;
-        icon.frame.y = 6.;
+        icon.frame.x = (r[2] - icon.frame.width) / 2.;
+        icon.frame.y = (r[3] - icon.frame.height) / 2.;
         self.nodes.last_mut().unwrap().children.push(icon);
     }
     fn member(&mut self, command: u16, x: f32, y: f32, width: f32, member: &super::Member) {
@@ -115,7 +156,12 @@ impl Paint {
         icon.frame.y = 8.;
         let label = text(
             id + 20,
-            Rect::new(54., 16., (width - 62.).max(1.), 28.),
+            Rect::new(
+                54.,
+                (52. - self.line_height) / 2.,
+                (width - 62.).max(1.),
+                self.line_height,
+            ),
             &format!(
                 "{}{}",
                 if member.admin { "@ " } else { "" },
@@ -141,6 +187,7 @@ impl Client {
             nodes: vec![],
             next: 9_000_000,
             buttons: [0; 201],
+            line_height: self.line_height(),
         };
         for particle in &self.particles {
             let t = self.now.saturating_sub(particle.at) as f32 / 1000.;
@@ -172,16 +219,55 @@ impl Client {
             nodes: vec![],
             next: 2_000_000,
             buttons: [0; 201],
+            line_height: self.line_height(),
         };
         p.rect([0., 0., w, full_h], BG, 0.);
+        let heading_scale = if w >= 1100. { 4 } else { 3 };
+        let measure = |value: &str| {
+            self.font
+                .as_ref()
+                .map_or(value.len() as f32 * 8. * heading_scale as f32, |f| {
+                    f.text_width(value, heading_scale as f32)
+                })
+        };
+        let back_width = measure("< OTriOS");
+        let line_height = self
+            .font
+            .as_ref()
+            .map_or(40., |f| f.metrics().line_height(heading_scale as f32));
+        let heading_y = 24. + (60. - line_height) / 2.;
         p.button(
             0,
-            [24., 24., 140., 60.],
+            [24., 24., back_width + 8., 60.],
             "Back to OTriOS",
-            "< OTriOS",
+            "",
             false,
         );
-        p.text(184., 38., (w - 430.).max(200.), "The Brass Relay", 4, TEXT);
+        let back = p.nodes.last_mut().unwrap();
+        for child in &mut back.children {
+            if let Primitive::Superellipse { color, .. } = &mut child.primitive {
+                *color = BG;
+            }
+        }
+        back.children.push(text(
+            back.id + 3,
+            Rect::new(0., heading_y - 24., back_width + 8., line_height),
+            "< OTriOS",
+            heading_scale,
+            TEXT,
+        ));
+        let separator_x = 24. + back_width + 18.;
+        p.text(separator_x, heading_y, 24., "•", heading_scale, BRASS);
+        let title_x = separator_x + measure("•") + 18.;
+        p.text(
+            title_x,
+            heading_y,
+            (w - 224. - title_x - 16.).max(1.),
+            "The Brass Relay",
+            heading_scale,
+            TEXT,
+        );
+        p.rect([24., 96., w - 48., 1.], LINE, 0.);
         p.button(
             3,
             [w - 224., 24., 96., 60.],
@@ -193,7 +279,7 @@ impl Client {
         let page_y = 108.;
         let draft_h = self.draft_height();
         let content_h = self.draft_y() - page_y;
-        p.rect(
+        p.surface(
             [
                 24.,
                 page_y,
@@ -201,6 +287,7 @@ impl Client {
                 content_h + draft_h + self.input_height() + 8.,
             ],
             CARD,
+            LINE,
             10.,
         );
         let mut viewport = canvas(
@@ -437,13 +524,18 @@ impl Client {
             p.nodes.push(dim);
             let pw = 720_f32.min(w - 48.);
             let x = (w - pw) / 2.;
-            let y = 100_f32.min((h - 200.).max(20.));
+            let compact_profile = keyboard || h < 720.;
+            let y = if self.panel == Panel::Profile && h < 800. {
+                20.
+            } else {
+                100_f32.min((h - 200.).max(20.))
+            };
             let ph = match self.panel {
                 Panel::Profile => {
-                    if keyboard {
+                    if compact_profile {
                         260_f32
                     } else {
-                        580_f32
+                        676_f32
                     }
                 }
                 Panel::Members => 650.,
@@ -452,14 +544,29 @@ impl Client {
                 _ => 280.,
             }
             .min((h - y - 24.).max(200.));
-            p.rect([x, y, pw, ph], CARD, 12.);
+            p.surface([x, y, pw, ph], CARD, BRASS, 12.);
             p.button(
                 6,
                 [x + pw - 72., y + 16., 52., 52.],
                 "Close dialog",
-                "x",
+                "",
                 false,
             );
+            let close = p.nodes.last_mut().unwrap();
+            for (i, points) in [vec![[19., 19.], [33., 33.]], vec![[19., 33.], [33., 19.]]]
+                .into_iter()
+                .enumerate()
+            {
+                close.children.push(node(
+                    close.id + 4 + i as u32,
+                    Rect::new(0., 0., 52., 52.),
+                    Primitive::Path {
+                        points,
+                        width: 1.8,
+                        color: TEXT,
+                    },
+                ));
+            }
             let title = match self.panel {
                 Panel::Profile => "Your calling card",
                 Panel::Members => "Operators on the wire",
@@ -475,6 +582,7 @@ impl Client {
             p.text(x + 24., y + 28., pw - 120., title, 3, TEXT);
             match self.panel {
                 Panel::Profile => {
+                    p.text(x + 24., y + 70., pw - 48., "Your room name", 2, MUTED);
                     if self.temporary {
                         p.text(
                             x + 24.,
@@ -487,7 +595,7 @@ impl Client {
                     }
                     p.button(
                         8,
-                        [x + 24., y + 88., pw - 48., 60.],
+                        [x + 24., y + 104., pw - 48., 60.],
                         "Edit room name",
                         "",
                         false,
@@ -500,24 +608,38 @@ impl Client {
                     };
                     p.nodes.last_mut().unwrap().children.push(text(
                         id,
-                        Rect::new(12., 20., pw - 72., 28.),
+                        Rect::new(
+                            12.,
+                            (60. - self.line_height()) / 2.,
+                            pw - 72.,
+                            self.line_height(),
+                        ),
                         &value,
                         2,
                         TEXT,
                     ));
-                    if !keyboard {
-                        let cell = (pw - 64.) / 8.;
+                    if !compact_profile {
+                        p.text(
+                            x + 24.,
+                            y + 178.,
+                            pw - 48.,
+                            "Pick your tiny alter ego",
+                            2,
+                            MUTED,
+                        );
+                        let cell = (pw - 64.) / 6.;
                         for i in 0..16_u8 {
-                            let avatar_id = self.avatar_page * 16 + i;
-                            let col = i % 8;
-                            let row = i / 8;
+                            // Every page presents two identities from each family.
+                            let avatar_id = (i / 2) * 8 + self.avatar_page * 2 + i % 2;
+                            let col = i % 6;
+                            let row = i / 6;
                             p.avatar_button(
                                 20 + u16::from(avatar_id),
                                 [
                                     x + 24. + f32::from(col) * cell,
-                                    y + 176. + f32::from(row) * cell,
-                                    cell - 4.,
-                                    cell - 4.,
+                                    y + 212. + f32::from(row) * 88.,
+                                    cell - 8.,
+                                    80.,
                                 ],
                                 avatar_id,
                                 &super::icons::name(avatar_id),
@@ -526,14 +648,14 @@ impl Client {
                         }
                         p.button(
                             9,
-                            [x + 24., y + 176. + cell * 2. + 12., 100., 48.],
+                            [x + 24., y + 488., 100., 48.],
                             "Previous avatars",
                             "<",
                             false,
                         );
                         p.text(
                             x + 148.,
-                            y + 192. + cell * 2.,
+                            y + 488. + (48. - self.line_height()) / 2.,
                             pw - 290.,
                             &format!("{} / 4", self.avatar_page + 1),
                             2,
@@ -541,7 +663,7 @@ impl Client {
                         );
                         p.button(
                             10,
-                            [x + pw - 124., y + 176. + cell * 2. + 12., 100., 48.],
+                            [x + pw - 124., y + 488., 100., 48.],
                             "Next avatars",
                             ">",
                             false,
@@ -559,10 +681,17 @@ impl Client {
                         );
                     }
                     p.button(
+                        6,
+                        [x + pw - 364., y + ph - 70., 128., 52.],
+                        "Cancel profile",
+                        "Cancel",
+                        false,
+                    );
+                    p.button(
                         7,
                         [x + pw - 224., y + ph - 70., 200., 52.],
                         "Save profile",
-                        "Save",
+                        "That's me",
                         true,
                     );
                 }
@@ -723,7 +852,12 @@ impl Client {
                         };
                         p.nodes.last_mut().unwrap().children.push(text(
                             id,
-                            Rect::new(12., 20., pw - 72., 28.),
+                            Rect::new(
+                                12.,
+                                (60. - self.line_height()) / 2.,
+                                pw - 72.,
+                                self.line_height(),
+                            ),
                             if value.is_empty() { label } else { &value },
                             2,
                             TEXT,

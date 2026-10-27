@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "immediateWidth": 390,
+  "before": {
+    "width": 390,
+    "value": "The viewport keeps its width.",
+    "selection": [
+      4,
+      8
+    ]
+  },
+  "after": {
+    "width": 390,
+    "top": 50,
+    "bottom": 469.734375,
+    "value": "The viewport keeps its width.",
+    "selection": [
+      4,
+      8
+    ],
+    "focused": true,
+    "layoutHeight": 844
+  }
+}

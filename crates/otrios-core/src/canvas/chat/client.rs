@@ -765,7 +765,12 @@ impl Client {
         input.inset = if focus == Focus::Compose {
             [12.; 4]
         } else {
-            [12., 20., 12., 4.]
+            [
+                12.,
+                (60. - self.line_height()) / 2.,
+                12.,
+                (60. - self.line_height()) / 2.,
+            ]
         };
         Some(input)
     }
@@ -888,7 +893,7 @@ impl Client {
             self.nickname.replace(&you.profile.name);
             self.nickname.place_cursor(you.profile.name.len());
             self.avatar = you.profile.avatar;
-            self.avatar_page = self.avatar / 16;
+            self.avatar_page = (self.avatar % 8) / 2;
         }
         self.panel = Panel::Profile;
         self.focus = None;
@@ -1121,7 +1126,10 @@ impl Client {
         self.compose_layout.line_height.max(20.)
     }
     pub(crate) fn input_height(&self) -> f32 {
-        (self.compose_layout.lines.len().clamp(1, 4) as f32 * self.line_height() + 24.).max(60.)
+        let rows = ((self.viewport[1] - 300.) / self.line_height())
+            .floor()
+            .clamp(1., 4.) as usize;
+        (self.compose_layout.lines.len().clamp(1, rows) as f32 * self.line_height() + 24.).max(60.)
     }
     pub(crate) fn draft_height(&self) -> f32 {
         self.drafts.values().next().map_or(32., |d| {
