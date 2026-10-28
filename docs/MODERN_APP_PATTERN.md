@@ -11,8 +11,8 @@ running device has crossed the boundary.
 Canvas(uiRef, stateRef)
 ```
 
-Home, Component Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and
-Monitoring each own an app package under `apps/<id>/`. The launcher carries
+Home, The Brass Relay, Test Playground and its demos, and Monitoring each own
+an app package under `apps/<id>/`. The launcher carries
 references rather than importing sibling state or behavior. UI descriptions
 contain primitives, component layout, typed field selectors, responders,
 navigation and optional bounded Wasm behavior. The same Canvas client mounts

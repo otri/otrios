@@ -83,3 +83,9 @@ increment against its immediate control using fresh disposable authorities.
 These increments are [deployed on browser and frame](experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](rfcs/0008-release-control.md) inside the [unified server session](rfcs/0009-unified-server-session.md), independently of state decoding ([deployment acceptance](experiments/release-hello-deployment.md)). [Sync v4 packed envelopes and measured optional compression](rfcs/0011-packed-canvas-transport.md) are deployed. Normal state traffic stays raw after frame measurements; the optional bulk compressor is bounded.
 
 [Public UI reuse and optional iPad navigation timings](rfcs/0016-ui-cache-and-navigation-timings.md) extend the packed transport with sync v5. Repeat mounts reuse admitted public UI by hash while requesting fresh State. Open `/?timings=1` for local startup and navigation phase reports.
+
+## Repository maintenance
+
+The [2026-10-28 cleanup](experiments/repository-cleanup-2026-10-28.md) reconciles
+current guides, indexes historical designs and records tooling, deployment and
+local artifact validation.
