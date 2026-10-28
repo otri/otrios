@@ -76,7 +76,7 @@
     "Wasm_build": "passed",
     "full_chat_browser": "passed"
   },
-  "actual_iPhone_verification": "awaiting user test on deployed release",
+  "actual_iPhone_verification": "User confirmed refresh and < OTriOS return to launcher on the actual iPhone on 2026-10-28.",
   "deployment": {
     "release": "df31d70519d8a49d9326feb77de082fa6b7bde6778a8be9daab34fea2a815ada",
     "state_protocol": "otrios-canvas-sync-v8",

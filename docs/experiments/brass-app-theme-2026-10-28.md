@@ -118,7 +118,7 @@ ARM release and Wasm builds. Four final Frame trials confirm Home and Brass
 Relay in both orientations, with the live kiosk restored.
 
 [Phone qualification](data/brass-app-theme-2026-10-28/phone-navigation-qualification.json).
-Final signed release:
+Phone navigation signed release:
 `df31d70519d8a49d9326feb77de082fa6b7bde6778a8be9daab34fea2a815ada`.
 Native SHA-256:
 `c4af026ea0a56ae6785cafb992ba2173c5fd6e93a29976e5649c6474de527b2f`.
@@ -131,3 +131,43 @@ confirms the new binary, confirmed state, zero pending commands, calibrated touc
 and an open input device; all four services are active. The read-only confirmed
 transcript fingerprint is unchanged across this correction's deployment. The
 private candidate was removed after qualification.
+
+## Shared header typography and inline actions
+
+Brass Relay previously used font scale 4 on wide screens and scaled its entire
+header with the denser phone body. Its phone header therefore looked larger than
+the other app headers and placed Members/You on a second row. Both authored
+headers and chat now consume the shared `HEADER_FONT_SCALE` token (3). Chat lays
+out its header at the host's standard app width, inside a local viewport; its
+body retains the readable phone density. Members and You remain beside the title.
+Header control identities and navigation are preserved. No state wire format
+changes are involved.
+
+The core reflow checks cover wide, portrait and keyboard-shortened extents. Real
+Chrome acceptance compares the breadcrumb's rendered size and canvas-relative
+padding with Test Playground, verifies inline actions, and rechecks touch
+navigation at three phone sizes and desktop size. All pass, along with the full
+chat/IME suite, required repository checks, ARM Clippy/release, Wasm release,
+76 selected Node checks and 11 native input/transport tests. Four Frame trials
+confirm Home and Brass Relay in landscape and portrait, restoring the live kiosk.
+
+[Header qualification](data/brass-app-theme-2026-10-28/header-qualification.json).
+These browser captures use an isolated test room:
+
+![Brass Relay header and retained phone body](data/brass-app-theme-2026-10-28/brass-header-393.png)
+
+![Matching standard app header](data/brass-app-theme-2026-10-28/standard-header-393.png)
+
+Header correction signed release:
+`810de336ecad70e3c8692f6bc907ba27ae8693bd6c8aa4a56ca08bf1c542970b`.
+Native SHA-256:
+`40a1f71223bc4408a92da6b8b87d5909ef56f7b10625447a560df2557ef3f8a9`.
+A stopped, hash-verified rollback snapshot retains the previous release and
+current journals at `/var/lib/otrios-authority/rollback/2026-10-28-brass-header`.
+
+The signed header release is active on the public web host and native Frame.
+All 120 public host checks pass (login not tested). The live native client
+confirms the deployed release and binary hash, confirmed state, zero pending
+commands, an open touch input device and active services. A read-only browser
+probe confirms the same 24 chat records and unchanged transcript fingerprint
+before and after deployment. The task’s isolated Frame candidate was removed.

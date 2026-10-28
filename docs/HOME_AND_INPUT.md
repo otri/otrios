@@ -10,6 +10,8 @@ links to the document or panning demos. Headers provide clickable ancestors:
 `< OTriOS • Test Playground` and `< OTriOS < Test Playground • Layouts`, for
 example. Each ancestor names its destination in the owning UI; there are no
 separate Home or Back buttons. Monitoring retains its private admission boundary.
+Brass Relay uses the same header font and standard app layout width, independently
+of its denser phone body text. Members and You stay inline with the heading.
 
 Every Test Playground screen reflows between 1280×800 landscape and 800×1280
 portrait. Motion demos own a flexible stage below their controls; the same stage

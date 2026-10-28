@@ -61,12 +61,22 @@ try{
         await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
         await ready(a,screen,extent);
       };
+      const brassOrigin=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return [r.x,r.y]})()");
+      const brassHeader=await controls(a),back=brassHeader.find(c=>c.label==='Back to OTriOS');
+      for(const label of ['Members','Edit profile'])assert(Math.abs(brassHeader.find(c=>c.label===label).bounds[1]-back.bounds[1])<0.5,'header actions stay inline');
+      await screenshot(a,'brass-header-'+width);
       await tap('Members','brass-relay');
       await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Close dialog')");
       await tap('Close dialog','brass-relay');
       await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Back to OTriOS')");
       await tap('Back to OTriOS','home',width<height?'800x1280':'1280x800');
       await wait(a,"location.pathname==='/'");
+      await tap('Test Playground','test-playground',width<height?'800x1280':'1280x800');
+      const standardHeader=(await controls(a)).find(c=>c.label==='OTriOS');
+      const standardOrigin=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return [r.x,r.y]})()");
+      for(const i of [0,1,2,3])assert(Math.abs((back.bounds[i]-(brassOrigin[i]||0))-(standardHeader.bounds[i]-(standardOrigin[i]||0)))<0.5,`shared header bounds at ${width}: ${back.bounds} / ${standardHeader.bounds}`);
+      await screenshot(a,'standard-header-'+width);
+      await tap('OTriOS','home',width<height?'800x1280':'1280x800');
       await tap('The Brass Relay','brass-relay',chatViewport(width,height).join('x'));await online(a);
       await call('Page.reload',{},a);await ready(a,'brass-relay',chatViewport(width,height).join('x'));await online(a);
       await tap('Back to OTriOS','home',width<height?'800x1280':'1280x800');
@@ -83,7 +93,7 @@ try{
       const {targetInfo}=await call('Target.getTargetInfo',{},a);
       await call('Target.disposeBrowserContext',{browserContextId:targetInfo.browserContextId});
     }
-    const result={passed:true,checks:['phone-width touch navigation after modal close','Home admission before viewport policy handoff','breadcrumb after full refresh','return with focused composer and short visual viewport','desktop touch navigation'],results};
+    const result={passed:true,checks:['phone-width touch navigation after modal close','Home admission before viewport policy handoff','breadcrumb after full refresh','return with focused composer and short visual viewport','desktop touch navigation','matching breadcrumb font geometry across apps','Members and You remain inline'],results};
     await writeFile(join(output,'phone-breadcrumb-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else{
   const draft='A pigeon '+Date.now()+' is composing',nickname='Captain '+Date.now().toString(36);

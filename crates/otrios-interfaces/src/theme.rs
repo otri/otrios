@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Shared visual tokens for authored apps and local runtime presentation.
+pub const HEADER_FONT_SCALE: u32 = 3;
 pub const BG: [u8; 4] = [23, 27, 32, 255];
 pub const CARD: [u8; 4] = [35, 40, 46, 255];
 pub const TEXT: [u8; 4] = [239, 241, 237, 255];

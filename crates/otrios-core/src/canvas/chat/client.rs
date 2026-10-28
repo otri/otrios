@@ -113,6 +113,7 @@ pub struct Client {
     pub(super) tail: bool,
     pub(super) font: Option<std::sync::Arc<Font>>,
     pub(super) viewport: [f32; 2],
+    pub(super) header_width: Option<f32>,
 }
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Info {
@@ -191,6 +192,7 @@ impl Default for Client {
             tail: false,
             font: None,
             viewport: [1280., 800.],
+            header_width: None,
         }
     }
 }
@@ -215,6 +217,9 @@ fn day_label(day: u64, today: u64) -> String {
     format!("{year:04}-{m:02}-{d:02}")
 }
 impl Client {
+    pub(crate) fn set_header_width(&mut self, width: f32) {
+        self.header_width = Some(width);
+    }
     pub(crate) fn prepare(
         &mut self,
         size: [f32; 2],

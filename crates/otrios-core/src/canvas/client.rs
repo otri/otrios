@@ -358,7 +358,15 @@ impl Client {
         {
             return Err("Invalid layout viewport".into());
         }
-        self.layout_viewport = Some(viewport);
+        if self.layout_viewport != Some(viewport) {
+            self.layout_viewport = Some(viewport);
+            if let Some(m) = &mut self.active
+                && let Some(chat) = &mut m.chat
+            {
+                chat.set_header_width(viewport[0]);
+                m.invalidate();
+            }
+        }
         Ok(())
     }
     pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
@@ -1058,6 +1066,11 @@ impl Client {
                         },
                     )?;
                     candidate.font = self.font.clone();
+                    if let Some(chat) = &mut candidate.chat
+                        && let Some(viewport) = self.layout_viewport
+                    {
+                        chat.set_header_width(viewport[0]);
+                    }
                     candidate.viewport =
                         if matches!(candidate.ui.presentation, Some(Presentation::Chat)) {
                             self.viewport

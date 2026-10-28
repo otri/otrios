@@ -620,7 +620,7 @@ pub fn surface(fill: [u8; 4], radius: f32) -> Element {
 }
 fn breadcrumb_header(title: &str, ancestors: &[(String, String)]) -> Element {
     let font = authored_font();
-    let scale = 3.;
+    let scale = otrios_interfaces::theme::HEADER_FONT_SCALE as f32;
     let height = font.metrics().line_height(scale);
     let y = (60. - height) / 2.;
     let mut nodes = vec![];

@@ -3938,10 +3938,12 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         .unwrap(),
     );
     for (width, height) in [
+        (1280., 800.),
         (800., 861.),
         (800., 615.),
         (800., 369.),
         (534., 1155.),
+        (534., 944.),
         (534., 575.),
         (534., 410.),
     ] {
@@ -3949,6 +3951,8 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         c.set_font(font.clone());
         c.set_software_keyboard(false);
         activate(&mut c, brass_relay::ui(&[]), "phone-height", vec![]);
+        c.set_layout_viewport([if width > 1000. { 1280. } else { 800. }, 1280.])
+            .unwrap();
         c.set_viewport([width, height]).unwrap();
         let check = |c: &Client| {
             let scene = c.scene().unwrap();
@@ -3973,12 +3977,18 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
             .iter()
             .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="< OTriOS"))
             .unwrap();
-        let title = scene
-            .root()
+        let header = scene.path(7_000_000).unwrap();
+        let header = header.last().unwrap();
+        let title_node = header
+            .node
             .children
             .iter()
-            .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="The Brass Relay"))
+            .find(
+                |n| matches!(&n.primitive, Primitive::Text {value,..} if value=="The Brass Relay"),
+            )
             .unwrap();
+        let title_path = scene.path(title_node.id).unwrap();
+        let title = title_path.last().unwrap();
         let Primitive::Text {
             scale: back_scale, ..
         } = label.primitive
@@ -3987,17 +3997,26 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         };
         let Primitive::Text {
             scale: title_scale, ..
-        } = title.primitive
+        } = title.node.primitive
         else {
             unreachable!()
         };
         assert_eq!(back_scale, title_scale);
-        assert!((back.origin[1] + label.frame.y - title.frame.y).abs() < 0.01);
-        assert!(font.text_width("The Brass Relay", title_scale as f32) <= title.frame.width);
-        if width < 700. {
-            let members = scene.path(node(&c, "Members")).unwrap();
-            assert!(members.last().unwrap().origin[1] >= title.frame.y + title.frame.height);
-        }
+        assert_eq!(title_scale, otrios_interfaces::theme::HEADER_FONT_SCALE);
+        assert!((back.origin[1] + label.frame.y * back.scale - title.origin[1]).abs() < 0.01);
+        assert!(font.text_width("The Brass Relay", title_scale as f32) <= title.node.frame.width);
+        let standard_width = if width > 1000. { 1280. } else { 800. };
+        assert!(
+            (title_scale as f32 * title.scale / width - 3. / standard_width).abs() < 0.00001,
+            "Header density matches the other apps"
+        );
+        let members = scene.path(node(&c, "Members")).unwrap();
+        let members = members.last().unwrap();
+        let profile = scene.path(node(&c, "Edit profile")).unwrap();
+        let profile = profile.last().unwrap();
+        assert!((members.origin[1] - back.origin[1]).abs() < 0.01);
+        assert!((profile.origin[1] - back.origin[1]).abs() < 0.01);
+        assert!(title.origin[0] + title.node.frame.width * title.scale < members.origin[0]);
         check(&c);
         c.activate(c.epoch(), node(&c, "Message composer")).unwrap();
         c.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
