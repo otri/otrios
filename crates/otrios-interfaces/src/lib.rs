@@ -5,6 +5,7 @@ pub mod ink;
 #[cfg(feature = "layout")]
 pub mod layout;
 pub mod scene;
+pub mod theme;
 
 /// SHA-256 digest of a canonical object envelope, once hashing is implemented.
 /// Constructing this type does not authenticate or validate the referenced bytes.

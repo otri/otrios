@@ -124,21 +124,38 @@ impl Presenter {
     /// Generate animation geometry without rebuilding telemetry text. A host may
     /// rasterize telemetry on a separate bounded presentation worker.
     pub fn geometry(&mut self, three_d: bool, intent: Intent, now: f64) -> Mesh {
+        self.geometry_in(three_d, intent, now, [80., 280., 1120., 400.])
+    }
+    /// The admitted app owns its stage; both hosts render into these logical bounds.
+    pub fn geometry_in(
+        &mut self,
+        three_d: bool,
+        intent: Intent,
+        now: f64,
+        stage: [f32; 4],
+    ) -> Mesh {
+        if stage.iter().any(|v| !v.is_finite()) || stage[2] <= 0. || stage[3] <= 0. {
+            return Mesh::default();
+        }
         self.advance(now, intent);
+        let [left, top, width, height] = stage;
         let mut children = Vec::new();
         let t = self.phase as f32;
         if three_d {
             // Bounded, nonintersecting tetrahedron cells. CPU projection and
             // painter sorting feed the shared GLES2/WebGL triangle rasterizers.
             for i in 0..intent.count {
-                let columns = (f32::from(intent.count).sqrt().ceil() as u16).max(1);
+                let columns = ((f32::from(intent.count) * (width / height).min(1.))
+                    .sqrt()
+                    .ceil() as u16)
+                    .clamp(1, intent.count);
                 let rows = intent.count.div_ceil(columns);
-                let cw = 1120. / f32::from(columns);
-                let ch = 400. / f32::from(rows);
+                let cw = width / f32::from(columns);
+                let ch = height / f32::from(rows);
                 let size = cw.min(ch) * 0.25;
                 let center = [
-                    80. + cw * (f32::from(i % columns) + 0.5),
-                    280. + ch * (f32::from(i / columns) + 0.5),
+                    left + cw * (f32::from(i % columns) + 0.5),
+                    top + ch * (f32::from(i / columns) + 0.5),
                 ];
                 let f = f32::from(i);
                 let a = t * (0.8 + f * 0.004) + f * 0.31;
@@ -177,10 +194,10 @@ impl Presenter {
                     }
                     let points = idx.into_iter().map(project).collect();
                     let palette = [
-                        [185, 238, 143, 255],
-                        [84, 174, 183, 255],
-                        [230, 170, 100, 255],
-                        [132, 145, 218, 255],
+                        otrios_interfaces::theme::BRASS,
+                        otrios_interfaces::theme::COPPER,
+                        [235, 204, 148, 255],
+                        [143, 115, 79, 255],
                     ];
                     children.push(node(
                         10 + u32::from(i) * 4 + face as u32,
@@ -196,8 +213,8 @@ impl Presenter {
             for i in 0..intent.count {
                 let f = f32::from(i);
                 let a = t * (0.5 + f * 0.011) + f * 2.399963;
-                let x = 640. + a.cos() * (220. + (f * 1.7).sin() * 200.);
-                let y = 460. + (a * 1.37).sin() * 170.;
+                let x = left + width * 0.5 + a.cos() * width * (0.2 + (f * 1.7).sin() * 0.17);
+                let y = top + height * 0.5 + (a * 1.37).sin() * (height * 0.5 - 18.).max(0.);
                 children.push(node(
                     10 + u32::from(i),
                     Rect::new(x - 12., y - 12., 24., 24.),
@@ -205,14 +222,18 @@ impl Presenter {
                         color: if i % 2 == 0 {
                             ACCENT
                         } else {
-                            [84, 174, 183, 255]
+                            otrios_interfaces::theme::COPPER
                         },
                     },
                 ));
             }
         }
-        let scene = Scene::new(canvas(0, Rect::new(0., 0., 1280., 800.), children))
-            .expect("bounded motion geometry");
+        let scene = Scene::new(canvas(
+            0,
+            Rect::new(0., 0., (left + width).max(1280.), (top + height).max(800.)),
+            children,
+        ))
+        .expect("bounded motion geometry");
         render_scene(&scene)
     }
     pub fn mesh(&mut self, three_d: bool, intent: Intent, now: f64, updates: u64) -> Mesh {
@@ -327,7 +348,7 @@ mod tests {
         for (v, xy) in mesh.vertices.chunks_exact(6).zip(expected) {
             assert!((v[0] - xy[0]).abs() < 0.001);
             assert!((v[1] - xy[1]).abs() < 0.001);
-            assert_eq!(&v[2..], &[185. / 255., 238. / 255., 143. / 255., 1.]);
+            assert_eq!(&v[2..], &[216. / 255., 183. / 255., 117. / 255., 1.]);
         }
     }
     #[test]

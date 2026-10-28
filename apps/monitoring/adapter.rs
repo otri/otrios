@@ -6,11 +6,8 @@ use serde_json::Value as Json;
 use std::{fs, io::Read};
 #[path = "view_templates.rs"]
 mod view_templates;
-const WHITE: [u8; 4] = [239, 244, 236, 255];
-const MUTED: [u8; 4] = [150, 171, 185, 255];
-const GREEN: [u8; 4] = [185, 238, 143, 255];
-const BLUE: [u8; 4] = [112, 194, 244, 255];
-const AMBER: [u8; 4] = [255, 199, 112, 255];
+use otrios_interfaces::theme::{BRASS as GREEN, COPPER as BLUE, MUTED, TEXT as WHITE};
+const AMBER: [u8; 4] = [235, 174, 120, 255];
 fn literal(v: Value) -> Expr {
     Expr::Literal(v)
 }

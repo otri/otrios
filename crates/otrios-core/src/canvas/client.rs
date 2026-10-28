@@ -653,6 +653,25 @@ impl Client {
         i.validate()?;
         Ok(Some((*three_d, i)))
     }
+    pub fn motion_viewport(&self) -> Result<Option<[f32; 4]>> {
+        let Some(Presentation::Motion { viewport, .. }) = self.presentation() else {
+            return Ok(None);
+        };
+        let Some(id) = viewport else {
+            return Ok(Some([80., 280., 1120., 400.]));
+        };
+        let scene = self.scene()?;
+        let path = scene
+            .path(u32::from(*id))
+            .ok_or("Missing motion viewport")?;
+        let node = path.last().ok_or("Missing motion path")?;
+        Ok(Some([
+            node.origin[0],
+            node.origin[1],
+            node.node.frame.width * node.scale,
+            node.node.frame.height * node.scale,
+        ]))
+    }
     pub fn stress_hz(&self) -> u8 {
         self.active.as_ref().map_or(0, |m| m.stress)
     }
@@ -2358,12 +2377,31 @@ fn qualify(
                 }
             }
             Presentation::Motion {
+                viewport,
                 playing,
                 speed,
                 count,
                 load,
                 ..
             } => {
+                if let Some(id) = viewport
+                    && (ui.format != "otrios-canvas-v6"
+                        || !Layout::from_bytes(&ui.layout)?
+                            .blueprint()
+                            .templates
+                            .iter()
+                            .any(|t| {
+                                fn contains(
+                                    n: &otrios_interfaces::layout::TemplateNode,
+                                    id: u16,
+                                ) -> bool {
+                                    n.id == id || n.children.iter().any(|c| contains(c, id))
+                                }
+                                contains(&t.root, *id)
+                            }))
+                {
+                    return Err("Invalid motion viewport".into());
+                }
                 if ![playing, speed, count, load]
                     .iter()
                     .all(|id| field(**id).is_some_and(|f| matches!(f.default, Value::Number(_))))
@@ -2616,12 +2654,18 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             }
         }
         remap(&mut content);
+        let scale = (frame[2] / content.frame.width).min(frame[3] / content.frame.height);
+        let width = content.frame.width * scale;
+        let height = content.frame.height * scale;
         let mut viewport = crate::dashboard::components::node(
             2_900_000_000,
-            otrios_interfaces::scene::Rect::new(frame[0], frame[1], frame[2], frame[3]),
-            otrios_interfaces::scene::Primitive::Viewport {
-                scale: frame[2] / 1280.,
-            },
+            otrios_interfaces::scene::Rect::new(
+                frame[0] + (frame[2] - width) / 2.,
+                frame[1],
+                width,
+                height,
+            ),
+            otrios_interfaces::scene::Primitive::Viewport { scale },
         );
         viewport.children.push(content);
         // An aggregate is content beneath the app header and navigation.

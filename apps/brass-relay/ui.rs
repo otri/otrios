@@ -7,8 +7,10 @@ pub fn description() -> Ui {
         "The Brass Relay",
         schema("brass-relay-state-v1", &[]),
     )
-    .with_brass_theme()
-    .with_composition(column(0., vec![heading()]), column(0., vec![heading()]))
+    .with_composition(
+        column(0., vec![heading().minimum([1., 72.])]),
+        column(0., vec![heading().minimum([1., 72.])]),
+    )
     .with_presentation(Presentation::Chat)
     .build("The Brass Relay", vec![crate::components::keyboard()]);
     for command in 0..=200 {

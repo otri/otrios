@@ -104,11 +104,11 @@ try{
   });
   function accept(f){
     if(graphicsLost||gl.isContextLost()||f.graphicsGeneration!==graphicsGeneration){worker.postMessage({type:'frame-ack',serial:f.serial,documentToken:f.document?.token});return;}
-    const wasReflow=!!model?.reflow;if(model?.screen!==f.screen){presenter.suspend();hudRevision=-1;scrollLabel='';}timings?.accept(f);
+    const wasReflow=!!model?.reflow;if(model?.screen!==f.screen||model?.extent?.join('x')!==f.extent.join('x')){presenter.suspend();hudRevision=-1;scrollLabel='';}timings?.accept(f);
     const focused=document.activeElement?.closest('#controls button'),focusKey=focused?{id:focused.dataset.sceneNode,label:focused.getAttribute('aria-label')}:null;
     if(model&&(model.ui!==f.ui||model.epoch!==f.epoch)){textInputs.clear();for(const b of controls.values())b.remove();controls.clear();}
     if(f.document){documentLayers.accept(f.document);revision.dataset.documentLoading=String(documentLayers.loading);revision.dataset.documentResources=String(documentLayers.layers.size);revision.dataset.documentGpu=JSON.stringify(documentLayers.stats());}
-    model={...model,...f};revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();stageElement.dataset.presentation=f.presentation;fitVisibleViewport();
+    model={...model,...f};revision.dataset.motionViewport=JSON.stringify(f.motionViewport||null);revision.dataset.epoch=String(f.epoch);modelAuthRequired=!!f.authRequired;showAuth();stageElement.dataset.presentation=f.presentation;fitVisibleViewport();
     if(f.effects)hudLayer.setFrame({vertices:f.effects});
     if(f.reflow)model.reflow=!!f.reflow.length;
     if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);
@@ -186,7 +186,7 @@ try{
       const reflow=model?.reflow&&presenter.reflow_active(now);
       if(!graphicsLost&&model&&(dirty||animated||reflow)){
         if(model.reflow)staticLayer.setFrame({vertices:presenter.reflow_vertices(now),glyphVertices:presenter.reflow_glyphs(),draws:presenter.reflow_draws()});
-        if(animated){const [playing,speed,count]=model.intent;motionLayer.setFrame({vertices:presenter.vertices(model.intent[3]!==0,playing!==0,speed,count,now,model.updates)});if(hudRevision!==presenter.hud_revision()){hudRevision=presenter.hud_revision();hudLayer.setFrame({vertices:presenter.hud(),glyphVertices:presenter.hud_glyph_vertices(),draws:presenter.hud_draws()});}}
+        if(animated){const [playing,speed,count]=model.intent;presenter.set_motion_viewport(model.motionViewport||[]);motionLayer.setFrame({vertices:presenter.vertices(model.intent[3]!==0,playing!==0,speed,count,now,model.updates)});const bucket=Math.floor(now/1000);if(hudRevision!==bucket){hudRevision=bucket;hudLayer.setFrame({vertices:presenter.scroll_hud(presenter.motion_hud_label(),...model.extent),glyphVertices:presenter.scroll_hud_glyphs(),draws:presenter.scroll_hud_draws()});}}
         const scrolling=['text-scroll','text-document'].includes(model.presentation);
         if(scrolling)textScrollHud(now,!!(model.resources?.text_scroll||model.resources?.text_document)?.active);
         const layers=(model.order||['base']).flatMap(layer=>({base:[staticLayer],document:documentLayers.draws,overlay:[motionLayer],effects:[hudLayer]})[layer]||[]);

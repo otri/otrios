@@ -319,7 +319,7 @@ impl CanvasApp {
         let font = self.font.as_ref().ok_or("Font resource not loaded")?;
         let frame = self.composer.compose(&mut self.inner, font)?;
         serde_json::to_string(
-            &serde_json::json!({"revisions": frame.revisions, "order": frame.order}),
+            &serde_json::json!({"revisions": frame.revisions, "order": frame.order, "motion":frame.motion}),
         )
         .map_err(|e| e.to_string())
     }
@@ -558,6 +558,7 @@ pub struct CanvasPresentation {
     updates: u64,
     inner: otrios_core::dashboard::motion::Presenter,
     scroll_hud_mesh: Mesh,
+    motion_viewport: Option<[f32; 4]>,
 }
 #[wasm_bindgen]
 impl CanvasPresentation {
@@ -592,6 +593,22 @@ impl CanvasPresentation {
     pub fn reflow_draws(&self) -> Vec<u32> {
         self.reflow_mesh.draws.clone()
     }
+    pub fn set_motion_viewport(&mut self, bounds: &[f32]) -> Result<(), String> {
+        let next = if bounds.is_empty() {
+            None
+        } else {
+            if bounds.len() != 4
+                || bounds.iter().any(|n| !n.is_finite())
+                || bounds[2] <= 0.
+                || bounds[3] <= 0.
+            {
+                return Err("Invalid motion viewport".into());
+            }
+            Some([bounds[0], bounds[1], bounds[2], bounds[3]])
+        };
+        self.motion_viewport = next;
+        Ok(())
+    }
     pub fn vertices(
         &mut self,
         three_d: bool,
@@ -608,10 +625,16 @@ impl CanvasPresentation {
         };
         i.validate()?;
         self.updates = updates.max(0.) as u64;
-        Ok(self
-            .inner
-            .mesh(three_d, i, now, updates.max(0.) as u64)
-            .vertices)
+        Ok(if let Some(bounds) = self.motion_viewport {
+            self.inner.geometry_in(three_d, i, now, bounds).vertices
+        } else {
+            self.inner
+                .mesh(three_d, i, now, updates.max(0.) as u64)
+                .vertices
+        })
+    }
+    pub fn motion_hud_label(&self) -> String {
+        self.inner.hud_label(self.updates)
     }
     pub fn suspend(&mut self) {
         self.inner.suspend();

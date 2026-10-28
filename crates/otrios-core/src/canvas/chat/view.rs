@@ -893,9 +893,9 @@ impl Client {
         {
             let mut keys = keys.clone();
             keys.frame.x = 0.;
-            keys.frame.y = -480.;
+            keys.frame.y = 0.;
             keys.frame.width = 1280.;
-            keys.frame.height = 800.;
+            keys.frame.height = 320.;
             let mut viewport = node(
                 500_000,
                 Rect::new(0., h, w, full_h - h),

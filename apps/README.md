@@ -44,8 +44,10 @@ behavior bytes and permitted field writes. Status/dependency strings do not gran
 capabilities. UI v2 supports typed, bounded fields and declared operations;
 custom reducers still use the small, separately versioned Wasm ABI v1.
 Text panning uses UI v3, the document reader uses v4, and Brass Relay uses v5.
-Other shipped screens remain v2. Chat adds channel 3 under state protocol v6;
-the opening release-control envelope remains v1.
+Motion demos use UI v6, which binds their presentation to an authored stage node.
+Other shipped screens remain v2. The current state protocol is v8; the opening
+release-control envelope remains v1. The UI format version is independent of
+the state wire protocol.
 Open Test Playground's **Text Panning** (`/test-playground/text-panning`) to inspect the
 retained full-page workload. Its offsets, velocity and FPS meter stay local.
 
@@ -112,7 +114,7 @@ Each app's `screens()` factory declares its screen documents and State bindings.
 Screen/package identity is separate from navigation names. Home declares its
 children with `Destination::app("layout-lab").route("layout-lab")`. A future app
 with child screens can declare their relative names the same way. The `.route`
-value is owned by that UI. Ordinary links, including Home buttons,
+value is owned by that UI. Ordinary links, including breadcrumb ancestors,
 omit `.route(...)` and target the same stable identity from anywhere.
 
 The packer walks named edges from the first catalog screen (Home at `/`) and
@@ -232,12 +234,19 @@ screen declarations requires repacking the complete catalog. Test Playground dec
 
 ## Test Playground navigation
 
-Home contains only Test Playground and Monitoring. `test-playground/app.rs`
+Home contains The Brass Relay, Test Playground and Monitoring. `test-playground/app.rs`
 registers its hub and all seven demo screens. Its UI owns their relative route
 names (`components`, `layouts`, `long-document`, `text-panning`, `text-input`,
 `animations-two-d`, `animations-three-d`). Demo package/UI/State identities stay stable;
 the catalog resolves them under `/test-playground/`. Layouts no longer owns the
-reader/panning edges. Back returns to the hub and Home returns to `/`.
+reader/panning edges. The shared header shows `< OTriOS < Test Playground • App`;
+its two ancestors navigate to `/` and the hub through stable app identities.
+
+`AppUi::with_breadcrumbs` declares those ancestors. The shared authoring header
+and outlined controls use `otrios_interfaces::theme` tokens, also consumed by
+runtime-owned presentations and the Monitoring adapter. All seven demos support
+portrait and landscape. The common motion-screen component provides a flexible
+stage and reflows its controls without changing semantic node identities.
 
 The shared primitive launcher card in `tools/canvas/components.rs` contains an
 icon, title and subheading. Test Playground owns Edit/Done and its seven order

@@ -19,16 +19,7 @@ pub fn description() -> Ui {
         column(
             12.,
             vec![
-                row(
-                    12.,
-                    vec![
-                        place("$heading", [650., 64.])
-                            .minimum([240., 64.])
-                            .flex_width(),
-                        place("back", [140., 64.]),
-                        place("home", [140., 64.]),
-                    ],
-                ),
+                heading(),
                 place("hint", [1184., 24.]).minimum([1., 24.]).flex_width(),
                 place("page", [1184., 600.])
                     .minimum([240., 100.])
@@ -45,16 +36,13 @@ pub fn description() -> Ui {
         "Long Document",
         schema("layout-document-state-v1", &[]),
     )
+    .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
     .with_composition(composition(), composition())
     .with_text_document("page", resource, 2, WHITE)
     .build(
         "Long Document",
         vec![
-            button("Back").on_press(Event::back()).key("back"),
-            button("Home")
-                .navigate_to(Destination::app("home"))
-                .key("home"),
-            text("EXPERIMENT - 1 MiB of wrapped text. Drag to read; release to coast.")
+            text("1 MiB • Drag to read; release to coast.")
                 .color(MUTED)
                 .key("hint"),
             canvas(vec![]).frame([0., 0., 1184., 600.]).key("page"),

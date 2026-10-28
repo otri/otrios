@@ -177,6 +177,7 @@ mod tests {
                 writes: vec![3],
             }),
             presentation: Some(Presentation::Motion {
+                viewport: None,
                 three_d: false,
                 playing: 4,
                 speed: 5,

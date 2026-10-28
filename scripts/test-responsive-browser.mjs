@@ -2,9 +2,23 @@
 // Optional real Chromium/WebGL acceptance against a disposable local authority.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
+import {inflateSync} from 'node:zlib';
 import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+// Chrome screenshots use 8-bit RGB/RGBA PNGs. Decode their rows with Node's
+// built-in zlib so this optional visual check needs no image-library dependency.
+function pngPixels(bytes){
+  let width,height,channels;const parts=[];
+  for(let at=8;at<bytes.length;){const length=bytes.readUInt32BE(at),kind=bytes.toString('ascii',at+4,at+8),data=bytes.subarray(at+8,at+8+length);at+=length+12;
+    if(kind==='IHDR'){width=data.readUInt32BE(0);height=data.readUInt32BE(4);assert.equal(data[8],8);channels={2:3,6:4}[data[9]];assert(channels);assert.equal(data[12],0);}
+    if(kind==='IDAT')parts.push(data);
+  }
+  const packed=inflateSync(Buffer.concat(parts)),stride=width*channels,pixels=Buffer.alloc(height*stride);
+  const paeth=(a,b,c)=>{const p=a+b-c,da=Math.abs(p-a),db=Math.abs(p-b),dc=Math.abs(p-c);return da<=db&&da<=dc?a:db<=dc?b:c;};
+  for(let y=0,at=0;y<height;y++){const filter=packed[at++];assert(filter<=4);for(let x=0;x<stride;x++){const i=y*stride+x,a=x>=channels?pixels[i-channels]:0,b=y?pixels[i-stride]:0,c=y&&x>=channels?pixels[i-stride-channels]:0;pixels[i]=(packed[at++]+[0,a,b,Math.floor((a+b)/2),paeth(a,b,c)][filter])&255;}}
+  return {width,height,channels,pixels};
+}
 const args=process.argv.slice(2),argument=(name,fallback)=>{const i=args.indexOf(name);return i<0?fallback:args[i+1];};
 if(typeof WebSocket!=='function')throw Error('Node with built-in WebSocket support is required');
 const origin=argument('--url');if(!origin)throw Error('Supply --url for a disposable authority');
@@ -32,16 +46,79 @@ try{
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
   const routes={'component-playground':'test-playground/components','layout-lab':'test-playground/layouts','layout-document':'test-playground/long-document','layout-text-scroll':'test-playground/text-panning','input-lab':'test-playground/text-input','animation-lab':'test-playground/animations-two-d','three-d-lab':'test-playground/animations-three-d'};
-  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,['input-lab','animation-lab','three-d-lab'].includes(route)?'1280x800':width<height?'800x1280':'1280x800');return sessionId;};
+  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{let control=(await controls(session)).find(c=>c.label===label);if(!control&&(await controls(session)).some(c=>c.label==='Test Playground')){await click(session,'Test Playground','test-playground',extent);control=(await controls(session)).find(c=>c.label===label);}assert(control,label);const [x,y,w,h]=control.bounds;
     await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:x+w/2,y:y+h/2},session);
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:x+w/2,y:y+h/2},session);
-    await ready(session,screen,['input-lab','animation-lab','three-d-lab'].includes(screen)?'1280x800':extent);};
-  const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
+    await ready(session,screen,extent);};
+  const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);const bytes=Buffer.from(data,'base64');await writeFile(join(output,name+'.png'),bytes);
+    if(args.includes('--brass-theme')){
+      const image=pngPixels(bytes);
+      for(const control of (await controls(session)).filter(c=>['OTriOS','Test Playground'].includes(c.label)&&c.bounds[1]<100)){
+        const [left,top,width,height]=control.bounds;let ink=0;
+        for(let y=Math.max(0,Math.floor(top));y<Math.min(image.height,Math.ceil(top+height));y++)for(let x=Math.max(0,Math.floor(left));x<Math.min(image.width,Math.ceil(left+width));x++){const i=(y*image.width+x)*image.channels;if(image.pixels[i]>180&&image.pixels[i+1]>180&&image.pixels[i+2]>180)ink++;}
+        assert(ink>100,`Missing breadcrumb pixels in ${name}: ${control.label} (${ink})`);
+      }
+    }
+  };
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
-  if(args.includes('--playground')){
+  if(args.includes('--brass-monitoring')){
+    const a=await page(1280,800,'home');
+    assert.equal(await evaluate(a,"(async()=> (await fetch('/monitoring/presentation')).status)()"),401);
+    await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Monitoring').click()");
+    await wait(a,"document.querySelector('#monitoring-login').open");
+    await screenshot(a,'monitoring-sign-in');
+    await evaluate(a,"(()=>{document.querySelector('[name=username]').value='theme@example.test';document.querySelector('[name=password]').value='test-only-password';document.querySelector('#monitoring-form').requestSubmit();})()");
+    await ready(a,'monitoring','1280x800');await wait(a,"!document.querySelector('#monitoring-login').open");
+    await wait(a,"document.querySelector('#view').getAttribute('aria-label').includes('Service overview')");
+    assert((await controls(a)).some(c=>c.label==='OTriOS'));assert(!(await controls(a)).some(c=>['Home','Back'].includes(c.label)));
+    await screenshot(a,'monitoring-landscape');
+    await metrics(a,800,1280);await ready(a,'monitoring','1280x800');await screenshot(a,'monitoring-portrait-letterbox');
+    const logout=(await controls(a)).find(c=>c.label==='Sign out');assert(logout);
+    await evaluate(a,`document.querySelector('[data-scene-node="${logout.id}"]').click()`);await ready(a,'home','800x1280');
+    assert.equal(await evaluate(a,"(async()=> (await fetch('/monitoring/presentation')).status)()"),401);
+    const result={passed:true,checks:['anonymous Monitoring denial','authenticated brass Monitoring and outlines','landscape canvas retained on portrait host','breadcrumb navigation and sign-out revocation'],data:'synthetic Monitoring fixture'};
+    await writeFile(join(output,'monitoring-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--brass-theme')){
+    const demos=[['Components','component-playground'],['Layouts','layout-lab'],['Long Document','layout-document'],['Text Panning','layout-text-scroll'],['Text Input','input-lab'],['2D Animations','animation-lab'],['3D Animations','three-d-lab']];
+    const results=[];
+    for(const [width,height] of [[1280,800],[800,1280]]){
+      const a=await page(width,height,'home');await screenshot(a,'home-'+width);
+      await click(a,'Test Playground','test-playground',width+'x'+height);
+      await screenshot(a,'playground-'+width);
+      for(const [title,screen] of demos){
+        await click(a,title,screen,width+'x'+height);
+        const current=await controls(a),labels=current.map(c=>c.label);
+        assert(labels.includes('OTriOS')&&labels.includes('Test Playground'));
+        assert(!labels.includes('Home')&&!labels.includes('Back'));
+        for(const c of current){const[x,y,w,h]=c.bounds;assert(x>=-0.1&&y>=-0.1&&x+w<=width+1&&y+h<=height+1,JSON.stringify({screen,width,control:c}));}
+        if(screen==='layout-document')await wait(a,"document.querySelector('#revision').dataset.documentLoading==='false'");
+        if(screen==='input-lab'){
+          await click(a,'First text field',screen,width+'x'+height);
+          await call('Input.insertText',{text:'Brass portrait '+width},a);
+          await wait(a,`document.querySelector('.canvas-editor').value.includes(${JSON.stringify('Brass portrait '+width)})`);
+        }
+        if(screen==='animation-lab'||screen==='three-d-lab'){
+          await new Promise(r=>setTimeout(r,250));
+          const stage=await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.motionViewport)");
+          assert(stage&&stage[0]>=0&&stage[1]>=96&&stage[0]+stage[2]<=width&&stage[1]+stage[3]<=height-100);
+          if(width<height)assert(stage[3]>500);
+        }
+        await screenshot(a,screen+'-'+width);
+        const sameIds=current.map(c=>[c.id,c.label]);
+        await metrics(a,height,width);await ready(a,screen,height+'x'+width);
+        assert.deepEqual((await controls(a)).map(c=>[c.id,c.label]),sameIds,'rotation retains controls');
+        await metrics(a,width,height);await ready(a,screen,width+'x'+height);
+        await click(a,'Test Playground','test-playground',width+'x'+height);
+        results.push({screen,width,height,controls:current.length});
+      }
+      await click(a,'OTriOS','home',width+'x'+height);
+    }
+    const result={passed:true,checks:['seven demos in both orientations','clickable app-owned breadcrumbs','all controls within the viewport','editor typing and rotation','portrait motion uses authored stage','same control IDs through rotation'],results};
+    await writeFile(join(output,'brass-theme-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else if(args.includes('--playground')){
     const expected=[['Components','component-playground'],['Layouts','layout-lab'],['Long Document','layout-document'],['Text Panning','layout-text-scroll'],['Text Input','input-lab'],['2D Animations','animation-lab'],['3D Animations','three-d-lab']];
     const a=await page(1280,800,'home');
     for(const [width,height]of [[1280,800],[800,1280]]){
@@ -50,7 +127,7 @@ try{
       assert(!await evaluate(a,"document.querySelector('#view').getAttribute('aria-label').includes('OPEN')"));
       await screenshot(a,'home-'+width);
       await click(a,'Test Playground','test-playground',width+'x'+height);
-      assert.deepEqual((await controls(a)).filter(c=>!['Edit cards','Home'].includes(c.label)).map(c=>c.label),expected.map(x=>x[0]));
+      assert.deepEqual((await controls(a)).filter(c=>!['Edit cards','OTriOS'].includes(c.label)).map(c=>c.label),expected.map(x=>x[0]));
       const bounds=await evaluate(a,"({w:innerWidth,h:innerHeight})");
       for(const c of await controls(a)){const[x,y,w,h]=c.bounds;assert(x>=0&&y>=0&&x+w<=bounds.w+1&&y+h<=bounds.h+1,JSON.stringify(c));}
       await screenshot(a,'test-playground-'+width);
@@ -58,11 +135,11 @@ try{
         await click(a,label,screen,width+'x'+height);
         assert.equal(await evaluate(a,"document.querySelector('#revision').dataset.screen"),screen);
         if(screen==='layout-lab')assert(!(await controls(a)).some(c=>['Long Document','Text Panning','Long Document','Text Panning'].includes(c.label)));
-        await click(a,'Back','test-playground',width+'x'+height);
+        await click(a,'Test Playground','test-playground',width+'x'+height);
       }
-      await click(a,'Home','home',width+'x'+height);
+      await click(a,'OTriOS','home',width+'x'+height);
     }
-    const result={passed:true,checks:['Home has Brass Relay, Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and parent Back','Layouts has no extra demo links','Edit belongs to Test Playground']};
+    const result={passed:true,checks:['Home has Brass Relay, Test Playground and Monitoring','seven demo cards with compact content','all cards fit portrait and landscape','all demo navigation and ancestor breadcrumbs','Layouts has no extra demo links','Edit belongs to Test Playground']};
     await writeFile(join(output,'playground-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--touch-replay')){
     const a=await page(1280,800,'component-playground'),results=[];
@@ -130,7 +207,7 @@ try{
     await evaluate(a,'documentLoss.restoreContext()');
     await wait(a,"document.querySelector('#revision').dataset.graphics==='ready'&&document.querySelector('#revision').dataset.documentLoading==='false'");
     await screenshot(a,'document-context-restored');assert.equal(await evaluate(a,"document.querySelector('#error').hidden"),true,await evaluate(a,"document.querySelector('#error').textContent"));}
-    await click(a,'Back','test-playground','800x1280');
+    await click(a,'Test Playground','test-playground','800x1280');
     await wait(a,"document.querySelector('#revision').dataset.documentResources==='0'");
     const result={passed:true,checks:['1 MiB source admission','touch drag and momentum','bounded working memory','independent client viewports','source anchor across reflow','context-loss resource replay','navigation retires document resources'],initial,dragged,coast,resized,screenshots:output};
     await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));process.exitCode=0;
@@ -169,8 +246,8 @@ try{
     const portrait=await info();assert(portrait.offset.every((v,i)=>v>=0&&v<=portrait.limit[i]));
     await screenshot(a,'text-scroll-portrait');
     const cache=await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.fontCache)");assert(cache.bytes<=4194304,'bounded glyph cache');
-    await click(a,'Back','test-playground','800x1280');await click(a,'Home','home','800x1280');
-    const result={passed:true,checks:['Test Playground owns demo routes','full text page uses real WebGL','two-axis touch drag and release momentum','cancel stops coasting','panning is client-local','portrait reflow and bounds','Back and Home navigation'],initial,dragged,coast,portrait,fps,cache};
+    await click(a,'Test Playground','test-playground','800x1280');await click(a,'OTriOS','home','800x1280');
+    const result={passed:true,checks:['Test Playground owns demo routes','full text page uses real WebGL','two-axis touch drag and release momentum','cancel stops coasting','panning is client-local','portrait reflow and bounds','ancestor breadcrumb navigation'],initial,dragged,coast,portrait,fps,cache};
     await writeFile(join(output,'text-scroll-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
   }else if(args.includes('--input-viewport')){
     const a=await page(1280,800,'input-lab'),b=await page(800,1280,'input-lab');
@@ -219,7 +296,7 @@ try{
       const sample=(await report()).samples.at(-1);assert.equal(sample.screen,screen);assert(sample.totalMs>0);assert(Number.isFinite(sample.ms.queue));assert(Number.isFinite(sample.ms.responseWait));results.push({pass,...sample});
       const count=(await report()).samples.length;
       if(screen==='input-lab'){await click(a,'First text field',screen);await evaluate(a,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');assert.equal((await report()).samples.length,count,'editing local state is not navigation');}
-      await click(a,'Home','home','800x1280');
+      await click(a,'OTriOS','home','800x1280');
       await wait(a,`JSON.parse(document.querySelector('#timing-report').value).samples.length>${count}`);
     }
     for(const sample of results.filter(s=>s.pass===1)){const first=results.find(s=>s.pass===0&&s.screen===sample.screen);assert(sample.responseBytes<first.responseBytes,`${sample.screen}: cached mount must save bytes`);assert(sample.uiCacheHits>first.uiCacheHits);}
@@ -236,7 +313,7 @@ try{
     await writeFile(join(output,'route-rename-ready.json'),JSON.stringify(before));console.log('READY for an app-owned parent rename');
     await wait(a,"location.pathname==='/playground/layouts'",90000);const after=await snapshot();
     assert.equal(after.time,before.time);assert.equal(after.length,before.length);assert.equal(after.epoch,before.epoch);assert.equal(after.state,before.state);assert.equal(after.ui,before.ui);assert.equal(socketCount.get(a),sockets);
-    await click(a,'Home','home','800x1280');await click(a,'Layouts','layout-lab','800x1280');await wait(a,"location.pathname==='/playground/layouts'");
+    await click(a,'OTriOS','home','800x1280');await click(a,'Layouts','layout-lab','800x1280');await wait(a,"location.pathname==='/playground/layouts'");
     await call('Page.reload',{},a);await ready(a,'layout-lab','800x1280');assert.equal(await evaluate(a,'location.pathname'),'/playground/layouts');
     await wait(owner,`document.querySelector('#revision').dataset.release!==${JSON.stringify(before.release)}`);await call('Page.bringToFront',{},owner);
     await click(owner,'Layouts','layout-lab','1280x800');await wait(owner,"location.pathname==='/playground/layouts'");
@@ -254,7 +331,7 @@ try{
     const a=await page(1280,800,'input-lab'),snapshot=()=>evaluate(a,"({path:location.pathname,hash:location.hash,time:performance.timeOrigin,release:document.querySelector('#revision').dataset.release,length:history.length})");
     const initial=await snapshot();assert.equal(initial.path,'/test-playground/text-input');assert.equal(initial.hash,'');assert.equal(hellos.get(a).release,initial.release,'hello identifies the module release at a clean URL');
     await click(a,'First text field','input-lab','1280x800');assert.equal((await snapshot()).path,initial.path);assert.equal((await snapshot()).length,initial.length,'local keyboard creates no navigation entry');
-    await click(a,'Home','home','1280x800');assert.equal((await snapshot()).path,'/');
+    await click(a,'OTriOS','home','1280x800');assert.equal((await snapshot()).path,'/');
     await click(a,'Components','component-playground','1280x800');assert.equal((await snapshot()).path,'/test-playground/components');
     const sockets=socketCount.get(a);
     for(const [action,screen]of [['back','test-playground'],['back','home'],['back','input-lab'],['forward','home'],['forward','test-playground'],['forward','component-playground']]){
@@ -268,7 +345,7 @@ try{
     assert(!(await controls(a)).some(c=>['Signal screen','Cards screen'].includes(c.label)));
     await call('Page.reload',{},a);await ready(a,'layout-lab','1280x800');assert.equal((await snapshot()).path,'/test-playground/layouts');
     const portrait=await page(800,1280,'layout-lab');
-    await click(portrait,'Home','home','800x1280');
+    await click(portrait,'OTriOS','home','800x1280');
     assert.equal(await evaluate(portrait,'location.pathname'),'/');
     for(const retired of ['/test-playground/layouts/signal','/test-playground/layouts/cards'])assert.equal(await evaluate(a,`(async()=> (await fetch(${JSON.stringify(retired)})).status)()`),404);
     await call('Page.bringToFront',{},a);
@@ -279,9 +356,9 @@ try{
   }else if(args.includes('--home-reorder')||args.includes('--playground-reorder')){
     const a=await page(800,1280,'test-playground'),b=await page(1280,800,'test-playground');
     await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
-    const cards=async session=>(await controls(session)).filter(c=>!['Edit cards','Done editing cards','Home'].includes(c.label)).sort((a,b)=>a.bounds[1]-b.bounds[1]||a.bounds[0]-b.bounds[0]);
+    const cards=async session=>(await controls(session)).filter(c=>!['Edit cards','Done editing cards','OTriOS'].includes(c.label)).sort((a,b)=>a.bounds[1]-b.bounds[1]||a.bounds[0]-b.bounds[0]);
     const order=async session=>(await cards(session)).map(c=>c.label);
-    const orderExpression=`[...document.querySelectorAll('#controls button')].filter(b=>!['Edit cards','Done editing cards','Home'].includes(b.getAttribute('aria-label'))).sort((a,b)=>a.getBoundingClientRect().y-b.getBoundingClientRect().y||a.getBoundingClientRect().x-b.getBoundingClientRect().x).map(b=>b.getAttribute('aria-label'))`;
+    const orderExpression=`[...document.querySelectorAll('#controls button')].filter(b=>!['Edit cards','Done editing cards','OTriOS'].includes(b.getAttribute('aria-label'))).sort((a,b)=>a.getBoundingClientRect().y-b.getBoundingClientRect().y||a.getBoundingClientRect().x-b.getBoundingClientRect().x).map(b=>b.getAttribute('aria-label'))`;
     await new Promise(r=>setTimeout(r,500)); const baseline=sentFrames.get(a)||0,baselineBytes=sentBytes.get(a)||0;
     await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Edit cards').click()");
     await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Done editing cards')");
@@ -359,7 +436,7 @@ try{
     assert(Number((await controls(other)).find(c=>c.label==='Linear slider').value)>75,'other app retains its confirmed value');
     console.log('Capturing updated Home');await screenshot(home,'home-after-update');
     console.log('Opening Home on other client');await call('Page.bringToFront',{},other);
-    await click(other,'Home','home','1280x800');
+    await click(other,'OTriOS','home','1280x800');
     await wait(other,"document.querySelector('#view').getAttribute('aria-label').includes('Explore the demos')");
     console.log('Refreshing Home');await call('Page.bringToFront',{},home);await call('Page.reload',{},home);await ready(home,'home','800x1280');
     await wait(home,"document.querySelector('#view').getAttribute('aria-label').includes('Explore the demos')");
@@ -395,9 +472,9 @@ try{
   await metrics(b,800,1280);await ready(b,'component-playground','800x1280');
   await drag(b,'Linear slider',0.43);await wait(b,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
   await wait(a,"Number([...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Linear slider').getAttribute('aria-valuenow'))<50");
-  await click(b,'Home','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,3);await screenshot(b,'home-portrait');
+  await click(b,'OTriOS','home','800x1280');const homeTall=(await controls(b)).filter(c=>c.label!=='Edit cards');assert(Math.abs(homeTall[0].bounds[1]-homeTall[1].bounds[1])<1);assert.equal(homeTall.length,3);await screenshot(b,'home-portrait');
   await click(b,'Layouts','layout-lab','800x1280');await screenshot(b,'layout-lab-portrait');
-  await click(a,'Home','home','1280x800');await click(a,'Layouts','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
+  await click(a,'OTriOS','home','1280x800');await click(a,'Layouts','layout-lab','1280x800');await screenshot(a,'layout-lab-landscape');
   const result={passed:true,checks:['landscape and portrait WebGL rendering','three-card Home composition','same controls and behavior identities','two clients share edits and ink across orientations','resize during pointer capture and subsequent input','Layouts in both orientations'],screenshots:output,native_hardware:'not tested'};
   await writeFile(join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));
   }

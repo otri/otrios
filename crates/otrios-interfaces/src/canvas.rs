@@ -164,6 +164,9 @@ pub enum Presentation {
         frame: [f32; 4],
     },
     Motion {
+        /// UI v6: authored stage; older descriptions keep the legacy extent.
+        #[serde(default)]
+        viewport: Option<u16>,
         three_d: bool,
         load: u16,
         playing: u16,

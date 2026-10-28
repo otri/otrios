@@ -2,12 +2,20 @@
 # Home and reusable input
 
 Home is an admitted Canvas launcher with three compact cards: **The Brass Relay**,
-**Test Playground** and **Monitoring**. Home and the lounge share neutral charcoal
-surfaces, restrained brass accents and the standard OTriOS heading. Each card contains an icon, title and subheading. Test
+**Test Playground** and **Monitoring**. All shipped apps share neutral charcoal
+surfaces, brass and copper accents, fine outlines and a header divider. Each card contains an icon, title and subheading. Test
 Playground owns the seven demo destinations: Components, Layouts, Long Document,
 Text Panning, Text Input, 2D Animations and 3D Animations. Layouts has no extra
-links to the document or panning demos. Demo headers provide Back to their parent
-and Home to the launcher. Monitoring retains its private admission boundary.
+links to the document or panning demos. Headers provide clickable ancestors:
+`< OTriOS • Test Playground` and `< OTriOS < Test Playground • Layouts`, for
+example. Each ancestor names its destination in the owning UI; there are no
+separate Home or Back buttons. Monitoring retains its private admission boundary.
+
+Every Test Playground screen reflows between 1280×800 landscape and 800×1280
+portrait. Motion demos own a flexible stage below their controls; the same stage
+bounds drive native and browser geometry. Text Input keeps readable key heights
+and fits all software keys across portrait width. Monitoring remains landscape,
+with its content fitted inside the outlined screen below the shared header.
 
 Navigation and route history stay on the device. A candidate Canvas qualifies
 UI, behavior and selected state before accepting its lease; a rejected candidate
@@ -110,8 +118,9 @@ Native uses the identical resolved path (`--screen test-playground/layouts`, als
 accepting a leading `/`). The catalog binds each path to its UI document and
 app-owned State reference. Future child screens may explicitly share their
 owning app's State; the routing mechanism does not require demonstration screens.
-Back first dismisses a local keyboard, then opens the parent path; a top-level
-screen returns to the catalog entry screen.
+The host Back action first dismisses a local keyboard, then opens the parent
+path; a top-level screen returns to the catalog entry screen. A breadcrumb
+directly opens its named ancestor.
 
 Changing a route name in Home's UI rebases descendant paths without changing their
 identities, UI documents, behavior or State. A compatible UI publication updates

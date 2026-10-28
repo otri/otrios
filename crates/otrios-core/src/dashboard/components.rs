@@ -2,11 +2,7 @@
 //! Primitive construction helpers for tests and native callers.
 //! Live components are defined by the FlexBuffers layout asset.
 use otrios_interfaces::scene::*;
-pub const BG: Color = [16, 28, 41, 255];
-pub const CARD: Color = [27, 44, 61, 255];
-pub const WHITE: Color = [239, 244, 236, 255];
-pub const MUTED: Color = [150, 171, 185, 255];
-pub const ACCENT: Color = [185, 238, 143, 255];
+pub use otrios_interfaces::theme::{BG, BRASS as ACCENT, CARD, MUTED, TEXT as WHITE};
 pub fn node(id: NodeId, frame: Rect, primitive: Primitive) -> SceneNode {
     SceneNode {
         id,

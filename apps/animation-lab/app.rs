@@ -11,8 +11,9 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
         &[
             "ui.rs",
             "state/schema.rs",
-            "sdk:canvas-authoring-v3",
-            "presentation:motion-v1",
+            "sdk:canvas-authoring-v6",
+            "presentation:motion-v2",
+            "component:motion-demo-v1",
         ],
     )
 }

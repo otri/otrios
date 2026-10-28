@@ -255,13 +255,22 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     if animated {
                         let now = started.elapsed().as_secs_f64() * 1000.;
-                        let mesh =
-                            presenter.geometry(f.motion_kind.unwrap_or(false), f.intent, now);
+                        let mesh = presenter.geometry_in(
+                            f.motion_kind.unwrap_or(false),
+                            f.intent,
+                            now,
+                            f.paint.motion.unwrap_or([80., 280., 1120., 400.]),
+                        );
                         display.upload(1, &mesh.vertices)?;
                         let bucket = (now / 1000.) as u64;
                         if hud != bucket
                             && hud_tx
-                                .try_send((f.epoch, bucket, presenter.hud_label(f.updates), None))
+                                .try_send((
+                                    f.epoch,
+                                    bucket,
+                                    presenter.hud_label(f.updates),
+                                    Some(f.paint.viewport),
+                                ))
                                 .is_ok()
                         {
                             hud = bucket;

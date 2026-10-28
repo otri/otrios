@@ -28,16 +28,7 @@ pub fn description() -> Ui {
         column(
             12.,
             vec![
-                row(
-                    12.,
-                    vec![
-                        place("$heading", [650., 64.])
-                            .minimum([240., 64.])
-                            .flex_width(),
-                        place("back", [140., 64.]),
-                        place("home", [140., 64.]),
-                    ],
-                ),
+                heading(),
                 place("hint", [1184., 24.]).minimum([1., 24.]).flex_width(),
                 place("page", [1184., 600.])
                     .minimum([500., 350.])
@@ -54,16 +45,13 @@ pub fn description() -> Ui {
         "Text Panning",
         schema("layout-text-scroll-state-v1", &[]),
     )
+    .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
     .with_composition(composition(), composition())
     .with_text_scroll("page", [width + 16., 64. * 27. + 16.])
     .build(
         "Text Panning",
         vec![
-            button("Back").on_press(Event::back()).key("back"),
-            button("Home")
-                .navigate_to(Destination::app("home"))
-                .key("home"),
-            text("EXPERIMENT - Drag in any direction. Release to coast. Touch to stop.")
+            text("Drag in any direction • Release to coast; touch to stop.")
                 .color(MUTED)
                 .key("hint"),
             canvas(lines).frame([0., 0., 1184., 600.]).key("page"),

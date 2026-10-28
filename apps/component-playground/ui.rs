@@ -8,7 +8,7 @@ use otrios_interfaces::canvas::{StateSchema, Ui};
 
 fn instrument(title: &str, subtitle: &str, design: [f32; 2], mut content: Vec<Element>) -> Element {
     let mut children = vec![
-        rounded_rect(CARD).pin_edges(0.).corner_radius(20.0.into()),
+        surface(CARD, 20.).pin_edges(0.),
         text(title)
             .frame([24., 24., design[0] - 48., 28.])
             .color(ACCENT)
@@ -83,10 +83,10 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
         ]);
     }
     pad_parts.extend([
-        rectangle([94, 169, 181, 110])
+        rectangle([216, 183, 117, 110])
             .frame([0., 0., 1., 210.])
             .x(PAD_X.mapped(0., 351.)),
-        rectangle([94, 169, 181, 110])
+        rectangle([216, 183, 117, 110])
             .frame([0., 0., 352., 1.])
             .y(PAD_Y.mapped(0., 209.)),
         circle(TEAL)
@@ -107,14 +107,14 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     let output = component(
         [370., 116.],
         vec![
-            rounded_rect(CARD).pin_edges(0.).corner_radius(18.0.into()),
+            surface(CARD, 18.).pin_edges(0.),
             text("Accent").position([24., 21.]).color(MUTED),
             text(ENABLED.choose_text("Muted", "Live"))
                 .position([24., 55.])
                 .font_scale(2.),
             canvas(vec![
                 rectangle(TRACK)
-                    .color(ENABLED.choose_color(TRACK, [56, 84, 55, 255]))
+                    .color(ENABLED.choose_color(TRACK, [112, 91, 55, 255]))
                     .frame([0., 0., 112., 56.])
                     .corner_radius(28.0.into()),
                 circle(WHITE)
@@ -129,8 +129,6 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     .semantic_label("Toggle")
     .on_press(Event::press(ENABLED).reduced_by(TOGGLE));
 
-    let home = || place("home", [140., 80.]);
-    let back = || place("back", [140., 80.]);
     let intro = || place("intro", [752., 60.]).flex_width();
     let linear = || place("linear", [370., 410.]);
     let rotary = || place("rotary", [370., 410.]);
@@ -139,7 +137,7 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     let wide = column(
         24.,
         vec![
-            row(16., vec![heading(), back(), home()]),
+            heading(),
             intro(),
             row(22., vec![linear(), rotary(), pad_slot()]),
             accent(),
@@ -148,7 +146,7 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
     let tall = column(
         16.,
         vec![
-            column(12., vec![heading(), row(16., vec![back(), home()])]),
+            heading(),
             intro(),
             row(12., vec![linear(), rotary()]),
             pad_slot(),
@@ -156,19 +154,13 @@ pub fn description(state_schema: StateSchema, code: &[u8]) -> Ui {
         ],
     );
     AppUi::new("component-playground", "Components", state_schema)
+        .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
         .with_composition(wide, tall)
         .with_touch_pad("pad-control")
         .with_behavior(code, &state::FIELDS)
         .build(
             "Components",
             vec![
-                button("Back")
-                    .navigate_to(Destination::app("test-playground"))
-                    .key("back"),
-                button("Home")
-                    .navigate_to(Destination::app("home"))
-                    .frame([1020., 35., 200., 80.])
-                    .key("home"),
                 text("Drag, rotate, explore. Shared across devices.")
                     .position([52., 146.])
                     .color(MUTED)

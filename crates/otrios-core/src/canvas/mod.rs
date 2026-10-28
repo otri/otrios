@@ -33,7 +33,11 @@ pub const MAX_BYTES: usize = 512 * 1024;
 pub fn validate_ui_format(ui: &Ui) -> Result<()> {
     if !matches!(
         ui.format.as_str(),
-        "otrios-canvas-v2" | "otrios-canvas-v3" | "otrios-canvas-v4" | "otrios-canvas-v5"
+        "otrios-canvas-v2"
+            | "otrios-canvas-v3"
+            | "otrios-canvas-v4"
+            | "otrios-canvas-v5"
+            | "otrios-canvas-v6"
     ) || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
         && !matches!(ui.format.as_str(), "otrios-canvas-v3" | "otrios-canvas-v4"))
         || (matches!(ui.presentation, Some(Presentation::TextDocument { .. }))

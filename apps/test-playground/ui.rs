@@ -7,38 +7,14 @@ pub fn description() -> Ui {
         column(
             24.,
             vec![
-                row(
-                    16.,
-                    vec![
-                        heading(),
-                        place("edit-order", [136., 80.]),
-                        place("home", [140., 80.]),
-                    ],
-                ),
+                row(16., vec![heading(), place("edit-order", [136., 60.])]),
                 wrap_cards(&super::state::CARDS, [384., 176.], [336., 176.], [16., 24.]),
             ],
         )
     };
     AppUi::new("test-playground", "Test Playground", super::state::schema())
-        .with_composition(
-            arrangement(),
-            column(
-                24.,
-                vec![
-                    column(
-                        12.,
-                        vec![
-                            heading(),
-                            row(
-                                16.,
-                                vec![place("edit-order", [136., 80.]), place("home", [140., 80.])],
-                            ),
-                        ],
-                    ),
-                    wrap_cards(&super::state::CARDS, [384., 176.], [336., 176.], [16., 24.]),
-                ],
-            ),
-        )
+        .with_breadcrumbs(&[("OTriOS", "home")])
+        .with_composition(arrangement(), arrangement())
         .with_reorder(
             &super::state::CARDS
                 .iter()
@@ -99,7 +75,7 @@ pub fn description() -> Ui {
                     LaunchIcon::Animation3d,
                 ),
                 canvas(vec![
-                    rounded_rect(CARD).pin_edges(0.),
+                    surface(CARD, 12.).pin_edges(0.),
                     text(reorder_label())
                         .frame([24., 28., 90., 24.])
                         .font_scale(2.),
@@ -108,9 +84,6 @@ pub fn description() -> Ui {
                 .key("edit-order")
                 .semantic_label("Edit cards")
                 .on_press(Event::edit_order()),
-                button("Home")
-                    .navigate_to(Destination::app("home"))
-                    .key("home"),
             ],
         )
 }
