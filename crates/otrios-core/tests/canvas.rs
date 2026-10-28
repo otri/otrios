@@ -3834,6 +3834,100 @@ fn browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits() 
 }
 
 #[test]
+fn phone_breadcrumb_qualifies_the_destination_in_its_layout_viewport() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    for height in [944., 575., 410.] {
+        let mut c = Client::default();
+        c.set_font(std::sync::Arc::new(
+            otrios_core::dashboard::font::Font::from_zstd(
+                include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        ));
+        c.set_software_keyboard(false);
+        activate(&mut c, brass_relay::ui(&[]), "phone", vec![]);
+        pump(
+            &mut c,
+            &mut Document::new(brass_relay::ui(&[]).state_schema, "phone").unwrap(),
+            &mut Session::default(),
+        );
+        let home_ui = encode_ui(&home::ui(&[])).unwrap();
+        c.admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![
+                    CatalogEntry {
+                        path: "".into(),
+                        app: home::manifest(),
+                        ui_hash: hash(&home_ui),
+                        private: false,
+                    },
+                    CatalogEntry {
+                        path: "brass-relay".into(),
+                        app: brass_relay::manifest(),
+                        ui_hash: hash(&encode_ui(&brass_relay::ui(&[])).unwrap()),
+                        private: false,
+                    },
+                ],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        c.set_layout_viewport([800., 1280.]).unwrap();
+        c.set_viewport([534., height]).unwrap();
+        c.tick(1000, 1000).unwrap();
+        let epoch = c.epoch();
+        for (phase, at) in [(PointerPhase::Down, 1100), (PointerPhase::Up, 1200)] {
+            c.pointer_at(
+                epoch,
+                PointerEvent {
+                    id: (-1280962938i32) as u32,
+                    phase,
+                    position: [94., 54.],
+                },
+                at,
+            )
+            .unwrap();
+            c.tick(at, 1000).unwrap();
+        }
+        let bytes = c.outgoing().unwrap().expect("Home mount request");
+        let ClientMessage::Mount { epoch, ui_ref, .. } = decode_client(&bytes).unwrap() else {
+            panic!("Home mount")
+        };
+        assert_eq!(ui_ref, "app:home/ui");
+        assert_eq!(
+            c.scene().unwrap().root().frame.width,
+            534.,
+            "The current chat stays in its presented viewport until admission"
+        );
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&home_ui),
+                ui: home_ui,
+                code: vec![],
+                state: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            c.ui_ref(),
+            "app:home/ui",
+            "Home must qualify with the layout extent, independently of chat density and keyboard height"
+        );
+        assert_eq!(
+            [
+                c.scene().unwrap().root().frame.width,
+                c.scene().unwrap().root().frame.height
+            ],
+            [800., 1280.]
+        );
+    }
+}
+
+#[test]
 fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_controls() {
     use otrios_interfaces::scene::Primitive;
     let font = std::sync::Arc::new(

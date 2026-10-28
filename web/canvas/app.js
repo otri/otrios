@@ -88,7 +88,7 @@ try{
     if(next.every((n,i)=>n===desiredViewport[i]))return;
     desiredViewport=next;moves.clear();
     for(const id of pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();
-    command({type:'viewport',size:next});
+    command({type:'viewport',size:next,layoutViewport:baseViewport});
   }
   const fitVisibleViewport=()=>{
     const v=window.visualViewport;if(v&&v.scale>1.01)return;
@@ -144,7 +144,7 @@ try{
   function leaveLogin(){command({type:'navigate',screen:null});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  const start={type:'start',reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,timings:!!timings,wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,release:initialRelease,screen:restoreScreen()};
+  const start={type:'start',reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,timings:!!timings,wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,layoutViewport:baseViewport,release:initialRelease,screen:restoreScreen()};
   try{worker.postMessage(start);}catch(error){
     // Older engines may instantiate Wasm but reject cloning compiled modules.
     if(error.name!=='DataCloneError')throw error;

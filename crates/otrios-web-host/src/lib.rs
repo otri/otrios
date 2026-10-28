@@ -28,6 +28,9 @@ impl CanvasApp {
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<bool, String> {
         self.inner.set_viewport([width, height])
     }
+    pub fn set_layout_viewport(&mut self, width: f32, height: f32) -> Result<(), String> {
+        self.inner.set_layout_viewport([width, height])
+    }
     pub fn viewport_size(&self) -> Vec<f32> {
         self.inner
             .scene()

@@ -151,6 +151,7 @@ pub struct Client {
     collection_revoked: bool,
     external_keyboard: bool,
     viewport: Option<[f32; 2]>,
+    layout_viewport: Option<[f32; 2]>,
     wire_clock: u64,
     decode_budget: DecodeBudget,
     generation: u32,
@@ -348,6 +349,18 @@ impl Client {
         }
     }
     /// Local presentation only. A rejected size retains the old scene and state.
+    /// The host's standard layout extent, independent of a chat visual viewport.
+    /// Use it to qualify the next non-chat mount while retaining the current one.
+    pub fn set_layout_viewport(&mut self, viewport: [f32; 2]) -> Result<()> {
+        if viewport
+            .iter()
+            .any(|v| !v.is_finite() || !(1. ..=8192.).contains(v))
+        {
+            return Err("Invalid layout viewport".into());
+        }
+        self.layout_viewport = Some(viewport);
+        Ok(())
+    }
     pub fn set_viewport(&mut self, viewport: [f32; 2]) -> Result<bool> {
         if viewport
             .iter()
@@ -1045,7 +1058,13 @@ impl Client {
                         },
                     )?;
                     candidate.font = self.font.clone();
-                    candidate.viewport = self.viewport.unwrap_or([1280., 800.]);
+                    candidate.viewport =
+                        if matches!(candidate.ui.presentation, Some(Presentation::Chat)) {
+                            self.viewport
+                        } else {
+                            self.layout_viewport.or(self.viewport)
+                        }
+                        .unwrap_or([1280., 800.]);
                     let scene = resolve_scene(&candidate)?;
                     if let Some(reader) = &mut candidate.text_document {
                         reader.sync(&scene, candidate.font.as_ref())?;

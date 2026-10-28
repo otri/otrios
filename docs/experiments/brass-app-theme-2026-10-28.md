@@ -70,7 +70,7 @@ Monitoring uses a synthetic fixture; no production telemetry is included.
 
 ## Release and rollback
 
-Final signed release:
+Initial theme release:
 `be7ddb85799dd1b42cf92bef03957be993be2bff4c6eec150b9f9d55e80a582c`.
 
 Native binary SHA-256:
@@ -92,3 +92,42 @@ existing Monitoring collector completed its first brass-palette refresh.
 tested). A read-only Chrome probe found the same confirmed transcript tail before
 and after deployment. Isolated candidate services and files were removed; the
 rollback snapshot remains available.
+
+## Phone breadcrumb admission correction
+
+The attached iPhone Safari debugger showed that a tap reached the canvas at the
+correct coordinates. The navigation request succeeded, but Home qualification
+failed at the outgoing 534×944 chat extent: its new breadcrumb heading required
+600 logical pixels. Desktop browsers and the Frame used larger extents. This
+was an app-admission viewport handoff failure, not an iOS hit-target failure.
+
+The browser now supplies its standard layout extent independently of the current
+chat visual viewport. Core uses that extent for a non-chat candidate, preserving
+the old chat scene until qualification succeeds. Native hosts retain their
+existing policy. UI bytes and state protocol v8 remain unchanged by this fix.
+
+The core regression reproduces the complete touch-to-Home-mount transition at
+534×944, 534×575 and 534×410. Real Chrome touch acceptance passes at 393×695,
+390×844, 430×932 and 1280×800, including modal close, full refresh and a focused
+composer with a shortened visual viewport. The optional harness disposes each
+browser context before the next case; retaining contexts with mocked visual
+viewports had stalled Chrome's synthetic touch acknowledgments. The full chat
+browser suite passes. Required repository checks pass with 62 Canvas tests,
+along with 11 native input/transport tests, 76 selected Node tests, ARM Clippy,
+ARM release and Wasm builds. Four final Frame trials confirm Home and Brass
+Relay in both orientations, with the live kiosk restored.
+
+[Phone qualification](data/brass-app-theme-2026-10-28/phone-navigation-qualification.json).
+Final signed release:
+`df31d70519d8a49d9326feb77de082fa6b7bde6778a8be9daab34fea2a815ada`.
+Native SHA-256:
+`c4af026ea0a56ae6785cafb992ba2173c5fd6e93a29976e5649c6474de527b2f`.
+A new stopped, hash-verified rollback snapshot retains the preceding brass release
+and current journals at
+`/var/lib/otrios-authority/rollback/2026-10-28-brass-phone-navigation`.
+
+The final live release passes all 120 public hosting checks. Native readiness
+confirms the new binary, confirmed state, zero pending commands, calibrated touch
+and an open input device; all four services are active. The read-only confirmed
+transcript fingerprint is unchanged across this correction's deployment. The
+private candidate was removed after qualification.

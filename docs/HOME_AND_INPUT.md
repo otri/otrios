@@ -55,6 +55,10 @@ The browser face is the same licensed Roboto source, with shared logical metrics
 kerning and ligatures disabled to match the current renderer. The viewport fits
 the visible area above a mobile keyboard without flipping the scene orientation
 just because the keyboard reduced its height. Pinch zoom remains enabled.
+The host supplies the standard layout extent separately when qualifying a new
+non-chat app. Returning Home therefore never tries to admit its launcher at the
+outgoing 534-unit phone chat width or a keyboard-shortened chat height. The
+current chat retains its presented extent until the destination qualifies.
 
 Full browser value/selection snapshots pass through the same bounded Rust editor.
 UTF-16 offsets are converted to complete UTF-8 grapheme boundaries. Invalid control
