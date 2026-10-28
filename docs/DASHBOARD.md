@@ -8,9 +8,9 @@ Rust primitive compositor and cached Slug font renderer.
 
 ## App boundary
 
-Home mounts `Canvas(uiRef, stateRef)` from an admitted catalog. Component
-Playground, Layout Lab, Input Lab, Animation Lab, 3D Lab and Monitoring own their
-UI, schema and local source dependencies in `apps/<id>/`. Named builders compile
+Home mounts `Canvas(uiRef, stateRef)` from an admitted catalog. The Brass Relay,
+Test Playground and its demos, and Monitoring own their UI, schema and local
+source dependencies in `apps/<id>/`. Named builders compile
 to typed FlexBuffers; clients do not parse JSON UI. Playground loads a bounded
 Wasm reducer. Other controls use declared setters rather than an unnecessary
 executable module. See [the app guide](../apps/README.md).
@@ -18,7 +18,8 @@ executable module. See [the app guide](../apps/README.md).
 The authority persists one Merkle root per app and acknowledges accepted
 changes after storage succeeds. Public visitors share these roots with the
 frame. Clients hold replicas, previews and pending commands in RAM only. Code,
-fonts and blobs use disposable bounded caches: about 512 MiB web and 2 GiB native.
+fonts and blobs use disposable bounded caches: about 512 MiB web. The native
+agent defaults to 2 GiB; the checked-in frame service configures 128 MiB.
 Touch trails are an ephemeral stream and fade after five seconds.
 
 Input Lab text is shared typed-register state; focus, selection, keyboard page
@@ -59,7 +60,7 @@ The real frame uses its accepted rotation, touch calibration and exclusive
 DRM ownership. Follow [direct display](DIRECT_DISPLAY.md); do not change kernel,
 display timings or calibration as part of an app edit. Without `--sync`, a
 local native experiment can load admitted packages from `--apps`; installed
-frame releases mount the authority through `/apps/stream`.
+frame releases use the negotiated `/session` connection.
 
 ## Validation and limits
 
@@ -72,10 +73,13 @@ runs the ARM host on the frame. Desktop browser results do not establish iPad
 or physical touch performance.
 
 This remains a bounded research runtime. Current fields are normalized integer
-registers or bounded typed text/color/series values, not the proposed general
-Merkle hierarchy. App documents/transport are bounded at 512 KiB; long-lived
-history checkpointing remains follow-up work. Read-only monitoring aggregates
-and touch trails avoid that history. General Unicode shaping, arbitrary native
-module sandboxing, shared-memory OS IPC and general collection selectors remain
-outside this migration. [Modern app pattern](MODERN_APP_PATTERN.md) records the
-implementation and remaining simplifications.
+registers or bounded typed text/color/series values within a bounded Merkle
+hierarchy. Canvas documents and messages are bounded at 512 KiB; checkpoints
+rotate at 4 MiB. Qualified collection views and transfers are bounded at 1 MiB,
+with up to 512 bytes of event-envelope overhead. Viewport-scoped collection
+windows provide bounded ordered selections, including Brass Relay messages; general cross-authority
+collection queries remain future work. Read-only monitoring aggregates and touch
+trails avoid durable document history. General Unicode shaping, arbitrary native
+module sandboxing and shared-memory OS IPC remain outside this migration.
+[Modern app pattern](MODERN_APP_PATTERN.md) records the implementation and
+remaining simplifications.

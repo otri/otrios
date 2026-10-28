@@ -48,4 +48,4 @@ The bounded subset includes printable ASCII, available Latin-1 glyphs, common pu
 
 Text scale 1 retains the demo's eight-logical-unit capital height. Layout uses explicit ascent, descent and line gap for its line box; glyph ink bounds independently retain accents, descenders and negative side bearings. The old eight-unit bitmap rectangle is no longer a vertical ink clip. Ancestor canvases continue to clip the final quads, with glyph coordinates interpolated to preserve correct coverage at clipped edges.
 
-The runtime ownership, glyph coverage cache, color pipeline and acceptance gates are specified in [RFC 0006](../../../docs/rfcs/0006-font-resources-and-text-presentation.md).
+The runtime ownership, glyph coverage cache, color pipeline and acceptance gates are specified in [RFC 0006: Font resources and text presentation](../../../docs/rfcs/0006-font-resources-and-text-presentation.md).

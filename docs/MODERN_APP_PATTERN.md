@@ -45,7 +45,8 @@ its own schema, persists changed app documents, then acknowledges them. A client
 holds its document, unacknowledged changes, editor focus, keyboard, captures and
 presentation resources in RAM. Disconnection preserves pending RAM edits; it
 does not create a client document checkpoint. Immutable code/blob caches retain
-the existing bounded budgets (about 512 MiB web and 2 GiB native). Touch trails
+the bounded budgets (about 512 MiB web; the native agent defaults to 2 GiB
+and the checked-in frame service sets 128 MiB). Touch trails
 use a separate ephemeral channel and fade without durable history.
 
 ## Admission and ownership
@@ -82,9 +83,12 @@ mirror.
 
 ## Typed data and presentation
 
-The UI/state contract is `otrios-canvas-v2`. It supports bounded numeric, text,
-boolean, color and series values with fixed field types and per-field write
-policy. The authority validates losing operations as well as selected values.
+The UI format has independently versioned schemas: v2 typed fields, v3 text
+panning, v4 documents, v5 Brass Relay and v6 motion stages. The current state
+wire protocol is v8; the release-control opening envelope remains v1. Typed
+state supports bounded numeric, text, boolean, color and series values with
+fixed field types and per-field write policy. The authority validates losing
+operations as well as selected values.
 Input Lab's text fields are shared atomic text registers. Concurrent edits
 converge by register semantics; this is not per-character collaborative editing.
 Caret, selection, focus, keyboard repeat and editing buffers stay local.
@@ -106,7 +110,9 @@ change. Unselected state changes and acknowledgements do not rebuild it. Sync
 uses coherent Merkle coverage compiled from the admitted UI and that writer's
 receipt, within the app State scope. Durable state stays on the authority and
 pending intents stay in one RAM queue ([foundation rollout](experiments/canvas-foundation.md)).
-General collection/item/cursor selectors from RFC 0003 remain unimplemented.
+RFC 0024 implements bounded ordered collection windows, including typed
+selection and cursors; general collection/item/cursor queries from RFC 0003
+remain unimplemented.
 
 The shared retained presentation composer assembles base UI, document, overlay
 and effect layers for both hosts. Explicit content, placement, semantic and
@@ -117,7 +123,9 @@ after an animation-frame submission. See [RFC 0023](rfcs/0023-retained-presentat
 for the bounded contract and the subsequent stable document-block delivery.
 
 Current bounds include 64 schema fields, 4 KiB text values, 2,016 series points
-and 512 KiB Canvas messages/artifacts. The durable adapter bounds writer receipts
+and 512 KiB Canvas messages/artifacts. Qualified collection views and transfers
+are bounded at 1 MiB plus up to 512 bytes of event-envelope overhead. The durable
+adapter bounds writer receipts
 to 1,024 per app with a 24-hour resume window, rotates its journal at 4 MiB
 and fails explicitly on exhaustion. Unlimited documents, general history GC
 and arbitrary schema migration are not supplied by this cutover. A schema change needs an explicit compatible migration or new
@@ -142,7 +150,7 @@ The default path composites directly in the ordinary framebuffer. An opt-in
 linear-light reference path retains the fullscreen conversion for comparisons;
 premultiplication alone does not make ordinary sRGB blending gamma-correct.
 Code/blob caches, glyph coverage and framebuffer allocations are separate budgets.
-See [RFC 0006](rfcs/0006-font-resources-and-text-presentation.md).
+See [RFC 0006: Font resources and text presentation](rfcs/0006-font-resources-and-text-presentation.md).
 
 ## Retirement and retained building blocks
 
@@ -166,7 +174,8 @@ Shared authoring lives in `tools/canvas/authoring.rs`; stable builders can move 
 the SDK without copying LGPL runtime implementation into permissive packages.
 Coherent covered Merkle replication is deployed on both hosts. The generic
 library supports multiple authorized paths, and Canvas derives its coverage from
-admitted UI dependencies. General collection selectors remain in progress. General OS loading,
+admitted UI dependencies. Bounded ordered collection windows are implemented;
+general collection queries remain future work. General OS loading,
 arbitrary capability imports and cross-app transactions remain outside this
 milestone. Follow the [foundation completion ledger](rfcs/0010-runtime-foundation.md)
 for current source, acceptance and deployment gates.

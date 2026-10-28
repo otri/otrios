@@ -6,6 +6,8 @@ The repository contains experimental Rust contract types, immutable aggregate ma
 
 The general content store, Linux shared-memory IPC, arbitrary Canvas subtree subscriptions, OS module loader, and capability enforcement remain unimplemented. The Canvas app runtime executes bounded Wasm behavior; it does not complete the planned Linux runtime.
 
+The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/DASHBOARD_LIVE.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
+
 ## Build and check
 
 Install Rust through [official rustup](https://rustup.rs/), then run:
@@ -39,78 +41,3 @@ Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), an
 ## Licensing
 
 The runtime uses LGPLv3 only; interfaces, SDK, documentation, and tooling use Apache 2.0. These are path-specific licenses, not a choice of either license for all files. Separate proprietary hardware, firmware, and accelerator implementations are an intended integration model, subject to the applicable licenses. See [the license boundary](LICENSE.md).
-
-Live Controls now includes a [primitive component playground](docs/COMPONENT_PLAYGROUND.md): captured slider/dial/pad gestures, independent shared values and local feedback. The editable layout demo lives in Test Playground.
-
-Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](docs/ANIMATION.md). The [direct KMS display path](docs/DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](docs/experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](docs/rfcs/0001-direct-linux-gles2.md).
-
-[Retained text viewports and culling](docs/rfcs/0017-retained-text-viewports.md)
-and [adaptive alpha coverage storage](docs/experiments/native-retained-simd-2026-10-27.md)
-reach 56.4–56.6 kernel-presented fps for dense scrolling text on the Mali-400 frame.
-The full Layout Lab demo measures about 42 fps; these averages do not imply a
-60 fps lock. Its **Text scroll demo** opens a full-page, two-axis momentum workload
-at `/test-playground/text-panning`, with retained geometry and viewport culling.
-
-The [fixed point/SIMD evaluation](docs/rfcs/0018-fixed-point-layout-simd.md)
-found a faster isolated integer SIMD kernel, but no complete scrolling gain over
-the optimized float path and slower rebuilds. The pilot and unsuccessful GPU
-position formats are retired. [RFC 0019](docs/rfcs/0019-native-fixed-simd-pipeline.md)
-records the outcome and evidence required for any future float SIMD batches.
-
-[The chunked document reader](docs/rfcs/0020-chunked-text-documents.md) adds
-paragraph reflow and bounded retained chunks through shared Rust layout and
-native/WebGL resource adapters. Test Playground’s **Long Document** experiment opens
-a 1 MiB momentum reader at `/test-playground/long-document`. Source anchors survive width
-changes; rich text and editing remain the second delivery. See the
-[qualification report](docs/experiments/chunked-documents-2026-10-27.md).
-
-[Timestamped touch history and momentum](docs/rfcs/0021-touch-history-and-momentum.md)
-share lift-off filtering across scrolling and captured controls. Repeated scroll
-strokes can add remaining momentum; bounded capture/replay tools qualify the same
-paths through sliders, the dial and the touch pad.
-
-A [public module host with private Monitoring](docs/PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
-
-The [Canvas app packages](apps/README.md) are the dashboard runtime on both hosts. Home opens The Brass Relay, Test Playground and private Monitoring. All apps share the brass palette, outlined surfaces and clickable breadcrumb header. Test Playground groups Components, Layouts, Long Document, Text Panning, Text Input, 2D Animations and 3D Animations through independently admitted UI/State references, with portrait and landscape layouts. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](docs/rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.
-
-[The Brass Relay](docs/BRASS_RELAY.md) adds a shared native/browser lounge with
-retained history, live drafts, clockwork avatars, playful commands and
-Monitoring-backed moderation. [RFC 0022](docs/rfcs/0022-playful-shared-chat-room.md)
-records the design and qualification requirements.
-
-[Viewport-scoped collections](docs/rfcs/0024-viewport-scoped-collections.md) now
-synchronize bounded coherent message windows over the shared session. Stable
-message blocks retain text/avatar placement and source anchors through window
-replacement and reflow. [Browser/frame and rollback evidence](docs/experiments/collection-windows-2026-10-28.md)
-records the deployed migration and fixed-window measurements through 25,000
-messages.
-
-The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines the target ownership model, current implementation limits and concrete gates for deleting the earlier dashboard paths.
-
-The [bounded Merkle hierarchy and subtree transport](docs/rfcs/0005-merkle-subtree-prototype.md)
-now provide immutable incremental hashing, causal multi-value registers, scoped
-replication/resync and partial-subtree joins. The live [Canvas state adapter](docs/rfcs/0006-durable-canvas-merkle-adapter.md) uses app-scoped Merkle replication,
-server-side field policy and durable intent receipts; pending edits stay in RAM.
-Browser/frame [deployment acceptance](docs/experiments/canvas-merkle-adapter-validation.md) records the cutover. The pre-Merkle baseline is tagged
-`2026-10-19-canvas-apps-milestone`; performance results distinguish actual tree
-updates from network, durable storage and display latency.
-
-The [photo-frame Canvas adapter comparison](docs/experiments/canvas-adapter-frame-benchmark.md) measures durable latency, native presentation, application/device CPU and actual replication traffic against the dated pre-Merkle milestone. It also isolates a binary-envelope encoding cost; measured results distinguish application CPU savings from total system cost.
-
-The [practical Canvas foundation](docs/rfcs/0010-runtime-foundation.md) now deploys
-one bounded RAM intent queue and coherent UI-derived Merkle coverage, including
-only the writer's own receipt. The global dashboard replica and Automerge dependency
-are retired; [resource diagnostics](docs/ARCHITECTURE-RESOURCES.md) are shared by both hosts.
-[Browser/frame qualification and measurements](docs/experiments/canvas-foundation.md)
-record lower replication traffic and mixed latency results. The final
-[retirement and browser/frame acceptance](docs/experiments/runtime-retirement.md)
-closes this bounded foundation milestone, including explicit validation costs.
-
-The [bounded replication increments](docs/rfcs/0007-bounded-replication-pipeline.md)
-fix opaque-byte expansion, make signal history opt-in and reuse bounded encoding
-workspace, with a separately measured interactive-socket change. Their
-[frame measurements](docs/experiments/canvas-replication-pipeline.md) compare each
-increment against its immediate control using fresh disposable authorities.
-These increments are [deployed on browser and frame](docs/experiments/release-discovery-deployment.md). Release discovery uses a stable [hello/upgrade channel](docs/rfcs/0008-release-control.md) inside the [unified server session](docs/rfcs/0009-unified-server-session.md), independently of state decoding ([deployment acceptance](docs/experiments/release-hello-deployment.md)). [Sync v4 packed envelopes and measured optional compression](docs/rfcs/0011-packed-canvas-transport.md) are deployed. Normal state traffic stays raw after frame measurements; the optional bulk compressor is bounded.
-
-[Public UI reuse and optional iPad navigation timings](docs/rfcs/0016-ui-cache-and-navigation-timings.md) extend the packed transport with sync v5. Repeat mounts reuse admitted public UI by hash while requesting fresh State. Open `/?timings=1` for local startup and navigation phase reports.

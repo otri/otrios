@@ -1,7 +1,7 @@
 # RFC 0017: Retained text viewports
 
 Status: implemented for the text scrolling performance milestone (2026-10-26).
-Amends the coverage-cache policy in RFC 0006 at the user's request.
+Amends the coverage-cache policy in [RFC 0006: Font resources and text presentation](0006-font-resources-and-text-presentation.md) at the user's request.
 
 ## Problem and representation
 

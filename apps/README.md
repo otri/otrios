@@ -57,7 +57,7 @@ tree and delivered by admitted mounts, not copied into the public module store.
 Monitoring authorization precedes its UI/code/state payloads. The public Home
 catalog may name Monitoring without exposing its private package.
 
-Browser and native use one app-scoped transport, `/apps/stream`, with browser
+Browser and native use one negotiated `/session` transport, with browser
 permissions derived from the existing session and trusted native access derived
 from its private listener. Public devices and the frame share the same intended
 public roots. Clients keep app documents in RAM; only the authority persists them.
