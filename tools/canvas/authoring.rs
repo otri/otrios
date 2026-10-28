@@ -8,13 +8,9 @@ pub struct Resizing {
     pub horizontal: AxisResize,
     pub vertical: AxisResize,
 }
-pub const BG: [u8; 4] = [16, 28, 41, 255];
-pub const CARD: [u8; 4] = [27, 44, 61, 255];
-pub const WHITE: [u8; 4] = [239, 244, 236, 255];
-pub const MUTED: [u8; 4] = [150, 171, 185, 255];
-pub const TRACK: [u8; 4] = [45, 65, 78, 255];
-pub const TEAL: [u8; 4] = [84, 174, 183, 255];
-pub const ACCENT: [u8; 4] = [185, 238, 143, 255];
+pub use otrios_interfaces::theme::{
+    BG, BRASS as ACCENT, CARD, COPPER as TEAL, LINE as TRACK, MUTED, TEXT as WHITE,
+};
 const SCREEN: [f32; 4] = [0., 0., 1280., 800.];
 const NORMALIZED_MAX: f32 = 1000.;
 
@@ -600,24 +596,79 @@ pub fn canvas(children: Vec<Element>) -> Element {
     n.children = children;
     n
 }
-pub fn button(label: &str) -> Element {
-    // These labels are literal authored UI. Measure the same hash-qualified font
-    // shipped with the release, then let the existing pins center its natural width
-    // in every component instance. No character-count estimate or host CSS offset.
+fn authored_font() -> &'static otrios_core::dashboard::font::Font {
     static FONT: std::sync::OnceLock<otrios_core::dashboard::font::Font> =
         std::sync::OnceLock::new();
-    let font = FONT.get_or_init(|| {
+    FONT.get_or_init(|| {
         otrios_core::dashboard::font::Font::from_zstd(
             include_bytes!("../../web/shared/fonts/Roboto-Regular.otq.zst"),
             otrios_core::dashboard::font_reference::RESOURCE_SHA256,
         )
         .expect("valid release font for authored label measurement")
-    });
+    })
+}
+/// Neutral filled surface with the same fine outline as the lounge controls.
+pub fn surface(fill: [u8; 4], radius: f32) -> Element {
+    canvas(vec![
+        rounded_rect(TRACK)
+            .pin_edges(0.)
+            .corner_radius(radius.into()),
+        rounded_rect(fill)
+            .pin_edges(1.5)
+            .corner_radius((radius - 1.5).max(0.).into()),
+    ])
+}
+fn breadcrumb_header(title: &str, ancestors: &[(String, String)]) -> Element {
+    let font = authored_font();
+    let scale = otrios_interfaces::theme::HEADER_FONT_SCALE as f32;
+    let height = font.metrics().line_height(scale);
+    let y = (60. - height) / 2.;
+    let mut nodes = vec![];
+    let mut x = 0.;
+    for (label, app) in ancestors {
+        let caption = format!("< {label}");
+        let width = font.text_width(&caption, scale) + 8.;
+        nodes.push(
+            canvas(vec![
+                text(caption.as_str())
+                    .frame([0., y, width, height])
+                    .font_scale(scale),
+            ])
+            .frame([x, 0., width, 60.])
+            .semantic_label(label)
+            .navigate_to(Destination::app(app)),
+        );
+        x += width + 12.;
+    }
+    if !ancestors.is_empty() {
+        nodes.push(
+            text("•")
+                .frame([x, y, 24., height])
+                .font_scale(scale)
+                .color(ACCENT),
+        );
+        x += font.text_width("•", scale) + 18.;
+    }
+    nodes.push(
+        text(title)
+            .frame([x, y, 1216. - x, height])
+            .font_scale(scale)
+            .pin_left(x)
+            .pin_right(0.),
+    );
+    component([1216., 72.], nodes)
+        .frame([24., 24., 1232., 72.])
+        .pin_left(24.)
+        .pin_right(24.)
+        .pin_top(24.)
+}
+pub fn button(label: &str) -> Element {
+    let font = authored_font();
     let label_width = font.text_width(label, 2.).max(1.);
     let mut b = canvas(vec![
-        rounded_rect(CARD).pin_edges(0.),
+        surface(CARD, 12.).pin_edges(0.),
         text(label)
-            .frame([0., 0., label_width, 16.])
+            .frame([0., 0., label_width, font.metrics().line_height(2.)])
             .center_x()
             .center_y(),
     ])
@@ -682,8 +733,8 @@ pub fn reorder_label() -> ValueExpr {
     ValueExpr::State(StateField::text(0, "edit-order"), Projection::ReorderLabel)
 }
 pub fn heading() -> Arrangement {
-    place("$heading", [900., 80.])
-        .minimum([480., 80.])
+    place("$heading", [1184., 72.])
+        .minimum([600., 72.])
         .flex_width()
 }
 impl Arrangement {
@@ -748,13 +799,14 @@ impl Arrangement {
     }
 }
 pub struct AppUi {
-    brass_theme: bool,
     id: String,
     title: String,
+    breadcrumbs: Vec<(String, String)>,
     schema: StateSchema,
     behavior: Option<BehaviorRef>,
     presentation: Option<Presentation>,
     composition: Option<(Arrangement, Arrangement)>,
+    motion_viewport: Option<String>,
     touch_pad: Option<String>,
     text_scroll: Option<(String, [f32; 2])>,
     text_document: Option<(String, TextResource, u8, [u8; 4])>,
@@ -763,13 +815,14 @@ pub struct AppUi {
 impl AppUi {
     pub fn new(id: &str, title: &str, schema: StateSchema) -> Self {
         Self {
-            brass_theme: false,
             id: id.into(),
             title: title.into(),
+            breadcrumbs: vec![],
             schema,
             behavior: None,
             presentation: None,
             composition: None,
+            motion_viewport: None,
             touch_pad: None,
             text_scroll: None,
             text_document: None,
@@ -780,8 +833,11 @@ impl AppUi {
         self.composition = Some((wide, tall));
         self
     }
-    pub fn with_brass_theme(mut self) -> Self {
-        self.brass_theme = true;
+    pub fn with_breadcrumbs(mut self, ancestors: &[(&str, &str)]) -> Self {
+        self.breadcrumbs = ancestors
+            .iter()
+            .map(|(title, app)| (title.to_string(), app.to_string()))
+            .collect();
         self
     }
     pub fn with_reorder(mut self, items: &[(&str, u16)]) -> Self {
@@ -805,6 +861,10 @@ impl AppUi {
         self.text_document = Some((key.into(), source, scale, color));
         self
     }
+    pub fn with_motion_viewport(mut self, key: &str) -> Self {
+        self.motion_viewport = Some(key.into());
+        self
+    }
     pub fn with_touch_pad(mut self, key: &str) -> Self {
         self.touch_pad = Some(key.into());
         self
@@ -824,14 +884,15 @@ impl AppUi {
     pub fn build(self, heading: &str, mut children: Vec<Element>) -> Ui {
         let mut body = vec![
             rounded_rect(BG).frame(SCREEN).pin_edges(0.),
-            text(heading)
-                .position([52., 45.])
-                .font_scale(4.)
-                .key("$heading"),
+            breadcrumb_header(heading, &self.breadcrumbs).key("$heading"),
+            rectangle(TRACK)
+                .frame([24., 95., 1232., 1.])
+                .pin_left(24.)
+                .pin_right(24.)
+                .pin_top(95.),
         ];
         body.append(&mut children);
         let mut compiler = Compiler {
-            brass_theme: self.brass_theme,
             next_node: 0,
             named_nodes: Default::default(),
             named_controls: Default::default(),
@@ -848,7 +909,7 @@ impl AppUi {
         let composition = self.composition.map(|(wide, tall)| Composition {
             wide_min_width: 1200.,
             wide: FlowPlan {
-                insets: [48., 32., 48., 24.],
+                insets: [24., 24., 24., 24.],
                 content: wide.compile(&compiler.named_nodes),
             },
             tall: FlowPlan {
@@ -892,6 +953,18 @@ impl AppUi {
                     .get(&key)
                     .expect("named touch pad responder"),
             })
+        } else if let Some(key) = self.motion_viewport {
+            let mut presentation = self.presentation.expect("motion declaration");
+            let Presentation::Motion { viewport, .. } = &mut presentation else {
+                panic!("motion viewport requires motion")
+            };
+            *viewport = Some(
+                *compiler
+                    .named_nodes
+                    .get(&key)
+                    .expect("named motion viewport"),
+            );
+            Some(presentation)
         } else {
             self.presentation
         };
@@ -921,7 +994,15 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: if matches!(presentation, Some(Presentation::Chat)) {
+            format: if matches!(
+                presentation,
+                Some(Presentation::Motion {
+                    viewport: Some(_),
+                    ..
+                })
+            ) {
+                "otrios-canvas-v6"
+            } else if matches!(presentation, Some(Presentation::Chat)) {
                 "otrios-canvas-v5"
             } else if matches!(presentation, Some(Presentation::TextDocument { .. })) {
                 "otrios-canvas-v4"
@@ -944,7 +1025,6 @@ impl AppUi {
     }
 }
 struct Compiler {
-    brass_theme: bool,
     next_node: u16,
     named_nodes: std::collections::BTreeMap<String, u16>,
     named_controls: std::collections::BTreeMap<String, u8>,
@@ -956,24 +1036,7 @@ struct Compiler {
 impl Compiler {
     fn value(&mut self, value: ValueExpr) -> Expr {
         match value {
-            ValueExpr::Literal(mut e) => {
-                if self.brass_theme
-                    && let Expr::Literal(Value::Color(color)) = &mut e
-                {
-                    use otrios_core::canvas::chat::icons as theme;
-                    *color = match *color {
-                        BG => theme::BG,
-                        CARD => theme::CARD,
-                        WHITE => theme::TEXT,
-                        MUTED => theme::MUTED,
-                        ACCENT => theme::BRASS,
-                        TEAL => theme::COPPER,
-                        TRACK => theme::LINE,
-                        other => other,
-                    };
-                }
-                e
-            }
+            ValueExpr::Literal(e) => e,
             ValueExpr::State(field, projection) => {
                 let local = if let Some(s) = self
                     .selectors

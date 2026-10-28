@@ -68,9 +68,9 @@ fn template(
 }
 
 pub fn blueprint() -> Blueprint {
-    let bg = [16, 28, 41, 255];
-    let card = [27, 44, 61, 255];
-    let white = [239, 244, 236, 255];
+    let bg = otrios_interfaces::theme::BG;
+    let card = otrios_interfaces::theme::CARD;
+    let white = otrios_interfaces::theme::TEXT;
     let mut root = template(
         1,
         "Screen",
@@ -104,7 +104,25 @@ pub fn blueprint() -> Blueprint {
             param(2, "background", ValueType::Color, c(card)),
             param(3, "radius", ValueType::Number, n(16.)),
         ],
-        vec![paint(1, p(2), p(3)), slot()],
+        vec![
+            paint(1, c(otrios_interfaces::theme::LINE), p(3)),
+            node(
+                2,
+                [
+                    n(1.5),
+                    n(1.5),
+                    Expr::Subtract(Box::new(Expr::Width), Box::new(n(3.))),
+                    Expr::Subtract(Box::new(Expr::Height), Box::new(n(3.))),
+                ],
+                Shape::Superellipse {
+                    radius: Expr::Subtract(Box::new(p(3)), Box::new(n(1.5))),
+                    exponent: 4.,
+                    color: p(2),
+                },
+                vec![],
+            ),
+            slot(),
+        ],
     );
     Blueprint {
         composition: None,

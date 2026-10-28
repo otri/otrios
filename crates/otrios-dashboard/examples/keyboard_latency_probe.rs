@@ -58,14 +58,15 @@ mod linux {
             .get(1)
             .map_or(Ok(90), |s| s.parse::<u16>().map_err(|e| e.to_string()))?;
         let baseline = args.get(2).is_some_and(|s| s == "baseline");
+        let app_id = args.get(3).map_or("brass-relay", |s| s.as_str());
         let catalog =
             decode_catalog(&std::fs::read(apps.join("catalog.flex")).map_err(|e| e.to_string())?)?;
         let entry = catalog
             .apps
             .iter()
-            .find(|a| a.app.id == "brass-relay")
-            .ok_or("Brass Relay absent")?;
-        let ui = std::fs::read(apps.join("brass-relay/ui.flex")).map_err(|e| e.to_string())?;
+            .find(|a| a.app.id == app_id)
+            .ok_or("Probe app absent")?;
+        let ui = std::fs::read(apps.join(app_id).join("ui.flex")).map_err(|e| e.to_string())?;
         let font = Arc::new(Font::from_zstd(
             include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
             font_reference::RESOURCE_SHA256,
@@ -329,7 +330,7 @@ mod linux {
             .collect::<Result<_, String>>()?;
         println!(
             "{}",
-            serde_json::json!({"synthetic":true,"kernel_flips":kernel_flips,"rotation":rotation,"characters":text.len(),"edges":processed,"tap_ms":60,"keys_per_second":8.333333,"frames":count,"feedback_frames":feedback,"feedback_pixels":feedback_pixels,"scene_uploads":uploads,"dispatch_p95_us":percentile(&mut dispatch,0.95),"compose_p95_us":percentile(&mut compose,0.95),"draw_present_p95_us":percentile(&mut draw,0.95),"release_to_present_p50_us":percentile(&mut latency,0.5),"release_to_present_p95_us":percentile(&mut latency,0.95),"release_to_present_max_us":latency.iter().max()})
+            serde_json::json!({"synthetic":true,"app":app_id,"kernel_flips":kernel_flips,"rotation":rotation,"characters":text.len(),"edges":processed,"tap_ms":60,"keys_per_second":8.333333,"frames":count,"feedback_frames":feedback,"feedback_pixels":feedback_pixels,"scene_uploads":uploads,"dispatch_p95_us":percentile(&mut dispatch,0.95),"compose_p95_us":percentile(&mut compose,0.95),"draw_present_p95_us":percentile(&mut draw,0.95),"release_to_present_p50_us":percentile(&mut latency,0.5),"release_to_present_p95_us":percentile(&mut latency,0.95),"release_to_present_max_us":latency.iter().max()})
         );
         Ok(())
     }

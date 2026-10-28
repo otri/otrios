@@ -18,6 +18,7 @@ pub struct Frame {
     pub reflow: Option<reflow::Frame>,
     pub effects: Arc<Vec<f32>>,
     pub viewport: [f32; 2],
+    pub motion: Option<[f32; 4]>,
     pub order: Vec<Layer>,
     pub revisions: Revisions,
 }
@@ -124,6 +125,7 @@ impl Composer {
             order,
             reflow: client.reflow_frame()?,
             viewport: [scene.root().frame.width, scene.root().frame.height],
+            motion: client.motion_viewport()?,
             revisions: self.revisions,
         });
         Ok(self.frame.as_ref().unwrap())

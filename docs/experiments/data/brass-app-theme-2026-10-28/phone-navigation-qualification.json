@@ -1,0 +1,98 @@
+{
+  "release": "df31d70519d8a49d9326feb77de082fa6b7bde6778a8be9daab34fea2a815ada",
+  "native_sha256": "c4af026ea0a56ae6785cafb992ba2173c5fd6e93a29976e5649c6474de527b2f",
+  "cause": "Phone chat uses 534 logical pixels; the previous host tried to qualify Home at that outgoing chat extent, below its 600-pixel heading minimum.",
+  "fix": "Host supplies its standard layout extent for admission of non-chat candidates, independently of the currently retained chat viewport and keyboard height.",
+  "core_regression": "Passed full Home mount admission from 534x944, 534x575 and 534x410 while retaining chat at its old viewport until acceptance.",
+  "browser": {
+    "passed": true,
+    "checks": [
+      "phone-width touch navigation after modal close",
+      "Home admission before viewport policy handoff",
+      "breadcrumb after full refresh",
+      "return with focused composer and short visual viewport",
+      "desktop touch navigation"
+    ],
+    "results": [
+      {
+        "width": 393,
+        "height": 695,
+        "passed": true
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "passed": true
+      },
+      {
+        "width": 430,
+        "height": 932,
+        "passed": true
+      },
+      {
+        "width": 1280,
+        "height": 800,
+        "passed": true
+      }
+    ]
+  },
+  "native_trials": [
+    {
+      "app": "home",
+      "layout": "landscape",
+      "status": 0,
+      "state_confirmed": true,
+      "pending_commands": 0
+    },
+    {
+      "app": "brass-relay",
+      "layout": "landscape",
+      "status": 0,
+      "state_confirmed": true,
+      "pending_commands": 0
+    },
+    {
+      "app": "home",
+      "layout": "portrait",
+      "status": 0,
+      "state_confirmed": true,
+      "pending_commands": 0
+    },
+    {
+      "app": "brass-relay",
+      "layout": "portrait",
+      "status": 0,
+      "state_confirmed": true,
+      "pending_commands": 0
+    }
+  ],
+  "kiosk_restored": true,
+  "checks": {
+    "scripts/check.sh": "passed; 62 Canvas tests",
+    "native_input_transport": "11 passed",
+    "selected_node_tests": "76 passed",
+    "ARM_Clippy": "passed with -D warnings",
+    "ARM_release_build": "passed",
+    "Wasm_build": "passed",
+    "full_chat_browser": "passed"
+  },
+  "actual_iPhone_verification": "User confirmed refresh and < OTriOS return to launcher on the actual iPhone on 2026-10-28.",
+  "deployment": {
+    "release": "df31d70519d8a49d9326feb77de082fa6b7bde6778a8be9daab34fea2a815ada",
+    "state_protocol": "otrios-canvas-sync-v8",
+    "native_sha256": "c4af026ea0a56ae6785cafb992ba2173c5fd6e93a29976e5649c6474de527b2f",
+    "services": {
+      "otrios-authority": true,
+      "otrios-dashboard-direct": true,
+      "otrios-tunnel": true,
+      "otrios-monitoring.timer": true
+    },
+    "state_confirmed": true,
+    "pending_commands": 0,
+    "input_device_open": true,
+    "public_checks": 120,
+    "confirmed_transcript_tail_unchanged": true,
+    "confirmed_transcript_tail_sha256": "74be8233e722c2d921378af1ecc9148c44c623f664c9bf5c4a144331f869dd04",
+    "private_candidate_removed": true
+  }
+}

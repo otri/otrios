@@ -10,4 +10,7 @@ calibration. It contains 20 complete strokes; it is not human finger data.
 Run them through the shared runtime with the `touch_replay` example. See
 [the capture/replay guide](../../../../../docs/rfcs/0021-touch-history-and-momentum.md).
 
-Screen routes follow Test Playground; captured sample positions and timestamps are unchanged.
+Screen routes follow Test Playground. The three synthetic slider/dial/pad cases
+are translated to their current brass-layout control bounds; their timing and
+relative motion are unchanged. Captured frame sample positions and timestamps
+are unchanged.

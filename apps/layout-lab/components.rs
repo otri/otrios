@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Reusable control definition. Its design canvas is independent of each instance frame.
 use crate::authoring::*;
-const PANEL: [u8; 4] = [37, 59, 78, 255];
+const PANEL: [u8; 4] = CARD;
 pub fn labeled_slider(label: &str, field: StateField, value: ValueExpr) -> Element {
     component(
         [520., 80.],
@@ -53,7 +53,7 @@ pub fn labeled_slider(label: &str, field: StateField, value: ValueExpr) -> Eleme
 }
 pub fn signal_graph(field: StateField) -> Element {
     let mut children = vec![
-        rounded_rect(CARD).pin_edges(0.).corner_radius(20.0.into()),
+        surface(CARD, 20.).pin_edges(0.),
         text("Toggle signal").position([32., 24.]).font_scale(3.),
         text("Data from Last 5min")
             .position([32., 72.])
@@ -79,9 +79,10 @@ pub fn signal_toggle(field: StateField) -> Element {
     component(
         [440., 240.],
         vec![
+            rounded_rect(TRACK).pin_edges(0.).corner_radius(20.0.into()),
             rounded_rect(CARD)
                 .color(field.choose_color(CARD, ACCENT))
-                .pin_edges(0.)
+                .pin_edges(1.5)
                 .corner_radius(20.0.into()),
             text("Toggle")
                 .position([32., 30.])
@@ -95,7 +96,7 @@ pub fn signal_toggle(field: StateField) -> Element {
                 [132., 64.],
                 vec![
                     rectangle(TRACK)
-                        .color(field.choose_color(TRACK, [56, 84, 55, 255]))
+                        .color(field.choose_color(TRACK, [112, 91, 55, 255]))
                         .frame([0., 0., 132., 64.])
                         .corner_radius(32.0.into()),
                     circle(WHITE)
@@ -117,7 +118,10 @@ pub fn resizable_card(title: &str, width: StateField, radius: ValueExpr) -> Elem
     component(
         [460., 240.],
         vec![
-            rounded_rect(PANEL).corner_radius(radius).pin_edges(0.),
+            rounded_rect(TRACK)
+                .corner_radius(radius.clone())
+                .pin_edges(0.),
+            rounded_rect(PANEL).corner_radius(radius).pin_edges(1.5),
             text(title)
                 .frame([24., 16., 340., 16.])
                 .pin_left(24.)

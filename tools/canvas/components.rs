@@ -4,30 +4,39 @@ use crate::authoring::*;
 pub fn keyboard() -> Element {
     let mut keys = vec![];
     for i in 0..10 {
-        keys.push((i, [16. + f32::from(i) * 108., 496., 100., 62.]));
+        keys.push((i, [16. + f32::from(i) * 108., 16., 100., 62.]));
     }
-    keys.extend([(10, [1096., 496., 168., 62.]), (11, [16., 566., 112., 62.])]);
+    keys.extend([(10, [1096., 16., 168., 62.]), (11, [16., 86., 112., 62.])]);
     for i in 0..9 {
-        keys.push((12 + i, [136. + f32::from(i) * 108., 566., 100., 62.]));
+        keys.push((12 + i, [136. + f32::from(i) * 108., 86., 100., 62.]));
     }
-    keys.extend([(21, [1108., 566., 156., 62.]), (22, [16., 636., 144., 62.])]);
+    keys.extend([(21, [1108., 86., 156., 62.]), (22, [16., 156., 144., 62.])]);
     for i in 0..9 {
-        keys.push((23 + i, [168. + f32::from(i) * 122., 636., 114., 62.]));
+        keys.push((23 + i, [168. + f32::from(i) * 122., 156., 114., 62.]));
     }
     keys.extend([
-        (32, [16., 706., 124., 62.]),
-        (33, [148., 706., 124., 62.]),
-        (34, [280., 706., 584., 62.]),
-        (35, [872., 706., 120., 62.]),
-        (36, [1000., 706., 120., 62.]),
-        (37, [1128., 706., 136., 62.]),
+        (32, [16., 226., 124., 62.]),
+        (33, [148., 226., 124., 62.]),
+        (34, [280., 226., 584., 62.]),
+        (35, [872., 226., 120., 62.]),
+        (36, [1000., 226., 120., 62.]),
+        (37, [1128., 226., 136., 62.]),
     ]);
     let keyboard = otrios_core::dashboard::keyboard::Keyboard::default();
     // Keys do not overlap: paint their backgrounds together, then their labels.
     // This preserves painter order while avoiding a GPU program switch per key.
     let mut children: Vec<_> = keys
         .iter()
-        .map(|(_, frame)| rounded_rect(CARD).frame(*frame))
+        .map(|(_, frame)| {
+            surface(CARD, 12.).frame(*frame).resizing(Resizing {
+                horizontal: AxisResize::Springs {
+                    leading: true,
+                    length: true,
+                    trailing: true,
+                },
+                vertical: AxisResize::Fixed,
+            })
+        })
         .collect();
     children.extend(keys.into_iter().map(|(key, frame)| {
         canvas(vec![
@@ -37,10 +46,20 @@ pub fn keyboard() -> Element {
                 .pin_right(12.),
         ])
         .frame(frame)
+        .resizing(Resizing {
+            horizontal: AxisResize::Springs {
+                leading: true,
+                length: true,
+                trailing: true,
+            },
+            vertical: AxisResize::Fixed,
+        })
         .semantic_label(&keyboard.label(key))
         .on_press(Event::key(key))
     }));
-    canvas(children).visible(keyboard_visible())
+    component([1280., 320.], children)
+        .frame([0., 480., 1280., 320.])
+        .visible(keyboard_visible())
 }
 
 /// Primitive-only icons keep launcher cards identical on both renderers.
@@ -166,4 +185,183 @@ pub fn launch_card(
     .key(id)
     .semantic_label(title)
     .navigate_to(Destination::app(id).route(route))
+}
+
+fn motion_slider(label: &str, field: StateField, frame: [f32; 4]) -> Element {
+    canvas(vec![
+        rounded_rect(CARD)
+            .frame([0., 20., frame[2], 24.])
+            .corner_radius(12.0.into())
+            .pin_left(0.)
+            .pin_right(0.),
+        rounded_rect(ACCENT)
+            .frame([0., 20., frame[2], 24.])
+            .corner_radius(12.0.into())
+            .width(field.mapped(24., frame[2]))
+            .resizing(Resizing {
+                horizontal: AxisResize::Springs {
+                    leading: false,
+                    length: true,
+                    trailing: true,
+                },
+                vertical: AxisResize::Fixed,
+            }),
+    ])
+    .frame(frame)
+    .on_drag(label, Event::slider(field))
+}
+
+/// Shared controls and portrait stage for the two app-owned motion demos.
+pub fn motion_screen(
+    id: &str,
+    title: &str,
+    state_schema: otrios_interfaces::canvas::StateSchema,
+    three_d: bool,
+    fields: [StateField; 4],
+    ancestors: &[(&str, &str)],
+) -> otrios_interfaces::canvas::Ui {
+    let [playing, speed, count, load] = fields;
+    AppUi::new(id, title, state_schema)
+        .with_breadcrumbs(ancestors)
+        .with_motion_viewport("stage")
+        .with_composition(
+            column(
+                20.,
+                vec![
+                    heading(),
+                    row(
+                        24.,
+                        vec![
+                            place("play", [220., 100.]),
+                            place("speed", [440., 100.])
+                                .minimum([240., 100.])
+                                .flex_width(),
+                            place("count", [440., 100.])
+                                .minimum([240., 100.])
+                                .flex_width(),
+                        ],
+                    ),
+                    place("stage", [1232., 400.])
+                        .minimum([200., 200.])
+                        .flex_width()
+                        .flex_height(),
+                    place("load", [1232., 104.])
+                        .minimum([220., 104.])
+                        .flex_width(),
+                ],
+            )
+            .flex_height(),
+            column(
+                24.,
+                vec![
+                    heading(),
+                    place("play", [220., 100.]),
+                    row(
+                        24.,
+                        vec![
+                            place("speed", [364., 100.])
+                                .minimum([240., 100.])
+                                .flex_width(),
+                            place("count", [364., 100.])
+                                .minimum([240., 100.])
+                                .flex_width(),
+                        ],
+                    ),
+                    place("stage", [752., 720.])
+                        .minimum([200., 240.])
+                        .flex_width()
+                        .flex_height(),
+                    place("load", [1232., 104.])
+                        .minimum([220., 104.])
+                        .flex_width(),
+                ],
+            )
+            .flex_height(),
+        )
+        .with_presentation(otrios_interfaces::canvas::Presentation::Motion {
+            viewport: None,
+            three_d,
+            playing: playing.id(),
+            speed: speed.id(),
+            count: count.id(),
+            load: load.id(),
+        })
+        .build(
+            title,
+            vec![
+                component(
+                    [220., 100.],
+                    vec![
+                        text(playing.choose_text("Paused", "Playing"))
+                            .color(MUTED)
+                            .frame([0., 0., 220., 24.]),
+                        button("Play / Pause")
+                            .on_press(Event::toggle(playing))
+                            .frame([0., 32., 220., 60.]),
+                    ],
+                )
+                .key("play"),
+                component(
+                    [440., 100.],
+                    vec![
+                        text(speed.format_number("Speed ", "×", 0.00375, 0.25))
+                            .color(MUTED)
+                            .frame([0., 0., 440., 24.])
+                            .pin_left(0.)
+                            .pin_right(0.),
+                        motion_slider(
+                            if three_d {
+                                "Rotation speed"
+                            } else {
+                                "Animation speed"
+                            },
+                            speed,
+                            [0., 32., 440., 64.],
+                        )
+                        .pin_left(0.)
+                        .pin_right(0.),
+                    ],
+                )
+                .key("speed"),
+                component(
+                    [440., 100.],
+                    vec![
+                        text(count.format_integer(
+                            if three_d { "Tetrahedra " } else { "Objects " },
+                            "",
+                            0.063,
+                            1.,
+                        ))
+                        .color(MUTED)
+                        .frame([0., 0., 440., 24.])
+                        .pin_left(0.)
+                        .pin_right(0.),
+                        motion_slider(
+                            if three_d {
+                                "Tetrahedron count"
+                            } else {
+                                "Animated object count"
+                            },
+                            count,
+                            [0., 32., 440., 64.],
+                        )
+                        .pin_left(0.)
+                        .pin_right(0.),
+                    ],
+                )
+                .key("count"),
+                surface(BG, 16.)
+                    .frame([80., 280., 1120., 400.])
+                    .key("stage"),
+                component(
+                    [1232., 104.],
+                    vec![
+                        button("State load")
+                            .on_press(Event::stress())
+                            .frame([0., 0., 220., 48.]),
+                    ],
+                )
+                .key("load"),
+            ],
+        )
 }

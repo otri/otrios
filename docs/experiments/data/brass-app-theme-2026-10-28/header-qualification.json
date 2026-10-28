@@ -1,0 +1,87 @@
+{
+  "release": "810de336ecad70e3c8692f6bc907ba27ae8693bd6c8aa4a56ca08bf1c542970b",
+  "native_sha256": "40a1f71223bc4408a92da6b8b87d5909ef56f7b10625447a560df2557ef3f8a9",
+  "header_font_scale": 3,
+  "header_policy": "Shared app header typography and layout width, independently of the denser chat body and software keyboard height.",
+  "browser": {
+    "passed": true,
+    "checks": [
+      "phone-width touch navigation after modal close",
+      "Home admission before viewport policy handoff",
+      "breadcrumb after full refresh",
+      "return with focused composer and short visual viewport",
+      "desktop touch navigation",
+      "matching breadcrumb font geometry across apps",
+      "Members and You remain inline"
+    ],
+    "results": [
+      {
+        "width": 393,
+        "height": 695,
+        "passed": true
+      },
+      {
+        "width": 390,
+        "height": 844,
+        "passed": true
+      },
+      {
+        "width": 430,
+        "height": 932,
+        "passed": true
+      },
+      {
+        "width": 1280,
+        "height": 800,
+        "passed": true
+      }
+    ]
+  },
+  "phone_body_font_css_px": 16.4365993535,
+  "native_trials": [
+    {
+      "screen": "home",
+      "layout": "landscape",
+      "status": 0
+    },
+    {
+      "screen": "brass-relay",
+      "layout": "landscape",
+      "status": 0
+    },
+    {
+      "screen": "home",
+      "layout": "portrait",
+      "status": 0
+    },
+    {
+      "screen": "brass-relay",
+      "layout": "portrait",
+      "status": 0
+    }
+  ],
+  "kiosk_restored": true,
+  "validation": {
+    "scripts/check.sh": "passed; 62 Canvas tests",
+    "native_input_transport": "11 passed",
+    "selected_node_tests": "76 passed",
+    "ARM_Clippy": "passed with -D warnings",
+    "ARM_release": "passed",
+    "Wasm_release": "passed",
+    "full_chat_browser": "passed"
+  },
+  "deployment": {
+    "public_host_checks": 120,
+    "public_host_result": "passed; login not tested",
+    "live_native_release_verified": true,
+    "live_native_sha256_verified": true,
+    "live_native_state_confirmed": true,
+    "live_native_pending_commands": 0,
+    "live_native_input_devices": 1,
+    "live_services_active": true,
+    "live_chat_dom_records": 24,
+    "live_chat_tail_sha256": "74be8233e722c2d921378af1ecc9148c44c623f664c9bf5c4a144331f869dd04",
+    "live_chat_fingerprint_unchanged": true,
+    "rollback_directory": "/var/lib/otrios-authority/rollback/2026-10-28-brass-header"
+  }
+}

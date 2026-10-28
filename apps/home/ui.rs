@@ -18,7 +18,6 @@ pub fn description() -> Ui {
         )
     };
     AppUi::new("home", "Home", super::state::schema())
-        .with_brass_theme()
         .with_composition(arrangement(), arrangement())
         .build(
             "OTriOS",

@@ -4,8 +4,6 @@ use crate::authoring::*;
 use otrios_interfaces::canvas::{StateSchema, Ui};
 
 pub fn description(state_schema: StateSchema) -> Ui {
-    let home = || place("home", [140., 80.]);
-    let back = || place("back", [140., 80.]);
     let intro = || place("intro", [752., 32.]).flex_width();
     let controls = || {
         row(
@@ -38,7 +36,7 @@ pub fn description(state_schema: StateSchema) -> Ui {
     let wide = column(
         16.,
         vec![
-            row(16., vec![heading(), back(), home()]),
+            heading(),
             intro(),
             top(),
             controls(),
@@ -48,7 +46,7 @@ pub fn description(state_schema: StateSchema) -> Ui {
     let tall = column(
         16.,
         vec![
-            column(12., vec![heading(), row(16., vec![back(), home()])]),
+            heading(),
             intro(),
             top(),
             controls(),
@@ -56,14 +54,11 @@ pub fn description(state_schema: StateSchema) -> Ui {
         ],
     );
     AppUi::new("layout-lab", "Layouts", state_schema)
+        .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
         .with_composition(wide, tall)
         .build(
             "Layouts",
             vec![
-                button("Back").on_press(Event::back()).key("back"),
-                button("Home")
-                    .navigate_to(Destination::app("home"))
-                    .key("home"),
                 text("One component. Different sizes. The same shared signal.")
                     .color(MUTED)
                     .key("intro"),

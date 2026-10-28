@@ -34,7 +34,7 @@ function sendFrame(){
   const ui=app.ui_ref();
   const plan=ui?JSON.parse(app.prepare_frame()):{revisions:{content:0,placement:0,semantics:0,effects:0},order:[]};
   const revisions=plan.revisions;
-  const frame={inputRevision,serial,order:plan.order,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  const frame={inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   if(frame.authRequired){frame.path="/"+app.pending_path();frame.title=app.title();}
@@ -100,7 +100,7 @@ function navigate(screen){
 onmessage=async({data:m})=>{try{
   if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
-    if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
+    if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_layout_viewport(...(m.layoutViewport||m.viewport||[1280,800]));app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);activeRelease=m.release;
     app.set_reduced_motion(!!m.reducedMotion);
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:state=>{
@@ -140,7 +140,7 @@ onmessage=async({data:m})=>{try{
   const applyPointer=args=>app.pointer(m.epoch??app.epoch(),...args.slice(0,4),Number.isFinite(args[4])?Math.max(0,args[4]-(performance.timeOrigin||0)):performance.now());
   if(['pointer','pointer-batch','activate','adjust'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
   switch(m.type){
-    case 'viewport':app.cancel_input();changed=app.set_viewport(...m.size);viewportRevision++;changed=!!app.ui_ref()||changed;break;
+    case 'viewport':app.cancel_input();if(m.layoutViewport)app.set_layout_viewport(...m.layoutViewport);changed=app.set_viewport(...m.size);viewportRevision++;changed=!!app.ui_ref()||changed;break;
     case 'reduced-motion':app.set_reduced_motion(!!m.reduced);changed=true;break;
     case 'login':monitoring.login(m.username,m.password);break;
     case 'logout':signOut();changed=true;break;

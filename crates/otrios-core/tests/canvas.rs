@@ -18,6 +18,196 @@ use test_playground::{
     animation as animation_lab, components_demo as playground, input as input_lab,
     layouts as layout, three_d as three_d_lab,
 };
+
+#[test]
+fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity() {
+    use otrios_core::dashboard::{font::Font, font_reference};
+    use otrios_interfaces::scene::{Action, Primitive};
+    let font = Font::from_zstd(
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+        font_reference::RESOURCE_SHA256,
+    )
+    .unwrap();
+    let behavior = code();
+    for (app, factory) in test_playground::screens() {
+        let bytes = if app.id == "component-playground" {
+            behavior.as_slice()
+        } else {
+            &[]
+        };
+        let mut c = Client::default();
+        activate(&mut c, factory(bytes), "themed-demo", bytes.to_vec());
+        let wide = c.scene().unwrap();
+        let identities = |scene: &otrios_core::dashboard::scene::Scene| {
+            scene
+                .controls()
+                .into_iter()
+                .map(|p| (p.node.id, p.node.semantics.as_ref().unwrap().label.clone()))
+                .collect::<Vec<_>>()
+        };
+        let before = identities(&wide);
+        let epoch = c.epoch();
+        c.set_viewport([800., 1280.]).unwrap();
+        let tall = c.scene().unwrap();
+        let mut composer = otrios_core::canvas::presentation::Composer::default();
+        let frame = composer.compose(&mut c, &font).unwrap();
+        for (i, draw) in frame
+            .base
+            .mesh
+            .draws
+            .chunks_exact(3)
+            .enumerate()
+            .filter(|(_, d)| d[0] == 1)
+            .take(4)
+        {
+            assert!(
+                frame.base.views[i * 8 + 1] > 0.,
+                "{}: header text run {i} was culled: {:?}, {:?}",
+                app.id,
+                draw,
+                &frame.base.views[i * 8..i * 8 + 8]
+            );
+        }
+        assert_eq!(identities(&tall), before, "{}", app.id);
+        assert_eq!(c.epoch(), epoch);
+        assert_eq!(
+            [tall.root().frame.width, tall.root().frame.height],
+            [800., 1280.]
+        );
+        for scene in [&wide, &tall] {
+            for control in scene.controls() {
+                let label = &control.node.semantics.as_ref().unwrap().label;
+                assert!(!["Home", "Back"].contains(&label.as_str()));
+                assert!(
+                    control.origin[0] >= 0. && control.origin[1] >= 0.,
+                    "{}: {label}",
+                    app.id
+                );
+                assert!(
+                    control.origin[0] + control.node.frame.width * control.scale
+                        <= scene.root().frame.width + 0.1,
+                    "{}: {label} right",
+                    app.id
+                );
+                assert!(
+                    control.origin[1] + control.node.frame.height * control.scale
+                        <= scene.root().frame.height + 0.1,
+                    "{}: {label} bottom",
+                    app.id
+                );
+            }
+            let header = &scene.root().children[1];
+            for node in &header.children {
+                if let Primitive::Text { value, scale, .. } = &node.primitive {
+                    assert!(
+                        font.text_width(value, *scale as f32) <= node.frame.width + 0.1,
+                        "{} clipped breadcrumb: {value}",
+                        app.id
+                    );
+                }
+            }
+        }
+        for (label, destination) in [
+            ("OTriOS", "app:home/ui"),
+            ("Test Playground", "app:test-playground/ui"),
+        ] {
+            if label == "Test Playground" && app.id == "test-playground" {
+                continue;
+            }
+            let owner = tall
+                .controls()
+                .into_iter()
+                .find(|p| p.node.semantics.as_ref().unwrap().label == label)
+                .unwrap();
+            let Some(otrios_interfaces::scene::TouchResponder::Activate(Action::AppNavigate(
+                action,
+            ))) = owner.node.responder
+            else {
+                panic!("breadcrumb destination")
+            };
+            let ui = factory(bytes);
+            assert_eq!(
+                ui.navigation
+                    .iter()
+                    .find(|n| n.action == action)
+                    .unwrap()
+                    .ui_ref,
+                destination
+            );
+        }
+        if let Some(bounds) = c.motion_viewport().unwrap() {
+            assert!(
+                bounds[2] > 700. && bounds[3] > 500.,
+                "portrait stage uses the available area"
+            );
+            let mut presenter = otrios_core::dashboard::motion::Presenter::default();
+            for three_d in [false, true] {
+                for now in [0., 230., 670., 1040.] {
+                    let mesh = presenter.geometry_in(
+                        three_d,
+                        otrios_core::dashboard::motion::Intent {
+                            count: 64,
+                            ..Default::default()
+                        },
+                        now,
+                        bounds,
+                    );
+                    assert!(!mesh.vertices.is_empty());
+                    for v in mesh.vertices.chunks_exact(6) {
+                        assert!(
+                            v[0] >= bounds[0] - 0.1
+                                && v[0] <= bounds[0] + bounds[2] + 0.1
+                                && v[1] >= bounds[1] - 0.1
+                                && v[1] <= bounds[1] + bounds[3] + 0.1,
+                            "motion leaves its authored stage"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn portrait_software_keyboard_keeps_every_key_visible_and_tappable() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let mut c = Client::default();
+    activate(&mut c, input_lab::ui(&[]), "portrait-keyboard", vec![]);
+    c.set_viewport([800., 1280.]).unwrap();
+    c.show_keyboard().unwrap();
+    for label in ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"] {
+        let scene = c.scene().unwrap();
+        let keys = scene.controls();
+        for p in keys.iter().filter(|p| p.origin[1] >= 900.) {
+            assert!(p.origin[0] >= 0. && p.origin[0] + p.node.frame.width * p.scale <= 800.1);
+            assert!(p.origin[1] + p.node.frame.height * p.scale <= 1280.1);
+            assert!(p.node.frame.width * p.scale >= 44. && p.node.frame.height * p.scale >= 44.);
+        }
+        let key = keys
+            .iter()
+            .find(|p| p.node.semantics.as_ref().is_some_and(|s| s.label == label))
+            .unwrap();
+        let position = [
+            key.origin[0] + key.node.frame.width * key.scale / 2.,
+            key.origin[1] + key.node.frame.height * key.scale / 2.,
+        ];
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
+            c.pointer(
+                c.epoch(),
+                PointerEvent {
+                    id: 1,
+                    phase,
+                    position,
+                },
+            )
+            .unwrap();
+        }
+    }
+    assert_eq!(
+        c.typed_value(1).unwrap(),
+        otrios_interfaces::layout::Value::Text("qwertyuiop".into())
+    );
+}
 fn edit(c: &mut Client, label: &str, a: u16, b: u16) {
     let scene = c.scene().unwrap();
     let node = scene
@@ -705,12 +895,15 @@ fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
     use otrios_interfaces::layout::{Binding, Expr, Responder, Shape};
     let ui = home::ui(&[]);
     let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
-    let heading = blueprint.templates[0]
-        .root
-        .children
-        .iter_mut()
-        .find(|n| matches!(n.shape, Shape::Text { .. }))
-        .unwrap();
+    fn first_text(
+        n: &mut otrios_interfaces::layout::TemplateNode,
+    ) -> Option<&mut otrios_interfaces::layout::TemplateNode> {
+        if matches!(n.shape, Shape::Text { .. }) {
+            return Some(n);
+        }
+        n.children.iter_mut().find_map(first_text)
+    }
+    let heading = first_text(&mut blueprint.templates[0].root).unwrap();
     if let Shape::Text { value, .. } = &mut heading.shape {
         *value = Expr::State(Binding::Local(65000));
     }
@@ -1463,21 +1656,21 @@ fn aggregate_content_cannot_cover_app_navigation_or_header() {
     .unwrap();
     let scene = c.scene().unwrap();
     let home = scene
-        .hit_path([1195., 85.])
+        .hit_path([80., 50.])
         .iter()
         .find_map(|n| {
             n.node
                 .semantics
                 .as_ref()
-                .filter(|s| s.label == "Home")
+                .filter(|s| s.label == "OTriOS")
                 .map(|_| n.node.id)
         })
-        .expect("Home remains tappable where the aggregate overlaps its lower edge");
+        .expect("OTriOS breadcrumb remains tappable above the aggregate");
     assert!(matches!(
         otrios_core::dashboard::input::InputRouter::activate(&scene, home).action,
         Some(Action::AppNavigate(_))
     ));
-    let header=scene.root().children.iter().position(|n|matches!(&n.primitive,otrios_interfaces::scene::Primitive::Text{value,..} if value=="Monitoring")).unwrap();
+    let header = scene.root().children.iter().position(|n| n.children.iter().any(|c| matches!(&c.primitive, otrios_interfaces::scene::Primitive::Text { value, .. } if value=="Monitoring"))).unwrap();
     let content = scene
         .root()
         .children
@@ -1604,16 +1797,17 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
     );
     assert!(c.set_session_controls(true));
     let scene = c.scene().unwrap();
-    let home = control(&scene, "Home").unwrap();
+    let home = control(&scene, "OTriOS").unwrap();
     let logout = control(&scene, "Sign out").unwrap();
-    assert_eq!(
-        (logout.frame.y, logout.frame.width, logout.frame.height),
-        (home.frame.y, home.frame.width, home.frame.height)
-    );
-    assert!(logout.frame.x + logout.frame.width + 20. <= home.frame.x);
-    assert_eq!(logout.children[0].primitive, home.children[0].primitive);
+    assert_eq!(logout.frame.height, home.frame.height);
+    assert!(logout.frame.x > home.frame.x + home.frame.width);
     assert!(
-        matches!((&logout.children[1].primitive, &home.children[1].primitive), (Primitive::Text { scale: a, color: ac, .. }, Primitive::Text { scale: b, color: bc, .. }) if a == b && ac == bc)
+        matches!(logout.children[0].primitive, Primitive::Canvas { .. }),
+        "sign out uses the outlined surface"
+    );
+    assert!(
+        matches!(home.children[0].primitive, Primitive::Text { .. }),
+        "breadcrumb is a text link"
     );
     let before = authority.save().unwrap();
     assert!(c.activate(c.epoch(), logout.id).unwrap());
@@ -1680,7 +1874,14 @@ fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus
             .node
             .children
             .iter()
-            .find(|n| !n.children.is_empty())
+            .find(|n| {
+                n.children.iter().any(|c| {
+                    matches!(
+                        c.primitive,
+                        otrios_interfaces::scene::Primitive::Text { .. }
+                    )
+                })
+            })
             .unwrap();
         let position = [field.origin[0] + text.frame.x + x, field.origin[1] + 35.];
         for phase in [PointerPhase::Down, PointerPhase::Up] {
@@ -2460,7 +2661,12 @@ fn playground_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
     let mut cards: Vec<_> = scene
         .controls()
         .into_iter()
-        .filter(|c| c.node.semantics.as_ref().is_none_or(|s| s.label != "Home"))
+        .filter(|c| {
+            c.node
+                .semantics
+                .as_ref()
+                .is_none_or(|s| s.label != "OTriOS")
+        })
         .filter(|c| {
             matches!(
                 c.node.responder,
@@ -3046,7 +3252,14 @@ fn text_viewport_fills_inner_margins_and_pans_locally_until_an_edit_recovers_car
             .node
             .children
             .iter()
-            .find(|n| !n.children.is_empty())
+            .find(|n| {
+                n.children.iter().any(|c| {
+                    matches!(
+                        c.primitive,
+                        otrios_interfaces::scene::Primitive::Text { .. }
+                    )
+                })
+            })
             .unwrap();
         assert_eq!(view.frame.x, 24.);
         assert_eq!(view.frame.width, field.node.frame.width - 48.);
@@ -3621,6 +3834,100 @@ fn browser_fields_validate_focus_modal_and_mount_before_applying_atomic_edits() 
 }
 
 #[test]
+fn phone_breadcrumb_qualifies_the_destination_in_its_layout_viewport() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    for height in [944., 575., 410.] {
+        let mut c = Client::default();
+        c.set_font(std::sync::Arc::new(
+            otrios_core::dashboard::font::Font::from_zstd(
+                include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        ));
+        c.set_software_keyboard(false);
+        activate(&mut c, brass_relay::ui(&[]), "phone", vec![]);
+        pump(
+            &mut c,
+            &mut Document::new(brass_relay::ui(&[]).state_schema, "phone").unwrap(),
+            &mut Session::default(),
+        );
+        let home_ui = encode_ui(&home::ui(&[])).unwrap();
+        c.admit_catalog(
+            &encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![
+                    CatalogEntry {
+                        path: "".into(),
+                        app: home::manifest(),
+                        ui_hash: hash(&home_ui),
+                        private: false,
+                    },
+                    CatalogEntry {
+                        path: "brass-relay".into(),
+                        app: brass_relay::manifest(),
+                        ui_hash: hash(&encode_ui(&brass_relay::ui(&[])).unwrap()),
+                        private: false,
+                    },
+                ],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        c.set_layout_viewport([800., 1280.]).unwrap();
+        c.set_viewport([534., height]).unwrap();
+        c.tick(1000, 1000).unwrap();
+        let epoch = c.epoch();
+        for (phase, at) in [(PointerPhase::Down, 1100), (PointerPhase::Up, 1200)] {
+            c.pointer_at(
+                epoch,
+                PointerEvent {
+                    id: (-1280962938i32) as u32,
+                    phase,
+                    position: [94., 54.],
+                },
+                at,
+            )
+            .unwrap();
+            c.tick(at, 1000).unwrap();
+        }
+        let bytes = c.outgoing().unwrap().expect("Home mount request");
+        let ClientMessage::Mount { epoch, ui_ref, .. } = decode_client(&bytes).unwrap() else {
+            panic!("Home mount")
+        };
+        assert_eq!(ui_ref, "app:home/ui");
+        assert_eq!(
+            c.scene().unwrap().root().frame.width,
+            534.,
+            "The current chat stays in its presented viewport until admission"
+        );
+        c.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&home_ui),
+                ui: home_ui,
+                code: vec![],
+                state: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            c.ui_ref(),
+            "app:home/ui",
+            "Home must qualify with the layout extent, independently of chat density and keyboard height"
+        );
+        assert_eq!(
+            [
+                c.scene().unwrap().root().frame.width,
+                c.scene().unwrap().root().frame.height
+            ],
+            [800., 1280.]
+        );
+    }
+}
+
+#[test]
 fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_controls() {
     use otrios_interfaces::scene::Primitive;
     let font = std::sync::Arc::new(
@@ -3631,10 +3938,12 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         .unwrap(),
     );
     for (width, height) in [
+        (1280., 800.),
         (800., 861.),
         (800., 615.),
         (800., 369.),
         (534., 1155.),
+        (534., 944.),
         (534., 575.),
         (534., 410.),
     ] {
@@ -3642,6 +3951,8 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         c.set_font(font.clone());
         c.set_software_keyboard(false);
         activate(&mut c, brass_relay::ui(&[]), "phone-height", vec![]);
+        c.set_layout_viewport([if width > 1000. { 1280. } else { 800. }, 1280.])
+            .unwrap();
         c.set_viewport([width, height]).unwrap();
         let check = |c: &Client| {
             let scene = c.scene().unwrap();
@@ -3666,12 +3977,18 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
             .iter()
             .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="< OTriOS"))
             .unwrap();
-        let title = scene
-            .root()
+        let header = scene.path(7_000_000).unwrap();
+        let header = header.last().unwrap();
+        let title_node = header
+            .node
             .children
             .iter()
-            .find(|n| matches!(&n.primitive,Primitive::Text{value,..} if value=="The Brass Relay"))
+            .find(
+                |n| matches!(&n.primitive, Primitive::Text {value,..} if value=="The Brass Relay"),
+            )
             .unwrap();
+        let title_path = scene.path(title_node.id).unwrap();
+        let title = title_path.last().unwrap();
         let Primitive::Text {
             scale: back_scale, ..
         } = label.primitive
@@ -3680,17 +3997,26 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         };
         let Primitive::Text {
             scale: title_scale, ..
-        } = title.primitive
+        } = title.node.primitive
         else {
             unreachable!()
         };
         assert_eq!(back_scale, title_scale);
-        assert!((back.origin[1] + label.frame.y - title.frame.y).abs() < 0.01);
-        assert!(font.text_width("The Brass Relay", title_scale as f32) <= title.frame.width);
-        if width < 700. {
-            let members = scene.path(node(&c, "Members")).unwrap();
-            assert!(members.last().unwrap().origin[1] >= title.frame.y + title.frame.height);
-        }
+        assert_eq!(title_scale, otrios_interfaces::theme::HEADER_FONT_SCALE);
+        assert!((back.origin[1] + label.frame.y * back.scale - title.origin[1]).abs() < 0.01);
+        assert!(font.text_width("The Brass Relay", title_scale as f32) <= title.node.frame.width);
+        let standard_width = if width > 1000. { 1280. } else { 800. };
+        assert!(
+            (title_scale as f32 * title.scale / width - 3. / standard_width).abs() < 0.00001,
+            "Header density matches the other apps"
+        );
+        let members = scene.path(node(&c, "Members")).unwrap();
+        let members = members.last().unwrap();
+        let profile = scene.path(node(&c, "Edit profile")).unwrap();
+        let profile = profile.last().unwrap();
+        assert!((members.origin[1] - back.origin[1]).abs() < 0.01);
+        assert!((profile.origin[1] - back.origin[1]).abs() < 0.01);
+        assert!(title.origin[0] + title.node.frame.width * title.scale < members.origin[0]);
         check(&c);
         c.activate(c.epoch(), node(&c, "Message composer")).unwrap();
         c.hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(

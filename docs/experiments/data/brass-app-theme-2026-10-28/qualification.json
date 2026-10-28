@@ -1,0 +1,333 @@
+{
+  "date": "2026-10-28",
+  "release": "be7ddb85799dd1b42cf92bef03957be993be2bff4c6eec150b9f9d55e80a582c",
+  "native_qualification_release": "eb3b3cc554c1681f1ed18cfa0c03c911c7924e5b3803c3c7fa000c279fa9d717",
+  "native_sha256": "75962966aafe51da723ff1c6502437346d3d7b8b65339d132927403ef37af455",
+  "touch_calibration_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e",
+  "state_protocol": "otrios-canvas-sync-v8",
+  "opening_control_version": 1,
+  "motion_ui_format": "otrios-canvas-v6",
+  "native_qualification_note": "Native, catalog, authority app UI/code and Wasm assets are byte-identical between the native qualification release and final release. Only web/app.js formatting, its gzip and the signed manifest differ.",
+  "frame_trials": [
+    {
+      "app": "home",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:home/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "test-playground",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:test-playground/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "component-playground",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:component-playground/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "layout-lab",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:layout-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "layout-document",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:layout-document/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "layout-text-scroll",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:layout-text-scroll/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "input-lab",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:input-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "animation-lab",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:animation-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "three-d-lab",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:three-d-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "monitoring",
+      "layout": "landscape",
+      "passed": true,
+      "ui_ref": "app:monitoring/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "home",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:home/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "test-playground",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:test-playground/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "component-playground",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:component-playground/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "layout-lab",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:layout-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "layout-document",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:layout-document/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "layout-text-scroll",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:layout-text-scroll/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "input-lab",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:input-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "animation-lab",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:animation-lab/ui",
+      "pending_commands": 0
+    },
+    {
+      "app": "three-d-lab",
+      "layout": "portrait",
+      "passed": true,
+      "ui_ref": "app:three-d-lab/ui",
+      "pending_commands": 0
+    }
+  ],
+  "keyboard": [
+    {
+      "app": "brass-relay",
+      "characters": 52,
+      "compose_p95_us": 13796,
+      "dispatch_p95_us": 2121,
+      "draw_present_p95_us": 41473,
+      "edges": 104,
+      "feedback_frames": 102,
+      "feedback_pixels": true,
+      "frames": 104,
+      "kernel_flips": 103,
+      "keys_per_second": 8.333333,
+      "release_to_present_max_us": 245301,
+      "release_to_present_p50_us": 52367,
+      "release_to_present_p95_us": 65658,
+      "rotation": 90,
+      "scene_uploads": 54,
+      "synthetic": true,
+      "tap_ms": 60
+    },
+    {
+      "app": "input-lab",
+      "characters": 52,
+      "compose_p95_us": 11160,
+      "dispatch_p95_us": 2070,
+      "draw_present_p95_us": 37131,
+      "edges": 104,
+      "feedback_frames": 102,
+      "feedback_pixels": true,
+      "frames": 104,
+      "kernel_flips": 103,
+      "keys_per_second": 8.333333,
+      "release_to_present_max_us": 208540,
+      "release_to_present_p50_us": 47564,
+      "release_to_present_p95_us": 57459,
+      "rotation": 0,
+      "scene_uploads": 52,
+      "synthetic": true,
+      "tap_ms": 60
+    }
+  ],
+  "kiosk_restored": true,
+  "browser_matrix": {
+    "passed": true,
+    "checks": [
+      "seven demos in both orientations",
+      "clickable app-owned breadcrumbs",
+      "all controls within the viewport",
+      "editor typing and rotation",
+      "portrait motion uses authored stage",
+      "same control IDs through rotation"
+    ],
+    "results": [
+      {
+        "screen": "component-playground",
+        "width": 1280,
+        "height": 800,
+        "controls": 6
+      },
+      {
+        "screen": "layout-lab",
+        "width": 1280,
+        "height": 800,
+        "controls": 7
+      },
+      {
+        "screen": "layout-document",
+        "width": 1280,
+        "height": 800,
+        "controls": 2
+      },
+      {
+        "screen": "layout-text-scroll",
+        "width": 1280,
+        "height": 800,
+        "controls": 2
+      },
+      {
+        "screen": "input-lab",
+        "width": 1280,
+        "height": 800,
+        "controls": 4
+      },
+      {
+        "screen": "animation-lab",
+        "width": 1280,
+        "height": 800,
+        "controls": 6
+      },
+      {
+        "screen": "three-d-lab",
+        "width": 1280,
+        "height": 800,
+        "controls": 6
+      },
+      {
+        "screen": "component-playground",
+        "width": 800,
+        "height": 1280,
+        "controls": 6
+      },
+      {
+        "screen": "layout-lab",
+        "width": 800,
+        "height": 1280,
+        "controls": 7
+      },
+      {
+        "screen": "layout-document",
+        "width": 800,
+        "height": 1280,
+        "controls": 2
+      },
+      {
+        "screen": "layout-text-scroll",
+        "width": 800,
+        "height": 1280,
+        "controls": 2
+      },
+      {
+        "screen": "input-lab",
+        "width": 800,
+        "height": 1280,
+        "controls": 4
+      },
+      {
+        "screen": "animation-lab",
+        "width": 800,
+        "height": 1280,
+        "controls": 6
+      },
+      {
+        "screen": "three-d-lab",
+        "width": 800,
+        "height": 1280,
+        "controls": 6
+      }
+    ]
+  },
+  "monitoring": {
+    "passed": true,
+    "checks": [
+      "anonymous Monitoring denial",
+      "authenticated brass Monitoring and outlines",
+      "landscape canvas retained on portrait host",
+      "breadcrumb navigation and sign-out revocation"
+    ],
+    "data": "synthetic Monitoring fixture"
+  },
+  "checks": {
+    "scripts/check.sh": "passed; Rust workspace, Clippy, formatting, process/socket and Python checks",
+    "dashboard-direct": "11 passed",
+    "ARM direct/server/canvas clippy": "passed with -D warnings",
+    "ARM release build": "all bins and keyboard_latency_probe passed",
+    "Wasm release build": "passed",
+    "Node suite": "79 passed",
+    "browser_chat": "passed",
+    "browser_navigation": "passed",
+    "browser_touch_replay": "passed"
+  },
+  "limits": [
+    "Monitoring captures use a synthetic fixture on isolated authorities, not production telemetry.",
+    "Keyboard taps are synthetic through the real editor/composer/GLES2 and kernel page flips; they are not human finger input.",
+    "Short native screen trials establish admission, rendering and readiness, not sustained performance benchmarks."
+  ],
+  "deployment": {
+    "passed": true,
+    "release": "be7ddb85799dd1b42cf92bef03957be993be2bff4c6eec150b9f9d55e80a582c",
+    "native_sha256": "75962966aafe51da723ff1c6502437346d3d7b8b65339d132927403ef37af455",
+    "services": {
+      "otrios-authority": true,
+      "otrios-dashboard-direct": true,
+      "otrios-tunnel": true,
+      "otrios-monitoring.timer": true
+    },
+    "input_device_open": true,
+    "native_threads": 6,
+    "state_confirmed": true,
+    "pending_commands": 0,
+    "public_host_checks": 120,
+    "monitoring_refreshed": true,
+    "transcript_tail_unchanged": true,
+    "transcript_tail_sha256": "a0bc6c27598b681cd69b75c80a426e5318c7fe31cbe91a5fbd1a1dd2640612a4",
+    "rollback": "/var/lib/otrios-authority/rollback/2026-10-28-brass-theme",
+    "private_candidate_removed": true
+  }
+}

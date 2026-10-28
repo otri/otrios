@@ -33,13 +33,13 @@ try{
   const metrics=async(session,width,height)=>{await call('Page.bringToFront',{},session);await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);};
   const testQuery=new URLSearchParams();if(args.includes('--timings'))testQuery.set('timings','1');if(args.includes('--stable-quads'))testQuery.set('stable-quads','1');
   const routes={'component-playground':'test-playground/components','layout-lab':'test-playground/layouts','layout-document':'test-playground/long-document','layout-text-scroll':'test-playground/text-panning','input-lab':'test-playground/text-input','animation-lab':'test-playground/animations-two-d','three-d-lab':'test-playground/animations-three-d'};
-  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,route==='brass-relay'?chatViewport(width,height).join('x'):['input-lab','animation-lab','three-d-lab'].includes(route)?'1280x800':width<height?'800x1280':'1280x800');return sessionId;};
+  const page=async(width,height,route,query=testQuery.size?'?'+testQuery:'')=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});await call('Page.enable',{},sessionId);await call('Runtime.enable',{},sessionId);await call('Network.enable',{},sessionId);await metrics(sessionId,width,height);await call('Page.navigate',{url:origin+'/'+(route==='home'?'':routes[route]||route)+query},sessionId);await ready(sessionId,route,route==='brass-relay'?chatViewport(width,height).join('x'):width<height?'800x1280':'1280x800');return sessionId;};
   const ready=async(session,screen,extent)=>{await wait(session,`document.querySelector('#revision')?.dataset.screen===${JSON.stringify(screen)}${extent?`&&document.querySelector('#view')?.dataset.logicalSize===${JSON.stringify(extent)}`:''}`);assert.equal(await evaluate(session,"document.querySelector('#error').hidden"),true);const name={home:'OTriOS','brass-relay':'The Brass Relay'}[screen];if(name)assert.deepEqual(await evaluate(session,"[document.title,document.querySelector('meta[property=\"og:title\"]').content,document.querySelector('meta[property=\"og:site_name\"]').content]"),[name==='OTriOS'?name:`OTriOS · ${name}`,name,'OTriOS']);};
   const controls=session=>evaluate(session,"[...document.querySelectorAll('#controls button')].map(b=>({id:b.dataset.sceneNode,label:b.getAttribute('aria-label'),value:b.getAttribute('aria-valuenow'),bounds:[b.getBoundingClientRect().x,b.getBoundingClientRect().y,b.getBoundingClientRect().width,b.getBoundingClientRect().height]}))");
   const click=async(session,label,screen,extent)=>{let control=(await controls(session)).find(c=>c.label===label);if(!control&&(await controls(session)).some(c=>c.label==='Test Playground')){await click(session,'Test Playground','test-playground',extent);control=(await controls(session)).find(c=>c.label===label);}assert(control,label);const [x,y,w,h]=control.bounds;
     await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:x+w/2,y:y+h/2},session);
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:x+w/2,y:y+h/2},session);
-    await ready(session,screen,['input-lab','animation-lab','three-d-lab'].includes(screen)?'1280x800':extent);};
+    await ready(session,screen,extent);};
   const screenshot=async(session,name)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const {data}=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(join(output,name+'.png'),Buffer.from(data,'base64'));};
   const drag=async(session,label,fraction,release=true)=>{const control=(await controls(session)).find(c=>c.label===label);assert(control);const [x,y,w,h]=control.bounds,point={x:x+w*fraction,y:y+h/2};await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},session);if(release)await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},session);};
   const info=s=>evaluate(s,"JSON.parse(document.querySelector('#revision').dataset.chat||'null')");
@@ -48,6 +48,54 @@ try{
   const paste=async(s,text)=>{await new Promise(r=>setTimeout(r,150));return call('Input.insertText',{text},s);};
   const control=async(s,label)=>{await click(s,label,'brass-relay');await new Promise(r=>setTimeout(r,100));};
   const dispatch=async(s,text)=>{await control(s,'Message composer');await paste(s,text);await press(s,'Enter');};
+  if(args.includes('--phone-breadcrumb')){
+    const results=[];
+    for(const [width,height] of [[393,695],[390,844],[430,932],[1280,800]]){
+      const a=await page(width,height,'brass-relay');await online(a);
+      await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5},a);
+      const tap=async(label,screen,extent)=>{
+        console.log('Touch',width,height,label);
+        const c=(await controls(a)).find(c=>c.label===label);assert(c,label);const[x,y,w,h]=c.bounds;
+        await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,x:x+w/2,y:y+h/2}]},a);
+        await new Promise(r=>setTimeout(r,70));
+        await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);
+        await ready(a,screen,extent);
+      };
+      const brassOrigin=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return [r.x,r.y]})()");
+      const brassHeader=await controls(a),back=brassHeader.find(c=>c.label==='Back to OTriOS');
+      for(const label of ['Members','Edit profile'])assert(Math.abs(brassHeader.find(c=>c.label===label).bounds[1]-back.bounds[1])<0.5,'header actions stay inline');
+      await screenshot(a,'brass-header-'+width);
+      await tap('Members','brass-relay');
+      await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Close dialog')");
+      await tap('Close dialog','brass-relay');
+      await wait(a,"!![...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Back to OTriOS')");
+      await tap('Back to OTriOS','home',width<height?'800x1280':'1280x800');
+      await wait(a,"location.pathname==='/'");
+      await tap('Test Playground','test-playground',width<height?'800x1280':'1280x800');
+      const standardHeader=(await controls(a)).find(c=>c.label==='OTriOS');
+      const standardOrigin=await evaluate(a,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return [r.x,r.y]})()");
+      for(const i of [0,1,2,3])assert(Math.abs((back.bounds[i]-(brassOrigin[i]||0))-(standardHeader.bounds[i]-(standardOrigin[i]||0)))<0.5,`shared header bounds at ${width}: ${back.bounds} / ${standardHeader.bounds}`);
+      await screenshot(a,'standard-header-'+width);
+      await tap('OTriOS','home',width<height?'800x1280':'1280x800');
+      await tap('The Brass Relay','brass-relay',chatViewport(width,height).join('x'));await online(a);
+      await call('Page.reload',{},a);await ready(a,'brass-relay',chatViewport(width,height).join('x'));await online(a);
+      await tap('Back to OTriOS','home',width<height?'800x1280':'1280x800');
+      await wait(a,"location.pathname==='/'");await screenshot(a,'phone-back-'+width);
+      if(width<600){
+        await tap('The Brass Relay','brass-relay',chatViewport(width,height).join('x'));await online(a);
+        await control(a,'Message composer');
+        await evaluate(a,`(()=>{window.__nativeViewport=window.visualViewport;window.__shortViewport={width:${width},height:300,offsetTop:0,offsetLeft:0,scale:1};Object.defineProperty(window,'visualViewport',{configurable:true,get:()=>window.__shortViewport});window.__nativeViewport.dispatchEvent(new Event('resize'));})()`);
+        await call('Page.captureScreenshot',{format:'png'},a);
+        await ready(a,'brass-relay',chatViewport(width,300).join('x'));
+        await tap('Back to OTriOS','home','800x1280');await wait(a,"location.pathname==='/'");
+      }
+      results.push({width,height,passed:true});
+      const {targetInfo}=await call('Target.getTargetInfo',{},a);
+      await call('Target.disposeBrowserContext',{browserContextId:targetInfo.browserContextId});
+    }
+    const result={passed:true,checks:['phone-width touch navigation after modal close','Home admission before viewport policy handoff','breadcrumb after full refresh','return with focused composer and short visual viewport','desktop touch navigation','matching breadcrumb font geometry across apps','Members and You remain inline'],results};
+    await writeFile(join(output,'phone-breadcrumb-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }else{
   const draft='A pigeon '+Date.now()+' is composing',nickname='Captain '+Date.now().toString(36);
   for(const [path,name] of [['/','OTriOS'],['/brass-relay','The Brass Relay'],['/test-playground','Test Playground'],['/monitoring','Monitoring']]){
     const response=await fetch(origin+path);assert(response.ok);const html=await response.text();
@@ -181,6 +229,7 @@ try{
   await writeFile(join(output,'collection-transport.json'),JSON.stringify({passed:true,windows,channels:Object.fromEntries(receivedChannels),hellos:Object.fromEntries(hellos),privateBodyLeaks:bodyLeaks.length},null,2));
   const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','native textarea focus, selection replacement and IME composition','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','visual viewport-only keyboard reflow preserves width, focus, text and selection','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }
 }finally{
   socket?.close();if(browser.pid&&browser.exitCode===null&&browser.signalCode===null){browser.kill('SIGTERM');await new Promise(resolve=>browser.once('exit',resolve));}await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
 }

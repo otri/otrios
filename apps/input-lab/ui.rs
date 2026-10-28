@@ -8,13 +8,14 @@ pub fn description() -> Ui {
         .enumerate()
         .map(|(i, f)| {
             canvas(vec![
-                rounded_rect(CARD).pin_edges(0.),
+                surface(BG, 12.).pin_edges(0.),
                 text(f.value())
                     .frame([24., 20., 1100., 48.])
                     .pin_left(24.)
                     .pin_right(24.),
             ])
-            .frame([64., 180. + i as f32 * 110., 1152., 88.])
+            .frame([24., 160. + i as f32 * 110., 1232., 88.])
+            .key(if i == 0 { "first" } else { "second" })
             .semantic_label(if i == 0 {
                 "First text field"
             } else {
@@ -24,17 +25,42 @@ pub fn description() -> Ui {
         })
         .collect::<Vec<_>>();
     let mut body = vec![
-        button("Back")
-            .on_press(Event::back())
-            .frame([830., 35., 140., 80.]),
-        button("Home")
-            .navigate_to(Destination::app("home"))
-            .frame([1000., 35., 216., 80.]),
-        text("Shared text / local caret, focus and keyboard").position([64., 130.]),
+        text("Shared text / local caret, focus and keyboard")
+            .color(MUTED)
+            .key("intro"),
     ];
     body.extend(fields);
-    body.push(crate::components::keyboard());
+    body.push(
+        crate::components::keyboard()
+            .frame([0., 480., 1280., 320.])
+            .pin_left(0.)
+            .pin_right(0.)
+            .pin_bottom(0.),
+    );
     AppUi::new("input-lab", "Text Input", super::state::description())
+        .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
+        .with_composition(
+            column(
+                20.,
+                vec![
+                    heading(),
+                    place("intro", [1232., 32.]).minimum([1., 32.]).flex_width(),
+                    place("first", [1232., 88.]).minimum([1., 88.]).flex_width(),
+                    place("second", [1232., 88.])
+                        .minimum([1., 88.])
+                        .flex_width(),
+                ],
+            ),
+            column(
+                24.,
+                vec![
+                    heading(),
+                    place("intro", [752., 32.]).minimum([1., 32.]).flex_width(),
+                    place("first", [752., 88.]).minimum([1., 88.]).flex_width(),
+                    place("second", [752., 88.]).minimum([1., 88.]).flex_width(),
+                ],
+            ),
+        )
         .with_presentation(Presentation::Editor {
             fields: vec![FIRST.id(), SECOND.id()],
         })

@@ -1180,6 +1180,7 @@ mod tests {
                 navigation: vec![],
                 behavior: None,
                 presentation: motion.then_some(Presentation::Motion {
+                    viewport: None,
                     three_d: true,
                     playing: 1,
                     speed: 2,

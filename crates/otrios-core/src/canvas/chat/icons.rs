@@ -3,13 +3,7 @@
 //! no bitmap atlas, font glyph dependency or per-frame trigonometry.
 use crate::dashboard::components::{canvas, node};
 use otrios_interfaces::scene::*;
-pub const BG: Color = [23, 27, 32, 255];
-pub const CARD: Color = [35, 40, 46, 255];
-pub const TEXT: Color = [239, 241, 237, 255];
-pub const MUTED: Color = [172, 179, 187, 255];
-pub const BRASS: Color = [216, 183, 117, 255];
-pub const COPPER: Color = [208, 170, 137, 255];
-pub const LINE: Color = [66, 73, 81, 255];
+pub use otrios_interfaces::theme::{BG, BRASS, CARD, COPPER, LINE, MUTED, TEXT};
 const NAMES: [&str; 64] = [
     "Clockwork bird",
     "Night owl",
