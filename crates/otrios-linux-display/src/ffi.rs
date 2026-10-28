@@ -86,6 +86,10 @@ unsafe extern "C" {
     fn ot_text_views(d: *mut c_void, slot: u32, views: *const f32, floats: usize) -> c_int;
     fn ot_present(d: *mut c_void, flip: *mut Flip) -> c_int;
     fn ot_input(d: *mut c_void, events: *mut Touch, capacity: usize) -> c_int;
+    fn ot_touch_open(path: *const c_char, error: *mut c_char, capacity: usize) -> *mut c_void;
+    fn ot_touch_error(input: *mut c_void) -> *const c_char;
+    fn ot_touch_read(input: *mut c_void, events: *mut Touch, capacity: usize) -> c_int;
+    fn ot_touch_close(input: *mut c_void);
     fn ot_pixels(d: *mut c_void, rgba: *mut u8, length: usize) -> c_int;
 }
 pub struct Display {
@@ -95,6 +99,10 @@ pub struct Display {
 impl Display {
     pub fn open(card: &str, input: &str, size: [u32; 2], rgb565: bool) -> Result<Self, String> {
         Self::create(card, input, size, rgb565, false)
+    }
+    /// Graphics only; a separately owned TouchInput can run on the input thread.
+    pub fn open_graphics(card: &str, size: [u32; 2], rgb565: bool) -> Result<Self, String> {
+        Self::create(card, "", size, rgb565, false)
     }
     /// Mesa-only pbuffer for shader/pixel acceptance without DRM ownership.
     pub fn headless(size: [u32; 2], rgb565: bool) -> Result<Self, String> {
@@ -353,6 +361,57 @@ impl Drop for Display {
     fn drop(&mut self) {
         // SAFETY: sole owner, !Send/!Sync, no outstanding borrows or retained Rust pointers.
         unsafe { ot_close(self.owner.as_ptr()) };
+    }
+}
+/// Independent same-thread evdev owner. Construct inside the input thread;
+/// moving a Display or sharing a foreign owner across threads remains forbidden.
+pub struct TouchInput {
+    owner: NonNull<c_void>,
+    _thread: PhantomData<Rc<()>>,
+}
+impl TouchInput {
+    pub fn open(path: &str) -> Result<Self, String> {
+        let path = CString::new(path).map_err(|e| e.to_string())?;
+        let mut error = [0 as c_char; 512];
+        // SAFETY: strings/output are borrowed synchronously. C returns either
+        // NULL after complete cleanup or sole ownership of an evdev context.
+        let pointer = unsafe { ot_touch_open(path.as_ptr(), error.as_mut_ptr(), error.len()) };
+        let owner = NonNull::new(pointer).ok_or_else(|| {
+            // SAFETY: C always terminates this bounded initialization error.
+            unsafe { CStr::from_ptr(error.as_ptr()) }
+                .to_string_lossy()
+                .into_owned()
+        })?;
+        Ok(Self {
+            owner,
+            _thread: PhantomData,
+        })
+    }
+    pub fn read(&mut self) -> Result<Vec<Touch>, String> {
+        let mut events = [Touch::default(); 64];
+        // SAFETY: live same-thread input owner and exactly capacity writable
+        // events. C retains no slice, does no GL work and bounds the count.
+        let count =
+            unsafe { ot_touch_read(self.owner.as_ptr(), events.as_mut_ptr(), events.len()) };
+        if count < 0 {
+            // SAFETY: the live owner keeps its NUL-terminated error until Drop.
+            return Err(
+                unsafe { CStr::from_ptr(ot_touch_error(self.owner.as_ptr())) }
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        let count = usize::try_from(count).map_err(|e| e.to_string())?;
+        if count > events.len() {
+            return Err("Invalid input event count".into());
+        }
+        Ok(events[..count].to_vec())
+    }
+}
+impl Drop for TouchInput {
+    fn drop(&mut self) {
+        // SAFETY: sole !Send/!Sync owner; no outstanding retained foreign borrows.
+        unsafe { ot_touch_close(self.owner.as_ptr()) };
     }
 }
 #[cfg(test)]

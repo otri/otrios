@@ -39,7 +39,7 @@ struct NetworkSend {
 #[derive(Clone)]
 pub(super) struct Frame {
     // Shared with the state owner. Revocation does not need renderer credit.
-    access: Arc<AtomicBool>,
+    pub(super) access: Arc<AtomicBool>,
     pub(super) ui_release: String,
     pub(super) paint: otrios_core::canvas::presentation::Frame,
     pub(super) snapshot: String,

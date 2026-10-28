@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 typedef struct ot_display ot_display;
+typedef struct ot_touch_source ot_touch_source;
 #define OT_MAX_SCENE_SLOTS 131u
 typedef struct { uint64_t usec; uint32_t sequence, crtc; } ot_flip;
 typedef struct { int32_t phase; float x, y; uint64_t age_us; } ot_touch;
@@ -26,5 +27,10 @@ int ot_present(ot_display *d,ot_flip *flip);
 int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t floats);
 int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats);
 int ot_input(ot_display *d,ot_touch *events,size_t capacity);
+/* Independent evdev owner. Create/read/destroy on its input thread; no GL calls. */
+ot_touch_source *ot_touch_open(const char *path,char *error,size_t capacity);
+const char *ot_touch_error(ot_touch_source *input);
+int ot_touch_read(ot_touch_source *input,ot_touch *events,size_t capacity);
+void ot_touch_close(ot_touch_source *input);
 int ot_pixels(ot_display *d,uint8_t *rgba,size_t length);
 #endif

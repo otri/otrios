@@ -4,7 +4,7 @@
 #[allow(unsafe_code)]
 mod ffi;
 #[cfg(all(target_os = "linux", feature = "platform"))]
-pub use ffi::{Display, Flip, Info, Touch};
+pub use ffi::{Display, Flip, Info, Touch, TouchInput};
 
 pub const MAX_VERTICES: usize = 2_000_000;
 /// Three legacy layers plus bounded, independently retained document resources.

@@ -5,6 +5,8 @@ mod direct_host;
 #[cfg(any(target_os = "linux", test))]
 mod font_resource;
 #[cfg(any(target_os = "linux", test))]
+mod native_input;
+#[cfg(any(target_os = "linux", test))]
 #[cfg_attr(
     not(target_os = "linux"),
     allow(

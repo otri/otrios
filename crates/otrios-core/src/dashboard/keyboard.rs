@@ -34,6 +34,9 @@ pub struct Keyboard {
     disabled: bool,
     contact: Option<(u32, Option<u16>)>,
     repeat_at: Option<u64>,
+    // One latest key pulse survives a short down/up batch and renderer
+    // backpressure. Its timeout starts only when a frame includes it.
+    feedback: Option<(u16, Option<u64>)>,
 }
 impl Keyboard {
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -45,6 +48,7 @@ impl Keyboard {
     pub fn cancel(&mut self) {
         self.contact = None;
         self.repeat_at = None;
+        self.feedback = None;
     }
     pub fn focus(&mut self) {
         if self.disabled {
@@ -62,6 +66,11 @@ impl Keyboard {
     }
     pub fn pressed(&self, key: u16) -> bool {
         self.contact.is_some_and(|(_, k)| k == Some(key))
+    }
+    pub fn feedback_key(&self) -> Option<u16> {
+        self.contact
+            .and_then(|(_, key)| key)
+            .or_else(|| self.feedback.map(|(key, _)| key))
     }
     pub fn touching(&self, id: u32) -> bool {
         self.contact.is_some_and(|(p, _)| p == id)
@@ -174,6 +183,7 @@ impl Keyboard {
             return None;
         }
         self.contact = Some((id, Some(key)));
+        self.feedback = Some((key, None));
         if Self::repeats(key) {
             let action = self.press(key);
             self.repeat_at = Some(now.saturating_add(450));
@@ -193,6 +203,7 @@ impl Keyboard {
             self.cancel();
         } else {
             self.contact = Some((id, key));
+            self.feedback = key.map(|key| (key, None));
         }
     }
     pub fn up(&mut self, id: u32) -> Option<Edit> {
@@ -201,10 +212,24 @@ impl Keyboard {
         }
         let key = self.contact.and_then(|(_, k)| k);
         self.cancel();
-        key.filter(|k| !Self::repeats(*k))
-            .and_then(|k| self.press(k))
+        let edit = key
+            .filter(|k| !Self::repeats(*k))
+            .and_then(|k| self.press(k));
+        if self.visible {
+            self.feedback = key.map(|key| (key, None));
+        }
+        edit
     }
     pub fn tick(&mut self, now: u64) -> Option<Edit> {
+        if self.contact.is_none()
+            && let Some((key, until)) = self.feedback
+        {
+            self.feedback = match until {
+                None => Some((key, None)),
+                Some(until) if now < until => Some((key, Some(until))),
+                Some(_) => None,
+            };
+        }
         if self.repeat_at.is_some_and(|t| now >= t) {
             self.repeat_at = Some(now.saturating_add(125));
             self.contact
@@ -212,6 +237,13 @@ impl Keyboard {
                 .and_then(|k| self.press(k))
         } else {
             None
+        }
+    }
+    pub fn feedback_prepared(&mut self, now: u64) {
+        if self.contact.is_none()
+            && let Some((key, None)) = self.feedback
+        {
+            self.feedback = Some((key, Some(now.saturating_add(60))));
         }
     }
 }
