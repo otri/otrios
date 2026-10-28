@@ -21,7 +21,8 @@ attempt and never saves a client checkpoint. Preservation of offline edits is a
 future requirement, not an implied feature.
 
 The browser artifact cache targets 512 MiB of payloads, reduced by available
-origin quota/headroom. Native disposable code/font/blob caches target 2 GiB.
+origin quota/headroom. The native agent defaults to 2 GiB for disposable
+code/font/blob caches; the checked-in frame service overrides it to 128 MiB.
 Immutable verified resources are evicted by recency; active and last-good native
 releases are pinned. Cache failure falls back to resource delivery rather than
 making app state durable locally. Browser HTTP/JIT caches and metadata, GPU glyph

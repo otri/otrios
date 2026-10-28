@@ -2,7 +2,7 @@
 # Public demos and private Monitoring
 
 `https://otrios.otri.ca` opens Home without sign-in. Component Playground, Layout
-Lab, Input Lab, Animation Lab and 3D Lab are public apps. Their durable controls
+Lab, Input Lab, Animation Lab, 3D Lab and The Brass Relay are public apps. Their durable controls
 share the photo frame's per-app Merkle state. Navigation, text entry and animation
 phase remain local. Monitoring alone requires browser sign-in.
 
@@ -21,10 +21,12 @@ titles), all 69 signed-builder Node tests, and `scripts/test-chat-browser.mjs`
 against the exact signed candidate. Browser checks cover raw route metadata,
 navigation titles and Monitoring before sign-in. Public GETs verified titles on
 Home, Brass Relay, Test Playground and Monitoring after deployment, together with
-signed HTML/JS/Wasm hashes and native readiness. Active release:
+signed HTML/JS/Wasm hashes and native readiness. The release at that qualification was:
 `f8cacaa81ae3a748dd853b4357403077f1d48735a4fcd2fa28c02dc4b36b9e00`.
-Code rollback is retained at
+At qualification, the code rollback was retained at
 `/var/lib/otrios-authority/rollback/2026-10-27-open-graph`.
+For the current release, read `/release` or the opening `/session` hello;
+the qualification hash above is historical.
 
 One Rust service on the Rockchip photo frame serves code and state. Cloudflare Tunnel reaches its public
 loopback listener on 8877; the local display and collector use trusted 8876.

@@ -40,7 +40,7 @@ raw replication path unless an explicit compressed packet is processed.
 | Chat collection | Authority ≤50,000 retained messages / 32 MiB canonical; client selects ≤64 / 256 KiB; eight separate pending sends | Durable receipt after fsync; one stable journal owner; expired anchors choose a notified retained neighbor |
 | Structured message source | ≤256 blocks, 512 KiB text allocation, 128 KiB per inline allocation / 4 MiB shared inline allocations | Reject source before replacement; unselected blocks/layout are disposable |
 | Document presentation | Core layout 8 MiB + host staging reserve 8 MiB; source index 8 MiB; GPU geometry 8 MiB; upload ≤512 KiB/turn | Bound held snapshots and reverse reserve; progressive loading/backpressure; text/avatar share resource admission, placement and clip |
-| Artifact caches | Browser target 512 MiB, native frame target 128 MiB; disposable immutable verified code/font/blob resources | Evict least recently used resources; storage unavailable never makes document state durable on client |
+| Artifact caches | Browser target 512 MiB, native agent default 2 GiB, checked-in frame service override 128 MiB; disposable immutable verified code/font/blob resources | Evict least recently used resources; storage unavailable never makes document state durable on client |
 
 A session's addressing/projection roots share immutable nodes. While a flight is
 outstanding it does not compute/queue a new projection. A lease may pin an older

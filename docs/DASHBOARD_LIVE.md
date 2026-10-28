@@ -57,7 +57,8 @@ Each app has a Merkle checkpoint and bounded append journal. Changed nodes and
 intent receipts are durable before roots are published or edits acknowledged.
 Checkpoints rotate at 4 MiB. Clients keep document state and pending edits in RAM;
 closing one may lose unconfirmed edits. Executable/font/blob caches are bounded
-(about 512 MiB web, 128 MiB frame disk budget). Ink expires after five seconds and is never
+(about 512 MiB web; native agent default 2 GiB, overridden to 128 MiB by the
+checked-in frame service). Ink expires after five seconds and is never
 persisted. Legacy `--state FILE` only derives the app directory/presentation path;
 prefer the explicit arguments above. Never run two authorities on the same state.
 
