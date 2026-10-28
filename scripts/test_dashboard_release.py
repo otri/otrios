@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Conformance checks for the code-signing boundary; never executes test artifacts."""
-import gzip, hashlib, importlib.util, json, os, pathlib, shutil, subprocess, tempfile, unittest
+import gzip, hashlib, importlib.util, json, os, pathlib, re, shutil, subprocess, tempfile, unittest
 HERE=pathlib.Path(__file__).parent
 
 def module(name,file):
@@ -41,6 +41,12 @@ class SignedReleases(unittest.TestCase):
         self.pointer=self.publish();self.id=self.pointer['id'];self.copy_cache(self.id)
     def tearDown(self):self.temp.cleanup()
     def publish(self):return publisher.publish(self.web,self.native,self.out,self.key,OPENSSL,catalog=self.root/'apps/catalog.flex')
+    def test_published_protocol_matches_native_session_contract(self):
+        source=(HERE.parent/"crates/otrios-interfaces/src/session.rs").read_text()
+        protocol=re.search(r'STATE_PROTOCOL: &str = "([^"]+)"',source).group(1)
+        manifest=json.loads((self.out/self.id/"manifest.json").read_bytes())
+        self.assertEqual(manifest["sync_protocol"],protocol)
+        self.assertEqual(self.pointer["sync_protocol"],protocol)
     def test_precompressed_web_assets_are_deterministic_signed_and_bound_to_source(self):
         source=b'export const message="hello from the signed app";\n'*2048
         (self.web/'app.js').write_bytes(source)
