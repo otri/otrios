@@ -1,5 +1,8 @@
 # Native retained coordinates, SIMD packing and coverage storage
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/native-retained-simd-2026-10-27.md) remain available at the pinned historical revision.
+
 Historical experiment record. The fixed-point pilot and alternate GPU position
 formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
 Commands and feature names below refer to the evaluated revision, not the current
@@ -159,13 +162,13 @@ The selected defaults are adaptive alpha coverage and GL_FLOAT positions, with
 GPU position formats remain opt-in. The exact signed-build native executable is
 SHA-256 `c65e9fc842b27a50f8f37117fb6254191cf87cc4e659207c15527e3e1bc1d373`.
 
-[Original native pixels](assets/native-retained-simd-2026-10-27/original.png),
-[selected pixels](assets/native-retained-simd-2026-10-27/selected.png),
-[8x difference](assets/native-retained-simd-2026-10-27/difference-8x.png) and the
-[full-screen demo capture](assets/native-retained-simd-2026-10-27/full-screen-demo.png)
+[Original native pixels](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/native-retained-simd-2026-10-27/original.png),
+[selected pixels](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/native-retained-simd-2026-10-27/selected.png),
+[8x difference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/native-retained-simd-2026-10-27/difference-8x.png) and the
+[full-screen demo capture](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/native-retained-simd-2026-10-27/full-screen-demo.png)
 are retained for inspection. Foreground/edge statistics, binary and fixture
 hashes, scalar/NEON parity, all timing repetitions and matched input traces are
-in the [measurement record](data/native-retained-simd-2026-10-27.json).
+in the [measurement record](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/native-retained-simd-2026-10-27.json).
 
 ## Verification and evidence
 
@@ -201,7 +204,7 @@ Authority, native dashboard and tunnel are active, state is confirmed, release
 identities agree, and calibration/rotation remain intact. The public conformance
 check passes all 99 anonymous/isolation checks; real Chromium passes the deployed
 demo's momentum, cancellation, client-local state, portrait and navigation checks.
-See the [deployment record](data/native-retained-deployment-2026-10-27.json).
+See the [deployment record](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/native-retained-deployment-2026-10-27.json).
 Operational rollback files are preserved; canonical state was not restored.
 
 
@@ -245,7 +248,7 @@ preserved in compressed archives with verified per-file SHA-256 manifests;
 148 completed remote files (121,725,440 bytes) were removed individually only
 after verification. Local unpacked evidence was reduced by 343,073,224 bytes
 net of its archive. No canonical state or operational rollback was removed.
-The [cleanup evidence record](data/native-renderer-cleanup-2026-10-27.json)
+The [cleanup evidence record](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/native-renderer-cleanup-2026-10-27.json)
 records the selected artifacts and acceptance results. Future SIMD work can
 operate on float data; adoption requires a measured batch and complete-frame
 benefit under the same pixel gates.

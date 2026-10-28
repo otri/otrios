@@ -1,6 +1,0 @@
-{
-  "signed_release": "c549b460eee88add24a97436221150d06477f057bdc512d60d54b40a022eae42",
-  "native_sha256": "27c9c2c9067551a218f71a8d0f3c58a0964da42645a5f2fb59970988e349752a",
-  "catalog_sha256": "3944cecef69c77868c4f2a85a269edd744d42ffd149cf6061d2463b26c113dbd",
-  "method": "one isolated direct renderer; RGB565; 8 sec idle and 64-object/30Hz-state/250ms-stall cases; actual service restored in finally; no private view or document data copied"
-}

@@ -1,5 +1,8 @@
 # Fixed hierarchy, culling and flow evaluation — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/fixed-point-hierarchy-2026-10-27.md) remain available at the pinned historical revision.
+
 Historical experiment record. The fixed-point pilot and alternate GPU position
 formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
 Commands and feature names below refer to the evaluated revision, not the current
@@ -69,10 +72,10 @@ Scalar fixed, NEON and host-generated fixed streams are byte-identical across
 all six workloads. Their dense stream SHA-256 is:
 `9a990f4507601aa7c44f769f5e934320cb9bbe62ff92cd2c8ac77ccbe057cbc1`.
 
-[Native nested reference](assets/hierarchy-mali-reference.png),
-[candidate](assets/hierarchy-mali-candidate.png),
-[8x difference](assets/hierarchy-mali-difference-8x.png), and
-[the DPR 3.2 browser strip](assets/hierarchy-browser-dpr3.2.png) preserve reviewable
+[Native nested reference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/hierarchy-mali-reference.png),
+[candidate](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/hierarchy-mali-candidate.png),
+[8x difference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/hierarchy-mali-difference-8x.png), and
+[the DPR 3.2 browser strip](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/hierarchy-browser-dpr3.2.png) preserve reviewable
 captures. Historical failed captures remain in the earlier reports.
 
 ## Cortex-A7 timings
@@ -120,8 +123,8 @@ and all three acceptance trials were repeated with free space.
 
 ## Evidence and commands
 
-[Complete pixel/CPU metrics, source hashes, fixture hashes and SIMD evidence](data/fixed-point-hierarchy-2026-10-27.json)
-and [kernel scanout trials](data/fixed-point-hierarchy-scanout-2026-10-27.json)
+[Complete pixel/CPU metrics, source hashes, fixture hashes and SIMD evidence](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/fixed-point-hierarchy-2026-10-27.json)
+and [kernel scanout trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/fixed-point-hierarchy-scanout-2026-10-27.json)
 retain the controls and individual repeats.
 
 Generate each fixture independently with feature-disabled float32 and

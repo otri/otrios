@@ -92,4 +92,4 @@ v1 views remain readable within the bounded layout contract.
 Stop the OTriOS collector before clearing its presentation, otherwise the next
 scheduled collection restores the view. This affects only OTriOS; Grafana and
 Prometheus keep running. Confirmed Canvas app state is independent of the
-replaceable Monitoring aggregate. See [live operations](DASHBOARD_LIVE.md).
+replaceable Monitoring aggregate. See [live operations](FRAME_HOSTING.md).

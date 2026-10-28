@@ -35,5 +35,5 @@ publisher signature. Neither a hash nor cache possession is an access grant.
 
 See [resource ownership and limits](ARCHITECTURE-RESOURCES.md),
 [packed transport](rfcs/0011-packed-canvas-transport.md), and
-[session/upgrade ownership](DASHBOARD_LIVE.md). The earlier Automerge checkpoint,
+[session/upgrade ownership](FRAME_HOSTING.md). The earlier Automerge checkpoint,
 IndexedDB document cache and migration fallback are removed from the app runtime.

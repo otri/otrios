@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Packed Canvas wire costs on the frame — 2026-10-20
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/canvas-packed-wire.md) remain available at the pinned historical revision.
+
 Frozen codec/diagnostics source: `157ca5b00fa14c28ecb95f4895a1d061cee8b99d`.
 This microbenchmark selects a default; it is not live or end-to-end acceptance.
 Normal sync-v4 replication stays **raw packed**. Explicit bounded LZ4 remains
@@ -49,8 +52,8 @@ same fixed order. No tree generation, network, fsync or GPU submission is timed.
 Temporary frame binaries were removed. Results remain useful directionally;
 complete-client delay/convergence/CPU measurements are a separate gate.
 
-[Raw results](data/canvas-packed-wire-2026-10-20/results.jsonl) and
-[archive, binary and harness hashes](data/canvas-packed-wire-2026-10-20/metadata.json).
+[Raw results](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/results.jsonl) and
+[archive, binary and harness hashes](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/metadata.json).
 The implementation decision and exact packet contract are in [RFC 0011](../rfcs/0011-packed-canvas-transport.md).
 
 ## Complete-client comparison and deployment
@@ -85,8 +88,8 @@ relay/SSH or frame GPU. Process peak RSS is 7,988 KiB in every trial; that coars
 unchanged high-water mark does not establish zero allocation. Clocks/thermals and
 network are unpinned. Both temporary Tailscale routes are restored exactly and
 frame experiment files removed after each matrix. Raw
-[direct](data/canvas-packed-wire-2026-10-20/direct-results.jsonl) /
-[delayed](data/canvas-packed-wire-2026-10-20/delayed-results.jsonl) records and their
+[direct](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/direct-results.jsonl) /
+[delayed](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/delayed-results.jsonl) records and their
 metadata identify frozen sources, binaries, signed releases and scope.
 
 ### Browser and frame qualification
@@ -125,8 +128,8 @@ state was retained. The retry pushes/preflights the exact pin **before** stoppin
 or activating, then succeeds. Keep this source-availability check ahead of future
 cutovers. Rollback never restores an old state backup over newly confirmed writes.
 
-[Deployment attribution](data/canvas-packed-wire-2026-10-20/deployment.json),
-[frame readiness](data/canvas-packed-wire-2026-10-20/frame-acceptance.json),
-[staged resource report](data/canvas-packed-wire-2026-10-20/staged-resources.json),
-[staged 3D image](data/canvas-packed-wire-2026-10-20/staged-browser.png) and
-[live browser](data/canvas-packed-wire-2026-10-20/live-browser.png).
+[Deployment attribution](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/deployment.json),
+[frame readiness](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/frame-acceptance.json),
+[staged resource report](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/staged-resources.json),
+[staged 3D image](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/staged-browser.png) and
+[live browser](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-packed-wire-2026-10-20/live-browser.png).

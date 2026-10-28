@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Read-only Canvas admission on the frame — 2026-10-20
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/canvas-readonly.md) remain available at the pinned historical revision.
+
 Source improvement committed as `214ea5e10c565f319abebbd39eec94bd9d814f36`;
 not deployed at measurement time. Reference is deployed foundation `c15221a`.
 A schema with no writable fields needs an ephemeral lease and acknowledgements,
@@ -31,8 +34,8 @@ runs three trials, for twelve total. The existing direct renderer stays running.
 Clocks/thermals are unpinned. No network, filesystem, GPU or private payload is
 part of the measured loop. Temporary frame binaries were removed.
 
-[Raw trials](data/canvas-readonly-2026-10-20/results.jsonl) and
-[commit/archive/binary/harness metadata](data/canvas-readonly-2026-10-20/metadata.json)
+[Raw trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-readonly-2026-10-20/results.jsonl) and
+[commit/archive/binary/harness metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-readonly-2026-10-20/metadata.json)
 allow attribution. The harness later removes the obsolete binary-mode setter for
 sync v4; the metadata hash identifies the exact v3 harness used here.
 

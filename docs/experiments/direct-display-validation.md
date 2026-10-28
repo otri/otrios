@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Direct display validation — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-validation.md) remain available at the pinned historical revision.
+
 The RK3126 now runs the dashboard through the owned DRM/GBM/EGL/GLES2 backend, with Weston and the browser stopped. The earlier SDL KMSDRM experiments below establish the progression to that backend. Linux/Mesa and the existing drivers remain. Actual DRM client listings showed exactly one dashboard owning DRM master. The SDL cursor was removed. The user confirmed direct touch works after permitting SDL/udev's AF_NETLINK device discovery; before that correction, rendering ran but the process had no open input device. Stationary cubes in the live room were separately explained by its persisted `playing=false` intent, not a stopped render loop. Readiness now reports motion intent and requires an accessible touch device.
 
 The existing 800×1280 mode remains at 66 MHz with totals 880×1324, approximately 56.6 Hz. CPU/GPU clocks, kernel, panel timings, bootloader, accepted touch matrix and existing boot recovery are unchanged. Every benchmark ran alone, with no live room/state options; the controller restored the original services after normal completion and handled interruption. Complete direct-service failure was deliberately injected with ExecStart=/usr/bin/false; the normal dashboard and Weston resumed, exactly one native process remained, and the saved console mode was restored. The direct unit is not enabled at boot.
@@ -21,7 +24,7 @@ The paired Weston baseline was about 22.2 FPS idle and 21.2 FPS under local load
 
 The tiled sample used signed release `072814a462b077422ea139dcad6ecadd7083c10f16a57a06f89a71d8d94edc78`. Its in-process libdrm read counter recorded **54.846 presented FPS** for 12 cubes after two seconds of warm-up: p95 17.668 ms, p99 35.300 ms, 32 missed vblanks over 976 events/17.777 seconds. The loaded 64-cube case recorded **53.997 presented FPS**, p95 17.808 ms, p99 35.309 ms and 47 missed vblanks over 959 events/17.742 seconds. These are kernel completion timestamps, not photon/input latency, and **do not meet the no-missed-refresh target**.
 
-Raw aggregate files: [paired baseline](direct-display-baseline.json), [opaque geometry](direct-display-opaque.json), [tiled copies](direct-display-tiled.json), and [alternative experiments](direct-display-alternatives.json). Baseline release is `cb268fd341df4fca70b9fa5ab605b8b8d563e0df96d11a5dc6e3a4bb8ff786b3`; the opaque path is `8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa`. Later source refactoring and a smaller HUD target have passed regression checks and live signed reload, but these tables are not measurements of those later binaries.
+Raw aggregate files: [paired baseline](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-baseline.json), [opaque geometry](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-opaque.json), [tiled copies](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-tiled.json), and [alternative experiments](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-alternatives.json). Baseline release is `cb268fd341df4fca70b9fa5ab605b8b8d563e0df96d11a5dc6e3a4bb8ff786b3`; the opaque path is `8de7ec0197e2bfebd2eb5c3a17941f7211ef549794a720957b03e38ba552a2aa`. Later source refactoring and a smaller HUD target have passed regression checks and live signed reload, but these tables are not measurements of those later binaries.
 
 ## What changed and what did not help
 
@@ -41,7 +44,7 @@ The final `bash scripts/check.sh` passes the core, binary-fixture, monitoring, r
 
 RFC 0001 was accepted by the user on 2026-10-19. The SDL-free development host passed ARMv7 geometry bounds/partial-init checks and real Mesa/Lima EGL pbuffer pixel tests in both formats, including retained VBO rendering and source-over alpha. Its dynamic dependencies contain libdrm, GBM, EGL and GLESv2, with no SDL. Both formats match the kernel framebuffer inspection. Static header image comparison found at most 4/2/4 RGB channel difference for RGB565 versus 32-bit output, consistent with quantization; this is not a physical panel colour/gradient acceptance test.
 
-All rows below are kernel completion feedback after two seconds of warm-up in 20-second isolated trials at unchanged clocks. These use the **former cube geometry**, before the subsequently requested tetrahedron change. The complete reports and binary SHA-256 are in [direct-display-owned-gles.json](direct-display-owned-gles.json).
+All rows below are kernel completion feedback after two seconds of warm-up in 20-second isolated trials at unchanged clocks. These use the **former cube geometry**, before the subsequently requested tetrahedron change. The complete reports and binary SHA-256 are in [direct-display-owned-gles.json](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-owned-gles.json).
 
 | Scene | XRGB8888 FPS / missed vblanks | RGB565 FPS / missed vblanks |
 |---|---:|---:|
@@ -57,7 +60,7 @@ The shared demo now uses regular tetrahedra with four triangular faces and indep
 
 ## Signed tetrahedron release
 
-The actual signed tetrahedron release `07ace9cb376f30d81257c40386beecf0e294e28ac27978bb4746dce748c5a382` was measured separately, using the same RGB565 mode and 20-second isolated trials. [Raw results](direct-display-tetrahedra.json) retain the harness's older `cubes-*` scenario labels with an explicit geometry annotation.
+The actual signed tetrahedron release `07ace9cb376f30d81257c40386beecf0e294e28ac27978bb4746dce748c5a382` was measured separately, using the same RGB565 mode and 20-second isolated trials. [Raw results](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/direct-display-tetrahedra.json) retain the harness's older `cubes-*` scenario labels with an explicit geometry annotation.
 
 | Tetrahedron scene | Kernel FPS | Missed vblanks | p95 / p99 |
 |---|---:|---:|---:|
@@ -66,6 +69,6 @@ The actual signed tetrahedron release `07ace9cb376f30d81257c40386beecf0e294e28ac
 
 These samples cover about 18 seconds after warm-up. The loaded case committed 199 isolated stress revisions over 20.046 seconds (9.93/s), with deliberate 250 ms state-worker stalls. Its maximum completion interval was 35.306 ms, so it still falls short of a universal no-missed-vblank claim. Median CPU composition/submission fell to 0.618 ms for 12 objects and 1.448 ms for 64 loaded objects. A later release-handoff JavaScript change does not alter this geometry; these remain measurements of the exact named signed release.
 
-![Tetrahedron GPU framebuffer readback, rotated into logical orientation](tetrahedron-native-readback.png)
+[Archived figure: Tetrahedron GPU framebuffer readback, rotated into logical orientation](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/tetrahedron-native-readback.png)
 
 The image is a GLES framebuffer readback, not a photograph of the panel. It was captured during startup: its rolling HUD includes cold shader/upload hitches and is not the warmed kernel-completion sample reported above. Live readiness and kernel inspection additionally confirmed `gles2-direct`, 5/6/5/0 colour bits, RG16 scanout, 1,600-byte pitch, one DRM owner, an accessible touch descriptor and a connected state stream. Physical touch/orientation confirmation on this new evdev host remains a user check.

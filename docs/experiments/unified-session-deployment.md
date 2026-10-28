@@ -1,12 +1,15 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Unified service acceptance — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/unified-session-deployment.md) remain available at the pinned historical revision.
+
 The deployed dashboard now uses one Rust serving process and one remote WebSocket
 per client. Trusted port 8876 and public port 8877 share that process. The existing
 Tailscale route and Cloudflare Tunnel target are unchanged. The source watcher is
 development tooling; the monitoring collector is scheduled work. Neither is a
 request-serving dependency. [RFC 0009](../rfcs/0009-unified-server-session.md) records
-the contract and fault model; [operations](../DASHBOARD_LIVE.md) describes deployment.
+the contract and fault model; [operations](../FRAME_HOSTING.md) describes deployment.
 
 A later [server-only burst fix](canvas-dispatch.md#server-only-rollout) advances the
 runtime pin while retaining this signed client release.
@@ -70,7 +73,7 @@ upstream input/network time and is not a latency percentile. Playback was restor
 to paused afterward. The trial measured 55.81 kernel page-flip FPS, p50 17.653 ms
 and p95 17.659 ms, with 36 missed vblanks. It mixed paused/playing periods and is
 smoke evidence, not an A/B performance claim. Raw bounded trial data and final
-readiness/process counts are in [the acceptance JSON](unified-session-deployment.json).
+readiness/process counts are in [the acceptance JSON](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/unified-session-deployment.json).
 
 ## Cleanup and rollback
 

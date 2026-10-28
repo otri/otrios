@@ -1,6 +1,0 @@
-{"raw_frame_bytes":128,"current_inner_bytes":159,"current_outer_bytes":197,"blob_inner_bytes":159,"blob_outer_bytes":197}
-{"raw_frame_bytes":256,"current_inner_bytes":554,"current_outer_bytes":1158,"blob_inner_bytes":298,"blob_outer_bytes":348}
-{"raw_frame_bytes":1024,"current_inner_bytes":2090,"current_outer_bytes":4230,"blob_inner_bytes":1066,"blob_outer_bytes":1116}
-{"raw_frame_bytes":2048,"current_inner_bytes":4138,"current_outer_bytes":8326,"blob_inner_bytes":2090,"blob_outer_bytes":2140}
-{"raw_frame_bytes":4096,"current_inner_bytes":8234,"current_outer_bytes":16518,"blob_inner_bytes":4138,"blob_outer_bytes":4188}
-{"raw_frame_bytes":16384,"current_inner_bytes":32810,"current_outer_bytes":65692,"blob_inner_bytes":16426,"blob_outer_bytes":16476}

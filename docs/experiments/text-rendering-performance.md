@@ -1,5 +1,8 @@
 # Text rendering baseline — 2026-10-26
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/text-rendering-performance.md) remain available at the pinned historical revision.
+
 The isolated Mali-400 renderer exceeds the 30 fps target with a scrolling screen
 of approximately 2,780 visible Roboto glyphs. Three runs measured **35.35, 35.53
 and 35.72 kernel-presented fps**. The panel refreshes at approximately 56.65 Hz.
@@ -27,8 +30,8 @@ measured 11.70 ms p50 / 13.96 ms p95 with rebuilt meshes, versus 4.19 ms p50 /
 as an end-to-end input-latency measurement; the native application uses separate
 state/layout and presentation owners.
 
-[Raw measurements and artifact hashes](data/text-rendering-2026-10-26.json).
-The [native float32 baseline capture](assets/text-scroll-f32-2x.png) is synthetic
+[Raw measurements and artifact hashes](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/text-rendering-2026-10-26.json).
+The [native float32 baseline capture](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/text-scroll-f32-2x.png) is synthetic
 text captured during the measured run, rotated back to logical landscape.
 
 ## Hardware and gamma tables
@@ -86,9 +89,9 @@ Do not silently broaden its threshold to claim identity.
 
 `capture-text-sampling-browser.mjs` records these metrics and produces stacked
 PNGs: filtered output, direct reference, and an 8× amplified absolute difference.
-The [2× comparison](assets/f32-sampling-2x-phase-025.png),
-[3× comparison](assets/f32-sampling-3x-phase-025.png), and
-[browser measurements](data/browser-sampling-f32-2026-10-26.json) preserve that baseline.
+The [2× comparison](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/f32-sampling-2x-phase-025.png),
+[3× comparison](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/f32-sampling-3x-phase-025.png), and
+[browser measurements](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/browser-sampling-f32-2026-10-26.json) preserve that baseline.
 The committed float32 baseline is retained for the next milestone. Fixed point
 and SIMD must be compared against the same filtering pipeline, dimensions, font,
 phases and clip bounds so their errors cannot hide behind the sampling change.

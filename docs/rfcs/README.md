@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC index
 
-These records describe bounded designs, implementation and qualification at the time stated in each document. Follow links for scope, subsequent changes and evidence. Current operational guidance lives in the [dashboard guide](../DASHBOARD.md) and [deployment guide](../DASHBOARD_LIVE.md).
+These records describe bounded designs, implementation and qualification at the time stated in each document. Follow links for scope, subsequent changes and evidence. Current operational guidance lives in the [dashboard guide](../DASHBOARD.md) and [deployment guide](../FRAME_HOSTING.md).
 
 Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when referring to either. Existing filenames and links are preserved. Assign a unique unused number to each new RFC.
 

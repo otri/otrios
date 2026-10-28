@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Retained presentation foundation — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/retained-presentation-2026-10-27.md) remain available at the pinned historical revision.
+
 First delivery of [RFC 0023](../rfcs/0023-retained-presentation-foundation.md).
 The preceding lounge implementation is committed as `b2476c6`; no implementation
 PR was opened. Stable structured document blocks and room-loop restructuring
@@ -67,7 +70,7 @@ trials were deferred when the user requested immediate rollout. CPU geometry
 parity and GPU cache pixel cases are separate evidence, not a completed
 whole-screen native comparison.
 
-[Machine-readable qualification](assets/retained-presentation-2026-10-27/qualification.json)
+[Machine-readable qualification](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/retained-presentation-2026-10-27/qualification.json)
 records the checks and that limitation. No FPS improvement is claimed by these
 work-avoidance and geometry-parity checks.
 

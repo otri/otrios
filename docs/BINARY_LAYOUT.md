@@ -43,7 +43,7 @@ bash scripts/build-dashboard-web.sh
 Signed release activation updates the admitted catalog/UI/code atomically; existing
 clients discover it through the stable session hello/upgrade event. Durable State
 references remain authority-owned. See [the app guide](../apps/README.md),
-[modern pattern](MODERN_APP_PATTERN.md) and [live deployment](DASHBOARD_LIVE.md).
+[modern pattern](MODERN_APP_PATTERN.md) and [live deployment](FRAME_HOSTING.md).
 A public hash identifies bytes; it does not grant access or authorize execution.
 
 The old global `default.flex`, `dashboard-layout` editor, `/layout` publication API

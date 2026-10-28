@@ -13,6 +13,7 @@ python3 scripts/test_frame_hosting.py
 
 python3 scripts/test-canvas-benchmark-counter.py
 python3 scripts/test-canvas-pipeline-cli.py
+python3 scripts/test-clean-artifacts.py
 
 python3 scripts/test_app_publish.py
 

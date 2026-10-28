@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Phone readability and retained profiles — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/phone-readability-and-profiles-2026-10-27.md) remain available at the pinned historical revision.
+
 ## Behavior
 
 Chat browser widths below 600 CSS pixels now use a 534-unit logical viewport,
@@ -66,14 +69,14 @@ with a 50-pixel top offset. Canvas width remains 390 pixels immediately and afte
 reflow, and editor focus, value and selection remain unchanged. This is a browser
 simulation; the larger density still needs the user's physical iPhone check.
 
-Evidence: [browser acceptance](assets/phone-readability-and-profiles-2026-10-27/acceptance.json),
-[phone measurements](assets/phone-readability-and-profiles-2026-10-27/mobile-reflow.json),
-[native readiness](assets/phone-readability-and-profiles-2026-10-27/device-verification.json)
-and [public asset verification](assets/phone-readability-and-profiles-2026-10-27/public-verification.json).
+Evidence: [browser acceptance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/phone-readability-and-profiles-2026-10-27/acceptance.json),
+[phone measurements](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/phone-readability-and-profiles-2026-10-27/mobile-reflow.json),
+[native readiness](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/phone-readability-and-profiles-2026-10-27/device-verification.json)
+and [public asset verification](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/phone-readability-and-profiles-2026-10-27/public-verification.json).
 
-![Phone viewport with keyboard space reserved](assets/phone-readability-and-profiles-2026-10-27/phone-keyboard-reflow.png)
+[Archived figure: Phone viewport with keyboard space reserved](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/phone-readability-and-profiles-2026-10-27/phone-keyboard-reflow.png)
 
-![Phone at full height](assets/phone-readability-and-profiles-2026-10-27/phone-full-height.png)
+[Archived figure: Phone at full height](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/phone-readability-and-profiles-2026-10-27/phone-full-height.png)
 
 ## Deployment
 

@@ -29,6 +29,70 @@ changes are involved. Local confirmed edits and cached code remain usable when
 the Internet is unavailable; public access and fresh metrics require networking.
 Frame power and home networking determine public site availability.
 
+For example, an authority configured with separate state and presentation paths
+and the frame's peer limits can be started with:
+
+```sh
+dashboard-server --bind 127.0.0.1:8876 --public-bind 127.0.0.1:8877 \
+  --app-state /ABS/RUNTIME/state.apps \
+  --presentation-file /ABS/RUNTIME/state.presentation.flex \
+  --trusted-peers 4 --public-peers 64 \
+  --releases /ABS/RUNTIME/releases --auth-file /ABS/RUNTIME/monitoring-auth.json \
+  --origin https://otrios.otri.ca
+```
+
+## One negotiated session
+
+Each host opens `/session` and sends the stable v1 JSON hello before any state
+bytes. The reply gives the active release, codec compatibility and state
+availability. Unknown CRDT versions still receive code upgrades. JSON control,
+binary Canvas frames (channel 1) and ephemeral ink (channel 2) share that socket.
+The browser opens it before Wasm starts; its worker opens no sockets. The native
+host has one network thread outside the state decoder. See [RFC 0009](rfcs/0009-unified-server-session.md).
+
+There is no healthy-client release polling. Publication sends upgrade events;
+each reconnect hello sends the current release hash and recovers missed events.
+`/release/events` remains a control-only v1 alias for older updaters. `/release` remains a small HTTP pointer. Retired
+`/apps/stream` and `/demo/ink` return 410; their bytes are never reinterpreted.
+
+The frame runs one direct DRM/GBM/EGL/GLES2 renderer, with the accepted rotation
+and touch calibration. Its supervisor receives release notices over a local Unix
+datagram socket. On cold start without a modern cached host, `session-bootstrap`
+obtains the hash over `/session` and exits before the renderer connects. Install
+it at `/opt/otrios-dashboard/session-bootstrap` alongside the supervisor. No
+permanent release-watch process, separate ink socket, Wayland, SDL or browser is
+needed on the frame. `--url` and `--code-url` both use `http://127.0.0.1:8876` on the frame.
+Plain HTTP/WS is accepted only for literal loopback addresses; remote origins
+require HTTPS/WSS. Native signature checks remain mandatory.
+
+## State, policy and failures
+
+The trusted loopback listener admits private apps for the local display and accepts the
+monitoring collector's `/presentation` upload. The public listener uses an exact
+route/Origin allowlist and Monitoring's HttpOnly cookie; static paths cannot
+expose `authority/apps/`. Public demos share the frame's per-app data roots.
+Navigation remains local. Private leases are checked on input, expiry and before
+queued bytes leave the socket. [Public access](PUBLIC_ACCESS.md) details policy.
+
+Each app has a Merkle checkpoint and bounded append journal. Changed nodes and
+intent receipts are durable before roots are published or edits acknowledged.
+Checkpoints rotate at 4 MiB. Clients keep document state and pending edits in RAM;
+closing one may lose unconfirmed edits. Connected upgrades wait for confirmed
+intents and finished gestures; a disconnected client may discard unconfirmed RAM
+edits when upgrading. Executable/font/blob caches are bounded
+(about 512 MiB web; native agent default 2 GiB, overridden to 128 MiB by the
+checked-in frame service). Ink expires after five seconds and is never
+persisted. Legacy `--state FILE` only derives the app directory/presentation path;
+prefer the explicit arguments above. Never run two authorities on the same state.
+
+State recovery runs separately from code/control handling. Recovery failures
+leave code and hello available, with state unavailable and public health 503.
+An activation can retry recovery; existing compatible sessions receive a readiness
+event when it succeeds. A whole-process crash interrupts all serving; that common
+failure domain is the accepted cost of consolidation. Bounded queues and socket
+write deadlines disconnect slow state readers for resync rather than accumulating
+unlimited messages. They cannot eliminate TCP head-of-line blocking.
+
 ## Installation layout
 
 - `/opt/otrios-authority`: ARM `dashboard-server`, `dashboard-monitoring`, verified
@@ -66,8 +130,10 @@ The private watcher config accepts:
 ```
 
 Keep the other established builder settings and the publisher keys on the Mac.
-The watcher builds browser/ARM artifacts, signs and stages the complete replica,
-then invokes `deploy-dashboard-frame.py`. Explicit deployment is also supported:
+The watcher freezes source, builds and tests browser/ARM artifacts, signs and
+stages the complete replica locally. With `frame` configured, it invokes
+`deploy-dashboard-frame.py`; without it, local-only mode invokes
+`activate-dashboard-release.py`. Explicit frame deployment is also supported:
 
 ```sh
 python3 scripts/deploy-dashboard-frame.py --config /PRIVATE/config.json \
@@ -99,15 +165,63 @@ symlink release entries, and removes only obsolete digest-named directories.
 Stop the native updater before manually pruning its cache during a cutover.
 It never deletes durable app roots or unrelated hardware recovery backups.
 
+## Signing and activation
+
+The frame activation CLI verifies the signature, manifest, exact public/private
+paths, sizes and every digest before atomically advancing `current.json`. It
+notifies the trusted-only `/admin/activate` hook; code events do not wait for
+catalog refresh or successful state decoding. A notification failure is reported
+and retried; reconnects also reread metadata.
+
+The public catalog admits UI/State references and hashes. UI/behavior payloads
+under `authority/apps/<id>/` travel only through authorized mounts. Their presence
+in the local signed store never grants public static access. Native execution
+requires the pinned Ed25519 signature; browser resources rely on HTTPS and the
+manifest hash closure, without independently verifying the detached signature.
+A signature does not sandbox trusted native publisher code.
+
+The Mac build/signing workspace is under
+`~/Library/Application Support/OTriOSDashboard`; the frame holds only the
+publisher public key. Unchanged authority bytes do not trigger a restart.
+
+```sh
+python3 scripts/watch-dashboard.py --config /ABS/RUNTIME/config.json
+python3 scripts/watch-dashboard.py --config /ABS/STAGING-CONFIG.json --once --stage-only
+python3 scripts/activate-dashboard-release.py --help
+```
+
+Staging writes `build/staged-release.json` without advancing the live pointer or
+source marker. Test a disposable authority first. Pause the watcher, snapshot
+service files and stopped durable state, install the matching authority and frame
+supervisor/helper, then activate. Keep one private operational rollback snapshot
+and signed cached releases. Rollback across retired protocols must restore the
+matching server and agents together; a browser may need a launcher-root visit.
+
+## Qualified cutover order
+
+Push the tested source commit and verify that the configured remote can fetch
+that exact SHA **before** stopping or activating anything. Freeze and qualify
+matching authority/native/browser builds, verify the signed local replica, then
+pin the watcher to that tested commit. Do not activate an unpushed source pin.
+Retain a rollback copy before replacing installed binaries/helpers.
+
+The frame supervisor and direct service are one deployment unit: install their
+matching versions together, preserving the accepted rotation and touch calibration.
+The supervisor runs one direct renderer, verifies first presentation and confirmed
+app readiness, and retains a verified direct last-good release. There is no SDL
+or Wayland fallback. Canonical app state stays on the authority; rollback must
+never replace newly confirmed state with an old backup.
+
 ## Hard cutover and checks
 
-Qualify a disposable ARM authority first. Stop the Mac watcher, collector and
-authority, copy the stopped canonical app checkpoints and journals plus latest
-presentation, and transfer ownership to the frame service user. Verify file
-digests before starting it. Stop the Mac tunnel before starting the frame tunnel;
-two tunnel connectors must not route to independently writable authorities.
-Start/enable the frame authority, display, timer and tunnel, then retire the Mac
-serving LaunchAgents. Keep only the active release; preserve canonical app data.
+Qualify a disposable ARM authority first. Pause the watcher and snapshot the
+current frame service files and stopped canonical checkpoints, journals and latest
+presentation before replacing matching binaries and helpers. Verify the signed
+release and data digests, preserve ownership and start the existing frame services.
+Never run independently writable authorities against the same state or route
+traffic between them. Preserve canonical app data through activation and rollback.
+The original Mac-to-frame migration and its measurements are historical; see the
+[frame authority cutover report](experiments/frame-authority-2026-10-20.md).
 
 Run `bash scripts/check.sh`, all-feature Clippy, browser worker/session/cache
 tests, real server-process checks, and the public host conformance checker.
@@ -129,6 +243,14 @@ systemctl status otrios-authority otrios-tunnel otrios-monitoring.timer otrios-d
 curl -fsS http://127.0.0.1:8876/health
 journalctl -u otrios-authority -u otrios-monitoring -u otrios-tunnel --since today
 ```
+
+After acceptance remove only retired OTriOS replica containers/volumes, publisher
+and release-control launchers, their binaries and ports 8878/8879. Preserve tunnel
+configuration/credentials, signing/auth material, durable state, immutable cached
+releases, the benchmark branch and the rollback snapshot. Other infrastructure
+and Supabase resources are outside scope. Historical experiment reports retain
+their original topology and measurements; current operation follows RFC 0009.
+
 
 ## Isolated session stress test
 

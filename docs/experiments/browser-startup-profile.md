@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Browser startup and app navigation — 2026-10-25
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/browser-startup-profile.md) remain available at the pinned historical revision.
+
 This is the frozen baseline. The subsequent [deployment and before/after
 measurements](startup-improvements.md) describe the implemented changes.
 
@@ -54,7 +57,7 @@ Production code, state and deployment configuration were not changed.
 | Both local prototypes | 2,070 ms | 1,848–3,470 ms | 895 ms | 5 |
 | Current release, unshaped control | 1,456 ms | 1,267–1,471 ms | 715 ms | 3 |
 
-![Startup phase comparison](data/browser-startup-2026-10-25/startup.svg)
+[Archived figure: Startup phase comparison](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/browser-startup-2026-10-25/startup.svg)
 
 Bars partition a representative median run at observed bootstrap milestones;
 they are elapsed intervals, not exclusive CPU attribution. Lines show the full
@@ -92,7 +95,7 @@ not TCP/TLS overhead. Repeats still deliver the full UI. Playground's cached
 behavior saves 218 bytes on repeat visits. No repeat improvement is established
 for 3D Lab. Home returns measured 194 ms median, range 153–931 ms, across 50 taps.
 
-![App navigation timings](data/browser-startup-2026-10-25/navigation.svg)
+[Archived figure: App navigation timings](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/browser-startup-2026-10-25/navigation.svg)
 
 Full pointer-down → presentation medians were respectively **280/208, 240/244,
 270/262, 191/176 and 193/202 ms** for first/repeat visits. Per-transition data also
@@ -185,9 +188,9 @@ cargo run --release --locked --offline -p otrios-core --features canvas \
   --example canvas_wire_cost -- --app-release RELEASE_DIRECTORY
 ```
 
-Committed evidence: [summary and samples](data/browser-startup-2026-10-25/summary.json),
-[100 navigation transitions](data/browser-startup-2026-10-25/navigation.csv),
-[cold Home screenshot](data/browser-startup-2026-10-25/cold-home.png).
+Committed evidence: [summary and samples](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/browser-startup-2026-10-25/summary.json),
+[100 navigation transitions](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/browser-startup-2026-10-25/navigation.csv),
+[cold Home screenshot](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/browser-startup-2026-10-25/cold-home.png).
 Successful matrix: **23 cold runs, 23 warm reloads, 50 app taps and 50 Home returns**.
 `bash scripts/check.sh` passed (185 Rust tests and 40 Python checks); Node syntax
 and Python compilation checks passed. No new dependencies or wire-format changes.

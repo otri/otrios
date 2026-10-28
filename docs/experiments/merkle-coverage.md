@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Coherent covered Merkle views on the frame — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/merkle-coverage.md) remain available at the pinned historical revision.
+
 The generic runtime can now publish several authorized stable-key paths as one
 coherent view. Unselected fields, other writers' receipts and ancestor payloads
 are absent. This is the building block for admitted UI coverage in
@@ -71,6 +74,6 @@ This is not browser/native Canvas deployment acceptance.
 
 Build/run `merkle_coverage_cost` with feature `merkle`, release profile and the
 pinned toolchain. The executable prints every trial as JSON. Use the ARMv7 target
-for frame runs. [Raw frame trials](data/merkle-coverage-2026-10-19/frame-results.jsonl)
-and [source/binary/method metadata](data/merkle-coverage-2026-10-19/metadata.json)
+for frame runs. [Raw frame trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/merkle-coverage-2026-10-19/frame-results.jsonl)
+and [source/binary/method metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/merkle-coverage-2026-10-19/metadata.json)
 are committed. No whole-process memory or end-to-end latency claim is made.
