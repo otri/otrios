@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Visual refresh and keyboard reflow — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/visual-refresh-2026-10-27.md) remain available at the pinned historical revision.
+
 Home and The Brass Relay now share outlined charcoal surfaces, brass actions,
 copper icons and consistent font metrics. The lounge header reads
 **< OTriOS • The Brass Relay**, with matching sizes and baselines. The calling
@@ -38,16 +41,16 @@ keep their existing sizing; browser pinch zoom remains available.
   state, stream readiness and zero pending commands. Authority, display and
   tunnel services are active. Public release assets match the signed manifest.
 
-Evidence: [browser acceptance](assets/visual-refresh-2026-10-27/acceptance.json),
-[viewport measurements](assets/visual-refresh-2026-10-27/mobile-reflow.json),
-[native verification](assets/visual-refresh-2026-10-27/device-verification.json)
-and [public asset verification](assets/visual-refresh-2026-10-27/public-verification.json).
+Evidence: [browser acceptance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/acceptance.json),
+[viewport measurements](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/mobile-reflow.json),
+[native verification](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/device-verification.json)
+and [public asset verification](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/public-verification.json).
 
-![Calling card](assets/visual-refresh-2026-10-27/profile-icons.png)
+[Archived figure: Calling card](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/profile-icons.png)
 
-![Home](assets/visual-refresh-2026-10-27/home-landscape.png)
+[Archived figure: Home](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/home-landscape.png)
 
-![Simulated phone keyboard viewport](assets/visual-refresh-2026-10-27/phone-keyboard-reflow.png)
+[Archived figure: Simulated phone keyboard viewport](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/visual-refresh-2026-10-27/phone-keyboard-reflow.png)
 
 ## Deployment
 

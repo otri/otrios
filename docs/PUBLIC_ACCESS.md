@@ -86,7 +86,7 @@ CLI verifies all public/private digests and sizes before advancing the pointer
 and notifying the trusted activation hook. There is no code replica, proxy
 container or separate release-control daemon. Healthy clients receive upgrade
 events over the existing session; reconnect hello recovers missed events. Release
-metadata is independent of state decoding. See [live deployment](DASHBOARD_LIVE.md)
+metadata is independent of state decoding. See [live deployment](FRAME_HOSTING.md)
 and [RFC 0009](rfcs/0009-unified-server-session.md).
 
 Build/sign on the Mac and publish to the frame as described in [frame hosting](FRAME_HOSTING.md).

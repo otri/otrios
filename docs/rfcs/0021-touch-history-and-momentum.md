@@ -115,7 +115,7 @@ momentum cap. Original reader and renderer baselines remain preserved.
 
 ## Qualification
 
-[Raw results and binary/source hashes](../experiments/touch-input-2026-10-27.json).
+[Raw results and binary/source hashes](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/touch-input-2026-10-27.json).
 
 - The slow fixture moves at 80 px/s, then has a 34-pixel last-millisecond jump.
   The old last-difference rule in commit `7ccd7f3` would clamp that jump to

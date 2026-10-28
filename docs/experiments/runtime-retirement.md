@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Canvas foundation retirement and acceptance — 2026-10-20
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/runtime-retirement.md) remain available at the pinned historical revision.
+
 The bounded dashboard foundation in RFC 0010 is implemented, qualified and live.
 This closes that milestone; it does not complete the separately proposed Linux
 shared-memory OS, federation, general collection queries or sequence/text CRDTs.
@@ -52,7 +55,7 @@ Frozen reference: `157ca5b00fa14c28ecb95f4895a1d061cee8b99d` (Rust inputs identi
 to the preceding live source `67d2d58`). Candidate:
 `42157f5f08753bbf04354283421e2cabbe6c934f`; deployment source `5000476` changes
 only docs and the isolated GPU-trial runner after that frozen Rust build.
-[Metadata](data/runtime-retirement-2026-10-20/direct-metadata.json) identifies
+[Metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/direct-metadata.json) identifies
 archives, binaries, catalog and separate signed releases. Dirty candidate status
 records two prose files that were subsequently committed; it does not conceal
 uncommitted runtime changes.
@@ -90,8 +93,8 @@ The Mac authority shrinks from 8,012,496 to 5,708,496 bytes (28.75%). Signed nat
 code grows from 6,305,856 to 6,319,012 bytes (+0.21%); Wasm grows from 2,680,584 to
 2,709,544 (+1.08%). Old native/browser dead code was already stripped and the new
 guard adds code. Fewer dependencies do not imply every artifact is smaller.
-Raw [trials](data/runtime-retirement-2026-10-20/direct-results.jsonl) and computed
-[summary](data/runtime-retirement-2026-10-20/direct-summary.json) preserve the costs.
+Raw [trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/direct-results.jsonl) and computed
+[summary](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/direct-summary.json) preserve the costs.
 
 ## Direct presentation isolation
 
@@ -111,8 +114,8 @@ This tests worker separation, not network latency or perfect vsync. The median
 flip interval is 17.653 ms; occasional missed vblanks remain. Startup-inclusive
 host cadence is ~49 FPS and must not replace the warm kernel measurement. This
 is not locked 60 FPS or a speed comparison with the preceding renderer.
-[GPU results](data/runtime-retirement-2026-10-20/gpu-results.json) and
-[metadata](data/runtime-retirement-2026-10-20/gpu-metadata.json) identify the method
+[GPU results](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/gpu-results.json) and
+[metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/gpu-metadata.json) identify the method
 and exact signed binary.
 
 ## Acceptance and live deployment
@@ -122,7 +125,7 @@ and exact signed binary.
   passes for deployed source `5000476`. Tests cover coherent subtree/policy
   isolation, delayed/final dispatch, real process boundaries, durable failure and
   recovery, reconnect/upgrade, malformed input and resource overload.
-  [Check record](data/runtime-retirement-2026-10-20/checks.json) includes the
+  [Check record](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/checks.json) includes the
   successful Linux CI run and reproducible command scope.
 - Staged browser mounts all seven apps. Playground slider clamps after dragging
   outside; label agrees, strokes stay separate with top-left coordinates and fade
@@ -146,18 +149,18 @@ and exact signed binary.
   unchanged, so tested signed code is not rebuilt or replaced. The temporary
   staged authority and idle build container are stopped; production remains
   one authority. See
-  [deployment identifiers](data/runtime-retirement-2026-10-20/deployment.json).
+  [deployment identifiers](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/deployment.json).
 - The frame automatically upgrades through control v1 to the same signed release.
   The matching direct-only supervisor/service then restarts successfully. Final
   readiness: one renderer PID 5977, no Weston, confirmed Home, pending 0, RGB565,
   rotation 90 and calibrated touch. The enabled service and installed hashes are
-  [recorded](data/runtime-retirement-2026-10-20/supervisor-install.json).
+  [recorded](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/supervisor-install.json).
 - The live browser edits Playground state, settles with pending/issued 0, and
   reports a shared replica/document root with zero compression scratch. Public
-  [browser image](data/runtime-retirement-2026-10-20/live-browser.png),
-  [diagnostics](data/runtime-retirement-2026-10-20/browser-resources.json),
-  [frame readiness](data/runtime-retirement-2026-10-20/frame-acceptance.json) and
-  [scanout](data/runtime-retirement-2026-10-20/frame.png) are recorded. Scanout is
+  [browser image](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/live-browser.png),
+  [diagnostics](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/browser-resources.json),
+  [frame readiness](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/frame-acceptance.json) and
+  [scanout](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/runtime-retirement-2026-10-20/frame.png) are recorded. Scanout is
   in physical portrait coordinates. Physical touch, color/orientation and reboot
   are not re-tested remotely; automated calibration/readiness is a separate fact.
 

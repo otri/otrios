@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Slug font prototype validation — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/slug-font-validation.md) remain available at the pinned historical revision.
+
 This prototype replaces embedded tessellated Roboto glyphs with admitted,
 compressed quadratic outlines, shared analytic Slug shaders and a disposable
 coverage texture cache. It covers the existing dashboard and the separate
@@ -96,7 +99,7 @@ intervals and 21 missed vblanks over 9.99 seconds. The nominal panel cadence is
 about 56.65 Hz, not 60 Hz. Overall cadence including startup/capture was 48.77
 FPS, so this is not a claim of a locked refresh rate. Composition submission was
 3.417 ms median / 5.299 ms p95. The cache recorded 119,643 hits / 297 misses,
-with 4,194,304 atlas bytes. See [the raw report](slug-font-frame-results.json)
+with 4,194,304 atlas bytes. See [the raw report](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/slug-font-frame-results.json)
 for the candidate binary digest and complete measurements. This was a local
 isolated state-load test, not upstream network-latency evidence.
 

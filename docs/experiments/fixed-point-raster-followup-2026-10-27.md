@@ -1,5 +1,8 @@
 # Retained glyph raster follow-up — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/fixed-point-raster-followup-2026-10-27.md) remain available at the pinned historical revision.
+
 Historical experiment record. The fixed-point pilot and alternate GPU position
 formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
 Commands and feature names below refer to the evaluated revision, not the current
@@ -40,10 +43,10 @@ With `stableTextQuads: true` in WebGL or `OTRIOS_TEXT_STABLE_QUADS=1` natively:
 | Input Lab | 4 | 1 |
 
 The large native comparison now retains useful coverage instead of rendering the
-whole mesh analytically. [Reference](assets/stable-large-mali-reference.png),
-[candidate](assets/stable-large-mali-candidate.png), and
-[8x difference](assets/stable-large-mali-difference-8x.png) contain the expected
-text. [The browser strip](assets/stable-large-browser-dpr2.png) uses the same
+whole mesh analytically. [Reference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/stable-large-mali-reference.png),
+[candidate](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/stable-large-mali-candidate.png), and
+[8x difference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/stable-large-mali-difference-8x.png) contain the expected
+text. [The browser strip](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/stable-large-browser-dpr2.png) uses the same
 reference/candidate/difference ordering. Scalar fixed and NEON still use the
 unchanged dense fixture hash from the initial evaluation.
 
@@ -99,7 +102,7 @@ The initial scalar/NEON mesh and kernel results remain the recorded baseline.
 
 ## Validation and reproduction
 
-[Raw results](data/fixed-point-raster-followup-2026-10-27.json) include each frame,
+[Raw results](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/fixed-point-raster-followup-2026-10-27.json) include each frame,
 cache/fallback counts, the high-DPR failure, the failed FPS trials, the disabled
 control and the rectangle-overdraw estimate. Native and browser pixel probes now
 both return failure above a maximum channel delta of 8.

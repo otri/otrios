@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Stable hello and event-driven upgrades — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/release-hello-deployment.md) remain available at the pinned historical revision.
+
 Historical deployment record. Current topology and operations follow [RFC 0009](../rfcs/0009-unified-server-session.md).
 
 
@@ -84,5 +87,5 @@ The existing feature PR remains unmerged.
 The v1 companion/control route is now a bootstrap compatibility boundary that
 must survive future app-state protocol changes. Very old clients whose state
 protocol was already retired still need one launcher-root visit to acquire the
-independent updater. See the [acceptance record](data/release-hello-2026-10-19.json)
-and [operational contract](../DASHBOARD_LIVE.md#protocol-independent-release-discovery).
+independent updater. See the [acceptance record](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/release-hello-2026-10-19.json)
+and [operational contract](../FRAME_HOSTING.md#protocol-independent-release-discovery).

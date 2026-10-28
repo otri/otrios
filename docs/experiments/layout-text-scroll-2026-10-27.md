@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Layout Lab text scrolling experiment, 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/layout-text-scroll-2026-10-27.md) remain available at the pinned historical revision.
+
 Source: `a4960030beb7b2808f3764f7ea00102beb51c439`, stacked on the qualified
 fixed-layout/retained-text evaluation. This workload makes the existing viewport
 renderer inspectable. It does not enable the proposed RFC 0019 migration.
@@ -47,9 +50,9 @@ the existing unchanged dense renderer fixture's 35–36 fps result. Do not lower
 text density or alter that fixture to pass its gate. Profile end-to-end CPU and
 GPU/submission work before selecting a fixed/SIMD or vertex-format change.
 
-[Native measurements and gesture trace](data/layout-text-scroll-2026-10-27/native-trial.json).
+[Native measurements and gesture trace](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/layout-text-scroll-2026-10-27/native-trial.json).
 
-![Native viewport during scrolling](assets/layout-text-scroll-2026-10-27/native.png)
+[Archived figure: Native viewport during scrolling](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/layout-text-scroll-2026-10-27/native.png)
 
 ## Browser and repository checks
 
@@ -66,13 +69,13 @@ is a software-renderer observation, not native GPU evidence. Core tests assert
 that retained mesh/style `Arc` identities and snapshot bytes survive scrolling,
 visible ranges cull most of the full page, and overscroll reverses immediately.
 
-[Browser measurements](data/layout-text-scroll-2026-10-27/browser-local.json).
+[Browser measurements](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/layout-text-scroll-2026-10-27/browser-local.json).
 
-![Browser portrait viewport after panning](assets/layout-text-scroll-2026-10-27/browser-portrait.png)
+[Archived figure: Browser portrait viewport after panning](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/layout-text-scroll-2026-10-27/browser-portrait.png)
 
 All six real native GPU tests passed on Mali-400 in each 2×, 3× and analytic
 sampling mode (the qualified stable-quad test configuration), including clipping, fallback ordering, color transfer and Roboto
-rotation checks ([log](data/layout-text-scroll-2026-10-27/native-gpu.log)).
+rotation checks ([log](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/layout-text-scroll-2026-10-27/native-gpu.log)).
 
 No raster shader, coordinate quantizer or GPU vertex format changes in this
 increment. Prior fixed/float pixel baselines remain controls; this demo's new UI
@@ -96,5 +99,5 @@ The native frame was opened through navigation-only calibrated taps and left at
 `layout-lab/text-scroll`, offset zero, ready to inspect. Canonical app state was
 not restored from a snapshot or edited by the scroll tests.
 
-[Deployment acceptance](data/layout-text-scroll-2026-10-27/deployment.json) and
-[live browser results](data/layout-text-scroll-2026-10-27/browser-live.json).
+[Deployment acceptance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/layout-text-scroll-2026-10-27/deployment.json) and
+[live browser results](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/layout-text-scroll-2026-10-27/browser-live.json).

@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Browser-native input bridge — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/browser-native-input-2026-10-27.md) remain available at the pinned historical revision.
+
 The browser previously suppressed the frame keyboard without supplying an HTML
 editing surface. Canvas focus alone could not open the iPhone system keyboard.
 The browser now mounts real input/textarea elements over the authored fields;
@@ -51,9 +54,9 @@ Actual iPhone keyboard activation, selection handles, suggestions and keyboard
 animation still need device verification. Computed field fonts remain at least
 16 px and scale with the scene; pinch zoom is not disabled.
 
-[Chat acceptance](assets/browser-native-input-2026-10-27/chat.json) and
-[field acceptance](assets/browser-native-input-2026-10-27/fields.json) record the
-browser checks. The [wrapped composer](assets/browser-native-input-2026-10-27/wrapped-composer.png)
+[Chat acceptance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/browser-native-input-2026-10-27/chat.json) and
+[field acceptance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/browser-native-input-2026-10-27/fields.json) record the
+browser checks. The [wrapped composer](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/browser-native-input-2026-10-27/wrapped-composer.png)
 shows the real textarea in the lounge. Screenshots are a visual review, not a
 pixel-equivalence claim between browser and GLES font rasterization.
 
@@ -74,6 +77,6 @@ remain active. A code-only rollback copy is available at
 history is disposable and was not backed up for this deployment.
 
 The public HTTPS release manifest, editor module and Roboto font were fetched and
-matched to their admitted SHA-256 values. [Device readiness](assets/browser-native-input-2026-10-27/device.json)
-and [public asset verification](assets/browser-native-input-2026-10-27/public.json)
+matched to their admitted SHA-256 values. [Device readiness](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/browser-native-input-2026-10-27/device.json)
+and [public asset verification](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/browser-native-input-2026-10-27/public.json)
 record the deployed checks. No PR was opened pending device feedback.

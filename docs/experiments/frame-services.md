@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Frame service inventory — 2026-10-25
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/frame-services.md) remain available at the pinned historical revision.
+
 Inventory of SPD-DASH-0001 / `100.73.221.26`, updated after the requested legacy
 kiosk removal. Evidence comes from unit definitions, installed launcher scripts,
 listening sockets and before/after process identities.
@@ -74,7 +77,7 @@ the native process was alive but its mount was unconfirmed. This differs from
 the earlier confirmed startup rollout and predates this cleanup. The cleanup
 does not repair or replace that active release or app State.
 
-See [removal evidence](data/legacy-kiosk-removal-2026-10-25.json) for before/after
+See [removal evidence](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/legacy-kiosk-removal-2026-10-25.json) for before/after
 health and process identities. `bash scripts/check.sh` passed (186 Rust tests,
 41 Python checks); no new runtime build or protocol change is required.
 

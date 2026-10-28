@@ -1,5 +1,8 @@
 # Canonical glyph scale and raster comparison — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/fixed-point-canonical-scale-2026-10-27.md) remain available at the pinned historical revision.
+
 Historical experiment record. The fixed-point pilot and alternate GPU position
 formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
 Commands and feature names below refer to the evaluated revision, not the current
@@ -46,10 +49,10 @@ the scanout measurements below use the frame's actual RGB565 surface. These
 comparisons hold the filtered coverage/color path constant between arithmetic
 variants; they do not assert identity to exact analytic coverage.
 
-[Native reference](assets/canonical-dense-mali-reference.png),
-[candidate](assets/canonical-dense-mali-candidate.png), and
-[8x difference](assets/canonical-dense-mali-difference-8x.png) save the selected
-worst dense frame at rotation 90. [The high-DPR browser strip](assets/canonical-dense-browser-dpr3.2.png)
+[Native reference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/canonical-dense-mali-reference.png),
+[candidate](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/canonical-dense-mali-candidate.png), and
+[8x difference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/canonical-dense-mali-difference-8x.png) save the selected
+worst dense frame at rotation 90. [The high-DPR browser strip](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/canonical-dense-browser-dpr3.2.png)
 stacks reference, candidate and 8x difference.
 
 Three isolated, kernel-timestamped dense scrolling trials measured **35.63,
@@ -59,8 +62,8 @@ Three isolated, kernel-timestamped dense scrolling trials measured **35.63,
 The immutable float32 geometry and viewport bytes in all ten new metadata-bearing
 fixtures round-trip identically to the committed v2 fixtures.
 
-[Pixel metrics and fixture provenance](data/fixed-point-canonical-scale-2026-10-27.json)
-and [scanout trials with binary/fixture hashes](data/fixed-point-canonical-scale-scanout-2026-10-27.json)
+[Pixel metrics and fixture provenance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/fixed-point-canonical-scale-2026-10-27.json)
+and [scanout trials with binary/fixture hashes](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/fixed-point-canonical-scale-scanout-2026-10-27.json)
 are retained for review. Reproduce with `text_scroll_frames --styles`, the browser
 comparison's `--stable-quads --dpr 1,2,3.2` options, and native
 `OTRIOS_TEXT_STABLE_QUADS=1`. Both modes remain disabled by default.

@@ -1,12 +1,15 @@
 # Chunked document reader qualification — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/chunked-documents-2026-10-27.md) remain available at the pinned historical revision.
+
 RFC 0020 delivery 1 passes its native presentation, bounded-memory and pixel
 qualification. Three 30-second physical-frame runs measure **56.38–56.45
 kernel-presented fps**, with zero loading frames while generating incoming
 chunks at 4,000 logical px/s and reversing. These are reader-probe measurements,
 using the production document GPU adapter; they do not establish the full
 Layout Lab chrome's frame rate or a 60 fps lock. Rich text and editing remain
-delivery 2. [Machine-readable results](chunked-documents-2026-10-27.json).
+delivery 2. [Machine-readable results](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/chunked-documents-2026-10-27.json).
 
 The Layout Lab **Long document** experiment opens `/layout-lab/document`, with
 about 1 MiB of wrapped text, drag/coast scrolling and source-anchored resize.
@@ -79,7 +82,7 @@ initial modeset's zero timestamp. The controller saves/restores tty mode, stops
 only the direct kiosk while owning the exclusive display lock, and restores its
 previous running state. Touch calibration and authority data are untouched.
 
-[Saved native readback](chunked-document-native-2026-10-27.png) retains the
+[Saved native readback](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/chunked-document-native-2026-10-27.png) retains the
 physical rotation used by the frame.
 
 ## Complete CPU work and memory

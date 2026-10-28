@@ -1,5 +1,8 @@
 # Fixed point and SIMD evaluation — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/fixed-point-text-2026-10-27.md) remain available at the pinned historical revision.
+
 Historical experiment record. The fixed-point pilot and alternate GPU position
 formats were subsequently retired; see [RFC 0019](../rfcs/0019-native-fixed-simd-pipeline.md).
 Commands and feature names below refer to the evaluated revision, not the current
@@ -123,7 +126,7 @@ The new comparison command fails above 8, conservatively matching the existing
 native viewport check's limit. It currently **fails** for four browser workloads
 and the large native workload. Existing native pixel tests and their thresholds
 are unchanged. Means and changed/above-one pixel counts are recorded in
-[the raw comparison data](data/fixed-point-text-2026-10-27.json). Mean errors use
+[the raw comparison data](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/fixed-point-text-2026-10-27.json). Mean errors use
 only pixels where either render differs from the background; a large empty
 background cannot dilute them. Ordinary dense native mean channel error is at
 most 0.028; large-scale differences are localized but their maxima remain failures.
@@ -138,11 +141,11 @@ does not make the GPU's rasterization or filtering exact.
 
 Saved strips show reference, candidate and an 8x amplified difference:
 
-- [Dense browser, DPR 2](assets/fixed-dense-browser-dpr2.png).
-- [Large browser worst frame, DPR 2](assets/fixed-large-browser-dpr2.png).
-- [Large Mali worst reference](assets/fixed-large-mali-reference.png),
-  [candidate](assets/fixed-large-mali-candidate.png),
-  [8x difference](assets/fixed-large-mali-difference-8x.png).
+- [Dense browser, DPR 2](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/fixed-dense-browser-dpr2.png).
+- [Large browser worst frame, DPR 2](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/fixed-large-browser-dpr2.png).
+- [Large Mali worst reference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/fixed-large-mali-reference.png),
+  [candidate](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/fixed-large-mali-candidate.png),
+  [8x difference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/fixed-large-mali-difference-8x.png).
 
 Before enabling the feature: resolve or explain the remaining scale/phase pixel
 differences with a stronger raster reference, retain existing checks, and reduce

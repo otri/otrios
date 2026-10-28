@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Animation validation — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/animation-validation.md) remain available at the pinned historical revision.
+
 The demos and ownership boundary are implemented; smooth panel-rate playback on the RK3126 remains unachieved. Separating CRDT work prevents a 250 ms state-worker pause from directly becoming a 250 ms drawing pause, but does not remove the current graphics/presentation bottleneck.
 
 ## Actual photo-frame measurements
@@ -19,7 +22,7 @@ Native artifact/release measured: `43c813da4cd58ba0e81fda14b8469fed4b427bf22775e
 
 At 12 cubes with no load, median CPU composition/submission was 2.10 ms, while the median present call took 41.64 ms. With 64 cubes and load/stalls, those medians were 6.82 ms and 39.03 ms. The slow cadence is present without state load; the roughly one-FPS drop with load does not resemble a 250 ms freeze in the drawing loop. All five runs remain below the panel's refresh rate, with most frame intervals over 25 ms.
 
-An earlier 12-cube run measured about 16.4 FPS. Caching HUD geometry reduced typical CPU submission from about 7 ms to about 2 ms, but by itself did not raise FPS. Clearing the solid stage and sampling only cached header/footer regions raised the native baseline to about 22 FPS. Disabling SDL's extra vsync wait was also tested (about 21.6 FPS on the earlier path) and was not retained. Raw baseline and final data are in [animation-frame-results.json](animation-frame-results.json).
+An earlier 12-cube run measured about 16.4 FPS. Caching HUD geometry reduced typical CPU submission from about 7 ms to about 2 ms, but by itself did not raise FPS. Clearing the solid stage and sampling only cached header/footer regions raised the native baseline to about 22 FPS. Disabling SDL's extra vsync wait was also tested (about 21.6 FPS on the earlier path) and was not retained. Raw baseline and final data are in [animation-frame-results.json](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/animation-frame-results.json).
 
 ## Real network changes, separate disposable room
 
@@ -29,7 +32,7 @@ After the producer stopped, the server's persisted final snapshot and the native
 
 ## Browser and regression checks
 
-The in-app browser exercised both demos, the isolated CRDT/stall controls, local navigation, keyboard field activation, literal key output/Backspace, and browser Back through keyboard/screen layers. The final Mac in-app browser sample with the 250 ms worker busy-stall active recorded 120.00 FPS across the most recent 3,600 intervals, p95 9.60 ms, p99 10.20 ms and no intervals over 25 ms (14,080 total frame intervals). It is recorded alongside the raw results. These desktop browser timings do not establish iPad/iPhone performance. Separately, on 2026-10-19 the user confirmed the physical-frame Input Lab test (both fields, Backspace and Back); see [dashboard validation](dashboard-validation.md). That confirmation is not an animation-performance or input-latency measurement.
+The in-app browser exercised both demos, the isolated CRDT/stall controls, local navigation, keyboard field activation, literal key output/Backspace, and browser Back through keyboard/screen layers. The final Mac in-app browser sample with the 250 ms worker busy-stall active recorded 120.00 FPS across the most recent 3,600 intervals, p95 9.60 ms, p99 10.20 ms and no intervals over 25 ms (14,080 total frame intervals). It is recorded alongside the raw results. These desktop browser timings do not establish iPad/iPhone performance. Separately, on 2026-10-19 the user confirmed the physical-frame Input Lab test (both fields, Backspace and Back); see [early dashboard physical-input confirmation](early-dashboard-and-app-cutovers.md#initial-dashboard-and-physical-input). That confirmation is not an animation-performance or input-latency measurement.
 
 `bash scripts/check.sh` passes 61 checks: 46 core, two binary fixture tests, three monitoring adapter tests, five real-process HTTP/WebSocket tests and five OpenSSL signing/tamper checks. An additional native state-worker test passes (62 total), showing that navigation/persistence complete while the one-slot presentation mailbox is full. All-feature strict Clippy, formatting and both browser-module syntax checks pass. Linux CI also builds Wasm/native and exercises the 64-cube animation path under Mesa/Xvfb; software Mesa CI is a compatibility check, not hardware performance acceptance.
 

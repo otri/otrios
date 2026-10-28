@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Canvas foundation qualification and rollout — 2026-10-20
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/canvas-foundation.md) remain available at the pinned historical revision.
+
 The single RAM intent queue and coherent admitted-UI replication are deployed on
 the browser and photo frame. Sync v3 includes only required state fields, signal
 windows and that writer's durable receipt. The authority retains complete stored
@@ -103,8 +106,8 @@ no checkpoint import or document reset is needed.
 The frame automatically downloads/verifies the new signed native executable.
 Renderer PID 3613 reports the same release, admitted/confirmed Home, zero pending
 commands, RGB565, rotation 90 and calibrated touch. Exactly one renderer and no
-Weston process are present. [Frame acceptance](data/canvas-foundation-2026-10-20/frame-acceptance.json)
-and the raw [scanout capture](data/canvas-foundation-2026-10-20/frame.png) confirm
+Weston process are present. [Frame acceptance](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/frame-acceptance.json)
+and the raw [scanout capture](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/frame.png) confirm
 rendered output; the capture uses portrait scanout coordinates. Physical touch,
 physical orientation/color and reboot are not re-tested by these observations.
 
@@ -117,10 +120,10 @@ The signed renderer and headless benchmark use the same source/toolchain with
 their standard feature sets; they are different executables. Their distinct
 binary hashes are recorded. No headless measurement is presented as renderer FPS.
 
-Evidence: [direct trials](data/canvas-foundation-2026-10-20/direct-results.jsonl),
-[direct metadata](data/canvas-foundation-2026-10-20/direct-metadata.json),
-[delayed trials](data/canvas-foundation-2026-10-20/delayed-results.jsonl),
-[delayed metadata](data/canvas-foundation-2026-10-20/delayed-metadata.json),
-[deployment identifiers](data/canvas-foundation-2026-10-20/deployment.json),
-[staged browser](data/canvas-foundation-2026-10-20/staged-browser.png) and
-[live browser](data/canvas-foundation-2026-10-20/live-browser.png).
+Evidence: [direct trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/direct-results.jsonl),
+[direct metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/direct-metadata.json),
+[delayed trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/delayed-results.jsonl),
+[delayed metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/delayed-metadata.json),
+[deployment identifiers](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/deployment.json),
+[staged browser](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/staged-browser.png) and
+[live browser](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-foundation-2026-10-20/live-browser.png).

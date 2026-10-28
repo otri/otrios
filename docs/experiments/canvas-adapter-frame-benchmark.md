@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Canvas adapter comparison on the photo frame — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/canvas-adapter-frame-benchmark.md) remain available at the pinned historical revision.
+
 The deployed Merkle adapter reduces application CPU in this small app, but does
 not yet improve end-to-end peer latency. Its current transport uses substantially
 more bytes. Native presentation feedback improves modestly in these runs, while
@@ -24,7 +27,7 @@ mixed result, rather than a general Merkle speedup claim.
 
 Only identical host-side probe/telemetry code was added to each version. Runtime,
 policy, durability, receipts and codecs were left as shipped. Native binary hashes
-and the fixture metadata are in [metadata.json](data/canvas-adapter-frame-2026-10-19/metadata.json).
+and the fixture metadata are in [metadata.json](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-adapter-frame-2026-10-19/metadata.json).
 
 ## End-to-end clients on the frame
 
@@ -45,8 +48,8 @@ include mount, warm-up and waiting; CPU per operation divides by all edits.
 
 Numbers are **medians of three per-run statistics**, including median per-run p95,
 not a pooled p95. Full per-run values and ranges are retained in
-[headless.jsonl](data/canvas-adapter-frame-2026-10-19/headless.jsonl) and
-[summary.json](data/canvas-adapter-frame-2026-10-19/summary.json).
+[headless.jsonl](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-adapter-frame-2026-10-19/headless.jsonl) and
+[summary.json](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-adapter-frame-2026-10-19/summary.json).
 
 | Requested 10 Hz | Pre-Merkle | Merkle |
 | --- | ---: | ---: |
@@ -108,7 +111,7 @@ The measurements do not attribute the remaining CPU to a particular process.
 The renderer is unchanged, and these runs do not establish a new locked-refresh
 or GPU performance claim. Flip rates reflect the complete benchmark load. Raw
 presentation samples, CPU summaries, convergence checks and kernel flip reports
-are in [native.jsonl](data/canvas-adapter-frame-2026-10-19/native.jsonl).
+are in [native.jsonl](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-adapter-frame-2026-10-19/native.jsonl).
 
 ## Bandwidth and a confirmed encoding issue
 
@@ -154,7 +157,7 @@ some of it. Changed parent records also contain unchanged sibling hashes. These
 are independent of the outer-envelope amplification below. This does not show
 that SHA-256 is the dominant CPU cost.
 
-[Raw breakdown](data/canvas-adapter-frame-2026-10-19/last-delta-breakdown.jsonl),
+[Raw breakdown](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-adapter-frame-2026-10-19/last-delta-breakdown.jsonl),
 [inspection example](../../crates/otrios-core/examples/canvas_delta_breakdown.rs).
 A follow-up should make signal retention explicitly requested or separately scoped,
 and use bounded/chunked history updates, before treating the adapters as equivalent
@@ -174,7 +177,7 @@ serialization, with no deployed protocol change:
 | 2,048 B | 8,326 B | 2,140 B |
 | 4,096 B | 16,518 B | 4,188 B |
 
-[Raw size output](data/canvas-adapter-frame-2026-10-19/wire-size.jsonl).
+[Raw size output](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-adapter-frame-2026-10-19/wire-size.jsonl).
 This proves a wrapping-size opportunity, not measured CPU/latency gains from a
 Blob deployment. Removing that roughly fourfold penalty still leaves real
 Merkle path/receipt overhead. The next bounded optimization should use actual

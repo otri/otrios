@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Single-queue dispatch prototype — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/canvas-dispatch.md) remain available at the pinned historical revision.
+
 Historical isolated comparison. The queue was later qualified and deployed with
 the [2026-10-20 Canvas foundation](canvas-foundation.md), selected for simpler
 ownership and bounded behavior. The measurements and original hold decision
@@ -84,7 +87,7 @@ Stopped state, server binary and configuration were privately snapshotted before
 restart. The live store was retained. Public/Monitoring conformance passed all
 81 checks afterward. The frame retained renderer PID 1154, reconnected at epoch 2,
 and reported admitted/confirmed Home with one trusted session. The builder was
-stopped after experiments. [Deployment identifiers](data/canvas-dispatch-2026-10-19/server-deployment.json)
+stopped after experiments. [Deployment identifiers](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-dispatch-2026-10-19/server-deployment.json)
 contain no credentials or document values. Physical touch was not re-tested.
 
 ## Verification and next work
@@ -109,7 +112,7 @@ Next compare a schema-defined packed envelope with the exact same canonical node
 then measure bounded optional compression on identical uncompressed batches.
 Neither is implemented by this dispatch experiment.
 
-Raw evidence: [direct trials](data/canvas-dispatch-2026-10-19/direct-results.jsonl),
-[direct metadata](data/canvas-dispatch-2026-10-19/direct-metadata.json),
-[delayed trials](data/canvas-dispatch-2026-10-19/delayed-results.jsonl),
-[delayed metadata](data/canvas-dispatch-2026-10-19/delayed-metadata.json).
+Raw evidence: [direct trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-dispatch-2026-10-19/direct-results.jsonl),
+[direct metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-dispatch-2026-10-19/direct-metadata.json),
+[delayed trials](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-dispatch-2026-10-19/delayed-results.jsonl),
+[delayed metadata](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/canvas-dispatch-2026-10-19/delayed-metadata.json).

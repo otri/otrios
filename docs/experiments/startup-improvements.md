@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Startup delivery improvements — 2026-10-25
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/startup-improvements.md) remain available at the pinned historical revision.
+
 Deployed release:
 `fe98da6b5478528c8abc07944d4df57a170268f6fccad1711f083f8fccf396b2`.
 Implementation source: `cd78e5a`, stacked on the current app-owned navigation work.
@@ -88,7 +91,7 @@ transition; includes any accompanying state messages, excludes TCP/TLS overhead.
 Input Lab traffic fell about 61.5%. Repeat visits still mount the full UI; this
 change compresses delivery rather than introducing a UI cache or local mount path.
 
-![Startup and navigation comparison](data/startup-improvements-2026-10-25/comparison.svg)
+[Archived figure: Startup and navigation comparison](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/startup-improvements-2026-10-25/comparison.svg)
 
 All samples, including outliers, are retained. One Input Lab first visit took
 **4,327 ms** after release: about 3,180 ms before the mount was sent, 1,049 ms for
@@ -124,8 +127,8 @@ with account access, then verify `HIT` on the immutable Wasm URL and no-store on
 `/` and `/release`. The rule excludes state, discovery and private/authenticated
 endpoints. Existing unrelated Cloudflare rules must be preserved.
 
-Evidence: [summary, ranges and samples](data/startup-improvements-2026-10-25/summary.json),
-[100 navigation transitions](data/startup-improvements-2026-10-25/navigation.csv).
+Evidence: [summary, ranges and samples](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/startup-improvements-2026-10-25/summary.json),
+[100 navigation transitions](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/startup-improvements-2026-10-25/navigation.csv).
 Use the capture/replay commands in the baseline report with the new release and
 `--variant baseline`; historical experimental transforms target the frozen old
 release, while the new implementation is already present in the captured assets.

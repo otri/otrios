@@ -1,9 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Public UI cache and iPad timing qualification
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/ui-cache-navigation-timings.md) remain available at the pinned historical revision.
+
 2026-10-25. Deployed signed full runtime `f469a04009c0b8085eec6902059bb744d439f9d5908bf539a9f541143e9def59`.
 See [RFC 0016](../rfcs/0016-ui-cache-and-navigation-timings.md) and
-[measurement data](data/ui-cache-navigation-timings.json).
+[measurement data](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/ui-cache-navigation-timings.json).
 
 Open `https://otrios.otri.ca/?timings=1`, tap between apps, then open **Timings**
 and **Copy report**. Selecting the report is the clipboard fallback on Safari.

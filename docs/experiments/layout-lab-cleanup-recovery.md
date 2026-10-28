@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Layout Lab cleanup and frame recovery — 2026-10-25
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/layout-lab-cleanup-recovery.md) remain available at the pinned historical revision.
+
 The full corrected release is
 `295314db6477aff80372b0c0ef1b4276f6f5da38aa797fa2a601f5367d789dcb`, built from
 `c448b1608154c984922790a0be1161cf3115a016`. Home and Layout Lab load on the user's
@@ -50,7 +53,7 @@ inconsistent active catalog or replace durable app State.
   49 JavaScript/Wasm tests**, independent-memory Wasm acceptance, all-feature ARM
   Clippy and ARM/browser builds. No new dependency or protocol version.
 
-See [recovery evidence](data/layout-lab-recovery-2026-10-25.json) for timed health
+See [recovery evidence](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/layout-lab-recovery-2026-10-25.json) for timed health
 and native observations. Earlier performance measurements remain frozen to their
 recorded release; this recovery does not claim a new performance measurement.
 

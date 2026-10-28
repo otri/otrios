@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Chat input and viewport anchors — 2026-10-27
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/chat-input-and-anchors-2026-10-27.md) remain available at the pinned historical revision.
+
 ## Corrections
 
 Wasm disables the runtime software keyboard through a host-local input policy.
@@ -50,7 +53,7 @@ Two independent real Chromium/WebGL contexts passed the signed-artifact checks,
 including absent browser software keys, wrapped composer growth and caret
 visibility, messages, live/private drafts, rename/avatar selection, multiline
 paste, reload, responsive layout and graphics loss/recovery. The
-[wrapped composer reference](assets/chat-input-and-anchors-2026-10-27/wrapped-composer.png)
+[wrapped composer reference](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/chat-input-and-anchors-2026-10-27/wrapped-composer.png)
 was visually inspected.
 
 ## Activation
@@ -64,6 +67,6 @@ display and tunnel services are active. The touch calibration hash is unchanged.
 
 Rollback at `/var/lib/otrios-authority/rollback/2026-10-27-chat-input-fixes`
 includes the preceding signed release and a consistent copy of the live chat/app
-state. [Machine-readable qualification](assets/chat-input-and-anchors-2026-10-27/qualification.json)
+state. [Machine-readable qualification](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/assets/chat-input-and-anchors-2026-10-27/qualification.json)
 records the browser checks and activation. Native physical interaction remains
 available for user testing. No PR was opened.

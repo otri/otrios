@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Independent release discovery and replication rollout — 2026-10-19
 
+Raw measurements and figures from this report were retired from the current tree.
+The [original report and artifacts](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/release-discovery-deployment.md) remain available at the pinned historical revision.
+
 Historical deployment record. Current topology and operations follow [RFC 0009](../rfcs/0009-unified-server-session.md).
 
 
@@ -104,5 +107,5 @@ The source publisher is resumed, pinned to the exact deployed commit. The public
 module replica and origin pointers match, and the installed authority's SHA-256
 matches the tested release binary. The isolated loopback test server and browser
 tab were closed. No DNS, tunnel, kernel, display-mode or touch-calibration change
-was made. See the [machine-readable acceptance record](data/release-discovery-2026-10-19.json)
-and [operational release-discovery contract](../DASHBOARD_LIVE.md#protocol-independent-release-discovery).
+was made. See the [machine-readable acceptance record](https://github.com/otri/otrios/blob/b2355f443ce5f545a2f0f5dfe55ae358e5ce7b45/docs/experiments/data/release-discovery-2026-10-19.json)
+and [operational release-discovery contract](../FRAME_HOSTING.md#protocol-independent-release-discovery).
