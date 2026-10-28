@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-28",
+  "source": {
+    "source_commit": "fcd180d9b8150e4e98ee803f2d5db285bdd91cd4",
+    "source_fingerprint": "e7ba27d1dd1b90047a3c5a0c670cc9dbf39ca05cf04b4658cc45467ddcb0619e",
+    "release": "292e09a536befd5be2ccc9d53c8e8f1e64312d89e59cfe9dd6343334a69a3f54",
+    "verified_signature_and_assets": true
+  },
+  "previous_release": "810de336ecad70e3c8692f6bc907ba27ae8693bd6c8aa4a56ca08bf1c542970b",
+  "validation": {
+    "required_check": {
+      "command": "bash scripts/check.sh",
+      "passed": true,
+      "rust_tests": 308,
+      "python_tests": 46
+    },
+    "node_session_worker_cache_tests": {
+      "passed": true,
+      "tests": 62
+    },
+    "signed_builder_node_tests": {
+      "passed": true,
+      "tests": 74
+    },
+    "native_worker_tests": {
+      "command": "cargo test -p otrios-dashboard --features direct --bin dashboard-direct --locked --offline",
+      "passed": true,
+      "tests": 11
+    },
+    "linux_arm_all_feature_clippy": {
+      "command": "cargo clippy --workspace --all-targets --all-features --target armv7-unknown-linux-gnueabihf --locked --offline -- -D warnings",
+      "passed": true
+    },
+    "macos_all_feature_clippy": {
+      "passed": false,
+      "reason": "Existing Linux-only display examples reference types unavailable on macOS; Linux ARM all-feature validation passed."
+    },
+    "relative_markdown_links": {
+      "passed": true
+    },
+    "post_cleanup_check": {
+      "command": "CARGO_INCREMENTAL=0 cargo check -p otrios-dashboard --features server,canvas,host-sync --bins --locked --offline",
+      "passed": true
+    },
+    "staged_host": {
+      "passed": true,
+      "checks": 123,
+      "authenticated_login_tested": false
+    },
+    "staged_browser": {
+      "passed": true,
+      "checks": [
+        "unified Home in both orientations",
+        "independent persistent guest cookies",
+        "live draft visibility and private clearing",
+        "bidirectional durable messages",
+        "64-avatar paging and profile rename",
+        "wrapped composer grows and scrolls its caret into view",
+        "native textarea focus, selection replacement and IME composition",
+        "no app keyboard in browsers",
+        "multiline paste",
+        "identity and history survive reload",
+        "commands and particles",
+        "member dialog close control",
+        "responsive retained transcript",
+        "visual viewport-only keyboard reflow preserves width, focus, text and selection",
+        "WebGL loss/recovery replays resources and preserves identity"
+      ]
+    },
+    "arm_process_qualification": {
+      "passed": true,
+      "release": "292e09a536befd5be2ccc9d53c8e8f1e64312d89e59cfe9dd6343334a69a3f54",
+      "signature_and_assets_verified": true,
+      "concurrent_linux_clients": 2,
+      "confirmed_value": 700,
+      "durable_restart": true,
+      "production_state_used": false,
+      "listener": "loopback-only"
+    },
+    "arm_probe_initial_assertion": "The temporary harness initially expected unquantized input 730; the authored slider confirms 700. Corrected the harness assertion; no runtime changes were needed."
+  },
+  "deployment": {
+    "transfer_bytes": 25927680,
+    "release": "292e09a536befd5be2ccc9d53c8e8f1e64312d89e59cfe9dd6343334a69a3f54",
+    "state_protocol": "otrios-canvas-sync-v8",
+    "control_version": 1,
+    "signature_and_assets_verified": true,
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-monitoring.timer": "active",
+      "otrios-tunnel": "active"
+    },
+    "native": [
+      {
+        "pending_commands": 0,
+        "pid": 20466,
+        "rotation": 90,
+        "screen": "brass-relay",
+        "state_confirmed": true,
+        "state_ref": "app:brass-relay/state",
+        "stream_ready": true,
+        "ui_ref": "app:brass-relay/ui",
+        "ui_release": "292e09a536befd5be2ccc9d53c8e8f1e64312d89e59cfe9dd6343334a69a3f54"
+      }
+    ],
+    "calibration_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e",
+    "calibration_unchanged": true,
+    "public_host_checks": 120,
+    "authenticated_login_tested": false,
+    "read_only_browser": {
+      "passed": true,
+      "dom_records": 25,
+      "sent_message_commands": 0,
+      "protocol": "otrios-canvas-sync-v8"
+    }
+  },
+  "rollback": {
+    "backup": "/var/lib/otrios-authority/rollback/2026-10-28-repository-cleanup",
+    "release": "810de336ecad70e3c8692f6bc907ba27ae8693bd6c8aa4a56ca08bf1c542970b",
+    "signature_and_assets_verified": true,
+    "saved_installed_files": 10,
+    "stopped_state_files": 32,
+    "rollback": "rollback-code.py restores code/services only; never rewinds canonical app state",
+    "rollback_executed": false
+  },
+  "local_cleanup": {
+    "removed": [
+      {
+        "path": "target/debug/incremental",
+        "allocated_bytes_before": 6290911232,
+        "action": "removed"
+      },
+      {
+        "path": "scripts/__pycache__",
+        "allocated_bytes_before": 192512,
+        "action": "removed"
+      },
+      {
+        "path": "web/dashboard/pkg",
+        "allocated_bytes_before": 3338240,
+        "action": "removed"
+      }
+    ],
+    "allocated_bytes_removed": 6294441984,
+    "filesystem_free_bytes_change": 0,
+    "retained_qualification_directories": 24,
+    "retained_files": 5203,
+    "retained_metadata_unchanged": true,
+    "retained_other_paths": [
+      "target/debug/deps",
+      "target/release",
+      "target/wasm32-unknown-unknown",
+      "target/cleanup-2026-10-28",
+      "web/canvas/pkg",
+      "apps/**/package",
+      "bench-results",
+      ".env",
+      "all state/signing/auth/rollback material"
+    ]
+  },
+  "retained_boundaries": [
+    "Historical RFC filenames and evidence",
+    "Stable release-control v1 and retired-route tombstones",
+    "Linux IPC research backlog",
+    "canvas-server alias and loadAppCatalog wrapper",
+    "Hardware regression probes",
+    "State, auth/signing material, benchmark results and rollback snapshots"
+  ],
+  "limitations": [
+    "These are Canvas application/process and release checks, not Linux shared-memory PoC acceptance.",
+    "No new physical touch, color or FPS qualification was performed.",
+    "The immediate filesystem free-space counter did not change; allocated bytes removed do not establish physical space reclaimed."
+  ]
+}

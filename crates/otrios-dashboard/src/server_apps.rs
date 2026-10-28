@@ -3,6 +3,7 @@
 use super::*;
 use otrios_core::canvas::{self, Behavior, Document, Session};
 use otrios_interfaces::canvas::{App as AppContract, ClientMessage, ServerMessage};
+use otrios_interfaces::session::STATE_PROTOCOL;
 use std::{
     collections::{BTreeMap, VecDeque},
     io::Read,
@@ -117,7 +118,7 @@ impl Hub {
                 let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
                 if manifest["format"] != "otrios-release-v1"
                     || manifest["state_schema"] != "otrios-canvas-merkle-state-v1"
-                    || manifest["sync_protocol"] != "otrios-canvas-sync-v8"
+                    || manifest["sync_protocol"] != STATE_PROTOCOL
                 {
                     return Err("Installed release app protocol mismatch".into());
                 }

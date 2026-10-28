@@ -3,7 +3,7 @@
 
 `https://otrios.otri.ca` opens Home without sign-in. Component Playground, Layout
 Lab, Input Lab, Animation Lab, 3D Lab and The Brass Relay are public apps. Their durable controls
-share the photo frame's per-app Merkle state. Navigation, text entry and animation
+share the photo frame's per-app Merkle state. Navigation, editing focus and animation
 phase remain local. Monitoring alone requires browser sign-in.
 
 Navigation entries serve app-specific page titles and Open Graph metadata in

@@ -222,9 +222,8 @@ force.
 Build each committed revision with `scripts/build-canvas-pipeline-benchmark.py`
 using a separate output folder and the configured Rust environment. It freezes
 source for both ARM and Mac builds and records source-archive/binary hashes.
-For the binary comparison use the same build on both sides and select legacy
-encoding only for the reference. Subsequent comparisons use the preceding build
-as reference. Example (substitute local paths and the existing frame connection):
+For subsequent comparisons use the preceding build as reference. Example
+(substitute local paths and the existing frame connection):
 
 ```sh
 python3 scripts/build-canvas-pipeline-benchmark.py --output /ABS/BUILD \
@@ -234,11 +233,19 @@ python3 scripts/benchmark-canvas-pipeline.py \
   --release /ABS/SIGNED_RELEASE --output /ABS/FRESH_RESULTS \
   --frame USER@FRAME --known-hosts /ABS/KNOWN_HOSTS --tailscale /ABS/TAILSCALE \
   --rates 10,30 --updates 120 --repetitions 3
-# Add --legacy-reference only for the binary comparison.
 python3 scripts/benchmark-merkle-workspace.py \
   --reference /ABS/HISTORY_BUILD --candidate /ABS/WORKSPACE_BUILD \
   --output /ABS/FRESH_TREE_RESULTS --frame USER@FRAME --known-hosts /ABS/KNOWN_HOSTS
 ```
+
+For the historical legacy/binary comparison, use a separate checkout at commit
+`ed3c86b` and its `scripts/build-canvas-pipeline-benchmark.py` to build the
+reference and candidate from that same revision. Run that checkout's
+`scripts/benchmark-canvas-pipeline.py` with `--legacy-reference` and a compatible
+signed release and frame setup from that period. That revision contains both the
+runner and the benchmark client that honors the flag. Commit `a88767f` removed
+the client support; the current runner rejects the flag rather than silently
+labeling a current binary as legacy. The archived results remain unchanged.
 
 The current runner defaults to negotiated `/session`. When reproducing the
 pre-unified-server builds above, add `--reference-session /apps/stream
