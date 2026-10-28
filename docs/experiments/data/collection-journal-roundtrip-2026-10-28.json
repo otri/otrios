@@ -1,0 +1,62 @@
+{
+  "probe_sha256": "9f2240afda9a159c43da4ad034d84ad1fe9d3fb7fac2b67e4492bbf465a6920d",
+  "scope": "on-frame loopback, private copy of stopped state; no production writes",
+  "candidate_send": {
+    "collection_root": "083b36c56f4622cd6d71a9aa87a7b3b2206fe63c173bd26c94da300e26be0838",
+    "first": 1,
+    "last": 13,
+    "marker_found": true,
+    "messages": 13,
+    "passed": true,
+    "protocol": "v8",
+    "release": {
+      "id": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "sync_protocol": "otrios-canvas-sync-v8",
+      "web_entry": "/releases/37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16/web/index.html"
+    },
+    "sent": true
+  },
+  "prior_recovers_candidate_send": {
+    "legacy_welcome_contains_marker": true,
+    "passed": true,
+    "protocol": "v6",
+    "release": {
+      "id": "f8cacaa81ae3a748dd853b4357403077f1d48735a4fcd2fa28c02dc4b36b9e00",
+      "sync_protocol": "otrios-canvas-sync-v6",
+      "web_entry": "/releases/f8cacaa81ae3a748dd853b4357403077f1d48735a4fcd2fa28c02dc4b36b9e00/web/index.html"
+    },
+    "sent": false
+  },
+  "candidate_after_rollback": {
+    "collection_root": "083b36c56f4622cd6d71a9aa87a7b3b2206fe63c173bd26c94da300e26be0838",
+    "first": 1,
+    "last": 13,
+    "marker_found": true,
+    "messages": 13,
+    "passed": true,
+    "protocol": "v8",
+    "release": {
+      "id": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "sync_protocol": "otrios-canvas-sync-v8",
+      "web_entry": "/releases/37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16/web/index.html"
+    },
+    "sent": false
+  },
+  "candidate_after_restart": {
+    "collection_root": "083b36c56f4622cd6d71a9aa87a7b3b2206fe63c173bd26c94da300e26be0838",
+    "first": 1,
+    "last": 13,
+    "marker_found": true,
+    "messages": 13,
+    "passed": true,
+    "protocol": "v8",
+    "release": {
+      "id": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+      "sync_protocol": "otrios-canvas-sync-v8",
+      "web_entry": "/releases/37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16/web/index.html"
+    },
+    "sent": false
+  },
+  "stopped_journal_sha256": "547023d3dc1b6357b0da571571a7f069ac75c23b692fcad8ca9bf5dbd97d296b",
+  "production_healthy": true
+}

@@ -37,10 +37,27 @@ pub(super) enum Entry {
     Sequence(u64),
 }
 pub(super) struct Journal {
+    // A stable sidecar inode spans atomic data-file replacement during
+    // compaction. Never unlink it while the authority is running.
+    _owner: fs::File,
     path: PathBuf,
     file: fs::File,
     pub bytes: u64,
     failed: bool,
+}
+fn lock_owner(path: &Path) -> Result<fs::File> {
+    let lock = path.with_extension("journal.owner.lock");
+    let mut options = fs::OpenOptions::new();
+    options.create(true).truncate(false).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(lock).map_err(err)?;
+    file.try_lock()
+        .map_err(|error| format!("Room journal already owned or unavailable: {error}"))?;
+    Ok(file)
 }
 fn create(path: &Path) -> Result<fs::File> {
     let mut options = fs::OpenOptions::new();
@@ -61,10 +78,24 @@ fn record(entry: &Entry) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 impl Journal {
+    #[cfg(test)]
+    pub(super) fn fail_writes(&mut self) {
+        self.failed = true;
+    }
+    #[cfg(test)]
     pub fn open(path: PathBuf) -> Result<(Self, Vec<Entry>)> {
+        let mut entries = Vec::new();
+        let journal = Self::recover(path, |entry| {
+            entries.push(entry);
+            Ok(())
+        })?;
+        Ok((journal, entries))
+    }
+    pub fn recover(path: PathBuf, mut visit: impl FnMut(Entry) -> Result<()>) -> Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(err)?;
         }
+        let owner = lock_owner(&path)?;
         let mut file = match fs::OpenOptions::new().read(true).write(true).open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -92,7 +123,6 @@ impl Journal {
             return Err("Chat journal format".into());
         }
         let mut at = 8_u64;
-        let mut entries = Vec::new();
         while at < length {
             if length - at < 36 {
                 break;
@@ -112,7 +142,7 @@ impl Journal {
                 return Err("Chat journal checksum".into());
             }
             super::check(&data, super::MAX_EVENT_BYTES)?;
-            entries.push(flexbuffers::from_slice(&data).map_err(err)?);
+            visit(flexbuffers::from_slice(&data).map_err(err)?)?;
             at += 36 + size as u64;
         }
         // A crash may leave an incomplete final write. Complete but corrupt
@@ -123,15 +153,13 @@ impl Journal {
                 .map_err(err)?;
         }
         file.seek(std::io::SeekFrom::End(0)).map_err(err)?;
-        Ok((
-            Self {
-                path,
-                file,
-                bytes: at,
-                failed: false,
-            },
-            entries,
-        ))
+        Ok(Self {
+            _owner: owner,
+            path,
+            file,
+            bytes: at,
+            failed: false,
+        })
     }
     pub fn append(&mut self, entry: &Entry) -> Result<()> {
         if self.failed {
@@ -152,7 +180,7 @@ impl Journal {
         self.bytes += bytes.len() as u64;
         Ok(())
     }
-    pub fn compact(&mut self, entries: impl IntoIterator<Item = Entry>) -> Result<()> {
+    pub fn compact(&mut self, entries: impl IntoIterator<Item = Result<Entry>>) -> Result<()> {
         if self.failed {
             return Err("Chat journal requires recovery".into());
         }
@@ -164,7 +192,7 @@ impl Journal {
             file.write_all(b"OTCHAT01").map_err(err)?;
             let mut size = 8;
             for entry in entries {
-                let bytes = record(&entry)?;
+                let bytes = record(&entry?)?;
                 size += bytes.len() as u64;
                 if size > MAX_JOURNAL {
                     return Err("Chat compacted journal limit".into());

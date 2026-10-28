@@ -13,6 +13,16 @@ impl Offer {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+    /// Decode the existing canonical transfer envelope without publishing it.
+    /// A replica still qualifies its scope, baseline and materialized DAG.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let transfer = wire::decode_transfer(bytes)?;
+        Ok(Self {
+            cursor: transfer.cursor,
+            root: transfer.root,
+            bytes: bytes.into(),
+        })
+    }
 }
 /// Single authority owner: subscribe, capture and publication are serialized by
 /// &mut self. A host may put this behind its publication lock, never split them.
@@ -38,9 +48,14 @@ pub struct Subscription {
 impl Authority {
     /// Epoch must change whenever the host loses lease/cursor state.
     pub fn new(epoch: u64, current: Snapshot) -> Self {
+        Self::with_lease_counter(epoch, current, 0)
+    }
+    /// Embedding collection authorities allocate globally unique lease IDs while
+    /// retaining independent bounded selected roots for each peer.
+    pub(crate) fn with_lease_counter(epoch: u64, current: Snapshot, next_lease: u64) -> Self {
         Self {
             epoch,
-            next_lease: 0,
+            next_lease,
             current,
         }
     }

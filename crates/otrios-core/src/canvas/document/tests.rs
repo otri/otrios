@@ -13,6 +13,237 @@ fn reader(text: &str, width: f64, height: f64) -> Reader {
     )
     .unwrap()
 }
+fn keyed(first: u64, count: u64) -> Source {
+    let inline = Inline::new(
+        vec![
+            0., 0., 1., 0., 0., 1., 12., 0., 1., 0., 0., 1., 0., 12., 1., 0., 0., 1.,
+        ],
+        [4., -4.],
+    )
+    .unwrap();
+    Source::from_blocks((first..first+count).map(|id| Block::new(
+        BlockId { object: id, part: 0 },
+        format!("Sender {id}\nA paragraph with an explicit hard break.\nSecond paragraph {}\n\n", "wrapped text ".repeat(6)),
+        24., Some(inline.clone()),
+    ).unwrap()).collect()).unwrap()
+}
+
+#[test]
+fn keyed_windows_preserve_anchor_and_chunk_identity_across_prepend_append_and_reflow() {
+    let mut r = Reader::new(
+        keyed(20, 32),
+        Arc::new(test_font()),
+        2.,
+        [255; 4],
+        480.,
+        160.,
+    )
+    .unwrap();
+    settle(&mut r);
+    r.jump_to(Anchor {
+        block: 7,
+        source_byte: 0,
+        viewport_y: -3.5,
+    })
+    .unwrap();
+    settle(&mut r);
+    let anchor = r.anchor();
+    let identity = r.source.block_id(anchor.block).unwrap();
+    assert_eq!(identity.object, 27);
+    let before = r.frame();
+    let revision = r.stats().anchor_revision;
+    let packed = r.stats().packed_glyphs;
+    r.replace_blocks(keyed(10, 64)).unwrap();
+    settle(&mut r);
+    assert_eq!(r.source.block_id(r.anchor().block), Some(identity));
+    assert_eq!(r.anchor().source_byte, anchor.source_byte);
+    assert!((r.anchor().viewport_y - anchor.viewport_y).abs() < 1e-8);
+    assert_eq!(r.stats().anchor_revision, revision);
+    let after = r.frame();
+    for old in &before.draws {
+        let retained = after
+            .draws
+            .iter()
+            .find(|d| d.chunk.version == old.chunk.version)
+            .unwrap();
+        assert!(Arc::ptr_eq(&old.chunk, &retained.chunk));
+        assert!((old.view[3] - retained.view[3]).abs() < 1e-5);
+    }
+    assert_eq!(
+        r.stats().packed_glyphs,
+        packed,
+        "unrelated new source blocks do not repack a warm visible window"
+    );
+    assert!(
+        after
+            .draws
+            .iter()
+            .any(|d| !d.chunk.mesh.vertices.is_empty())
+    );
+    for draw in after
+        .draws
+        .iter()
+        .filter(|d| !d.chunk.mesh.vertices.is_empty())
+    {
+        let views = draw.views();
+        assert_eq!(
+            &views[2..8],
+            &views[10..16],
+            "inline art and text share translation/clip"
+        );
+        assert_eq!(draw.chunk.mesh.draws[0], 0);
+        assert_eq!(draw.chunk.mesh.draws[3], 1);
+    }
+    let old_bytes = before.draws[0].chunk.mesh.glyph_vertices.clone();
+    r.resize(260., 160.).unwrap();
+    settle(&mut r);
+    assert_eq!(r.source.block_id(r.anchor().block), Some(identity));
+    let line = lines(&r, r.anchor().block as usize)
+        .into_iter()
+        .find(|l| l.source.start <= anchor.source_byte && anchor.source_byte < l.source.end)
+        .unwrap();
+    let y = r.heights.prefix(r.anchor().block as usize) + f64::from(line.line) * r.line_height
+        - r.offset;
+    assert!((y - anchor.viewport_y).abs() < 1e-8);
+    assert_eq!(
+        before.draws[0].chunk.mesh.glyph_vertices, old_bytes,
+        "pinned old-width geometry remains immutable"
+    );
+}
+
+#[test]
+fn keyed_revisions_invalidate_only_changed_content_and_window_traversal_stays_bounded() {
+    let mut r = Reader::new(
+        keyed(1, 64),
+        Arc::new(test_font()),
+        2.,
+        [255; 4],
+        480.,
+        160.,
+    )
+    .unwrap();
+    settle(&mut r);
+    let old = r.frame();
+    let unaffected = r.pages[&(1, 0)].chunks[0].clone();
+    let mut source = keyed(1, 64);
+    let changed = Block::new(
+        BlockId { object: 1, part: 0 },
+        "A changed sender\nNew content\n\n".into(),
+        24.,
+        source.inline(0).cloned(),
+    )
+    .unwrap();
+    let mut blocks = (0..64)
+        .map(|i| {
+            if i == 0 {
+                changed.clone()
+            } else {
+                Block::new(
+                    source.key(i).0,
+                    source.block(i as u32).unwrap().to_owned(),
+                    24.,
+                    source.inline(i).cloned(),
+                )
+                .unwrap()
+            }
+        })
+        .collect::<Vec<_>>();
+    source = Source::from_blocks(std::mem::take(&mut blocks)).unwrap();
+    r.replace_blocks(source).unwrap();
+    settle(&mut r);
+    assert!(
+        r.frame()
+            .draws
+            .iter()
+            .any(|d| d.chunk.version > old.draws.last().unwrap().chunk.version)
+    );
+    assert!(
+        Arc::ptr_eq(&unaffected, &r.pages[&(1, 0)].chunks[0]),
+        "a neighboring unchanged record keeps its cached layout"
+    );
+    for first in (1..=1025).step_by(32) {
+        r.replace_blocks(keyed(first, 64)).unwrap();
+        settle(&mut r);
+        let stats = r.stats();
+        assert_eq!(stats.blocks, 64);
+        assert!(stats.source_bytes < 512 * 1024);
+        assert!(stats.source_index_bytes < source::MAX_INDEX_BYTES);
+        assert!(stats.working_bytes <= CPU_WORKING_BYTES);
+        assert!(stats.resident_pages <= MAX_RESIDENT_PAGES);
+        assert!(
+            r.frame()
+                .draws
+                .iter()
+                .map(|d| d.chunk.gpu_bytes())
+                .sum::<usize>()
+                <= GPU_GEOMETRY_BYTES
+        );
+    }
+}
+
+#[test]
+fn prefix_labels_preserve_the_message_anchor_when_older_coverage_arrives() {
+    let labeled = |first| {
+        let source = keyed(first, 32);
+        let target = BlockId {
+            object: first,
+            part: 0,
+        };
+        let mut blocks = vec![
+            Block::label(
+                BlockId {
+                    object: first,
+                    part: 2,
+                },
+                String::new(),
+                24.,
+                target,
+            )
+            .unwrap(),
+            Block::label(
+                BlockId {
+                    object: first,
+                    part: 1,
+                },
+                "Today".into(),
+                24.,
+                target,
+            )
+            .unwrap(),
+        ];
+        blocks.extend((0..32).map(|i| {
+            Block::new(
+                source.key(i).0,
+                source.block(i as u32).unwrap().into(),
+                24.,
+                source.inline(i).cloned(),
+            )
+            .unwrap()
+        }));
+        Source::from_blocks(blocks).unwrap()
+    };
+    let mut r = Reader::new(labeled(20), Arc::new(test_font()), 2., [255; 4], 480., 160.).unwrap();
+    settle(&mut r);
+    let anchor = r.anchor();
+    assert_eq!(
+        r.source.block_id(anchor.block),
+        Some(BlockId {
+            object: 20,
+            part: 0
+        })
+    );
+    assert!(anchor.viewport_y > 0.);
+    r.replace_blocks(labeled(10)).unwrap();
+    settle(&mut r);
+    assert_eq!(
+        r.source.block_id(r.anchor().block),
+        Some(BlockId {
+            object: 20,
+            part: 0
+        })
+    );
+    assert!((r.anchor().viewport_y - anchor.viewport_y).abs() < 1e-8);
+}
 fn settle(r: &mut Reader) {
     for _ in 0..100_000 {
         r.work(16).unwrap();
@@ -65,7 +296,7 @@ fn golden_wrapping_preserves_spaces_newlines_tabs_and_whole_missing_clusters() {
             .iter()
             .any(|c| c.start > emoji_start && c.start < emoji_end)
     );
-    assert_eq!(r.source.text(), "aa aa\n\nÉ👩‍💻b\r\nz\tz");
+    assert_eq!(r.source.original_text().unwrap(), "aa aa\n\nÉ👩‍💻b\r\nz\tz");
 }
 #[test]
 fn scroll_reuses_immutable_meshes_and_culls_outside_lines() {
@@ -161,7 +392,10 @@ fn resumable_long_tokens_and_hard_chunk_limits_do_not_truncate_source() {
     settle(&mut r);
     let summary = &r.summaries[0];
     assert!(summary.exact);
-    assert_eq!(summary.cursor as usize, r.source.text().len());
+    assert_eq!(
+        summary.cursor as usize,
+        r.source.original_text().unwrap().len()
+    );
     for page in r.pages.values() {
         assert!(
             page.chunks
@@ -201,11 +435,14 @@ fn zero_advance_measured_runs_yield_and_progress_at_whole_cluster_limits() {
     measure.factor = 0.;
     let mut scan = layout::Scan::new(0);
     for _ in 0..63 {
-        assert!(scan.step(&source, 10_000, 100., &mut measure, 64).is_none());
+        assert!(
+            scan.step(&source, 0, 10_000, 100., &mut measure, 64)
+                .is_none()
+        );
     }
     let mut line = None;
     for _ in 0..2 {
-        line = scan.step(&source, 10_000, 100., &mut measure, 64);
+        line = scan.step(&source, 0, 10_000, 100., &mut measure, 64);
         if line.is_some() {
             break;
         }
@@ -248,12 +485,12 @@ fn appended_paragraphs_preserve_existing_geometry_and_anchor() {
     settle(&mut r);
     let before = r.frame();
     let anchor = r.anchor();
-    let original = r.source.text().to_owned();
+    let original = r.source.original_text().unwrap().to_owned();
     r.append_blocks(&["third paragraph".into(), "fourth paragraph".into()])
         .unwrap();
     settle(&mut r);
     assert_eq!(r.anchor(), anchor);
-    assert!(r.source.text().starts_with(&original));
+    assert!(r.source.original_text().unwrap().starts_with(&original));
     assert_eq!(r.source.block(2), Some("third paragraph"));
     for old in before.draws {
         let retained = r
@@ -264,7 +501,7 @@ fn appended_paragraphs_preserve_existing_geometry_and_anchor() {
             .unwrap();
         assert!(Arc::ptr_eq(&retained.chunk, &old.chunk));
     }
-    let snapshot = r.source.text().to_owned();
+    let snapshot = r.source.original_text().unwrap().to_owned();
     assert!(r.append_blocks(&["bad\nparagraph".into()]).is_err());
-    assert_eq!(r.source.text(), snapshot);
+    assert_eq!(r.source.original_text().unwrap(), snapshot);
 }

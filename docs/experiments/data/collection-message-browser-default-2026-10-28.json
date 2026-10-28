@@ -1,0 +1,304 @@
+{
+  "results": [
+    {
+      "dpr": 1,
+      "frame": 0,
+      "active_pixels": 85949,
+      "changed_pixels": 104,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 192,
+        "y": 692,
+        "reference": [
+          160,
+          166,
+          168
+        ],
+        "candidate": [
+          161,
+          166,
+          168
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.0004033399651731453,
+      "edge_pixels": 85364,
+      "mean_edge_byte_error": 0.0004061040563547475
+    },
+    {
+      "dpr": 1,
+      "frame": 1,
+      "active_pixels": 85988,
+      "changed_pixels": 101,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 192,
+        "y": 686,
+        "reference": [
+          168,
+          173,
+          175
+        ],
+        "candidate": [
+          168,
+          173,
+          174
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.0003915274999612349,
+      "edge_pixels": 85418,
+      "mean_edge_byte_error": 0.0003941401890311956
+    },
+    {
+      "dpr": 1,
+      "frame": 17,
+      "active_pixels": 76131,
+      "changed_pixels": 93,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 323,
+        "y": 695,
+        "reference": [
+          163,
+          168,
+          170
+        ],
+        "candidate": [
+          163,
+          169,
+          170
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.00040719286493018614,
+      "edge_pixels": 75530,
+      "mean_edge_byte_error": 0.0004104329405534225
+    },
+    {
+      "dpr": 1,
+      "frame": 59,
+      "active_pixels": 62230,
+      "changed_pixels": 79,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 695,
+        "y": 699,
+        "reference": [
+          178,
+          182,
+          183
+        ],
+        "candidate": [
+          178,
+          183,
+          183
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.00042316139054046815,
+      "edge_pixels": 61754,
+      "mean_edge_byte_error": 0.0004264231196899526
+    },
+    {
+      "dpr": 1,
+      "frame": 79,
+      "active_pixels": 77564,
+      "changed_pixels": 105,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 321,
+        "y": 698,
+        "reference": [
+          124,
+          132,
+          136
+        ],
+        "candidate": [
+          124,
+          131,
+          136
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.0004512402661028312,
+      "edge_pixels": 77065,
+      "mean_edge_byte_error": 0.00045416207097904364
+    },
+    {
+      "dpr": 2,
+      "frame": 0,
+      "active_pixels": 268705,
+      "changed_pixels": 209,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 1180,
+        "y": 1390,
+        "reference": [
+          30,
+          42,
+          54
+        ],
+        "candidate": [
+          31,
+          42,
+          54
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.0002592682185544246,
+      "edge_pixels": 235384,
+      "mean_edge_byte_error": 0.00029597027268916606
+    },
+    {
+      "dpr": 2,
+      "frame": 1,
+      "active_pixels": 269278,
+      "changed_pixels": 242,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 732,
+        "y": 1388,
+        "reference": [
+          73,
+          82,
+          91
+        ],
+        "candidate": [
+          73,
+          83,
+          91
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.00029956649509676493,
+      "edge_pixels": 236581,
+      "mean_edge_byte_error": 0.00034096849141168
+    },
+    {
+      "dpr": 2,
+      "frame": 17,
+      "active_pixels": 238583,
+      "changed_pixels": 183,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 573,
+        "y": 1391,
+        "reference": [
+          91,
+          100,
+          107
+        ],
+        "candidate": [
+          92,
+          100,
+          107
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.00025567622169224126,
+      "edge_pixels": 208242,
+      "mean_edge_byte_error": 0.0002929284198192488
+    },
+    {
+      "dpr": 2,
+      "frame": 59,
+      "active_pixels": 196537,
+      "changed_pixels": 136,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 637,
+        "y": 1399,
+        "reference": [
+          121,
+          129,
+          133
+        ],
+        "candidate": [
+          121,
+          129,
+          134
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.00023235658764846653,
+      "edge_pixels": 172401,
+      "mean_edge_byte_error": 0.0002648863212317021
+    },
+    {
+      "dpr": 2,
+      "frame": 79,
+      "active_pixels": 242750,
+      "changed_pixels": 218,
+      "above_one_pixels": 0,
+      "max_byte_error": 1,
+      "worst_pixel": {
+        "x": 2192,
+        "y": 1399,
+        "reference": [
+          58,
+          68,
+          77
+        ],
+        "candidate": [
+          57,
+          68,
+          77
+        ]
+      },
+      "error_bounds": null,
+      "mean_active_byte_error": 0.000299347751458977,
+      "edge_pixels": 213274,
+      "mean_edge_byte_error": 0.0003407197626839965
+    }
+  ],
+  "cacheReports": [
+    {
+      "dpr": 1,
+      "stream": "reference",
+      "hits": 8114,
+      "misses": 40,
+      "fallbacks": 0,
+      "resets": 0,
+      "bytes": 4194304
+    },
+    {
+      "dpr": 1,
+      "stream": "candidate",
+      "hits": 4439,
+      "misses": 39,
+      "fallbacks": 0,
+      "resets": 0,
+      "bytes": 4194304
+    },
+    {
+      "dpr": 2,
+      "stream": "reference",
+      "hits": 8114,
+      "misses": 40,
+      "fallbacks": 0,
+      "resets": 1,
+      "bytes": 4194304
+    },
+    {
+      "dpr": 2,
+      "stream": "candidate",
+      "hits": 4439,
+      "misses": 39,
+      "fallbacks": 0,
+      "resets": 1,
+      "bytes": 4194304
+    }
+  ],
+  "subpixel_bits": 4,
+  "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)"
+}

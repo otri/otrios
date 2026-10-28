@@ -78,6 +78,13 @@ retained history, live drafts, clockwork avatars, playful commands and
 Monitoring-backed moderation. [RFC 0022](docs/rfcs/0022-playful-shared-chat-room.md)
 records the design and qualification requirements.
 
+[Viewport-scoped collections](docs/rfcs/0024-viewport-scoped-collections.md) now
+synchronize bounded coherent message windows over the shared session. Stable
+message blocks retain text/avatar placement and source anchors through window
+replacement and reflow. [Browser/frame and rollback evidence](docs/experiments/collection-windows-2026-10-28.md)
+records the deployed migration and fixed-window measurements through 25,000
+messages.
+
 The [modern app pattern and retirement map](docs/MODERN_APP_PATTERN.md) defines the target ownership model, current implementation limits and concrete gates for deleting the earlier dashboard paths.
 
 The [bounded Merkle hierarchy and subtree transport](docs/rfcs/0005-merkle-subtree-prototype.md)

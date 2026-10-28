@@ -98,21 +98,23 @@ impl Viewport {
     pub fn touching(&self) -> bool {
         self.motion.touching()
     }
-    pub fn append_blocks(&mut self, blocks: &[String], follow: bool) -> Result<()> {
-        if let Some(reader) = &mut self.reader {
-            reader.append_blocks(blocks)?;
-        } else {
-            self.source.append_blocks(blocks)?;
-        }
-        self.follow_tail |= follow;
-        Ok(())
-    }
     pub fn replace_source(&mut self, source: Source, anchor: Option<super::Anchor>) {
         self.source = source;
         self.reader = None;
         self.font_key = None;
         self.bounds_dirty = true;
         self.pending_anchor = anchor;
+    }
+    pub fn replace_blocks(&mut self, source: Source) -> Result<()> {
+        if let Some(reader) = &mut self.reader
+            && reader.source().structured()
+        {
+            reader.replace_blocks(source.clone())?;
+            self.source = source;
+        } else {
+            self.replace_source(source, None);
+        }
+        Ok(())
     }
     pub fn follow_tail(&mut self) {
         self.follow_tail = true;
@@ -125,22 +127,8 @@ impl Viewport {
                 .as_ref()
                 .is_none_or(|r| r.offset() + r.height >= r.extent().0 - 2. * r.line_height())
     }
-    pub fn at_top(&self) -> bool {
-        self.reader.as_ref().is_some_and(|r| r.offset() < r.height)
-    }
     pub fn anchor(&self) -> Option<super::Anchor> {
         self.reader.as_ref().map(Reader::anchor)
-    }
-    pub fn visible_blocks(&self) -> ([f32; 4], Vec<(u32, f32)>) {
-        (
-            self.clip,
-            self.reader.as_ref().map_or_else(Vec::new, |r| {
-                r.visible_block_origins()
-                    .into_iter()
-                    .map(|(block, y)| (block, y as f32 + self.origin[1]))
-                    .collect()
-            }),
-        )
     }
     pub fn cancel(&mut self) {
         self.motion.cancel();

@@ -5,7 +5,7 @@ import {webcrypto} from 'node:crypto';
 import {digest,uiOnlyChange,prepareUiUpdate} from '../web/shared/ui-update.mjs';
 globalThis.crypto??=webcrypto;
 const asset=n=>({bytes:n,sha256:String(n).repeat(64)});
-const baseline=()=>({ui_abi:'otrios-app-ui-v1',sync_protocol:'otrios-canvas-sync-v6',assets:{'apps/catalog.flex':asset(1),'web/app.js':asset(2),'native/armv7/dashboard-native':asset(3)},authority:{'authority/apps/home/ui.flex':asset(4),'authority/apps/home/behavior.wasm':asset(5),'authority/apps/other/ui.flex':asset(6)}});
+const baseline=()=>({ui_abi:'otrios-app-ui-v1',sync_protocol:'otrios-canvas-sync-v8',assets:{'apps/catalog.flex':asset(1),'web/app.js':asset(2),'native/armv7/dashboard-native':asset(3)},authority:{'authority/apps/home/ui.flex':asset(4),'authority/apps/home/behavior.wasm':asset(5),'authority/apps/other/ui.flex':asset(6)}});
 test('App UI replacement requires the identical executable and other-app closure',()=>{
  const a=baseline(),b=structuredClone(a);b.assets['apps/catalog.flex']=asset(7);b.authority['authority/apps/home/ui.flex']=asset(8);assert(uiOnlyChange(a,b));
  for(const mutate of [m=>m.assets['web/app.js']=asset(9),m=>m.authority['authority/apps/home/behavior.wasm']=asset(9),m=>m.sync_protocol='future',m=>delete m.ui_abi,m=>m.assets['extra']=asset(1)]){const bad=structuredClone(b);mutate(bad);assert(!uiOnlyChange(a,bad));}

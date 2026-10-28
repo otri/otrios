@@ -101,5 +101,8 @@ pub mod canvas;
 #[cfg(feature = "merkle")]
 pub mod merkle;
 
+#[cfg(feature = "merkle")]
+pub mod collection;
+
 #[cfg(feature = "dashboard")]
 mod flex_guard;

@@ -20,12 +20,12 @@ try{
     browser.once('error',error=>{clearTimeout(timer);reject(error);});browser.once('exit',code=>{clearTimeout(timer);reject(Error(`Chromium exited ${code}: ${log.slice(-1200)}`));});
   });
   socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
-  let serial=0;const pending=new Map(),inkReceived=new Map(),socketCount=new Map(),sentFrames=new Map(),sentBytes=new Map(),hellos=new Map();
+  let serial=0,privateSentBody;const pending=new Map(),inkReceived=new Map(),socketCount=new Map(),sentFrames=new Map(),sentBytes=new Map(),hellos=new Map(),receivedChannels=new Map(),bodyLeaks=[];
   socket.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.id){const task=pending.get(m.id);if(task){pending.delete(m.id);clearTimeout(task.timer);if(m.error)task.reject(Error(JSON.stringify(m.error)));else task.resolve(m.result);}}
     else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===1){try{const h=JSON.parse(m.params.response.payloadData);if(h.type==='hello')hellos.set(m.sessionId,h);}catch{}}
     else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===2){sentFrames.set(m.sessionId,(sentFrames.get(m.sessionId)||0)+1);sentBytes.set(m.sessionId,(sentBytes.get(m.sessionId)||0)+Buffer.from(m.params.response.payloadData,'base64').length);}
     else if(m.method==='Network.webSocketCreated')socketCount.set(m.sessionId,(socketCount.get(m.sessionId)||0)+1);
-    else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2&&Buffer.from(m.params.response.payloadData,'base64')[0]===2)inkReceived.set(m.sessionId,(inkReceived.get(m.sessionId)||0)+1);
+    else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2){const bytes=Buffer.from(m.params.response.payloadData,'base64'),channel=bytes[0],key=m.sessionId+':'+channel,old=receivedChannels.get(key)||{frames:0,bytes:0};receivedChannels.set(key,{frames:old.frames+1,bytes:old.bytes+bytes.length});if(channel===2)inkReceived.set(m.sessionId,(inkReceived.get(m.sessionId)||0)+1);if(channel===3&&privateSentBody&&bytes.includes(Buffer.from(privateSentBody)))bodyLeaks.push(m.sessionId);}
   });
   const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout: ${method}`));},30000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
   const evaluate=async(session,expression)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
@@ -85,11 +85,15 @@ try{
   await wait(a,"JSON.parse(document.querySelector('#revision').dataset.chat).pending===0");
   await dispatch(b,'A dispatch from the other station.');
   await wait(a,"document.querySelector('#chat-log').textContent.includes('other station')");
+  const sentSnapshot=await evaluate(a,`(()=>{const row=[...document.querySelector('#chat-log').children].find(row=>row.textContent.includes(${JSON.stringify(draft)}));return {sequence:row.dataset.sequence,text:row.textContent};})()`);
   console.log('messages exchanged');await control(a,'Edit profile');await screenshot(a,'profile-icons');
   await control(a,'Next avatars');await control(a,'Next avatars');await control(a,'Next avatars');
   const avatar=(await controls(a)).find(c=>c.label.includes('Pocket watch'));assert(avatar);await control(a,avatar.label);
   await control(a,'Edit room name');await press(a,'a',4);await paste(a,nickname);await control(a,'Save profile');
   await wait(a,`JSON.parse(document.querySelector('#revision').dataset.chat).name===${JSON.stringify(nickname)}`);
+  for(const session of [a,b])assert.equal(await evaluate(session,`[...document.querySelector('#chat-log').children].find(row=>row.dataset.sequence===${JSON.stringify(sentSnapshot.sequence)}).textContent`),sentSnapshot.text,'profile changes preserve the immutable sender snapshot on a sent record');
+  privateSentBody='A dispatch with the new sender snapshot '+Date.now();
+  await dispatch(a,privateSentBody);
   for(const session of [a,b])await wait(session,`(()=>{const log=document.querySelector('#chat-log').textContent;return log.includes(${JSON.stringify(nickname)})&&log.includes(${JSON.stringify(draft)});})()`);
   assert((await info(a)).avatar>=56);
   const shortComposerHeight=(await controls(a)).find(c=>c.label==='Message composer').bounds[3];
@@ -111,6 +115,20 @@ try{
   await dispatch(a,'/roll 2d6');await wait(b,"document.querySelector('#chat-log').textContent.includes('rolls 2d6')");
   await dispatch(a,'/steam');
   await screenshot(a,'lounge-landscape');await screenshot(b,'lounge-portrait');
+  const documentStats=s=>evaluate(s,"JSON.parse(document.querySelector('#revision').dataset.runtimeResources).text_document");
+  const beforeScroll=await documentStats(a),beforeAuthors=(await info(a)).authors_revision;
+  await call('Page.bringToFront',{},a);
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:450,y:250},a);
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,x:450,y:420},a);
+  await wait(a,`JSON.parse(document.querySelector('#revision').dataset.runtimeResources).text_document.offset<${beforeScroll.offset-20}`);
+  await new Promise(r=>setTimeout(r,200));
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:450,y:420},a);
+  await wait(a,"!JSON.parse(document.querySelector('#revision').dataset.chat).history_loading");
+  const afterScroll=await documentStats(a);
+  assert.equal(afterScroll.source_bytes,beforeScroll.source_bytes,'panning does not reconstruct message source');
+  assert.equal((await info(a)).authors_revision,beforeAuthors);
+  await screenshot(a,'transcript-drag-landscape');
+  await writeFile(join(output,'message-block-scroll.json'),JSON.stringify({passed:true,before:beforeScroll,after:afterScroll},null,2));
   await control(b,'Members');await screenshot(b,'members-portrait');
   assert((await controls(b)).some(c=>c.label==='Close dialog'));
   assert(!(await evaluate(b,"document.querySelector('#view').getAttribute('aria-label')")).includes('questionable ideas'));
@@ -126,10 +144,12 @@ try{
   await wait(b,`document.querySelector('#chat-log').textContent.includes(${JSON.stringify('Dispatch after graphics recovery '+nickname)})`);
   await control(a,'Back to OTriOS');await ready(a,'home','800x1280');await screenshot(a,'home-portrait');
   assert.deepEqual((await controls(a)).map(c=>c.label),['The Brass Relay','Test Playground','Monitoring']);
+  const homeBeforeLogin=await evaluate(a,"document.querySelector('#revision').dataset.epoch");
   await evaluate(a,"[...document.querySelectorAll('#controls button')].find(b=>b.getAttribute('aria-label')==='Monitoring').click();true");
   await wait(a,"document.querySelector('#monitoring-login').open&&document.title==='OTriOS · Monitoring'");
   assert.equal(await evaluate(a,"document.querySelector('meta[property=\"og:title\"]').content"),'Monitoring');
   await evaluate(a,"document.querySelector('#login-back').click();true");await wait(a,"document.title==='OTriOS'");await ready(a,'home','800x1280');
+  await wait(a,`document.querySelector('#revision').dataset.epoch!==${JSON.stringify(homeBeforeLogin)}&&document.querySelector('#revision').dataset.screen==='home'`);
   const phone=a;await metrics(phone,390,844);await ready(phone,'home','800x1280');
   await click(phone,'The Brass Relay','brass-relay',chatViewport(390,844).join('x'));await online(phone);
   await control(phone,'Message composer');await paste(phone,'The viewport keeps its width.');
@@ -154,6 +174,11 @@ try{
   await ready(phone,'brass-relay',chatViewport(390,844).join('x'));
   await screenshot(phone,'phone-full-height');
   await writeFile(join(output,'mobile-reflow.json'),JSON.stringify({passed:true,fontSizeCss:phoneFont,immediateWidth,before:phoneBefore,after:phoneAfter},null,2));
+  const windows=await Promise.all([info(a),info(b)]);
+  for(const window of windows){assert(window.messages<=64);assert(window.selected_bytes<=256*1024);assert(window.replica_bytes<=512*1024);}
+  for(const session of [a,b]){assert(receivedChannels.get(session+':4')?.frames>0,'both browsers consume the collection channel');assert.equal(hellos.get(session)?.version,1);assert.equal(hellos.get(session)?.state_protocol,'otrios-canvas-sync-v8');}
+  assert.deepEqual(bodyLeaks,[],'a private sent body must not be broadcast over the ephemeral room lane');
+  await writeFile(join(output,'collection-transport.json'),JSON.stringify({passed:true,windows,channels:Object.fromEntries(receivedChannels),hellos:Object.fromEntries(hellos),privateBodyLeaks:bodyLeaks.length},null,2));
   const result={passed:true,checks:['unified Home in both orientations','independent persistent guest cookies','live draft visibility and private clearing','bidirectional durable messages','64-avatar paging and profile rename','wrapped composer grows and scrolls its caret into view','native textarea focus, selection replacement and IME composition','no app keyboard in browsers','multiline paste','identity and history survive reload','commands and particles','member dialog close control','responsive retained transcript','visual viewport-only keyboard reflow preserves width, focus, text and selection','WebGL loss/recovery replays resources and preserves identity'],screenshots:output};
   await writeFile(join(output,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{

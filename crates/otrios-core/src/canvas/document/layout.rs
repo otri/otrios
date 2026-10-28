@@ -2,7 +2,7 @@
 //! Prototype typography: LTR, one glyph per extended grapheme, missing clusters
 //! map once to glyph 0. Greedy breaks after ASCII spaces/tabs/hyphens; otherwise
 //! break before the overflowing grapheme. No normalization or complex shaping.
-use super::Source;
+use super::{Source, source::Key};
 use crate::dashboard::font::Font;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -17,6 +17,7 @@ pub(super) struct Token {
     pub advance: f64,
     pub tab: bool,
     pub break_after: bool,
+    pub hard_break: bool,
 }
 struct MeasuredPage {
     tokens: Box<[Token]>,
@@ -24,8 +25,8 @@ struct MeasuredPage {
 }
 pub(super) struct Measure {
     pub font: Arc<Font>,
-    pages: BTreeMap<u32, MeasuredPage>,
-    page_hint: Option<(u32, usize)>,
+    pages: BTreeMap<(Key, u32), MeasuredPage>,
+    page_hint: Option<((Key, u32), usize)>,
     stamp: u64,
     fallback: u16,
     ascii: [u16; 128],
@@ -70,9 +71,11 @@ impl Measure {
             measurement_ns: 0,
         }
     }
-    pub fn token(&mut self, source: &Source, cursor: u32, end: u32) -> Token {
+    pub fn token(&mut self, source: &Source, block: usize, cursor: u32, end: u32) -> Token {
         self.stamp += 1;
+        let identity = source.key(block);
         if let Some((key, index)) = self.page_hint
+            && key.0 == identity
             && let Some(page) = self.pages.get_mut(&key)
             && let Some(token) = page
                 .tokens
@@ -84,7 +87,8 @@ impl Measure {
             page.used = self.stamp;
             return token;
         }
-        if let Some((key, page)) = self.pages.range_mut(..=cursor).next_back()
+        if let Some((key, page)) = self.pages.range_mut(..=(identity, cursor)).next_back()
+            && key.0 == identity
             && let Ok(i) = page.tokens.binary_search_by_key(&cursor, |t| t.start)
         {
             self.page_hint = Some((*key, i + 1));
@@ -98,36 +102,36 @@ impl Measure {
         #[cfg(not(target_arch = "wasm32"))]
         let start = self.profiling.then(std::time::Instant::now);
         let glyphs = self.font.glyphs();
-        let tokens: Box<[_]> =
-            super::clusters::Clusters::new(&source.text[cursor as usize..end as usize])
-                .take(TOKENS_PER_PAGE)
-                .map(|(at, cluster)| {
-                    let mut chars = cluster.chars();
-                    let first = chars.next().unwrap();
-                    let glyph = if cluster.len() == 1 {
-                        self.ascii[cluster.as_bytes()[0] as usize]
-                    } else if chars.next().is_none() {
-                        glyphs
-                            .binary_search_by_key(&first, |g| g.scalar)
-                            .map_or(self.fallback, |n| n as u16)
-                    } else {
-                        self.fallback
-                    };
-                    Token {
-                        start: cursor + at as u32,
-                        end: cursor + (at + cluster.len()) as u32,
-                        glyph,
-                        advance: f64::from(glyphs[glyph as usize].advance) * self.factor,
-                        tab: cluster == "\t",
-                        break_after: matches!(cluster, " " | "\t" | "-"),
-                    }
-                })
-                .collect();
+        let tokens: Box<[_]> = super::clusters::Clusters::new(source.slice(block, cursor..end))
+            .take(TOKENS_PER_PAGE)
+            .map(|(at, cluster)| {
+                let mut chars = cluster.chars();
+                let first = chars.next().unwrap();
+                let glyph = if cluster.len() == 1 {
+                    self.ascii[cluster.as_bytes()[0] as usize]
+                } else if chars.next().is_none() {
+                    glyphs
+                        .binary_search_by_key(&first, |g| g.scalar)
+                        .map_or(self.fallback, |n| n as u16)
+                } else {
+                    self.fallback
+                };
+                Token {
+                    start: cursor + at as u32,
+                    end: cursor + (at + cluster.len()) as u32,
+                    glyph,
+                    advance: f64::from(glyphs[glyph as usize].advance) * self.factor,
+                    tab: cluster == "\t",
+                    break_after: matches!(cluster, " " | "\t" | "-"),
+                    hard_break: cluster == "\n",
+                }
+            })
+            .collect();
         let token = tokens[0];
-        self.page_hint = Some((cursor, 1));
+        self.page_hint = Some(((identity, cursor), 1));
         self.measured += tokens.len() as u64;
         self.pages.insert(
-            cursor,
+            (identity, cursor),
             MeasuredPage {
                 tokens,
                 used: self.stamp,
@@ -151,7 +155,12 @@ impl Measure {
             + self
                 .pages
                 .values()
-                .map(|p| p.tokens.len() * size_of::<Token>() + size_of::<MeasuredPage>() + 48)
+                .map(|p| {
+                    p.tokens.len() * size_of::<Token>()
+                        + size_of::<MeasuredPage>()
+                        + size_of::<(Key, u32)>()
+                        + 48
+                })
                 .sum::<usize>()
     }
 }
@@ -188,6 +197,7 @@ impl Scan {
     pub fn step(
         &mut self,
         source: &Source,
+        block: usize,
         end: u32,
         width: f64,
         measure: &mut Measure,
@@ -197,7 +207,12 @@ impl Scan {
             if self.cursor == end || self.glyphs.len() == MAX_LINE_CLUSTERS {
                 return Some(self.finish(self.glyphs.len()));
             }
-            let token = measure.token(source, self.cursor, end);
+            let token = measure.token(source, block, self.cursor, end);
+            if token.hard_break {
+                let mut line = self.finish(self.glyphs.len());
+                line.end = token.end;
+                return Some(line);
+            }
             let advance = measure.advance(token, self.x);
             if self.x + advance > width && !self.glyphs.is_empty() {
                 let count = if self.last_break > 0 {

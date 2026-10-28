@@ -1,8 +1,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0024: Viewport-scoped collection synchronization
 
-Status: proposed. Clarifies the user's pervasive-sync objective; not implemented
-by the chat UI fixes. Extends [RFC 0003](0003-module-roots-and-state-selectors.md),
+Status: implemented and deployed on 2026-10-28. Both delivery gates are
+qualified: reusable bounded ordered collections over the shared session, and
+Brass Relay's single-owner journal migration with stable message blocks. The
+2,000/25,000-row browser runs, separate-process scaling, independent pixel
+comparisons, physical native page flips and journal rollback/restart evidence
+are recorded in the [implementation ledger](../experiments/collection-windows-2026-10-28.md).
+The existing frame/web environment runs signed release
+`37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16`.
+State protocol is v8; release-control hello remains v1. Physical human interaction,
+long-term soak and the default-renderer DPR 3.2 rounding limitation described in
+the ledger are not claimed as resolved by these fixtures.
+Clarifies the user's pervasive-sync objective; not implemented by the chat UI
+fixes. Extends [RFC 0003](0003-module-roots-and-state-selectors.md),
 the existing partial Merkle replica, and [RFC 0023](0023-retained-presentation-foundation.md).
 
 ## The missing boundary
@@ -13,8 +24,8 @@ including scrollback, rather than downloading the full thread or implementing a
 separate application-specific history protocol. Server authority still controls
 admission, ordering and moderation. CRDT replication does not grant permission.
 
-Today Canvas uses covered Merkle synchronization for bounded typed fields. Chat
-instead uses a separate ordered journal and history commands over channel 3.
+The pre-RFC implementation uses covered Merkle synchronization for bounded typed
+Canvas fields. Chat instead uses a separate ordered journal and history commands over channel 3.
 That is a bounded prototype shortcut, not the intended reusable data mechanism.
 Keep its durability and retry guarantees during the cutover, then retire its
 history-specific replication path. Presence, expiring drafts and particle events

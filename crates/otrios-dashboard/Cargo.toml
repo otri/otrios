@@ -94,3 +94,7 @@ required-features = ["canvas", "host-sync"]
 [[example]]
 name = "cache_reuse_probe"
 required-features = ["direct"]
+
+[[example]]
+name = "chat_loopback_probe"
+required-features = ["canvas", "host-sync"]

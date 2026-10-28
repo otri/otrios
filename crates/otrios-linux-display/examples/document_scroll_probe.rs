@@ -3,6 +3,8 @@
 //! as the native app. Use an exclusive-display controller that restores services.
 #[path = "../../otrios-dashboard/src/document_gpu.rs"]
 mod document_gpu;
+#[path = "../../otrios-core/examples/common/message_fixture.rs"]
+mod message_fixture;
 use otrios_core::{
     canvas::document::{Reader, Source},
     dashboard::{display::Surface, font::Font, font_reference},
@@ -23,9 +25,9 @@ fn p(values: &mut [u64], q: f64) -> u64 {
 }
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let source = args
-        .next()
-        .ok_or("Supply UTF-8 corpus, seconds, speed, rotation, optional capture")?;
+    let source = args.next().ok_or(
+        "Supply UTF-8 corpus or messages:1..64, seconds, speed, rotation, optional capture",
+    )?;
     let seconds = args
         .next()
         .unwrap_or("30".into())
@@ -57,7 +59,12 @@ fn main() -> Result<(), String> {
     let surface = Surface::with_size(rotation, logical_size)?;
     let extent = logical_size.map(|n| n as f32);
     let start = Instant::now();
-    let source = Source::new(std::fs::read_to_string(source).map_err(|e| e.to_string())?)?;
+    let source = if let Some(count) = source.strip_prefix("messages:") {
+        let count = count.parse::<u64>().map_err(|e| e.to_string())?;
+        message_fixture::source(&message_fixture::samples(100, count)?)?
+    } else {
+        Source::new(std::fs::read_to_string(source).map_err(|e| e.to_string())?)?
+    };
     let source_bytes = source.source_bytes();
     let source_us = start.elapsed().as_micros();
     let font = Arc::new(Font::from_zstd(

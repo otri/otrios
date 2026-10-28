@@ -1,0 +1,247 @@
+{
+  "pixels": {
+    "status": 0,
+    "stderr": "Text probe GL renderer: Mali400\nCached text upload bytes 1010560\nText cache key preparation 322.895 ms; cached vertex packing/upload 11.192 ms total; recent hits 12592\nText probe GL renderer: Mali400\nCached text upload bytes 1010560\nText cache key preparation 333.250 ms; cached vertex packing/upload 11.056 ms total; recent hits 12592\n",
+    "comparisons": [
+      {
+        "rotation": 0,
+        "frame": 0,
+        "pixels": 1024000,
+        "active_pixels": 87021,
+        "changed_pixels": 1159,
+        "above_one_pixels": 423,
+        "max_byte_error": 4,
+        "edge_pixels": 86463,
+        "mean_edge_byte_error": 0.01343927460300938,
+        "mean_active_byte_error": 0.01335309867733076
+      },
+      {
+        "rotation": 0,
+        "frame": 1,
+        "pixels": 1024000,
+        "active_pixels": 87162,
+        "changed_pixels": 1148,
+        "above_one_pixels": 419,
+        "max_byte_error": 4,
+        "edge_pixels": 86588,
+        "mean_edge_byte_error": 0.01351996427526524,
+        "mean_active_byte_error": 0.01343092938054045
+      },
+      {
+        "rotation": 0,
+        "frame": 17,
+        "pixels": 1024000,
+        "active_pixels": 77259,
+        "changed_pixels": 897,
+        "above_one_pixels": 331,
+        "max_byte_error": 4,
+        "edge_pixels": 76688,
+        "mean_edge_byte_error": 0.011722824953056541,
+        "mean_active_byte_error": 0.011636184781061105
+      },
+      {
+        "rotation": 0,
+        "frame": 59,
+        "pixels": 1024000,
+        "active_pixels": 63423,
+        "changed_pixels": 701,
+        "above_one_pixels": 299,
+        "max_byte_error": 4,
+        "edge_pixels": 62953,
+        "mean_edge_byte_error": 0.01218898755155963,
+        "mean_active_byte_error": 0.012098660317760645
+      },
+      {
+        "rotation": 0,
+        "frame": 79,
+        "pixels": 1024000,
+        "active_pixels": 78533,
+        "changed_pixels": 1332,
+        "above_one_pixels": 570,
+        "max_byte_error": 7,
+        "edge_pixels": 78039,
+        "mean_edge_byte_error": 0.019515883084098976,
+        "mean_active_byte_error": 0.0193931213629939
+      },
+      {
+        "rotation": 90,
+        "frame": 0,
+        "pixels": 1024000,
+        "active_pixels": 87016,
+        "changed_pixels": 1201,
+        "above_one_pixels": 435,
+        "max_byte_error": 4,
+        "edge_pixels": 86458,
+        "mean_edge_byte_error": 0.013833306345277475,
+        "mean_active_byte_error": 0.013744598694492967
+      },
+      {
+        "rotation": 90,
+        "frame": 1,
+        "pixels": 1024000,
+        "active_pixels": 87159,
+        "changed_pixels": 1214,
+        "above_one_pixels": 440,
+        "max_byte_error": 4,
+        "edge_pixels": 86585,
+        "mean_edge_byte_error": 0.014186444919250833,
+        "mean_active_byte_error": 0.014093017741522199
+      },
+      {
+        "rotation": 90,
+        "frame": 17,
+        "pixels": 1024000,
+        "active_pixels": 77253,
+        "changed_pixels": 950,
+        "above_one_pixels": 360,
+        "max_byte_error": 4,
+        "edge_pixels": 76682,
+        "mean_edge_byte_error": 0.012554010936943047,
+        "mean_active_byte_error": 0.01246122049197658
+      },
+      {
+        "rotation": 90,
+        "frame": 59,
+        "pixels": 1024000,
+        "active_pixels": 63418,
+        "changed_pixels": 1070,
+        "above_one_pixels": 495,
+        "max_byte_error": 5,
+        "edge_pixels": 62947,
+        "mean_edge_byte_error": 0.01996388496142257,
+        "mean_active_byte_error": 0.01981561491479811
+      },
+      {
+        "rotation": 90,
+        "frame": 79,
+        "pixels": 1024000,
+        "active_pixels": 78530,
+        "changed_pixels": 1219,
+        "above_one_pixels": 473,
+        "max_byte_error": 4,
+        "edge_pixels": 78036,
+        "mean_edge_byte_error": 0.015962718061749277,
+        "mean_active_byte_error": 0.015862303153784115
+      }
+    ]
+  },
+  "runs": [
+    {
+      "rotation": 90,
+      "status": 0,
+      "stderr": "Text probe GL renderer: Mali400\nCached text upload bytes 485760\nText cache key preparation 317.915 ms; cached vertex packing/upload 15.673 ms total; recent hits 6032\n",
+      "metrics": {
+        "source_bytes": 295434,
+        "source_admission_us": 36217,
+        "first_visible_us": 5672,
+        "seconds": 20,
+        "startup_us": 1316424,
+        "kernel_span_us": 20001190,
+        "speed": 400,
+        "rotation": 90,
+        "kernel_fps": 56.54663547518923,
+        "frames": 1132,
+        "interval_p50_us": 17653,
+        "interval_p95_us": 17658,
+        "interval_p99_us": 17664,
+        "missed_vblanks": 2,
+        "loading_frames": 0,
+        "cold_loading_frames": 0,
+        "draw_p95_us": 2619,
+        "worker_p95_us": 291,
+        "working_peak_bytes": 2617420,
+        "index_peak_bytes": 3856,
+        "packed_glyphs": 7752,
+        "measured_clusters": 13082,
+        "uploaded_bytes": 1726944,
+        "chunk_uploads": 42,
+        "gpu_evictions": 0
+      }
+    },
+    {
+      "rotation": 90,
+      "status": 0,
+      "stderr": "Text probe GL renderer: Mali400\nCached text upload bytes 485760\nText cache key preparation 327.906 ms; cached vertex packing/upload 15.378 ms total; recent hits 6032\n",
+      "metrics": {
+        "source_bytes": 295434,
+        "source_admission_us": 36034,
+        "first_visible_us": 5821,
+        "seconds": 20,
+        "startup_us": 1291103,
+        "kernel_span_us": 20001192,
+        "speed": 400,
+        "rotation": 90,
+        "kernel_fps": 56.54662982086268,
+        "frames": 1132,
+        "interval_p50_us": 17653,
+        "interval_p95_us": 17658,
+        "interval_p99_us": 17661,
+        "missed_vblanks": 2,
+        "loading_frames": 0,
+        "cold_loading_frames": 0,
+        "draw_p95_us": 2574,
+        "worker_p95_us": 292,
+        "working_peak_bytes": 2617420,
+        "index_peak_bytes": 3856,
+        "packed_glyphs": 7752,
+        "measured_clusters": 13082,
+        "uploaded_bytes": 1726944,
+        "chunk_uploads": 42,
+        "gpu_evictions": 0
+      }
+    },
+    {
+      "rotation": 90,
+      "status": 0,
+      "stderr": "Text probe GL renderer: Mali400\nCached text upload bytes 485760\nText cache key preparation 318.098 ms; cached vertex packing/upload 15.553 ms total; recent hits 6032\n",
+      "metrics": {
+        "source_bytes": 295434,
+        "source_admission_us": 37616,
+        "first_visible_us": 5671,
+        "seconds": 20,
+        "startup_us": 1313165,
+        "kernel_span_us": 20001192,
+        "speed": 400,
+        "rotation": 90,
+        "kernel_fps": 56.54662982086268,
+        "frames": 1132,
+        "interval_p50_us": 17653,
+        "interval_p95_us": 17657,
+        "interval_p99_us": 17661,
+        "missed_vblanks": 2,
+        "loading_frames": 0,
+        "cold_loading_frames": 0,
+        "draw_p95_us": 2414,
+        "worker_p95_us": 293,
+        "working_peak_bytes": 2617420,
+        "index_peak_bytes": 3856,
+        "packed_glyphs": 7752,
+        "measured_clusters": 13082,
+        "uploaded_bytes": 1726944,
+        "chunk_uploads": 42,
+        "gpu_evictions": 0
+      }
+    }
+  ],
+  "capture_failure": "Two attempts exhausted /tmp while saving PPMs. Console/service restored; rerun without captures required.",
+  "failed_capture_attempts": [
+    {
+      "rotation": 90,
+      "status": 1,
+      "stdout": "",
+      "stderr": "Text probe GL renderer: Mali400\nCached text upload bytes 485760\nText cache key preparation 334.937 ms; cached vertex packing/upload 18.910 ms total; recent hits 6032\nError: \"No space left on device (os error 28)\"\n"
+    },
+    {
+      "rotation": 90,
+      "status": 1,
+      "stdout": "",
+      "stderr": "Text probe GL renderer: Mali400\nCached text upload bytes 485760\nText cache key preparation 316.096 ms; cached vertex packing/upload 15.232 ms total; recent hits 6032\nError: \"No space left on device (os error 28)\"\n"
+    }
+  ],
+  "restored": true,
+  "hashes": {
+    "scroll-probe": "0f4b9bc37fa6a7ae9e5df54c8f71838f4af7896d2cb8f4d26515e100e0dccd8c"
+  },
+  "scope": "64-message structured source, real Reader/production GPU adapter; no authority/network, full chat UI, physical touch or typist load",
+  "stable_quads": false
+}

@@ -44,6 +44,7 @@ pub mod canvas;
 #[cfg(feature = "layout")]
 pub mod chat;
 
+pub mod collection;
 pub mod merkle;
 
 #[cfg(feature = "release")]

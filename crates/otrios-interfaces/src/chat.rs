@@ -6,7 +6,10 @@ pub const CHANNEL: u8 = 3;
 pub const MAX_COMMAND_BYTES: usize = 8192;
 pub const MAX_EVENT_BYTES: usize = 192 * 1024;
 pub const AVATARS: u8 = 64;
-pub const PAGE_MESSAGES: usize = 64;
+/// Admitted Brass Relay message collection; identity is not permission.
+pub const COLLECTION: u64 = 22;
+pub const MESSAGE_FIELD: u64 = 1;
+pub const MESSAGE_SCHEMA: &[u8] = b"otrios-brass-relay-message-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,9 +57,6 @@ pub enum Command {
         nonce: String,
         text: String,
     },
-    History {
-        before: u64,
-    },
     ClaimDraft,
     Draft {
         generation: u64,
@@ -88,24 +88,13 @@ pub enum Event {
         credential: Option<String>,
         epoch: u64,
         members: Vec<Member>,
-        messages: Vec<Message>,
-        oldest: u64,
-        newest: u64,
     },
     Members {
         members: Vec<Member>,
     },
-    Message {
-        message: Message,
-    },
     Receipt {
         nonce: String,
         sequence: u64,
-    },
-    History {
-        messages: Vec<Message>,
-        oldest: u64,
-        before: u64,
     },
     DraftLease {
         generation: u64,

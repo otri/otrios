@@ -76,6 +76,241 @@ fn restart(room: &mut Room) {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+#[test]
+fn admitted_collection_owns_sent_snapshots_receipts_and_all_tab_kick_revocation() {
+    use otrios_core::collection as col;
+    let mut room = room(true, 60);
+    let mut writer = socket(&room.private, None);
+    let (author, resume, epoch) = join(&mut writer, None);
+    let mut reader = socket(&room.private, None);
+    let (target, target_resume, _) = join(&mut reader, None);
+    fn send_col(s: &mut Socket, command: col::Command) {
+        s.send(Wire::Binary(
+            frame(col::CHANNEL, col::encode_command(&command).unwrap()).into(),
+        ))
+        .unwrap();
+    }
+    fn next_col(s: &mut Socket) -> col::Event {
+        loop {
+            match s.read().unwrap() {
+                Wire::Binary(bytes) if bytes.first() == Some(&col::CHANNEL) => {
+                    return col::Event::from_bytes(&bytes[1..]).unwrap();
+                }
+                Wire::Ping(_) => s.flush().unwrap(),
+                Wire::Close(_) => panic!("collection socket closed"),
+                _ => (),
+            }
+        }
+    }
+    fn denied_after_revocation(s: &mut Socket, plan: col::Selection) {
+        // The send boundary can suppress a just-revoked queued view before the
+        // worker observes the same revocation. Controls are idempotent and take
+        // priority over an in-flight request; retry only after consuming them.
+        for _ in 0..3 {
+            send_col(
+                s,
+                col::Command::Select {
+                    generation: 2,
+                    plan: plan.clone(),
+                },
+            );
+            match next_col(s) {
+                col::Event::Revoked {
+                    collection: COLLECTION,
+                    ..
+                } => (),
+                col::Event::Rejected {
+                    status: col::Status::Forbidden,
+                    ..
+                } => return,
+                other => panic!("data escaped revoked admission: {other:?}"),
+            }
+        }
+        panic!("revoked selection never reported its denied admission");
+    }
+    let plan = otrios_core::canvas::chat::message_selection(col::Anchor::Tail);
+    let mut stranger = socket(&room.private, None);
+    send_col(
+        &mut stranger,
+        col::Command::Select {
+            generation: 1,
+            plan: plan.clone(),
+        },
+    );
+    assert!(matches!(
+        next_col(&mut stranger),
+        col::Event::Rejected {
+            status: col::Status::Forbidden,
+            ..
+        }
+    ));
+    send_col(
+        &mut reader,
+        col::Command::Select {
+            generation: 1,
+            plan: plan.clone(),
+        },
+    );
+    let col::Event::View(initial) = next_col(&mut reader) else {
+        panic!("view");
+    };
+    let mut replica = col::Replica::new(
+        initial.epoch,
+        COLLECTION,
+        otrios_core::canvas::chat::message_schema(),
+    );
+    replica.begin_request(1, plan.clone()).unwrap();
+    replica.apply(&initial).unwrap();
+    send_col(
+        &mut reader,
+        col::Command::Acknowledge {
+            generation: 1,
+            cursor: initial.transfer.cursor,
+            root: initial.transfer.root,
+        },
+    );
+    let nonce = "1".repeat(32);
+    send_chat(
+        &mut writer,
+        Command::Send {
+            epoch,
+            nonce: nonce.clone(),
+            text: "Immutable dispatch".into(),
+        },
+    );
+    assert!(matches!(
+        until(&mut writer, |e| matches!(e, Event::Receipt { .. })),
+        Event::Receipt { sequence: 1, .. }
+    ));
+    let col::Event::View(sent) = next_col(&mut reader) else {
+        panic!("sent view");
+    };
+    replica.apply(&sent).unwrap();
+    let pinned = replica.window().unwrap().clone();
+    assert_eq!(pinned.keys, vec![1]);
+    let message = otrios_core::canvas::chat::read_message(&pinned.record(1).unwrap()).unwrap();
+    assert_eq!(message.sender, author.profile);
+    assert_eq!(message.text, "Immutable dispatch");
+    send_col(
+        &mut reader,
+        col::Command::Acknowledge {
+            generation: 1,
+            cursor: sent.transfer.cursor,
+            root: sent.transfer.root,
+        },
+    );
+    let mut second_tab = socket(&room.private, None);
+    let (same, _, _) = join(&mut second_tab, target_resume);
+    assert_eq!(same.profile.id, target.profile.id);
+    send_col(
+        &mut second_tab,
+        col::Command::Select {
+            generation: 1,
+            plan: plan.clone(),
+        },
+    );
+    let col::Event::View(unacknowledged) = next_col(&mut second_tab) else {
+        panic!("second tab view");
+    };
+    // Leave this tab's complete private view unacknowledged through the kick.
+    assert_eq!(unacknowledged.generation, 1);
+    send_chat(
+        &mut writer,
+        Command::Profile {
+            name: "Admiral Newname".into(),
+            avatar: 42,
+        },
+    );
+    until(
+        &mut writer,
+        |e| matches!(e, Event::Members { members } if members.iter().any(|m| m.profile.name == "Admiral Newname")),
+    );
+    send_chat(
+        &mut writer,
+        Command::Authenticate {
+            username: "test-user".into(),
+            password: "test-only-password".into(),
+        },
+    );
+    until(&mut writer, |e| {
+        matches!(e, Event::Permissions { admin: true })
+    });
+    send_chat(
+        &mut writer,
+        Command::Kick {
+            participant: target.profile.id,
+            generation: target.generation,
+            reason: "Test cooldown".into(),
+        },
+    );
+    loop {
+        match next_col(&mut reader) {
+            col::Event::Revoked {
+                collection: COLLECTION,
+                ..
+            } => break,
+            col::Event::View(offer) => {
+                replica.apply(&offer).unwrap();
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    replica.revoke();
+    assert!(replica.window().is_none());
+    denied_after_revocation(&mut reader, plan.clone());
+    assert!(matches!(
+        next_col(&mut second_tab),
+        col::Event::Revoked {
+            collection: COLLECTION,
+            ..
+        }
+    ));
+    denied_after_revocation(&mut second_tab, plan.clone());
+    assert_eq!(
+        otrios_core::canvas::chat::read_message(&pinned.record(1).unwrap())
+            .unwrap()
+            .sender,
+        author.profile
+    );
+    restart(&mut room);
+    let mut recovered = socket(&room.private, None);
+    join(&mut recovered, resume);
+    send_chat(
+        &mut recovered,
+        Command::Send {
+            epoch,
+            nonce,
+            text: "Immutable dispatch".into(),
+        },
+    );
+    assert!(matches!(
+        until(&mut recovered, |e| matches!(e, Event::Receipt { .. })),
+        Event::Receipt { sequence: 1, .. }
+    ));
+    send_col(
+        &mut recovered,
+        col::Command::Select {
+            generation: 1,
+            plan: plan.clone(),
+        },
+    );
+    let col::Event::View(after) = next_col(&mut recovered) else {
+        panic!("recovered view");
+    };
+    let mut new_replica = col::Replica::new(
+        after.epoch,
+        COLLECTION,
+        otrios_core::canvas::chat::message_schema(),
+    );
+    new_replica.begin_request(1, plan).unwrap();
+    new_replica.apply(&after).unwrap();
+    assert_eq!(new_replica.window().unwrap().keys, vec![1, 2]);
+    assert_eq!(
+        new_replica.window().unwrap().record(1).unwrap().hash(),
+        pinned.record(1).unwrap().hash()
+    );
+}
 #[test]
 fn room_adapter_handles_identity_live_drafts_native_auth_all_tab_kick_and_recovery() {
     let mut room = room(true, 60);
@@ -168,10 +403,64 @@ fn room_adapter_handles_identity_live_drafts_native_auth_all_tab_kick_and_recove
         Event::Receipt { sequence, .. } => sequence,
         _ => unreachable!(),
     };
-    until(
-        &mut browser,
-        |e| matches!(e,Event::Message{message} if message.sequence==sequence),
-    );
+    // Bodies are obtained only through the generic collection lane.
+    use otrios_core::collection as col;
+    browser
+        .send(Wire::Binary(
+            frame(
+                col::CHANNEL,
+                col::encode_command(&col::Command::Select {
+                    generation: 1,
+                    plan: otrios_core::canvas::chat::message_selection(col::Anchor::Tail),
+                })
+                .unwrap(),
+            )
+            .into(),
+        ))
+        .unwrap();
+    loop {
+        match browser.read().unwrap() {
+            Wire::Binary(bytes) if bytes.first() == Some(&col::CHANNEL) => {
+                let col::Event::View(offer) = col::Event::from_bytes(&bytes[1..]).unwrap() else {
+                    panic!("view");
+                };
+                let mut replica = col::Replica::new(
+                    offer.epoch,
+                    COLLECTION,
+                    otrios_core::canvas::chat::message_schema(),
+                );
+                replica
+                    .begin_request(
+                        1,
+                        otrios_core::canvas::chat::message_selection(col::Anchor::Tail),
+                    )
+                    .unwrap();
+                replica.apply(&offer).unwrap();
+                let message = otrios_core::canvas::chat::read_message(
+                    &replica.window().unwrap().record(sequence).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(message.text, "A durable dispatch");
+                browser
+                    .send(Wire::Binary(
+                        frame(
+                            col::CHANNEL,
+                            col::encode_command(&col::Command::Acknowledge {
+                                generation: 1,
+                                cursor: offer.transfer.cursor,
+                                root: offer.transfer.root,
+                            })
+                            .unwrap(),
+                        )
+                        .into(),
+                    ))
+                    .unwrap();
+                break;
+            }
+            Wire::Ping(_) => browser.flush().unwrap(),
+            _ => (),
+        }
+    }
     send_chat(
         &mut native,
         Command::Kick {

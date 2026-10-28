@@ -1,0 +1,4 @@
+records,index_pages_visited,records_considered,collection_canonical_bytes,selected_bytes,view_canonical_bytes,wire_bytes,authority_rss_kib,replica_rss_kib
+128,5,16,45329,4848,7151,7514,2784,2288
+4096,7,16,1450001,4848,7151,7514,9776,2352
+65536,9,16,23199767,4848,7151,7514,112416,2400

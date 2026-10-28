@@ -2,14 +2,17 @@
 use super::journal::{Entry, Guest, Journal, Receipt};
 use super::{Command, Event, Kind, Member, Message, Profile, Result, err, random};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::BTreeMap,
     path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use unicode_segmentation::UnicodeSegmentation;
 
 const DAY: u64 = 86_400_000;
 const EPOCH: u64 = 600_000;
-const HISTORY_BYTES: usize = 32 * 1024 * 1024;
 const MAX_RECEIPTS: usize = 65_536;
 #[derive(Clone, Debug)]
 pub struct Delivery {
@@ -34,6 +37,12 @@ type Parsed = (Kind, String, Option<(String, Option<String>)>);
 struct Connection {
     id: String,
     admin: bool,
+    admission: Arc<AtomicBool>,
+}
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.admission.store(false, Ordering::Release);
+    }
 }
 #[derive(Default)]
 struct Draft {
@@ -57,10 +66,10 @@ pub struct Room {
     memberships: BTreeMap<String, u64>,
     drafts: BTreeMap<String, Draft>,
     rates: BTreeMap<String, Rate>,
-    messages: VecDeque<Message>,
+    history: super::history::History,
     receipts: BTreeMap<(String, u64, String), Receipt>,
     sequence: u64,
-    history_bytes: usize,
+    failed: bool,
     journal: Option<Journal>,
 }
 fn digest(value: &str) -> String {
@@ -93,29 +102,45 @@ fn name(value: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 impl Room {
+    #[cfg(test)]
+    pub(super) fn fail_journal_writes(&mut self) {
+        self.journal.as_mut().unwrap().fail_writes();
+    }
+    #[cfg(test)]
+    pub(super) fn force_compaction(&mut self) {
+        self.journal.as_mut().unwrap().bytes = 49 * 1024 * 1024;
+    }
     pub fn open(path: Option<PathBuf>, now: u64) -> Result<Self> {
-        let (journal, entries) = if let Some(path) = path {
-            let (j, e) = Journal::open(path)?;
-            (Some(j), e)
-        } else {
-            (None, vec![])
-        };
+        Self::open_in(
+            path,
+            now,
+            Arc::new(Mutex::new(crate::collection::Channel::new(generation()?))),
+        )
+    }
+    pub fn open_in(
+        path: Option<PathBuf>,
+        now: u64,
+        collections: Arc<Mutex<crate::collection::Channel>>,
+    ) -> Result<Self> {
         let mut room = Self {
             guests: BTreeMap::new(),
             connections: BTreeMap::new(),
             memberships: BTreeMap::new(),
             drafts: BTreeMap::new(),
             rates: BTreeMap::new(),
-            messages: VecDeque::new(),
+            history: super::history::History::recovering()?,
             receipts: BTreeMap::new(),
             sequence: 0,
-            history_bytes: 0,
-            journal,
+            failed: false,
+            journal: None,
         };
-        for entry in entries {
-            room.restore(entry, now)?;
+        if let Some(path) = path {
+            room.journal = Some(Journal::recover(path, |entry| room.restore(entry, now))?);
         }
         room.prune(now);
+        // Recovery never exposes a partly rebuilt log, including on a corrupt
+        // later record. The shared registry receives exactly one qualified root.
+        room.history.activate(collections)?;
         Ok(room)
     }
     fn restore(&mut self, entry: Entry, now: u64) -> Result<()> {
@@ -167,22 +192,46 @@ impl Room {
         }
         Ok(())
     }
-    fn add_message(&mut self, message: Message) -> Result<()> {
+    fn prepare_message(&self, message: &Message) -> Result<super::history::Prepared> {
         text(&message.text, 2304, 1200, 18)?;
+        name(&message.sender.name)?;
+        if !super::valid_hex(&message.sender.id, 16)
+            || message.sender.avatar >= super::AVATARS
+            || (!message.nonce.is_empty() && !super::valid_hex(&message.nonce, 16))
+        {
+            return Err("Invalid immutable message profile or nonce".into());
+        }
         if message.sequence <= self.sequence {
             return Err("Chat history sequence is not increasing".into());
         }
+        self.history.prepare(message)
+    }
+    fn add_message(&mut self, message: Message) -> Result<()> {
+        self.history.commit(self.prepare_message(&message)?)?;
+        self.accept_message(&message);
+        Ok(())
+    }
+    fn persist_message(&mut self, message: &Message, entry: &Entry, now: u64) -> Result<()> {
+        let prepared = self.prepare_message(message)?;
+        self.persist(entry, now)?;
+        // Room is the sole writer for this resource. A publication failure after
+        // fsync must stop further writes, since retry deduplication is durable
+        // in the journal even if its new index root could not become active.
+        if let Err(error) = self.history.commit(prepared) {
+            self.failed = true;
+            for connection in self.connections.values() {
+                connection.admission.store(false, Ordering::Release);
+            }
+            return Err(error);
+        }
+        self.accept_message(message);
+        Ok(())
+    }
+    fn accept_message(&mut self, message: &Message) {
         self.sequence = message.sequence;
         if let Some(guest) = self.guests.get_mut(&message.sender.id) {
             guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(message.at);
         }
-        self.history_bytes += message.text.len() + message.sender.name.len() + 256;
-        self.messages.push_back(message);
-        while self.messages.len() > 50_000 || self.history_bytes > HISTORY_BYTES {
-            let m = self.messages.pop_front().unwrap();
-            self.history_bytes -= m.text.len() + m.sender.name.len() + 256;
-        }
-        Ok(())
     }
     fn prune(&mut self, now: u64) {
         self.guests.retain(|id, g| {
@@ -195,21 +244,33 @@ impl Room {
         self.rates.retain(|id, _| self.guests.contains_key(id));
     }
     fn persist(&mut self, entry: &Entry, now: u64) -> Result<()> {
+        if self.failed {
+            return Err("Room requires journal recovery".into());
+        }
         self.prune(now);
         if self
             .journal
             .as_ref()
             .is_some_and(|j| j.bytes > 48 * 1024 * 1024)
         {
+            let snapshot = self.history.snapshot()?;
             let entries = self
                 .guests
                 .values()
                 .cloned()
-                .map(Entry::Guest)
-                .chain(self.messages.iter().cloned().map(Entry::Message))
-                .chain(self.receipts.values().cloned().map(Entry::Receipt))
-                .chain([Entry::Sequence(self.sequence)])
-                .collect::<Vec<_>>();
+                .map(|guest| Ok(Entry::Guest(guest)))
+                .chain(
+                    snapshot
+                        .records()
+                        .map(|(_, row)| super::read_message(row).map(Entry::Message)),
+                )
+                .chain(
+                    self.receipts
+                        .values()
+                        .cloned()
+                        .map(|receipt| Ok(Entry::Receipt(receipt))),
+                )
+                .chain([Ok(Entry::Sequence(self.sequence))]);
             self.journal.as_mut().unwrap().compact(entries)?;
         }
         if let Some(journal) = &mut self.journal {
@@ -350,6 +411,18 @@ impl Room {
     pub fn active(&self, connection: u64) -> bool {
         self.connections.contains_key(&connection)
     }
+    /// Bind the server's local admission lifetime. Client bytes cannot construct
+    /// this link. Dropping a membership clears it before any kick/leave event.
+    pub fn bind_admission(&mut self, connection: u64, admission: Arc<AtomicBool>) -> Result<()> {
+        let connection = self
+            .connections
+            .get_mut(&connection)
+            .ok_or("Join the room first")?;
+        connection.admission.store(false, Ordering::Release);
+        connection.admission = admission;
+        connection.admission.store(true, Ordering::Release);
+        Ok(())
+    }
     pub fn join(
         &mut self,
         connection: u64,
@@ -381,6 +454,7 @@ impl Room {
             Connection {
                 id: profile.id.clone(),
                 admin,
+                admission: Arc::new(AtomicBool::new(true)),
             },
         );
         let mut you = self
@@ -397,9 +471,6 @@ impl Room {
                 credential: native.then_some(token),
                 epoch: now / EPOCH,
                 members: self.members(),
-                messages: self.page(u64::MAX),
-                oldest: self.oldest(),
-                newest: self.sequence,
             },
         ));
         events.push(self.roster());
@@ -460,33 +531,6 @@ impl Room {
             self.roster(),
         ]
     }
-    fn oldest(&self) -> u64 {
-        self.messages
-            .front()
-            .map_or(self.sequence.saturating_add(1), |m| m.sequence)
-    }
-    fn page(&self, before: u64) -> Vec<Message> {
-        let mut size = 0;
-        let mut page = vec![];
-        let end = self
-            .messages
-            .partition_point(|message| message.sequence < before);
-        for message in self.messages.range(..end).rev().take(super::PAGE_MESSAGES) {
-            // History records retain their original sender snapshot; presentation
-            // resolves the stable ID to the current profile without rewriting the log.
-            let mut message = message.clone();
-            if let Some(guest) = self.guests.get(&message.sender.id) {
-                message.sender = guest.profile.clone();
-            }
-            size += message.text.len() + message.sender.name.len() + 256;
-            if size > 128 * 1024 {
-                break;
-            }
-            page.push(message);
-        }
-        page.reverse();
-        page
-    }
     fn claim(&mut self, connection: u64, now: u64) -> Result<Vec<Delivery>> {
         let c = self
             .connections
@@ -545,6 +589,9 @@ impl Room {
         Ok(events)
     }
     pub fn handle(&mut self, connection: u64, command: Command, now: u64) -> Result<Vec<Delivery>> {
+        if self.failed {
+            return Err("Room requires journal recovery".into());
+        }
         let c = self
             .connections
             .get(&connection)
@@ -557,14 +604,6 @@ impl Room {
                 events.extend(self.leave(connection, now)?);
                 Ok(events)
             }
-            Command::History { before } => Ok(vec![Delivery::one(
-                connection,
-                Event::History {
-                    messages: self.page(before),
-                    oldest: self.oldest(),
-                    before,
-                },
-            )]),
             Command::ClaimDraft => self.claim(connection, now),
             Command::Profile {
                 name: requested,
@@ -656,7 +695,10 @@ impl Room {
                 guest.cooldown = now + 60_000;
                 guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
                 let message = Message {
-                    sequence: self.sequence + 1,
+                    sequence: self
+                        .sequence
+                        .checked_add(1)
+                        .ok_or("Room message sequence exhausted")?,
                     at: now,
                     sender: self.guests[&id].profile.clone(),
                     kind: Kind::Notice,
@@ -672,7 +714,8 @@ impl Room {
                     ),
                     nonce: String::new(),
                 };
-                self.persist(
+                self.persist_message(
+                    &message,
                     &Entry::Kick {
                         guest: guest.clone(),
                         message: message.clone(),
@@ -680,7 +723,6 @@ impl Room {
                     now,
                 )?;
                 self.guests.insert(participant.clone(), guest);
-                self.add_message(message.clone())?;
                 let targets = self
                     .connections
                     .iter()
@@ -700,7 +742,6 @@ impl Room {
                 self.memberships.remove(&participant);
                 self.drafts.remove(&participant);
                 events.push(self.roster());
-                events.push(Delivery::all(Event::Message { message }));
                 Ok(events)
             }
             Command::Send {
@@ -761,7 +802,10 @@ impl Room {
                     rate.effects += 1;
                 }
                 let message = Message {
-                    sequence: self.sequence + 1,
+                    sequence: self
+                        .sequence
+                        .checked_add(1)
+                        .ok_or("Room message sequence exhausted")?,
                     at: now,
                     sender: self.guests[&id].profile.clone(),
                     kind,
@@ -775,27 +819,22 @@ impl Room {
                     digest: hash,
                     sequence: message.sequence,
                 };
-                self.persist(
+                self.persist_message(
+                    &message,
                     &Entry::Sent {
                         message: message.clone(),
                         receipt: receipt.clone(),
                     },
                     now,
                 )?;
-                self.add_message(message.clone())?;
                 self.receipts.insert(receipt_key, receipt);
-                let mut events = vec![
-                    Delivery::all(Event::Message {
-                        message: message.clone(),
-                    }),
-                    Delivery::one(
-                        connection,
-                        Event::Receipt {
-                            nonce,
-                            sequence: message.sequence,
-                        },
-                    ),
-                ];
+                let mut events = vec![Delivery::one(
+                    connection,
+                    Event::Receipt {
+                        nonce,
+                        sequence: message.sequence,
+                    },
+                )];
                 if let Some(d) = self.drafts.get_mut(&id) {
                     d.text.clear();
                     d.revision = d.revision.saturating_add(1);

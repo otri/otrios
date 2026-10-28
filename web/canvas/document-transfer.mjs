@@ -13,12 +13,13 @@ export class DocumentTransfer {
     if(!this.meta)return {key:null,draws:[],upserts:[],retire:[],loading:false,token:++this.sequence};
     const {draws,em}=this.meta,wanted=new Set(draws.map(d=>d.version)),retire=[],upserts=[];
     if(wanted.size!==draws.length||draws.length>128)throw Error('Invalid document draw list');
-    const size=d=>{if(!Number.isInteger(d.glyphs)||d.glyphs<1||d.glyphs>2048)throw Error('Invalid document chunk size');return d.glyphs*512+12;};
+    const geometry=d=>d.geometry||0;
+    const size=d=>{const n=geometry(d);if(!Number.isInteger(d.glyphs)||d.glyphs<0||d.glyphs>2048||!Number.isInteger(n)||n<0||n>5460||n%3||!n&&!d.glyphs)throw Error('Invalid document chunk size');return d.glyphs*512+n*24+12*((n?1:0)+(d.glyphs?1:0));};
     if(draws.reduce((n,d)=>n+size(d),0)>this.limit)throw Error('Visible document exceeds GPU budget');
     let bytes=0;
     for(const d of draws){
       if(this.resources.has(d.version))continue;
-      const payloadBytes=d.glyphs*256;
+      const payloadBytes=d.glyphs*256+geometry(d)*24;
       if(bytes+payloadBytes>this.uploadLimit)continue;
       while([...this.resources.values()].reduce((n,r)=>n+r.bytes,0)+size(d)>this.limit||this.resources.size>=128){
         const old=[...this.resources].find(([id,r])=>!wanted.has(id)&&r.state==='ack');
@@ -26,10 +27,10 @@ export class DocumentTransfer {
         this.resources.delete(old[0]);retire.push(old[0]);
       }
       if([...this.resources.values()].reduce((n,r)=>n+r.bytes,0)+size(d)>this.limit)continue;
-      const glyphVertices=read(d.version);
-      if(!(glyphVertices instanceof Float32Array)||glyphVertices.byteLength!==payloadBytes)throw Error('Document snapshot/resource mismatch');
+      const {glyphVertices,vertices}=read(d.version);
+      if(!(glyphVertices instanceof Float32Array)||!(vertices instanceof Float32Array)||glyphVertices.byteLength!==d.glyphs*256||vertices.byteLength!==geometry(d)*24)throw Error('Document snapshot/resource mismatch');
       this.resources.set(d.version,{bytes:size(d),state:'sent'});
-      bytes+=payloadBytes;upserts.push({version:d.version,glyphVertices});
+      bytes+=payloadBytes;upserts.push({version:d.version,glyphVertices,vertices});
     }
     // Refresh insertion order so eviction preserves a reverse-direction reserve.
     for(const d of draws){const r=this.resources.get(d.version);if(r){this.resources.delete(d.version);this.resources.set(d.version,r);}}
@@ -48,18 +49,22 @@ export class DocumentTransfer {
 
 // Display-owned buffers. Resources never contain source text or mutable layout.
 export class DocumentLayers {
-  constructor(renderer){this.renderer=renderer;this.key=null;this.layers=new Map();this.draws=[];this.loading=false;}
-  clear(){for(const layer of this.layers.values())layer.dispose();this.layers.clear();this.draws=[];this.key=null;this.loading=false;}
+  constructor(renderer){this.renderer=renderer;this.key=null;this.layers=new Map();this.sizes=new Map();this.draws=[];this.loading=false;this.uploadedBytes=0;this.uploads=0;this.evictions=0;}
+  clear(){for(const layer of this.layers.values())layer.dispose();this.evictions+=this.layers.size;this.layers.clear();this.sizes.clear();this.draws=[];this.key=null;this.loading=false;}
+  stats(){return {resident_versions:this.layers.size,budgeted_geometry_bytes:[...this.sizes.values()].reduce((a,b)=>a+b,0),raw_uploaded_bytes:this.uploadedBytes,resource_uploads:this.uploads,resource_evictions:this.evictions};}
   accept(packet){
     if(packet.key!==this.key){this.clear();this.key=packet.key;}
-    for(const id of packet.retire){this.layers.get(id)?.dispose();this.layers.delete(id);}
-    for(const {version,glyphVertices} of packet.upserts){
+    for(const id of packet.retire){if(this.layers.has(id))this.evictions++;this.layers.get(id)?.dispose();this.layers.delete(id);this.sizes.delete(id);}
+    for(const {version,glyphVertices,vertices} of packet.upserts){
       if(this.layers.has(version))throw Error('Duplicate document resource version');
       const layer=this.renderer.createLayer();
-      layer.setFrame({vertices:new Float32Array(),glyphVertices,draws:new Uint32Array([1,0,glyphVertices.length/16]),textStyles:new Float32Array([packet.em])});
+      const geometry=vertices.length/6,glyphs=glyphVertices.length/16;
+      layer.setFrame({vertices,glyphVertices,draws:new Uint32Array([...(geometry?[0,0,geometry]:[]),...(glyphs?[1,0,glyphs]:[])]),textStyles:new Float32Array([...(geometry?[0]:[]),...(glyphs?[packet.em]:[])])});
       this.layers.set(version,layer);
+      this.sizes.set(version,glyphVertices.length/64*512+vertices.byteLength+12*((geometry?1:0)+(glyphs?1:0)));
+      this.uploadedBytes+=vertices.byteLength+glyphVertices.byteLength;this.uploads++;
     }
-    this.draws=packet.draws.map(d=>{const layer=this.layers.get(d.version);if(!layer)throw Error('Document frame references an unadmitted version');layer.setTextViews(new Float32Array(d.view));return layer;});
+    this.draws=packet.draws.map(d=>{const layer=this.layers.get(d.version);if(!layer)throw Error('Document frame references an unadmitted version');const geometry=d.geometry||0;layer.setTextViews(new Float32Array([...(geometry?[0,geometry,...d.view.slice(2)]:[]),...(d.glyphs?d.view:[])]));return layer;});
     this.loading=packet.loading;
   }
 }

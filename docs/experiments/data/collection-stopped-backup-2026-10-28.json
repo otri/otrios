@@ -1,0 +1,14 @@
+{
+  "backup": "/var/lib/otrios-authority/rollback/2026-10-28-rfc0024",
+  "files": 119,
+  "journal": {
+    "bytes": 116010,
+    "sha256": "547023d3dc1b6357b0da571571a7f069ac75c23b692fcad8ca9bf5dbd97d296b"
+  },
+  "release": "f8cacaa81ae3a748dd853b4357403077f1d48735a4fcd2fa28c02dc4b36b9e00",
+  "active": {
+    "otrios-authority": true,
+    "otrios-dashboard-direct": true,
+    "otrios-monitoring.timer": true
+  }
+}

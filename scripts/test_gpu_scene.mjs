@@ -119,6 +119,21 @@ test('retained viewports change only uniforms and cull indexed glyph ranges',()=
   views[9]=100;assert.throws(()=>layer.setTextViews(views),/Culled text/);
 });
 
+test('inline triangles and cached glyphs move and clip together without warm uploads',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();renderer.setFont(packet());
+  const f=frame();f.draws=new Uint32Array([0,0,3,1,0,4]);layer.setFrame(f);
+  const clip=[10,10,30,40],views=new Float32Array([0,3,7.25,9.5,...clip,0,4,7.25,9.5,...clip]);layer.setTextViews(views);renderer.prepare([layer]);
+  calls.length=0;layer.draw();
+  assert.equal(calls.filter(c=>c[0]==='scissor').length,2);
+  const transforms=calls.filter(c=>c[0]==='uniformMatrix3fv').map(c=>c[3]).filter(v=>Math.abs(v[6]-(-1+2/1280*7.25))<1e-6);
+  assert.equal(transforms.length,2,'geometry and glyph programs receive identical translated projections');
+  assert.deepEqual([...transforms[0]],[...transforms[1]]);
+  calls.length=0;views[3]=views[11]=20.25;layer.setTextViews(views);renderer.prepare([layer]);layer.draw();
+  assert.equal(calls.filter(c=>c[0]==='bufferData').length,0);
+  assert.deepEqual(calls.filter(c=>c[0]==='scissor').map(c=>c.slice(1)),[[10,760,20,30],[10,760,20,30]]);
+  views[1]=4;assert.throws(()=>layer.setTextViews(views),/geometry range/);
+});
+
 test('clipped glyph edges reuse the complete prefiltered coverage',()=>{
   const {gl}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer();renderer.setFont(packet());
   layer.setFrame(frame());renderer.prepare([layer]);const f=frame();

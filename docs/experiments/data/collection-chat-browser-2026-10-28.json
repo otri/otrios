@@ -1,0 +1,1662 @@
+{
+  "browser": "Chrome 156.0.8078.48, SwiftShader WebGL",
+  "node": "24.19.0",
+  "runs": [
+    {
+      "passed": true,
+      "records": 2000,
+      "setup_ms": 3720.149917,
+      "initial_collection_traffic": {
+        "frames": 1,
+        "bytes": 40783
+      },
+      "initial": {
+        "chat": {
+          "participant": "4c1848d979fa0f5538422f24b807e760",
+          "name": "Chief Sprocket",
+          "avatar": 47,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 1,
+          "first_sequence": 1937,
+          "last_sequence": 2000,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 1,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "4c1848d979fa0f5538422f24b807e760",
+            "name": "Chief Sprocket",
+            "avatar": 47,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 1,
+            "first_sequence": 1937,
+            "last_sequence": 2000,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 1,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 800,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 60,
+              "source_byte": 122,
+              "viewport_y": -9.846153846155232
+            },
+            "anchor_identity": {
+              "object": 1995,
+              "part": 0
+            },
+            "anchor_revision": "03ed20fa08cfe1ac5ccee5acb6e46dc7a9682659650d9ff8ada1565fd441bfa6",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 473896,
+            "pinned_mesh_bytes": 155140,
+            "resident_pages": 14,
+            "exact_blocks": 29,
+            "blocks": 66,
+            "measured_clusters": 3449,
+            "broken_clusters": 3813,
+            "packed_glyphs": 1300,
+            "laid_out_lines": 129,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 6260.395604395608,
+            "extent": 6804.395604395608,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 5,
+          "budgeted_geometry_bytes": 285880,
+          "raw_uploaded_bytes": 150080,
+          "resource_uploads": 5,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1601844,
+          "totalSize": 2359296,
+          "embedderHeapUsedSize": 1374904,
+          "backingStorageSize": 410134
+        },
+        "worker_heap": {
+          "usedSize": 841188,
+          "totalSize": 1572864,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "older": {
+        "chat": {
+          "participant": "4c1848d979fa0f5538422f24b807e760",
+          "name": "Chief Sprocket",
+          "avatar": 47,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 2,
+          "first_sequence": 1919,
+          "last_sequence": 1982,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 3,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "4c1848d979fa0f5538422f24b807e760",
+            "name": "Chief Sprocket",
+            "avatar": 47,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 2,
+            "first_sequence": 1919,
+            "last_sequence": 1982,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 3,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 4193,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 34,
+              "source_byte": 27,
+              "viewport_y": -4.351648351652329
+            },
+            "anchor_identity": {
+              "object": 1951,
+              "part": 0
+            },
+            "anchor_revision": "c43d3b3b8952456b48f255ef4868a74260dd31666cd31ca7e106794c41a77014",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 1480736,
+            "pinned_mesh_bytes": 186168,
+            "resident_pages": 39,
+            "exact_blocks": 66,
+            "blocks": 66,
+            "measured_clusters": 10096,
+            "broken_clusters": 15599,
+            "packed_glyphs": 6070,
+            "laid_out_lines": 528,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 3459.296703296708,
+            "extent": 6804.39560439561,
+            "extent_exact": true,
+            "active": true,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 50,
+          "budgeted_geometry_bytes": 2858800,
+          "raw_uploaded_bytes": 1500800,
+          "resource_uploads": 50,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1696132,
+          "totalSize": 2621440,
+          "embedderHeapUsedSize": 1257464,
+          "backingStorageSize": 1645563
+        },
+        "worker_heap": {
+          "usedSize": 903640,
+          "totalSize": 1572864,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "outside": {
+        "chat": {
+          "participant": "4c1848d979fa0f5538422f24b807e760",
+          "name": "Chief Sprocket",
+          "avatar": 47,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 2,
+          "first_sequence": 1919,
+          "last_sequence": 1982,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 3,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "4c1848d979fa0f5538422f24b807e760",
+            "name": "Chief Sprocket",
+            "avatar": 47,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 2,
+            "first_sequence": 1919,
+            "last_sequence": 1982,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 3,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 5191,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 34,
+              "source_byte": 27,
+              "viewport_y": -4.351648351652329
+            },
+            "anchor_identity": {
+              "object": 1951,
+              "part": 0
+            },
+            "anchor_revision": "c43d3b3b8952456b48f255ef4868a74260dd31666cd31ca7e106794c41a77014",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 1480736,
+            "pinned_mesh_bytes": 186168,
+            "resident_pages": 39,
+            "exact_blocks": 66,
+            "blocks": 66,
+            "measured_clusters": 10096,
+            "broken_clusters": 15599,
+            "packed_glyphs": 6070,
+            "laid_out_lines": 528,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 3459.296703296708,
+            "extent": 6804.39560439561,
+            "extent_exact": true,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 50,
+          "budgeted_geometry_bytes": 2858800,
+          "raw_uploaded_bytes": 1500800,
+          "resource_uploads": 50,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1686916,
+          "totalSize": 2621440,
+          "embedderHeapUsedSize": 720072,
+          "backingStorageSize": 1659597
+        },
+        "worker_heap": {
+          "usedSize": 914560,
+          "totalSize": 1572864,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "resized": {
+        "chat": {
+          "participant": "4c1848d979fa0f5538422f24b807e760",
+          "name": "Chief Sprocket",
+          "avatar": 47,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 2,
+          "first_sequence": 1919,
+          "last_sequence": 1982,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 3,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "4c1848d979fa0f5538422f24b807e760",
+            "name": "Chief Sprocket",
+            "avatar": 47,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 2,
+            "first_sequence": 1919,
+            "last_sequence": 1982,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 3,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 5645,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 34,
+              "source_byte": 27,
+              "viewport_y": -4.351648351652329
+            },
+            "anchor_identity": {
+              "object": 1951,
+              "part": 0
+            },
+            "anchor_revision": "c43d3b3b8952456b48f255ef4868a74260dd31666cd31ca7e106794c41a77014",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 936196,
+            "pinned_mesh_bytes": 248320,
+            "resident_pages": 42,
+            "exact_blocks": 21,
+            "blocks": 66,
+            "measured_clusters": 10096,
+            "broken_clusters": 19041,
+            "packed_glyphs": 8319,
+            "laid_out_lines": 664,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 4303.252747252754,
+            "extent": 8492.307692307699,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 8,
+          "budgeted_geometry_bytes": 457408,
+          "raw_uploaded_bytes": 1740928,
+          "resource_uploads": 58,
+          "resource_evictions": 50
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1640312,
+          "totalSize": 2097152,
+          "embedderHeapUsedSize": 728952,
+          "backingStorageSize": 475595
+        },
+        "worker_heap": {
+          "usedSize": 913972,
+          "totalSize": 1835008,
+          "embedderHeapUsedSize": 159080,
+          "backingStorageSize": 125880
+        }
+      },
+      "latest": {
+        "chat": {
+          "participant": "4c1848d979fa0f5538422f24b807e760",
+          "name": "Chief Sprocket",
+          "avatar": 47,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 3,
+          "first_sequence": 1938,
+          "last_sequence": 2001,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33720,
+          "replica_bytes": 39927,
+          "lease_generation": 4,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "4c1848d979fa0f5538422f24b807e760",
+            "name": "Chief Sprocket",
+            "avatar": 47,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 3,
+            "first_sequence": 1938,
+            "last_sequence": 2001,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33720,
+            "replica_bytes": 39927,
+            "lease_generation": 4,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 5866,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 57,
+              "source_byte": 122,
+              "viewport_y": -4.571428571430346
+            },
+            "anchor_identity": {
+              "object": 1993,
+              "part": 0
+            },
+            "anchor_revision": "1ec28acdd6f10470a194251c83f3be8866df703586efe1ced7f4761f87ecefcd",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 28695,
+            "source_index_bytes": 3440,
+            "working_bytes": 1727524,
+            "pinned_mesh_bytes": 234928,
+            "resident_pages": 92,
+            "exact_blocks": 52,
+            "blocks": 66,
+            "measured_clusters": 10153,
+            "broken_clusters": 25720,
+            "packed_glyphs": 11093,
+            "laid_out_lines": 943,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 7415.560439560446,
+            "extent": 8439.560439560446,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 19,
+          "budgeted_geometry_bytes": 1059336,
+          "raw_uploaded_bytes": 2058176,
+          "resource_uploads": 69,
+          "resource_evictions": 50
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1877616,
+          "totalSize": 3407872,
+          "embedderHeapUsedSize": 1120744,
+          "backingStorageSize": 788943
+        },
+        "worker_heap": {
+          "usedSize": 946900,
+          "totalSize": 1835008,
+          "embedderHeapUsedSize": 474720,
+          "backingStorageSize": 128874
+        }
+      },
+      "reloaded": {
+        "chat": {
+          "participant": "4c1848d979fa0f5538422f24b807e760",
+          "name": "Chief Sprocket",
+          "avatar": 47,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 1,
+          "first_sequence": 1938,
+          "last_sequence": 2001,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33720,
+          "replica_bytes": 39927,
+          "lease_generation": 1,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "4c1848d979fa0f5538422f24b807e760",
+            "name": "Chief Sprocket",
+            "avatar": 47,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 1,
+            "first_sequence": 1938,
+            "last_sequence": 2001,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33720,
+            "replica_bytes": 39927,
+            "lease_generation": 1,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 407,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 57,
+              "source_byte": 122,
+              "viewport_y": -4.571428571431255
+            },
+            "anchor_identity": {
+              "object": 1993,
+              "part": 0
+            },
+            "anchor_revision": "1ec28acdd6f10470a194251c83f3be8866df703586efe1ced7f4761f87ecefcd",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 28695,
+            "source_index_bytes": 3440,
+            "working_bytes": 617640,
+            "pinned_mesh_bytes": 234928,
+            "resident_pages": 36,
+            "exact_blocks": 30,
+            "blocks": 66,
+            "measured_clusters": 3383,
+            "broken_clusters": 4105,
+            "packed_glyphs": 1752,
+            "laid_out_lines": 168,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 7415.560439560444,
+            "extent": 8439.560439560444,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 8,
+          "budgeted_geometry_bytes": 430400,
+          "raw_uploaded_bytes": 227200,
+          "resource_uploads": 8,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1592344,
+          "totalSize": 2359296,
+          "embedderHeapUsedSize": 757784,
+          "backingStorageSize": 449781
+        },
+        "worker_heap": {
+          "usedSize": 837300,
+          "totalSize": 1572864,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "received": {
+        "9D2E1A79FB567B4A2D20EC3A4FB4CBC3:1": {
+          "frames": 4,
+          "bytes": 80512
+        },
+        "9D2E1A79FB567B4A2D20EC3A4FB4CBC3:3": {
+          "frames": 17,
+          "bytes": 3676
+        },
+        "9D2E1A79FB567B4A2D20EC3A4FB4CBC3:4": {
+          "frames": 5,
+          "bytes": 203771
+        },
+        "E81BC356AEF651167F4EF15B74DF3DB9:1": {
+          "frames": 2,
+          "bytes": 40256
+        },
+        "E81BC356AEF651167F4EF15B74DF3DB9:3": {
+          "frames": 16,
+          "bytes": 3184
+        },
+        "E81BC356AEF651167F4EF15B74DF3DB9:4": {
+          "frames": 2,
+          "bytes": 46450
+        }
+      },
+      "sent": {
+        "9D2E1A79FB567B4A2D20EC3A4FB4CBC3:1": {
+          "frames": 12,
+          "bytes": 960
+        },
+        "9D2E1A79FB567B4A2D20EC3A4FB4CBC3:3": {
+          "frames": 4,
+          "bytes": 272
+        },
+        "9D2E1A79FB567B4A2D20EC3A4FB4CBC3:4": {
+          "frames": 10,
+          "bytes": 971
+        },
+        "E81BC356AEF651167F4EF15B74DF3DB9:1": {
+          "frames": 6,
+          "bytes": 480
+        },
+        "E81BC356AEF651167F4EF15B74DF3DB9:3": {
+          "frames": 6,
+          "bytes": 494
+        },
+        "E81BC356AEF651167F4EF15B74DF3DB9:4": {
+          "frames": 3,
+          "bytes": 287
+        }
+      },
+      "heap_scope": "CDP per-isolate JS heap and array-buffer/external-string backing storage; not RSS",
+      "private_body_leaks": 0,
+      "fixture": {
+        "canonical_bytes": 1158074,
+        "elapsed_ms": 9699,
+        "fixture_only": true,
+        "journal_bytes": 1224596,
+        "records_requested": 2000,
+        "records_retained": 2000,
+        "root": "0f1c9351dc134c76769c5f5cfb635f6812576e675d147edd2821ea56383d699f"
+      }
+    },
+    {
+      "passed": true,
+      "records": 25000,
+      "setup_ms": 9277.706375,
+      "initial_collection_traffic": {
+        "frames": 1,
+        "bytes": 40783
+      },
+      "initial": {
+        "chat": {
+          "participant": "703fc65322c920d8662df1549ff9f134",
+          "name": "Lady Crumpet",
+          "avatar": 3,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 1,
+          "first_sequence": 24937,
+          "last_sequence": 25000,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 1,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "703fc65322c920d8662df1549ff9f134",
+            "name": "Lady Crumpet",
+            "avatar": 3,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 1,
+            "first_sequence": 24937,
+            "last_sequence": 25000,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 1,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 6458,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 60,
+              "source_byte": 122,
+              "viewport_y": -9.846153846155232
+            },
+            "anchor_identity": {
+              "object": 24995,
+              "part": 0
+            },
+            "anchor_revision": "6107a61480e5156979b297919d9c6940825a6501532f47c78f8b457e91bd630a",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 433492,
+            "pinned_mesh_bytes": 155140,
+            "resident_pages": 13,
+            "exact_blocks": 13,
+            "blocks": 66,
+            "measured_clusters": 1604,
+            "broken_clusters": 1935,
+            "packed_glyphs": 1300,
+            "laid_out_lines": 66,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 6260.395604395607,
+            "extent": 6804.395604395607,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 5,
+          "budgeted_geometry_bytes": 285880,
+          "raw_uploaded_bytes": 150080,
+          "resource_uploads": 5,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1616648,
+          "totalSize": 2621440,
+          "embedderHeapUsedSize": 1428872,
+          "backingStorageSize": 418887
+        },
+        "worker_heap": {
+          "usedSize": 881524,
+          "totalSize": 1572864,
+          "embedderHeapUsedSize": 475344,
+          "backingStorageSize": 128518
+        }
+      },
+      "older": {
+        "chat": {
+          "participant": "703fc65322c920d8662df1549ff9f134",
+          "name": "Lady Crumpet",
+          "avatar": 3,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 2,
+          "first_sequence": 24919,
+          "last_sequence": 24982,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 3,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "703fc65322c920d8662df1549ff9f134",
+            "name": "Lady Crumpet",
+            "avatar": 3,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 2,
+            "first_sequence": 24919,
+            "last_sequence": 24982,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 3,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 9776,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 34,
+              "source_byte": 27,
+              "viewport_y": -4.351648351652329
+            },
+            "anchor_identity": {
+              "object": 24951,
+              "part": 0
+            },
+            "anchor_revision": "494a24a37f584e9c0dabdb06e4e9bd9949da26a9e6017fabc4305c48d26a3c5c",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 1480736,
+            "pinned_mesh_bytes": 186168,
+            "resident_pages": 39,
+            "exact_blocks": 66,
+            "blocks": 66,
+            "measured_clusters": 10096,
+            "broken_clusters": 15599,
+            "packed_glyphs": 6070,
+            "laid_out_lines": 528,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 3459.296703296708,
+            "extent": 6804.39560439561,
+            "extent_exact": true,
+            "active": true,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 50,
+          "budgeted_geometry_bytes": 2858800,
+          "raw_uploaded_bytes": 1500800,
+          "resource_uploads": 50,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1680652,
+          "totalSize": 2621440,
+          "embedderHeapUsedSize": 715496,
+          "backingStorageSize": 1654250
+        },
+        "worker_heap": {
+          "usedSize": 882092,
+          "totalSize": 1310720,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "outside": {
+        "chat": {
+          "participant": "703fc65322c920d8662df1549ff9f134",
+          "name": "Lady Crumpet",
+          "avatar": 3,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 2,
+          "first_sequence": 24919,
+          "last_sequence": 24982,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 3,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "703fc65322c920d8662df1549ff9f134",
+            "name": "Lady Crumpet",
+            "avatar": 3,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 2,
+            "first_sequence": 24919,
+            "last_sequence": 24982,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 3,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 10695,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 34,
+              "source_byte": 27,
+              "viewport_y": -4.351648351652329
+            },
+            "anchor_identity": {
+              "object": 24951,
+              "part": 0
+            },
+            "anchor_revision": "494a24a37f584e9c0dabdb06e4e9bd9949da26a9e6017fabc4305c48d26a3c5c",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 1480736,
+            "pinned_mesh_bytes": 186168,
+            "resident_pages": 39,
+            "exact_blocks": 66,
+            "blocks": 66,
+            "measured_clusters": 10096,
+            "broken_clusters": 15599,
+            "packed_glyphs": 6070,
+            "laid_out_lines": 528,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 3459.296703296708,
+            "extent": 6804.39560439561,
+            "extent_exact": true,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 50,
+          "budgeted_geometry_bytes": 2858800,
+          "raw_uploaded_bytes": 1500800,
+          "resource_uploads": 50,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1688316,
+          "totalSize": 2621440,
+          "embedderHeapUsedSize": 715976,
+          "backingStorageSize": 1669012
+        },
+        "worker_heap": {
+          "usedSize": 894328,
+          "totalSize": 1310720,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "resized": {
+        "chat": {
+          "participant": "703fc65322c920d8662df1549ff9f134",
+          "name": "Lady Crumpet",
+          "avatar": 3,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 2,
+          "first_sequence": 24919,
+          "last_sequence": 24982,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33792,
+          "replica_bytes": 39999,
+          "lease_generation": 3,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "703fc65322c920d8662df1549ff9f134",
+            "name": "Lady Crumpet",
+            "avatar": 3,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 2,
+            "first_sequence": 24919,
+            "last_sequence": 24982,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33792,
+            "replica_bytes": 39999,
+            "lease_generation": 3,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 11144,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 34,
+              "source_byte": 27,
+              "viewport_y": -4.351648351652329
+            },
+            "anchor_identity": {
+              "object": 24951,
+              "part": 0
+            },
+            "anchor_revision": "494a24a37f584e9c0dabdb06e4e9bd9949da26a9e6017fabc4305c48d26a3c5c",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 24769,
+            "source_index_bytes": 3440,
+            "working_bytes": 936196,
+            "pinned_mesh_bytes": 248320,
+            "resident_pages": 42,
+            "exact_blocks": 21,
+            "blocks": 66,
+            "measured_clusters": 10096,
+            "broken_clusters": 19041,
+            "packed_glyphs": 8319,
+            "laid_out_lines": 664,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 4303.252747252754,
+            "extent": 8492.307692307699,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 8,
+          "budgeted_geometry_bytes": 457408,
+          "raw_uploaded_bytes": 1740928,
+          "resource_uploads": 58,
+          "resource_evictions": 50
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1642012,
+          "totalSize": 2359296,
+          "embedderHeapUsedSize": 724856,
+          "backingStorageSize": 475570
+        },
+        "worker_heap": {
+          "usedSize": 892992,
+          "totalSize": 1310720,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "latest": {
+        "chat": {
+          "participant": "703fc65322c920d8662df1549ff9f134",
+          "name": "Lady Crumpet",
+          "avatar": 3,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 3,
+          "first_sequence": 24938,
+          "last_sequence": 25001,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33728,
+          "replica_bytes": 39935,
+          "lease_generation": 4,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "703fc65322c920d8662df1549ff9f134",
+            "name": "Lady Crumpet",
+            "avatar": 3,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 3,
+            "first_sequence": 24938,
+            "last_sequence": 25001,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33728,
+            "replica_bytes": 39935,
+            "lease_generation": 4,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 11345,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 57,
+              "source_byte": 122,
+              "viewport_y": -4.571428571430346
+            },
+            "anchor_identity": {
+              "object": 24993,
+              "part": 0
+            },
+            "anchor_revision": "47cfed46a0efc27f5ebc1dabc4e8c6c2ffdd2b496a5444b0c85e5f02c79f2e80",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 27991,
+            "source_index_bytes": 3440,
+            "working_bytes": 1727956,
+            "pinned_mesh_bytes": 235264,
+            "resident_pages": 92,
+            "exact_blocks": 50,
+            "blocks": 66,
+            "measured_clusters": 10157,
+            "broken_clusters": 25103,
+            "packed_glyphs": 11097,
+            "laid_out_lines": 916,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 7415.560439560446,
+            "extent": 8439.560439560446,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 20,
+          "budgeted_geometry_bytes": 1117840,
+          "raw_uploaded_bytes": 2088496,
+          "resource_uploads": 70,
+          "resource_evictions": 50
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1678148,
+          "totalSize": 2359296,
+          "embedderHeapUsedSize": 725840,
+          "backingStorageSize": 783407
+        },
+        "worker_heap": {
+          "usedSize": 911648,
+          "totalSize": 1835008,
+          "embedderHeapUsedSize": 159176,
+          "backingStorageSize": 125880
+        }
+      },
+      "reloaded": {
+        "chat": {
+          "participant": "703fc65322c920d8662df1549ff9f134",
+          "name": "Lady Crumpet",
+          "avatar": 3,
+          "admin": false,
+          "online": true,
+          "messages": 64,
+          "authors_revision": 1,
+          "first_sequence": 24938,
+          "last_sequence": 25001,
+          "pending": 0,
+          "drafts": 0,
+          "history_loading": false,
+          "selected_bytes": 33728,
+          "replica_bytes": 39935,
+          "lease_generation": 1,
+          "kicked": false
+        },
+        "resources": {
+          "chat": {
+            "participant": "703fc65322c920d8662df1549ff9f134",
+            "name": "Lady Crumpet",
+            "avatar": 3,
+            "admin": false,
+            "online": true,
+            "messages": 64,
+            "authors_revision": 1,
+            "first_sequence": 24938,
+            "last_sequence": 25001,
+            "pending": 0,
+            "drafts": 0,
+            "history_loading": false,
+            "selected_bytes": 33728,
+            "replica_bytes": 39935,
+            "lease_generation": 1,
+            "kicked": false
+          },
+          "sampled_monotonic_ms": 302,
+          "dispatch": {
+            "pending_fields": 0,
+            "issued_fields": 0,
+            "pending_payload_bytes": 0,
+            "issued_payload_bytes": 0,
+            "pending_age_ms": null,
+            "issued_age_ms": null,
+            "ready_in_ms": null
+          },
+          "state": {
+            "selected_nodes": 1,
+            "selected_canonical_bytes": 264,
+            "replica_root_shared": true
+          },
+          "behavior_cache_entries": 0,
+          "behavior_cache_bytes": 0,
+          "ui_cache_entries": 1,
+          "ui_cache_bytes": 95705,
+          "ui_cache_hits": 1,
+          "behavior_hash": null,
+          "reflow_order": [],
+          "reflow_editing": false,
+          "wire": {
+            "compression_capacity": 0,
+            "decode_capacity": 131072,
+            "table_capacity_bound": 0,
+            "buffer_grows": 1
+          },
+          "text_scroll": null,
+          "text_document": {
+            "anchor": {
+              "block": 57,
+              "source_byte": 122,
+              "viewport_y": -4.571428571430346
+            },
+            "anchor_identity": {
+              "object": 24993,
+              "part": 0
+            },
+            "anchor_revision": "47cfed46a0efc27f5ebc1dabc4e8c6c2ffdd2b496a5444b0c85e5f02c79f2e80",
+            "work_ns": 0,
+            "max_work_ns": 0,
+            "measurement_ns": 0,
+            "breaking_ns": 0,
+            "packing_ns": 0,
+            "source_bytes": 27991,
+            "source_index_bytes": 3440,
+            "working_bytes": 351384,
+            "pinned_mesh_bytes": 235264,
+            "resident_pages": 21,
+            "exact_blocks": 12,
+            "blocks": 66,
+            "measured_clusters": 1419,
+            "broken_clusters": 1186,
+            "packed_glyphs": 1014,
+            "laid_out_lines": 52,
+            "evictions": 0,
+            "backpressure": 0,
+            "offset": 7415.560439560444,
+            "extent": 8439.560439560444,
+            "extent_exact": false,
+            "active": false,
+            "velocity": 0,
+            "loading": false
+          }
+        },
+        "gpu": {
+          "resident_versions": 8,
+          "budgeted_geometry_bytes": 431728,
+          "raw_uploaded_bytes": 227504,
+          "resource_uploads": 8,
+          "resource_evictions": 0
+        },
+        "dom_records": 64,
+        "main_heap": {
+          "usedSize": 1561336,
+          "totalSize": 2621440,
+          "embedderHeapUsedSize": 1026656,
+          "backingStorageSize": 459875
+        },
+        "worker_heap": {
+          "usedSize": 834076,
+          "totalSize": 1572864,
+          "embedderHeapUsedSize": 32544,
+          "backingStorageSize": 125847
+        }
+      },
+      "received": {
+        "B114AA0BF75FD761D9518604F689BA8F:1": {
+          "frames": 4,
+          "bytes": 80512
+        },
+        "B114AA0BF75FD761D9518604F689BA8F:3": {
+          "frames": 17,
+          "bytes": 3676
+        },
+        "B114AA0BF75FD761D9518604F689BA8F:4": {
+          "frames": 5,
+          "bytes": 203787
+        },
+        "A49D48469C18F166876AFED51AF9A2DF:1": {
+          "frames": 2,
+          "bytes": 40256
+        },
+        "A49D48469C18F166876AFED51AF9A2DF:3": {
+          "frames": 16,
+          "bytes": 3192
+        },
+        "A49D48469C18F166876AFED51AF9A2DF:4": {
+          "frames": 2,
+          "bytes": 46458
+        }
+      },
+      "sent": {
+        "B114AA0BF75FD761D9518604F689BA8F:1": {
+          "frames": 12,
+          "bytes": 960
+        },
+        "B114AA0BF75FD761D9518604F689BA8F:3": {
+          "frames": 4,
+          "bytes": 272
+        },
+        "B114AA0BF75FD761D9518604F689BA8F:4": {
+          "frames": 10,
+          "bytes": 971
+        },
+        "A49D48469C18F166876AFED51AF9A2DF:1": {
+          "frames": 6,
+          "bytes": 480
+        },
+        "A49D48469C18F166876AFED51AF9A2DF:3": {
+          "frames": 6,
+          "bytes": 494
+        },
+        "A49D48469C18F166876AFED51AF9A2DF:4": {
+          "frames": 3,
+          "bytes": 287
+        }
+      },
+      "heap_scope": "CDP per-isolate JS heap and array-buffer/external-string backing storage; not RSS",
+      "private_body_leaks": 0,
+      "fixture": {
+        "canonical_bytes": 14475080,
+        "elapsed_ms": 118813,
+        "fixture_only": true,
+        "journal_bytes": 15300596,
+        "records_requested": 25000,
+        "records_retained": 25000,
+        "root": "38c7104e194e01690ac5b2d44f2744cb199603422cfa68010aa3c5a42df0d1e3"
+      }
+    }
+  ]
+}

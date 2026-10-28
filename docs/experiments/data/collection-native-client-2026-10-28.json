@@ -1,0 +1,197 @@
+{
+  "status": 0,
+  "stderr": "Host session negotiated compatible=true state_available=true\n",
+  "binary_sha256": "dd7a6d11a141ba652c0b0e275a402ec0f6d234dba2c3e666e1a4e71a10b22781",
+  "calibration_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e",
+  "ready": {
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ],
+    "epoch": 1,
+    "input_busy": false,
+    "keyboard_visible": false,
+    "layout": "app:brass-relay/ui",
+    "motion": {
+      "count": 12,
+      "playing": true,
+      "speed": 1.0
+    },
+    "output": [
+      800,
+      1280
+    ],
+    "pending_commands": 0,
+    "pid": 16144,
+    "release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+    "reload_ready": true,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "runtime_release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+    "runtime_resources": {
+      "behavior_cache_bytes": 0,
+      "behavior_cache_entries": 0,
+      "behavior_hash": null,
+      "chat": {
+        "admin": false,
+        "authors_revision": 1,
+        "avatar": 0,
+        "drafts": 0,
+        "first_sequence": 1,
+        "history_loading": false,
+        "kicked": false,
+        "last_sequence": 13,
+        "lease_generation": 1,
+        "messages": 13,
+        "name": "Captain Rivet",
+        "online": true,
+        "participant": "3f4405093a11973b115a0a83a0a223d0",
+        "pending": 0,
+        "replica_bytes": 8095,
+        "selected_bytes": 6096
+      },
+      "dispatch": {
+        "issued_age_ms": null,
+        "issued_fields": 0,
+        "issued_payload_bytes": 0,
+        "pending_age_ms": null,
+        "pending_fields": 0,
+        "pending_payload_bytes": 0,
+        "ready_in_ms": null
+      },
+      "reflow_editing": false,
+      "reflow_order": [],
+      "sampled_monotonic_ms": 586,
+      "state": {
+        "replica_root_shared": true,
+        "selected_canonical_bytes": 264,
+        "selected_nodes": 1
+      },
+      "text_document": {
+        "active": false,
+        "anchor": {
+          "block": 8,
+          "source_byte": 0,
+          "viewport_y": -9.846153846153811
+        },
+        "anchor_identity": {
+          "object": 7,
+          "part": 0
+        },
+        "anchor_revision": "1646baec898adc5ffd1141f55b8afc2e5337f25913af300b4b325167e8ab8721",
+        "backpressure": 0,
+        "blocks": 15,
+        "breaking_ns": 0,
+        "broken_clusters": 1056,
+        "evictions": 0,
+        "exact_blocks": 15,
+        "extent": 1134.065934065934,
+        "extent_exact": true,
+        "laid_out_lines": 47,
+        "loading": false,
+        "max_work_ns": 0,
+        "measured_clusters": 877,
+        "measurement_ns": 0,
+        "offset": 590.065934065934,
+        "packed_glyphs": 798,
+        "packing_ns": 0,
+        "pinned_mesh_bytes": 109424,
+        "resident_pages": 16,
+        "source_bytes": 32843,
+        "source_index_bytes": 788,
+        "velocity": 0.0,
+        "work_ns": 0,
+        "working_bytes": 271624
+      },
+      "text_scroll": null,
+      "ui_cache_bytes": 95705,
+      "ui_cache_entries": 1,
+      "ui_cache_hits": 0,
+      "wire": {
+        "buffer_grows": 1,
+        "compression_capacity": 0,
+        "decode_capacity": 131072,
+        "table_capacity_bound": 0
+      }
+    },
+    "scanout_format": "RGB565",
+    "screen": "brass-relay",
+    "snapshot": "app:brass-relay/state",
+    "state_confirmed": true,
+    "state_ref": "app:brass-relay/state",
+    "stream_ready": true,
+    "stride": 1600,
+    "sync_to_present_ms": 1594.149234,
+    "touch_calibrated": true,
+    "touch_devices": 1,
+    "ui_ref": "app:brass-relay/ui",
+    "ui_release": "37acc341c77eeda6f362907492f46b633aeefdefe28d5a1725cfc21b65ab1f16",
+    "ui_updates": true,
+    "video": "DRM"
+  },
+  "report": {
+    "alpha": "premultiplied",
+    "cadence": {
+      "fps": 0.0,
+      "frames": 0,
+      "over_25ms": 0,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "samples": 0
+    },
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ],
+    "compose_submit_max_us": 1084599,
+    "compose_submit_p50_us": 1084599,
+    "compose_submit_p95_us": 1084599,
+    "compose_submit_p99_us": 1084599,
+    "drawn": 2,
+    "font_cache": [
+      327,
+      80,
+      2097152
+    ],
+    "font_renderer": "slug-coverage-cache",
+    "font_resource": "bfcbd60cc3250fa2cb9f7dae9a38c691036efa3ec3a16b01f1d4399c50f1e28b",
+    "gamma": "srgb-framebuffer-blend",
+    "kernel_flips": {
+      "crtc": null,
+      "events": 0,
+      "fps": 0.0,
+      "max_us": null,
+      "missed_vblanks": 0,
+      "p50_us": 0,
+      "p95_us": 0,
+      "p99_us": 0,
+      "seconds": 0.0
+    },
+    "load_requested_hz": 0,
+    "load_updates": 0,
+    "measurement": "kernel page-flip completions after two-second warmup; no tracing",
+    "objects": 12,
+    "output": [
+      800,
+      1280
+    ],
+    "present_p50_us": 580474,
+    "present_p95_us": 580474,
+    "received_app_updates": 1,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "scanout_format": "RGB565",
+    "screen": "brass-relay",
+    "seconds": 20.005703538,
+    "stride": 1600,
+    "video": "DRM",
+    "worker_stall_ms": 0
+  },
+  "restored": true,
+  "scope": "Exact signed executable, real KMS/GLES2, on-frame loopback candidate and cloned journal; settled idle readiness, not an FPS measurement or physical touch test"
+}

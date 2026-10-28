@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Fenwick tree: immutable block order, mutable exact/estimated heights. Edits
-//! will need sequence operations; the read-only reader never shifts a suffix.
+//! Fenwick tree for one bounded source order and mutable exact/estimated heights.
+//! A new keyed window rebuilds this small index while retained pages keep their
+//! logical block identity; height discovery never edits source content.
 pub(super) struct Heights {
     values: Vec<f64>,
     tree: Vec<f64>,

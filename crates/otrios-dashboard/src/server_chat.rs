@@ -4,7 +4,7 @@ use super::*;
 use otrios_core::canvas::chat::{self as core, Command, Delivery, Event};
 use std::sync::{
     Mutex as StdMutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use tokio::sync::{broadcast, mpsc};
 const COOKIE: &str = "__Host-otrios_guest";
@@ -21,6 +21,7 @@ pub(super) struct Packet {
     pub joined: Option<bool>,
 }
 pub(super) struct Hub {
+    collections: Arc<StdMutex<otrios_core::collection::Channel>>,
     room: Arc<StdMutex<RoomState>>,
     bus: broadcast::Sender<Arc<Packet>>,
     next: AtomicU64,
@@ -38,8 +39,12 @@ pub(super) struct Peer {
     pub joined: bool,
 }
 impl Hub {
-    pub fn new(path: Option<PathBuf>) -> Result<Arc<Self>, String> {
+    pub fn new(
+        path: Option<PathBuf>,
+        collections: Arc<StdMutex<otrios_core::collection::Channel>>,
+    ) -> Result<Arc<Self>, String> {
         Ok(Arc::new(Self {
+            collections,
             // Recovery belongs to the room, never to the release-control bootstrap.
             room: Arc::new(StdMutex::new(RoomState::Unopened(path))),
             bus: broadcast::channel(128).0,
@@ -82,10 +87,11 @@ impl Hub {
         work: impl FnOnce(&mut core::Room) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
         let room = self.room.clone();
+        let collections = self.collections.clone();
         tokio::task::spawn_blocking(move || {
             let mut guard = room.lock().map_err(|_| "Room lock unavailable")?;
             if let RoomState::Unopened(path) = &mut *guard {
-                *guard = match core::Room::open(path.take(), now()) {
+                *guard = match core::Room::open_in(path.take(), now(), collections) {
                     Ok(room) => RoomState::Ready(Box::new(room)),
                     Err(error) => {
                         eprintln!("Chat recovery failed: {error}");
@@ -107,6 +113,7 @@ impl Hub {
         cookie: Option<String>,
         key: Option<String>,
         auth: Option<Arc<auth::Sessions>>,
+        admission: Arc<AtomicBool>,
     ) -> Peer {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (input, mut commands) = mpsc::channel::<Vec<u8>>(8);
@@ -152,7 +159,7 @@ impl Hub {
                 let result=match command {
                     Command::Join{credential}=>{
                         if public&&credential.is_some(){Err("Browser identity must use its guest cookie".into())}
-                        else {let token=if public{cookie.clone()}else{credential};if token.is_none() && !hub.admit_guest() {Err("Guest provisioning rate limit".into())}else{hub.run(move|room|room.join(id,token.as_deref(),admin,now(),!public)).await}}
+                        else {let token=if public{cookie.clone()}else{credential};if token.is_none() && !hub.admit_guest() {Err("Guest provisioning rate limit".into())}else{let admission=admission.clone();hub.run(move|room| {let events=room.join(id,token.as_deref(),admin,now(),!public)?; if room.active(id) {room.bind_admission(id,admission)?;} Ok(events)}).await}}
                     }
                     Command::Authenticate{username,password} if !public=>{
                         match &auth{Some(auth)=>match auth.authenticate(&username,&password).await{Ok((_,key))=>{auth_key=Some(key);hub.run(move|room|Ok(room.set_admin(id,true))).await},Err(_)=>Err("Monitoring sign-in failed; check credentials or wait before retrying".into())},None=>Err("Monitoring sign-in is unavailable".into())}

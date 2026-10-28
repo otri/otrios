@@ -301,7 +301,7 @@ impl Client {
         );
         let mut viewport = canvas(
             u32::from(VIEWPORT),
-            Rect::new(88., page_y + 16., (page_w - 80.).max(1.), content_h - 24.),
+            Rect::new(24., page_y + 16., (page_w - 16.).max(1.), content_h - 24.),
             vec![],
         );
         viewport.responder = None;
@@ -334,12 +334,12 @@ impl Client {
             );
         }
         let dy = page_y + content_h;
-        if self.new_messages > 0 {
+        if self.new_messages > 0 || self.more_after {
             p.button(
                 12,
                 [48., dy - 48., 260., 44.],
                 "Show new messages",
-                &format!("{} new dispatches", self.new_messages),
+                "Latest dispatches",
                 true,
             );
         }
