@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "before": {
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "screen": "bundle-counter",
+    "ui": "app:bundle-counter/ui",
+    "text": "< OTriOS. •. Bundle Counter. A small shared counter. 2. +1. Reset",
+    "value": 2,
+    "online": "Live shared space",
+    "controls": [
+      "OTriOS",
+      "Increase counter",
+      "Reset counter"
+    ]
+  },
+  "after": {
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "screen": "bundle-counter",
+    "ui": "app:bundle-counter/ui",
+    "text": "< OTriOS. •. Bundle Counter. A small shared counter. 2. +1. Reset",
+    "value": 2,
+    "online": "Live shared space",
+    "controls": [
+      "OTriOS",
+      "Increase counter",
+      "Reset counter"
+    ]
+  },
+  "hello": {
+    "type": "hello",
+    "version": 1,
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "state_protocol": "otrios-canvas-sync-v8",
+    "state": true
+  },
+  "errors": []
+}
