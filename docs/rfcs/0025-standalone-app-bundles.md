@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0025: Standalone app bundles
 
-Date: 2026-10-29. Status: proposed architecture; B1 offline packaging is
-implemented and qualified locally. B2/B3 signed installation and Frame qualification
-are the active milestone; deployment qualification is pending.
+Date: 2026-10-29. Status: B1 packaging and bounded B2/B3 signed Canvas app
+installation are implemented. Independent app discovery, native/browser execution,
+app-only upgrade and state-preserving rollback are qualified on live Frame.
+General dependency resolution, capability imports and multi-publisher policy remain
+proposed. See the [Frame qualification](../experiments/app-bundle-frame-2026-10-29.md).
 Builds on [RFC 0004](0004-canvas-behavior-and-app-packages.md),
 [UI replacement](0013-app-ui-updates.md), [behavior replacement](0014-app-behavior-updates.md)
 and [release control](0009-unified-server-session.md).
@@ -16,7 +18,7 @@ verified and installed without rebuilding the host. Today the packer imports
 an explicit Rust source registry, the signed release carries all admitted app
 packages, and some authority operations are app-specific Rust. Moving files into
 a directory does not remove those dependencies. This RFC defines the destination
-and an offline first increment without presenting it as a generic installer.
+and implements installation for the bounded existing Canvas contract.
 
 ## Bundle layout
 
@@ -182,15 +184,17 @@ basenames, case aliases (including directories), file/directory collisions,
 symlinks, special files and empty directories. Payloads are Info.flex or descend from Code, UI,
 Schemas, Resources, Dependencies or Notices. State, Cache and Contents are invalid.
 
-The CLI assumes caller-controlled, quiescent trees. Metadata checks plus ordinary
-opens are not race-free against hostile concurrent mutation. Read limits still
-hold if a file grows; depth and total directory entries are bounded. Export uses
+The CLI assumes caller-controlled, quiescent trees. Bounded no-follow/nonblocking
+leaf opens and metadata checks do not provide a descriptor-relative filesystem
+against hostile same-UID directory mutation. Read limits still hold if a file grows;
+depth and total directory entries are bounded. Export uses
 a fresh sibling staging directory, re-inspects it, then renames to an absent
-destination. This is not a crash-durable installation transaction. B2 requires
-descriptor-relative no-follow reads, immutable staging, fsync ordering and a
-durable activation pointer before handling hostile inputs.
+destination. Export alone is not a crash-durable installation transaction. The
+installer verifies owned byte snapshots, stages in the trusted private release
+store, then uses the fsync and atomic activation sequence above. General hostile
+archive extraction and adversarial same-UID filesystem writers remain out of scope.
 
-## Installation and lifecycle (B2/B3 proposal)
+## Installation and lifecycle
 
 1. Receive bounded staging; verify the entire closure and trusted publisher
    signature before executable loading or compilation.
@@ -224,8 +228,13 @@ wire changes require matching codec identifiers and a protocol bump.
 | Milestone | Required evidence |
 | --- | --- |
 | B1 (complete locally) | Offline export/inspection of one catalog screen/package; pinned deterministic digest; malformed header/type/feature/path/budget rejection; complete hash closure; catalog/UI/schema/behavior binding; private classification; real CLI export/inspect with tamper/link/no-overwrite checks; required repository checks |
-| B2 | Signature/trust contract and safe immutable installation; interrupted staging/activation, publisher/key/revision conflicts and rollback tests; no execution before trust |
-| B3 | Multi-screen/dependency closure, generic authority admission, Home discovery without host rebuild; public/private denial and revocation; real browser/Frame lifecycle and signed-release rollback qualification |
+| B2 (bounded implementation qualified) | Pinned publisher signature and immutable release installation; interrupted staging/activation, key/revision conflicts and rollback tests; no execution before trust |
+| B3 (bounded Canvas admission qualified on Frame) | Generic schema/UI/pure-Wasm app admission, generated Home discovery, unchanged host bytes, private denial, real browser/native execution, app upgrade and signed-release rollback with confirmed state preserved |
+
+General dependency resolution, multi-publisher revocation distribution, capability
+imports and independently linked modules require later milestones. Existing
+multi-screen catalog routes are preserved; the current independent installer adds
+one Canvas package at a root route rather than resolving a new app's screen graph.
 
 B1 exports one current package, potentially a screen in a larger app. External
 navigation, fonts, declared dependencies and authority services are not silently
@@ -236,9 +245,10 @@ SDK stability and target compilation are outside B1.
 Legacy dependency strings mix source files, SDK hints and runtime requirements.
 B1 retains them as descriptive data, not a complete typed dependency or permission
 plan. In particular, exporting Monitoring with an empty capabilities list does
-not remove its existing admission requirement: every B1 artifact is noninstallable.
-B2/B3 must translate host requirements into explicit checked contracts before
-generic installation, rather than treating the legacy strings as grants.
+not remove its existing admission requirement. Unsigned exports alone remain
+noninstallable. The bounded installer checks Canvas features and rejects capability
+imports; legacy dependency hints never become grants. Rich host dependency plans
+remain future work.
 
 Runtime validation/tests stay LGPL in otrios-core; Apache public contracts stay
 in otrios-interfaces and filesystem/build tooling in the thin CLI. B1 needed no
@@ -270,6 +280,8 @@ cargo run -p otrios-dashboard --features canvas --bin canvas-bundle -- \
 bash scripts/check.sh
 ```
 
-These check authoring/inspection, not installation, Linux IPC, publisher trust,
-native compilation or physical display acceptance. See the
-[B1 qualification record](../experiments/app-bundles-2026-10-29.md) for actual results.
+The export/inspect commands check unsigned authoring and byte integrity. See
+[installation commands](../FRAME_HOSTING.md), the historical
+[B1 record](../experiments/app-bundles-2026-10-29.md), and the
+[signed Frame qualification](../experiments/app-bundle-frame-2026-10-29.md).
+Neither milestone claims Linux shared-memory IPC or native AOT compilation.

@@ -1,0 +1,215 @@
+{
+  "source_commit": "47d8137ae78d33d1d65503cb6139006d2016c6a9",
+  "host_release": "49ec0c839a9d63890c23ecf2aac14c96317352885d440554994987242da57b11",
+  "v1_bundle": "86d123c91d807a9be578ec34e5619a914b4d41afc3d46d70c6baa41558382aa0",
+  "v2_bundle": "c5b654ae3be53873fa242c6ab74ce9505d17b89fae5a28676d28c9832e5c9f82",
+  "install_transfer_bytes": 163840,
+  "upgrade_transfer_bytes": 112640,
+  "rollback_transfer_bytes": 112640,
+  "host_assets_unchanged": true,
+  "browser_install": {
+    "passed": true,
+    "before": {
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 0. +1. Reset",
+      "value": 0,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "after": {
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 1. +1. Reset",
+      "value": 1,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "hello": {
+      "type": "hello",
+      "version": 1,
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "state_protocol": "otrios-canvas-sync-v8",
+      "state": true
+    },
+    "errors": []
+  },
+  "browser_upgrade": {
+    "passed": true,
+    "before": {
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 2. +1. Reset",
+      "value": 2,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "after": {
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 2. +1. Reset",
+      "value": 2,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "upgraded": {
+      "release": "843e4ca2b7dacda01e45df1668a9e180298e30bbe62cb882ea5618181fc400c7",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 4. +2. Reset",
+      "value": 4,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "hello": {
+      "type": "hello",
+      "version": 1,
+      "release": "843e4ca2b7dacda01e45df1668a9e180298e30bbe62cb882ea5618181fc400c7",
+      "state_protocol": "otrios-canvas-sync-v8",
+      "state": true
+    },
+    "errors": []
+  },
+  "browser_rollback": {
+    "passed": true,
+    "before": {
+      "release": "843e4ca2b7dacda01e45df1668a9e180298e30bbe62cb882ea5618181fc400c7",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 4. +2. Reset",
+      "value": 4,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "after": {
+      "release": "843e4ca2b7dacda01e45df1668a9e180298e30bbe62cb882ea5618181fc400c7",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 4. +2. Reset",
+      "value": 4,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "upgraded": {
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "screen": "bundle-counter",
+      "ui": "app:bundle-counter/ui",
+      "text": "< OTriOS. \u2022. Bundle Counter. A small shared counter. 5. +1. Reset",
+      "value": 5,
+      "online": "Live shared space",
+      "controls": [
+        "OTriOS",
+        "Increase counter",
+        "Reset counter"
+      ]
+    },
+    "hello": {
+      "type": "hello",
+      "version": 1,
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "state_protocol": "otrios-canvas-sync-v8",
+      "state": true
+    },
+    "errors": []
+  },
+  "native_input": {
+    "input": "synthetic evdev taps through accepted calibration and live native reader",
+    "before": {
+      "ui_ref": "app:home/ui",
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839"
+    },
+    "after": {
+      "ui_ref": "app:bundle-counter/ui",
+      "screen": "bundle-counter",
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ]
+    },
+    "confirmed": "CONFIRMED app=bundle-counter value=2 before=None state=app:bundle-counter/state guest=true",
+    "touch_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+  },
+  "native_upgrade": {
+    "ready": {
+      "ui_ref": "app:bundle-counter/ui",
+      "screen": "bundle-counter",
+      "release": "843e4ca2b7dacda01e45df1668a9e180298e30bbe62cb882ea5618181fc400c7",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ]
+    },
+    "probe": "CONFIRMED app=bundle-counter value=4 before=None state=app:bundle-counter/state guest=true",
+    "native_last_good": "843e4ca2b7dacda01e45df1668a9e180298e30bbe62cb882ea5618181fc400c7"
+  },
+  "native_rollback": {
+    "ready": {
+      "ui_ref": "app:bundle-counter/ui",
+      "screen": "bundle-counter",
+      "release": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ]
+    },
+    "probe": "CONFIRMED app=bundle-counter value=5 before=None state=app:bundle-counter/state guest=true",
+    "native_last_good": "a2f3f423d759b695eb795068e8582524f1e1f66d06b9d59cda4076813a937839"
+  },
+  "arm_guest": {
+    "home-controls": "{\"app\":\"home\",\"controls\":[{\"label\":\"The Brass Relay\",\"x\":224.0,\"y\":208.0},{\"label\":\"Test Playground\",\"x\":640.0,\"y\":208.0},{\"label\":\"Monitoring\",\"x\":1056.0,\"y\":208.0},{\"label\":\"Bundle Counter\",\"x\":224.0,\"y\":408.0}],\"ui_sha256\":\"1a04bafb42c114585d90ebbf308c130852b01fa7aae042c1129ea12711797a1a\"}",
+    "bundle-counter-controls": "{\"app\":\"bundle-counter\",\"controls\":[{\"label\":\"OTriOS\",\"x\":93.90934753417969,\"y\":54.0},{\"label\":\"Increase counter\",\"x\":356.0,\"y\":440.0},{\"label\":\"Reset counter\",\"x\":984.0,\"y\":440.0}],\"ui_sha256\":\"b6ef147ce7b9b3fce1f585a20f48d6286dce53a41adfd4d206acd9075fc7655b\"}",
+    "bundle-counter-read": "CONFIRMED app=bundle-counter value=1 before=None state=app:bundle-counter/state guest=true",
+    "monitoring-deny": "DENIED app=monitoring payloads=false"
+  }
+}

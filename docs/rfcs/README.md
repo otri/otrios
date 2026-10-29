@@ -33,5 +33,5 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0022: A playful shared chat room](0022-playful-shared-chat-room.md) | Implementation qualified |
 | [RFC 0023: Retained presentation and structured documents](0023-retained-presentation-foundation.md) | First delivery deployed |
 | [RFC 0024: Viewport-scoped collection synchronization](0024-viewport-scoped-collections.md) | Implemented and deployed |
-| [RFC 0025: Standalone app bundles](0025-standalone-app-bundles.md) | B1 offline export/inspection qualified locally; installation remains proposed |
+| [RFC 0025: Standalone app bundles](0025-standalone-app-bundles.md) | Signed bounded Canvas app installation, discovery, native/browser execution, upgrades and rollback qualified on Frame |
 | [RFC 0026: Target-specific Wasm compilation](0026-target-wasm-compilation.md) | Proposed experiment; no execution backend selected or integrated |

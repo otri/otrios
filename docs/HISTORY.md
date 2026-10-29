@@ -5,6 +5,12 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Standalone app bundles](rfcs/0025-standalone-app-bundles.md) install independently
+of the host source registry. The [Frame qualification](experiments/app-bundle-frame-2026-10-29.md)
+records signed Counter installation, generated Home discovery, native/browser Wasm
+execution, app-only upgrade and rollback without losing confirmed state. Native
+AOT compilation remains the separate RFC 0026 experiment.
+
 Live Controls now includes a [primitive component playground](COMPONENT_PLAYGROUND.md): captured slider/dial/pad gestures, independent shared values and local feedback. The editable layout demo lives in Test Playground.
 
 Animation and 3D experiments: [presentation ownership, load controls and hardware measurements](ANIMATION.md). The [direct KMS display path](DIRECT_DISPLAY.md) bypasses Weston, with [measured renderer improvements](experiments/direct-display-validation.md) and an accepted [SDL-free Linux backend design](rfcs/0001-direct-linux-gles2.md).

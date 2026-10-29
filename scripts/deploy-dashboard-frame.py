@@ -55,7 +55,8 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
   activation.agent.atomic(store/'current.json',pointer)
   shutil.chown(store/'current.json',user='otrios',group='otrios')
  if restart:subprocess.run(['systemctl','restart','otrios-authority.service'],check=True)
- for attempt in range(30):
+ # ARM recovery can exceed six seconds when loading existing app journals.
+ for attempt in range(300):
   try:
    with urllib.request.urlopen('http://127.0.0.1:8876/health',timeout=2) as response:health=json.load(response)
    if health['status']=='ok':break
