@@ -41,6 +41,8 @@ pub const DASHBOARD_HEIGHT: u32 = 800;
 pub mod keyboard;
 
 #[cfg(feature = "layout")]
+pub mod bundle;
+#[cfg(feature = "layout")]
 pub mod canvas;
 #[cfg(feature = "layout")]
 pub mod chat;

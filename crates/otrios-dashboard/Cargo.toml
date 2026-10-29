@@ -58,6 +58,11 @@ path = "src/canvas_pack.rs"
 required-features = ["canvas"]
 
 [[bin]]
+name = "canvas-bundle"
+path = "src/canvas_bundle.rs"
+required-features = ["canvas"]
+
+[[bin]]
 name = "canvas-server"
 path = "src/canvas_server.rs"
 required-features = ["canvas", "server"]

@@ -71,6 +71,17 @@ Layout aggregate without adding telemetry history to app documents.
 
 ## Build and validation
 
+[RFC 0025](../docs/rfcs/0025-standalone-app-bundles.md) starts standalone flat-root
+`.otapp` bundles. After packing, `canvas-bundle export apps APP_ID OUTPUT.otapp
+--revision N` exports one current screen/package; `canvas-bundle inspect
+OUTPUT.otapp` checks its bounded complete hash closure. Both commands use
+`cargo run -p otrios-dashboard --features canvas --bin canvas-bundle --`.
+The offline artifact is unsigned and cannot be installed by the live authority.
+External navigation/dependencies and authority services are not resolved. Mutable
+state and target compilation caches stay outside the bundle. See
+[RFC 0026](../docs/rfcs/0026-target-wasm-compilation.md) for the deferred Frame AOT
+experiment. Existing signed-release packaging and deployment are unchanged.
+
 ```sh
 bash scripts/build-dashboard-web.sh
 # With the authority dependencies enabled:

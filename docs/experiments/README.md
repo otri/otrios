@@ -7,6 +7,8 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Offline app bundles — 2026-10-29](app-bundles-2026-10-29.md): flat FlexBuffers package export/integrity inspection; installation and AOT remain deferred.
+
 - [Viewport-scoped collections — 2026-10-28](collection-windows-2026-10-28.md): bounded windows, structured messages, recovery and browser/frame deployment.
 - [Brass app theme — 2026-10-28](brass-app-theme-2026-10-28.md): shared headers, navigation and visual qualification.
 - [Frame keyboard — 2026-10-28](frame-keyboard-2026-10-28.md): native keyboard qualification and limitations.
