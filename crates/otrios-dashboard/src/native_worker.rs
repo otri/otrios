@@ -353,7 +353,12 @@ pub(super) fn state_worker(
     let admitted = otrios_core::canvas::decode_catalog(&catalog)?;
     let entry = if let Some(id) = &o.screen {
         let id = entry_app(id)?;
-        admitted.apps.iter().find(|e| e.path == id)
+        // An app removed during a verified release handoff returns to Home.
+        admitted
+            .apps
+            .iter()
+            .find(|e| e.path == id)
+            .or_else(|| admitted.apps.first())
     } else {
         admitted.apps.first()
     }

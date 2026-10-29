@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Record a qualified runtime, or publish an app UI or behavior module using that verified runtime."""
 import argparse,hashlib,importlib.util,json,pathlib,re,shutil,subprocess,tempfile
+from types import SimpleNamespace
 
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,pathlib.Path(__file__).with_name(file));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
@@ -18,7 +19,7 @@ def runtime_inputs(repo):
         p=pathlib.PurePosixPath(name)
         if (p.parts[0]=='crates' and 'tests' in p.parts) or (p.parts[0]=='scripts' and p.name.startswith('test')):continue
         if (len(p.parts)==3 and p.parts[0]=='apps' and p.name in ['ui.rs','components.rs']) or (len(p.parts)==4 and p.parts[0]=='apps' and p.parts[2]=='behavior' and p.name=='main.wat') or 'pkg' in p.parts or 'package' in p.parts:continue
-        if name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml'] or (p.parts[0] in ['apps','crates','tools','web','scripts'] and p.suffix in ['.rs','.toml','.py','.sh','.js','.mjs','.wat','.html','.css','.c','.h','.vert','.frag','.zst','.txt']):
+        if name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt'] or (p.parts[0] in ['apps','crates','tools','web','scripts'] and p.suffix in ['.rs','.toml','.py','.sh','.js','.mjs','.wat','.html','.css','.c','.h','.vert','.frag','.zst','.txt']):
             selected.append((name,file_hash(repo/name)))
     return hashlib.sha256(json.dumps(selected,separators=(',',':')).encode()).hexdigest()
 
@@ -29,6 +30,32 @@ def record(a):
     files={name:{'path':str(path.resolve()),'sha256':file_hash(path)}for name,path in [('server',a.server),('monitoring',a.monitoring),('bootstrap',a.bootstrap)]}
     value={'format':'otrios-app-runtime-v1','release':release,'runtime_inputs':runtime_inputs(a.repo),'binaries':files,'source_dirty':bool(subprocess.check_output(['git','status','--porcelain'],cwd=a.repo,text=True).strip()),'source':subprocess.check_output(['git','rev-parse','HEAD'],cwd=a.repo,text=True).strip()}
     publisher.atomic(a.record,json.dumps(value,indent=2).encode());print('RECORDED '+release)
+
+def publish_bundle(a,base,ui_sources,source_root):
+    """Keep existing scoped authoring while production consumes only signed bundles."""
+    if a.app=='home':raise ValueError('Home is generated from installed app descriptors; use install-app.py')
+    checker=a.runtime/'build/mac-target/debug/canvas-bundle'
+    with tempfile.TemporaryDirectory(prefix='bundle-update-',dir=a.runtime/'build')as tmp:
+        stage=pathlib.Path(tmp);apps=stage/'apps'
+        def tool(*args):subprocess.run([str(checker),*[str(arg)for arg in args]],check=True)
+        tool('materialize',base/'apps/catalog.flex',base/'authority/bundles',apps,'--key',a.runtime/'publisher/public.pem','--openssl',a.openssl)
+        # Temporary build-input bridge for the established scoped UI/WAT packer;
+        # these files are never admitted as a production release package.
+        bridge=stage/'baseline';(bridge/'apps').mkdir(parents=True);shutil.copyfile(apps/'catalog.flex',bridge/'apps/catalog.flex')
+        for package in apps.glob('*/package'):
+            destination=bridge/'authority/apps'/package.parent.name;destination.parent.mkdir(parents=True,exist_ok=True);shutil.copytree(package,destination)
+        command=['cargo','run','-p','otrios-dashboard','--bin','canvas-pack','--features','canvas','--locked','--offline','--',str(apps),('--app-behavior'if a.kind=='behavior'else'--app-ui'),a.app,str(bridge)]
+        if a.kind=='behavior':command.append(str(a.repo/'apps'/a.app/'behavior/main.wat'))
+        subprocess.run(command,cwd=a.repo,check=True)
+        unsigned=stage/'candidate.otapp';bumped=stage/'revision.otapp';signed=stage/'signed.otapp'
+        tool('export',apps,a.app,unsigned,'--revision','1')
+        tool('bump',unsigned,base/'authority/bundles'/(a.app+'.otapp'),bumped,'--key',a.runtime/'publisher/public.pem','--openssl',a.openssl)
+        tool('sign',bumped,signed,'--key',a.runtime/'publisher/private.pem','--openssl',a.openssl)
+        if {name:file_hash(source_root/name)for name in ui_sources}!=ui_sources:raise ValueError('App source changed during packing')
+        receipt=json.loads(a.record.read_text())
+        if runtime_inputs(a.repo)!=receipt['runtime_inputs']:raise ValueError('Host inputs changed during packing')
+        installer=module('bundle_installer','install-app.py')
+        return installer.install(SimpleNamespace(runtime=a.runtime,baseline=a.baseline,bundle=signed,remove=None,checker=checker,openssl=a.openssl,deploy_config=a.deploy_config))
 
 def publish(a):
     receipt=json.loads(a.record.read_text())
@@ -44,7 +71,8 @@ def publish(a):
     recorded=a.runtime/'releases'/receipt['release']
     # Baselines after successive UI edits must retain the recorded executable closure.
     old=json.loads((recorded/'manifest.json').read_bytes());manifest=json.loads((base/'manifest.json').read_bytes())
-    if not agent.app_only_change(old,manifest):raise ValueError('Baseline is not compatible with the qualified runtime')
+    if not agent.app_install_change(old,manifest):raise ValueError('Baseline is not compatible with the qualified runtime')
+    if manifest.get('bundle_abi')=='otrios-app-bundle-v1':return publish_bundle(a,base,ui_sources,source_root)
     with tempfile.TemporaryDirectory(prefix='app-ui-',dir=a.runtime/'build') as tmp:
         stage=pathlib.Path(tmp);shutil.copytree(base/'web',stage/'web')
         apps=stage/'apps';apps.mkdir();shutil.copyfile(base/'apps/catalog.flex',apps/'catalog.flex')

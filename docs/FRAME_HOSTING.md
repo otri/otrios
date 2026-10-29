@@ -70,7 +70,7 @@ require HTTPS/WSS. Native signature checks remain mandatory.
 The trusted loopback listener admits private apps for the local display and accepts the
 monitoring collector's `/presentation` upload. The public listener uses an exact
 route/Origin allowlist and Monitoring's HttpOnly cookie; static paths cannot
-expose `authority/apps/`. Public demos share the frame's per-app data roots.
+expose `authority/bundles/` or legacy `authority/apps/`. Public demos share the frame's per-app data roots.
 Navigation remains local. Private leases are checked on input, expiry and before
 queued bytes leave the socket. [Public access](PUBLIC_ACCESS.md) details policy.
 
@@ -167,6 +167,42 @@ It never deletes durable app roots or unrelated hardware recovery backups.
 
 ## Signing and activation
 
+### Standalone app installation
+
+Bundle-aware releases use public `apps/catalog.flex` plus private signed trees at
+`authority/bundles/<app-id>.otapp/`. Both outer release verification and inner
+bundle verification must succeed before activation. The matching ARM
+`/opt/otrios-authority/canvas-bundle` checker is installed with the authority;
+the authority verifies again against its existing publisher.pem before guest
+execution. The signing private key remains on the Mac. Older complete releases
+remain readable for operational rollback.
+
+After qualifying/deploying the bundle-capable host, stage an app without rebuilding
+the host binaries:
+
+```sh
+python3 scripts/install-app.py --runtime /PRIVATE/OTriOSDashboard \
+  --checker /PRIVATE/OTriOSDashboard/build/mac-target/debug/canvas-bundle \
+  --openssl /PATH/TO/openssl --bundle /ABS/SIGNED_APP.otapp
+```
+
+The tool writes `build/app-install.json` and `build/app-install-receipt.json`.
+Qualify that exact candidate before adding the established `--deploy-config` for
+Frame installation. It preserves every public runtime asset and native binary,
+generates Home from installed entries, and uses the expected-baseline activation
+lock. Registry changes use a safe browser/native handoff after confirmed edits and
+idle gestures. Code/state stay on the existing session; control v1 and state v8
+are unchanged. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
+outside the host source registry.
+
+`--remove APP_ID` removes registration, retaining authority state. Refused revisions,
+bad signatures, unresolved navigation or state-schema changes leave the pointer
+unchanged. For rollback, restore a complete verified release with matching host
+bytes/helpers and notify activation; never copy an old state backup over confirmed
+data. Keep the private operational rollback snapshot before pruning cached releases.
+
+### Release verification
+
 The frame activation CLI verifies the signature, manifest, exact public/private
 paths, sizes and every digest before atomically advancing `current.json`. It
 notifies the trusted-only `/admin/activate` hook; code events do not wait for
@@ -174,7 +210,7 @@ catalog refresh or successful state decoding. A notification failure is reported
 and retried; reconnects also reread metadata.
 
 The public catalog admits UI/State references and hashes. UI/behavior payloads
-under `authority/apps/<id>/` travel only through authorized mounts. Their presence
+under `authority/bundles/<id>.otapp/` (or legacy `authority/apps/<id>/`) travel only through authorized mounts. Their presence
 in the local signed store never grants public static access. Native execution
 requires the pinned Ed25519 signature; browser resources rely on HTTPS and the
 manifest hash closure, without independently verifying the detached signature.

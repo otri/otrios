@@ -110,6 +110,15 @@ def app_only_change(previous,next):
     behavior=previous.get('behavior_abi')=='otrios-app-behavior-v1' and next.get('behavior_abi')==previous['behavior_abi']
     return ui_only_change(previous,next,behavior=behavior)
 
+def app_install_change(previous,next):
+    """Registry installation reuses host bytes but may require a safe full reload."""
+    if previous.get('bundle_abi')!='otrios-app-bundle-v1':return app_only_change(previous,next)
+    if {k:v for k,v in previous.items() if k not in ('assets','authority')}!={k:v for k,v in next.items() if k not in ('assets','authority')}:return False
+    a,b=previous.get('assets',{}),next.get('assets',{})
+    if a.keys()!=b.keys() or any(a[k]!=b[k] for k in a if k!='apps/catalog.flex'):return False
+    pattern=r'authority/bundles/[a-z-]+\.otapp/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+'
+    return bool(previous.get('authority')) and bool(next.get('authority')) and all(re.fullmatch(pattern,name) and all(part not in ('.','..') for part in pathlib.PurePosixPath(name).parts) for m in (previous,next) for name in m.get('authority',{}))
+
 def hot_reload_ready(info):
     if info.get('input_busy',True):return False
     # Current PoC policy: disconnected RAM edits may be dropped for an upgrade.

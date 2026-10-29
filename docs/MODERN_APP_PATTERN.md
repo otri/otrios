@@ -56,7 +56,8 @@ resources and `apps/catalog.flex`. The catalog binds app identities and entry
 references to UI hashes; an admitted UI binds its behavior hash and permitted
 writes. App manifest dependency strings describe requirements, not grants.
 
-UI/code package bytes live under the release's signed `authority/apps/` tree.
+UI/code package bytes in bundle-aware releases live in signed `.otapp` trees
+under `authority/bundles/`; older verified rollback releases use `authority/apps/`.
 They are excluded from the public module replica and HTTP asset allowlists.
 The authority checks Monitoring permission before sending its UI, executable
 imports or state. An anonymous visitor may see its catalog entry and lock without

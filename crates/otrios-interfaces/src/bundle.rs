@@ -8,6 +8,8 @@ pub const INFO_HEADER: &[u8; 8] = b"OTAPP\0\x01\0";
 pub const FILES_FORMAT: &str = "otrios-bundle-files-v1";
 pub const INFO_PATH: &str = "Info.flex";
 pub const FILES_PATH: &str = "Integrity/files.flex";
+pub const SIGNATURE_PATH: &str = "Integrity/publisher.flex";
+pub const SIGNATURE_FORMAT: &str = "otrios-app-signature-v1";
 pub const UI_PATH: &str = "UI/main.flex";
 pub const SCHEMA_PATH: &str = "Schemas/state.flex";
 pub const CODE_PATH: &str = "Code/behavior.wasm";
@@ -43,4 +45,14 @@ pub struct BundleFile {
 pub struct BundleFiles {
     pub format: String,
     pub files: Vec<BundleFile>,
+}
+
+/// Detached Ed25519 receipt, outside its own hash closure. The key ID is SHA-256
+/// of the raw 32-byte public key; the trust key must be supplied independently.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundleSignature {
+    pub format: String,
+    pub key_sha256: String,
+    pub signature: Vec<u8>,
 }

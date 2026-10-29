@@ -37,6 +37,7 @@ pub(super) struct Hub {
     view_id: Vec<u8>,
     active: Vec<u8>,
     active_release: String,
+    publisher: Option<[u8; 32]>,
 }
 struct Lease {
     epoch: u32,
@@ -101,7 +102,11 @@ impl Hub {
             view_id: vec![],
             active: vec![],
             active_release: String::new(),
+            publisher: None,
         })
+    }
+    pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
+        self.publisher = Some(key);
     }
     pub(super) fn refresh(&mut self, releases: &Option<PathBuf>, release: &Value) -> Result<()> {
         let id = release["id"].as_str().unwrap_or("development");
@@ -133,7 +138,11 @@ impl Hub {
                 )
             };
         let catalog_hash = canvas::hash(&catalog_bytes);
-        if self.bundles.contains_key(&catalog_hash) {
+        let bundle_format = manifest.as_ref().and_then(|m| m.get("bundle_abi"));
+        if bundle_format.is_some_and(|format| format != "otrios-app-bundle-v1") {
+            return Err("Unsupported installed bundle ABI".into());
+        }
+        if bundle_format.is_none() && self.bundles.contains_key(&catalog_hash) {
             self.active = catalog_hash;
             self.active_release = id.into();
             return Ok(());
@@ -182,16 +191,59 @@ impl Hub {
             } else {
                 state_refs.insert(a.state_ref.clone(), (owner.to_owned(), private));
             }
+            let verified = if bundle_format.is_some() {
+                let m = manifest.as_ref().ok_or("Missing bundle release manifest")?;
+                let root = releases
+                    .as_ref()
+                    .ok_or("Bundle installation requires a signed release")?
+                    .join(id);
+                let prefix = format!("authority/bundles/{}.otapp/", a.id);
+                let tree =
+                    super::bundle_files::read_tree(&root.join(prefix.trim_end_matches('/')))?;
+                if m["authority"]
+                    .as_object()
+                    .ok_or("Missing private release closure")?
+                    .keys()
+                    .filter(|name| name.starts_with(&prefix))
+                    .count()
+                    != tree.len()
+                {
+                    return Err("Bundle differs from signed release closure".into());
+                }
+                for (path, bytes) in &tree {
+                    verify_asset(m, &format!("{prefix}{path}"), bytes)?;
+                }
+                let verified = otrios_core::bundle::verify(
+                    tree,
+                    self.publisher
+                        .as_ref()
+                        .ok_or("Missing trusted bundle publisher key")?,
+                )?;
+                if verified.summary().info.app != a
+                    || verified.summary().info.private != entry.private
+                {
+                    return Err("Bundle identity/policy differs from signed catalog".into());
+                }
+                Some(verified)
+            } else {
+                None
+            };
             let base = if manifest.is_some() {
                 folder.join(&a.id)
             } else {
                 folder.join(&a.id).join("package")
             };
-            let ui = bounded(&base.join("ui.flex"), canvas::MAX_BYTES)?;
+            let ui = if let Some(verified) = &verified {
+                verified.file(otrios_interfaces::bundle::UI_PATH)?.to_vec()
+            } else {
+                bounded(&base.join("ui.flex"), canvas::MAX_BYTES)?
+            };
             if entry.ui_hash != canvas::hash(&ui) {
                 return Err("Catalog UI digest mismatch".into());
             }
-            if let Some(m) = &manifest {
+            if let Some(m) = &manifest
+                && verified.is_none()
+            {
                 verify_asset(m, &format!("authority/apps/{}/ui.flex", a.id), &ui)?;
             }
             let description = canvas::decode_ui(&ui)?;
@@ -212,8 +264,16 @@ impl Hub {
                 })
                 .collect::<Vec<_>>();
             let code = if let Some(reference) = &description.behavior {
-                let bytes = bounded(&base.join("behavior.wasm"), 65536)?;
-                if let Some(m) = &manifest {
+                let bytes = if let Some(verified) = &verified {
+                    verified
+                        .file(otrios_interfaces::bundle::CODE_PATH)?
+                        .to_vec()
+                } else {
+                    bounded(&base.join("behavior.wasm"), 65536)?
+                };
+                if let Some(m) = &manifest
+                    && verified.is_none()
+                {
                     verify_asset(m, &format!("authority/apps/{}/behavior.wasm", a.id), &bytes)?;
                 }
                 Behavior::load(&bytes, reference)?;

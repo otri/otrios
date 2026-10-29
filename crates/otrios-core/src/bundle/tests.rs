@@ -108,6 +108,7 @@ fn info_extensions_are_ignored_but_required_semantics_fail_closed() {
     tree.insert(INFO_PATH.into(), bytes);
     reseal(&mut tree);
     assert_ne!(inspect(&tree).unwrap().digest, before.digest);
+    assert!(with_revision(tree.clone(), 2).is_err());
     change_info(&mut tree, |info| {
         info.required_features.push("future-sandbox-v2".into())
     });
@@ -331,4 +332,40 @@ fn truncated_and_seeded_mutated_metadata_never_panics() {
         }
         let _ = decode_info(&bytes);
     }
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn signed_snapshot_requires_external_trust_and_survives_source_mutation() {
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    let key = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let mut tree = fixture(None);
+    let digest = inspect(&tree).unwrap().digest;
+    assert!(verify(tree.clone(), &public).is_err());
+    let signature = key.sign(&signing_payload(&digest, &public).unwrap());
+    // Independently generated with OpenSSL 3 from the fixed PKCS#8 seed fixture.
+    assert_eq!(
+        hex(&public),
+        "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+    );
+    assert_eq!(
+        hex(&hash(&signing_payload(&digest, &public).unwrap())),
+        "0996b55102ecccf252a59417edb7e3eb4bcf340e5e1170491df7b0a1111112dc"
+    );
+    assert_eq!(
+        hex(signature.as_ref()),
+        "2860dcb0eacf89cb91064e5670a1e4e0cbf9f0016e072f600f8e63fc4fa49a1ff2437980bada9b642d7e04bb7fe97246878dd2a73cca5521c0384f1f6e7c5f0d"
+    );
+    attach_signature(&mut tree, &public, signature.as_ref()).unwrap();
+    assert_eq!(inspect(&tree).unwrap().digest, digest);
+    let verified = verify(tree.clone(), &public).unwrap();
+    assert_eq!(verified.summary().digest, digest);
+    assert!(verify(tree.clone(), &[8; 32]).is_err());
+    change_info(&mut tree, |info| info.revision += 1);
+    assert!(verify(tree.clone(), &public).is_err());
+    assert_eq!(verified.summary().info.revision, 1);
+    assert!(verified.file(UI_PATH).is_ok());
+    assert!(public_key_der(&public).is_err());
+    assert!(attach_signature(&mut tree, &public, &[0; 63]).is_err());
 }

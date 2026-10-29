@@ -6,7 +6,7 @@ from importlib.machinery import SourceFileLoader
 publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_name('publish-dashboard.py'))).load_module()
 
 def inputs(repo):
-    exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt']
+    exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt']
     files=[repo/x for x in exact]
     files.extend((repo/'crates/otrios-core/tests/fixtures').rglob('*.json'))
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
@@ -33,8 +33,9 @@ def rebuild(config,wanted,activate=True):
     env=dict(os.environ,**config['build_env'],CARGO_TARGET_DIR=str(build/'mac-target'))
     run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
     run(['cargo','test','-p','otrios-dashboard','--features','server,canvas,host-sync','--locked'],cwd=source,env=env)
-    for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py']:
-        run([sys.executable,script],cwd=source)
+    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--locked'],cwd=source,env=env)
+    for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py','scripts/test_app_bundles.py']:
+        run([sys.executable,script],cwd=source,env=dict(env,OTRIOS_TEST_BIN_DIR=str(build/'mac-target/debug')))
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
@@ -48,20 +49,43 @@ def rebuild(config,wanted,activate=True):
     elif probe.stdout.strip()!='true':run(['docker','start',name])
     archive=build/'source.tar'
     with tarfile.open(archive,'w') as t:
-        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','crates','apps','tools','web/shared/fonts']:t.add(source/item,arcname=item)
+        for item in ['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES','crates','apps','tools','web/shared/fonts']:t.add(source/item,arcname=item)
     run(['docker','cp',archive,name+':/tmp/source.tar'])
     run(['docker','exec',name,'rm','-rf','/src/crates'])
     run(['docker','exec',name,'tar','-xf','/tmp/source.tar','-C','/src'])
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
-    feature,binary='direct,server','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--target','armv7-unknown-linux-gnueabihf'])
+    feature,binary='direct,server,canvas','dashboard-direct'
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
-    for program in ['dashboard-server','dashboard-monitoring']:
+    for program in ['dashboard-server','dashboard-monitoring','canvas-bundle']:
         run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+program,build/('frame-'+program)])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
-    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=source/'apps/catalog.flex')
+    checker=build/'mac-target/debug/canvas-bundle'
+    unsigned=source/'unsigned-bundles';signed=source/'signed-bundles';unsigned.mkdir();signed.mkdir()
+    previous=None
+    if (runtime/'releases/current.json').is_file():
+        prior=json.loads((runtime/'releases/current.json').read_bytes())['id']
+        candidate=runtime/'releases'/prior/'authority/bundles'
+        if candidate.is_dir():previous=candidate
+    for package in sorted((source/'apps').glob('**/package')):
+        app=package.parent.relative_to(source/'apps').as_posix()
+        old=previous/(app+'.otapp') if previous else None
+        if app=='home' and old and old.is_dir():
+            shutil.copytree(old,signed/(app+'.otapp'));continue
+        initial=unsigned/(app+'.otapp')
+        run([checker,'export',source/'apps',app,initial,'--revision','1'])
+        if old and old.is_dir():
+            bumped=unsigned/(app+'-revision.otapp')
+            run([checker,'bump',initial,old,bumped,'--key',runtime/'publisher/public.pem','--openssl',config['openssl']]);initial=bumped
+        run([checker,'sign',initial,signed/(app+'.otapp'),'--key',runtime/'publisher/private.pem','--openssl',config['openssl']])
+    if previous:
+        for old in sorted(previous.glob('*.otapp')):
+            if not (signed/old.name).exists():shutil.copytree(old,signed/old.name)
+    installed=source/'installed-bundles'
+    run([checker,'compose',source/'apps/catalog.flex',signed,installed,'--key',runtime/'publisher/public.pem','--sign-key',runtime/'publisher/private.pem','--openssl',config['openssl']])
+    release=publisher.publish(source/'web/canvas',native,runtime/'releases',runtime/'publisher/private.pem',config['openssl'],activate=False,catalog=installed/'catalog.flex',bundles=installed,bundle_checker=checker)
     if activate:
         pointer=build/'activation.pending.json';publisher.atomic(pointer,json.dumps(release,sort_keys=True).encode())
         if config.get('frame'):

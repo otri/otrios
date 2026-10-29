@@ -12,6 +12,7 @@ otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
 canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex"]
+signed-bundles = ["canvas", "dep:ring", "dep:base64"]
 merkle = ["dep:sha2"]
 default = []
 dashboard = ["otrios-interfaces/layout", "dep:flexbuffers", "dep:sha2", "dep:unicode-segmentation", "dep:ruzstd"]
@@ -82,6 +83,14 @@ required-features = ["canvas"]
 version = "=0.14.0"
 default-features = false
 features = ["std", "safe-encode", "safe-decode", "checked-decode"]
+optional = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.ring]
+version = "=0.17.14"
+optional = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.base64]
+version = "=0.22.1"
 optional = true
 
 [[example]]

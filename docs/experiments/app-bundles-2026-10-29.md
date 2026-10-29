@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Offline app bundle qualification — 2026-10-29
 
-Scope: [RFC 0025](../rfcs/0025-standalone-app-bundles.md) B1, on feature branch
-`feat/installable-app-bundles`, macOS aarch64, pinned Rust 1.90.0. This qualifies
+Scope: [RFC 0025](../rfcs/0025-standalone-app-bundles.md) B1 at commit `18996da`, on
+feature branch `feat/installable-app-bundles`, macOS aarch64, pinned Rust 1.90.0. This historical record qualifies
 offline authoring/integrity inspection only. No installation, signature trust,
 native AOT execution, physical Frame acceptance or Linux shared-memory PoC
 acceptance is claimed. Existing release/state/control formats are unchanged.

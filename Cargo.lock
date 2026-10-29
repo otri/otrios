@@ -591,10 +591,12 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 name = "otrios-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "flexbuffers",
  "getrandom 0.4.3",
  "lz4_flex",
  "otrios-interfaces",
+ "ring",
  "ruzstd",
  "serde",
  "serde_json",
@@ -612,6 +614,7 @@ dependencies = [
  "axum",
  "futures-util",
  "getrandom 0.4.3",
+ "libc",
  "otrios-core",
  "otrios-interfaces",
  "otrios-linux-display",

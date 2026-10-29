@@ -26,6 +26,7 @@ pub struct InspectedBundle {
     pub digest: String,
     pub files: usize,
     pub bytes: usize,
+    pub signature: Option<BundleSignature>,
 }
 
 /// Portable, case-sensitive ASCII paths; reject case aliases across a tree too.
@@ -148,7 +149,7 @@ fn file_manifest(tree: &BundleTree) -> BundleFiles {
         format: FILES_FORMAT.into(),
         files: tree
             .iter()
-            .filter(|(path, _)| path.as_str() != FILES_PATH)
+            .filter(|(path, _)| !matches!(path.as_str(), FILES_PATH | SIGNATURE_PATH))
             .map(|(path, bytes)| BundleFile {
                 path: path.clone(),
                 bytes: bytes.len() as u64,
@@ -198,6 +199,55 @@ pub fn pack(
     Ok(tree)
 }
 
+pub fn with_revision(mut tree: BundleTree, revision: u64) -> Result<BundleTree> {
+    let mut info = inspect(&tree)?.info;
+    if tree.get(INFO_PATH) != Some(&encode_info(&info)?) {
+        return Err(
+            "Extended/noncanonical metadata requires a compatible publisher for revision edits"
+                .into(),
+        );
+    }
+    info.revision = revision;
+    tree.remove(SIGNATURE_PATH);
+    tree.insert(INFO_PATH.into(), encode_info(&info)?);
+    tree.insert(FILES_PATH.into(), encode(&file_manifest(&tree))?);
+    inspect(&tree)?;
+    Ok(tree)
+}
+
+/// Authoring transform. Preserve original metadata bytes and remove old proof;
+/// the changed payload closure must be signed again before admission.
+pub fn with_payload(mut tree: BundleTree, path: &str, bytes: &[u8]) -> Result<BundleTree> {
+    inspect(&tree)?;
+    if !payload_path(path) || matches!(path, INFO_PATH | UI_PATH | SCHEMA_PATH | CODE_PATH) {
+        return Err("Use the typed authoring path for bundle contracts/code".into());
+    }
+    tree.remove(SIGNATURE_PATH);
+    tree.insert(path.to_string(), bytes.to_vec());
+    tree.insert(FILES_PATH.into(), encode(&file_manifest(&tree))?);
+    inspect(&tree)?;
+    Ok(tree)
+}
+
+/// Existing app upgrades preserve identity/admission and the live state schema.
+/// Explicit operational rollback selects a previous verified release snapshot,
+/// rather than disguising an older bundle as a forward update.
+pub fn compatible_install(previous: &VerifiedBundle, next: &VerifiedBundle) -> Result<()> {
+    let before = &previous.summary.info;
+    let after = &next.summary.info;
+    if before.app.id != after.app.id
+        || before.app.ui_ref != after.app.ui_ref
+        || before.app.state_ref != after.app.state_ref
+        || before.private != after.private
+        || canvas::decode_schema(previous.file(SCHEMA_PATH)?)?
+            != canvas::decode_schema(next.file(SCHEMA_PATH)?)?
+        || (previous.summary.digest != next.summary.digest && after.revision <= before.revision)
+    {
+        return Err("App install identity, state, policy or revision conflict".into());
+    }
+    Ok(())
+}
+
 pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     if tree.is_empty() || tree.len() > MAX_FILES {
         return Err("Bundle file count budget exceeded".into());
@@ -206,7 +256,9 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     let mut paths = BTreeSet::new();
     let mut folded = BTreeMap::new();
     for (path, bytes) in tree {
-        if (path != FILES_PATH && !payload_path(path)) || bytes.len() > MAX_FILE_BYTES {
+        if (!matches!(path.as_str(), FILES_PATH | SIGNATURE_PATH) && !payload_path(path))
+            || bytes.len() > MAX_FILE_BYTES
+        {
             return Err("Bundle path/file budget rejected".into());
         }
         // Detect aliases in directory segments as well as complete file names.
@@ -321,12 +373,127 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     let mut digest = Sha256::new();
     digest.update(DIGEST_DOMAIN);
     digest.update(manifest_bytes);
+    let signature = tree
+        .get(SIGNATURE_PATH)
+        .map(|bytes| metadata::<BundleSignature>(bytes))
+        .transpose()?;
+    if signature.as_ref().is_some_and(|receipt| {
+        receipt.format != SIGNATURE_FORMAT
+            || receipt.signature.len() != 64
+            || !valid_digest(&receipt.key_sha256)
+    }) {
+        return Err("Invalid bundle signature envelope".into());
+    }
     Ok(InspectedBundle {
         info,
         digest: hex(&digest.finalize()),
         files: tree.len(),
         bytes: total,
+        signature,
     })
+}
+
+/// Decode only Ed25519 SubjectPublicKeyInfo DER, never arbitrary algorithm keys.
+pub fn public_key_der(bytes: &[u8]) -> Result<[u8; 32]> {
+    const PREFIX: &[u8] = &[
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    if bytes.len() != PREFIX.len() + 32 || !bytes.starts_with(PREFIX) {
+        return Err("Expected Ed25519 public key".into());
+    }
+    bytes[PREFIX.len()..].try_into().map_err(canvas::err)
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+pub fn public_key_pem(bytes: &[u8]) -> Result<[u8; 32]> {
+    use base64::Engine;
+    if bytes.len() > 4096 {
+        return Err("Publisher key budget exceeded".into());
+    }
+    let text = std::str::from_utf8(bytes).map_err(canvas::err)?.trim();
+    let encoded = text
+        .strip_prefix("-----BEGIN PUBLIC KEY-----")
+        .and_then(|s| s.strip_suffix("-----END PUBLIC KEY-----"))
+        .ok_or("Expected public key PEM")?;
+    let encoded: String = encoded
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .collect();
+    public_key_der(
+        &base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(canvas::err)?,
+    )
+}
+
+/// Fixed-size signing input: domain separator, raw public key, binary bundle hash.
+pub fn signing_payload(digest: &str, key: &[u8; 32]) -> Result<Vec<u8>> {
+    if !valid_digest(digest) {
+        return Err("Invalid signing digest".into());
+    }
+    let mut bytes = b"otrios-app-bundle-signature-v1\0".to_vec();
+    bytes.extend_from_slice(key);
+    for index in (0..64).step_by(2) {
+        bytes.push(u8::from_str_radix(&digest[index..index + 2], 16).map_err(canvas::err)?);
+    }
+    Ok(bytes)
+}
+
+fn valid_digest(digest: &str) -> bool {
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+pub fn attach_signature(tree: &mut BundleTree, key: &[u8; 32], signature: &[u8]) -> Result<()> {
+    if signature.len() != 64 {
+        return Err("Expected Ed25519 signature".into());
+    }
+    let receipt = BundleSignature {
+        format: SIGNATURE_FORMAT.into(),
+        key_sha256: hex(&hash(key)),
+        signature: signature.to_vec(),
+    };
+    tree.insert(SIGNATURE_PATH.into(), encode(&receipt)?);
+    inspect(tree)?;
+    Ok(())
+}
+
+/// Owns the authenticated byte snapshot. No caller-supplied boolean can construct it.
+#[derive(Debug)]
+pub struct VerifiedBundle {
+    summary: InspectedBundle,
+    tree: BundleTree,
+}
+impl VerifiedBundle {
+    pub fn files(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.tree
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+    }
+    pub fn summary(&self) -> &InspectedBundle {
+        &self.summary
+    }
+    pub fn file(&self, path: &str) -> Result<&[u8]> {
+        self.tree
+            .get(path)
+            .map(Vec::as_slice)
+            .ok_or("Missing authenticated bundle file".into())
+    }
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+pub fn verify(tree: BundleTree, key: &[u8; 32]) -> Result<VerifiedBundle> {
+    let summary = inspect(&tree)?;
+    let receipt = summary.signature.as_ref().ok_or("Unsigned app bundle")?;
+    if receipt.key_sha256 != hex(&hash(key)) {
+        return Err("Bundle publisher is not trusted".into());
+    }
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
+        .verify(&signing_payload(&summary.digest, key)?, &receipt.signature)
+        .map_err(|_| "Bundle publisher signature rejected")?;
+    Ok(VerifiedBundle { summary, tree })
 }
 
 #[cfg(test)]

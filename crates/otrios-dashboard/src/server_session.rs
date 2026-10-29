@@ -564,6 +564,7 @@ mod tests {
             auth: None,
             apps: Mutex::new(None),
             state_config: StateConfig {
+                bundle_key: PathBuf::from("unconfigured-test-key"),
                 source: PathBuf::new(),
                 state: None,
                 presentation: None,

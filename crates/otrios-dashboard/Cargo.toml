@@ -8,17 +8,18 @@ publish.workspace = true
 license = "Apache-2.0"
 
 [features]
-canvas = ["otrios-core/canvas", "dep:wat"]
+canvas = ["otrios-core/signed-bundles", "dep:wat"]
 default = []
 host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls"]
-direct = ["host-sync", "otrios-core/canvas", "dep:otrios-linux-display"]
-server = ["otrios-core/canvas", "dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util", "dep:argon2", "dep:getrandom", "dep:sha2"]
+direct = ["host-sync", "otrios-core/signed-bundles", "dep:otrios-linux-display"]
+server = ["otrios-core/signed-bundles", "dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util", "dep:argon2", "dep:getrandom", "dep:sha2"]
 
 [dependencies]
 otrios-core = { path = "../otrios-core", features = ["dashboard"] }
 otrios-interfaces = { path = "../otrios-interfaces", features = ["release"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libc = "=0.2.191"
 otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
 wat = { version = "=1.239.0", optional = true }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }
@@ -94,6 +95,14 @@ required-features = ["canvas", "host-sync"]
 
 [[example]]
 name = "touch_replay"
+required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "bundle_counter"
+required-features = ["canvas"]
+
+[[example]]
+name = "bundle_app_probe"
 required-features = ["canvas", "host-sync"]
 
 [[example]]

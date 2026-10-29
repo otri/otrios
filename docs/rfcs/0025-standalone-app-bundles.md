@@ -2,7 +2,8 @@
 # RFC 0025: Standalone app bundles
 
 Date: 2026-10-29. Status: proposed architecture; B1 offline packaging is
-implemented and qualified locally. Production installation is not implemented.
+implemented and qualified locally. B2/B3 signed installation and Frame qualification
+are the active milestone; deployment qualification is pending.
 Builds on [RFC 0004](0004-canvas-behavior-and-app-packages.md),
 [UI replacement](0013-app-ui-updates.md), [behavior replacement](0014-app-behavior-updates.md)
 and [release control](0009-unified-server-session.md).
@@ -98,15 +99,78 @@ cross-language conformance vectors before the format is declared stable.
 
 Info uses that same locked authoring encoder, but inspection accepts additive
 optional metadata without normalization. UI/schema keep their existing codecs.
+Revision editing refuses extended/noncanonical Info metadata it cannot preserve,
+rather than silently discarding unknown fields. Installation copies original
+metadata bytes unchanged.
 Hash exact published bytes, never reconstructed metadata.
 Bundle digest = `SHA256("otrios-app-bundle-v1\0" || files.flex bytes)`.
 
-B1 is unsigned: report publisher authentication as absent and refuse any claim of
-production installation. B2 specifies domain-separated Ed25519 signatures,
-authenticated publisher/key IDs, trust roots, revocation and rollback policy.
-Signature bytes sit outside their own hash closure; the exact signed envelope
-needs conformance vectors before admission. B1 rejects signature extensions.
-Existing whole-release signing stays authoritative.
+B1's original artifacts are unsigned. Current inspection still reports publisher
+authentication as absent; only verification against an independently supplied key
+produces an authenticated byte snapshot. B2's receipt is specified below.
+Existing whole-release signing remains the installation authority.
+
+### B2 signature envelope
+
+`Integrity/publisher.flex` is a closed FlexBuffers map with `format` equal to
+`otrios-app-signature-v1`, `key_sha256` (SHA-256 of the raw 32-byte Ed25519 public
+key as lowercase hex) and `signature` (a vector of exactly 64 byte values).
+It is excluded from files.flex and from the bundle digest, and counted in file
+and byte budgets. All payloads and files.flex retain their B1 identity.
+
+Sign the concatenation of ASCII `otrios-app-bundle-signature-v1` plus NUL, the raw
+32-byte public key, and the binary 32-byte bundle digest. The verifier rejects a
+key ID different from its externally configured key and verifies Ed25519 before
+returning an owned immutable snapshot. No caller-supplied trust flag is accepted.
+The unit fixture pins a public key, payload hash and signature independently
+generated using OpenSSL; the process test signs with OpenSSL and verifies with ring.
+
+The first trust scope is the existing single publisher. Frame uses its existing
+`/etc/otrios-authority/publisher.pem`, configurable through `--bundle-key` for
+disposable tests. A package cannot add a trust root. The private key stays on the
+builder. Removing/changing trusted keys is a trusted administrative operation;
+multi-publisher grants, automated key rotation and revocation distribution remain
+future work. Neither package requirements nor signatures grant service access.
+
+### B2/B3 installation transaction
+
+Use the existing signed immutable release snapshot as the registry transaction.
+The release contains `bundle_abi: otrios-app-bundle-v1`, public apps/catalog.flex,
+and private `authority/bundles/<app-id>.otapp/` trees. The outer signature covers
+the complete trees including their detached receipts. Before advancing the pointer,
+the activation tool verifies every outer digest and every inner signature against
+the pinned publisher, then fsyncs files/directories before the atomic pointer write.
+The authority independently validates those trees/signatures before guest loading.
+No bundle path is added to public HTTP asset allowlists.
+
+`install-app.py` verifies a candidate, preserves all other bundles, composes the
+catalog/Home and reuses the exact qualified browser/native assets. It stages a
+complete newly signed release, and the existing deployment lock checks the expected
+baseline during transfer/activation. Failures leave the active pointer unchanged.
+Existing app updates must retain ID, UI/State references, private classification
+and state schema. Changed content requires a strictly higher revision; equal
+revision/equal content is idempotent. Explicit operational rollback selects a
+previous complete verified release and never restores old authority state.
+
+The current Canvas contract needs no source registry entry to admit a new schema,
+primitive UI and pure bounded Wasm reducer. The launcher is generated from the
+installed catalog's root entries; child routes stay under their existing parents.
+Composition checks every navigation destination and qualifies every signed package
+through the real Canvas runtime before publication. Unknown effects/capabilities
+and arbitrary module linking remain outside this contract. Existing app-specific
+Brass Relay and Monitoring services remain explicit host requirements.
+
+Registry changes use a safe full browser/native host handoff after confirmed edits
+and idle gestures; host bytes are reused without rebuilding. They are not sent
+through the legacy fixed-catalog UI-only fast path. A removed native screen returns
+to Home on handoff; its mutable state is retained. An old browser URL for a removed
+app returns the normal 404. Already pinned versions may finish before upgrading.
+
+Full host builds preserve independently installed bundles. Scoped UI/behavior
+authoring remains available through publish-app.py: it materializes a temporary
+verified build-input bridge, rebuilds/signs only the changed package, then uses
+the same registry installer. Legacy package directories are not production input
+when bundle_abi is present. Home is owned by registry composition.
 
 ## Limits and filesystem rules
 
@@ -177,9 +241,23 @@ B2/B3 must translate host requirements into explicit checked contracts before
 generic installation, rather than treating the legacy strings as grants.
 
 Runtime validation/tests stay LGPL in otrios-core; Apache public contracts stay
-in otrios-interfaces and filesystem/build tooling in the thin CLI. No new
-dependency or unsafe code is needed. B1 changes no live payload, protocol, catalog
-or release path, so it needs no deployment.
+in otrios-interfaces and filesystem/build tooling in the thin CLI. B1 needed no
+new dependencies or deployment. B2 adds direct uses of already locked ring 0.17.14
+(Apache-2.0 AND ISC) for standard Ed25519 verification, base64 0.22.1
+(MIT OR Apache-2.0) for bounded public-key PEM decoding, and libc 0.2.191
+(MIT OR Apache-2.0) for safe no-follow/nonblocking open flags. No new crate version,
+hand-written cryptography, unsafe block or workspace lint exception is introduced.
+Native signature support is feature-gated and does not add ring to browser Wasm.
+The repository exporter includes its Apache license under Notices; registry
+composition and scoped revision tooling preserve existing resource/dependency/
+notice payloads. Other publishers remain responsible for their own notices.
+
+The installer operates on authenticated owned byte snapshots and private staging;
+the release store is writable only by trusted management/service code, not guests.
+No-follow/nonblocking file opens reject swapped links/devices without blocking on
+a FIFO. Bounded traversal plus signature verification is not a general capability
+filesystem for hostile same-UID concurrent writers; that threat remains out of
+scope. Deployment and failure tests must qualify the actual owned-store workflow.
 
 ## Commands
 

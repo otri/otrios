@@ -23,15 +23,16 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
     with archive.extractfile(item) as src,dest.open('wb') as out:shutil.copyfileobj(src,out)
  activation=module('activation',stage/'activate-dashboard-release.py')
  pointer=(stage/'current.json').read_bytes();key=pathlib.Path('/etc/otrios-authority/publisher.pem')
+ checks=json.loads((stage/'transfer.json').read_text())
+ for name,digest in checks.items():
+  if hashlib.sha256((stage/name).read_bytes()).hexdigest()!=digest:raise ValueError('Transfer digest mismatch')
+ if 'canvas-bundle' in checks:(stage/'canvas-bundle').chmod(0o700)
  if (stage/'ui-base.json').exists():
   base=json.loads((stage/'ui-base.json').read_bytes())['id'];store=root/'releases'
   if json.loads((store/'current.json').read_bytes())['id']==json.loads(pointer)['id']:
    print('UNCHANGED '+activation.verify(store,key,'openssl',pointer));sys.exit(0)
   release=activation.complete_ui(stage/'releases',store,key,'openssl',pointer,base)
- else:release=activation.verify(stage/'releases',key,'openssl',pointer)
- checks=json.loads((stage/'transfer.json').read_text())
- for name,digest in checks.items():
-  if hashlib.sha256((stage/name).read_bytes()).hexdigest()!=digest:raise ValueError('Transfer digest mismatch')
+ else:release=activation.verify(stage/'releases',key,'openssl',pointer,bundle_checker=stage/'canvas-bundle' if 'canvas-bundle' in checks else None)
  store=root/'releases';store.mkdir(exist_ok=True)
  import fcntl
  with (store/'.activation.lock').open('a') as lock:
@@ -50,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
    if changed:activation.agent.atomic(dest,data,0o755)
    if name=='dashboard-server':restart=changed
    if name=='frame-dashboard-agent.py':restart_native=changed
+  activation.durable_release(store,release)
   activation.agent.atomic(store/'current.json',pointer)
   shutil.chown(store/'current.json',user='otrios',group='otrios')
  if restart:subprocess.run(['systemctl','restart','otrios-authority.service'],check=True)
@@ -73,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
  else:print('Native release still activating; its running cache was retained')
 '''
 
-def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None):
+def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None,bundle_checker=None):
     repo=pathlib.Path(__file__).resolve().parent.parent
     runtime=pathlib.Path(config['runtime']);pointer=pathlib.Path(pointer)
     spec=importlib.util.spec_from_file_location('activation',repo/'scripts/activate-dashboard-release.py')
@@ -82,11 +84,16 @@ def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None):
     import hashlib
     files={name:repo/'scripts'/name for name in ['frame-dashboard-agent.py','activate-dashboard-release.py','prune-dashboard-releases.py','collect-monitoring.py']}
     files.update({'dashboard-server':pathlib.Path(server),'dashboard-monitoring':pathlib.Path(monitoring),'session-bootstrap':pathlib.Path(bootstrap)})
+    manifest=json.loads((runtime/'releases'/release/'manifest.json').read_bytes())
+    if manifest.get('bundle_abi'):
+        helper=pathlib.Path(bundle_checker) if bundle_checker else pathlib.Path(server).parent/'frame-canvas-bundle'
+        if not ui_base and not helper.is_file():raise ValueError('Full bundle deployment requires its matching ARM checker')
+        if helper.is_file():files['canvas-bundle']=helper
     checks={} if ui_base else {name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()}
     changed=None
     if ui_base:
         old=json.loads((runtime/'releases'/ui_base/'manifest.json').read_bytes());new=json.loads((runtime/'releases'/release/'manifest.json').read_bytes())
-        if not activation.agent.app_only_change(old,new):raise ValueError('App transfer changed runtime executable closure')
+        if not activation.agent.app_install_change(old,new):raise ValueError('App transfer changed runtime executable closure')
         changed=['manifest.json','manifest.sig']+[name for section in ['assets','authority'] for name,item in new[section].items()if old[section].get(name)!=item]
     payload=io.BytesIO()
     with tarfile.open(fileobj=payload,mode='w') as archive:
