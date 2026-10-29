@@ -203,6 +203,8 @@ class Host:
         env=dict(os.environ,OTRIOS_RELEASE_ID=release)
         env['OTRIOS_RELEASE_SOCKET']=str(a.runtime_dir/'release.sock')
         env.setdefault('OTRIOS_CHAT_IDENTITY',str(a.cache/'guest.identity'))
+        # Presentation only; old native releases safely ignore this during rollback.
+        env['OTRIOS_PRIVATE_APP_ACCESS']='true'
         command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
         if screen and screen!='locked':command+=['--screen',screen]
         command+=['--catalog-update-socket',str(self.ui_socket)]

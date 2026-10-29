@@ -70,6 +70,9 @@ impl CanvasApp {
     pub fn navigate(&mut self, path: &str) -> Result<(), String> {
         self.inner.navigate(path)
     }
+    pub fn set_private_access(&mut self, granted: bool) -> bool {
+        self.inner.set_private_access(granted)
+    }
     pub fn set_session_controls(&mut self, enabled: bool) -> bool {
         self.inner.set_session_controls(enabled)
     }

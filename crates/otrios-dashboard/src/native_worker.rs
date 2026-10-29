@@ -152,12 +152,16 @@ pub(super) struct Options {
     pub(super) stall_ms: u64,
     pub(super) rotation: u16,
     pub(super) portrait: bool,
+    pub(super) private_access: bool,
     pub(super) touch_matrix: Option<Calibration>,
     #[cfg(test)]
     pub(super) state_gate: Option<Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>>,
 }
 pub(super) fn options() -> Result<Options, String> {
-    let mut o = Options::default();
+    let mut o = Options {
+        private_access: std::env::var("OTRIOS_PRIVATE_APP_ACCESS").is_ok_and(|v| v == "true"),
+        ..Options::default()
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value = args.next().ok_or("Missing argument value")?;
@@ -171,6 +175,9 @@ pub(super) fn options() -> Result<Options, String> {
                 }
             }
             "--sync" => o.url = Some(value),
+            "--private-app-access" => {
+                o.private_access = value.parse().map_err(|_| "Expected true or false")?
+            }
             "--state" => o.state = Some(value),
             "--apps" => o.apps = Some(value),
             "--frames" => o.frames = Some(value.parse::<usize>().map_err(|e| e.to_string())?),
@@ -717,6 +724,7 @@ pub(super) fn state_worker(
         if !online && last_online {
             client.chat_disconnected();
         }
+        dirty |= client.set_private_access(o.private_access && online);
         last_online = online;
         let confirmed = o.url.is_none() || (online && client.confirmed());
         if !client.ui_ref().is_empty() && stress_epoch != Some(client.epoch()) {

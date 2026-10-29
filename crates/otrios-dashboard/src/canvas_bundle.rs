@@ -165,17 +165,22 @@ fn compose(
                     } else {
                         components::LaunchIcon::Playground
                     };
-                    components::launch_card(
-                        &entry.app.id,
-                        &entry.path,
-                        &entry.app.title,
-                        if entry.private {
-                            "Sign-in required"
-                        } else {
-                            "Installed app"
-                        },
-                        icon,
-                    )
+                    if entry.private {
+                        components::private_launch_card(
+                            &entry.app.id,
+                            &entry.path,
+                            &entry.app.title,
+                            icon,
+                        )
+                    } else {
+                        components::launch_card(
+                            &entry.app.id,
+                            &entry.path,
+                            &entry.app.title,
+                            "",
+                            icon,
+                        )
+                    }
                 })
                 .collect(),
         );

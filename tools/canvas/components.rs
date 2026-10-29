@@ -164,27 +164,79 @@ pub fn launch_card(
     subheading: &str,
     icon: LaunchIcon,
 ) -> Element {
-    component(
-        [384., 176.],
-        vec![
-            rounded_rect(TRACK).pin_edges(0.).corner_radius(20.0.into()),
-            rounded_rect(CARD).pin_edges(1.5).corner_radius(18.5.into()),
-            launch_icon(icon),
-            text(title)
-                .frame([24., 84., 336., 32.])
-                .font_scale(2.)
-                .pin_left(24.)
-                .pin_right(24.),
+    launch_card_inner(id, route, title, subheading, icon, false)
+}
+/// Access indicators are local presentation. Opening still requires authority admission.
+pub fn private_launch_card(id: &str, route: &str, title: &str, icon: LaunchIcon) -> Element {
+    launch_card_inner(id, route, title, "", icon, true)
+}
+fn access_badge(granted: bool) -> Element {
+    let x = if granted { 24. } else { 12. };
+    let mut parts = vec![
+        rounded_rect(ACCENT)
+            .frame([x, 0., 24., 30.])
+            .corner_radius(12.0.into()),
+        rectangle(CARD).frame([x + 4., 5., 16., 25.]),
+    ];
+    if granted {
+        parts.push(rectangle(CARD).frame([44., 16., 4., 16.]));
+    }
+    parts.extend([
+        rounded_rect(ACCENT)
+            .frame([8., 20., 32., 24.])
+            .corner_radius(4.0.into()),
+        circle(CARD).frame([21., 27., 6., 6.]),
+        rectangle(CARD).frame([23., 31., 2., 7.]),
+    ]);
+    component([48., 48.], parts)
+        .frame([312., 20., 48., 48.])
+        .pin_right(24.)
+        .visible(private_app_access(granted))
+}
+fn launch_card_inner(
+    id: &str,
+    route: &str,
+    title: &str,
+    subheading: &str,
+    icon: LaunchIcon,
+    private: bool,
+) -> Element {
+    let mut children = vec![
+        rounded_rect(TRACK).pin_edges(0.).corner_radius(20.0.into()),
+        rounded_rect(CARD).pin_edges(1.5).corner_radius(18.5.into()),
+        launch_icon(icon),
+        text(title)
+            .frame([24., 84., 336., 32.])
+            .font_scale(2.)
+            .pin_left(24.)
+            .pin_right(24.),
+    ];
+    if !subheading.is_empty() {
+        children.push(
             text(subheading)
                 .frame([24., 128., 336., 24.])
                 .color(MUTED)
                 .pin_left(24.)
                 .pin_right(24.),
-        ],
-    )
-    .key(id)
-    .semantic_label(title)
-    .navigate_to(Destination::app(id).route(route))
+        );
+    }
+    if private {
+        for (granted, label) in [(false, "Sign-in required"), (true, "Access available")] {
+            children.push(access_badge(granted));
+            children.push(
+                text(label)
+                    .frame([24., 128., 336., 24.])
+                    .color(MUTED)
+                    .pin_left(24.)
+                    .pin_right(24.)
+                    .visible(private_app_access(granted)),
+            );
+        }
+    }
+    component([384., 176.], children)
+        .key(id)
+        .semantic_label(title)
+        .navigate_to(Destination::app(id).route(route))
 }
 
 fn motion_slider(label: &str, field: StateField, frame: [f32; 4]) -> Element {

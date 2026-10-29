@@ -1828,6 +1828,45 @@ fn monitoring_session_controls_share_navigation_style_and_only_request_local_log
 }
 
 #[test]
+fn launcher_access_badges_follow_local_access_and_keep_cookie_actions_separate() {
+    use otrios_interfaces::scene::{Primitive, SceneNode};
+    fn text(n: &SceneNode) -> String {
+        let mut out = match &n.primitive {
+            Primitive::Text { value, .. } => value.clone(),
+            _ => String::new(),
+        };
+        for child in &n.children {
+            out.push_str(&text(child));
+        }
+        out
+    }
+    let ui = home::ui(&[]);
+    assert_eq!(ui.format, "otrios-canvas-v7");
+    let mut old_format = ui.clone();
+    old_format.format = "otrios-canvas-v2".into();
+    assert!(validate_ui_format(&old_format).is_err());
+    let mut c = Client::default();
+    activate(&mut c, ui, "home", vec![]);
+    assert!(text(c.scene().unwrap().root()).contains("Sign-in required"));
+    assert!(!text(c.scene().unwrap().root()).contains("Access available"));
+    assert!(c.set_private_access(true));
+    let scene = c.scene().unwrap();
+    assert!(text(scene.root()).contains("Access available"));
+    assert!(!text(scene.root()).contains("Sign-in required"));
+    assert!(
+        !c.private(),
+        "an access badge does not make Home a private mount"
+    );
+    assert!(
+        !c.take_sign_out(),
+        "trusted access is independent of cookie controls"
+    );
+    assert!(c.set_private_access(false));
+    assert!(text(c.scene().unwrap().root()).contains("Sign-in required"));
+    assert!(!text(c.scene().unwrap().root()).contains("Access available"));
+}
+
+#[test]
 fn text_field_taps_place_caret_at_proportional_glyphs_instead_of_restoring_focus_memory() {
     use otrios_core::dashboard::font::Font;
     use otrios_interfaces::{

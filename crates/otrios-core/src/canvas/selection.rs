@@ -55,6 +55,7 @@ impl StateSelection {
                     Projection::KeyboardLabel { .. }
                         | Projection::KeyboardVisible
                         | Projection::SessionControls
+                        | Projection::SessionAccess { .. }
                         | Projection::ReorderLabel
                 )
             {

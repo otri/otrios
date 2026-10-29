@@ -46,6 +46,37 @@ stays behind admission checks; installation must never expose it as static asset
 Folder names and Home navigation paths do not define app identity. A future
 resource API resolves logical locale/scale alternatives without install paths.
 
+### Designated application roots
+
+The system namespace should expose `/Applications` for apps available without
+sign-in and `/PrivateApplications` for apps requiring authenticated admission.
+Monitoring belongs under `/PrivateApplications`. These are OTriOS conventions:
+macOS distinguishes shared `/Applications` and user-specific `~/Applications`,
+which is an ownership distinction rather than an application sign-in boundary.
+See [Apple's filesystem domains](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemOverview/FileSystemOverview.html).
+Apple also uses `PrivateFrameworks` for implementation-private frameworks; that
+is a comparable naming style, not a sign-in mechanism. See the
+[framework guide](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPFrameworks/Tasks/CreatingFrameworks.html).
+
+This names the next discovery/storage increment. The deployed signed release
+still stores both classes under `authority/bundles`; it has not created Linux
+root directories or a filesystem watcher. The signed `Info.flex.private` value
+and admitted catalog currently select the class. A future folder-based installer
+must check that placement agrees with signed policy, reject duplicate identities
+across roots and publish registry changes transactionally. Moving or renaming a
+folder must never grant access. Both roots can contribute discoverable launcher
+metadata while private UI, code and state stay behind admission.
+
+Home omits the generic "Installed app" subtitle. Private app cards carry a closed
+padlock and "Sign-in required" when access is absent, or an open padlock and
+"Access available" when access is present. The browser uses its validated cookie
+session; the installed Frame host declares its trusted authority session. Access
+indicators are local to the viewing session and never persisted in shared app
+state. Observed cookie expiration/revocation relocks the browser card; a disconnected Frame
+relocks its indicator. UI format `otrios-canvas-v7` introduces the host-local
+`SessionAccess` selector, independent of state protocol v8 and release-control v1.
+Changing this indicator does not authorize a mount or create sign-out controls.
+
 ## FlexBuffers and evolution
 
 Info.flex starts with eight bytes: ASCII OTAPP, NUL, then little-endian u16 major
