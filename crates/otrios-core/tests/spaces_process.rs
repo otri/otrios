@@ -217,6 +217,16 @@ impl Rig {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    fn storage_action(&self, binary: &str, action: &str) -> std::process::Output {
+        Command::new(binary)
+            .arg("--spaces-registry")
+            .arg(self.root.join("spaces.flex"))
+            .arg("--app-state")
+            .arg(self.root.join("state"))
+            .args(["--spaces-storage", action])
+            .output()
+            .unwrap()
+    }
     fn provision(&self, binary: &str, manifest: &Path) -> std::process::Output {
         Command::new(binary)
             .arg("--apps")
@@ -656,6 +666,126 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
         }
     }
     socket
+}
+
+#[test]
+fn offline_backup_restore_preserves_latest_revocation_and_older_writers_cannot_admit_restored_state()
+ {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("Backup household");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "frame".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let (confirmed, collection) = document_session(&rig, &space, "counter", schema(), Some(42));
+    assert_eq!(confirmed, 42);
+    let collection = collection.unwrap();
+    assert!(
+        !rig.storage_action(&binary, "backup").status.success(),
+        "live authority ownership must exclude offline snapshotting"
+    );
+    rig.stop();
+    let copied = rig.storage_action(&binary, "backup");
+    assert!(
+        copied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&copied.stderr)
+    );
+    let id = serde_json::from_slice::<Json>(&copied.stdout).unwrap()["backup"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), Some(73)).0,
+        73
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "frame".into(),
+            role: None,
+        },
+    );
+    let generation = http(&rig.public, "GET", Some('a'), None).1["generation"].clone();
+    rig.stop();
+    let restored = rig.storage_action(&binary, &format!("restore:{id}"));
+    assert!(
+        restored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        42
+    );
+    assert_eq!(
+        http(&rig.public, "GET", Some('a'), None).1["generation"],
+        generation
+    );
+    rig.child(&rig.native, &space, Some('c'), "deny");
+    rig.stop();
+    let checkpoint = rig
+        .root
+        .join(format!("state/collection-{collection}.merkle"));
+    let held = rig.root.join("held-checkpoint");
+    fs::rename(&checkpoint, &held).unwrap();
+    fs::create_dir(&checkpoint).unwrap();
+    assert!(
+        !rig.storage_action(&binary, &format!("restore:{id}"))
+            .status
+            .success()
+    );
+    assert!(rig.root.join("spaces.flex.restore").exists());
+    rig.restart(&binary, true, false);
+    assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
+    rig.stop();
+    fs::remove_dir(&checkpoint).unwrap();
+    fs::rename(held, checkpoint).unwrap();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        42
+    );
+    assert!(!rig.root.join("spaces.flex.restore").exists());
+    rig.child(&rig.native, &space, Some('c'), "deny");
+    rig.stop();
+    if let Ok(older) = std::env::var("OTRIOS_SPACES_OLD_SERVER") {
+        let primary = fs::read(rig.root.join("spaces.flex")).unwrap();
+        let latest = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
+        assert_eq!(&primary[..5], b"OTSP4");
+        rig.restart(&older, true, false);
+        assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
+        rig.stop();
+        assert_eq!(fs::read(rig.root.join("spaces.flex")).unwrap(), primary);
+        assert_eq!(
+            fs::read(rig.root.join("spaces.flex.latest")).unwrap(),
+            latest
+        );
+    }
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        42
+    );
 }
 
 #[test]

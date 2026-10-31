@@ -29,6 +29,7 @@ impl Store {
         if !producers_stopped {
             return Ok(false);
         }
+        self.remove_orphan_restores()?;
         let root = self.checked_storage()?;
         let paths = [
             (format!("collection-{collection}.merkle"), false),
@@ -103,7 +104,7 @@ impl Store {
     }
 }
 
-fn check_tree(path: &Path, depth: usize, budget: &mut usize) -> Result<()> {
+pub(super) fn check_tree(path: &Path, depth: usize, budget: &mut usize) -> Result<()> {
     if depth > 8 {
         return Err(Error::Capacity);
     }

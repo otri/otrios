@@ -725,6 +725,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut bundle_key = PathBuf::from("/etc/otrios-authority/publisher.pem");
     let mut spaces_registry = None;
     let mut provision_spaces = None;
+    let mut spaces_storage = None;
     let mut collector_binding = None;
     let mut origins = vec![];
     let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/canvas");
@@ -747,6 +748,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--bundle-key"=>bundle_key=PathBuf::from(args.next().ok_or("Missing bundle publisher key")?),
         "--spaces-registry"=>spaces_registry=Some(PathBuf::from(args.next().ok_or("Missing Space registry path")?)),
         "--provision-spaces"=>provision_spaces=Some(PathBuf::from(args.next().ok_or("Missing provisioning manifest")?)),
+        "--spaces-storage"=>spaces_storage=Some(args.next().ok_or("Missing storage action")?),
         "--collector-binding"=>collector_binding=Some(PathBuf::from(args.next().ok_or("Missing collector binding")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
         "--origin"=>origins.push(args.next().ok_or("Missing origin")?),
@@ -782,6 +784,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if (provision_spaces.is_some() || collector_binding.is_some()) && spaces_registry.is_none() {
         return Err("Provisioning and collector bindings require --spaces-registry".into());
+    }
+    if let Some(action) = spaces_storage {
+        if spaces_registry
+            .as_ref()
+            .is_some_and(|path| path.with_extension("provisioning").exists())
+        {
+            return Err("Resume Space provisioning before storage maintenance".into());
+        }
+        if provision_spaces.is_some() || collector_binding.is_some() {
+            return Err("Choose storage maintenance or provisioning".into());
+        }
+        let mut store = otrios_core::spaces::Store::open_existing(
+            spaces_registry.ok_or("Storage maintenance requires --spaces-registry")?,
+        )?;
+        store.bind_storage(
+            app_state
+                .as_deref()
+                .ok_or("Storage maintenance requires --app-state")?,
+        )?;
+        store.recover_storage()?;
+        let now = u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())?;
+        let result = match action.as_str() {
+            "backup" => json!({"backup":store.create_backup(now, true)?}),
+            "list" => json!({"backups":store.backup_ids()?}),
+            "prune" => json!({"removed":store.prune_backups(now)?}),
+            "resume" => json!({"recovered":true}),
+            _ => {
+                let id = action
+                    .strip_prefix("restore:")
+                    .ok_or("Storage action must be backup, list, prune, resume or restore:ID")?;
+                json!({"restored_files":store.restore_backup(id, now, true)?})
+            }
+        };
+        println!("{result}");
+        return Ok(());
     }
     let presentation_file = explicit_presentation.or_else(|| {
         state_file

@@ -3,9 +3,9 @@
 use super::*;
 use std::process::{Command, Output};
 
-struct Fixture(PathBuf);
+pub(super) struct Fixture(pub(super) PathBuf);
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "otrios-space-ledger-{}-{}",
             std::process::id(),
@@ -22,13 +22,13 @@ impl Fixture {
         }
         Self(root)
     }
-    fn path(&self) -> PathBuf {
+    pub(super) fn path(&self) -> PathBuf {
         self.0.join("registry.flex")
     }
-    fn storage(&self) -> PathBuf {
+    pub(super) fn storage(&self) -> PathBuf {
         self.0.join("state")
     }
-    fn seeded(&self) -> (Store, Binding) {
+    pub(super) fn seeded(&self) -> (Store, Binding) {
         let mut store = Store::open(self.path()).unwrap();
         fs::create_dir(self.storage()).unwrap();
         store.bind_storage(&self.storage()).unwrap();

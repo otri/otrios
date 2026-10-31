@@ -214,6 +214,11 @@ impl Hub {
                     .ok_or("Durable app storage required")?,
             )
             .map_err(|e| e.to_string())?;
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .recover_storage()
+            .map_err(|e| e.to_string())?;
         let registry = self.registry_path()?.to_path_buf();
         let marker = self
             .state

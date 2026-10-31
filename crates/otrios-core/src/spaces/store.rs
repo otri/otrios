@@ -24,6 +24,7 @@ pub struct Store {
     // Stable inode, including across atomic replacement of both state files.
     _owner: fs::File,
     failed: bool,
+    restoring: bool,
 }
 impl Drop for Store {
     fn drop(&mut self) {
@@ -80,7 +81,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP3".to_vec();
+    let mut bytes = b"OTSP4".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -99,10 +100,13 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
     Ok(payload)
 }
 fn decode(bytes: &[u8]) -> Result<Record> {
-    let record: Record =
-        flexbuffers::from_slice(payload(bytes, &[b"OTSP3"])?).map_err(|_| Error::Invalid)?;
+    let record: Record = flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4"])?)
+        .map_err(|_| Error::Invalid)?;
     validate_record(&record)?;
     Ok(record)
+}
+fn current_framing(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"OTSP3") || bytes.starts_with(b"OTSP4")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
@@ -163,6 +167,13 @@ fn read(path: &Path, limit: usize, require_private: bool) -> Result<Option<Vec<u
     Ok(Some(bytes))
 }
 impl Store {
+    /// Maintenance never initializes an apparently empty authority root.
+    pub fn open_existing(path: PathBuf) -> Result<Self> {
+        if read(&suffix(&path, ".latest"), MAX_STORE_BYTES, true)?.is_none() {
+            return Err(Error::Unavailable);
+        }
+        Self::open(path)
+    }
     /// Upgrade legacy registries once. An initialized root cannot be recovered
     /// from an old primary alone when its latest decision ledger is missing.
     pub fn open(path: PathBuf) -> Result<Self> {
@@ -208,7 +219,7 @@ impl Store {
             Some(root)
         };
         let primary = read(&path, MAX_STORE_BYTES, false)?;
-        if primary.as_ref().is_some_and(|b| b.starts_with(b"OTSP3")) {
+        if primary.as_deref().is_some_and(current_framing) {
             private(&fs::symlink_metadata(&path).map_err(io_error)?)?;
         }
         let ledger = read(&latest, MAX_STORE_BYTES, true)?;
@@ -222,7 +233,7 @@ impl Store {
                 return Err(Error::Invalid);
             }
             if let Some(bytes) = &primary {
-                let previous = if bytes.starts_with(b"OTSP3") {
+                let previous = if current_framing(bytes) {
                     let previous = decode(bytes)?;
                     if previous.root != current.root
                         || previous
@@ -245,7 +256,7 @@ impl Store {
             }
             current
         } else {
-            if !anchor.is_empty() || primary.as_ref().is_some_and(|b| b.starts_with(b"OTSP3")) {
+            if !anchor.is_empty() || primary.as_deref().is_some_and(current_framing) {
                 return Err(Error::Unavailable);
             }
             Record {
@@ -259,7 +270,7 @@ impl Store {
             }
         };
         let bytes = encode(&current)?;
-        if ledger.is_none() {
+        if ledger.as_ref() != Some(&bytes) {
             write(&latest, &bytes)?;
         }
         if root.is_none() {
@@ -276,16 +287,25 @@ impl Store {
         if primary.as_ref() != Some(&bytes) {
             write(&path, &bytes)?;
         }
+        let restoring = match fs::symlink_metadata(suffix(&path, ".restore")) {
+            Ok(metadata) => {
+                private(&metadata)?;
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(io_error(error)),
+        };
         Ok(Self {
             current,
             path,
             latest,
             _owner: owner,
             failed: false,
+            restoring,
         })
     }
     pub fn registry(&self) -> Result<&Registry> {
-        if self.failed {
+        if self.failed || self.restoring {
             Err(Error::Unavailable)
         } else {
             Ok(&self.current.registry)
@@ -305,6 +325,12 @@ impl Store {
     }
     fn checked_storage(&self) -> Result<&Path> {
         self.registry()?;
+        self.checked_storage_unfenced()
+    }
+    fn checked_storage_unfenced(&self) -> Result<&Path> {
+        if self.failed {
+            return Err(Error::Unavailable);
+        }
         let path = self.storage_path().ok_or(Error::Unavailable)?;
         directory(path)?;
         if read(&path.join("spaces.root"), 32, true)?.as_deref()
@@ -317,7 +343,9 @@ impl Store {
     /// Pair an authority's app storage with its safety root once. Missing or
     /// substituted initialized storage must not silently become empty data.
     pub fn bind_storage(&mut self, path: &Path) -> Result<()> {
-        self.registry()?;
+        if self.failed {
+            return Err(Error::Unavailable);
+        }
         directory(path)?;
         let path = fs::canonicalize(path).map_err(io_error)?;
         let marker = path.join("spaces.root");
@@ -335,6 +363,7 @@ impl Store {
                 Err(Error::Unavailable)
             };
         }
+        self.registry()?;
         if existing.is_none()
             && let Err(error) = write(&marker, self.current.root.as_bytes())
         {
@@ -383,6 +412,8 @@ impl Store {
 #[path = "store_tests.rs"]
 mod tests;
 
+#[path = "backups.rs"]
+mod backups;
 #[path = "payloads.rs"]
 mod payloads;
 fn write(path: &Path, bytes: &[u8]) -> Result<()> {

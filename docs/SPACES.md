@@ -435,17 +435,18 @@ Space rejects attachment of a closed-only app.
 
 ## Persistence
 
-The native Store writes `OTSP3`, a 32-byte SHA-256 payload digest, and a bounded
+The native Store writes `OTSP4`, a 32-byte SHA-256 payload digest, and a bounded
 FlexBuffers record containing the registry, a stable authority-root identity and
 its paired app-storage path. Collections are bounded vectors, not unbounded map keys.
 Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
 
-Recovery upgrades `OTSP1` and `OTSP2` registries while preserving their decisions;
+Recovery upgrades `OTSP1`, `OTSP2` and `OTSP3` registries while preserving their decisions;
 the initial prototype defaults older members' continuous-membership generation
 to zero. The upgrade writes the latest decision ledger before replacing the
-primary. Older writers reject `OTSP3`. Rollback must use a reader/writer that
+primary. Older writers reject `OTSP4`, including OTSP3 writers that cannot honor
+an incomplete payload restore. Rollback must use a reader/writer that
 supports this framing and the current admission rules. Management request version
 1, state protocol v13 and release-control v1 are unchanged by this storage upgrade.
 
@@ -496,6 +497,63 @@ and processes at most 128 extra root files per turn. Tree depth/entry limits or
 filesystem failures keep cleanup pending. A reclaimed authority namespace says
 nothing about backup expiry, disconnected replicas or unmanaged exports.
 This backend is not yet connected to an exposed DeleteData operation.
+
+## Managed snapshots and offline restore
+
+Run storage maintenance as the authority's OS user after stopping the authority.
+Its exclusive registry lock rejects concurrent offline maintenance. These commands
+require an existing paired safety root and never initialize missing storage:
+
+```sh
+dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage backup
+dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage list
+dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage restore:BACKUP_ID
+dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage prune
+```
+
+These actions finish without opening listeners or loading app execution. Pending
+provisioning must be resumed first. Maintenance is separate from online Space
+membership; restoring payloads does not change who may access them.
+
+Snapshots live under `REGISTRY.backups`, paired by the private
+`REGISTRY.backups.root` marker. Each immutable snapshot ID contains its creation
+time and a random nonce. A checksummed manifest records collection identities,
+schemas, file lengths and SHA-256 digests. Only current attached/retained collection
+payloads are copied, including histories and assets; tombstoned collections,
+authority membership/auth configuration, safety decisions and owner locks are
+excluded. Files are private and streamed with bounded memory. Atomic directory
+publication follows file and directory sync, so incomplete snapshots stay
+unavailable and can be reclaimed after a crash.
+
+The PoC keeps up to 16 snapshots with a 2 GiB payload budget. One snapshot is at
+most 512 MiB, 4096 files and 64 MiB per file, with a manifest at most 2 MiB. Capacity
+failure leaves the source unchanged. Snapshots expire for restore access seven
+days after creation. Pruning removes expired bytes and incomplete snapshot copies;
+corrupt manifests cannot extend retention because expiry comes from the owned
+snapshot name. Pruning currently runs before a snapshot and through the explicit
+maintenance action. Authority timer/status integration remains unfinished.
+
+A restore verifies all selected payloads into private staging and first creates
+a safety snapshot of current data. It replaces only snapshot collections whose
+identities and schemas still match the latest registry. Collections created
+after the snapshot remain intact; files added later inside a restored collection
+are removed to reproduce that collection's snapshot. Latest membership, audience,
+attachments and deletion decisions are retained. A deleted collection is skipped
+even if its old backup files still exist or have already been reclaimed.
+
+Before replacing payloads, the authority durably publishes `REGISTRY.restore`.
+Registry admission then stays unavailable until every replacement/removal and
+directory sync completes. Startup validates the paired storage, resumes that
+plan and verifies staged or already-promoted bytes before admitting apps. A
+failed or corrupt restore stays closed. Abandoned staging before publication is
+reclaimed; an interrupted published plan resumes idempotently. `--spaces-storage
+resume` also completes a pending plan. Code rollback keeps payloads and current
+control metadata; payload restore is a separate explicit maintenance action.
+
+This workflow covers named Space collections. Legacy migration originals still
+need their retention/finalization integration. DeleteData remains unavailable
+until producer shutdown, managed cleanup/backup reporting and these remaining
+lifecycle integrations are complete.
 
 ## Rollout requirements
 
