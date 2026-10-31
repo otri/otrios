@@ -1129,13 +1129,28 @@ fn chat_window(
     epoch: u32,
     generation: u64,
 ) -> Vec<otrios_interfaces::chat::Message> {
+    chat_select(
+        socket,
+        epoch,
+        generation,
+        otrios_core::collection::Anchor::Tail,
+    )
+    .0
+}
+fn chat_select(
+    socket: &mut Socket,
+    epoch: u32,
+    generation: u64,
+    anchor: otrios_core::collection::Anchor,
+) -> (Vec<otrios_interfaces::chat::Message>, u64) {
     use otrios_core::collection as col;
     use otrios_interfaces::channels::{frame, scoped};
     let mut client = col::Client::new(canvas::chat::COLLECTION, canvas::chat::message_schema());
     client
-        .select(canvas::chat::message_selection(col::Anchor::Tail))
+        .select(canvas::chat::message_selection(anchor))
         .unwrap();
     let mut counter = generation - 1;
+    let mut authority_epoch = None;
     loop {
         while let Some(command) = client.outgoing(&mut counter).unwrap() {
             socket
@@ -1145,15 +1160,300 @@ fn chat_window(
                 .unwrap();
         }
         if let Some(window) = client.window() {
-            return window
-                .keys
-                .iter()
-                .map(|key| canvas::chat::read_message(&window.record(*key).unwrap()).unwrap())
-                .collect();
+            return (
+                window
+                    .keys
+                    .iter()
+                    .map(|key| canvas::chat::read_message(&window.record(*key).unwrap()).unwrap())
+                    .collect(),
+                authority_epoch.expect("selected authority epoch"),
+            );
         }
-        client
-            .receive(col::Event::from_bytes(&chat_aux(socket, 4, epoch)).unwrap())
+        let event = col::Event::from_bytes(&chat_aux(socket, 4, epoch)).unwrap();
+        if let col::Event::View(offer) = &event {
+            authority_epoch = Some(offer.epoch);
+        }
+        client.receive(event).unwrap();
+    }
+}
+
+fn legacy_chat(rig: &Rig, count: u64) -> (canvas::chat::Room, String) {
+    use otrios_interfaces::chat::Command as C;
+    let now = 1_000_000;
+    let mut room =
+        canvas::chat::Room::open(Some(rig.root.join("state/brass-relay.journal")), now).unwrap();
+    let (profile, credential) = room.identity(None, now).unwrap();
+    room.join(1, Some(&credential), false, now, true).unwrap();
+    for sequence in 1..=count {
+        let at = now + sequence * 1000;
+        room.handle(
+            1,
+            C::Send {
+                epoch: at / 600_000,
+                nonce: format!("{sequence:032x}"),
+                text: format!("Confirmed legacy dispatch {sequence}"),
+            },
+            at,
+        )
+        .unwrap();
+    }
+    (room, profile.id)
+}
+
+#[test]
+fn offline_chat_import_preserves_full_history_and_never_replays_over_later_confirmed_data() {
+    use otrios_core::collection as col;
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start_mode(&binary, false);
+    rig.stop();
+    chat_fixture(&mut rig);
+    let (source_owner, author) = legacy_chat(&rig, 70);
+    let source = rig.root.join("state/brass-relay.journal");
+    let original = fs::read(&source).unwrap();
+    let manifest = rig.root.join("provision-chat.json");
+    let config = json!({"version":2,"spaces":[
+        {"name":"Migrated chat","admins":["alice"],"members":["frame"],"apps":[{"id":"relay","legacy_chat_root":"app:relay/other/state"}]},
+        {"name":"Fresh chat","admins":["alice"],"members":[],"apps":[{"id":"relay"}]}
+    ]});
+    let old_manifest = rig.root.join("provision-chat-v1.json");
+    let mut old_config = config.clone();
+    old_config["version"] = json!(1);
+    private_json(&old_manifest, &old_config);
+    let old_result = rig.provision(&binary, &old_manifest);
+    assert!(!old_result.status.success());
+    assert!(String::from_utf8_lossy(&old_result.stderr).contains("version 2"));
+    assert!(
+        !rig.root.join("spaces.provisioning").exists(),
+        "reject the unsupported plan before beginning provisioning"
+    );
+    private_json(&manifest, &config);
+    let locked = rig.provision(&binary, &manifest);
+    assert!(
+        !locked.status.success(),
+        "a live source writer must prevent import"
+    );
+    assert_eq!(fs::read(&source).unwrap(), original);
+    assert!(rig.root.join("spaces.provisioning").exists());
+    drop(source_owner);
+    // Confirmed complete records survive recovery of an incomplete final write.
+    let mut torn = fs::OpenOptions::new().append(true).open(&source).unwrap();
+    torn.write_all(b"tail").unwrap();
+    torn.sync_all().unwrap();
+    drop(torn);
+    let completed = rig.provision(&binary, &manifest);
+    assert!(
+        completed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    let record: Json = serde_json::from_slice(&completed.stdout).unwrap();
+    let household = record["spaces"][0]["space"].as_str().unwrap().to_string();
+    let work = record["spaces"][1]["space"].as_str().unwrap().to_string();
+    let import = &record["spaces"][0]["imports"][0];
+    assert_eq!(import["kind"], "legacy-chat");
+    assert_eq!(
+        import["source_sha256"],
+        canvas::hex(&canvas::hash(&original))
+    );
+    assert_eq!(fs::read(&source).unwrap(), original);
+    let collection = import["collection"].as_str().unwrap();
+    let target = rig.root.join(format!(
+        "state/collection-{collection}.data/chat-{}.journal",
+        canvas::hex(&canvas::hash(b"app:relay/other/state"))
+    ));
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        original,
+        "copy all retained history, not just its first window"
+    );
+    assert!(!rig.root.join("spaces.provisioning").exists());
+    rig.restart(&binary, true, true);
+    let mut frame = socket(&rig.native, &household, Some('c'));
+    let (_, initial) = chat_mount(&rig, &mut frame, "relay/other", 1);
+    assert_eq!(initial.messages.len(), 64);
+    assert_eq!(initial.messages[0].message.sequence, 7);
+    assert_eq!(initial.messages[63].message.sequence, 70);
+    assert!(initial.older);
+    let (tail, epoch) = chat_select(&mut frame, 1, 1, col::Anchor::Tail);
+    assert_eq!(tail.len(), 64);
+    let (older, _) = chat_select(
+        &mut frame,
+        1,
+        2,
+        col::Anchor::Before(col::Cursor {
+            epoch,
+            collection: canvas::chat::COLLECTION,
+            key: 7,
+        }),
+    );
+    assert_eq!(
+        older.iter().map(|m| m.sequence).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5, 6]
+    );
+    assert!(older.iter().all(|m| m.sender.id == author));
+    let (frame_profile, epoch) = chat_join(&mut frame, 1);
+    assert_ne!(
+        frame_profile, author,
+        "admission cannot steal the legacy guest profile"
+    );
+    assert_eq!(
+        chat_send(&mut frame, 1, epoch, 71, "Confirmed after migration"),
+        71
+    );
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        original,
+        "new writes never return to the global source"
+    );
+    for (space, root) in [(&household, "relay"), (&work, "relay/other")] {
+        let mut fresh = socket(&rig.public, space, Some('a'));
+        assert!(chat_mount(&rig, &mut fresh, root, 1).1.messages.is_empty());
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "frame".into(),
+            role: None,
+        },
+    );
+    drop(frame);
+    rig.stop();
+    let before = fs::read(&target).unwrap();
+    assert!(rig.provision(&binary, &manifest).status.success());
+    assert_eq!(fs::read(&target).unwrap(), before);
+    // A new provisioning intent can retain the completed import declaration;
+    // it validates the destination without needing or replaying the old source.
+    fs::remove_file(&source).unwrap();
+    let revised = rig.root.join("provision-chat-revised.json");
+    let mut revised_config = config;
+    revised_config["spaces"][0]["members"] = json!([]);
+    private_json(&revised, &revised_config);
+    let result = rig.provision(&binary, &revised);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!source.exists());
+    assert_eq!(fs::read(&target).unwrap(), before);
+    rig.restart(&binary, true, true);
+    let (_, state) = http(&rig.public, "GET", Some('a'), None);
+    assert!(
+        !state["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == household)
+            .unwrap()["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["identity"] == "frame")
+    );
+    let mut alice = socket(&rig.public, &household, Some('a'));
+    let (_, recovered) = chat_mount(&rig, &mut alice, "relay/other", 1);
+    assert_eq!(recovered.messages.last().unwrap().message.sequence, 71);
+    assert_eq!(
+        recovered.messages.last().unwrap().message.sender.id,
+        frame_profile
+    );
+    drop(alice);
+    rig.stop();
+    fs::remove_file(&target).unwrap();
+    revised_config["spaces"][1]["name"] = json!("Another provisioning intent");
+    let missing_target = rig.root.join("provision-missing-target.json");
+    private_json(&missing_target, &revised_config);
+    assert!(!rig.provision(&binary, &missing_target).status.success());
+    assert!(
+        !target.exists(),
+        "a completed import cannot recreate missing confirmed data"
+    );
+    assert!(!source.exists());
+}
+
+#[test]
+fn offline_chat_import_rejects_missing_corrupt_and_conflicting_data_without_empty_replacement() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    for failure in ["missing", "corrupt", "conflict"] {
+        let mut rig = Rig::start(&binary);
+        rig.stop();
+        chat_fixture(&mut rig);
+        let (owner, _) = legacy_chat(&rig, 1);
+        drop(owner);
+        let source = rig.root.join("state/brass-relay.journal");
+        rig.restart(&binary, true, true);
+        let space = rig.space("Import destination");
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "relay".into(),
+            },
+        );
+        let (_, registry) = http(&rig.public, "GET", Some('a'), None);
+        let collection = registry["spaces"][0]["apps"][0]["collection"]
+            .as_str()
             .unwrap();
+        let target = rig.root.join(format!(
+            "state/collection-{collection}.data/chat-primary.journal"
+        ));
+        if failure == "conflict" {
+            let mut client = socket(&rig.public, &space, Some('a'));
+            chat_mount(&rig, &mut client, "relay", 1);
+            let (_, epoch) = chat_join(&mut client, 1);
+            assert_eq!(
+                chat_send(
+                    &mut client,
+                    1,
+                    epoch,
+                    1,
+                    "Different confirmed destination content"
+                ),
+                1
+            );
+        }
+        rig.stop();
+        let target_before = fs::read(&target).ok();
+        if failure == "missing" {
+            fs::remove_file(&source).unwrap();
+        }
+        if failure == "corrupt" {
+            let mut bytes = fs::read(&source).unwrap();
+            bytes[20] ^= 1;
+            fs::write(&source, bytes).unwrap();
+        }
+        let source_before = fs::read(&source).ok();
+        let manifest = rig.root.join("provision-conflict.json");
+        private_json(
+            &manifest,
+            &json!({"version":2,"spaces":[
+                {"name":"Import destination","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}
+            ]}),
+        );
+        let result = rig.provision(&binary, &manifest);
+        assert!(!result.status.success(), "must reject {failure}");
+        assert_eq!(
+            fs::read(&source).ok(),
+            source_before,
+            "source stays intact on {failure}"
+        );
+        assert_eq!(
+            fs::read(&target).ok(),
+            target_before,
+            "destination stays intact on {failure}"
+        );
+        assert!(rig.root.join("spaces.provisioning").exists());
+        rig.restart(&binary, true, false);
+        assert_eq!(
+            http(&rig.public, "GET", Some('a'), None).0,
+            503,
+            "partial provisioning cannot serve empty data"
+        );
     }
 }
 

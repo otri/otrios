@@ -158,8 +158,8 @@ management lock. Durable room writes finish within that lock's lifetime;
 cancelling a socket task cannot leave a detached write behind it. Quit and
 revocation release presence independently of renderer credit, and output rechecks
 admission through delivery. Removing and reattaching an app preserves its chat
-journal and profiles. Explicit import of pre-Space chat history remains a pending
-migration step; this checkpoint does not authorize a live cutover that omits it.
+journal and profiles. Pre-Space chat history requires the explicit offline import
+below; attaching the app alone does not infer a legacy source.
 
 Separate child clients exercise authority reads/writes, collection isolation,
 explicit Frame access, active revocation/reconnect, Member management denial and
@@ -307,6 +307,44 @@ Every declared confirmed root is recovered, copied and recorded under the same
 destination collection before the provisioning marker permits admission. Include
 every existing root that the rollout intends to retain; undeclared roots are not
 silently inferred from legacy references.
+
+Chat import uses provisioning manifest version 2, so older v1 provisioners reject
+the plan instead of ignoring its import declaration. Existing v1 plans without a
+chat import remain supported. Each app entry can declare one `legacy_chat_root`
+that names an installed Chat presentation owned by that app:
+
+```json
+{
+  "version": 2,
+  "spaces": [{
+    "name": "Household",
+    "admins": ["alice"],
+    "members": ["frame"],
+    "apps": [{
+      "id": "brass-relay",
+      "legacy_chat_root": "app:brass-relay/state"
+    }]
+  }]
+}
+```
+
+Stop the old authority before provisioning. The importer takes the legacy
+`state.apps/brass-relay.journal` ownership lock, validates every complete record,
+recovers only an incomplete final write, and copies the complete retained journal
+into the selected owning document. It does not copy just the initial 64-message
+window, choose a destination automatically, or import arbitrary filesystem paths.
+The source must be a private regular file, at most 64 MiB. A missing/corrupt source,
+live owner, or different confirmed destination rejects the import and leaves
+provisioning unavailable rather than starting with empty data.
+
+The durable private `legacy-chat-import.json` receipt records collection, schema,
+owning root, source digest and byte count. A completed import validates its current
+destination on later provisioning; it never replays the old journal over newer
+confirmed messages and can resume without the old source file. A missing or corrupt
+destination cannot be recreated through that receipt. The original legacy journal
+is retained after the first import; later deletion/backup policy must account for
+that copy. Historical sender snapshots survive; admitted identities receive their
+own app-local profiles and cannot claim a legacy guest profile using its old secret.
 
 Create makes a Closed Space with the authenticated actor as its first Admin.
 Every other change requires current Admin membership. The host serializes requests

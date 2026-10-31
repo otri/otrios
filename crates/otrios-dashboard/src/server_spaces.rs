@@ -138,8 +138,7 @@ pub(super) fn manage_request(
     hub.manage_space(actor, request, policy.as_ref())
 }
 
-pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
-    use std::io::Read;
+pub(super) fn private_metadata(path: &Path, limit: usize) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if !metadata.is_file() || metadata.len() > limit as u64 {
         return Err("Invalid private configuration".into());
@@ -151,6 +150,11 @@ pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>, String
             return Err("Private configuration must be mode 0600".into());
         }
     }
+    Ok(())
+}
+pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    private_metadata(path, limit)?;
     let mut bytes = vec![];
     fs::File::open(path)
         .and_then(|f| f.take(limit as u64 + 1).read_to_end(&mut bytes))
@@ -199,8 +203,23 @@ pub(super) async fn provision(app: &App, path: &Path) -> Result<(), String> {
     let raw = private_bytes(path, 65536)?;
     let config: Value =
         serde_json::from_slice(&raw).map_err(|_| "Invalid provisioning manifest")?;
-    if config["version"] != 1 {
+    let version = config["version"]
+        .as_u64()
+        .ok_or("Invalid provisioning version")?;
+    if !matches!(version, 1 | 2) {
         return Err("Unsupported provisioning version".into());
+    }
+    let chat_import = config["spaces"].as_array().is_some_and(|spaces| {
+        spaces.iter().any(|space| {
+            space["apps"]
+                .as_array()
+                .is_some_and(|apps| apps.iter().any(|app| app.get("legacy_chat_root").is_some()))
+        })
+    });
+    if version == 1 && chat_import {
+        // Older v1 provisioners ignore unknown import fields. A version they
+        // reject must guard a plan that would otherwise create an empty room.
+        return Err("Legacy chat import requires provisioning manifest version 2".into());
     }
     let digest = otrios_core::canvas::hex(&otrios_core::canvas::hash(&raw));
     let mut guard = app.apps.lock().await;
@@ -340,6 +359,13 @@ pub(super) async fn provision(app: &App, path: &Path) -> Result<(), String> {
                     }
                     imports.push(hub.import_legacy(actor, &space, id, source)?);
                 }
+            }
+            if let Some(root) = entry.get("legacy_chat_root") {
+                let root = root
+                    .as_str()
+                    .filter(|s| !s.is_empty() && s.len() <= 128)
+                    .ok_or("Invalid legacy chat root")?;
+                imports.push(hub.import_legacy_chat(actor, &space, id, root)?);
             }
         }
         records.push(json!({"name":name,"space":space,"imports":imports}));

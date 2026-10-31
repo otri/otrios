@@ -406,6 +406,105 @@ impl Hub {
             .ok_or(otrios_core::spaces::Error::Unavailable)?
             .registry()
     }
+    pub(super) fn import_legacy_chat(
+        &mut self,
+        identity: &str,
+        space: &str,
+        app: &str,
+        destination: &str,
+    ) -> Result<Value> {
+        use otrios_interfaces::spaces::Role;
+        const LIMIT: usize = 64 * 1024 * 1024;
+        if !self.provisioning
+            || !self
+                .registry()
+                .map_err(|e| e.to_string())?
+                .spaces
+                .iter()
+                .any(|s| {
+                    s.id == space
+                        && otrios_core::spaces::role(s, Some(identity)) == Some(Role::Admin)
+                })
+        {
+            return Err("Chat import requires offline provisioning by a Space Admin".into());
+        }
+        let package = self
+            .bundles
+            .get(&self.active)
+            .and_then(|bundle| {
+                bundle.packages.values().find(|p| {
+                    p.chat
+                        && p.app.id.split('/').next() == Some(app)
+                        && p.app.state_ref == destination
+                })
+            })
+            .cloned()
+            .ok_or("Chat import target is not an installed owning root")?;
+        let binding = self.binding(
+            &spaces::Scope {
+                space: Some(space.into()),
+                identity: Some(identity.into()),
+            },
+            &package,
+        )?;
+        let path = self.chat_file(&binding, &package)?;
+        let receipt = path.with_file_name("legacy-chat-import.json");
+        if receipt.exists() {
+            let record: Value = serde_json::from_slice(&spaces::private_bytes(&receipt, 4096)?)
+                .map_err(|_| "Invalid chat import receipt")?;
+            if record.as_object().is_none_or(|r| r.len() != 9)
+                || record["version"] != 1
+                || record["kind"] != "legacy-chat"
+                || record["app"] != app
+                || record["collection"] != binding.collection
+                || record["root"] != package.app.state_ref
+                || record["schema"] != binding.schema
+                || record["source"] != "brass-relay.journal"
+                || !record["source_sha256"]
+                    .as_str()
+                    .is_some_and(otrios_interfaces::release::valid_hash)
+                || !record["bytes"]
+                    .as_u64()
+                    .is_some_and(|n| (8..=LIMIT as u64).contains(&n))
+            {
+                return Err("Collection has a different or invalid legacy chat import".into());
+            }
+            // A completed import is never replayed over subsequent confirmed
+            // edits. Validate its current journal even if the old source is gone.
+            spaces::private_metadata(&path, LIMIT)?;
+            let _target = otrios_core::canvas::chat::Room::open(Some(path), chat::now())?;
+            return Ok(record);
+        }
+        let source = self
+            .state
+            .as_ref()
+            .ok_or("Durable chat storage required")?
+            .join("brass-relay.journal");
+        spaces::private_metadata(&source, LIMIT)?;
+        // This owns the old journal's stable sidecar lock through the copy.
+        // Recovery validates every complete record and only trims a torn tail.
+        let _source = otrios_core::canvas::chat::Room::open(Some(source.clone()), chat::now())?;
+        let bytes = spaces::private_bytes(&source, LIMIT)?;
+        if !path.exists()
+            && (receipt.exists() || path.with_extension("journal.owner.lock").exists())
+        {
+            return Err("Missing imported chat journal with retained ownership metadata".into());
+        }
+        let record = json!({"version":1,"kind":"legacy-chat","app":app,
+            "collection":binding.collection,"root":package.app.state_ref,"schema":binding.schema,
+            "source":"brass-relay.journal","source_sha256":canvas::hex(&canvas::hash(&bytes)),"bytes":bytes.len()});
+        let record_bytes = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
+        self.collection_parent(&path)?;
+        if path.exists() {
+            if spaces::private_bytes(&path, LIMIT)? != bytes {
+                return Err("Chat migration target contains different confirmed data".into());
+            }
+        } else {
+            persist(&path, &bytes).map_err(|e| e.to_string())?;
+        }
+        persist(&receipt, &record_bytes).map_err(|e| e.to_string())?;
+        Ok(record)
+    }
     pub(super) fn manage_space(
         &mut self,
         actor: &str,
@@ -713,17 +812,25 @@ impl Hub {
                 .ok_or("Chat room budget exhausted")?;
             self.chat_rooms.remove(&idle);
         }
-        let suffix = key.split_once(':').map_or("primary", |(_, hash)| hash);
-        let path = self
-            .state
-            .as_ref()
-            .ok_or("Durable chat storage required")?
-            .join(format!("collection-{}.data", binding.collection))
-            .join(format!("chat-{suffix}.journal"));
+        let path = self.chat_file(binding, package)?;
         self.collection_parent(&path)?;
         let room = space_chat::Hub::new(path)?;
         self.chat_rooms.insert(key, room.clone());
         Ok(room)
+    }
+    fn chat_file(
+        &self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<PathBuf> {
+        let key = collection_room(binding, package);
+        let suffix = key.split_once(':').map_or("primary", |(_, hash)| hash);
+        Ok(self
+            .state
+            .as_ref()
+            .ok_or("Durable chat storage required")?
+            .join(format!("collection-{}.data", binding.collection))
+            .join(format!("chat-{suffix}.journal")))
     }
     pub(super) fn chat_room(&self, active: &Activation) -> Result<Arc<space_chat::Hub>> {
         if !active.chat {
