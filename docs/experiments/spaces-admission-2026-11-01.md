@@ -60,3 +60,15 @@ retained-document code was changed for this increment.
 This report establishes local authority/browser behavior and native-owner adapter
 behavior. ARM execution, physical Frame presentation, signed live cutover and its
 rollback remain unqualified here. No Linux shared-memory IPC claim is made.
+
+## Collection-aware mount checkpoint
+
+Clean source `9392387753f91f667b7e1a6ea2cb39e9513efbf5` passed the full
+`scripts/check.sh` suite and the same rebuilt Chromium qualification with zero
+runtime exceptions. The [v9 report](data/spaces-mount-binding-2026-11-01.json)
+records the exact authority/Wasm digests and fixture release. Release-control v1
+is unchanged; state protocol v9 carries the collection/action binding and first
+aggregate view before candidate acceptance. Added runtime tests distinguish
+same-collection pending-intent recovery from replacement-collection or read-only
+admission, and prove read admission cannot allocate writer receipts or gain write
+capability. This checkpoint also remains local qualification only.
