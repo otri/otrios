@@ -137,6 +137,28 @@ pub fn role(space: &Space, identity: Option<&str>) -> Option<Role> {
 pub fn visible(space: &Space, identity: Option<&str>) -> bool {
     space.audience != Audience::Closed || role(space, identity).is_some()
 }
+/// Configured service principals cannot also acquire human membership roles.
+pub fn admit_service_identity(registry: &Registry, identity: &str) -> Result<()> {
+    if !valid_identity(identity) {
+        return Err(Error::Invalid);
+    }
+    if registry
+        .spaces
+        .iter()
+        .any(|s| s.members.iter().any(|m| m.identity == identity))
+    {
+        return Err(Error::Denied);
+    }
+    Ok(())
+}
+pub fn admit_human_management(actor: &str, request: &Request, services: &[&str]) -> Result<()> {
+    if services.contains(&actor)
+        || matches!(&request.change, Change::Membership { identity, .. } if services.contains(&identity.as_str()))
+    {
+        return Err(Error::Denied);
+    }
+    Ok(())
+}
 fn admin(space: &Space, identity: &str) -> Result<()> {
     if role(space, Some(identity)) == Some(Role::Admin) {
         Ok(())

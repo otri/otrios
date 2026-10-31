@@ -4,6 +4,39 @@ use otrios_core::spaces::{self, Error, Store};
 use otrios_interfaces::spaces::*;
 
 #[test]
+fn configured_service_principals_cannot_create_spaces_or_acquire_human_roles() {
+    let registry = fixture();
+    spaces::admit_service_identity(&registry, "collector").unwrap();
+    assert_eq!(
+        spaces::admit_service_identity(&registry, "alice"),
+        Err(Error::Denied)
+    );
+    let create = request(
+        &registry,
+        Change::Create {
+            name: "Unexpected service Space".into(),
+        },
+    );
+    assert_eq!(
+        spaces::admit_human_management("collector", &create, &["collector"]),
+        Err(Error::Denied)
+    );
+    let member = request(
+        &registry,
+        Change::Membership {
+            space: registry.spaces[0].id.clone(),
+            identity: "collector".into(),
+            role: Some(Role::Admin),
+        },
+    );
+    assert_eq!(
+        spaces::admit_human_management("alice", &member, &["collector"]),
+        Err(Error::Denied)
+    );
+    spaces::admit_human_management("alice", &create, &["collector"]).unwrap();
+}
+
+#[test]
 fn collection_schema_covers_all_distinct_roots_and_is_independent_of_screen_order() {
     use otrios_interfaces::{
         canvas::{Field, StateSchema},

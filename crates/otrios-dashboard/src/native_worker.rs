@@ -272,6 +272,25 @@ fn configured_session(url: &str) -> Result<(String, Option<String>), String> {
     }
     Ok((url, selected))
 }
+fn session_selection(url: &str, selected: Option<&str>) -> Result<String, String> {
+    if selected.is_some_and(|id| !otrios_core::spaces::valid_id(id)) {
+        return Err("Invalid Space selection".into());
+    }
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let mut fields = query
+        .split('&')
+        .filter(|f| !f.is_empty() && !f.starts_with("space="))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if let Some(space) = selected {
+        fields.push(format!("space={space}"));
+    }
+    Ok(if fields.is_empty() {
+        base.into()
+    } else {
+        format!("{base}?{}", fields.join("&"))
+    })
+}
 
 fn authenticated_request(
     url: &str,
@@ -387,6 +406,13 @@ pub(super) fn state_worker(
         return Err("Clients keep state in RAM; remove the obsolete --state option".into());
     }
     let (resources, catalog) = app_resources(&o)?;
+    let selected_space = Arc::new(Mutex::new(
+        o.url
+            .as_ref()
+            .map(|url| configured_session(url))
+            .transpose()?
+            .and_then(|(_, selected)| selected),
+    ));
     let mut client = Client::default();
     if let Some(url) = &o.url {
         let (_, selected) = configured_session(url)?;
@@ -431,8 +457,8 @@ pub(super) fn state_worker(
     })?;
     client.admit_catalog(&catalog)?;
     let admitted = otrios_core::canvas::decode_catalog(&catalog)?;
-    let entry = if let Some(id) = &o.screen {
-        let id = entry_app(id)?;
+    let requested_path = o.screen.as_deref().map(entry_app).transpose()?;
+    let entry = if let Some(id) = requested_path {
         // An app removed during a verified release handoff returns to Home.
         admitted
             .apps
@@ -444,7 +470,11 @@ pub(super) fn state_worker(
     }
     .ok_or("Entry app is not in the catalog")?;
     if o.url.is_some() {
-        client.open(&entry.app.ui_ref, &entry.app.state_ref);
+        if requested_path.is_some_and(|id| !id.is_empty() && id == entry.path) {
+            client.open(&entry.app.ui_ref, &entry.app.state_ref);
+        } else {
+            client.navigate("")?;
+        }
     } else {
         mount_local(&mut client, &resources, &entry.app.id, &entry.app.state_ref)?;
     }
@@ -475,6 +505,7 @@ pub(super) fn state_worker(
             .or_else(|| std::env::var("OTRIOS_RELEASE_SOCKET").ok());
         let active = ink_active.clone();
         let code_release = active_release.clone();
+        let selected = selected_space.clone();
         thread::spawn(move || {
             network(
                 url,
@@ -488,6 +519,7 @@ pub(super) fn state_worker(
                 ink_publish,
                 active,
                 code_release,
+                selected,
             )
         })
     });
@@ -656,6 +688,12 @@ pub(super) fn state_worker(
                         if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
                     {
                         dirty |= client.receive_spaces(&bytes)?;
+                        if client.spaces_snapshot().is_some() {
+                            stream_ready.store(true, Ordering::Release);
+                        }
+                        if client.take_collection_revoked() {
+                            revoke_display(&mut display_access, &mut composer);
+                        }
                     }
                     NetworkEvent::Spaces(..) => {}
                 }
@@ -749,6 +787,19 @@ pub(super) fn state_worker(
             {
                 ink_pending = Some(bytes);
             }
+        }
+        if let Some(space) = client.take_space_switch() {
+            *selected_space.lock().map_err(|_| "Space selection lock")? = Some(space.clone());
+            client.select_space(&space)?;
+            if let Some(id) = epoch {
+                abort.store(id, Ordering::Release);
+            }
+            epoch = None;
+            outgoing = None;
+            stream_ready.store(false, Ordering::Release);
+            revoke_display(&mut display_access, &mut composer);
+            client.take_collection_revoked();
+            dirty = true;
         }
         let connected = epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id);
         if !connected {
@@ -928,22 +979,25 @@ fn network(
     ink_in: mpsc::SyncSender<Vec<u8>>,
     ink_active: Arc<AtomicBool>,
     active_release: Arc<Mutex<String>>,
+    selected_space: Arc<Mutex<Option<String>>>,
 ) {
     use otrios_interfaces::session::{self as wire, ServerControl};
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let url = match configured_session(&url) {
-        Ok((url, _)) => url,
-        Err(error) => {
-            eprintln!("Frame session: {error}");
-            return;
-        }
-    };
+    let base_url = app_stream(&url);
     let identity = std::env::var_os("OTRIOS_IDENTITY_FILE").map(std::path::PathBuf::from);
     let mut epoch = 0_u64;
     loop {
         stream_ready.store(false, Ordering::Release);
         connection.store(0, Ordering::Release);
+        let selected = match selected_space.lock() {
+            Ok(selected) => selected.clone(),
+            Err(_) => return,
+        };
+        let url = match session_selection(&base_url, selected.as_deref()) {
+            Ok(url) => url,
+            Err(_) => return,
+        };
         let request = match authenticated_request(&url, identity.as_deref()) {
             Ok(request) => request,
             Err(error) => {
@@ -1183,6 +1237,25 @@ fn network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn space_switch_replaces_only_the_selected_scope() {
+        let first = "a".repeat(32);
+        let next = "b".repeat(32);
+        let url = format!("ws://localhost/session?space={first}&device=frame");
+        assert_eq!(
+            session_selection(&url, Some(&next)).unwrap(),
+            format!("ws://localhost/session?device=frame&space={next}")
+        );
+        assert_eq!(
+            session_selection(&url, None).unwrap(),
+            "ws://localhost/session?device=frame"
+        );
+        assert_eq!(
+            session_selection("ws://localhost/session", None).unwrap(),
+            "ws://localhost/session"
+        );
+        assert!(session_selection(&url, Some("invalid")).is_err());
+    }
     struct Fixture {
         root: std::path::PathBuf,
         ui: Vec<u8>,

@@ -200,6 +200,11 @@ impl Hub {
         if !otrios_core::spaces::valid_identity(identity) {
             return Err("Invalid service identity".into());
         }
+        otrios_core::spaces::admit_service_identity(
+            self.registry().map_err(|e| e.to_string())?,
+            identity,
+        )
+        .map_err(|e| e.to_string())?;
         let p = self
             .bundles
             .get(&self.active)
@@ -226,6 +231,11 @@ impl Hub {
         {
             return Err("Collector must be explicitly bound to Monitoring".into());
         }
+        otrios_core::spaces::admit_service_identity(
+            self.registry().map_err(|e| e.to_string())?,
+            &grant.identity,
+        )
+        .map_err(|e| e.to_string())?;
         self.collector = Some(grant);
         Ok(())
     }
@@ -362,6 +372,23 @@ impl Hub {
         request: &otrios_interfaces::spaces::Request,
         policy: Option<&otrios_interfaces::spaces::AppPolicy>,
     ) -> std::result::Result<u64, otrios_core::spaces::Error> {
+        if let Some(service) = &self.collector {
+            otrios_core::spaces::admit_human_management(
+                actor,
+                request,
+                &[service.identity.as_str()],
+            )?;
+        }
+        let removed = match &request.change {
+            otrios_interfaces::spaces::Change::Remove { space, app } => self
+                .registry()?
+                .spaces
+                .iter()
+                .find(|s| &s.id == space)
+                .and_then(|s| s.apps.iter().find(|a| &a.policy.app == app))
+                .map(|a| a.collection.clone()),
+            _ => None,
+        };
         let cursor = otrios_core::spaces::advance_discovery(&self.discovery)?;
         let generation = self
             .spaces
@@ -370,6 +397,12 @@ impl Hub {
             .commit(actor, request, policy)?
             .generation;
         self.discovery = cursor;
+        if let Some(collection) = removed {
+            self.rooms.retain(|key, room| {
+                room.failed || key.split(':').next() != Some(collection.as_str())
+            });
+            self.collection_views.remove(&collection);
+        }
         Ok(generation)
     }
     pub(super) fn discovery_cursor(&self) -> &otrios_interfaces::spaces::DiscoveryCursor {

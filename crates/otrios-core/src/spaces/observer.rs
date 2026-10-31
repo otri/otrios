@@ -51,11 +51,19 @@ impl Observer {
             self.outcome = Some(Outcome::Unknown { id });
         }
     }
+    pub fn forget(&mut self) {
+        self.snapshot = None;
+        self.cursor = None;
+        self.reset();
+    }
     pub fn snapshot(&self) -> Option<&Discovery> {
         self.snapshot.as_ref()
     }
     pub fn unavailable(&self) -> bool {
         self.unavailable
+    }
+    pub fn awaiting_snapshot(&self) -> bool {
+        self.enabled && !self.unavailable && self.snapshot.is_none()
     }
     pub fn pending(&self) -> bool {
         self.pending.is_some()

@@ -46,6 +46,15 @@ impl CanvasApp {
     pub fn configure_spaces(&mut self, selected: Option<String>) -> Result<(), String> {
         self.inner.configure_spaces(selected.as_deref())
     }
+    pub fn spaces_ui(&self) -> bool {
+        self.inner.spaces_ui()
+    }
+    pub fn take_space_switch(&mut self) -> Option<String> {
+        self.inner.take_space_switch()
+    }
+    pub fn take_sign_in(&mut self) -> bool {
+        self.inner.take_sign_in()
+    }
     pub fn spaces_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.inner.spaces_outgoing()
     }

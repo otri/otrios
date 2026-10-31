@@ -36,6 +36,7 @@ struct Mount {
     input: InputRouter,
     state_ref: String,
     binding: Option<otrios_interfaces::canvas::MountBinding>,
+    quit_control: Option<u8>,
     private: bool,
     session_controls: bool,
     private_access: bool,
@@ -184,10 +185,20 @@ pub struct Client {
     writer: Option<[u8; 16]>,
     dispatch: DispatchPolicy,
     spaces: crate::spaces::Observer,
+    host: super::host_ui::Model,
+    host_active: bool,
+    host_actions: BTreeMap<u8, super::host_ui::HostAction>,
+    host_requested: bool,
+    host_wire: VecDeque<ClientMessage>,
+    space_switch: Option<String>,
+    sign_in_requested: bool,
+    selected_space: Option<String>,
 }
 impl Client {
     pub fn configure_spaces(&mut self, selected: Option<&str>) -> Result<()> {
-        self.spaces.configure(selected).map_err(err)
+        self.spaces.configure(selected).map_err(err)?;
+        self.selected_space = selected.map(str::to_owned);
+        Ok(())
     }
     pub fn spaces_snapshot(&self) -> Option<&otrios_interfaces::spaces::Discovery> {
         self.spaces.snapshot()
@@ -196,13 +207,298 @@ impl Client {
         self.spaces.outgoing().map_err(err)
     }
     pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool> {
-        self.spaces.receive(bytes).map_err(err)
+        let changed = self.spaces.receive(bytes).map_err(err)?;
+        let mut rendered = false;
+        if self.host_active && self.spaces.snapshot().is_none() {
+            self.active = None;
+            self.host_active = false;
+            self.host_actions.clear();
+            self.collection_revoked = true;
+            return Ok(true);
+        }
+        if self.host_requested && self.spaces.unavailable() {
+            self.host_requested = false;
+            self.open_entry();
+            return Ok(true);
+        }
+        if self.spaces.snapshot().is_some()
+            && (self.host_active
+                || self.host_requested
+                || self
+                    .requested
+                    .as_ref()
+                    .is_some_and(|r| r.pair.0 == "app:home/ui")
+                || self
+                    .active
+                    .as_ref()
+                    .is_some_and(|m| m.ui.ui_ref == "app:home/ui")
+                || self.active.is_none() && self.requested.is_none()
+                || self.selected_space.is_none() && !self.auth_required
+                || self.auth_required
+                    && self.spaces.snapshot().is_some_and(|s| {
+                        s.identity.is_some()
+                            && !self.requested.as_ref().is_some_and(|request| {
+                                let owner = request
+                                    .pair
+                                    .1
+                                    .strip_prefix("app:")
+                                    .and_then(|reference| reference.split_once('/'))
+                                    .map(|(owner, _)| owner);
+                                s.selected.as_ref().is_some_and(|detail| {
+                                    detail.apps.iter().any(|app| {
+                                        Some(app.app.as_str()) == owner && app.launch.is_some()
+                                    })
+                                })
+                            })
+                    }))
+        {
+            if self.host_active {
+                if changed {
+                    self.collection_revoked = true;
+                    self.build_host(true)?;
+                    rendered = true;
+                }
+            } else {
+                rendered = self.show_spaces()?;
+            }
+        }
+        Ok(changed || rendered)
     }
     pub fn manage_space(&mut self, change: otrios_interfaces::spaces::Change) -> Result<u32> {
         self.spaces.request(change).map_err(err)
     }
     pub fn take_space_outcome(&mut self) -> Option<crate::spaces::Outcome> {
         self.spaces.take_outcome()
+    }
+    pub fn take_space_switch(&mut self) -> Option<String> {
+        self.space_switch.take()
+    }
+    pub fn select_space(&mut self, space: &str) -> Result<()> {
+        self.configure_spaces(Some(space))?;
+        self.spaces.forget();
+        self.active = None;
+        self.qualified = None;
+        self.requested = None;
+        self.navigation = None;
+        self.decision = None;
+        self.host_wire.clear();
+        self.host_active = false;
+        self.host_actions.clear();
+        self.host_requested = false;
+        self.host.pane = super::host_ui::Pane::Home;
+        self.host.message.clear();
+        self.auth_required = false;
+        self.collection_revoked = true;
+        Ok(())
+    }
+    pub fn take_sign_in(&mut self) -> bool {
+        std::mem::take(&mut self.sign_in_requested)
+    }
+    pub fn spaces_ui(&self) -> bool {
+        self.host_active
+    }
+    pub fn show_spaces(&mut self) -> Result<bool> {
+        if self.spaces.snapshot().is_none() {
+            return Ok(false);
+        }
+        if !self.host_active
+            && (!self.reload_ready() || self.requested.is_some() || self.decision.is_some())
+        {
+            // Home is local, but connected edits and finished gestures still
+            // precede disposal of the participant's current execution.
+            if self.active.is_some() {
+                self.host_requested = true;
+                return Ok(false);
+            }
+        }
+        if !self.host_active {
+            if let Some(request) = self.requested.take()
+                && request.sent
+            {
+                self.host_wire.push_back(ClientMessage::CancelMount {
+                    epoch: request.epoch,
+                });
+            }
+            if let Some(mount) = &self.active
+                && !self.local
+            {
+                self.host_wire
+                    .push_back(ClientMessage::Leave { epoch: mount.epoch });
+            }
+            self.qualified = None;
+            self.decision = None;
+            self.navigation = None;
+            self.host.pane = super::host_ui::Pane::Home;
+            self.host.page = 0;
+        }
+        self.host_requested = false;
+        self.build_host(false)?;
+        Ok(true)
+    }
+    fn build_host(&mut self, preserve: bool) -> Result<()> {
+        let draft = if preserve && self.host_active {
+            self.typed_value(1)
+                .ok()
+                .and_then(|v| {
+                    if let Value::Text(v) = v {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if let Some(outcome) = self.spaces.take_outcome() {
+            self.host.message = match outcome {
+                crate::spaces::Outcome::Unknown { .. } => {
+                    "Reply lost. Check the refreshed Space before trying again.".into()
+                }
+                crate::spaces::Outcome::Decided { status, .. } => match status {
+                    otrios_interfaces::spaces::ManagementStatus::Applied => "Saved.",
+                    otrios_interfaces::spaces::ManagementStatus::Denied => {
+                        "Admin access is required."
+                    }
+                    otrios_interfaces::spaces::ManagementStatus::LastAdmin => {
+                        "A Space needs at least one Admin."
+                    }
+                    otrios_interfaces::spaces::ManagementStatus::Conflict => {
+                        "The Space changed. Review it and try again."
+                    }
+                    otrios_interfaces::spaces::ManagementStatus::Incompatible => {
+                        "The retained data needs a compatible app version."
+                    }
+                    otrios_interfaces::spaces::ManagementStatus::Invalid => {
+                        "Check the details and try again."
+                    }
+                    _ => "The request is unavailable. Try again after reconnecting.",
+                }
+                .into(),
+            };
+        }
+        let snapshot = self.spaces.snapshot().ok_or("Spaces are unavailable")?;
+        let private = snapshot.identity.is_some();
+        let rendered = super::host_ui::render(
+            snapshot,
+            &mut self.host,
+            &draft,
+            !self.chat_native,
+            !self.chat_native,
+        )?;
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or("Canvas epoch exhausted")?;
+        let writer = match self.writer {
+            Some(writer) => writer,
+            None => {
+                let writer = state::writer_nonce()?;
+                self.writer = Some(writer);
+                writer
+            }
+        };
+        let mut mount = qualify(
+            rendered.ui,
+            "host:spaces/state",
+            &[],
+            &self.cache,
+            &[],
+            Qualification {
+                epoch: self.generation,
+                private,
+                writer,
+            },
+        )?;
+        mount.font = self.font.clone();
+        mount.session_controls = self.session_controls;
+        mount.private_access = self.private_access;
+        mount.viewport = self
+            .layout_viewport
+            .or(self.viewport)
+            .unwrap_or([1280., 800.]);
+        mount.keyboard.set_enabled(!self.external_keyboard);
+        mount.invalidate();
+        cached_scene(&mount)?;
+        self.active = Some(mount);
+        self.host_active = true;
+        self.host_actions = rendered.actions;
+        self.local = true;
+        self.auth_required = false;
+        self.requested = None;
+        Ok(())
+    }
+    fn host_action(&mut self, action: super::host_ui::HostAction) -> Result<bool> {
+        use super::host_ui::{HostAction, Pane};
+        self.host.message.clear();
+        match action {
+            HostAction::Pane(pane) => {
+                self.host.pane = pane;
+                self.host.page = 0;
+                self.build_host(false)?;
+            }
+            HostAction::Page(direction) => {
+                self.host.page = self.host.page.saturating_add_signed(isize::from(direction));
+                self.build_host(false)?;
+            }
+            HostAction::Space(space) => {
+                self.space_switch = Some(space);
+            }
+            HostAction::Launch(ui, state) => {
+                self.host_active = false;
+                self.host_actions.clear();
+                self.open(&ui, &state);
+            }
+            HostAction::SignIn => {
+                self.sign_in_requested = true;
+                self.auth_required = true;
+            }
+            HostAction::SignOut => {
+                self.sign_out_requested = true;
+            }
+            action => {
+                let text = if matches!(action, HostAction::Create | HostAction::Invite(_)) {
+                    match self.typed_value(1)? {
+                        Value::Text(text) => text,
+                        _ => String::new(),
+                    }
+                } else {
+                    String::new()
+                };
+                let change = match action {
+                    HostAction::Manage(change) => change,
+                    HostAction::Create => otrios_interfaces::spaces::Change::Create { name: text },
+                    HostAction::Invite(role) => otrios_interfaces::spaces::Change::Membership {
+                        space: self
+                            .spaces
+                            .snapshot()
+                            .and_then(|s| s.selected.as_ref())
+                            .ok_or("Select a Space")?
+                            .space
+                            .clone(),
+                        identity: text,
+                        role: Some(role),
+                    },
+                    _ => unreachable!(),
+                };
+                match self.spaces.request(change) {
+                    Ok(_) => {
+                        self.host.message = "Saving…".into();
+                        if self.host.pane == Pane::Create {
+                            self.host.pane = Pane::Spaces;
+                        } else if self.host.pane == Pane::Invite {
+                            self.host.pane = Pane::Members;
+                        }
+                    }
+                    Err(_) => {
+                        self.host.message =
+                            "Check the details and wait for the current request.".into()
+                    }
+                }
+                self.build_host(true)?;
+            }
+        }
+        Ok(true)
     }
     /// The host supplies text input; retain editor focus without drawing keys.
     pub fn set_software_keyboard(&mut self, enabled: bool) {
@@ -508,12 +804,23 @@ impl Client {
     /// Admit compatible UI document revisions without replacing executable code.
     /// The staged mount qualifies its new coverage before replacing the old view.
     pub fn can_update_catalog(&mut self) -> bool {
+        if self.host_active {
+            return !self.input_busy();
+        }
         self.requested.is_none()
             && self.navigation.is_none()
             && !self.input_busy()
             && self.confirmed()
     }
     pub fn update_catalog(&mut self, bytes: &[u8]) -> Result<bool> {
+        if self.host_active {
+            let mount = self.active.take();
+            let result = self.admit_catalog(bytes);
+            self.active = mount;
+            self.navigation = None;
+            result?;
+            return Ok(false);
+        }
         if hash(bytes) == self.catalog_hash {
             return Ok(false);
         }
@@ -859,6 +1166,10 @@ impl Client {
         self.chat_disconnected();
         self.decision = None;
         self.auth_required = false;
+        self.host_wire.clear();
+        if self.host_active {
+            return;
+        }
         if let Some(r) = &mut self.requested {
             r.sent = false;
             return;
@@ -882,6 +1193,9 @@ impl Client {
     }
     /// The same catalog destination is used by browser URLs and native entry points.
     pub fn screen(&self) -> String {
+        if self.host_active {
+            return "spaces".into();
+        }
         self.catalog
             .as_ref()
             .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == self.ui_ref()))
@@ -889,6 +1203,9 @@ impl Client {
             .unwrap_or_default()
     }
     pub fn path(&self) -> String {
+        if self.host_active {
+            return String::new();
+        }
         self.catalog
             .as_ref()
             .and_then(|c| c.apps.iter().find(|e| e.app.ui_ref == self.ui_ref()))
@@ -897,6 +1214,14 @@ impl Client {
     }
     pub fn navigate(&mut self, path: &str) -> Result<()> {
         let path = path.strip_prefix('/').unwrap_or(path);
+        if path.is_empty() && self.spaces.snapshot().is_some() {
+            self.show_spaces()?;
+            return Ok(());
+        }
+        if path.is_empty() && self.spaces.awaiting_snapshot() {
+            self.host_requested = true;
+            return Ok(());
+        }
         let entry = self
             .catalog
             .as_ref()
@@ -925,6 +1250,11 @@ impl Client {
         self.navigate("").is_ok()
     }
     pub fn clear_private(&mut self) {
+        let host = self.host_active;
+        self.host_active = false;
+        self.host_actions.clear();
+        self.host_requested = false;
+        self.spaces.forget();
         if self
             .active
             .as_ref()
@@ -940,11 +1270,16 @@ impl Client {
             self.decision = Some(MountDecision::Cancel(request.epoch));
         }
         self.auth_required = false;
-        self.open_entry();
+        if !host {
+            self.open_entry();
+        }
     }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>> {
         if self.catalog.is_none() {
             return Ok(None);
+        }
+        if let Some(message) = self.host_wire.pop_front() {
+            return encode_client(&message).map(Some);
         }
         let writer = match self.writer {
             Some(w) => w,
@@ -1041,6 +1376,8 @@ impl Client {
         state: &[u8],
     ) -> Result<bool> {
         self.qualified = None;
+        self.host_active = false;
+        self.host_actions.clear();
         let description = decode_ui(ui)?;
         self.generation = self.generation.checked_add(1).ok_or("Epoch exhausted")?;
         if self.writer.is_none() {
@@ -1163,6 +1500,11 @@ impl Client {
                         },
                     )?;
                     candidate.binding = binding;
+                    if candidate.binding.is_some() {
+                        candidate.quit_control = (0..=u8::MAX).rev().find(|control| {
+                            !candidate.ui.handlers.iter().any(|h| h.control == *control)
+                        });
+                    }
                     candidate
                         .doc
                         .set_read_only(candidate.binding.as_ref().is_some_and(|b| !b.editable));
@@ -1316,6 +1658,12 @@ impl Client {
                     return Ok(true);
                 }
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    if self.requested.as_ref().is_some_and(|r| r.reconnecting)
+                        && self.active.as_ref().is_some_and(|m| m.binding.is_some())
+                    {
+                        self.active = None;
+                        self.collection_revoked = true;
+                    }
                     self.qualified = None;
                     self.decision = Some(MountDecision::Cancel(epoch));
                     if self.previous_catalog.is_some() {
@@ -1325,6 +1673,7 @@ impl Client {
                         return Err("UI update access rejected".into());
                     }
                     self.auth_required = true;
+                    self.spaces.reset();
                 }
                 Ok(false)
             }
@@ -1373,6 +1722,7 @@ impl Client {
             current.epoch = candidate.epoch;
             current.visible = candidate.visible;
             current.view = candidate.view;
+            current.quit_control = candidate.quit_control;
             current.invalidate();
             candidate = current;
         }
@@ -1411,6 +1761,8 @@ impl Client {
             self.collection_revoked = true;
         }
         self.active = Some(candidate);
+        self.host_active = false;
+        self.host_actions.clear();
         self.local = false;
         self.requested = None;
         self.auth_required = false;
@@ -1422,6 +1774,18 @@ impl Client {
     pub fn event(&mut self, epoch: u32, control: u8, a: u16, b: u16) -> Result<bool> {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
+        }
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|m| m.quit_control == Some(control))
+        {
+            return self.show_spaces();
+        }
+        if self.host_active
+            && let Some(action) = self.host_actions.get(&control).cloned()
+        {
+            return self.host_action(action);
         }
         let h = self
             .active
@@ -1781,6 +2145,9 @@ impl Client {
                     .and_then(|m| m.ui.navigation.iter().find(|n| n.action == id))
                     .cloned()
                 {
+                    if n.ui_ref == "app:home/ui" && self.spaces.snapshot().is_some() {
+                        return self.show_spaces();
+                    }
                     if n.state_ref.is_empty() {
                         let destination = self
                             .catalog
@@ -2070,6 +2437,9 @@ impl Client {
         Ok(self.open_entry())
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        if self.host_requested && self.confirmed() && !self.input_busy() {
+            return self.show_spaces();
+        }
         self.wire_clock = self.wire_clock.max(now);
         let Some(m) = &mut self.active else {
             return Ok(false);
@@ -2229,6 +2599,9 @@ impl Client {
             return Ok(false);
         };
         let m = self.active.as_ref().ok_or("No Canvas")?;
+        if m.quit_control == Some(control) {
+            return Ok(false);
+        }
         let h =
             m.ui.handlers
                 .iter()
@@ -2255,6 +2628,9 @@ impl Client {
             return Ok(None);
         };
         let m = self.active.as_ref().ok_or("No Canvas")?;
+        if m.quit_control == Some(control) {
+            return Ok(None);
+        }
         let h =
             m.ui.handlers
                 .iter()
@@ -2686,6 +3062,7 @@ fn qualify(
         input: InputRouter::default(),
         state_ref: state_ref.into(),
         binding: None,
+        quit_control: None,
         private,
         session_controls: false,
         private_access: false,
@@ -2890,6 +3267,36 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             }
         }
         local_labels(&mut root, m.order_editing, &m.ui);
+    }
+    if let Some(control) = m.quit_control {
+        use crate::dashboard::components::{background, canvas, text};
+        use otrios_interfaces::scene::{Rect, SwitchSemantics};
+        let mut quit = canvas(
+            4_100_000_000,
+            Rect::new((root.frame.width - 136.).max(0.), 24., 112., 48.),
+            vec![
+                background(
+                    4_100_000_001,
+                    112.,
+                    48.,
+                    otrios_interfaces::theme::CARD,
+                    12.,
+                ),
+                text(
+                    4_100_000_002,
+                    Rect::new(20., 8., 88., 32.),
+                    "Quit",
+                    2,
+                    otrios_interfaces::theme::TEXT,
+                ),
+            ],
+        );
+        quit.responder = Some(TouchResponder::Activate(Action::AppEvent(control)));
+        quit.semantics = Some(SwitchSemantics {
+            label: "Quit".into(),
+            checked: false,
+        });
+        root.children.push(quit);
     }
     Scene::new(root)
 }

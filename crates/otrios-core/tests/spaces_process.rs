@@ -456,6 +456,15 @@ fn monitoring_collector_has_an_explicit_collection_grant_and_no_human_membership
     let operations = record["spaces"][0]["space"].as_str().unwrap();
     let other = record["spaces"][1]["space"].as_str().unwrap();
     rig.restart(&binary, true, true);
+    let (_, state) = http(&rig.public, "GET", Some('a'), None);
+    let create = Request {
+        version: 1,
+        expected_generation: state["generation"].as_u64().unwrap(),
+        change: Change::Create {
+            name: "Collector must not become an Admin".into(),
+        },
+    };
+    assert_eq!(http(&rig.public, "POST", Some('d'), Some(&create)).0, 403);
     assert_eq!(presentation(&rig.native, None, &view), 403);
     assert_eq!(presentation(&rig.native, Some('a'), &view), 403);
     assert_eq!(presentation(&rig.native, Some('d'), &view), 200);
@@ -1171,6 +1180,106 @@ fn space_client() {
         assert_eq!(replica.value(1).unwrap(), mode.parse::<u16>().unwrap());
     }
 }
+#[test]
+fn removing_an_attachment_revokes_sessions_retains_admin_visible_data_and_reattaches_after_restart()
+{
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let household = rig.space("Household");
+    let work = rig.space("Work");
+    for space in [&household, &work] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "counter".into(),
+            },
+        );
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    rig.child(&rig.public, &household, Some('a'), "write");
+    let mut active = socket(&rig.public, &household, Some('b'));
+    mount(&mut active, &rig.catalog);
+    let ServerMessage::Mounted {
+        binding: Some(binding),
+        ..
+    } = read(&mut active)
+    else {
+        panic!("mount")
+    };
+    send(&mut active, ClientMessage::AcceptMount { epoch: 1 });
+    assert!(matches!(
+        read(&mut active),
+        ServerMessage::Activated { epoch: 1 }
+    ));
+    rig.change(
+        'a',
+        Change::Remove {
+            space: household.clone(),
+            app: "counter".into(),
+        },
+    );
+    assert!(matches!(
+        read(&mut active),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    send(
+        &mut active,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 2,
+                values: vec![(1, Value::Number(99.))],
+            })
+            .unwrap(),
+        },
+    );
+    assert!(matches!(read(&mut active), ServerMessage::Error { .. }));
+    let (_, admin) = http(&rig.public, "GET", Some('a'), None);
+    let retained = admin["spaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == household)
+        .unwrap()["apps"][0]
+        .clone();
+    assert_eq!(retained["collection"], binding.collection);
+    assert_eq!(retained["attached"], false);
+    let (_, member) = http(&rig.public, "GET", Some('b'), None);
+    assert!(member["spaces"][0]["apps"].as_array().unwrap().is_empty());
+    rig.child(&rig.public, &work, Some('a'), "0");
+    rig.stop();
+    rig.restart(&binary, true, true);
+    rig.change(
+        'a',
+        Change::Attach {
+            space: household.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.child(&rig.public, &household, Some('a'), "42");
+    rig.child(&rig.public, &work, Some('a'), "0");
+    let (_, admin) = http(&rig.public, "GET", Some('a'), None);
+    let restored = admin["spaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == household)
+        .unwrap()["apps"][0]
+        .clone();
+    assert_eq!(restored["collection"], binding.collection);
+    assert_eq!(restored["attached"], true);
+}
+
 #[test]
 fn revocation_between_qualification_and_acceptance_cannot_activate_a_staged_collection() {
     let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {

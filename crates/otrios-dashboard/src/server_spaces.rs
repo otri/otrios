@@ -122,10 +122,8 @@ pub(super) fn manage_request(
     request: &contract::Request,
 ) -> std::result::Result<u64, core::Error> {
     // Later lifecycle/public stages remain unavailable on every management path.
-    if matches!(
-        &request.change,
-        Change::DeleteData { .. } | Change::Remove { .. }
-    ) || matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
+    if matches!(&request.change, Change::DeleteData { .. })
+        || matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
     {
         return Err(core::Error::Unavailable);
     }

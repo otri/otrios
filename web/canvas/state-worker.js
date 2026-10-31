@@ -14,7 +14,7 @@ let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
 let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
-let chatLogKey='',spacesSending=false;
+let chatLogKey='',spacesSending=false,signingOut=false;
 function pumpSpaces(){if(transportReady&&!spacesSending){const bytes=app?.spaces_outgoing();if(bytes){spacesSending=true;postMessage({type:'spaces-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function pumpChat(){
   if(app?.screen()==='brass-relay'&&!chatIdentityReady){if(!chatIdentityRequested){chatIdentityRequested=true;postMessage({type:'chat-identity'});}return;}
@@ -54,7 +54,7 @@ function sendFrame(){
   postMessage({type:'frame',...frame},transfer);
 }
 function clearPresentation(){chatLogKey='';composition=null;documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
-function signOut(){dropPrivate();app.set_session_controls(false);app.navigate('');monitoring.logout();}
+async function signOut(){if(signingOut)return;signingOut=true;transportReady=false;dropPrivate();app.set_session_controls(false);publish();const done=await monitoring.logout();signingOut=false;if(done)postMessage({type:'transport-reconnect'});else postMessage({type:'warning',message:'Could not finish signing out. Reload to retry.'});}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();}
 function reloadReady(){return !composition&&!app.input_busy()&&(!stateOnline||app.reload_ready());}
@@ -128,7 +128,7 @@ onmessage=async({data:m})=>{try{
   if(m.type==='state-frame'){try{if(!stopped&&transportReady&&m.epoch===transportEpoch)receiveState(m.bytes,m.receivedAt);}finally{postMessage({type:'state-frame-ack',epoch:m.epoch});}return;}
   if(m.type==='ink-frame'){try{if(transportReady&&m.epoch===transportEpoch&&wantsInk()&&app.receive_ink(m.bytes,performance.now()))publish();}finally{postMessage({type:'ink-frame-ack',epoch:m.epoch});}return;}
   if(m.type==='chat-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_chat(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish();}}finally{postMessage({type:'chat-frame-ack',epoch:m.epoch});}outgoing();return;}
-  if(m.type==='spaces-frame'){try{if(transportReady&&m.epoch===transportEpoch){if(app.receive_spaces(m.bytes))publish(false);}}finally{postMessage({type:'spaces-frame-ack',epoch:m.epoch});}outgoing();return;}
+  if(m.type==='spaces-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_spaces(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish(app.spaces_ui());}}finally{postMessage({type:'spaces-frame-ack',epoch:m.epoch});}outgoing();return;}
   if(m.type==='spaces-send-ack'){if(m.epoch===transportEpoch){spacesSending=false;pumpSpaces();}return;}
   if(m.type==='collection-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_collection(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish();}}finally{postMessage({type:'collection-frame-ack',epoch:m.epoch});}outgoing();return;}
   if(m.type==='collection-send-ack'){if(m.epoch===transportEpoch){collectionSending=false;pumpCollection();}return;}
@@ -169,6 +169,8 @@ onmessage=async({data:m})=>{try{
   if(composition&&composition.epoch!==app.epoch())composition=null;
   if(pointerCommand)changed=app.tick(performance.now(),Date.now()/1000)||changed;
   if(app.take_sign_out()){signOut();changed=true;}
+  app.take_sign_in();
+  const selectedSpace=app.take_space_switch();if(selectedSpace)postMessage({type:'space-switch',space:selectedSpace});
   if(timings&&m.timing&&app.pending_mount_epoch())navigationTiming={...m.timing,workerStarted};
   if(changed)publish();outgoing();postMessage({type:'command-ack'});
 }catch(e){error(e);postMessage({type:'command-ack'});}};

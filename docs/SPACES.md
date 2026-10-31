@@ -73,12 +73,27 @@ Commands are at most 8 KiB; events are at most 128 KiB, with structural bounds
 before FlexBuffers deserialization. Only one management intent is outstanding per
 host observer. A lost reply/reconnect marks its outcome unknown and refreshes the
 snapshot; it never automatically replays Create or a destructive action. Every
-management path uses the same generation/role checks. This checkpoint provides
-the channel and host adapters; the shared Apps & Data controls follow separately.
+management path uses the same generation/role checks.
 
-This increment admits Create, Membership, Attach and Closed audience changes.
-Removal, deletion and public audience changes remain unavailable through HTTP
-until their lifecycle integrations are complete. Global chat/collection/ink lanes
+The shared native/browser Home includes a Space picker and launch entries. Admins
+can use Apps & Data to inspect attached/retained collections, add/remove apps and
+manage members. Local forms use the shared keyboard; their drafts never enter app
+state. These are trusted host controls with a private action table: a publisher
+cannot invoke them by reusing labels or event numbers. A changed admission snapshot
+redacts held management frames before renderer credit returns.
+
+Quit waits for connected edits to be confirmed and gestures to finish, then leaves
+that participant's activation and returns to Home. Removing an attachment durably
+closes its admission and drops healthy cached rooms/presentations while retaining
+checkpoints, journals and the collection identity. Other Spaces are unaffected.
+Admin-visible retained data can be reattached to recover its original values,
+including after authority restart. A failed durable room stays poisoned rather
+than being reopened as an empty collection. These controls do not claim local
+uninstall, complete auxiliary-lane lifecycle or physical Frame qualification.
+
+This increment admits Create, Membership, Attach, Remove and Closed audience changes.
+Deletion and public audience changes remain unavailable through HTTP until their
+lifecycle integrations are complete. Global chat/collection/ink lanes
 and legacy presentation reads are disabled in managed mode; they cannot be used
 as an unscoped fallback. Monitoring presentation uploads require an explicit
 collector identity and collection grant.
@@ -95,7 +110,10 @@ Wasm package from the tested revision, then run
 `python3 scripts/qualify-spaces-browser.py --wasm-pkg /ABS/BUILT/pkg`. The probe uses
 disposable data and signing keys, normal sign-in and separate Chromium cookie
 contexts. It checks shared edits, Space isolation, anonymous/non-Member denial,
-active revocation and continued use by an unaffected Member. Reports include the
+active revocation and continued use by an unaffected Member. It also exercises
+the host controls for Quit, retained-data inspection, removal, reattachment and
+Space switching, verifying that another participant can edit after Quit and that
+reattachment preserves the collection and value. Reports include the
 source revision, dirty-tree status and artifact digests. The fixture has no native
 artifact; it does not establish ARM execution or Frame deployment acceptance.
 
@@ -181,6 +199,8 @@ grant admits only uploads to its configured Monitoring collection. It grants no
 human membership, view admission or sibling collection access. Ordinary human
 Admin credentials cannot upload the view. Membership changes do not invent or
 revoke a service role; removal or collection replacement invalidates its grant.
+Configured service identities cannot create Spaces or acquire human membership;
+binding a service identity already present in a human roster is rejected.
 Current installed schema/closed-only constraints also apply to cached bindings.
 
 Monitoring views are stored as `collection-ID.presentation.flex` beside that

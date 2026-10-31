@@ -4,6 +4,7 @@ mod behavior;
 pub mod chat;
 mod client;
 pub mod document;
+mod host_ui;
 pub mod presentation;
 pub mod reflow;
 mod selection;
