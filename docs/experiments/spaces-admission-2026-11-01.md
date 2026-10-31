@@ -618,3 +618,48 @@ This qualifies public audiences/comments in local software and Chromium. S4
 publication with owned assets, current ARM qualification, signed live cutover and
 physical Frame acceptance remain outstanding. The disposable fixture does not
 establish Frame signing trust or SSH host identity.
+
+
+## S4 publication and owned-assets backend checkpoint
+
+Source: `3d4579ca5abec84da2d2a404a01673b57a536756`.
+`bash scripts/check.sh` passed in full (check 38), including 201 Core library
+tests, 68 canvas tests, 19 collection tests, 21 Space tests, 20 trusted-host UI
+tests and all 22 authority process tests. The authority SHA-256 is
+`60cf7d8b5b0a80da565e58c74a6a4a4fe40b3d36d31e1cf489108af6fd8fd2eb`.
+State protocol v15 declares publication, attachment blobs and message moderation;
+release-control v1 and registry OTSP5 remain unchanged.
+
+The process probe sends a 200,000-byte binary attachment and publishes one reviewed
+confirmed dispatch from a closed Space into a public-comment Space. A source Member
+without destination Edit is denied. Anonymous destination reads use the scoped
+message reference; a private source revision and removed message cannot retrieve
+bytes. Members moderate destination messages; visitors cannot. The copied sender ID
+and nonce differ, and public output has no source collection/profile or authority
+identity fields. Destination deletion leaves the source readable; a new explicit
+publication targets a fresh destination collection. Source deletion and namespace
+reclamation leave the independent copy and its bytes intact through restart.
+
+Core tests qualify copied-byte integrity, bounded immutable namespaces, symlink
+rejection, interrupted stages, quota across restart, deduplication, stale selection
+rejection, missing/corrupt source assets, failed journal outcomes, retained reader
+pins, sequence/receipt preservation after moderation and compaction, and confirmed
+legacy chat preservation during atomic OTCHAT01-to-OTCHAT02 upgrade. The existing
+empty-attachment record shape is retained. Binary blobs round-trip at the 256 KiB
+limit without scalar-vector expansion.
+
+Check 37 found that reducing the mixed chat queue to one slot could close a healthy
+peer during a short control burst. The final adapter keeps eight slots and holds
+byte credits through processing; large binary replies bypass broadcast history.
+The full process suite and required check 38 pass with this bounded design.
+
+Both preserved older writers were supplied. OTSP4 control-format rejection remains
+covered. The real pre-attachment OTSP5 authority (SHA-256
+`afe51ae2964725defa74b714337aea937b053da546e4e141c9866ae75d9a806c`)
+rejects a private copy of the OTCHAT02 journal during explicit import without
+changing its bytes. This qualifies refusal of the new chat format, not a live
+signed Frame rollback.
+
+The trusted publication chooser, browser file controls and current protocol
+browser/ARM/physical Frame acceptance remain pending. The earlier Chromium public
+sharing evidence is protocol v14 and is not claimed as v15 publication acceptance.
