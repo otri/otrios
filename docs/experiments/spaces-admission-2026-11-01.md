@@ -84,3 +84,16 @@ without management replay. A real shared-session scenario races initial capture
 with attachment, observes subsequent changes, rejects Member management and
 removes a revoked Member's closed-Space metadata. This qualifies the channel and
 host adapters; shared Apps & Data controls and physical Frame remain pending.
+
+## Current-policy activation checkpoint
+
+Clean source `1401d2f5408d8538c5ceb12d2c435cc3a0cb3969` passed the full
+`scripts/check.sh` suite and rebuilt Chromium qualification with zero runtime
+exceptions. The [v11 report](data/spaces-activation-2026-11-01.json) identifies its
+artifacts. Managed candidates now remain invisible until an authority Activated
+reply. Covered tests hold protected candidate state/aggregate content offscreen,
+discard denied/disconnected/cancelled candidates and preserve late reconnect
+edits only within matching bindings. A real authority scenario revokes membership
+between qualification and acceptance, receives denial rather than activation,
+rejects the subsequent write and verifies unchanged data through another client.
+These results still do not establish physical Frame acceptance.
