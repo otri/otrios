@@ -129,6 +129,15 @@ fn fixture(root: &Path) -> Vec<u8> {
     catalog
 }
 fn http(address: &str, method: &str, token: Option<char>, body: Option<&Request>) -> (u16, Json) {
+    http_path(address, "/spaces", method, token, body)
+}
+fn http_path(
+    address: &str,
+    path: &str,
+    method: &str,
+    token: Option<char>,
+    body: Option<&Request>,
+) -> (u16, Json) {
     let bytes = body
         .map(|v| serde_json::to_vec(v).unwrap())
         .unwrap_or_default();
@@ -136,7 +145,7 @@ fn http(address: &str, method: &str, token: Option<char>, body: Option<&Request>
     socket
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    write!(socket, "{method} /spaces HTTP/1.0\r\nHost: {address}\r\nOrigin: {ORIGIN}\r\nX-OTriOS-Request: spaces\r\nContent-Type: application/json\r\nContent-Length: {}\r\n", bytes.len()).unwrap();
+    write!(socket, "{method} {path} HTTP/1.0\r\nHost: {address}\r\nOrigin: {ORIGIN}\r\nX-OTriOS-Request: spaces\r\nContent-Type: application/json\r\nContent-Length: {}\r\n", bytes.len()).unwrap();
     if let Some(c) = token {
         write!(
             socket,
@@ -935,6 +944,189 @@ fn document_session(
     }
     send(&mut socket, ClientMessage::Leave { epoch: 1 });
     (replica.value(1).unwrap(), binding.map(|b| b.collection))
+}
+
+#[test]
+fn quit_releases_durable_room_capacity_without_evicting_live_or_poisoned_participants() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    let ui = canvas::decode_ui(&fs::read(rig.root.join("apps/counter/package/ui.flex")).unwrap())
+        .unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    let mut ids = vec!["counter".to_owned()];
+    for index in 1_u8..12 {
+        let id = format!("counter/document-{}", char::from(b'a' + index - 1));
+        let mut ui = ui.clone();
+        ui.ui_ref = format!("app:{id}/ui");
+        let bytes = canvas::encode_ui(&ui).unwrap();
+        let app = App {
+            id: id.clone(),
+            title: format!("Document {index}"),
+            ui_ref: ui.ui_ref,
+            state_ref: format!("app:{id}/state"),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        };
+        let package = rig.root.join("apps").join(&id).join("package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("ui.flex"), &bytes).unwrap();
+        fs::write(package.join("app.flex"), canvas::encode_app(&app).unwrap()).unwrap();
+        catalog.apps.push(CatalogEntry {
+            app,
+            path: id.clone(),
+            ui_hash: canvas::hash(&bytes),
+            private: false,
+        });
+        ids.push(id);
+    }
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, true, true);
+    let spaces = (0..22)
+        .map(|index| {
+            let space = rig.space(&format!("Room budget {index}"));
+            rig.change(
+                'a',
+                Change::Attach {
+                    space: space.clone(),
+                    app: "counter".into(),
+                },
+            );
+            space
+        })
+        .collect::<Vec<_>>();
+    document_session(&rig, &spaces[0], &ids[0], schema(), Some(41));
+    document_session(&rig, &spaces[0], &ids[1], schema(), Some(73));
+    let open = |space: &str, id: &str| {
+        let mut socket = socket(&rig.public, space, Some('a'));
+        let state_ref = format!("app:{id}/state");
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: format!("app:{id}/ui"),
+                state_ref: state_ref.clone(),
+                catalog_hash: canvas::hash(&rig.catalog),
+                known_ui: None,
+                known_code: vec![],
+                writer: vec![9; 16],
+                resume: 0,
+                collection: None,
+            },
+        );
+        let ServerMessage::Mounted {
+            state,
+            binding: Some(binding),
+            ..
+        } = read(&mut socket)
+        else {
+            panic!("mount")
+        };
+        let replica = canvas::StateAdapter::new(schema(), &state_ref, &state, [9; 16]).unwrap();
+        send(&mut socket, ClientMessage::AcceptMount { epoch: 1 });
+        assert!(matches!(
+            read(&mut socket),
+            ServerMessage::Activated { epoch: 1 }
+        ));
+        (socket, replica, binding.collection)
+    };
+    let (mut active, mut replica, _) = open(&spaces[0], &ids[0]);
+    let (mut poisoned, _, collection) = open(&spaces[0], &ids[1]);
+    let journal = rig.root.join(format!(
+        "state/collection-{collection}.data/doc-{}.merkle.log",
+        canvas::hex(&canvas::hash(format!("app:{}/state", ids[1]).as_bytes()))
+    ));
+    let saved = journal.with_extension("saved");
+    fs::rename(&journal, &saved).unwrap();
+    fs::create_dir(&journal).unwrap();
+    send(
+        &mut poisoned,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 1,
+                values: vec![(1, Value::Number(999.))],
+            })
+            .unwrap(),
+        },
+    );
+    assert!(matches!(read(&mut poisoned), ServerMessage::Error { .. }));
+    fs::remove_dir(&journal).unwrap();
+    fs::rename(saved, &journal).unwrap();
+    drop(poisoned);
+    for (index, space) in spaces.iter().enumerate() {
+        for (document, id) in ids.iter().enumerate() {
+            if index == 0 && document < 2 {
+                continue;
+            }
+            let value = (index * ids.len() + document + 1) as u16;
+            assert_eq!(
+                document_session(&rig, space, id, schema(), Some(value)).0,
+                value
+            );
+        }
+    }
+    let (status, health) = http_path(&rig.native, "/health", "GET", None, None);
+    assert_eq!(status, 200);
+    assert_eq!(
+        health["app_roots"], 256,
+        "264 distinct documents fit a bounded cache through idle eviction"
+    );
+    // Revisit every healthy document, including those evicted from RAM.
+    for (index, space) in spaces.iter().enumerate() {
+        for (document, id) in ids.iter().enumerate() {
+            if index == 0 && document < 2 {
+                continue;
+            }
+            assert_eq!(
+                document_session(&rig, space, id, schema(), None).0,
+                (index * ids.len() + document + 1) as u16
+            );
+        }
+    }
+    let mut rejected = socket(&rig.public, &spaces[0], Some('a'));
+    send(
+        &mut rejected,
+        ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: format!("app:{}/ui", ids[1]),
+            state_ref: format!("app:{}/state", ids[1]),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![8; 16],
+            resume: 0,
+            collection: None,
+        },
+    );
+    assert!(
+        matches!(read(&mut rejected), ServerMessage::Error { message, .. } if message.contains("uncertain"))
+    );
+    assert_eq!(replica.value(1).unwrap(), 41);
+    replica.set(&[(1, 42)]).unwrap();
+    while let Some(bytes) = replica.generate().unwrap() {
+        send(&mut active, ClientMessage::Sync { epoch: 1, bytes });
+    }
+    while !replica.confirmed() {
+        if let ServerMessage::Sync { bytes, .. } = read(&mut active) {
+            replica.receive(&bytes).unwrap();
+        }
+    }
+    drop(active);
+    drop(rejected);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &spaces[0], &ids[0], schema(), None).0,
+        42
+    );
+    assert_eq!(
+        document_session(&rig, &spaces[0], &ids[1], schema(), None).0,
+        73
+    );
 }
 
 #[test]

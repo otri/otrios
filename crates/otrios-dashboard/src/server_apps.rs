@@ -31,6 +31,7 @@ struct Room {
     doc: Document,
     file: Option<PathBuf>,
     failed: bool,
+    lease: Arc<()>,
 }
 pub(super) struct Hub {
     bundles: BTreeMap<Vec<u8>, Bundle>,
@@ -57,6 +58,7 @@ struct Lease {
     sync: Session,
     view_id: Vec<u8>,
     binding: Option<otrios_interfaces::spaces::Binding>,
+    _room: Arc<()>,
 }
 #[derive(Default)]
 struct Leases {
@@ -581,7 +583,18 @@ impl Hub {
             return Ok(());
         }
         if self.rooms.len() >= 256 {
-            return Err("App root budget exhausted".into());
+            // Only durable, healthy, idle rooms can be reconstructed. Keep an
+            // uncertain persistence outcome poisoned until operator recovery;
+            // active and staged participants keep their room pinned.
+            let idle = self
+                .rooms
+                .iter()
+                .find_map(|(key, room)| {
+                    (room.file.is_some() && !room.failed && Arc::strong_count(&room.lease) == 1)
+                        .then(|| key.clone())
+                })
+                .ok_or("App root budget exhausted")?;
+            self.rooms.remove(&idle);
         }
         let file = Some(self.collection_file(binding, package)?);
         if let Some(path) = &file {
@@ -613,6 +626,7 @@ impl Hub {
                 doc,
                 file,
                 failed: false,
+                lease: Arc::new(()),
             },
         );
         Ok(())
@@ -880,6 +894,7 @@ impl Hub {
                             doc,
                             file,
                             failed: false,
+                            lease: Arc::new(()),
                         },
                     );
                 }
@@ -1193,6 +1208,7 @@ impl Hub {
                     sync,
                     view_id: vec![],
                     binding,
+                    _room: room.lease.clone(),
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.

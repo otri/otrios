@@ -88,7 +88,12 @@ closes its admission and drops healthy cached rooms/presentations while retainin
 checkpoints, journals and the collection identity. Other Spaces are unaffected.
 Admin-visible retained data can be reattached to recover its original values,
 including after authority restart. A failed durable room stays poisoned rather
-than being reopened as an empty collection. These controls do not claim local
+than being reopened as an empty collection. Active and staged participants pin
+their rooms. At the 256-room cache limit, a new mount may evict only a healthy,
+durable room with no participants; revisiting it recovers its checkpoint/journal.
+Leaving releases the pin, while an uncertain persistence outcome remains poisoned
+until restart even if the underlying filesystem becomes writable again.
+These controls do not claim local
 uninstall, complete auxiliary-lane lifecycle or physical Frame qualification.
 
 This increment admits Create, Membership, Attach, Remove and Closed audience changes.
