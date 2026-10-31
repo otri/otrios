@@ -107,7 +107,8 @@ onmessage=async({data:m})=>{try{
       if(!state.authenticated&&app.private()){dropPrivate();app.navigate('');outgoing();}
       const signedIn=state.authenticated&&!authenticated;authenticated=state.authenticated;
       if(signedIn){if(app.auth_required())app.retry_mount();postMessage({type:'transport-reconnect'});}
-      const chromeChanged=app.set_session_controls(authenticated);
+      const accessChanged=app.set_private_access(authenticated);
+      const chromeChanged=app.set_session_controls(authenticated)||accessChanged;
       postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
     }});
     navigate(m.screen);connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));

@@ -38,11 +38,17 @@ pub fn validate_ui_format(ui: &Ui) -> Result<()> {
             | "otrios-canvas-v4"
             | "otrios-canvas-v5"
             | "otrios-canvas-v6"
+            | "otrios-canvas-v7"
     ) || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
         && !matches!(ui.format.as_str(), "otrios-canvas-v3" | "otrios-canvas-v4"))
         || (matches!(ui.presentation, Some(Presentation::TextDocument { .. }))
             && ui.format != "otrios-canvas-v4")
         || (matches!(ui.presentation, Some(Presentation::Chat)) && ui.format != "otrios-canvas-v5")
+        || (ui
+            .selectors
+            .iter()
+            .any(|s| matches!(s.projection, Projection::SessionAccess { .. }))
+            && ui.format != "otrios-canvas-v7")
     {
         return Err("Unsupported Canvas UI format".into());
     }

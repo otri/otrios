@@ -50,6 +50,10 @@ pub enum Projection {
     KeyboardVisible,
     /// Local browser session controls; never an authorization grant or shared state.
     SessionControls,
+    /// Host-local private-app access indicator; field 0, never an authorization grant.
+    SessionAccess {
+        granted: bool,
+    },
     /// Mount-local reorder label, independent of the document.
     ReorderLabel,
     KeyboardLabel {

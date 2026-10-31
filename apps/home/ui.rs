@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use crate::authoring::*;
-use crate::components::{LaunchIcon, launch_card};
+use crate::components::{LaunchIcon, launch_card, private_launch_card};
 use otrios_interfaces::canvas::Ui;
 pub fn description() -> Ui {
     let arrangement = || {
@@ -36,11 +36,10 @@ pub fn description() -> Ui {
                     "Explore the demos",
                     LaunchIcon::Playground,
                 ),
-                launch_card(
+                private_launch_card(
                     "monitoring",
                     "monitoring",
                     "Monitoring",
-                    "Live service data",
                     LaunchIcon::Monitoring,
                 ),
             ],

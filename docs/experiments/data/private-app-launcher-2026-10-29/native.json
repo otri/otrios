@@ -1,0 +1,36 @@
+{
+  "ready": {
+    "ui_ref": "app:home/ui",
+    "screen": "",
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "state_confirmed": true,
+    "stream_ready": true,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ]
+  },
+  "health": {
+    "app_roots": 12,
+    "catalogs": 1,
+    "ink_limit": 68,
+    "ink_subscribers": 0,
+    "peer_limits": [
+      4,
+      64
+    ],
+    "presentation": true,
+    "public_sessions": 1,
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "status": "ok",
+    "trusted_sessions": 1
+  },
+  "services": {
+    "otrios-authority": "active",
+    "otrios-dashboard-direct": "active",
+    "otrios-tunnel": "active"
+  },
+  "touch_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+}

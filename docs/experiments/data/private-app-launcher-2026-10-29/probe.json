@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "initial": {
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "ui": "app:home/ui",
+    "text": "OTriOS. The Brass Relay. Test Playground. Monitoring. Sign-in required. Bundle Counter",
+    "controls": [
+      "The Brass Relay",
+      "Test Playground",
+      "Monitoring",
+      "Bundle Counter"
+    ]
+  },
+  "authenticated": {
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "ui": "app:home/ui",
+    "text": "OTriOS. The Brass Relay. Test Playground. Monitoring. Access available. Bundle Counter",
+    "controls": [
+      "The Brass Relay",
+      "Test Playground",
+      "Monitoring",
+      "Bundle Counter"
+    ]
+  },
+  "revoked": {
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "ui": "app:home/ui",
+    "text": "OTriOS. The Brass Relay. Test Playground. Monitoring. Sign-in required. Bundle Counter",
+    "controls": [
+      "The Brass Relay",
+      "Test Playground",
+      "Monitoring",
+      "Bundle Counter"
+    ]
+  },
+  "hello": {
+    "type": "hello",
+    "version": 1,
+    "release": "19feedfb994aebde973ebe08cbc37738af59414943dc8d6444e1c4ca7f2a2b82",
+    "state_protocol": "otrios-canvas-sync-v8",
+    "state": true
+  },
+  "errors": []
+}

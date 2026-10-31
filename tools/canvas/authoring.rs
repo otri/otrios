@@ -579,6 +579,12 @@ pub fn session_controls_visible() -> ValueExpr {
         Projection::SessionControls,
     )
 }
+pub fn private_app_access(granted: bool) -> ValueExpr {
+    ValueExpr::State(
+        StateField::normalized(0, "private-app-access", 0),
+        Projection::SessionAccess { granted },
+    )
+}
 pub fn keyboard_visible() -> ValueExpr {
     ValueExpr::State(
         StateField::normalized(0, "keyboard", 0),
@@ -994,7 +1000,13 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: if matches!(
+            format: if compiler
+                .selectors
+                .iter()
+                .any(|s| matches!(s.projection, Projection::SessionAccess { .. }))
+            {
+                "otrios-canvas-v7"
+            } else if matches!(
                 presentation,
                 Some(Presentation::Motion {
                     viewport: Some(_),

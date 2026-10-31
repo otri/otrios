@@ -343,6 +343,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-canvas-v4"
                     | "otrios-canvas-v5"
                     | "otrios-canvas-v6"
+                    | "otrios-canvas-v7"
             )
         })
     {

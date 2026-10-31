@@ -37,6 +37,7 @@ struct Mount {
     state_ref: String,
     private: bool,
     session_controls: bool,
+    private_access: bool,
     scene: OnceLock<Arc<Scene>>,
     layout_scene: OnceLock<Arc<Scene>>,
     visible: BTreeMap<u16, Value>,
@@ -170,6 +171,7 @@ pub struct Client {
     font: Option<Arc<crate::dashboard::font::Font>>,
     auth_required: bool,
     session_controls: bool,
+    private_access: bool,
     sign_out_requested: bool,
     writer: Option<[u8; 16]>,
     dispatch: DispatchPolicy,
@@ -423,6 +425,18 @@ impl Client {
             && m.session_controls != enabled
         {
             m.session_controls = enabled;
+            m.invalidate();
+            return true;
+        }
+        false
+    }
+    /// Presentation only. Authority admission independently checks every private request.
+    pub fn set_private_access(&mut self, granted: bool) -> bool {
+        self.private_access = granted;
+        if let Some(m) = &mut self.active
+            && m.private_access != granted
+        {
+            m.private_access = granted;
             m.invalidate();
             return true;
         }
@@ -1109,6 +1123,7 @@ impl Client {
                         candidate.order_editing = old.order_editing;
                     }
                     candidate.session_controls = self.session_controls;
+                    candidate.private_access = self.private_access;
                     candidate.keyboard.set_enabled(!self.external_keyboard);
                     candidate.invalidate();
                     cached_scene(&candidate)?;
@@ -1162,6 +1177,7 @@ impl Client {
                             current.doc = candidate.doc;
                             current.epoch = candidate.epoch;
                             current.session_controls = candidate.session_controls;
+                            current.private_access = candidate.private_access;
                             current.refresh()?;
                             current.invalidate();
                             candidate = current;
@@ -2199,6 +2215,7 @@ fn qualify(
                 }
                 Projection::KeyboardVisible
                 | Projection::SessionControls
+                | Projection::SessionAccess { .. }
                 | Projection::ReorderLabel => s.field != 0,
                 _ => field(s.field).is_none(),
             }
@@ -2527,6 +2544,7 @@ fn qualify(
         state_ref: state_ref.into(),
         private,
         session_controls: false,
+        private_access: false,
         scene: OnceLock::new(),
         layout_scene: OnceLock::new(),
         visible: BTreeMap::new(),
@@ -2577,6 +2595,8 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
             Value::Text(if m.order_editing { "Done" } else { "Edit" }.into())
         } else if matches!(s.projection, Projection::SessionControls) {
             Value::Boolean(m.private && m.session_controls)
+        } else if let Projection::SessionAccess { granted } = s.projection {
+            Value::Boolean(m.private_access == granted)
         } else if matches!(s.projection, Projection::KeyboardVisible) {
             Value::Boolean(m.keyboard.visible)
         } else {
@@ -2637,6 +2657,7 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
                 Projection::KeyboardLabel { .. }
                 | Projection::KeyboardVisible
                 | Projection::SessionControls
+                | Projection::SessionAccess { .. }
                 | Projection::ReorderLabel => unreachable!(),
             }
         };
