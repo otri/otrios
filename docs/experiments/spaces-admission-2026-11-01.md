@@ -103,8 +103,8 @@ These results still do not establish physical Frame acceptance.
 Clean source `707d8e98777550c337e05ec6fbc5568c39e97191` passed the full
 `scripts/check.sh` suite and rebuilt Chromium probe with zero runtime exceptions.
 The [report](data/spaces-owned-documents-2026-11-01.json) records its artifacts.
-Fifteen covered Space tests include the canonical collection schema; seven real
-process scenarios include two confirmed legacy documents migrating into one app
+Fifteen covered Space tests include the canonical collection schema; seven tests
+in the real process suite include two confirmed legacy documents migrating into one app
 collection, independent documents and Space isolation, restart without an explicit
 registry flag, and incompatible-code rejection without checkpoint replacement.
 Restoring compatible code reopens the original identities and values. Browser
@@ -120,8 +120,9 @@ exceptions. The [report](data/spaces-host-controls-2026-11-01.json) identifies t
 source, authority/Wasm bytes and signed disposable fixture. State protocol v11
 and release-control v1 remain unchanged.
 
-Sixteen covered Space tests, nine host UI tests and eight real authority process
-scenarios pass. The UI checks cover role-filtered controls, responsive bounds,
+Sixteen covered Space tests, nine host UI tests and eight tests in the real
+authority process suite pass (seven authority scenarios plus the child-client
+entry test). The UI checks cover role-filtered controls, responsive bounds,
 local-only forms, stale roster redaction, publisher/host action separation,
 confirmation before Quit, reconnect denial and Home/discovery ordering. The
 process scenarios prove removal revokes an active client, preserves Admin-visible
@@ -141,3 +142,30 @@ An intermediate full run encountered a connection reset in the existing
 release-bootstrap integration test. Its isolated rerun and the final complete
 suite passed. Local uninstall, collection-owned auxiliary channels, durable
 deletion, public sharing and physical Frame deployment remain pending.
+
+
+## ARM emulation qualification
+
+The clean `fa29e9aa0b7778cd73d066ffb812b24e09e75350` source archive builds the
+ARMv7 host, authority, collector, session bootstrap and app packer using Rust
+1.90.0 and the matching ARM C compiler/archiver. ELF inspection confirms ARM
+machine code. The [report](data/spaces-arm-emulated-2026-11-01.json) records the
+artifact hashes, compiler configuration and emulator version.
+
+All eight top-level process tests pass against the ARM authority under QEMU:
+seven authority scenarios and the child-client entry helper. They cover Space
+isolation/admission, shared discovery, staged revocation, confirmed legacy-root
+migration, collector separation and retained removal/reattachment. The later
+264-document cache-pressure case was validated natively in `bf8e371`; it is not
+part of this older ARM source qualification.
+
+The builder initially selected a host C compiler despite its ARM Rust linker.
+The corrected configuration explicitly selects target CC/AR; `72894de` also
+tracks those settings in the build script and rejects an implicit host compiler
+for a cross build. The modified script was separately run with the real ARM
+compiler and its generated objects inspected. Its full required suite passes.
+
+QEMU uses the container's installed armhf runtime libraries (`-L /`), rather than
+the linker's cross sysroot. These unsigned binaries were never activated on
+Frame. This evidence establishes emulated authority execution; physical display,
+touch, signed activation and rollback still require Frame acceptance.
