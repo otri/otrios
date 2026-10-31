@@ -2,7 +2,7 @@
 // Real isolated Chromium contexts against the disposable Space authority fixture.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {readFile,mkdtemp,mkdir,writeFile,rm,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 const fixture=JSON.parse(await readFile(process.argv[2],'utf8'));
@@ -13,11 +13,11 @@ let socket;
 try {
  const endpoint=await new Promise((resolve,reject)=>{let log='';const timer=setTimeout(()=>reject(Error(log)),20000);chrome.stderr.on('data',data=>{log+=data;const match=log.match(/DevTools listening on (ws:\/\/\S+)/);if(match){clearTimeout(timer);resolve(match[1]);}});chrome.on('error',reject);});
  socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
- let serial=0;const pending=new Map(),errors=[],denied=new Set(),hellos=[],ink=new Map(),inkSent=new Map(),welcomes=new Map();
+ let serial=0;const pending=new Map(),errors=[],denied=new Set(),hellos=[],ink=new Map(),inkSent=new Map(),welcomes=new Map(),revocations=new Map(),disposals=new Map();
  socket.addEventListener('message',({data})=>{const m=JSON.parse(data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}}
  else if(m.method==='Runtime.exceptionThrown')errors.push({session:m.sessionId,description:m.params.exceptionDetails.text});
- else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2){const b=Buffer.from(m.params.response.payloadData,'base64');if(b[0]===1&&b.subarray(1,5).toString()==='OTC5'&&b[5]===0&&b[11]===20)denied.add(m.sessionId);if(b[0]===2){if(b.length<5||(b.length-5)%21){errors.push({description:'Malformed scoped ink'});return;}const epoch=b.readUInt32LE(1);for(let at=5;at+21<=b.length;at+=21){if(b[at+12]===4)welcomes.set(m.sessionId,(welcomes.get(m.sessionId)||0)+1);else{const points=ink.get(m.sessionId)||[];points.push({epoch,phase:b[at+12],peer:b.readUInt32LE(at+6),x:b.readUInt16LE(at+17),y:b.readUInt16LE(at+19)});ink.set(m.sessionId,points);}}}}
- else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===2){const b=Buffer.from(m.params.response.payloadData,'base64');if(b[0]===2&&b.length>=20){const points=inkSent.get(m.sessionId)||[];for(let at=5;at+15<=b.length;at+=15)points.push({epoch:b.readUInt32LE(1),phase:b[at+6],stroke:b.readUInt32LE(at+7),x:b.readUInt16LE(at+11),y:b.readUInt16LE(at+13)});inkSent.set(m.sessionId,points);}}
+ else if(m.method==='Network.webSocketFrameReceived'&&m.params.response.opcode===2){const b=Buffer.from(m.params.response.payloadData,'base64');if(b[0]===1&&b.length>=16&&b.subarray(1,5).toString()==='OTC5'&&b[5]===0&&b[11]===20){denied.add(m.sessionId);const events=revocations.get(m.sessionId)||[];events.push(b.readUInt32LE(12));revocations.set(m.sessionId,events);}if(b[0]===2){if(b.length<5||(b.length-5)%21){errors.push({description:'Malformed scoped ink'});return;}const epoch=b.readUInt32LE(1);for(let at=5;at+21<=b.length;at+=21){if(b[at+12]===4)welcomes.set(m.sessionId,(welcomes.get(m.sessionId)||0)+1);else{const points=ink.get(m.sessionId)||[];points.push({epoch,phase:b[at+12],peer:b.readUInt32LE(at+6),x:b.readUInt16LE(at+17),y:b.readUInt16LE(at+19)});ink.set(m.sessionId,points);}}}}
+ else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===2){const b=Buffer.from(m.params.response.payloadData,'base64');if(b[0]===1&&b.length>=16&&b.subarray(1,5).toString()==='OTC5'&&b[5]===0&&b[11]===5){const events=disposals.get(m.sessionId)||[];events.push(b.readUInt32LE(12));disposals.set(m.sessionId,events);}if(b[0]===2&&b.length>=20){const points=inkSent.get(m.sessionId)||[];for(let at=5;at+15<=b.length;at+=15)points.push({epoch:b.readUInt32LE(1),phase:b[at+6],stroke:b.readUInt32LE(at+7),x:b.readUInt16LE(at+11),y:b.readUInt16LE(at+13)});inkSent.set(m.sessionId,points);}}
  else if(m.method==='Network.webSocketFrameSent'&&m.params.response.opcode===1){try{const h=JSON.parse(m.params.response.payloadData);if(h.type==='hello')hellos.push({version:h.version,state_protocol:h.state_protocol});}catch{}}
  });
  const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(method));},20000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
@@ -88,6 +88,50 @@ try {
  await click(a,'Quit');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Remove app');await wait(b,"document.querySelector('#revision')?.dataset.ui!=='app:brass-relay/ui'");assert.equal(await evaluate(b,"document.querySelector('#chat-log').children.length"),0);
  await click(a,'Add app');await click(a,'Open');await wait(a,hasMessage('Household transcript shared in this Space'));await wait(a,hasMessage('Another participant continues after Quit'));
  const chatShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/space-chat.png',Buffer.from(chatShot.data,'base64'));
+
+ // Delete a live, migrated transcript through the trusted host confirmation.
+ // CDP observes real transport traffic; no Worker/DOM prototypes are replaced.
+ await click(b,'The Brass Relay');await wait(b,hasMessage('Household transcript shared in this Space'));
+ const beforeDelete=await(await fetch(fixture.url+'/spaces',{headers})).json();
+ const deleting=beforeDelete.spaces.find(space=>space.id===fixture.space_a).apps.find(app=>app.policy.app==='brass-relay');
+ const deleteRequest={version:1,expected_generation:beforeDelete.generation,change:{type:'delete-data',space:fixture.space_a,app:'brass-relay',collection:deleting.collection,remove:false}};
+ const memberDelete=await evaluate(b,`fetch('/spaces',{method:'POST',headers:{'Content-Type':'application/json','X-OTriOS-Request':'spaces'},body:JSON.stringify(${JSON.stringify(deleteRequest)})}).then(response=>response.status)`);
+ assert.equal(memberDelete,403,'a signed-in Member cannot delete the collection');
+ const revokedBefore=(revocations.get(b)||[]).length,disposedBefore=(disposals.get(b)||[]).length;
+ await click(a,'Quit');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Delete data');
+ await wait(a,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('Space: Browser A')");
+ const confirmation=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/delete-confirmation.png',Buffer.from(confirmation.data,'base64'));
+ await click(a,'Permanently delete');
+ await inkWait(()=>(revocations.get(b)||[]).length>revokedBefore);
+ await wait(b,"document.querySelector('#chat-log').children.length===0");
+ let deletedSpace;
+ for(let attempt=0;attempt<100;attempt++){
+  const state=await(await fetch(fixture.url+'/spaces',{headers})).json();
+  deletedSpace=state.spaces.find(space=>space.id===fixture.space_a);
+  if(deletedSpace.cleanup.local_pending===0&&deletedSpace.apps.find(app=>app.policy.app==='brass-relay').collection!==deleting.collection)break;
+  await new Promise(resolve=>setTimeout(resolve,50));
+ }
+ const freshCollection=deletedSpace.apps.find(app=>app.policy.app==='brass-relay').collection;
+ assert.notEqual(freshCollection,deleting.collection);assert.equal(deletedSpace.cleanup.local_pending,0);
+ assert.equal(deletedSpace.cleanup.legacy_qualification_required,true,'unqualified migration copies stay pending');
+ const revokedEpoch=revocations.get(b)[revokedBefore];
+ assert(disposals.get(b).slice(disposedBefore).includes(revokedEpoch),'the real browser host must acknowledge disposal of the revoked epoch');
+ await assert.rejects(stat(fixture.root+'/state/collection-'+deleting.collection+'.data'),{code:'ENOENT'});
+ await wait(a,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('Imported originals await migration qualification')");
+ const cleanup=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/deletion-cleanup.png',Buffer.from(cleanup.data,'base64'));
+ await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Open');
+ await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:brass-relay/ui'&&JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");
+ assert.equal(await evaluate(a,"document.querySelector('#chat-log').children.length"),0);
+ assert.notEqual(await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.chat).participant"),chatProfile);
+ await call('Page.navigate',{url:fixture.url+'/brass-relay?space='+fixture.space_a},b);
+ await wait(b,"document.querySelector('#revision')?.dataset.ui==='app:brass-relay/ui'&&JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");
+ assert.equal(await evaluate(b,"document.querySelector('#chat-log').children.length"),0);
+ await dispatch(a,'Fresh transcript after permanent deletion');await wait(b,hasMessage('Fresh transcript after permanent deletion'));
+ await dispatch(other,'Independent second Space continues');
+ assert(!await evaluate(other,hasMessage('Fresh transcript after permanent deletion')));
+ assert(!await evaluate(a,hasMessage('Independent second Space continues')));
+ assert(!await evaluate(a,hasMessage('Legacy household dispatch')));
+ const freshShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/fresh-chat-collection.png',Buffer.from(freshShot.data,'base64'));
  assert.equal(errors.length,0,JSON.stringify(errors));assert(hellos.every(h=>h.version===1));
- const result={passed:true,initial,value:retainedValue,shared:expected,isolated,anonymousDenied:true,nonMemberDenied:true,activeRevoked:true,remainingMemberContinues:true,quitPreservesData:true,quitLeavesOtherParticipantEditing:true,removeRevokesAnotherClient:true,retainedDataVisible:true,reattachPreservesCollectionAndValue:true,spacePickerSwitchesScope:true,inkSharedAcrossClients:true,inkSpaceIsolation:true,inkParticipantContinuesAfterQuit:true,inkPointerCaptureLifecycle:true,chatSharedAcrossClients:true,chatSpaceIsolation:true,legacyChatHistoryMigratedAndIsolated:true,chatQuitLeavesOtherParticipantSending:true,chatProfileRestoredAfterQuit:true,chatRemovalRevokesAndRedacts:true,chatReattachmentRestoresTranscript:true,source:fixture.source,sourceDirty:fixture.source_dirty,authoritySha256:fixture.authority_sha256,wasmSha256:fixture.wasm_sha256,release:fixture.release,browserIdentities:'cookie sessions in isolated browser contexts',hello:hellos[0],runtimeErrors:errors};await writeFile(output+'/qualification.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+ const result={passed:true,initial,value:retainedValue,shared:expected,isolated,anonymousDenied:true,nonMemberDenied:true,activeRevoked:true,remainingMemberContinues:true,quitPreservesData:true,quitLeavesOtherParticipantEditing:true,removeRevokesAnotherClient:true,retainedDataVisible:true,reattachPreservesCollectionAndValue:true,spacePickerSwitchesScope:true,inkSharedAcrossClients:true,inkSpaceIsolation:true,inkParticipantContinuesAfterQuit:true,inkPointerCaptureLifecycle:true,chatSharedAcrossClients:true,chatSpaceIsolation:true,legacyChatHistoryMigratedAndIsolated:true,chatQuitLeavesOtherParticipantSending:true,chatProfileRestoredAfterQuit:true,chatRemovalRevokesAndRedacts:true,chatReattachmentRestoresTranscript:true,memberDeletionDenied:true,trustedDeletionConfirmation:true,connectedDisposalAckObserved:true,deletedNamespaceReclaimed:true,legacyCleanupPendingIsExplicit:true,freshCollectionAfterDelete:true,deletedTranscriptRedacted:true,otherSpaceContinuesAfterDelete:true,freshCollection,deletedCollection:deleting.collection,source:fixture.source,sourceDirty:fixture.source_dirty,authoritySha256:fixture.authority_sha256,wasmSha256:fixture.wasm_sha256,release:fixture.release,browserIdentities:'cookie sessions in isolated browser contexts',hello:hellos[0],runtimeErrors:errors};await writeFile(output+'/qualification.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
 }finally{socket?.close();if(chrome.pid&&chrome.exitCode===null){chrome.kill();await new Promise(r=>chrome.once('exit',r));}await rm(profile,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
