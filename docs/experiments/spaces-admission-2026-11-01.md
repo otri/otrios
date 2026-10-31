@@ -374,3 +374,23 @@ This is the S3 storage prerequisite. DeleteData remains unavailable through HTTP
 and the shared session until producer shutdown, reclamation, backup/retention
 workflows and cleanup reporting are integrated and qualified. No physical Frame
 deployment or current ARM acceptance is claimed by these checks.
+
+## S3 payload reclamation backend
+
+Code checkpoint `e2af583678e0c4db6711ac265637d5dcd330b62b` passed the full
+`bash scripts/check.sh` suite (`/tmp/otrios-spaces-check-26.log`). Six covered
+reclamation tests pass, including a separately invoked child helper. The backend
+requires a durable tombstone and producer quiescence. It rejects live collection
+IDs and leaves all files intact while producers remain active.
+
+Child processes exit at five cleanup boundaries. Restart retains the deletion
+decision and finishes partial reclamation without changing another Space's
+checkpoint, journal or presentation. Tests also reclaim chat/history/index and
+migration-receipt files, interrupted replacement files, and more than 128 orphan
+files through bounded pending/retry turns. Shared hard links and child symlinks
+preserve the other collection's asset/history bytes; a symlink replacing the
+collection directory is rejected. Reclamation is idempotent after completion.
+
+This is backend evidence. Authority producer shutdown, cleanup reporting,
+backup/retention and restore integration remain unfinished, so DeleteData is
+still unavailable through management APIs. There is no physical Frame claim.
