@@ -336,3 +336,41 @@ fix, followed by the full suite, including all thirteen authority process tests.
 
 This completes the S2 software increment. Permanent deletion, public sharing,
 current ARM qualification and signed physical Frame acceptance remain outstanding.
+
+## S3 decision-ledger foundation
+
+Code checkpoint `5e7575a890e85c3602697bdd56dc79177e7592b4` passed the full
+`bash scripts/check.sh` suite (`/tmp/otrios-spaces-check-25.log`). The authority
+binary SHA-256 was `3f503859b70f2ab3c8875c26d78dbfd0136eee46facb43b6001ebef0a814d1a4`.
+The private registry framing is now OTSP3; shared-session state protocol v13,
+management v1 and release-control v1 are unchanged.
+
+Eight covered store tests pass, including a separately invoked child helper.
+Children exit without destructors at eight publication boundaries: before the
+ledger, after its temporary-file sync/rename/directory sync, after those same
+three primary-file steps, and before in-memory publication. Recovery preserves
+the pre-decision binding before ledger replacement and applies the deletion
+decision after it. Replacing the primary with an older snapshot cannot remove
+the recovered tombstone or restore its collection identity. These are real
+process-exit checks, not a simulation of power loss or storage hardware failure.
+
+Additional cases verify exclusive ownership across atomic replacements,
+missing-lock refusal, missing-primary reconstruction, missing-ledger refusal
+even with an older OTSP2 backup, persistence poisoning and restart recovery,
+partial initialization recovery, foreign/corrupt records, root pairing,
+private permissions and symlink rejection. Ownership releases explicitly on
+Drop so a concurrent process spawn cannot retain the lock through an inherited
+descriptor while exec is still closing descriptors.
+
+All sixteen existing registry/admission tests pass with legacy framing upgrades.
+All fourteen authority process tests pass, including the new recovery scenario:
+an older primary does not regrant a revoked Frame identity; the confirmed value
+42 survives recovery; missing paired app storage and a missing ledger each keep
+state unavailable while release hello still works; restoring the original
+storage/ledger recovers 42 and keeps that identity revoked. Existing offline
+document/chat migration and lifecycle checks also pass against this framing.
+
+This is the S3 storage prerequisite. DeleteData remains unavailable through HTTP
+and the shared session until producer shutdown, reclamation, backup/retention
+workflows and cleanup reporting are integrated and qualified. No physical Frame
+deployment or current ARM acceptance is claimed by these checks.
