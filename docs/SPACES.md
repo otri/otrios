@@ -435,27 +435,54 @@ Space rejects attachment of a closed-only app.
 
 ## Persistence
 
-The native Store writes `OTSP2`, a 32-byte SHA-256 payload digest, and a FlexBuffers
-Registry. Collections are encoded as bounded vectors, not unbounded map keys.
+The native Store writes `OTSP3`, a 32-byte SHA-256 payload digest, and a bounded
+FlexBuffers record containing the registry, a stable authority-root identity and
+its paired app-storage path. Collections are bounded vectors, not unbounded map keys.
 Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
 
-Recovery also accepts the initial `OTSP1` prototype, defaulting older members'
-continuous-membership generation to zero. The next commit writes `OTSP2`; older
-prototype writers reject it. Rollback must use a reader/writer that supports this
-framing and the current admission rules. Management request version 1 is unchanged.
+Recovery upgrades `OTSP1` and `OTSP2` registries while preserving their decisions;
+the initial prototype defaults older members' continuous-membership generation
+to zero. The upgrade writes the latest decision ledger before replacing the
+primary. Older writers reject `OTSP3`. Rollback must use a reader/writer that
+supports this framing and the current admission rules. Management request version
+1, state protocol v13 and release-control v1 are unchanged by this storage upgrade.
 
-A commit builds a private candidate, writes a mode-0600 temporary file, syncs it,
-renames it over the registry and syncs the containing directory before publication.
-An uncertain persistence result closes registry admission until restart. One
-authority process owns the state directory; concurrent authority processes are
-unsupported, as with the existing app journals.
+A stable private `REGISTRY.owner.lock` inode carries an exclusive OS lock and
+the root identity. The registry's containing directory must not be writable by
+other users. Do not remove or replace this lock file. A second process cannot
+acquire the registry, including across atomic state-file replacements.
+
+Each commit writes the complete latest decision record to `REGISTRY.latest`,
+then the primary registry. Each publication uses a mode-0600 temporary file,
+file sync, atomic rename and parent-directory sync. Only then does the in-memory
+registry advance or the management request acknowledge. Any uncertain result
+closes admission until restart. Recovery applies the ledger before serving an
+older primary, including an older primary restored from backup; a missing primary
+can be rebuilt from the ledger. Missing, corrupt, foreign or inconsistent safety
+metadata fails closed instead of falling back to an older registry. A torn initial
+owner identity can finish only against the matching durable ledger.
+
+The authority pairs app storage once using its private `spaces.root` marker and
+records the canonical path in the decision record. Removing that initialized
+storage or substituting a different root leaves state unavailable, even if the
+host creates an empty directory during startup. Restoring the original paired
+storage recovers its confirmed data. Release-control hello remains available
+while state recovery is unavailable.
+
+The primary, `.latest` and `.owner.lock` files are control metadata outside
+rollbackable app payloads. A supported payload restore must retain the latest
+ledger and root identity; copying an old registry alone cannot regrant revoked
+membership or remove deletion decisions. Rolling all control metadata back to an
+old snapshot is unsupported and cannot recover later decisions. The managed
+payload backup/retention and reclamation workflows remain unfinished.
 
 DeleteData publishes the old collection's tombstone and a fresh replacement ID in
-one registry commit. This is only the management decision: host producer shutdown,
-payload reclamation, backup restore protection and client invalidation still need
-integration before permanent deletion can be exposed as complete.
+one registry publication. This is still only the management decision: producer
+shutdown, payload reclamation, the supported backup/restore workflow and client
+invalidation must be integrated before permanent deletion is exposed. HTTP and
+shared-session DeleteData requests remain unavailable during this preparation.
 
 ## Rollout requirements
 

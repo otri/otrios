@@ -205,6 +205,15 @@ impl Hub {
             );
         }
         self.spaces = Some(otrios_core::spaces::Store::open(path).map_err(|e| e.to_string())?);
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .bind_storage(
+                self.state
+                    .as_deref()
+                    .ok_or("Durable app storage required")?,
+            )
+            .map_err(|e| e.to_string())?;
         let registry = self.registry_path()?.to_path_buf();
         let marker = self
             .state

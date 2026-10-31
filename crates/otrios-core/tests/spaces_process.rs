@@ -657,6 +657,117 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     }
     socket
 }
+
+#[test]
+fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_become_empty_data() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("Recovery household");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "frame".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let primary = rig.root.join("spaces.flex");
+    assert!(
+        otrios_core::spaces::Store::open(primary.clone()).is_err(),
+        "a running authority exclusively owns this root"
+    );
+    let old_primary = fs::read(&primary).unwrap();
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), Some(42)).0,
+        42
+    );
+    rig.child(&rig.native, &space, Some('c'), "42");
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "frame".into(),
+            role: None,
+        },
+    );
+    rig.stop();
+    fs::write(&primary, old_primary).unwrap();
+    rig.restart(&binary, true, true);
+    rig.child(&rig.native, &space, Some('c'), "deny");
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        42
+    );
+    assert_eq!(
+        fs::read(&primary).unwrap(),
+        fs::read(rig.root.join("spaces.flex.latest")).unwrap()
+    );
+    rig.stop();
+    let unavailable = |rig: &Rig| {
+        assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
+        let mut request = format!("ws://{}/session", rig.public)
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert("Origin", ORIGIN.parse().unwrap());
+        let (mut socket, _) = tungstenite::connect(request).unwrap();
+        if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
+            tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        }
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v13","state":true}).to_string().into())).unwrap();
+        let Message::Text(reply) = socket.read().unwrap() else {
+            panic!("release hello remains independent of recovery");
+        };
+        let reply: Json = serde_json::from_str(&reply).unwrap();
+        assert_eq!(reply["type"], "hello");
+        assert_eq!(reply["compatible"], true);
+        assert_eq!(reply["state_available"], false);
+    };
+    let saved = rig.root.join("saved-state");
+    fs::rename(rig.root.join("state"), &saved).unwrap();
+    rig.restart(&binary, true, false);
+    unavailable(&rig);
+    assert!(
+        !rig.root.join("state/spaces.root").exists(),
+        "missing initialized storage must not be rebound"
+    );
+    rig.stop();
+    fs::remove_dir(rig.root.join("state")).unwrap();
+    fs::rename(saved, rig.root.join("state")).unwrap();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        42
+    );
+    rig.stop();
+    let latest = rig.root.join("spaces.flex.latest");
+    let saved_latest = rig.root.join("saved-latest");
+    fs::rename(&latest, &saved_latest).unwrap();
+    rig.restart(&binary, true, false);
+    unavailable(&rig);
+    assert!(
+        !latest.exists(),
+        "missing latest ledger must not be reconstructed from an older primary"
+    );
+    rig.stop();
+    fs::rename(saved_latest, latest).unwrap();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        42
+    );
+    rig.child(&rig.native, &space, Some('c'), "deny");
+}
 fn send(socket: &mut Socket, message: ClientMessage) {
     let mut bytes = canvas::encode_client(&message).unwrap();
     bytes.insert(0, 1);

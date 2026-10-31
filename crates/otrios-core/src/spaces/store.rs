@@ -1,65 +1,286 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Private durable registry. An uncertain publication poisons admission until
-//! restart; callers cannot acknowledge a management decision before directory sync.
+//! Exclusively owned registry and latest decision ledger. The ledger is outside
+//! rollbackable app payloads; recovery reconciles it before any admission.
 use super::*;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
-pub struct Store {
+const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 8192;
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Record {
+    root: String,
+    storage: Option<String>,
     registry: Registry,
+}
+pub struct Store {
+    current: Record,
     path: PathBuf,
+    latest: PathBuf,
+    // Stable inode, including across atomic replacement of both state files.
+    _owner: fs::File,
     failed: bool,
+}
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Concurrent process spawning may briefly inherit an open-file
+        // description before exec closes it. Release ownership explicitly,
+        // rather than waiting for every inherited descriptor to disappear.
+        let _ = self._owner.unlock();
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileStep {
+    TempSynced,
+    Renamed,
+    DirectorySynced,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Boundary {
+    BeforeLatest,
+    Latest(FileStep),
+    Primary(FileStep),
+    BeforePublication,
 }
 fn io_error(error: impl std::fmt::Display) -> Error {
     Error::Persistence(error.to_string())
 }
-
-pub fn encode(registry: &Registry) -> Result<Vec<u8>> {
-    validate(registry)?;
-    let payload = flexbuffers::to_vec(registry).map_err(io_error)?;
-    if payload.len() > MAX_REGISTRY_BYTES {
+fn suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    name.into()
+}
+fn validate_record(record: &Record) -> Result<()> {
+    validate(&record.registry)?;
+    if flexbuffers::to_vec(&record.registry)
+        .map_err(io_error)?
+        .len()
+        > MAX_REGISTRY_BYTES
+    {
         return Err(Error::Capacity);
     }
-    let mut bytes = b"OTSP2".to_vec();
+    if !valid_id(&record.root)
+        || record
+            .storage
+            .as_ref()
+            .is_some_and(|s| s.len() > 4096 || !Path::new(s).is_absolute())
+    {
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+fn encode(record: &Record) -> Result<Vec<u8>> {
+    validate_record(record)?;
+    let payload = flexbuffers::to_vec(record).map_err(io_error)?;
+    if payload.len() > MAX_STORE_BYTES - 37 {
+        return Err(Error::Capacity);
+    }
+    // Earlier writers reject this framing rather than ignore the safety ledger.
+    let mut bytes = b"OTSP3".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
 }
-pub fn decode(bytes: &[u8]) -> Result<Registry> {
+fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
     if bytes.len() < 40
-        || bytes.len() > MAX_REGISTRY_BYTES + 37
-        || !matches!(&bytes[..5], b"OTSP1" | b"OTSP2")
+        || bytes.len() > MAX_STORE_BYTES
+        || !headers.contains(&&bytes[..5])
         || crate::canvas::hash(&bytes[37..]) != bytes[5..37]
     {
         return Err(Error::Invalid);
     }
     let payload = &bytes[37..];
-    crate::flex_guard::validate(payload, 16, MAX_REGISTRY_BYTES, MAX_DELETIONS)
+    crate::flex_guard::validate(payload, 18, MAX_STORE_BYTES, MAX_DELETIONS)
         .map_err(|_| Error::Invalid)?;
-    let registry: Registry = flexbuffers::from_slice(payload).map_err(|_| Error::Invalid)?;
+    Ok(payload)
+}
+fn decode(bytes: &[u8]) -> Result<Record> {
+    let record: Record =
+        flexbuffers::from_slice(payload(bytes, &[b"OTSP3"])?).map_err(|_| Error::Invalid)?;
+    validate_record(&record)?;
+    Ok(record)
+}
+fn legacy(bytes: &[u8]) -> Result<Registry> {
+    let registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
+        .map_err(|_| Error::Invalid)?;
     validate(&registry)?;
     Ok(registry)
 }
+fn private(metadata: &fs::Metadata) -> Result<()> {
+    if !metadata.is_file() {
+        return Err(Error::Invalid);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(Error::Invalid);
+        }
+    }
+    Ok(())
+}
+fn directory(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(io_error)?;
+    if !metadata.is_dir() {
+        return Err(Error::Invalid);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o022 != 0 {
+            return Err(Error::Invalid);
+        }
+    }
+    Ok(())
+}
+fn read(path: &Path, limit: usize, require_private: bool) -> Result<Option<Vec<u8>>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
+    if !metadata.is_file() || metadata.len() > limit as u64 {
+        return Err(Error::Invalid);
+    }
+    if require_private {
+        private(&metadata)?;
+    }
+    let file = fs::File::open(path).map_err(io_error)?;
+    if require_private {
+        private(&file.metadata().map_err(io_error)?)?;
+    }
+    let mut bytes = vec![];
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() > limit {
+        return Err(Error::Capacity);
+    }
+    Ok(Some(bytes))
+}
 impl Store {
-    /// Missing state is initialized explicitly; corrupt existing state never resets.
+    /// Upgrade legacy registries once. An initialized root cannot be recovered
+    /// from an old primary alone when its latest decision ledger is missing.
     pub fn open(path: PathBuf) -> Result<Self> {
-        let registry = match fs::File::open(&path) {
-            Ok(file) => {
-                let mut bytes = vec![];
-                file.take(MAX_REGISTRY_BYTES as u64 + 38)
-                    .read_to_end(&mut bytes)
-                    .map_err(io_error)?;
-                decode(&bytes)?
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .ok_or(Error::Invalid)?;
+        directory(parent)?;
+        let lock_path = suffix(&path, ".owner.lock");
+        // Only a trusted operator can mutate this containing directory. Refuse
+        // symlinks and non-files before opening any control metadata.
+        let anchor = read(&lock_path, 37, true)?;
+        let latest = suffix(&path, ".latest");
+        if anchor.is_none() && fs::symlink_metadata(&latest).is_ok() {
+            // Never replace the stable inode underneath a potentially live owner.
+            return Err(Error::Unavailable);
+        }
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut owner = options.open(&lock_path).map_err(io_error)?;
+        private(&owner.metadata().map_err(io_error)?)?;
+        owner.try_lock().map_err(io_error)?;
+        // Re-read after acquiring ownership: a preceding owner may have finished
+        // initialization between our inspection and lock acquisition.
+        let anchor = read(&lock_path, 37, true)?.or(anchor).unwrap_or_default();
+        let root = if anchor.len() < 37 {
+            None
+        } else {
+            if &anchor[..5] != b"OTSO1" {
+                return Err(Error::Invalid);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => empty(),
-            Err(e) => return Err(io_error(e)),
+            let root = std::str::from_utf8(&anchor[5..])
+                .map_err(|_| Error::Invalid)?
+                .to_owned();
+            if !valid_id(&root) {
+                return Err(Error::Invalid);
+            }
+            Some(root)
         };
+        let primary = read(&path, MAX_STORE_BYTES, false)?;
+        if primary.as_ref().is_some_and(|b| b.starts_with(b"OTSP3")) {
+            private(&fs::symlink_metadata(&path).map_err(io_error)?)?;
+        }
+        let ledger = read(&latest, MAX_STORE_BYTES, true)?;
+        let current = if let Some(bytes) = &ledger {
+            let current = decode(bytes)?;
+            let expected_anchor = [b"OTSO1".as_slice(), current.root.as_bytes()].concat();
+            if !expected_anchor.starts_with(&anchor) {
+                return Err(Error::Invalid);
+            }
+            if root.as_ref().is_some_and(|root| root != &current.root) {
+                return Err(Error::Invalid);
+            }
+            if let Some(bytes) = &primary {
+                let previous = if bytes.starts_with(b"OTSP3") {
+                    let previous = decode(bytes)?;
+                    if previous.root != current.root
+                        || previous
+                            .storage
+                            .as_ref()
+                            .is_some_and(|s| Some(s) != current.storage.as_ref())
+                    {
+                        return Err(Error::Invalid);
+                    }
+                    previous.registry
+                } else {
+                    legacy(bytes)?
+                };
+                if previous.generation > current.registry.generation
+                    || previous.generation == current.registry.generation
+                        && previous != current.registry
+                {
+                    return Err(Error::Invalid);
+                }
+            }
+            current
+        } else {
+            if !anchor.is_empty() || primary.as_ref().is_some_and(|b| b.starts_with(b"OTSP3")) {
+                return Err(Error::Unavailable);
+            }
+            Record {
+                root: fresh()?,
+                storage: None,
+                registry: primary
+                    .as_ref()
+                    .map(|b| legacy(b))
+                    .transpose()?
+                    .unwrap_or_else(empty),
+            }
+        };
+        let bytes = encode(&current)?;
+        if ledger.is_none() {
+            write(&latest, &bytes)?;
+        }
+        if root.is_none() {
+            owner.rewind().map_err(io_error)?;
+            owner
+                .write_all(b"OTSO1")
+                .and_then(|()| owner.write_all(current.root.as_bytes()))
+                .map_err(io_error)?;
+            owner
+                .set_len(37)
+                .and_then(|()| owner.sync_all())
+                .map_err(io_error)?;
+        }
+        if primary.as_ref() != Some(&bytes) {
+            write(&path, &bytes)?;
+        }
         Ok(Self {
-            registry,
+            current,
             path,
+            latest,
+            _owner: owner,
             failed: false,
         })
     }
@@ -67,11 +288,51 @@ impl Store {
         if self.failed {
             Err(Error::Unavailable)
         } else {
-            Ok(&self.registry)
+            Ok(&self.current.registry)
         }
     }
     pub fn path(&self) -> &Path {
         &self.path
+    }
+    pub fn latest_path(&self) -> &Path {
+        &self.latest
+    }
+    pub fn root_id(&self) -> &str {
+        &self.current.root
+    }
+    pub fn storage_path(&self) -> Option<&Path> {
+        self.current.storage.as_deref().map(Path::new)
+    }
+    /// Pair an authority's app storage with its safety root once. Missing or
+    /// substituted initialized storage must not silently become empty data.
+    pub fn bind_storage(&mut self, path: &Path) -> Result<()> {
+        self.registry()?;
+        directory(path)?;
+        let path = fs::canonicalize(path).map_err(io_error)?;
+        let marker = path.join("spaces.root");
+        let existing = read(&marker, 32, true)?;
+        if existing
+            .as_deref()
+            .is_some_and(|b| b != self.current.root.as_bytes())
+        {
+            return Err(Error::Invalid);
+        }
+        if let Some(expected) = self.storage_path() {
+            return if expected == path && existing.is_some() {
+                Ok(())
+            } else {
+                Err(Error::Unavailable)
+            };
+        }
+        if existing.is_none()
+            && let Err(error) = write(&marker, self.current.root.as_bytes())
+        {
+            self.failed = true;
+            return Err(error);
+        }
+        let mut next = self.current.clone();
+        next.storage = Some(path.to_str().ok_or(Error::Invalid)?.into());
+        self.publish(next, |_| {})
     }
     pub fn commit(
         &mut self,
@@ -79,17 +340,41 @@ impl Store {
         request: &Request,
         installed: Option<&AppPolicy>,
     ) -> Result<&Registry> {
-        let candidate = apply(self.registry()?, actor, request, installed)?;
-        let bytes = encode(&candidate)?;
-        if let Err(error) = write(&self.path, &bytes) {
+        let registry = apply(self.registry()?, actor, request, installed)?;
+        let next = Record {
+            registry,
+            ..self.current.clone()
+        };
+        self.publish(next, |_| {})?;
+        self.registry()
+    }
+    fn publish(&mut self, next: Record, mut boundary: impl FnMut(Boundary)) -> Result<()> {
+        self.registry()?;
+        let bytes = encode(&next)?;
+        boundary(Boundary::BeforeLatest);
+        let result = (|| {
+            write_at(&self.latest, &bytes, |step| {
+                boundary(Boundary::Latest(step))
+            })?;
+            write_at(&self.path, &bytes, |step| boundary(Boundary::Primary(step)))
+        })();
+        if let Err(error) = result {
             self.failed = true;
             return Err(error);
         }
-        self.registry = candidate;
-        self.registry()
+        boundary(Boundary::BeforePublication);
+        self.current = next;
+        Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;
 fn write(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_at(path, bytes, |_| {})
+}
+fn write_at(path: &Path, bytes: &[u8], mut step: impl FnMut(FileStep)) -> Result<()> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -108,10 +393,14 @@ fn write(path: &Path, bytes: &[u8]) -> Result<()> {
         let mut file = options.open(&temp).map_err(io_error)?;
         file.write_all(bytes).map_err(io_error)?;
         file.sync_all().map_err(io_error)?;
+        step(FileStep::TempSynced);
         fs::rename(&temp, path).map_err(io_error)?;
+        step(FileStep::Renamed);
         fs::File::open(parent)
             .and_then(|d| d.sync_all())
-            .map_err(io_error)
+            .map_err(io_error)?;
+        step(FileStep::DirectorySynced);
+        Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);

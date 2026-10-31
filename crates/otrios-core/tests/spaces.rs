@@ -810,6 +810,7 @@ fn deletion_is_atomic_replaces_identity_and_survives_registry_recovery() {
             .collection,
         b.collection
     );
+    drop(recovered);
     let mut bytes = std::fs::read(&file).unwrap();
     bytes[39] ^= 1;
     std::fs::write(&file, bytes).unwrap();
@@ -982,6 +983,6 @@ fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
             None,
         )
         .unwrap();
-    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP2");
+    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP3");
     std::fs::remove_dir_all(path).unwrap();
 }
