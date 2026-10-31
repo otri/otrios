@@ -3,6 +3,9 @@
 use super::*;
 use otrios_core::spaces as core;
 use otrios_interfaces::spaces::{self as contract, Change, Role};
+#[path = "server_spaces_session.rs"]
+mod session;
+pub(super) use self::session::{Packet, Peer, subscribe};
 
 #[derive(Clone, Default)]
 pub(super) struct Scope {
@@ -73,6 +76,9 @@ pub async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     )
 }
 pub async fn manage(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes) -> Response {
+    if bytes.len() > contract::MAX_COMMAND_BYTES {
+        return error(core::Error::Capacity);
+    }
     if !headers
         .get(header::ORIGIN)
         .and_then(|h| h.to_str().ok())
@@ -94,34 +100,44 @@ pub async fn manage(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Byte
         Ok(request) => request,
         Err(_) => return error(core::Error::Invalid),
     };
-    // Later milestone operations stay unavailable until their serving/cleanup
-    // integrations are qualified. The contract already reserves their encodings.
-    if matches!(
-        &request.change,
-        Change::DeleteData { .. } | Change::Remove { .. }
-    ) || matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
-    {
-        return error(core::Error::Unavailable);
-    }
     let mut guard = app.apps.lock().await;
+    if identity(&app, &key).await.as_deref() != Some(actor.as_str()) {
+        return error(core::Error::Denied);
+    }
     let Some(hub) = guard.as_mut() else {
         return error(core::Error::Unavailable);
     };
-    let policy = if let Change::Attach { app, .. } = &request.change {
-        match hub.app_policy(app) {
-            Ok(policy) => Some(policy),
-            Err(_) => return error(core::Error::Unavailable),
-        }
-    } else {
-        None
-    };
-    match hub.manage_space(&actor, &request, policy.as_ref()) {
+    match manage_request(hub, &actor, &request) {
         Ok(generation) => {
             announce(&app).await;
             response(json!({"version":contract::VERSION,"generation":generation}))
         }
         Err(e) => error(e),
     }
+}
+
+pub(super) fn manage_request(
+    hub: &mut apps::Hub,
+    actor: &str,
+    request: &contract::Request,
+) -> std::result::Result<u64, core::Error> {
+    // Later lifecycle/public stages remain unavailable on every management path.
+    if matches!(
+        &request.change,
+        Change::DeleteData { .. } | Change::Remove { .. }
+    ) || matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
+    {
+        return Err(core::Error::Unavailable);
+    }
+    let policy = if let Change::Attach { app, .. } = &request.change {
+        match hub.app_policy(app) {
+            Ok(policy) => Some(policy),
+            Err(_) => return Err(core::Error::Unavailable),
+        }
+    } else {
+        None
+    };
+    hub.manage_space(actor, request, policy.as_ref())
 }
 
 pub(super) fn private_bytes(path: &Path, limit: usize) -> Result<Vec<u8>, String> {

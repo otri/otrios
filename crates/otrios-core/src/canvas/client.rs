@@ -176,8 +176,27 @@ pub struct Client {
     sign_out_requested: bool,
     writer: Option<[u8; 16]>,
     dispatch: DispatchPolicy,
+    spaces: crate::spaces::Observer,
 }
 impl Client {
+    pub fn configure_spaces(&mut self, selected: Option<&str>) -> Result<()> {
+        self.spaces.configure(selected).map_err(err)
+    }
+    pub fn spaces_snapshot(&self) -> Option<&otrios_interfaces::spaces::Discovery> {
+        self.spaces.snapshot()
+    }
+    pub fn spaces_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        self.spaces.outgoing().map_err(err)
+    }
+    pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool> {
+        self.spaces.receive(bytes).map_err(err)
+    }
+    pub fn manage_space(&mut self, change: otrios_interfaces::spaces::Change) -> Result<u32> {
+        self.spaces.request(change).map_err(err)
+    }
+    pub fn take_space_outcome(&mut self) -> Option<crate::spaces::Outcome> {
+        self.spaces.take_outcome()
+    }
     /// The host supplies text input; retain editor focus without drawing keys.
     pub fn set_software_keyboard(&mut self, enabled: bool) {
         self.external_keyboard = !enabled;
@@ -822,6 +841,7 @@ impl Client {
         self.navigation = Some((ui_ref.into(), state_ref.into()));
     }
     pub fn reset_connection(&mut self) {
+        self.spaces.reset();
         self.chat_disconnected();
         self.decision = None;
         self.auth_required = false;

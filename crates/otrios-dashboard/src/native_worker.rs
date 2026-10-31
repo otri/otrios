@@ -30,6 +30,7 @@ enum NetworkEvent {
     Packet(u64, Instant, Vec<u8>),
     Chat(u64, Vec<u8>),
     Collection(u64, Vec<u8>),
+    Spaces(u64, Vec<u8>),
 }
 struct NetworkSend {
     channel: u8,
@@ -252,6 +253,25 @@ fn app_stream(url: &str) -> String {
         query.map_or(String::new(), |q| format!("?{q}"))
     )
 }
+fn configured_session(url: &str) -> Result<(String, Option<String>), String> {
+    let mut url = app_stream(url);
+    if let Ok(space) = std::env::var("OTRIOS_SPACE") {
+        if !otrios_core::spaces::valid_id(&space) || url.contains('?') {
+            return Err("Specify one valid Frame Space selection".into());
+        }
+        url.push_str(&format!("?space={space}"));
+    }
+    let mut selected = None;
+    for field in url.split_once('?').map_or("", |(_, q)| q).split('&') {
+        if let Some(id) = field.strip_prefix("space=") {
+            if selected.is_some() || !otrios_core::spaces::valid_id(id) {
+                return Err("Specify one valid Frame Space selection".into());
+            }
+            selected = Some(id.to_owned());
+        }
+    }
+    Ok((url, selected))
+}
 
 fn authenticated_request(
     url: &str,
@@ -368,6 +388,10 @@ pub(super) fn state_worker(
     }
     let (resources, catalog) = app_resources(&o)?;
     let mut client = Client::default();
+    if let Some(url) = &o.url {
+        let (_, selected) = configured_session(url)?;
+        client.configure_spaces(selected.as_deref())?;
+    }
     client.set_chat_native(true);
     let identity_path = o
         .chat_identity
@@ -628,6 +652,12 @@ pub(super) fn state_worker(
                         }
                     }
                     NetworkEvent::Collection(..) => {}
+                    NetworkEvent::Spaces(id, bytes)
+                        if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
+                    {
+                        dirty |= client.receive_spaces(&bytes)?;
+                    }
+                    NetworkEvent::Spaces(..) => {}
                 }
             }
         }
@@ -743,6 +773,13 @@ pub(super) fn state_worker(
                         epoch: epoch.expect("connected epoch"),
                         bytes,
                         channel: otrios_interfaces::collection::CHANNEL,
+                    });
+                }
+                if outgoing.is_none() {
+                    outgoing = client.spaces_outgoing()?.map(|bytes| NetworkSend {
+                        epoch: epoch.expect("connected epoch"),
+                        bytes,
+                        channel: otrios_interfaces::spaces::CHANNEL,
                     });
                 }
             }
@@ -895,14 +932,13 @@ fn network(
     use otrios_interfaces::session::{self as wire, ServerControl};
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let mut url = app_stream(&url);
-    if let Ok(space) = std::env::var("OTRIOS_SPACE") {
-        if !otrios_core::spaces::valid_id(&space) || url.contains('?') {
-            eprintln!("Specify one valid Frame Space selection");
+    let url = match configured_session(&url) {
+        Ok((url, _)) => url,
+        Err(error) => {
+            eprintln!("Frame session: {error}");
             return;
         }
-        url.push_str(&format!("?space={space}"));
-    }
+    };
     let identity = std::env::var_os("OTRIOS_IDENTITY_FILE").map(std::path::PathBuf::from);
     let mut epoch = 0_u64;
     loop {
@@ -1059,6 +1095,16 @@ fn network(
                         break;
                     }
                     match bytes.split_first() {
+                        Some((&otrios_interfaces::spaces::CHANNEL, payload))
+                            if payload.len() <= otrios_interfaces::spaces::MAX_EVENT_BYTES =>
+                        {
+                            if reply
+                                .try_send(NetworkEvent::Spaces(epoch, payload.to_vec()))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                         Some((&otrios_interfaces::collection::CHANNEL, payload))
                             if payload.len() <= otrios_interfaces::collection::MAX_EVENT_BYTES =>
                         {
@@ -1572,6 +1618,23 @@ mod tests {
                     }
                     match socket.read() {
                         Ok(Message::Binary(bytes)) => {
+                            if bytes.first() == Some(&otrios_interfaces::spaces::CHANNEL) {
+                                socket
+                                    .send(Message::Binary(
+                                        otrios_interfaces::session::frame(
+                                            otrios_interfaces::spaces::CHANNEL,
+                                            otrios_core::spaces::encode_event(
+                                                &otrios_interfaces::spaces::Event::Unavailable {
+                                                    version: 1,
+                                                },
+                                            )
+                                            .unwrap(),
+                                        )
+                                        .into(),
+                                    ))
+                                    .unwrap();
+                                continue;
+                            }
                             match decode_client(bytes.strip_prefix(&[1]).unwrap()).unwrap() {
                                 ClientMessage::Mount {
                                     epoch: id,

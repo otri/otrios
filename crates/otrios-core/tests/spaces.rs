@@ -3,12 +3,382 @@
 use otrios_core::spaces::{self, Error, Store};
 use otrios_interfaces::spaces::*;
 
+#[test]
+fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
+    use std::collections::BTreeMap;
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let binding = attach(&mut registry, &space);
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Remove {
+            space: space.clone(),
+            app: "notes".into(),
+        },
+    );
+    let installed = vec![InstalledApp {
+        policy: policy(),
+        title: "Notes".into(),
+        ui_ref: "app:notes/ui".into(),
+        state_ref: "app:notes/state".into(),
+    }];
+    let facts = BTreeMap::from([(
+        binding.collection.clone(),
+        spaces::CollectionFacts {
+            stored_bytes: Some(2048),
+            available: true,
+        },
+    )]);
+    let cursor = spaces::discovery_cursor().unwrap();
+    let snapshot = |identity| {
+        spaces::discovery(
+            &registry,
+            identity,
+            Some(&space),
+            &installed,
+            &facts,
+            cursor.clone(),
+        )
+        .unwrap()
+    };
+    let admin = snapshot(Some("alice"));
+    let detail = admin.selected.as_ref().unwrap();
+    assert_eq!(detail.members.as_ref().unwrap().len(), 2);
+    assert_eq!(detail.installed, installed);
+    assert_eq!(detail.apps[0].collection, binding.collection);
+    assert_eq!(detail.apps[0].stored_bytes, Some(2048));
+    assert!(!detail.apps[0].attached);
+    assert!(detail.apps[0].launch.is_none());
+    let member = snapshot(Some("bob"));
+    let detail = member.selected.as_ref().unwrap();
+    assert!(detail.members.is_none());
+    assert!(detail.apps.is_empty());
+    assert!(detail.installed.is_empty());
+    for identity in [None, Some("stranger")] {
+        let hidden = snapshot(identity);
+        assert!(hidden.spaces.is_empty());
+        assert!(hidden.selected.is_none());
+        let bytes = spaces::encode_event(&Event::Snapshot {
+            snapshot: hidden,
+            resync: true,
+        })
+        .unwrap();
+        for private in ["Household", "alice", "notes", &binding.collection] {
+            assert!(
+                !bytes
+                    .windows(private.len())
+                    .any(|w| w == private.as_bytes())
+            );
+        }
+    }
+    for snapshot in [admin, member] {
+        let event = Event::Snapshot {
+            snapshot,
+            resync: true,
+        };
+        assert_eq!(
+            spaces::decode_event(&spaces::encode_event(&event).unwrap()).unwrap(),
+            event
+        );
+    }
+}
+
+#[test]
+fn discovery_preserves_unavailable_or_incompatible_collections_without_a_launch_grant() {
+    use std::collections::BTreeMap;
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let binding = attach(&mut registry, &space);
+    let mut installed = InstalledApp {
+        policy: policy(),
+        title: "Notes".into(),
+        ui_ref: "app:notes/ui".into(),
+        state_ref: "app:notes/state".into(),
+    };
+    let facts = BTreeMap::from([(
+        binding.collection.clone(),
+        spaces::CollectionFacts {
+            stored_bytes: Some(200),
+            available: true,
+        },
+    )]);
+    for expected in [
+        AppAvailability::Unavailable,
+        AppAvailability::Incompatible,
+        AppAvailability::Available,
+    ] {
+        installed.policy.schema = if expected == AppAvailability::Incompatible {
+            "b".repeat(64)
+        } else {
+            policy().schema
+        };
+        let apps = if expected == AppAvailability::Unavailable {
+            vec![]
+        } else {
+            vec![installed.clone()]
+        };
+        let snapshot = spaces::discovery(
+            &registry,
+            Some("alice"),
+            Some(&space),
+            &apps,
+            &facts,
+            spaces::discovery_cursor().unwrap(),
+        )
+        .unwrap();
+        let row = &snapshot.selected.unwrap().apps[0];
+        assert_eq!(row.availability, expected);
+        assert_eq!(row.collection, binding.collection);
+        assert_eq!(row.stored_bytes, Some(200));
+        assert_eq!(row.launch.is_some(), expected == AppAvailability::Available);
+    }
+}
+
+#[test]
+fn management_wire_bounds_versions_shapes_and_untrusted_flex_before_deserialization() {
+    let command = Command::Manage {
+        version: 1,
+        id: 1,
+        request: Request {
+            version: 1,
+            expected_generation: 0,
+            change: Change::Create {
+                name: "Space".into(),
+            },
+        },
+    };
+    let bytes = spaces::encode_command(&command).unwrap();
+    assert_eq!(spaces::decode_command(&bytes).unwrap(), command);
+    for end in 0..bytes.len() {
+        assert!(spaces::decode_command(&bytes[..end]).is_err());
+    }
+    let mut huge = bytes.clone();
+    huge.resize(MAX_COMMAND_BYTES + 1, 0);
+    assert_eq!(spaces::decode_command(&huge), Err(Error::Capacity));
+    let invalid = Command::Watch {
+        version: 2,
+        selected: None,
+        cursor: None,
+    };
+    assert_eq!(spaces::encode_command(&invalid), Err(Error::Invalid));
+    let invalid = Command::Watch {
+        version: 1,
+        selected: Some("invalid".into()),
+        cursor: None,
+    };
+    assert_eq!(spaces::encode_command(&invalid), Err(Error::Invalid));
+    for event in [
+        Event::Unavailable { version: 1 },
+        Event::ResyncRequired { version: 1 },
+        Event::Result {
+            version: 1,
+            id: 9,
+            status: ManagementStatus::LastAdmin,
+            created: None,
+        },
+    ] {
+        assert_eq!(
+            spaces::decode_event(&spaces::encode_event(&event).unwrap()).unwrap(),
+            event
+        );
+    }
+    // The guard, rather than a panicking FlexBuffers accessor, sees malformed roots.
+    for size in 0..256 {
+        let mut bytes = b"OTriOS\0spaces-command\0v1\0".to_vec();
+        bytes.extend(vec![255; size]);
+        assert!(spaces::decode_command(&bytes).is_err());
+    }
+}
+
 fn request(registry: &Registry, change: Change) -> Request {
     Request {
         version: VERSION,
         expected_generation: registry.generation,
         change,
     }
+}
+
+#[test]
+fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_payloads() {
+    use std::collections::BTreeMap;
+    let mut registry = fixture();
+    let mut selected = registry.spaces[0].clone();
+    selected.name = "S".repeat(128);
+    for index in 1..MAX_MEMBERS {
+        selected.members.push(Member {
+            identity: format!("{index:03}{}", "m".repeat(93)),
+            role: Role::Member,
+            joined_generation: 1,
+        });
+    }
+    let mut installed = vec![];
+    let mut facts = BTreeMap::new();
+    for index in 0..MAX_APPS {
+        let app = format!(
+            "app-{}{}{}",
+            "a".repeat(58),
+            char::from(b'a' + (index / 26) as u8),
+            char::from(b'a' + (index % 26) as u8)
+        );
+        let mut policy = policy();
+        policy.app = app.clone();
+        let collection = format!("{:032x}", index + 1);
+        selected.apps.push(AppData {
+            policy: policy.clone(),
+            collection: collection.clone(),
+            attached: true,
+            attachment_epoch: 1,
+        });
+        facts.insert(
+            collection,
+            spaces::CollectionFacts {
+                stored_bytes: Some(u64::MAX),
+                available: true,
+            },
+        );
+        if index < MAX_INSTALLED_APPS {
+            installed.push(InstalledApp {
+                policy,
+                title: "T".repeat(96),
+                ui_ref: format!("app:{app}/ui"),
+                state_ref: "r".repeat(128),
+            });
+        }
+    }
+    registry.spaces[0] = selected;
+    for index in 1..MAX_SPACES {
+        let mut space = registry.spaces[0].clone();
+        space.id = format!("{:032x}", 10000 + index);
+        space.apps.clear();
+        space.members.truncate(1);
+        registry.spaces.push(space);
+    }
+    spaces::validate(&registry).unwrap();
+    let snapshot = spaces::discovery(
+        &registry,
+        Some("alice"),
+        Some(&registry.spaces[0].id),
+        &installed,
+        &facts,
+        spaces::discovery_cursor().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snapshot.spaces.len(), MAX_SPACES);
+    let detail = snapshot.selected.as_ref().unwrap();
+    assert_eq!(detail.apps.len(), MAX_APPS);
+    assert_eq!(detail.members.as_ref().unwrap().len(), MAX_MEMBERS);
+    let event = Event::Snapshot {
+        snapshot,
+        resync: true,
+    };
+    let bytes = spaces::encode_event(&event).unwrap();
+    assert!(bytes.len() <= MAX_EVENT_BYTES);
+    assert_eq!(spaces::decode_event(&bytes).unwrap(), event);
+}
+
+#[test]
+fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
+    use std::collections::BTreeMap;
+    let registry = fixture();
+    let space = &registry.spaces[0].id;
+    let snapshot = spaces::discovery(
+        &registry,
+        Some("alice"),
+        Some(space),
+        &[],
+        &BTreeMap::new(),
+        spaces::discovery_cursor().unwrap(),
+    )
+    .unwrap();
+    let event = spaces::encode_event(&Event::Snapshot {
+        snapshot: snapshot.clone(),
+        resync: true,
+    })
+    .unwrap();
+    let mut observer = spaces::Observer::default();
+    assert!(observer.outgoing().unwrap().is_none());
+    observer.configure(Some(space)).unwrap();
+    assert!(matches!(
+        spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+        Command::Watch { cursor: None, .. }
+    ));
+    assert!(observer.receive(&event).unwrap());
+    let id = observer
+        .request(Change::Create {
+            name: "Second".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        observer.request(Change::Create {
+            name: "Duplicate".into()
+        }),
+        Err(Error::Capacity)
+    );
+    assert!(
+        matches!(spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(), Command::Manage { id: actual, .. } if actual == id)
+    );
+    observer.reset();
+    assert_eq!(
+        observer.take_outcome(),
+        Some(spaces::Outcome::Unknown { id })
+    );
+    assert!(!observer.pending());
+    assert!(
+        matches!(spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(), Command::Watch { cursor: Some(cursor), .. } if cursor == snapshot.cursor)
+    );
+    assert_eq!(
+        observer.request(Change::Create {
+            name: "Unvalidated".into()
+        }),
+        Err(Error::Unavailable)
+    );
+    assert!(observer.outgoing().unwrap().is_none());
+    observer.receive(&event).unwrap();
+    let next = observer
+        .request(Change::Create {
+            name: "Deliberate retry".into(),
+        })
+        .unwrap();
+    assert_ne!(id, next);
+    observer.outgoing().unwrap().unwrap();
+    let applied = spaces::encode_event(&Event::Result {
+        version: 1,
+        id: next,
+        status: ManagementStatus::Applied,
+        created: Some("a".repeat(32)),
+    })
+    .unwrap();
+    observer.receive(&applied).unwrap();
+    assert!(matches!(
+        observer.take_outcome(),
+        Some(spaces::Outcome::Decided {
+            status: ManagementStatus::Applied,
+            ..
+        })
+    ));
+    observer
+        .receive(&spaces::encode_event(&Event::ResyncRequired { version: 1 }).unwrap())
+        .unwrap();
+    assert!(observer.snapshot().is_none());
+    assert!(matches!(
+        spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+        Command::Watch { cursor: None, .. }
+    ));
+    observer
+        .receive(&spaces::encode_event(&Event::Unavailable { version: 1 }).unwrap())
+        .unwrap();
+    assert!(observer.unavailable());
+    assert!(observer.outgoing().unwrap().is_none());
 }
 fn policy() -> AppPolicy {
     AppPolicy {

@@ -162,6 +162,8 @@ async fn activate(State(app): State<Arc<App>>) -> StatusCode {
         if let Some(hub) = guard.as_mut() {
             if let Err(e) = hub.refresh(&copy.releases, &release) {
                 eprintln!("Catalog activation: {e}");
+            } else {
+                announce(&copy).await;
             }
         } else {
             drop(guard);

@@ -125,6 +125,7 @@ enum Event {
     Availability,
     Wire(Option<Result<Message, axum::Error>>),
     State(Option<apps::Packet>),
+    Spaces(Option<spaces::Packet>),
     Collection(Option<collections::Packet>),
     Ink(Result<Vec<ink::Event>, tokio::sync::broadcast::error::RecvError>),
     Chat(Result<Arc<chat::Packet>, tokio::sync::broadcast::error::RecvError>),
@@ -198,6 +199,7 @@ async fn peer(
     });
     let mut ink: Option<ink::Subscription> = None;
     let mut collection_peer: Option<collections::Peer> = None;
+    let mut spaces_peer: Option<spaces::Peer> = None;
     let mut admission = Arc::new(AtomicBool::new(false));
     let mut chat_peer: Option<chat::Peer> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
@@ -215,6 +217,7 @@ async fn peer(
             _=heartbeat.tick()=>Event::Heartbeat,
             value=input.next()=>Event::Wire(value),
             value=state_rx.recv(),if state_enabled=>Event::State(value),
+            value=async{match spaces_peer.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::Spaces(value),
             value=async{match collection_peer.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::Collection(value),
             value=async{match ink.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Ink(value),
             value=async{match chat_peer.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Chat(value),
@@ -268,11 +271,44 @@ async fn peer(
                         }
                         // Until the auxiliary lanes are collection-owned, a
                         // managed session cannot fall back to their global rooms.
-                        if app.state_config.spaces.is_some() && bytes.first() != Some(&wire::STATE)
+                        if app.state_config.spaces.is_some()
+                            && !matches!(
+                                bytes.first(),
+                                Some(&wire::STATE) | Some(&otrios_interfaces::spaces::CHANNEL)
+                            )
                         {
                             break;
                         }
                         match bytes.split_first() {
+                            Some((&otrios_interfaces::spaces::CHANNEL, payload))
+                                if !payload.is_empty()
+                                    && payload.len()
+                                        <= otrios_interfaces::spaces::MAX_COMMAND_BYTES =>
+                            {
+                                let peer = spaces_peer.get_or_insert_with(|| {
+                                    spaces::subscribe(app.clone(), key.clone())
+                                });
+                                if peer.input.try_send(payload.to_vec()).is_err() {
+                                    spaces_peer = None;
+                                    let bytes = otrios_core::spaces::encode_event(
+                                        &otrios_interfaces::spaces::Event::ResyncRequired {
+                                            version: 1,
+                                        },
+                                    )
+                                    .expect("bounded status");
+                                    if !send(
+                                        &mut output,
+                                        Message::Binary(
+                                            wire::frame(otrios_interfaces::spaces::CHANNEL, bytes)
+                                                .into(),
+                                        ),
+                                    )
+                                    .await
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
                             Some((&otrios_interfaces::collection::CHANNEL, payload))
                                 if !payload.is_empty()
                                     && payload.len()
@@ -472,6 +508,31 @@ async fn peer(
                 drop(guard);
             }
             Event::State(None) => break,
+            Event::Spaces(Some(packet)) => {
+                let guard = app.apps.lock().await;
+                let principal = spaces::identity(&app, &key).await;
+                if principal != packet.identity
+                    || packet.cursor.as_ref().is_some_and(|cursor| {
+                        guard
+                            .as_ref()
+                            .is_none_or(|hub| hub.discovery_cursor() != cursor)
+                    })
+                {
+                    continue;
+                }
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(otrios_interfaces::spaces::CHANNEL, packet.bytes).into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+                drop(guard);
+            }
+            Event::Spaces(None) => break,
             Event::Collection(Some(packet)) => {
                 // Never flush a private view after the admission that produced
                 // it expires, including while renderer/socket work was blocked.

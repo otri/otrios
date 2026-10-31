@@ -8,6 +8,10 @@ pub const MAX_MEMBERS: usize = 128;
 pub const MAX_APPS: usize = 128;
 pub const MAX_DELETIONS: usize = 4096;
 pub const MAX_REGISTRY_BYTES: usize = 2 * 1024 * 1024;
+pub const CHANNEL: u8 = 5;
+pub const MAX_COMMAND_BYTES: usize = 8192;
+pub const MAX_EVENT_BYTES: usize = 128 * 1024;
+pub const MAX_INSTALLED_APPS: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -152,4 +156,123 @@ pub struct Request {
     pub version: u32,
     pub expected_generation: u64,
     pub change: Change,
+}
+
+/// One authority incarnation and its serialized discovery revision. Observation
+/// gaps always replace the snapshot; cursors confer no access.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveryCursor {
+    pub authority: String,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Command {
+    Watch {
+        version: u32,
+        selected: Option<String>,
+        cursor: Option<DiscoveryCursor>,
+    },
+    Manage {
+        version: u32,
+        id: u32,
+        request: Request,
+    },
+}
+
+/// Verified installed launch metadata. Reading it never starts app execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstalledApp {
+    pub policy: AppPolicy,
+    pub title: String,
+    pub ui_ref: String,
+    pub state_ref: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpaceSummary {
+    pub id: String,
+    pub name: String,
+    pub audience: Audience,
+    pub role: Option<Role>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AppAvailability {
+    Available,
+    Unavailable,
+    Incompatible,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppSummary {
+    pub app: String,
+    pub title: String,
+    pub collection: String,
+    pub attached: bool,
+    pub availability: AppAvailability,
+    /// Managed checkpoint/journal/presentation bytes, excluding shared runtime
+    /// code and backups. None means unavailable, never an invented zero.
+    pub stored_bytes: Option<u64>,
+    pub launch: Option<InstalledApp>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpaceDetail {
+    pub space: String,
+    pub apps: Vec<AppSummary>,
+    pub members: Option<Vec<Member>>,
+    pub installed: Vec<InstalledApp>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Discovery {
+    pub version: u32,
+    pub cursor: DiscoveryCursor,
+    pub generation: u64,
+    pub identity: Option<String>,
+    pub spaces: Vec<SpaceSummary>,
+    pub selected: Option<SpaceDetail>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagementStatus {
+    Applied,
+    Invalid,
+    Denied,
+    Conflict,
+    LastAdmin,
+    Incompatible,
+    Capacity,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Event {
+    ResyncRequired {
+        version: u32,
+    },
+    Snapshot {
+        snapshot: Discovery,
+        resync: bool,
+    },
+    Result {
+        version: u32,
+        id: u32,
+        status: ManagementStatus,
+        created: Option<String>,
+    },
+    Unavailable {
+        version: u32,
+    },
 }

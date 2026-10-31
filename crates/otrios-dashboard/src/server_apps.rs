@@ -46,6 +46,8 @@ pub(super) struct Hub {
     collector: Option<otrios_interfaces::spaces::ServiceBinding>,
     collection_views: BTreeMap<String, (Vec<u8>, Vec<u8>)>,
     provisioning: bool,
+    discovery: otrios_interfaces::spaces::DiscoveryCursor,
+    discovery_catalog: Vec<u8>,
 }
 struct Lease {
     epoch: u32,
@@ -116,6 +118,8 @@ impl Hub {
             collector: None,
             collection_views: BTreeMap::new(),
             provisioning: false,
+            discovery: otrios_core::spaces::discovery_cursor().map_err(|e| e.to_string())?,
+            discovery_catalog: vec![],
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
@@ -321,12 +325,96 @@ impl Hub {
         request: &otrios_interfaces::spaces::Request,
         policy: Option<&otrios_interfaces::spaces::AppPolicy>,
     ) -> std::result::Result<u64, otrios_core::spaces::Error> {
-        Ok(self
+        let cursor = otrios_core::spaces::advance_discovery(&self.discovery)?;
+        let generation = self
             .spaces
             .as_mut()
             .ok_or(otrios_core::spaces::Error::Unavailable)?
             .commit(actor, request, policy)?
-            .generation)
+            .generation;
+        self.discovery = cursor;
+        Ok(generation)
+    }
+    pub(super) fn discovery_cursor(&self) -> &otrios_interfaces::spaces::DiscoveryCursor {
+        &self.discovery
+    }
+    fn discovery_catalog_changed(&mut self) -> Result<()> {
+        if self.discovery_catalog != self.active {
+            self.discovery = otrios_core::spaces::advance_discovery(&self.discovery)
+                .map_err(|e| e.to_string())?;
+            self.discovery_catalog = self.active.clone();
+        }
+        Ok(())
+    }
+    pub(super) fn discovery(
+        &self,
+        identity: Option<&str>,
+        selected: Option<&str>,
+    ) -> std::result::Result<otrios_interfaces::spaces::Discovery, otrios_core::spaces::Error> {
+        use otrios_interfaces::spaces::InstalledApp;
+        let registry = self.registry()?;
+        let installed = self
+            .bundles
+            .get(&self.active)
+            .into_iter()
+            .flat_map(|b| b.packages.values())
+            .filter(|p| !p.app.id.contains('/'))
+            .map(|p| InstalledApp {
+                policy: p.policy.clone(),
+                title: p.app.title.clone(),
+                ui_ref: p.app.ui_ref.clone(),
+                state_ref: p.app.state_ref.clone(),
+            })
+            .collect::<Vec<_>>();
+        // Only the selected admitted Space needs storage facts. Do not read any
+        // collection payload or start app execution during discovery.
+        let mut facts = BTreeMap::new();
+        for s in registry.spaces.iter().filter(|s| {
+            Some(s.id.as_str()) == selected && otrios_core::spaces::visible(s, identity)
+        }) {
+            for a in &s.apps {
+                let package = self
+                    .bundles
+                    .get(&self.active)
+                    .and_then(|b| b.packages.values().find(|p| p.app.id == a.policy.app));
+                let mut available = package.is_some_and(|p| !p.chat)
+                    && !self.rooms.get(&a.collection).is_some_and(|r| r.failed);
+                let stored_bytes = self.state.as_ref().and_then(|root| {
+                    let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
+                    let presentation =
+                        root.join(format!("collection-{}.presentation.flex", a.collection));
+                    if package.is_some_and(|p| p.aggregate_view) && !presentation.is_file() {
+                        available = false;
+                    }
+                    [
+                        checkpoint.with_extension("merkle.log"),
+                        checkpoint,
+                        presentation,
+                    ]
+                    .iter()
+                    .try_fold(0_u64, |sum, p| match fs::metadata(p) {
+                        Ok(m) if m.is_file() => sum.checked_add(m.len()),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(sum),
+                        _ => None,
+                    })
+                });
+                facts.insert(
+                    a.collection.clone(),
+                    otrios_core::spaces::CollectionFacts {
+                        stored_bytes,
+                        available,
+                    },
+                );
+            }
+        }
+        otrios_core::spaces::discovery(
+            registry,
+            identity,
+            selected,
+            &installed,
+            &facts,
+            self.discovery.clone(),
+        )
     }
     pub(super) fn app_policy(&self, app: &str) -> Result<otrios_interfaces::spaces::AppPolicy> {
         let p = self
@@ -487,6 +575,7 @@ impl Hub {
         if bundle_format.is_none() && self.bundles.contains_key(&catalog_hash) {
             self.active = catalog_hash;
             self.active_release = id.into();
+            self.discovery_catalog_changed()?;
             return Ok(());
         }
         let catalog = canvas::decode_catalog(&catalog_bytes)?;
@@ -768,6 +857,7 @@ impl Hub {
         }
         self.active = catalog_hash;
         self.active_release = id.into();
+        self.discovery_catalog_changed()?;
         Ok(())
     }
     pub(super) fn catalog_bytes(&self) -> Result<Vec<u8>> {
@@ -1162,7 +1252,7 @@ pub(super) async fn worker(
             _=expiry.tick()=>None,
         };
         let allowed = private_allowed(&app, public, &key).await;
-        let scope = spaces::Scope {
+        let mut scope = spaces::Scope {
             space: space.clone(),
             identity: spaces::identity(&app, &key).await,
         };
@@ -1183,6 +1273,7 @@ pub(super) async fn worker(
             }
             let release = app.release.read().await.clone();
             let mut guard = app.apps.lock().await;
+            scope.identity = spaces::identity(&app, &key).await;
             let Some(hub) = guard.as_mut() else {
                 continue;
             };
@@ -1200,6 +1291,7 @@ pub(super) async fn worker(
             })
         } else {
             let mut guard = app.apps.lock().await;
+            scope.identity = spaces::identity(&app, &key).await;
             match guard.as_mut() {
                 Some(hub) => hub
                     .updates(&mut leases, allowed, &scope)

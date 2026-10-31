@@ -19,7 +19,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v9` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v10` includes a version-1 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when both collection identity and effective
@@ -32,6 +32,39 @@ Aggregate presentations accompany the initial mount, so a managed candidate is
 qualified with its first usable view before acceptance. A missing or invalid
 view rejects the candidate and retains the previous activation. The release
 control v1 opening envelope remains unchanged across this protocol upgrade.
+
+## Discovery on the shared session
+
+Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
+use the covered RAM-only observer; it sends Watch after each reconnect. The
+browser/native state protocol is v10 because v9 peers do not know this channel.
+Release discovery remains on its unchanged control v1 envelope.
+
+Watch selects metadata for one Space and includes the previous authority/revision
+cursor where available. Every Watch explicitly replaces the snapshot through
+resync. Observation is registered before initial capture. The
+authority publishes catalog and management revisions under its admission lock,
+then emits complete, filtered snapshots. A changed incarnation or skipped revision
+explicitly marks resync. Mailbox overflow requires resync; no unbounded queue or
+second WebSocket is introduced. Snapshot delivery rechecks current identity and
+revision under the management lock, preventing an older queued roster from being
+delivered after revocation acknowledges.
+
+Snapshots contain up to 64 visible Space summaries and metadata for the selected
+Space only: at most 128 app rows, 128 Admin-visible member records and 16 verified
+installed launch records. They never contain document payloads or credentials.
+Retained collection rows, storage totals and installed-app management metadata
+are Admin-only. Storage totals cover managed checkpoints, journals and aggregate
+presentations; unreadable totals remain unknown. Available metadata is not a
+completed launch: state, code and first-view qualification still precede acceptance.
+An unavailable or schema-incompatible app keeps its collection identity.
+
+Commands are at most 8 KiB; events are at most 128 KiB, with structural bounds
+before FlexBuffers deserialization. Only one management intent is outstanding per
+host observer. A lost reply/reconnect marks its outcome unknown and refreshes the
+snapshot; it never automatically replays Create or a destructive action. Every
+management path uses the same generation/role checks. This checkpoint provides
+the channel and host adapters; the shared Apps & Data controls follow separately.
 
 This increment admits Create, Membership, Attach and Closed audience changes.
 Removal, deletion and public audience changes remain unavailable through HTTP

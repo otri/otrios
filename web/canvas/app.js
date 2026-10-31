@@ -44,6 +44,7 @@ function startDiscovery(){if(session){session.resume();return;}session=connectSe
   onInk:(bytes,epoch)=>transportBridge?.receive('ink',bytes,epoch),
   onChat:(bytes,epoch)=>transportBridge?.receive('chat',bytes,epoch),
   onCollection:(bytes,epoch)=>transportBridge?.receive('collection',bytes,epoch),
+  onSpaces:(bytes,epoch)=>transportBridge?.receive('spaces',bytes,epoch),
   onStatus:(ready,epoch)=>transportBridge?.status(ready,epoch),
   onError:error=>console.warn('Session:',error),
 });}
@@ -144,7 +145,7 @@ try{
   function leaveLogin(){command({type:'navigate',screen:null});}
   document.querySelector('#login-back').addEventListener('click',leaveLogin);login.addEventListener('cancel',event=>{event.preventDefault();leaveLogin();});
   try{sessionStorage.removeItem('otrios-dashboard-v1');sessionStorage.removeItem('otrios-dashboard-presentation-v1');}catch{}
-  const start={type:'start',reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,timings:!!timings,wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,layoutViewport:baseViewport,release:initialRelease,screen:restoreScreen()};
+  const start={type:'start',space:new URL(location.href).searchParams.get('space'),reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,timings:!!timings,wasmModule,fontBytes:fontResource.bytes,fontHash:fontResource.hash,catalogBytes:appRelease.catalog,manifest:appRelease.manifest,moduleUrl:import.meta.url,viewport:desiredViewport,layoutViewport:baseViewport,release:initialRelease,screen:restoreScreen()};
   try{worker.postMessage(start);}catch(error){
     // Older engines may instantiate Wasm but reject cloning compiled modules.
     if(error.name!=='DataCloneError')throw error;

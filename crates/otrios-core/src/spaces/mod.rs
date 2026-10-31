@@ -3,6 +3,12 @@
 //! before calling this module and hold one authority lock through writes/reads.
 use otrios_interfaces::spaces::*;
 use std::collections::BTreeSet;
+mod discovery;
+mod observer;
+mod wire;
+pub use discovery::{CollectionFacts, advance_discovery, discovery, discovery_cursor};
+pub use observer::{Observer, Outcome};
+pub use wire::{decode_command, decode_event, encode_command, encode_event, management_status};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod store;

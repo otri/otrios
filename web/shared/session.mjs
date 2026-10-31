@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Stable bootstrap/network owner. No dependency on Wasm or the CRDT decoder.
-export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v9',STATE=1,INK=2,CHAT=3,COLLECTION=4;
+export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v10',STATE=1,INK=2,CHAT=3,COLLECTION=4,SPACES=5;
 export function validRelease(r){return r&&/^[0-9a-f]{64}$/.test(r.id)&&r.web_entry===`/releases/${r.id}/web/index.html`;}
 export function connectSession({
-  onRelease=()=>{},onState=()=>{},onInk=()=>{},onChat=()=>{},onCollection=()=>{},onStatus=()=>{},onError=()=>{},
+  onRelease=()=>{},onState=()=>{},onInk=()=>{},onChat=()=>{},onCollection=()=>{},onSpaces=()=>{},onStatus=()=>{},onError=()=>{},
   open=url=>new WebSocket(url),schedule=setTimeout,cancel=clearTimeout,
   base=location.href,current=base.match(/\/releases\/([0-9a-f]{64})\//)?.[1]||null,
   stateProtocol=STATE_PROTOCOL,
@@ -42,6 +42,7 @@ export function connectSession({
         if(frame[0]===STATE&&payload.length<=512*1024)onState(payload,epoch);
         else if(frame[0]===CHAT&&payload.length<=192*1024)onChat(payload,epoch);
         else if(frame[0]===COLLECTION&&payload.length<=1024*1024+512)onCollection(payload,epoch);
+        else if(frame[0]===SPACES&&payload.length<=128*1024)onSpaces(payload,epoch);
         else if(frame[0]===INK&&payload.length<=1025*21){if(wantsInk)onInk(payload,epoch);}
         else throw Error('Invalid session channel/size');
       }catch(error){onError(error);socket.close();}
@@ -51,7 +52,7 @@ export function connectSession({
   }
   function send(channel,bytes,epoch=generation){
     if(epoch!==generation||!ready||!peer||bytes.length===0)return false;
-    if(bytes.length>(channel===STATE?512*1024:channel===CHAT?8192:channel===COLLECTION?1024:32*15))throw Error('Session payload exceeds limit');
+    if(bytes.length>(channel===STATE?512*1024:channel===CHAT||channel===SPACES?8192:channel===COLLECTION?1024:32*15))throw Error('Session payload exceeds limit');
     if(peer.bufferedAmount>1024*1024){peer.close();return false;}
     const frame=new Uint8Array(bytes.length+1);frame[0]=channel;frame.set(bytes,1);try{peer.send(frame);return true;}catch(error){onError(error);status(false);peer.close();return false;}
   }
@@ -62,6 +63,7 @@ export function connectSession({
     sendState:(bytes,epoch)=>send(STATE,bytes,epoch),sendInk:(bytes,epoch)=>wantsInk&&send(INK,bytes,epoch),
     sendChat:(bytes,epoch)=>send(CHAT,bytes,epoch),
     sendCollection:(bytes,epoch)=>send(COLLECTION,bytes,epoch),
+    sendSpaces:(bytes,epoch)=>send(SPACES,bytes,epoch),
     subscribeInk(value){wantsInk=!!value;syncInk();},
     resume(){if(stopped){stopped=false;delay=250;connect();}},
     reconnect(){if(stopped)return;const old=peer;peer=null;cancel(timer);cancel(deadline);subscribed=false;status(false);old?.close();delay=250;connect();},
@@ -72,14 +74,15 @@ export function connectSession({
 // Bounded network/app-worker handoff. State overflow reconnects for resync;
 // ephemeral ink overflow drops samples. Epochs reject work from old sessions.
 export function bridgeWorker(session,post){
-  let epoch=0,state=0,ink=0,chat=0,collection=0;
+  let epoch=0,state=0,ink=0,chat=0,collection=0,spaces=0;
   return {
-    status(ready,nextEpoch){if(epoch!==nextEpoch){epoch=nextEpoch;state=0;ink=0;chat=0;collection=0;}post({type:'transport',ready,epoch});},
+    status(ready,nextEpoch){if(epoch!==nextEpoch){epoch=nextEpoch;state=0;ink=0;chat=0;collection=0;spaces=0;}post({type:'transport',ready,epoch});},
     receive(type,bytes,atEpoch){
       if(atEpoch!==session.epoch)return;
       if(type==='state'){if(state>=8){session.reconnect();return;}state++;}
       else if(type==='chat'){if(chat>=8){session.reconnect();return;}chat++;}
       else if(type==='collection'){if(collection>=2){session.reconnect();return;}collection++;}
+      else if(type==='spaces'){if(spaces>=2){session.reconnect();return;}spaces++;}
       else{if(ink>=8)return;ink++;}
       post({type:type+'-frame',bytes,epoch:atEpoch},[bytes.buffer]);
     },
@@ -91,12 +94,14 @@ export function bridgeWorker(session,post){
         case 'state-send':session.sendState(m.bytes,m.epoch);post({type:'state-send-ack',epoch:m.epoch});break;
         case 'chat-send':session.sendChat(m.bytes,m.epoch);post({type:'chat-send-ack',epoch:m.epoch});break;
         case 'collection-send':session.sendCollection(m.bytes,m.epoch);post({type:'collection-send-ack',epoch:m.epoch});break;
+        case 'spaces-send':session.sendSpaces(m.bytes,m.epoch);post({type:'spaces-send-ack',epoch:m.epoch});break;
         case 'ink-send':session.sendInk(m.bytes,m.epoch);post({type:'ink-send-ack',epoch:m.epoch});break;
         case 'ink-subscribe':session.subscribeInk(m.active);break;
         case 'state-frame-ack':if(m.epoch===epoch)state=Math.max(0,state-1);break;
         case 'ink-frame-ack':if(m.epoch===epoch)ink=Math.max(0,ink-1);break;
         case 'chat-frame-ack':if(m.epoch===epoch)chat=Math.max(0,chat-1);break;
         case 'collection-frame-ack':if(m.epoch===epoch)collection=Math.max(0,collection-1);break;
+        case 'spaces-frame-ack':if(m.epoch===epoch)spaces=Math.max(0,spaces-1);break;
         default:return false;
       }
       return true;

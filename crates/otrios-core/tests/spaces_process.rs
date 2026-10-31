@@ -615,7 +615,7 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v9","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v10","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -630,6 +630,213 @@ fn send(socket: &mut Socket, message: ClientMessage) {
     let mut bytes = canvas::encode_client(&message).unwrap();
     bytes.insert(0, 1);
     socket.send(Message::Binary(bytes.into())).unwrap();
+}
+fn send_spaces(socket: &mut Socket, command: otrios_interfaces::spaces::Command) {
+    let mut bytes = otrios_core::spaces::encode_command(&command).unwrap();
+    bytes.insert(0, otrios_interfaces::spaces::CHANNEL);
+    socket.send(Message::Binary(bytes.into())).unwrap();
+}
+fn read_spaces(socket: &mut Socket) -> otrios_interfaces::spaces::Event {
+    loop {
+        match socket.read().unwrap() {
+            Message::Binary(bytes) if bytes[0] == otrios_interfaces::spaces::CHANNEL => {
+                return otrios_core::spaces::decode_event(&bytes[1..]).unwrap();
+            }
+            Message::Ping(_) => socket.flush().unwrap(),
+            _ => (),
+        }
+    }
+}
+
+#[test]
+fn shared_session_discovery_observes_racing_changes_and_rechecks_management_and_roster_access() {
+    use otrios_interfaces::spaces::{Command as SpaceCommand, Event, ManagementStatus};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let rig = Rig::start(&binary);
+    let space = rig.space("Discovery");
+    let mut admin = socket(&rig.public, &space, Some('a'));
+    send_spaces(
+        &mut admin,
+        SpaceCommand::Watch {
+            version: 1,
+            selected: Some(space.clone()),
+            cursor: None,
+        },
+    );
+    // Race publication against initial capture. Either initial snapshot is valid;
+    // observation must reach the committed generation without another request.
+    let target = rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    )["generation"]
+        .as_u64()
+        .unwrap();
+    let mut snapshot = loop {
+        if let Event::Snapshot { snapshot, .. } = read_spaces(&mut admin)
+            && snapshot.generation >= target
+        {
+            break snapshot;
+        }
+    };
+    let detail = snapshot.selected.as_ref().unwrap();
+    assert_eq!(detail.apps.len(), 1);
+    assert!(detail.apps[0].launch.is_some());
+    assert_eq!(detail.members.as_ref().unwrap().len(), 1);
+    let collection = detail.apps[0].collection.clone();
+    send_spaces(
+        &mut admin,
+        SpaceCommand::Manage {
+            version: 1,
+            id: 1,
+            request: Request {
+                version: 1,
+                expected_generation: snapshot.generation,
+                change: Change::Membership {
+                    space: space.clone(),
+                    identity: "alice".into(),
+                    role: None,
+                },
+            },
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut admin),
+        Event::Result {
+            id: 1,
+            status: ManagementStatus::LastAdmin,
+            ..
+        }
+    ));
+    let Event::Snapshot {
+        snapshot: unchanged,
+        ..
+    } = read_spaces(&mut admin)
+    else {
+        panic!("snapshot")
+    };
+    assert_eq!(unchanged.generation, snapshot.generation);
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let Event::Snapshot {
+        snapshot: updated, ..
+    } = read_spaces(&mut admin)
+    else {
+        panic!("observation")
+    };
+    snapshot = updated;
+    let mut member = socket(&rig.public, &space, Some('b'));
+    send_spaces(
+        &mut member,
+        SpaceCommand::Watch {
+            version: 1,
+            selected: Some(space.clone()),
+            cursor: None,
+        },
+    );
+    let Event::Snapshot {
+        snapshot: member_snapshot,
+        ..
+    } = read_spaces(&mut member)
+    else {
+        panic!("member snapshot")
+    };
+    let detail = member_snapshot.selected.as_ref().unwrap();
+    assert!(detail.members.is_none());
+    assert!(detail.installed.is_empty());
+    assert!(detail.apps[0].stored_bytes.is_none());
+    assert_eq!(detail.apps[0].collection, collection);
+    send_spaces(
+        &mut member,
+        SpaceCommand::Manage {
+            version: 1,
+            id: 2,
+            request: Request {
+                version: 1,
+                expected_generation: snapshot.generation,
+                change: Change::Membership {
+                    space: space.clone(),
+                    identity: "bob".into(),
+                    role: Some(Role::Admin),
+                },
+            },
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut member),
+        Event::Result {
+            id: 2,
+            status: ManagementStatus::Denied,
+            ..
+        }
+    ));
+    assert!(matches!(read_spaces(&mut member), Event::Snapshot { .. }));
+    let mut stranger = socket(&rig.public, &space, None);
+    send_spaces(
+        &mut stranger,
+        SpaceCommand::Watch {
+            version: 1,
+            selected: Some(space.clone()),
+            cursor: None,
+        },
+    );
+    let Event::Snapshot {
+        snapshot: hidden, ..
+    } = read_spaces(&mut stranger)
+    else {
+        panic!("anonymous snapshot")
+    };
+    assert!(hidden.spaces.is_empty());
+    assert!(hidden.selected.is_none());
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    let Event::Snapshot {
+        snapshot: revoked, ..
+    } = read_spaces(&mut member)
+    else {
+        panic!("revocation")
+    };
+    assert!(revoked.spaces.is_empty());
+    assert!(revoked.selected.is_none());
+    // A returning observer from a previous authority incarnation receives a full
+    // explicit resync even when its numeric revision happens to match.
+    let mut stale = snapshot.cursor.clone();
+    stale.authority = "0".repeat(32);
+    send_spaces(
+        &mut stranger,
+        SpaceCommand::Watch {
+            version: 1,
+            selected: Some(space),
+            cursor: Some(stale),
+        },
+    );
+    loop {
+        if let Event::Snapshot {
+            resync: true,
+            snapshot,
+            ..
+        } = read_spaces(&mut stranger)
+        {
+            assert!(snapshot.selected.is_none());
+            break;
+        }
+    }
 }
 fn read(socket: &mut Socket) -> ServerMessage {
     loop {

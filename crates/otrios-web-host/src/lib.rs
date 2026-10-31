@@ -43,6 +43,18 @@ impl CanvasApp {
     pub fn admit_catalog(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.inner.admit_catalog(bytes)
     }
+    pub fn configure_spaces(&mut self, selected: Option<String>) -> Result<(), String> {
+        self.inner.configure_spaces(selected.as_deref())
+    }
+    pub fn spaces_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
+        self.inner.spaces_outgoing()
+    }
+    pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        self.inner.receive_spaces(bytes)
+    }
+    pub fn spaces_info(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.spaces_snapshot()).map_err(|e| e.to_string())
+    }
     pub fn can_update_catalog(&mut self) -> bool {
         self.inner.can_update_catalog()
     }
