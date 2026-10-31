@@ -818,6 +818,7 @@ impl Hub {
                 known_code,
                 writer,
                 resume,
+                collection,
             } => {
                 if epoch == 0
                     || epoch <= leases.last_epoch
@@ -857,6 +858,39 @@ impl Hub {
                 } else {
                     state_ref.clone()
                 };
+                let mount_binding = binding.as_ref().map(|b| {
+                    use otrios_interfaces::spaces::Operation;
+                    otrios_interfaces::canvas::MountBinding {
+                        version: 1,
+                        collection: b.collection.clone(),
+                        editable: self.allowed(scope, b, Operation::Edit),
+                        comments: self.allowed(scope, b, Operation::Comment),
+                        moderate: self.allowed(scope, b, Operation::Moderate),
+                    }
+                });
+                let initial_view = if p.aggregate_view {
+                    Some(if let Some(b) = &binding {
+                        self.collection_views
+                            .get(&b.collection)
+                            .ok_or("Missing collection presentation")?
+                            .1
+                            .clone()
+                    } else {
+                        self.view.clone()
+                    })
+                } else {
+                    None
+                };
+                // Resume receipts belong to the admitted collection. A replacement
+                // collection starts at zero even when the app/state references match.
+                let resume = if binding
+                    .as_ref()
+                    .is_some_and(|b| collection.as_deref() != Some(&b.collection))
+                {
+                    0
+                } else {
+                    resume
+                };
                 let room = self
                     .rooms
                     .get_mut(&room_key)
@@ -871,7 +905,11 @@ impl Hub {
                         .unwrap_or_default()
                         .as_secs() as i64,
                 );
-                let (mut sync, changed) = candidate.open_session(&writer, resume)?;
+                let (mut sync, changed) = if mount_binding.as_ref().is_some_and(|b| !b.editable) {
+                    (candidate.open_read_session(&writer)?, false)
+                } else {
+                    candidate.open_session(&writer, resume)?
+                };
                 sync.set_selection(p.selection.clone())?;
                 if changed
                     && let Some(file) = &room.file
@@ -899,6 +937,9 @@ impl Hub {
                         p.code
                     },
                     state,
+
+                    binding: mount_binding,
+                    initial_view,
                 });
                 leases.staged = Some(Lease {
                     epoch,

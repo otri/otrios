@@ -1596,6 +1596,9 @@ mod tests {
                                                     ui_hash: otrios_core::canvas::hash(&ui),
                                                     code: vec![],
                                                     state,
+
+                                                    binding: None,
+                                                    initial_view: None,
                                                 })
                                                 .unwrap(),
                                             )

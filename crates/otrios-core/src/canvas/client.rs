@@ -35,6 +35,7 @@ struct Mount {
     behavior: Option<Behavior>,
     input: InputRouter,
     state_ref: String,
+    binding: Option<otrios_interfaces::canvas::MountBinding>,
     private: bool,
     session_controls: bool,
     private_access: bool,
@@ -957,6 +958,12 @@ impl Client {
                     .as_ref()
                     .filter(|m| m.state_ref == r.pair.1)
                     .map_or(0, |m| m.doc.resume_sequence()),
+
+                collection: self
+                    .active
+                    .as_ref()
+                    .filter(|m| m.state_ref == r.pair.1)
+                    .and_then(|m| m.binding.as_ref().map(|b| b.collection.clone())),
             })
             .map(Some);
         }
@@ -998,6 +1005,9 @@ impl Client {
             ui_hash: hash(ui),
             code: code.into(),
             state: state.into(),
+
+            binding: None,
+            initial_view: None,
         })?)?;
         self.local = true;
         self.decision = None;
@@ -1028,6 +1038,8 @@ impl Client {
                 ui_hash,
                 code,
                 state,
+                binding,
+                initial_view,
             } => {
                 let Some(r) = &self.requested else {
                     return Ok(false);
@@ -1079,6 +1091,22 @@ impl Client {
                             writer: self.writer.ok_or("Missing writer nonce")?,
                         },
                     )?;
+                    candidate.binding = binding;
+                    candidate
+                        .doc
+                        .set_read_only(candidate.binding.as_ref().is_some_and(|b| !b.editable));
+                    if let Some(bytes) = initial_view {
+                        if !matches!(candidate.ui.presentation, Some(Presentation::View { .. })) {
+                            return Err("Undeclared initial aggregate view".into());
+                        }
+                        let view = Layout::from_bytes(&bytes)?;
+                        view.resolve_slots(&BTreeMap::new())?;
+                        candidate.view = Some(view);
+                    } else if candidate.binding.is_some()
+                        && matches!(candidate.ui.presentation, Some(Presentation::View { .. }))
+                    {
+                        return Err("Missing initial aggregate view".into());
+                    }
                     candidate.font = self.font.clone();
                     if let Some(chat) = &mut candidate.chat
                         && let Some(viewport) = self.layout_viewport
@@ -1101,6 +1129,7 @@ impl Client {
                     if let Some(old) = &self.active
                         && old.state_ref == candidate.state_ref
                         && old.ui.state_schema == candidate.ui.state_schema
+                        && old.binding == candidate.binding
                     {
                         candidate.doc.restore_pending(&old.doc)?;
                         candidate.now = old.now;
@@ -1109,8 +1138,11 @@ impl Client {
                     }
                     if self.previous_catalog.is_some()
                         && let Some(old) = &self.active
+                        && old.binding == candidate.binding
                     {
-                        candidate.view = old.view.clone();
+                        if candidate.view.is_none() {
+                            candidate.view = old.view.clone();
+                        }
                         candidate.keyboard = old.keyboard.clone();
                         candidate.editors = old.editors.clone();
                         candidate.text_views = old.text_views.clone();
@@ -1154,7 +1186,12 @@ impl Client {
                             }
                             self.ui_cache_hits += u64::from(cached);
                         }
-                        if self.previous_catalog.take().is_some() {
+                        if self.previous_catalog.take().is_some()
+                            && self
+                                .active
+                                .as_ref()
+                                .is_some_and(|old| old.binding == candidate.binding)
+                        {
                             let mut current = self.active.take().ok_or("Missing app activation")?;
                             if current.ui.behavior != candidate.ui.behavior {
                                 current.behavior = candidate.behavior;
@@ -1164,12 +1201,15 @@ impl Client {
                             current.doc = candidate.doc;
                             current.epoch = candidate.epoch;
                             current.visible = candidate.visible;
+                            current.view = candidate.view;
                             current.invalidate();
                             candidate = current;
                         }
                         if reconnecting
                             && self.active.as_ref().is_some_and(|old| {
-                                old.ui == candidate.ui && old.state_ref == candidate.state_ref
+                                old.ui == candidate.ui
+                                    && old.state_ref == candidate.state_ref
+                                    && old.binding == candidate.binding
                             })
                         {
                             let mut current =
@@ -1178,6 +1218,9 @@ impl Client {
                             current.epoch = candidate.epoch;
                             current.session_controls = candidate.session_controls;
                             current.private_access = candidate.private_access;
+                            if candidate.view.is_some() {
+                                current.view = candidate.view;
+                            }
                             current.refresh()?;
                             current.invalidate();
                             candidate = current;
@@ -2541,6 +2584,7 @@ fn qualify(
         behavior,
         input: InputRouter::default(),
         state_ref: state_ref.into(),
+        binding: None,
         private,
         session_controls: false,
         private_access: false,

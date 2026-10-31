@@ -19,6 +19,20 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
+State protocol `otrios-canvas-sync-v9` includes a version-1 presentation binding
+in each managed mount: collection identity and effective edit/comment/moderation
+actions. These describe authority decisions and are never credentials. A client
+resumes pending RAM intents only when both collection identity and effective
+actions match its previous mount. A replacement collection starts at receipt
+sequence zero; identical app and state references cannot restore old edits into
+it. Read admission does not allocate durable writer receipts even for editable
+schemas. The authority still checks every write independently.
+
+Aggregate presentations accompany the initial mount, so a managed candidate is
+qualified with its first usable view before acceptance. A missing or invalid
+view rejects the candidate and retains the previous activation. The release
+control v1 opening envelope remains unchanged across this protocol upgrade.
+
 This increment admits Create, Membership, Attach and Closed audience changes.
 Removal, deletion and public audience changes remain unavailable through HTTP
 until their lifecycle integrations are complete. Global chat/collection/ink lanes

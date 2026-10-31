@@ -471,6 +471,8 @@ fn monitoring_collector_has_an_explicit_collection_grant_and_no_human_membership
                 known_code: vec![],
                 writer: vec![1; 16],
                 resume: 0,
+
+                collection: None,
             },
         )
     };
@@ -613,7 +615,7 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v8","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v9","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -652,6 +654,8 @@ fn mount(socket: &mut Socket, catalog: &[u8]) {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
 }

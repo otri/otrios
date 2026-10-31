@@ -245,6 +245,8 @@ pub enum ClientMessage {
         /// RAM-only nonce for durable deduplication; never an access grant.
         writer: Vec<u8>,
         resume: u64,
+        /// Previously admitted collection, used only to scope RAM resume state.
+        collection: Option<String>,
     },
     /// Activate an already-qualified candidate; no new app Sync precedes this.
     AcceptMount {
@@ -275,6 +277,10 @@ pub enum ServerMessage {
         code: Vec<u8>,
         /// Complete authoritative state used to qualify a candidate before activation.
         state: Vec<u8>,
+        /// Authority-issued scope/actions; never an authorization credential.
+        binding: Option<MountBinding>,
+        /// A declared aggregate presentation qualifies before accepting the mount.
+        initial_view: Option<Vec<u8>>,
     },
     Sync {
         epoch: u32,
@@ -287,6 +293,16 @@ pub enum ServerMessage {
         epoch: u32,
         message: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MountBinding {
+    pub version: u32,
+    pub collection: String,
+    pub editable: bool,
+    pub comments: bool,
+    pub moderate: bool,
 }
 
 /// Versioned inner state protocol. Client clocks/trees are never accepted as writes.

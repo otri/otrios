@@ -383,6 +383,9 @@ fn activate_snapshot(
             ui: bytes,
             code,
             state: state_bytes,
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -570,7 +573,9 @@ fn corrupt_candidate_retains_previous_view_without_applying_code() {
                 state: vec![],
                 ui: b,
                 ui_hash: vec![0; 32],
-                code: vec![]
+                code: vec![],
+                binding: None,
+                initial_view: None,
             })
             .unwrap()
         )
@@ -963,7 +968,9 @@ fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
                     state: vec![],
                     ui_hash: hash(&data),
                     ui: data,
-                    code: vec![]
+                    code: vec![],
+                    binding: None,
+                    initial_view: None,
                 })
                 .unwrap()
             )
@@ -1361,6 +1368,9 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
                 ui: bytes,
                 code,
                 state: authority.save().unwrap(),
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -1372,6 +1382,74 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
     );
     pump(&mut client, &mut authority, &mut Session::default());
     assert_eq!(authority.value(1).unwrap(), 800);
+}
+
+#[test]
+fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions() {
+    for (same_collection, editable, expected) in
+        [(true, true, 800), (false, true, 420), (true, false, 420)]
+    {
+        let code = code();
+        let ui = playground::ui(&code);
+        let mut client = Client::default();
+        activate(&mut client, ui.clone(), "scoped-reconnect", code.clone());
+        let mut authority = Document::new(ui.state_schema.clone(), "scoped-reconnect").unwrap();
+        let binding = |collection: &str, editable| {
+            Some(MountBinding {
+                version: 1,
+                collection: collection.repeat(32),
+                editable,
+                comments: false,
+                moderate: false,
+            })
+        };
+        let remount = |client: &mut Client, binding, expected_hint| {
+            client.reset_connection();
+            let ClientMessage::Mount {
+                epoch, collection, ..
+            } = decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("mount")
+            };
+            assert_eq!(collection, expected_hint);
+            let bytes = encode_ui(&ui).unwrap();
+            client
+                .receive(
+                    &encode_server(&ServerMessage::Mounted {
+                        epoch,
+                        ui_hash: hash(&bytes),
+                        ui: bytes,
+                        code: code.clone(),
+                        state: authority.save().unwrap(),
+                        binding,
+                        initial_view: None,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+        };
+        remount(&mut client, binding("a", true), None);
+        // Consume Accept before creating an unconfirmed preview.
+        assert!(matches!(
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+            ClientMessage::AcceptMount { .. }
+        ));
+        edit(&mut client, "Linear slider", 870, 0);
+        assert_eq!(client.value(1).unwrap(), 800);
+        remount(
+            &mut client,
+            binding(if same_collection { "a" } else { "b" }, editable),
+            Some("a".repeat(32)),
+        );
+        assert_eq!(client.value(1).unwrap(), expected);
+        pump(&mut client, &mut authority, &mut Session::default());
+        assert_eq!(authority.value(1).unwrap(), expected);
+        if !editable {
+            edit(&mut client, "Linear slider", 100, 0);
+            assert_eq!(client.value(1).unwrap(), 420);
+            assert!(client.confirmed());
+        }
+    }
 }
 
 #[test]
@@ -1408,7 +1486,9 @@ fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
                     ui: encode_ui(&ui).unwrap(),
                     ui_hash: vec![0; 32],
                     code: vec![],
-                    state: authority.save().unwrap()
+                    state: authority.save().unwrap(),
+                    binding: None,
+                    initial_view: None,
                 })
                 .unwrap()
             )
@@ -1502,7 +1582,9 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                     ui: bytes.clone(),
                     ui_hash: vec![0; 32],
                     code: code.clone(),
-                    state: authority.save().unwrap()
+                    state: authority.save().unwrap(),
+                    binding: None,
+                    initial_view: None,
                 })
                 .unwrap()
             )
@@ -1538,6 +1620,9 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                 ui: bytes,
                 code,
                 state: authority.save().unwrap(),
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -1622,6 +1707,9 @@ fn old_private_lease_revocation_preserves_newer_public_mount() {
                 ui: bytes,
                 code: vec![],
                 state: vec![],
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -2035,6 +2123,9 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
             ui: bytes,
             code: vec![],
             state,
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -2386,6 +2477,9 @@ fn home_ui_replacement_retains_state_and_old_scene_and_rejects_stale_input() {
                 ui_hash: hash(&bytes),
                 code: vec![],
                 state,
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -2427,7 +2521,9 @@ fn rejected_home_update_restores_catalog_and_retains_usable_scene() {
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code: vec![],
-                state: vec![]
+                state: vec![],
+                binding: None,
+                initial_view: None,
             })
             .unwrap()
         )
@@ -2519,6 +2615,9 @@ fn every_app_uses_the_same_idempotent_ui_replacement_contract() {
                 ui: bytes,
                 code,
                 state: authority.save().unwrap(),
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -2588,6 +2687,9 @@ fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_n
             ui: bytes,
             code: after.clone(),
             state: authority.save().unwrap(),
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -2635,6 +2737,9 @@ fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_n
             ui: bytes,
             code: vec![],
             state: authority.save().unwrap(),
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -2678,7 +2783,9 @@ fn invalid_behavior_replacement_retains_active_guest_and_permissions() {
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code: bad,
-                state: authority.save().unwrap()
+                state: authority.save().unwrap(),
+                binding: None,
+                initial_view: None,
             })
             .unwrap()
         )
@@ -3004,6 +3111,9 @@ fn entry_and_app_links_resolve_app_owned_catalog_state_references() {
                 ui_hash: hash(&bytes),
                 code: vec![],
                 state: vec![],
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -3179,6 +3289,9 @@ fn cached_ui_mount_still_qualifies_fresh_state_and_rejects_wrong_digest() {
             ui_hash,
             code: vec![],
             state: authority.save().unwrap(),
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap()
     };
@@ -3947,6 +4060,9 @@ fn phone_breadcrumb_qualifies_the_destination_in_its_layout_viewport() {
                 ui: home_ui,
                 code: vec![],
                 state: vec![],
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -4367,6 +4483,9 @@ fn brass_relay_consumes_only_bounded_collection_views_and_receipt_confirmed_send
             ui,
             code: vec![],
             state: vec![],
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )

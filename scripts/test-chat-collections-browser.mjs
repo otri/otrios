@@ -77,7 +77,7 @@ try {
   assert.equal(resized.chat.lease_generation,generation,'resize reuses data coverage');assert.deepEqual(resized.resources.text_document.anchor_identity,anchor);await capture(a,'older-portrait');
   await click(a,'Show new messages');await wait(a,`JSON.parse(document.querySelector('#revision').dataset.chat).last_sequence===${records+1}`);const latest=await snapshot(a);assert.equal(latest.chat.messages,64);
   const identity=latest.chat.participant;await call('Page.reload',{},a);await wait(a,`JSON.parse(document.querySelector('#revision').dataset.chat||'{}').online&&JSON.parse(document.querySelector('#revision').dataset.chat).last_sequence===${records+1}`);const reloaded=await snapshot(a);assert.equal(reloaded.chat.participant,identity);
-  for(const s of [a,b]){assert.equal(hellos.get(s)?.version,1);assert.equal(hellos.get(s)?.state_protocol,'otrios-canvas-sync-v8');}
+  for(const s of [a,b]){assert.equal(hellos.get(s)?.version,1);assert.equal(hellos.get(s)?.state_protocol,'otrios-canvas-sync-v9');}
   assert.deepEqual(leaks,[]);
   const result={passed:true,records,setup_ms:setupMs,initial_collection_traffic:initialTraffic,initial,older,outside,resized,latest,reloaded,received:Object.fromEntries(received),sent:Object.fromEntries(sent),heap_scope:'CDP per-isolate JS heap and array-buffer/external-string backing storage; not RSS',private_body_leaks:leaks.length};
   await writeFile(join(output,'collection-windows.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({passed:true,records,setup_ms:setupMs,initial_collection_traffic:initialTraffic,selected_bytes:initial.chat.selected_bytes,replica_bytes:initial.chat.replica_bytes,worker_heap:initial.worker_heap,gpu:initial.gpu,first_older:older.chat.first_sequence}));
