@@ -169,3 +169,33 @@ QEMU uses the container's installed armhf runtime libraries (`-L /`), rather tha
 the linker's cross sysroot. These unsigned binaries were never activated on
 Frame. This evidence establishes emulated authority execution; physical display,
 touch, signed activation and rollback still require Frame acceptance.
+
+## Scoped ink and observation-fence checkpoint
+
+Clean source `bc6f2ceae9f81a2d3cecfaaecd4b177b7854d8f8` passed the full
+`scripts/check.sh` suite and rebuilt Chromium qualification with no runtime
+exceptions. The [report](data/spaces-ink-2026-11-01.json) identifies its artifacts.
+State protocol v12 scopes auxiliary payloads by accepted mount epoch and fences
+discovery refreshes with echoed observation IDs; release-control v1 is unchanged.
+
+The covered checks include 16 Space tests, ten host UI tests and two auxiliary
+frame tests. Ten top-level process tests pass: nine authority scenarios plus the
+child-client entry helper. The new ink scenario checks accepted versus staged
+admission, isolation by Space/app/document, stale epochs, subscription release on
+Quit, membership/attachment revocation, unaffected sibling use and fresh trails
+after reattachment. The metadata ordering regression checks that a delayed old
+snapshot cannot satisfy a new observation, repaint a roster or strand a removed
+app. All 13 browser-worker tests pass and now run in the required suite, including
+cookie revocation before reconnect and renderer-credit-independent redaction.
+
+Real Chromium pointer strokes reach a second client in the same Space. Another
+Space receives neither live points nor recent history after resubscribing.
+Drawing continues after one participant quits. The same probe also repeats the
+counter lifecycle and Space-picker checks.
+
+![Scoped drawing in the disposable browser fixture](data/spaces-ink-2026-11-01.png)
+
+This is local authority/browser evidence. The earlier ARM-emulation report names
+its older source explicitly; physical Frame acceptance remains pending. Managed
+chat/collection integration, local uninstall, durable deletion and public sharing
+are still required before RFC completion.
