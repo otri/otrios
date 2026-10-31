@@ -3,6 +3,7 @@
 mod behavior;
 pub mod chat;
 mod client;
+mod device_apps;
 pub mod document;
 mod host_ui;
 pub mod presentation;

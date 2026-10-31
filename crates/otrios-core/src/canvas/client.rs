@@ -164,6 +164,10 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    local_apps: super::device_apps::LocalApps,
+    local_uninstall: bool,
+    local_apps_offline: bool,
+    local_uninstall_disconnected: bool,
     chat_credential: Option<String>,
     chat_new_credential: Option<String>,
     chat_enabled: bool,
@@ -211,6 +215,95 @@ pub struct Client {
     managed_transport: bool,
 }
 impl Client {
+    /// Losing the old transport ends the opportunity to confirm its RAM-only
+    /// edits. An explicit local uninstall may then discard those intents.
+    pub fn set_local_apps_online(&mut self, online: bool) {
+        self.local_apps_offline = !online;
+        self.local_uninstall_disconnected |= !online && self.local_uninstall;
+    }
+    /// Apply device-operator metadata, including fail-closed invalidation. Hosts
+    /// must keep ticking after an error so an existing execution is stopped.
+    pub fn update_local_apps(
+        &mut self,
+        snapshot: Option<otrios_interfaces::device_apps::Namespace>,
+    ) -> Result<bool> {
+        let result = self.local_apps.update(snapshot);
+        self.local_uninstall = !self.host_active
+            && self
+                .active
+                .as_ref()
+                .is_some_and(|m| !self.local_apps.reference(&m.ui.ui_ref));
+        self.local_uninstall_disconnected =
+            self.local_uninstall && (self.local_uninstall_disconnected || self.local_apps_offline);
+        if self.local_uninstall
+            || self
+                .navigation
+                .as_ref()
+                .is_some_and(|p| !self.local_apps.reference(&p.0))
+        {
+            self.navigation = None;
+        }
+        if self.local_uninstall
+            || self
+                .requested
+                .as_ref()
+                .is_some_and(|r| !self.local_apps.reference(&r.pair.0))
+        {
+            if let Some(request) = self.requested.take().filter(|r| r.sent) {
+                self.host_wire.push_back(ClientMessage::CancelMount {
+                    epoch: request.epoch,
+                });
+                // Accept may already be in the transport queue, or Activated
+                // in flight. Leave closes that epoch in either authority slot.
+                self.host_wire.push_back(ClientMessage::Leave {
+                    epoch: request.epoch,
+                });
+            }
+            self.qualified = None;
+            self.decision = None;
+            self.auth_required = false;
+        }
+        let changed = if self.host_active {
+            self.build_host(true)?;
+            true
+        } else {
+            false
+        };
+        result.map(|()| changed)
+    }
+    fn finish_local_uninstall(&mut self) -> Result<bool> {
+        if !self.local_uninstall
+            || self.input_busy()
+            || !self.local_uninstall_disconnected && !self.reload_ready()
+        {
+            return Ok(false);
+        }
+        // Preserve the final confirmed authority state; only this participant
+        // leaves. A pending launch cannot keep removed code alive indefinitely.
+        if let Some(request) = self.requested.take().filter(|r| r.sent) {
+            self.host_wire.push_back(ClientMessage::CancelMount {
+                epoch: request.epoch,
+            });
+            self.host_wire.push_back(ClientMessage::Leave {
+                epoch: request.epoch,
+            });
+        }
+        self.qualified = None;
+        self.decision = None;
+        self.navigation = None;
+        self.auth_required = false;
+        if let Some(mount) = self.active.take().filter(|_| !self.local) {
+            self.host_wire
+                .push_back(ClientMessage::Leave { epoch: mount.epoch });
+        }
+        self.local_uninstall = false;
+        self.local_uninstall_disconnected = false;
+        self.collection_revoked = true;
+        if self.spaces.snapshot().is_some() {
+            self.build_host(false)?;
+        }
+        Ok(true)
+    }
     pub fn space_managed(&self) -> bool {
         self.managed_transport || self.active.as_ref().is_some_and(|m| m.binding.is_some())
     }
@@ -227,6 +320,9 @@ impl Client {
     }
     fn pending_available(&self) -> bool {
         self.requested.as_ref().is_some_and(|request| {
+            if !self.local_apps.reference(&request.pair.0) {
+                return false;
+            }
             let owner = request
                 .pair
                 .1
@@ -404,10 +500,12 @@ impl Client {
                 .into(),
             };
         }
-        let snapshot = self.spaces.snapshot().ok_or("Spaces are unavailable")?;
+        let snapshot = self
+            .local_apps
+            .project(self.spaces.snapshot().ok_or("Spaces are unavailable")?);
         let private = snapshot.identity.is_some();
         let rendered = super::host_ui::render(
-            snapshot,
+            &snapshot,
             &mut self.host,
             &draft,
             !self.chat_native,
@@ -449,6 +547,7 @@ impl Client {
         cached_scene(&mount)?;
         self.active = Some(mount);
         self.host_active = true;
+        self.local_uninstall = false;
         self.host_actions = rendered.actions;
         self.local = true;
         self.auth_required = false;
@@ -883,6 +982,9 @@ impl Client {
     /// Admit compatible UI document revisions without replacing executable code.
     /// The staged mount qualifies its new coverage before replacing the old view.
     pub fn can_update_catalog(&mut self) -> bool {
+        if self.local_uninstall {
+            return false;
+        }
         if self.host_active {
             return !self.input_busy();
         }
@@ -1142,6 +1244,9 @@ impl Client {
         self.active.as_ref().map_or(0, |m| m.stress_updates)
     }
     pub fn stress_tick(&mut self, now: f64) -> Result<bool> {
+        if self.local_uninstall {
+            return Ok(false);
+        }
         if !now.is_finite() {
             return Ok(false);
         }
@@ -1229,6 +1334,9 @@ impl Client {
         }
     }
     pub fn open(&mut self, ui_ref: &str, state_ref: &str) {
+        if !self.local_apps.reference(ui_ref) || self.local_uninstall {
+            return;
+        }
         self.reject_catalog_update();
         self.sign_out_requested = false;
         if let Some(request) = self.requested.take()
@@ -1246,6 +1354,12 @@ impl Client {
         self.decision = None;
         self.auth_required = false;
         self.host_wire.clear();
+        if self.local_uninstall {
+            self.local_uninstall_disconnected = true;
+            self.requested = None;
+            self.navigation = None;
+            return;
+        }
         if self.host_active {
             return;
         }
@@ -1321,6 +1435,9 @@ impl Client {
             .ok_or("Unknown admitted destination")?
             .app
             .clone();
+        if !self.local_apps.reference(&entry.ui_ref) || self.local_uninstall {
+            return Err("App is not installed on this device".into());
+        }
         if self.ui_ref() == entry.ui_ref
             && self.state_ref() == entry.state_ref
             && self.navigation.is_none()
@@ -1461,10 +1578,13 @@ impl Client {
         code: &[u8],
         state: &[u8],
     ) -> Result<bool> {
+        let description = decode_ui(ui)?;
+        if self.local_uninstall || !self.local_apps.reference(&description.ui_ref) {
+            return Err("App is not installed on this device".into());
+        }
         self.qualified = None;
         self.host_active = false;
         self.host_actions.clear();
-        let description = decode_ui(ui)?;
         self.generation = self.generation.checked_add(1).ok_or("Epoch exhausted")?;
         if self.writer.is_none() {
             self.writer = Some(state::writer_nonce()?);
@@ -1545,6 +1665,9 @@ impl Client {
                 let reconnecting = r.reconnecting;
                 let cached = ui.is_empty();
                 let candidate = (|| -> Result<Mount> {
+                    if !self.local_apps.reference(&r.pair.0) {
+                        return Err("App is not installed on this device".into());
+                    }
                     let e = self
                         .catalog
                         .as_ref()
@@ -1902,6 +2025,12 @@ impl Client {
         cached_scene(self.active.as_ref().ok_or("No Canvas")?)
     }
     pub fn event(&mut self, epoch: u32, control: u8, a: u16, b: u16) -> Result<bool> {
+        if self.local_uninstall {
+            return Ok(false);
+        }
+        self.dispatch_event(epoch, control, a, b)
+    }
+    fn dispatch_event(&mut self, epoch: u32, control: u8, a: u16, b: u16) -> Result<bool> {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
@@ -2054,6 +2183,9 @@ impl Client {
     }
     /// Preserve source sample time independently of worker delivery/animation time.
     pub fn pointer_at(&mut self, epoch: u32, mut event: PointerEvent, at: u64) -> Result<bool> {
+        if self.local_uninstall && event.phase == PointerPhase::Down {
+            return Ok(false);
+        }
         if event.position.iter().any(|v| !v.is_finite()) {
             event.phase = PointerPhase::Cancel;
             event.position = [0., 0.];
@@ -2229,6 +2361,9 @@ impl Client {
         Ok(changed)
     }
     pub fn activate(&mut self, epoch: u32, id: u32) -> Result<bool> {
+        if self.local_uninstall {
+            return Ok(false);
+        }
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
@@ -2265,7 +2400,7 @@ impl Client {
                 }
                 GestureKind::Activate => (0, 0),
             };
-            return self.event(self.epoch(), control, a, b);
+            return self.dispatch_event(self.epoch(), control, a, b);
         }
         match d.action {
             Some(Action::AppNavigate(id)) => {
@@ -2292,7 +2427,7 @@ impl Client {
                     return Ok(true);
                 }
             }
-            Some(Action::AppEvent(id)) => return self.event(self.epoch(), id, 0, 0),
+            Some(Action::AppEvent(id)) => return self.dispatch_event(self.epoch(), id, 0, 0),
             _ => {}
         }
         Ok(false)
@@ -2446,6 +2581,9 @@ impl Client {
         Ok(false)
     }
     pub fn hardware_edit(&mut self, edit: &Edit) -> Result<bool> {
+        if self.local_uninstall {
+            return Ok(false);
+        }
         if self.requested.as_ref().is_some_and(|r| !r.reconnecting) || self.active.is_none() {
             return Ok(false);
         }
@@ -2567,6 +2705,9 @@ impl Client {
         Ok(self.open_entry())
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        if self.finish_local_uninstall()? {
+            return Ok(true);
+        }
         if self.decision.is_none()
             && let Some(candidate) = self.qualified.as_mut().filter(|q| !q.accepted)
         {
@@ -2764,6 +2905,9 @@ impl Client {
         }))
     }
     pub fn adjust_control(&mut self, id: u32, dx: i16, dy: i16) -> Result<bool> {
+        if self.local_uninstall {
+            return Ok(false);
+        }
         if self.order_draggable(id) {
             let m = self.active.as_mut().ok_or("No Canvas")?;
             let order = ordered_items(m)?;

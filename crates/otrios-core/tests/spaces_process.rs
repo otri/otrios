@@ -1557,6 +1557,19 @@ fn managed_chat_isolates_owned_transcripts_and_preserves_them_after_quit_revocat
             text: "Revoked dispatch".into(),
         },
     );
+    send_spaces(
+        &mut bob,
+        otrios_interfaces::spaces::Command::Watch {
+            version: 1,
+            observation: 1,
+            selected: None,
+            cursor: None,
+        },
+    );
+    let otrios_interfaces::spaces::Event::Snapshot { snapshot, .. } = read_spaces(&mut bob) else {
+        panic!("revoked participant can still refresh Home");
+    };
+    assert!(snapshot.spaces.is_empty());
     send(&mut alice, ClientMessage::Leave { epoch: 1 });
     assert_eq!(
         chat_send(&mut frame, 1, epoch, 2, "Frame continues after Quit"),
@@ -1581,6 +1594,12 @@ fn managed_chat_isolates_owned_transcripts_and_preserves_them_after_quit_revocat
             break;
         }
     }
+    let (_, sibling) = chat_mount(&rig, &mut frame, "sibling", 2);
+    assert!(
+        sibling.messages.is_empty(),
+        "revoked app cannot leak into the next activation"
+    );
+    chat_join(&mut frame, 2);
     drop(alice);
     drop(bob);
     drop(frame);

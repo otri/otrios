@@ -99,8 +99,51 @@ their rooms. At the 256-room cache limit, a new mount may evict only a healthy,
 durable room with no participants; revisiting it recovers its checkpoint/journal.
 Leaving releases the pin, while an uncertain persistence outcome remains poisoned
 until restart even if the underlying filesystem becomes writable again.
-These controls do not claim local
-uninstall, complete auxiliary-lane lifecycle or physical Frame qualification.
+Physical Frame qualification remains separate from these software checks.
+
+## Device-local uninstall
+
+The native host optionally takes `--local-apps /ABS/PRIVATE/local-apps.json`
+or `OTRIOS_LOCAL_APPS` with that path. The device operator initializes and
+changes this private installation metadata as the same OS user that runs the
+host, using a directory that other users cannot write:
+
+```sh
+python3 scripts/device-apps.py --file /ABS/PRIVATE/local-apps.json init
+python3 scripts/device-apps.py --file /ABS/PRIVATE/local-apps.json remove brass-relay
+python3 scripts/device-apps.py --file /ABS/PRIVATE/local-apps.json restore brass-relay
+```
+
+`status` prints the namespace generation and removed roots. A configured host
+binds an exclusively owned private Unix notification socket before capturing
+the initial snapshot. Mutations serialize through a separate writer lock, replace
+the mode-0600 file atomically, fsync it and its directory, then request resync.
+An offline mutation is loaded on next startup; coalesced notifications always
+read the latest snapshot. Missing, invalid or rolled-back input closes local app
+launches. Equal-generation snapshots must have identical contents. The live
+worker retains its last accepted generation even while input is invalid.
+
+The device's installed namespace is the verified release catalog minus removed
+roots and their child destinations. Removed code cannot qualify a mount, run
+from cached code, or reappear through a fresh authority discovery snapshot.
+Signed catalog bytes and release hashes stay intact; immutable distribution and
+rollback code replicas may remain cached. `restore` reinstalls the root only if
+compatible verified code is available. It does not fetch unsigned code.
+
+Uninstall cancels staged launches, blocks new interactions, waits for outstanding
+edits and captured gestures, then disposes local execution and invalidates held
+presentation frames independently of renderer credit. Managed clients return to
+Home, where attachments show unavailable locally. Uninstall sends no Space
+management operation: attachments, collection identities, retained histories and
+other devices are unchanged. Reinstall can reopen the same collection. This
+PoC discards unconfirmed RAM edits if that participant loses its transport during
+uninstall. A reconnect cannot qualify the removed root or resume those discarded
+intents. Confirmed authority data is preserved; uninstalling a root does not
+introduce durable client storage. Device installation
+administration is an OS-operator action, independent of Space Admin membership.
+When `OTRIOS_LOCAL_APPS` is configured, the Frame supervisor also passes the
+required `--local-apps` option to the verified executable. Older binaries reject
+that option; a rollback must use an executable that enforces the namespace.
 
 This increment admits Create, Membership, Attach, Remove and Closed audience changes.
 Deletion and public audience changes remain unavailable through HTTP until their

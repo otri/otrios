@@ -394,6 +394,284 @@ fn quit_waits_for_confirmation_preserves_data_and_publisher_controls_cannot_mana
     assert_eq!(client.value(1).unwrap(), 1000);
 }
 
+fn local_namespace(generation: u64, removed: &[&str]) -> otrios_interfaces::device_apps::Namespace {
+    otrios_interfaces::device_apps::Namespace {
+        version: 1,
+        generation,
+        removed: removed.iter().map(|s| (*s).into()).collect(),
+    }
+}
+
+#[test]
+fn local_uninstall_flushes_confirmed_edits_leaves_other_clients_and_reattaches_same_data() {
+    let (mut client, ui) = fixture(Role::Admin);
+    let catalog_hash = client.catalog_hash().to_vec();
+    let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    let mut session = launch(&mut client, &ui, &mut authority);
+    let epoch = client.epoch();
+    client.event(epoch, ui.handlers[0].control, 0, 0).unwrap();
+    assert!(!client.confirmed());
+    client
+        .update_local_apps(Some(local_namespace(1, &["counter"])))
+        .unwrap();
+    assert!(!client.event(epoch, ui.handlers[0].control, 0, 0).unwrap());
+    client.tick(1000, 0).unwrap();
+    assert!(
+        !client.spaces_ui(),
+        "unconfirmed edits must drain before disposal"
+    );
+    let mut leaves = 0;
+    for step in 0..40 {
+        client.tick(1100 + step * 33, 0).unwrap();
+        while let Some(bytes) = client.outgoing().unwrap() {
+            match decode_client(&bytes).unwrap() {
+                ClientMessage::Sync { bytes, .. } => {
+                    authority.receive(&mut session, &bytes).unwrap();
+                }
+                ClientMessage::Leave { epoch: left } => {
+                    assert_eq!(left, epoch);
+                    leaves += 1;
+                }
+                other => panic!("uninstall sent unexpected authority command {other:?}"),
+            }
+        }
+        if let Some(bytes) = authority.generate(&mut session).unwrap() {
+            client
+                .receive(&encode_server(&ServerMessage::Sync { epoch, bytes }).unwrap())
+                .unwrap();
+        }
+        if client.spaces_ui() && leaves == 1 {
+            break;
+        }
+    }
+    assert!(client.spaces_ui());
+    assert!(
+        client.take_collection_revoked(),
+        "held presentation must be invalidated"
+    );
+    assert_eq!(leaves, 1);
+    assert_eq!(authority.value(1).unwrap(), 1000);
+    assert_eq!(client.catalog_hash(), catalog_hash);
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "no Space management operation"
+    );
+    assert!(!labels(&client).iter().any(|label| label == "Counter"));
+    client.open(&ui.ui_ref, "app:counter/state");
+    assert!(client.outgoing().unwrap().is_none());
+    // A newer remote discovery snapshot cannot reinstall code locally.
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: snapshot(Role::Admin, 2),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!labels(&client).iter().any(|label| label == "Counter"));
+    let retained = &client
+        .spaces_snapshot()
+        .unwrap()
+        .selected
+        .as_ref()
+        .unwrap()
+        .apps[0];
+    assert!(retained.attached);
+    assert_eq!(retained.collection, "d".repeat(32));
+    let (mut other, _) = fixture(Role::Member);
+    launch(&mut other, &ui, &mut authority);
+    assert_eq!(other.value(1).unwrap(), 1000);
+    client
+        .update_local_apps(Some(local_namespace(2, &[])))
+        .unwrap();
+    launch(&mut client, &ui, &mut authority);
+    assert_eq!(client.value(1).unwrap(), 1000);
+}
+
+#[test]
+fn local_uninstall_cancels_staged_mount_and_rejects_missing_or_rolled_back_namespace() {
+    let (mut client, ui) = fixture(Role::Member);
+    click(&mut client, "Counter");
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    let bytes = encode_ui(&ui).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 1,
+                    collection: "d".repeat(32),
+                    editable: true,
+                    comments: false,
+                    moderate: false,
+                }),
+                initial_view: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    // Model Accept already queued while the authority's Activated is in flight.
+    assert_eq!(
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::AcceptMount { epoch }
+    );
+    client
+        .update_local_apps(Some(local_namespace(2, &["counter"])))
+        .unwrap();
+    assert_eq!(
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::CancelMount { epoch }
+    );
+    assert_eq!(
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::Leave { epoch }
+    );
+    assert!(
+        !client
+            .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+            .unwrap()
+    );
+    assert!(
+        client
+            .update_local_apps(Some(local_namespace(1, &[])))
+            .is_err()
+    );
+    assert!(
+        client
+            .update_local_apps(Some(local_namespace(2, &[])))
+            .is_err()
+    );
+    assert!(client.update_local_apps(None).is_err());
+    client.open(&ui.ui_ref, "app:counter/state");
+    assert!(client.outgoing().unwrap().is_none());
+    assert!(
+        client
+            .mount_local(&encode_ui(&ui).unwrap(), "app:counter/state", &[], &[])
+            .is_err()
+    );
+    client
+        .update_local_apps(Some(local_namespace(3, &[])))
+        .unwrap();
+    client.open(&ui.ui_ref, "app:counter/state");
+    assert!(matches!(
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::Mount { .. }
+    ));
+}
+
+#[test]
+fn local_uninstall_waits_for_captured_release_and_preserves_its_final_edit() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    let (mut client, ui) = fixture(Role::Member);
+    let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    launch(&mut client, &ui, &mut authority);
+    let epoch = client.epoch();
+    let scene = client.scene().unwrap();
+    let button = scene
+        .controls()
+        .into_iter()
+        .find(|v| v.node.semantics.as_ref().unwrap().label == "Increase")
+        .unwrap();
+    let position = [button.origin[0] + 20., button.origin[1] + 20.];
+    client
+        .pointer(
+            epoch,
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Down,
+                position,
+            },
+        )
+        .unwrap();
+    assert!(client.input_busy());
+    client
+        .update_local_apps(Some(local_namespace(1, &["counter"])))
+        .unwrap();
+    client.tick(1000, 0).unwrap();
+    assert!(!client.spaces_ui());
+    assert!(
+        !client
+            .pointer(
+                epoch,
+                PointerEvent {
+                    id: 2,
+                    phase: PointerPhase::Down,
+                    position
+                }
+            )
+            .unwrap()
+    );
+    client
+        .pointer(
+            epoch,
+            PointerEvent {
+                id: 1,
+                phase: PointerPhase::Up,
+                position,
+            },
+        )
+        .unwrap();
+    assert!(!client.input_busy());
+    assert_eq!(
+        client.value(1).unwrap(),
+        1000,
+        "captured release still commits its edit"
+    );
+    assert!(!client.confirmed());
+    client.tick(1100, 0).unwrap();
+    assert!(!client.spaces_ui(), "released edit must also be confirmed");
+}
+
+#[test]
+fn disconnected_uninstall_discards_only_unconfirmed_ram_and_cannot_reconnect_removed_code() {
+    for offline_first in [false, true] {
+        let (mut client, ui) = fixture(Role::Member);
+        let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+        launch(&mut client, &ui, &mut authority);
+        client
+            .event(client.epoch(), ui.handlers[0].control, 0, 0)
+            .unwrap();
+        assert!(!client.confirmed());
+        if offline_first {
+            client.set_local_apps_online(false);
+        }
+        client
+            .update_local_apps(Some(local_namespace(1, &["counter"])))
+            .unwrap();
+        client.reset_connection();
+        client.set_local_apps_online(true); // A new socket cannot revive the old lease.
+        client.tick(1000, 0).unwrap();
+        assert!(client.spaces_ui());
+        assert!(client.take_collection_revoked());
+        while let Some(bytes) = client.outgoing().unwrap() {
+            assert!(matches!(
+                decode_client(&bytes).unwrap(),
+                ClientMessage::Leave { .. }
+            ));
+        }
+        assert_eq!(authority.value(1).unwrap(), 0);
+        client
+            .update_local_apps(Some(local_namespace(2, &[])))
+            .unwrap();
+        launch(&mut client, &ui, &mut authority);
+        assert_eq!(
+            client.value(1).unwrap(),
+            0,
+            "discarded intent must not resume after reinstall"
+        );
+    }
+}
+
 #[test]
 fn denied_managed_reconnect_redacts_the_previous_replica_without_renderer_credit() {
     let (mut client, ui) = fixture(Role::Member);

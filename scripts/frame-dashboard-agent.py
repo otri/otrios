@@ -206,6 +206,9 @@ class Host:
         # Presentation only; old native releases safely ignore this during rollback.
         env['OTRIOS_PRIVATE_APP_ACCESS']='true'
         command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
+        # An older verified binary must reject this required option rather than
+        # silently ignoring installation policy supplied only in its environment.
+        if env.get('OTRIOS_LOCAL_APPS'):command+=['--local-apps',env['OTRIOS_LOCAL_APPS']]
         if screen and screen!='locked':command+=['--screen',screen]
         command+=['--catalog-update-socket',str(self.ui_socket)]
         command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]

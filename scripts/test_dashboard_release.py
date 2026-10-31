@@ -332,6 +332,10 @@ class DirectHostContract(unittest.TestCase):
                 self.assertNotIn('--screen',launch.call_args.args[0])
                 agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'),screen='home')
                 self.assertIn('--screen',launch.call_args.args[0]);self.assertEqual(launch.call_args.args[0][launch.call_args.args[0].index('--screen')+1],'home')
+                with patch.dict(agent.os.environ,{'OTRIOS_LOCAL_APPS':str(pathlib.Path(tmp)/'local-apps.json')}):
+                    agent.Host(args,'a'*64,pathlib.Path('/verified/dashboard-native'))
+                command=launch.call_args.args[0]
+                self.assertEqual(command[command.index('--local-apps')+1],str(pathlib.Path(tmp)/'local-apps.json'))
     def test_connected_candidate_waits_for_an_admitted_confirmed_app(self):
         from types import SimpleNamespace
         from unittest.mock import patch

@@ -776,7 +776,31 @@ async fn peer(
                     break;
                 }
             }
-            Event::ManagedChat(None) => break,
+            Event::ManagedChat(None) => {
+                let guard = app.apps.lock().await;
+                let scope = spaces::Scope {
+                    space: space.clone(),
+                    identity: spaces::identity(&app, &key).await,
+                };
+                // Policy publication can stop chat before the state worker has
+                // published its revoked lease or queued AccessRequired. Preserve
+                // the shared socket so that final invalidation can still drain.
+                // Unexpected failure of a currently authorized worker requires
+                // reconnect/resync, as before.
+                if managed_chat.as_ref().is_some_and(|peer| {
+                    managed_ink.current(&live) == Some(&peer.active)
+                        && guard.as_ref().is_some_and(|hub| {
+                            hub.allowed(
+                                &scope,
+                                &peer.active.binding,
+                                otrios_interfaces::spaces::Operation::Read,
+                            )
+                        })
+                }) {
+                    break;
+                }
+                managed_chat = None;
+            }
             Event::Spaces(Some(packet)) => {
                 let guard = app.apps.lock().await;
                 let principal = spaces::identity(&app, &key).await;

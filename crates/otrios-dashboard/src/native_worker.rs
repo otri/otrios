@@ -23,6 +23,9 @@ use std::{
 };
 #[path = "bench_telemetry.rs"]
 mod bench_telemetry;
+#[cfg(unix)]
+#[path = "native_worker/local_apps.rs"]
+mod local_apps;
 #[path = "session_client.rs"]
 mod session_client;
 enum NetworkEvent {
@@ -133,6 +136,7 @@ pub(super) enum Input {
 }
 #[derive(Clone, Default)]
 pub(super) struct Options {
+    pub(super) local_apps: Option<String>,
     pub(super) chat_identity: Option<String>,
     pub(super) font: Option<Arc<otrios_core::dashboard::font::Font>>,
     pub(super) url: Option<String>,
@@ -160,6 +164,7 @@ pub(super) struct Options {
 }
 pub(super) fn options() -> Result<Options, String> {
     let mut o = Options {
+        local_apps: std::env::var("OTRIOS_LOCAL_APPS").ok(),
         private_access: std::env::var("OTRIOS_PRIVATE_APP_ACCESS").is_ok_and(|v| v == "true"),
         ..Options::default()
     };
@@ -181,6 +186,7 @@ pub(super) fn options() -> Result<Options, String> {
             }
             "--state" => o.state = Some(value),
             "--apps" => o.apps = Some(value),
+            "--local-apps" => o.local_apps = Some(value),
             "--frames" => o.frames = Some(value.parse::<usize>().map_err(|e| e.to_string())?),
             "--rotation" => {
                 o.rotation = value.parse::<u16>().map_err(|e| e.to_string())?;
@@ -414,6 +420,19 @@ pub(super) fn state_worker(
             .and_then(|(_, selected)| selected),
     ));
     let mut client = Client::default();
+    #[cfg(unix)]
+    let local_apps = o
+        .local_apps
+        .as_ref()
+        .map(|path| local_apps::Observer::bind(std::path::Path::new(path)))
+        .transpose()?;
+    #[cfg(unix)]
+    if let Some(observer) = &local_apps {
+        let bytes = observer.capture();
+        if let Err(error) = client.update_local_apps(bytes.ok()) {
+            eprintln!("Local apps namespace unavailable: {error}");
+        }
+    }
     if let Some(url) = &o.url {
         let (_, selected) = configured_session(url)?;
         client.configure_spaces(selected.as_deref())?;
@@ -552,6 +571,19 @@ pub(super) fn state_worker(
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
     loop {
+        client.set_local_apps_online(
+            epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id),
+        );
+        #[cfg(unix)]
+        if let Some(observer) = &local_apps
+            && observer.changed()?
+        {
+            let bytes = observer.capture();
+            match client.update_local_apps(bytes.ok()) {
+                Ok(changed) => dirty |= changed,
+                Err(error) => eprintln!("Local apps namespace unavailable: {error}"),
+            }
+        }
         if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
             return Err("Network worker stopped unexpectedly".into());
         }
@@ -772,6 +804,9 @@ pub(super) fn state_worker(
             }
         }
         dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        if client.take_collection_revoked() {
+            revoke_display(&mut display_access, &mut composer);
+        }
         if client.rejected_mount_pending() {
             catalog_candidate = None;
             eprintln!("App candidate layout rejected; continuing current app");
@@ -1575,10 +1610,15 @@ mod tests {
     }
     #[test]
     fn app_transport_receives_remote_edits_reconnects_and_revokes_a_held_frame() {
-        check_transport_revocation(false);
-        check_transport_revocation(true);
+        check_transport_revocation(false, false);
+        check_transport_revocation(true, false);
     }
-    fn check_transport_revocation(private: bool) {
+    #[cfg(unix)]
+    #[test]
+    fn local_uninstall_revokes_a_held_frame_without_waiting_for_display_credit() {
+        check_transport_revocation(false, true);
+    }
+    fn check_transport_revocation(private: bool, uninstall: bool) {
         use otrios_core::canvas::{Document, Session, decode_client, encode_server};
         use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
         use tungstenite::Message;
@@ -1588,6 +1628,17 @@ mod tests {
             Revoke,
         }
         let fixture = fixture();
+        let local_apps_path = fixture.root.join("local-apps.json");
+        #[cfg(unix)]
+        if uninstall {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(
+                &local_apps_path,
+                br#"{"version":1,"generation":1,"removed":[]}"#,
+            )
+            .unwrap();
+            fs::set_permissions(&local_apps_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
         let catalog_path = fixture.root.join("catalog.flex");
         let mut catalog =
             otrios_core::canvas::decode_catalog(&fs::read(&catalog_path).unwrap()).unwrap();
@@ -1774,6 +1825,7 @@ mod tests {
             }
         });
         let options = Options {
+            local_apps: uninstall.then(|| local_apps_path.to_string_lossy().into()),
             apps: Some(fixture.root.to_string_lossy().into()),
             screen: Some("three-d-lab".into()),
             url: Some(format!("ws://{address}/stream")),
@@ -1812,7 +1864,25 @@ mod tests {
             tx.send(Input::RenderReady(frame.serial)).unwrap();
         };
         assert!(!held.paint.base.mesh.vertices.is_empty());
-        actions.send(ServerAction::Revoke).unwrap();
+        if uninstall {
+            let result = std::process::Command::new("python3")
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../scripts/device-apps.py"
+                ))
+                .arg("--file")
+                .arg(&local_apps_path)
+                .args(["remove", "three-d-lab"])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        } else {
+            actions.send(ServerAction::Revoke).unwrap();
+        }
         let deadline = Instant::now() + Duration::from_secs(3);
         while held.access.load(Ordering::Acquire) {
             assert!(
