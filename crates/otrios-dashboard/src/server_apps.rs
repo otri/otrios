@@ -22,6 +22,7 @@ struct Package {
     policy: otrios_interfaces::spaces::AppPolicy,
     chat: bool,
     aggregate_view: bool,
+    primary_ref: String,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -89,6 +90,38 @@ fn bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
         return Err("App artifact exceeds budget".into());
     }
     Ok(bytes)
+}
+fn collection_room(binding: &otrios_interfaces::spaces::Binding, package: &Package) -> String {
+    if package.app.state_ref == package.primary_ref {
+        binding.collection.clone()
+    } else {
+        format!(
+            "{}:{}",
+            binding.collection,
+            canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
+        )
+    }
+}
+fn collection_data_usage(root: &Path, collection: &str) -> Option<u64> {
+    let path = root.join(format!("collection-{collection}.data"));
+    let entries = match fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(0),
+        _ => return None,
+    };
+    let mut total = 0_u64;
+    for (count, entry) in entries.enumerate() {
+        if count == 64 {
+            return None;
+        }
+        let entry = entry.ok()?;
+        let meta = fs::symlink_metadata(entry.path()).ok()?;
+        if !meta.is_file() {
+            return None;
+        }
+        total = total.checked_add(meta.len())?;
+    }
+    Some(total)
 }
 impl Hub {
     pub(super) fn new(source: PathBuf, state: Option<PathBuf>) -> Result<Self> {
@@ -258,7 +291,11 @@ impl Hub {
         let package = self
             .bundles
             .get(&self.active)
-            .and_then(|b| b.packages.values().find(|p| p.app.id == app))
+            .and_then(|b| {
+                b.packages
+                    .values()
+                    .find(|p| p.app.id.split('/').next() == Some(app) && p.app.state_ref == source)
+            })
             .cloned()
             .ok_or("Installed app unavailable")?;
         if package.app.state_ref != source {
@@ -278,11 +315,11 @@ impl Hub {
             .ok_or("Legacy root unavailable")?;
         let bytes = source.doc.save()?;
         let root = source.doc.root_hash();
-        let path = self
-            .state
-            .as_ref()
-            .ok_or("Durable app storage required")?
-            .join(format!("collection-{}.merkle", binding.collection));
+        let path = self.collection_file(&binding, &package)?;
+        if !path.exists() && path.with_extension("merkle.log").exists() {
+            return Err("Missing migration checkpoint with retained journal".into());
+        }
+        self.collection_parent(&path)?;
         if path.exists() {
             let existing = store::load(
                 &path,
@@ -378,7 +415,9 @@ impl Hub {
                     .get(&self.active)
                     .and_then(|b| b.packages.values().find(|p| p.app.id == a.policy.app));
                 let mut available = package.is_some_and(|p| !p.chat)
-                    && !self.rooms.get(&a.collection).is_some_and(|r| r.failed);
+                    && !self.rooms.iter().any(|(key, r)| {
+                        r.failed && key.split(':').next() == Some(a.collection.as_str())
+                    });
                 let stored_bytes = self.state.as_ref().and_then(|root| {
                     let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
                     let presentation =
@@ -392,11 +431,14 @@ impl Hub {
                         presentation,
                     ]
                     .iter()
-                    .try_fold(0_u64, |sum, p| match fs::metadata(p) {
-                        Ok(m) if m.is_file() => sum.checked_add(m.len()),
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(sum),
-                        _ => None,
-                    })
+                    .try_fold(
+                        collection_data_usage(root, &a.collection)?,
+                        |sum, p| match fs::metadata(p) {
+                            Ok(m) if m.is_file() => sum.checked_add(m.len()),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(sum),
+                            _ => None,
+                        },
+                    )
                 });
                 facts.insert(
                     a.collection.clone(),
@@ -440,14 +482,14 @@ impl Hub {
             .split('/')
             .next()
             .ok_or("Missing installed app")?;
-        let schema = canvas::hex(&canvas::hash(&canvas::encode_schema(&package.schema)?));
+        let schema = &package.policy.schema;
         let registry = self.registry().map_err(|e| e.to_string())?;
         let binding = otrios_core::spaces::bind(
             self.registry().map_err(|e| e.to_string())?,
             scope.identity.as_deref(),
             scope.space.as_deref().ok_or("Select a Space")?,
             owner,
-            &schema,
+            schema,
         )
         .map_err(|e| e.to_string())?;
         otrios_core::spaces::authorize_installed(
@@ -501,16 +543,20 @@ impl Hub {
         binding: &otrios_interfaces::spaces::Binding,
         package: &Package,
     ) -> Result<()> {
-        if self.rooms.contains_key(&binding.collection) {
+        let key = collection_room(binding, package);
+        if self.rooms.contains_key(&key) {
             return Ok(());
         }
         if self.rooms.len() >= 256 {
             return Err("App root budget exhausted".into());
         }
-        let file = self
-            .state
-            .as_ref()
-            .map(|root| root.join(format!("collection-{}.merkle", binding.collection)));
+        let file = Some(self.collection_file(binding, package)?);
+        if let Some(path) = &file {
+            if !path.exists() && path.with_extension("merkle.log").exists() {
+                return Err("Missing collection checkpoint with retained journal".into());
+            }
+            self.collection_parent(path)?;
+        }
         let mut doc = match file.as_ref().filter(|p| p.exists()) {
             Some(path) => store::load(
                 path,
@@ -529,7 +575,7 @@ impl Hub {
             persist(file, &doc.save()?).map_err(|e| e.to_string())?;
         }
         self.rooms.insert(
-            binding.collection.clone(),
+            key,
             Room {
                 doc,
                 file,
@@ -537,6 +583,50 @@ impl Hub {
             },
         );
         Ok(())
+    }
+    fn collection_file(
+        &self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<PathBuf> {
+        let root = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?;
+        if package.app.state_ref == package.primary_ref {
+            Ok(root.join(format!("collection-{}.merkle", binding.collection)))
+        } else {
+            Ok(root
+                .join(format!("collection-{}.data", binding.collection))
+                .join(format!(
+                    "doc-{}.merkle",
+                    canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
+                )))
+        }
+    }
+    fn collection_parent(&self, path: &Path) -> Result<()> {
+        let root = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?;
+        let parent = path.parent().ok_or("Missing collection directory")?;
+        if parent == root {
+            return Ok(());
+        }
+        match fs::create_dir(parent) {
+            Ok(()) => fs::File::open(root)
+                .and_then(|d| d.sync_all())
+                .map_err(|e| e.to_string()),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::AlreadyExists
+                    && fs::symlink_metadata(parent).is_ok_and(|m| m.is_dir()) =>
+            {
+                fs::File::open(root)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| e.to_string())
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
     pub(super) fn refresh(&mut self, releases: &Option<PathBuf>, release: &Value) -> Result<()> {
         let id = release["id"].as_str().unwrap_or("development");
@@ -793,12 +883,42 @@ impl Hub {
                         policy,
                         chat,
                         aggregate_view,
+                        primary_ref: String::new(),
                     },
                 )
                 .is_some()
             {
                 return Err("Duplicate UI reference".into());
             }
+        }
+        let mut policies = BTreeMap::new();
+        for p in packages.values().filter(|p| !p.app.id.contains('/')) {
+            let owned = packages
+                .values()
+                .filter(|other| other.app.id.split('/').next() == Some(p.app.id.as_str()))
+                .collect::<Vec<_>>();
+            let roots = owned
+                .iter()
+                .map(|p| otrios_interfaces::spaces::RootSchema {
+                    state_ref: p.app.state_ref.clone(),
+                    schema: p.schema.clone(),
+                })
+                .collect::<Vec<_>>();
+            let policy = otrios_interfaces::spaces::AppPolicy {
+                app: p.app.id.clone(),
+                schema: otrios_core::spaces::collection_schema(&roots)
+                    .map_err(|e| e.to_string())?,
+                closed_only: owned.iter().any(|p| p.private),
+                editable: owned.iter().any(|p| p.policy.editable || p.chat),
+                comments: false,
+            };
+            policies.insert(p.app.id.clone(), (policy, p.app.state_ref.clone()));
+        }
+        for p in packages.values_mut() {
+            let owner = p.app.id.split('/').next().ok_or("Missing app owner")?;
+            let (policy, primary_ref) = policies.get(owner).ok_or("Missing admitted app owner")?;
+            p.policy = policy.clone();
+            p.primary_ref = primary_ref.clone();
         }
         self.rooms.extend(new_rooms);
         self.bundles
@@ -834,7 +954,8 @@ impl Hub {
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
         for (state_ref, room) in &mut self.rooms {
-            if let Some(owner) = managed_refs.get(state_ref) {
+            if let Some(owner) = managed_refs.get(state_ref.split(':').next().unwrap_or(state_ref))
+            {
                 let fields = self
                     .bundles
                     .values()
@@ -842,6 +963,7 @@ impl Hub {
                     .filter(|p| {
                         p.app.id.split('/').next() == Some(owner.as_str())
                             && &p.schema == room.doc.schema()
+                            && p.app.state_ref == room.doc.scope()
                     })
                     .flat_map(|p| p.signal_fields.iter().copied())
                     .collect::<std::collections::BTreeSet<_>>();
@@ -944,7 +1066,7 @@ impl Hub {
                     if p.aggregate_view {
                         self.load_collection_view(&binding.collection)?;
                     }
-                    binding.collection.clone()
+                    collection_room(binding, &p)
                 } else {
                     state_ref.clone()
                 };

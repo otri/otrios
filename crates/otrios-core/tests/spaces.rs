@@ -4,6 +4,56 @@ use otrios_core::spaces::{self, Error, Store};
 use otrios_interfaces::spaces::*;
 
 #[test]
+fn collection_schema_covers_all_distinct_roots_and_is_independent_of_screen_order() {
+    use otrios_interfaces::{
+        canvas::{Field, StateSchema},
+        layout::Value,
+    };
+    let a = RootSchema {
+        state_ref: "app:notes/pages".into(),
+        schema: StateSchema {
+            id: "pages-v1".into(),
+            fields: vec![Field {
+                id: 1,
+                name: "title".into(),
+                default: Value::Text(String::new()),
+                writable: true,
+            }],
+        },
+    };
+    let mut b = a.clone();
+    b.state_ref = "app:notes/settings".into();
+    let single = spaces::collection_schema(std::slice::from_ref(&a)).unwrap();
+    assert_eq!(
+        spaces::collection_schema(&[a.clone(), a.clone()]).unwrap(),
+        single
+    );
+    let both = spaces::collection_schema(&[a.clone(), b.clone()]).unwrap();
+    assert_ne!(both, single);
+    assert_eq!(
+        spaces::collection_schema(&[b.clone(), a.clone()]).unwrap(),
+        both
+    );
+    b.schema.fields[0].writable = false;
+    assert_ne!(
+        spaces::collection_schema(&[a.clone(), b.clone()]).unwrap(),
+        both
+    );
+    b.state_ref = a.state_ref.clone();
+    assert_eq!(
+        spaces::collection_schema(&[a.clone(), b]),
+        Err(Error::Incompatible)
+    );
+    assert_eq!(
+        spaces::collection_schema(&vec![a.clone(); MAX_ROOTS + 1]),
+        Err(Error::Capacity)
+    );
+    let mut invalid = a;
+    invalid.state_ref.push('\0');
+    assert_eq!(spaces::collection_schema(&[invalid]), Err(Error::Invalid));
+}
+
+#[test]
 fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
     use std::collections::BTreeMap;
     let mut registry = fixture();

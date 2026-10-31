@@ -5,6 +5,8 @@ use otrios_interfaces::spaces::*;
 use std::collections::BTreeSet;
 mod discovery;
 mod observer;
+mod schema;
+pub use schema::collection_schema;
 mod wire;
 pub use discovery::{CollectionFacts, advance_discovery, discovery, discovery_cursor};
 pub use observer::{Observer, Outcome};

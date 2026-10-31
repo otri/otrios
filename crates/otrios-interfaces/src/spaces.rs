@@ -12,6 +12,8 @@ pub const CHANNEL: u8 = 5;
 pub const MAX_COMMAND_BYTES: usize = 8192;
 pub const MAX_EVENT_BYTES: usize = 128 * 1024;
 pub const MAX_INSTALLED_APPS: usize = 16;
+pub const MAX_ROOTS: usize = 16;
+pub const MAX_COLLECTION_SCHEMA_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -45,11 +47,20 @@ pub struct Member {
 #[serde(deny_unknown_fields)]
 pub struct AppPolicy {
     pub app: String,
-    /// Digest of the complete canonical state schema, not just its display name.
+    /// Digest of the complete canonical collection schema, including its roots.
     pub schema: String,
     pub closed_only: bool,
     pub editable: bool,
     pub comments: bool,
+}
+
+/// Multiple screens may share a root; distinct roots remain separate documents
+/// inside one Space-owned app collection. References are not access grants.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootSchema {
+    pub state_ref: String,
+    pub schema: crate::canvas::StateSchema,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

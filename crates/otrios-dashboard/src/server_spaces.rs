@@ -321,7 +321,27 @@ pub(super) async fn provision(app: &App, path: &Path) -> Result<(), String> {
                 )?;
             }
             if let Some(source) = entry["legacy_state_ref"].as_str() {
+                if entry.get("legacy_roots").is_some() {
+                    return Err("Choose one legacy root declaration".into());
+                }
                 imports.push(hub.import_legacy(actor, &space, id, source)?);
+            }
+            if let Some(roots) = entry.get("legacy_roots") {
+                let roots = roots
+                    .as_array()
+                    .filter(|r| r.len() <= contract::MAX_ROOTS)
+                    .ok_or("Invalid legacy roots")?;
+                let mut seen = std::collections::BTreeSet::new();
+                for root in roots {
+                    let source = root
+                        .as_str()
+                        .filter(|s| !s.is_empty() && s.len() <= 128)
+                        .ok_or("Invalid legacy root")?;
+                    if !seen.insert(source) {
+                        return Err("Duplicate legacy root".into());
+                    }
+                    imports.push(hub.import_legacy(actor, &space, id, source)?);
+                }
             }
         }
         records.push(json!({"name":name,"space":space,"imports":imports}));

@@ -878,6 +878,222 @@ fn mount(socket: &mut Socket, catalog: &[u8]) {
         },
     );
 }
+fn document_session(
+    rig: &Rig,
+    space: &str,
+    id: &str,
+    schema: StateSchema,
+    value: Option<u16>,
+) -> (u16, Option<String>) {
+    let mut socket = socket(&rig.public, space, Some('a'));
+    let state_ref = format!("app:{id}/state");
+    send(
+        &mut socket,
+        ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: format!("app:{id}/ui"),
+            state_ref: state_ref.clone(),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![7; 16],
+            resume: 0,
+            collection: None,
+        },
+    );
+    let ServerMessage::Mounted { state, binding, .. } = read(&mut socket) else {
+        panic!("document mount")
+    };
+    let mut replica = canvas::StateAdapter::new(schema, &state_ref, &state, [7; 16]).unwrap();
+    send(&mut socket, ClientMessage::AcceptMount { epoch: 1 });
+    if binding.is_some() {
+        assert!(matches!(
+            read(&mut socket),
+            ServerMessage::Activated { epoch: 1 }
+        ));
+    }
+    if let Some(value) = value {
+        replica.set(&[(1, value)]).unwrap();
+        while let Some(bytes) = replica.generate().unwrap() {
+            send(&mut socket, ClientMessage::Sync { epoch: 1, bytes });
+        }
+        while !replica.confirmed() {
+            if let ServerMessage::Sync { bytes, .. } = read(&mut socket) {
+                replica.receive(&bytes).unwrap();
+            }
+        }
+        assert_eq!(replica.value(1).unwrap(), value);
+    }
+    send(&mut socket, ClientMessage::Leave { epoch: 1 });
+    (replica.value(1).unwrap(), binding.map(|b| b.collection))
+}
+
+#[test]
+fn owned_documents_share_one_collection_without_aliasing_and_migrate_all_confirmed_roots() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start_mode(&binary, false);
+    rig.stop();
+    let mut child_ui =
+        canvas::decode_ui(&fs::read(rig.root.join("apps/counter/package/ui.flex")).unwrap())
+            .unwrap();
+    child_ui.ui_ref = "app:counter/details/ui".into();
+    child_ui.state_schema.id = "counter-details-v1".into();
+    let child_schema = child_ui.state_schema.clone();
+    let child_ui = canvas::encode_ui(&child_ui).unwrap();
+    let app = App {
+        id: "counter/details".into(),
+        title: "Details".into(),
+        ui_ref: "app:counter/details/ui".into(),
+        state_ref: "app:counter/details/state".into(),
+        status: "canvas-app".into(),
+        dependencies: vec![],
+    };
+    let package = rig.root.join("apps/counter/details/package");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(package.join("ui.flex"), &child_ui).unwrap();
+    fs::write(package.join("app.flex"), canvas::encode_app(&app).unwrap()).unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    catalog.apps.push(CatalogEntry {
+        app,
+        path: "counter/details".into(),
+        ui_hash: canvas::hash(&child_ui),
+        private: false,
+    });
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, false, false);
+    let legacy_space = "a".repeat(32);
+    assert_eq!(
+        document_session(&rig, &legacy_space, "counter", schema(), Some(41)).0,
+        41
+    );
+    assert_eq!(
+        document_session(
+            &rig,
+            &legacy_space,
+            "counter/details",
+            child_schema.clone(),
+            Some(73)
+        )
+        .0,
+        73
+    );
+    rig.stop();
+    let manifest = rig.root.join("multi-root-provision.json");
+    private_json(
+        &manifest,
+        &json!({"version":1,"spaces":[
+            {"name":"Household","admins":["alice"],"members":[],"apps":[{"id":"counter","legacy_roots":["app:counter/state","app:counter/details/state"]}]},
+            {"name":"Work","admins":["alice"],"members":[],"apps":[{"id":"counter"}]}
+        ]}),
+    );
+    let provisioned = rig.provision(&binary, &manifest);
+    assert!(
+        provisioned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&provisioned.stderr)
+    );
+    let record: Json = serde_json::from_slice(&provisioned.stdout).unwrap();
+    assert_eq!(record["spaces"][0]["imports"].as_array().unwrap().len(), 2);
+    let household = record["spaces"][0]["space"].as_str().unwrap();
+    let work = record["spaces"][1]["space"].as_str().unwrap();
+    rig.restart(&binary, true, true);
+    let root = document_session(&rig, household, "counter", schema(), None);
+    let child = document_session(
+        &rig,
+        household,
+        "counter/details",
+        child_schema.clone(),
+        None,
+    );
+    assert_eq!(root.0, 41);
+    assert_eq!(child.0, 73);
+    assert_eq!(root.1, child.1);
+    let other_root = document_session(&rig, work, "counter", schema(), None);
+    let other_child = document_session(&rig, work, "counter/details", child_schema.clone(), None);
+    assert_eq!(other_root.0, 0);
+    assert_eq!(other_child.0, 0);
+    assert_eq!(other_root.1, other_child.1);
+    assert_ne!(root.1, other_root.1);
+    rig.stop();
+    // The state-directory marker recovers all owned documents without the flag.
+    rig.restart(&binary, false, true);
+    assert_eq!(
+        document_session(&rig, household, "counter", schema(), None).0,
+        41
+    );
+    assert_eq!(
+        document_session(
+            &rig,
+            household,
+            "counter/details",
+            child_schema.clone(),
+            None
+        )
+        .0,
+        73
+    );
+    rig.stop();
+    let collection = root.1.unwrap();
+    let checkpoint = rig
+        .root
+        .join(format!("state/collection-{collection}.merkle"));
+    let child_checkpoint = rig.root.join(format!(
+        "state/collection-{collection}.data/doc-{}.merkle",
+        canvas::hex(&canvas::hash(b"app:counter/details/state"))
+    ));
+    let before = [
+        canvas::hash(&fs::read(&checkpoint).unwrap()),
+        canvas::hash(&fs::read(&child_checkpoint).unwrap()),
+    ];
+    let good_catalog = rig.catalog.clone();
+    let mut incompatible = canvas::decode_ui(&child_ui).unwrap();
+    incompatible.state_schema.id = "counter-details-v2".into();
+    let incompatible = canvas::encode_ui(&incompatible).unwrap();
+    fs::write(package.join("ui.flex"), &incompatible).unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    catalog.apps.last_mut().unwrap().ui_hash = canvas::hash(&incompatible);
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, true, true);
+    let mut rejected = socket(&rig.public, household, Some('a'));
+    mount(&mut rejected, &rig.catalog);
+    assert!(matches!(
+        read(&mut rejected),
+        ServerMessage::AccessRequired { .. }
+    ));
+    let (_, registry) = http(&rig.public, "GET", Some('a'), None);
+    let request = Request {
+        version: 1,
+        expected_generation: registry["generation"].as_u64().unwrap(),
+        change: Change::Attach {
+            space: household.into(),
+            app: "counter".into(),
+        },
+    };
+    assert_eq!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 409);
+    assert_eq!(canvas::hash(&fs::read(&checkpoint).unwrap()), before[0]);
+    assert_eq!(
+        canvas::hash(&fs::read(&child_checkpoint).unwrap()),
+        before[1]
+    );
+    rig.stop();
+    // Restoring compatible code reopens both original documents and identities.
+    rig.catalog = good_catalog;
+    fs::write(package.join("ui.flex"), &child_ui).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, household, "counter", schema(), None),
+        (41, Some(collection.clone()))
+    );
+    assert_eq!(
+        document_session(&rig, household, "counter/details", child_schema, None),
+        (73, Some(collection))
+    );
+}
 #[test]
 fn space_client() {
     let Ok(address) = std::env::var("OTRIOS_SPACE_TEST_ADDRESS") else {

@@ -335,6 +335,9 @@ impl Document {
     pub fn schema(&self) -> &StateSchema {
         &self.schema
     }
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
     pub fn set_wall_time(&mut self, time: i64) {
         self.wall = time.max(0);
     }
