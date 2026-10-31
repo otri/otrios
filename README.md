@@ -6,6 +6,12 @@ The repository contains experimental Rust contract types, immutable aggregate ma
 
 The general content store, Linux shared-memory IPC, arbitrary Canvas subtree subscriptions, OS module loader, and capability enforcement remain unimplemented. The Canvas app runtime executes bounded Wasm behavior; it does not complete the planned Linux runtime.
 
+[Standalone Canvas app bundles](docs/rfcs/0025-standalone-app-bundles.md) add flat
+FlexBuffers metadata, signed immutable packages and a registry installation path
+that reuses qualified host binaries. [Bundle Counter](apps/bundle-counter/README.md)
+builds outside the host source registry. Native Wasm AOT compilation remains a
+[separate proposed experiment](docs/rfcs/0026-target-wasm-compilation.md).
+
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
 ## Build and check

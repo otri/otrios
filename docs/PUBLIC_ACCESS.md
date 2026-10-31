@@ -52,7 +52,8 @@ peer, byte and rate limits. Its v1 hello must finish before binary state is
 accepted. Anonymous clients can mount only public app UI/state. State operations
 are validated server-side; layout, schema and arbitrary fields cannot be written
 by public controls. Monitoring UI/behavior/state are delivered only through an
-authorized mount. Private bytes under `authority/apps/` have no static public
+authorized mount. Private bytes under `authority/bundles/` (or legacy
+`authority/apps/`) have no static public
 route, despite residing beside public assets in the single signed local store.
 A lock icon or client-side `authenticated` field grants no authority.
 

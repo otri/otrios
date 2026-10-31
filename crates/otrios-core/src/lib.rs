@@ -98,6 +98,9 @@ pub mod dashboard;
 #[cfg(feature = "canvas")]
 pub mod canvas;
 
+#[cfg(feature = "canvas")]
+pub mod bundle;
+
 #[cfg(feature = "merkle")]
 pub mod merkle;
 

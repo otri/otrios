@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-29",
+  "milestone": "RFC 0025 B1 offline package export/inspection",
+  "host": "macOS aarch64",
+  "rust": "1.90.0",
+  "packages": [
+    {
+      "id": "home",
+      "sha256": "a1ec36298c37e3b28b4fbf88dcdc4de3c2489b3d9a08d3221a881357ad5796b3",
+      "files": 4,
+      "bytes": 27481,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "brass-relay",
+      "sha256": "fd1e5d80f1682e31ad8afa19361e8f80b1d792b23443c0b915279c31cc46bdf3",
+      "files": 4,
+      "bytes": 327890,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "test-playground",
+      "sha256": "01199161146788e4f801de4bf5f9c3d27856cc091c46ef28e3052a23e04b3df6",
+      "files": 4,
+      "bytes": 65627,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "component-playground",
+      "sha256": "080885e828e7ed619251aa652a092052a4e5006857cdeb0660a008dca32f6532",
+      "files": 5,
+      "bytes": 56495,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "layout-lab",
+      "sha256": "102ef446db06be364d0849dbb07f5a8fdc7d13731df1b8bacd0b9d1a96c83102",
+      "files": 4,
+      "bytes": 59167,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "layout-document",
+      "sha256": "da91b8f6460701a375a8a3df48ed5bd5d52cf7468a5897350c026a323286a4b8",
+      "files": 4,
+      "bytes": 31934,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "layout-text-scroll",
+      "sha256": "065bc0bb4e756454f2ec9571c226e65bed7a0aff72c261c660d7d0b3ff13d104",
+      "files": 4,
+      "bytes": 331741,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "input-lab",
+      "sha256": "554c470a40dfea8bf9450b8296635001910a81d0aa3b712224d846daa3aa5452",
+      "files": 4,
+      "bytes": 350222,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "animation-lab",
+      "sha256": "dba2786ab996723d8516a29f4a1ac0ad6a91e53e26332722cae3632a196a5e0f",
+      "files": 4,
+      "bytes": 30693,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "three-d-lab",
+      "sha256": "3fa7969a1e5c4d30cdb0657ca5f5c3721fc0c9ee18d6cde4f945d3b5344208c3",
+      "files": 4,
+      "bytes": 30675,
+      "private": false,
+      "publisher_authenticated": false,
+      "installable": false
+    },
+    {
+      "id": "monitoring",
+      "sha256": "925d735567de5f50ecd1dd620fed623c6b62d2852e15ff64130d325624827524",
+      "files": 4,
+      "bytes": 11333,
+      "private": true,
+      "publisher_authenticated": false,
+      "installable": false
+    }
+  ]
+}

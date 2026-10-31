@@ -14,6 +14,7 @@ class FrozenSources(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo=pathlib.Path(tmp)
             for name in ['Cargo.toml','Cargo.lock','rust-toolchain.toml']:(repo/name).write_text('test')
+            (repo/'LICENSES').mkdir();(repo/'LICENSES/Apache-2.0.txt').write_text('test-license')
             (repo/'assets/fonts/roboto').mkdir(parents=True)
             for name in ['Roboto.ttf','OFL.txt']:(repo/'assets/fonts/roboto'/name).write_bytes(b'font')
             fixture=repo/'crates/otrios-core/tests/fixtures/touch/trace.json'

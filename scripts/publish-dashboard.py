@@ -11,7 +11,7 @@ def atomic(path, data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp):os.unlink(tmp)
-def publish(web,native,out,key,openssl,activate=True,catalog=None):
+def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,bundle_checker=None):
     web,native,out,key=map(pathlib.Path,(web,native,out,key));out.mkdir(parents=True,exist_ok=True)
     elf=native.read_bytes()
     if len(elf)<52 or elf[:6]!=b'\x7fELF\x01\x01' or int.from_bytes(elf[18:20],'little')!=40:raise ValueError('Expected ARM32 little-endian ELF app')
@@ -46,7 +46,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
         assets['apps/catalog.flex']={'bytes':len(data),'sha256':digest(data)}
         # Private app bytes are signed with this immutable release but never
         # exposed by the public HTTP allowlist.
-        for package in sorted(catalog.parent.glob('**/package')):
+        for package in ([] if bundles else sorted(catalog.parent.glob('**/package'))):
             folder=package.parent
             relative=folder.relative_to(catalog.parent)
             if folder.is_symlink() or package.is_symlink():raise ValueError('App package directory symlink rejected')
@@ -60,18 +60,52 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None):
                 if not 0<len(data)<=512*1024:raise ValueError('App package asset budget exceeded')
                 path='authority/apps/'+relative.as_posix()+'/'+name;dest=stage/path;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
                 authority[path]={'bytes':len(data),'sha256':digest(data)}
+        if bundles:
+            if not bundle_checker:raise ValueError('Signed bundles require the qualified bundle checker')
+            import re
+            bundles=pathlib.Path(bundles)
+            public=stage/'publisher.public.pem'
+            count=0
+            subprocess.run([openssl,'pkey','-in',str(key),'-pubout','-out',str(public)],check=True,capture_output=True)
+            for source in sorted(bundles.iterdir()):
+                if source.name=='catalog.flex':continue
+                count+=1
+                if count>16:raise ValueError('Installed bundle count limit')
+                if source.is_symlink() or not source.is_dir() or not re.fullmatch(r'[a-z-]+\.otapp',source.name):raise ValueError('Invalid installed bundle directory')
+                result=subprocess.run([str(bundle_checker),'verify',str(source),'--key',str(public),'--openssl',openssl],check=True,capture_output=True,text=True,timeout=30)
+                if result.stdout.split()[1]+'.otapp'!=source.name:raise ValueError('Bundle folder/identity mismatch')
+                for item in sorted(source.rglob('*')):
+                    if item.is_symlink():raise ValueError('Bundle symlink rejected')
+                    if not item.is_file():continue
+                    data=item.read_bytes()
+                    if len(data)>512*1024:raise ValueError('Bundle file budget exceeded')
+                    path='authority/bundles/'+source.name+'/'+item.relative_to(source).as_posix()
+                    dest=stage/path;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
+                    authority[path]={'bytes':len(data),'sha256':digest(data)}
+            public.unlink()
+            if not count:raise ValueError('Empty installed bundle registry')
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}
         manifest={'behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v8','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        if bundles:manifest['bundle_abi']='otrios-app-bundle-v1'
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
         subprocess.run([openssl,'pkeyutl','-sign','-rawin','-inkey',str(key),'-in',str(stage/'manifest.json'),'-out',str(stage/'manifest.sig')],check=True,capture_output=True)
+        signature=(stage/'manifest.sig').read_bytes()
         destination=out/release
         if destination.exists():
-            if (destination/'manifest.json').read_bytes()!=raw:raise ValueError('Existing release is corrupt')
+            if destination.is_symlink() or (destination/'manifest.json').read_bytes()!=raw or (destination/'manifest.sig').read_bytes()!=signature:raise ValueError('Existing release is corrupt')
+            for name,item in list(assets.items())+list(authority.items()):
+                path=destination/name
+                if path.is_symlink() or any(parent.is_symlink() for parent in path.parents if parent.is_relative_to(destination)) or not path.resolve().is_relative_to(destination.resolve()) or path.stat().st_size!=item['bytes'] or digest(path.read_bytes())!=item['sha256']:raise ValueError('Existing release closure is corrupt')
         else:os.replace(stage,destination);pathlib.Path(stage).mkdir()
         pointer={'id':release,'web_entry':f'/releases/{release}/web/index.html','manifest':f'/releases/{release}/manifest.json','signature':f'/releases/{release}/manifest.sig','state_schema':manifest['state_schema'],'sync_protocol':manifest['sync_protocol']}
-        if activate:atomic(out/'current.json',json.dumps(pointer,sort_keys=True).encode())
+        if activate:
+            if bundles:
+                import importlib.util
+                spec=importlib.util.spec_from_file_location('bundle_activation',pathlib.Path(__file__).with_name('activate-dashboard-release.py'));activation=importlib.util.module_from_spec(spec);spec.loader.exec_module(activation)
+                activation.durable_release(out,release)
+            atomic(out/'current.json',json.dumps(pointer,sort_keys=True).encode())
         return pointer
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--web',required=True);p.add_argument('--native',required=True);p.add_argument('--catalog');p.add_argument('--out',required=True);p.add_argument('--key',required=True);p.add_argument('--openssl',default='openssl');a=p.parse_args()

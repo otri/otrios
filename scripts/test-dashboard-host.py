@@ -57,7 +57,7 @@ def main():
     assert manifest['state_schema']=='otrios-canvas-merkle-state-v1' and manifest['sync_protocol']=='otrios-canvas-sync-v8';count+=1
     assert 'apps/catalog.flex' in manifest['assets'];count+=1
     for name in manifest.get('authority',{}):
-        assert name.startswith('authority/apps/') and request(prefix+name)[0]==404;count+=1
+        assert name.startswith(('authority/apps/','authority/bundles/')) and request(prefix+name)[0]==404;count+=1
     for path in ['/layout','/presentation','/sync','/private/stream','/stream','/demo/stream','/monitoring/stream','/publish','/admin/activate']:
         for method in ['GET','POST']:
             assert request(path,method=method,body=b''if method=='POST'else None)[0]==404,(path,method);count+=1

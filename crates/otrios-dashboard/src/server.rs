@@ -28,6 +28,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 mod apps;
 #[path = "server_auth.rs"]
 mod auth;
+mod bundle_files;
 #[path = "server_chat.rs"]
 mod chat;
 #[path = "server_collection.rs"]
@@ -44,6 +45,7 @@ struct StateConfig {
     source: PathBuf,
     state: Option<PathBuf>,
     presentation: Option<PathBuf>,
+    bundle_key: PathBuf,
 }
 struct App {
     collections: Arc<collections::Hub>,
@@ -181,6 +183,13 @@ async fn recover_state(app: Arc<App>) {
                 return Err("No valid active release".into());
             }
             let mut hub = apps::Hub::new(config.source, config.state)?;
+            if config.bundle_key.exists() {
+                hub.trust_publisher(bundle_files::public_key(
+                    &config.bundle_key,
+                    false,
+                    "openssl",
+                )?);
+            }
             hub.refresh(&releases, &release)?;
             if let Some(path) = config.presentation.filter(|p| p.exists()) {
                 hub.set_view(fs::read(path).map_err(|e| e.to_string())?)?;
@@ -670,6 +679,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut collection_fixture = None;
     let mut explicit_presentation = None;
     let mut releases = None;
+    let mut bundle_key = PathBuf::from("/etc/otrios-authority/publisher.pem");
     let mut origins = vec![];
     let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/canvas");
     let mut source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
@@ -688,6 +698,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--public-peers"=>public_peers=args.next().ok_or("Missing public peer limit")?.parse::<usize>()?,
         "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
         "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release directory")?)),
+        "--bundle-key"=>bundle_key=PathBuf::from(args.next().ok_or("Missing bundle publisher key")?),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
         "--origin"=>origins.push(args.next().ok_or("Missing origin")?),
         _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--trusted-peers COUNT] [--public-peers COUNT] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--presentation-file FILE] [--collection-fixture FILE] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
@@ -736,6 +747,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             source,
             state: app_state,
             presentation: presentation_file.clone(),
+            bundle_key,
         },
         recovery: Mutex::new(()),
         state_available,

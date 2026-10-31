@@ -52,7 +52,8 @@ Open Test Playground's **Text Panning** (`/test-playground/text-panning`) to ins
 retained full-page workload. Its offsets, velocity and FPS meter stay local.
 
 The signed release publishes the generic browser/native hosts, catalog and public
-font resources. App UI/code bytes are retained in its signed `authority/apps/`
+font resources. Current app UI/code bytes are retained in signed `.otapp` trees
+under `authority/bundles/` (older rollback releases use `authority/apps/`)
 tree and delivered by admitted mounts, not copied into the public module store.
 Monitoring authorization precedes its UI/code/state payloads. The public Home
 catalog may name Monitoring without exposing its private package.
@@ -70,6 +71,23 @@ control is an isolated RAM CRDT workload. Monitoring replaces a protected binary
 Layout aggregate without adding telemetry history to app documents.
 
 ## Build and validation
+
+[RFC 0025](../docs/rfcs/0025-standalone-app-bundles.md) defines standalone flat-root
+`.otapp` bundles. `canvas-bundle export apps APP_ID OUTPUT.otapp --revision N`
+creates an unsigned package; `inspect` checks its complete hash closure, `sign`
+adds the publisher receipt, and `verify` authenticates it against a pinned key.
+Commands use `cargo run -p otrios-dashboard --features canvas --bin canvas-bundle --`.
+The repository exporter includes the Apache license in Notices. Mutable state
+and target compilation caches stay outside the bundle.
+
+Signed bundle-aware releases store packages under `authority/bundles/`. The
+installer composes their catalog and Home entries without rebuilding browser or
+native executables. [Bundle Counter](bundle-counter/README.md) is intentionally
+absent from the built-in source registry and demonstrates independent building,
+signing and installation. Navigation dependencies are checked; arbitrary host
+effects/modules are not resolved or granted. See [RFC 0026](../docs/rfcs/0026-target-wasm-compilation.md)
+for deferred AOT; the current guest backend remains Wasmi. Follow the existing
+[Frame verification/rollback workflow](../docs/FRAME_HOSTING.md) for deployment.
 
 ```sh
 bash scripts/build-dashboard-web.sh

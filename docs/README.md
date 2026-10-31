@@ -10,6 +10,7 @@
 | Scene, layout and input contracts | [Scene tree](SCENE_TREE.md), [binary layout](BINARY_LAYOUT.md), [Home and input](HOME_AND_INPUT.md) |
 | Linux object-model research backlog | [PoC plan](POC.md), [architecture](ARCHITECTURE.md) |
 | Design decisions and status | [RFC index](rfcs/README.md) |
+| Standalone app bundles and native Wasm compilation plan | [Bundle RFC](rfcs/0025-standalone-app-bundles.md), [compilation RFC](rfcs/0026-target-wasm-compilation.md) |
 | Measurements and qualification | [Experiment index](experiments/README.md), [milestone history](HISTORY.md) |
 | Artifact cleanup and documentation retention | [Maintenance](MAINTENANCE.md) |
 
