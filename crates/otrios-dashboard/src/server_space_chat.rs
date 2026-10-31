@@ -116,14 +116,13 @@ async fn worker(
         let Some(authority) = guard.as_ref().filter(|hub| {
             live.has_changed().is_ok()
                 && live.borrow().as_ref() == Some(&active)
-                && hub.allowed(&scope, &active.binding, Operation::Read)
+                && hub.grant_current(&scope, &active.binding, &active.grant)
         }) else {
             break;
         };
-        let edit = authority.allowed(&scope, &active.binding, Operation::Edit);
-        // Room moderation is an ordinary collaborative chat action. It does
-        // not grant Space administration or admit public comment visitors.
-        let moderate = edit;
+        let contribute = authority.allowed(&scope, &active.binding, Operation::Edit)
+            || authority.allowed(&scope, &active.binding, Operation::Comment);
+        let moderate = authority.allowed(&scope, &active.binding, Operation::Moderate);
         let packet = match work {
             Work::Input(None) => break,
             Work::Lease => continue,
@@ -145,13 +144,14 @@ async fn worker(
                     } else {
                         None
                     };
+                    let permitted = authority.chat_allowed(&scope, &active.binding, &command);
                     let identity = scope.identity.clone();
                     let result = hub.chat.run_inline(move |room| {
                         if matches!(command, wire::Command::Leave) {
                             return Ok(room.abandon(id, time));
                         }
-                        if !edit {
-                            return Err("Space membership is required for collaboration".into());
+                        if !permitted {
+                            return Err("This Space does not permit that chat action".into());
                         }
                         let mut events = room.set_admin(id, moderate);
                         events.extend(match command {
@@ -207,9 +207,7 @@ async fn worker(
                 }
             }
             Work::Chat(Ok(packet)) => {
-                if packet.target.is_some_and(|target| target != id)
-                    || packet.target.is_none() && !joined
-                {
+                if packet.target.is_some_and(|target| target != id) {
                     continue;
                 }
                 if let Some(value) = packet.joined {
@@ -240,7 +238,7 @@ async fn worker(
                 }
             }
             Work::Tick => {
-                if edit {
+                if contribute {
                     match hub.chat.run_inline(move |room| {
                         let mut events = room.set_admin(id, moderate);
                         events.extend(room.tick(chat::now())?);

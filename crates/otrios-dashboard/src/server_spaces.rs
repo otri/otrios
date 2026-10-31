@@ -121,11 +121,6 @@ pub(super) fn manage_request(
     actor: &str,
     request: &contract::Request,
 ) -> std::result::Result<u64, core::Error> {
-    // Public audiences remain gated until comment/publication enforcement is qualified.
-    if matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
-    {
-        return Err(core::Error::Unavailable);
-    }
     let policy = if let Change::Attach { app, .. } = &request.change {
         match hub.app_policy(app) {
             Ok(policy) => Some(policy),

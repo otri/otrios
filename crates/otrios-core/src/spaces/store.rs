@@ -401,6 +401,22 @@ impl Store {
         self.publish(next, |_| {})?;
         self.registry()
     }
+    pub fn commit_catalog(
+        &mut self,
+        actor: &str,
+        request: &Request,
+        installed: &[AppPolicy],
+    ) -> Result<&Registry> {
+        let registry = apply_catalog(self.registry()?, actor, request, installed)?;
+        self.publish(
+            Record {
+                registry,
+                ..self.current.clone()
+            },
+            |_| {},
+        )?;
+        self.registry()
+    }
     fn publish(&mut self, next: Record, mut boundary: impl FnMut(Boundary)) -> Result<()> {
         self.registry()?;
         let bytes = encode(&next)?;

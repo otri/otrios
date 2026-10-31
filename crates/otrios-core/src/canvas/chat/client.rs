@@ -87,6 +87,7 @@ pub struct Client {
     pub(super) effects: u8,
     pub(super) native: bool,
     pub(super) managed: bool,
+    pub(super) read_only: bool,
     pub(super) quit_control: Option<u8>,
     pub(super) online: bool,
     pub(super) temporary: bool,
@@ -168,6 +169,7 @@ impl Default for Client {
             effects: 2,
             native: false,
             managed: false,
+            read_only: false,
             quit_control: None,
             online: false,
             temporary: false,
@@ -220,10 +222,28 @@ fn day_label(day: u64, today: u64) -> String {
     year += i64::from(m <= 2);
     format!("{year:04}-{m:02}-{d:02}")
 }
+pub(super) fn read_action(command: u16) -> bool {
+    matches!(
+        command,
+        0 | 3 | 6 | 12 | 13 | 18 | 19 | 100..=167 | 190 | 191
+    )
+}
 impl Client {
     pub(crate) fn managed(&mut self, quit_control: Option<u8>) {
         self.managed = quit_control.is_some();
         self.quit_control = quit_control;
+    }
+    pub(crate) fn access(&mut self, write: bool) {
+        self.read_only = !write;
+        if self.read_only {
+            self.focus = None;
+            self.compose.replace("");
+            self.pending.clear();
+            self.queue.clear();
+            self.online = false; // admitted after the first readable transcript
+            self.joining = false;
+            self.you = None;
+        }
     }
     /// Install a candidate's first readable transcript without joining presence
     /// or enabling collaborative actions. The enclosing mount owns activation.
@@ -276,6 +296,7 @@ impl Client {
             .map(|row| row.message)
             .collect();
         self.members = initial.members;
+        self.online = self.read_only; // read subscription, without a profile/presence
         self.older = initial.older;
         self.reset = true;
         self.tail = true;
@@ -528,6 +549,9 @@ impl Client {
         }
     }
     pub fn outgoing(&mut self, credential: Option<String>) -> Result<Option<Vec<u8>>> {
+        if self.read_only {
+            return Ok(None);
+        }
         if !self.online && !self.joining && self.kicked.is_none() {
             self.joining = true;
             return encode_command(&Command::Join { credential }).map(Some);
@@ -867,6 +891,9 @@ impl Client {
         changed
     }
     pub fn edit(&mut self, edit: &Edit) -> Result<bool> {
+        if self.read_only {
+            return Ok(false);
+        }
         if edit == &Edit::Enter {
             if self.focus == Some(Focus::Compose) {
                 self.send()?;
@@ -978,6 +1005,9 @@ impl Client {
         self.focus = None;
     }
     pub(crate) fn action(&mut self, command: u16) -> Result<Action> {
+        if self.read_only && !read_action(command) {
+            return Ok(Action::Changed);
+        }
         match command {
             0 => return Ok(Action::Home),
             1 => {
@@ -1115,6 +1145,9 @@ impl Client {
         Ok(())
     }
     pub fn pointer(&mut self, event: PointerEvent, now: u64) -> Option<bool> {
+        if self.read_only {
+            return None;
+        }
         let [x, y] = event.position;
         if self.panel != Panel::None {
             return None;

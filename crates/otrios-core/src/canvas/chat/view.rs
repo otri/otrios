@@ -14,6 +14,7 @@ struct Paint {
     buttons: [u8; 201],
     line_height: f32,
     moderator_label: &'static str,
+    read_only: bool,
 }
 impl Paint {
     fn id(&mut self) -> u32 {
@@ -105,13 +106,21 @@ impl Paint {
             ));
         }
         let mut button = canvas(id, Rect::new(r[0], r[1], r[2], r[3]), children);
-        button.responder = Some(TouchResponder::Activate(Action::AppEvent(
-            (command + 40) as u8,
-        )));
-        button.semantics = Some(SwitchSemantics {
-            label: label.chars().take(90).collect(),
-            checked: false,
-        });
+        button.responder = if self.read_only && !super::client::read_action(command) {
+            None
+        } else {
+            Some(TouchResponder::Activate(Action::AppEvent(
+                (command + 40) as u8,
+            )))
+        };
+        button.semantics = if self.read_only && !super::client::read_action(command) {
+            None
+        } else {
+            Some(SwitchSemantics {
+                label: label.chars().take(90).collect(),
+                checked: false,
+            })
+        };
         self.nodes.push(button);
     }
     fn avatar_button(
@@ -131,7 +140,9 @@ impl Paint {
             if let Primitive::Superellipse { color, .. } = &mut button.children[1].primitive {
                 *color = [54, 47, 37, 255];
             }
-            button.semantics.as_mut().unwrap().checked = true;
+            if let Some(semantics) = &mut button.semantics {
+                semantics.checked = true;
+            }
         }
         let id = self.id();
         let mut icon = avatar(avatar_id, id, r[2].min(r[3]) - 12.);
@@ -194,6 +205,7 @@ impl Client {
             buttons: [0; 201],
             line_height: self.line_height(),
             moderator_label: if self.managed { "Moderator " } else { "Admin " },
+            read_only: self.read_only,
         };
         for particle in &self.particles {
             let t = self.now.saturating_sub(particle.at) as f32 / 1000.;
@@ -232,6 +244,7 @@ impl Client {
             buttons: [0; 201],
             line_height: self.line_height(),
             moderator_label: if self.managed { "Moderator " } else { "Admin " },
+            read_only: self.read_only,
         };
         p.rect([0., 0., w, full_h], BG, 0.);
         let header_start = p.nodes.len();
@@ -427,7 +440,9 @@ impl Client {
             rows.push(text(
                 id,
                 Rect::new(0., 0., self.input_width(), self.line_height()),
-                if self.focus == Some(Focus::Compose) {
+                if self.read_only {
+                    "Read-only Space view"
+                } else if self.focus == Some(Focus::Compose) {
                     "|"
                 } else {
                     "Message..."

@@ -4983,3 +4983,104 @@ fn native_keyboard_short_taps_have_local_feedback_without_rebuilding_the_scene()
         "cancel clears keyboard feedback"
     );
 }
+
+#[test]
+fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() {
+    use otrios_interfaces::chat;
+    let ui = brass_relay::ui(&[]);
+    let mut client = Client::default();
+    client.set_font(std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    ));
+    client.set_chat_credential(&"c".repeat(64)).unwrap();
+    activate(&mut client, ui.clone(), "chat-read-only", vec![]);
+    client.reset_connection();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    let initial = chat::Initial {
+        version: 1,
+        members: vec![],
+        messages: vec![chat::InitialMessage {
+            message: chat::Message {
+                sequence: 1,
+                at: 1_000_000,
+                sender: chat::Profile {
+                    id: "a".repeat(32),
+                    name: "Author".into(),
+                    avatar: 1,
+                },
+                kind: chat::Kind::Message,
+                text: "Readable without presence".into(),
+                nonce: "b".repeat(32),
+            },
+            revision: [1; 32],
+        }],
+        older: false,
+    };
+    let bytes = encode_ui(&ui).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 1,
+                    collection: "d".repeat(32),
+                    editable: false,
+                    comments: false,
+                    moderate: false,
+                }),
+                initial_view: Some(flexbuffers::to_vec(&initial).unwrap()),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let mut accepted = false;
+    for turn in 1..=128 {
+        client.tick(turn * 8, 1_000_000).unwrap();
+        if let Some(bytes) = client.outgoing().unwrap() {
+            assert!(
+                matches!(decode_client(&bytes).unwrap(), ClientMessage::AcceptMount { epoch: seen } if seen == epoch)
+            );
+            accepted = true;
+            break;
+        }
+    }
+    assert!(accepted);
+    client
+        .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+        .unwrap();
+    assert_eq!(client.chat_messages().len(), 1);
+    assert!(client.chat_info().unwrap().online);
+    assert!(
+        client.chat_outgoing().unwrap().is_none(),
+        "read admission cannot create a guest profile"
+    );
+    assert!(
+        !client
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .any(|control| control.node.semantics.as_ref().unwrap().label == "Message composer")
+    );
+    client.show_keyboard().unwrap();
+    assert!(
+        !client
+            .hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
+                "cannot send".into()
+            ))
+            .unwrap()
+    );
+    assert!(client.chat_outgoing().unwrap().is_none());
+}

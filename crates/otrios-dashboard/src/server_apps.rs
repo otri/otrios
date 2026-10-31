@@ -56,6 +56,11 @@ pub(super) struct Hub {
     cleanup: BTreeMap<String, otrios_interfaces::spaces::CleanupSummary>,
     next_maintenance: Option<std::time::Instant>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Grant {
+    principal: Option<String>,
+    actions: u8,
+}
 struct Lease {
     epoch: u32,
     state_ref: String,
@@ -63,6 +68,7 @@ struct Lease {
     sync: Session,
     view_id: Vec<u8>,
     binding: Option<otrios_interfaces::spaces::Binding>,
+    grant: Grant,
     _room: Arc<()>,
     _chat: Option<Arc<space_chat::Hub>>,
     ink: bool,
@@ -72,6 +78,7 @@ struct Lease {
 pub(super) struct Activation {
     pub epoch: u32,
     pub binding: otrios_interfaces::spaces::Binding,
+    pub grant: Grant,
     pub room: String,
     pub ink: bool,
     pub chat: bool,
@@ -96,6 +103,7 @@ impl Leases {
             lease.binding.as_ref().map(|binding| Activation {
                 epoch: lease.epoch,
                 binding: binding.clone(),
+                grant: lease.grant.clone(),
                 room: lease.state_ref.clone(),
                 ink: lease.ink,
                 chat: lease.chat,
@@ -761,12 +769,26 @@ impl Hub {
             _ => None,
         };
         let cursor = otrios_core::spaces::advance_discovery(&self.discovery)?;
-        let generation = self
+        let policies = self
+            .bundles
+            .get(&self.active)
+            .into_iter()
+            .flat_map(|bundle| bundle.packages.values())
+            .filter(|p| !p.app.id.contains('/'))
+            .map(|p| p.policy.clone())
+            .collect::<Vec<_>>();
+        let store = self
             .spaces
             .as_mut()
-            .ok_or(otrios_core::spaces::Error::Unavailable)?
-            .commit(actor, request, policy)?
-            .generation;
+            .ok_or(otrios_core::spaces::Error::Unavailable)?;
+        let generation = if matches!(
+            request.change,
+            otrios_interfaces::spaces::Change::Audience { .. }
+        ) {
+            store.commit_catalog(actor, request, &policies)?.generation
+        } else {
+            store.commit(actor, request, policy)?.generation
+        };
         self.discovery = cursor;
         if let Some(collection) = removed {
             self.rooms.retain(|key, room| {
@@ -934,6 +956,12 @@ impl Hub {
         operation: otrios_interfaces::spaces::Operation,
     ) -> bool {
         scope.space.as_deref() == Some(binding.space.as_str())
+            && (operation == otrios_interfaces::spaces::Operation::Read
+                || otrios_core::spaces::admit_human_action(
+                    scope.identity.as_deref(),
+                    &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
+                )
+                .is_ok())
             && self.registry().is_ok_and(|registry| {
                 self.app_policy(&binding.app).is_ok_and(|policy| {
                     otrios_core::spaces::authorize_installed(
@@ -947,17 +975,58 @@ impl Hub {
                 })
             })
     }
+    fn actions(&self, scope: &spaces::Scope, binding: &otrios_interfaces::spaces::Binding) -> u8 {
+        use otrios_interfaces::spaces::Operation;
+        u8::from(self.allowed(scope, binding, Operation::Edit))
+            | (u8::from(self.allowed(scope, binding, Operation::Comment)) << 1)
+            | (u8::from(self.allowed(scope, binding, Operation::Moderate)) << 2)
+    }
+    pub(super) fn grant_current(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+        grant: &Grant,
+    ) -> bool {
+        grant.principal == scope.identity
+            && grant.actions == self.actions(scope, binding)
+            && self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Read)
+    }
+    pub(super) fn chat_allowed(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+        command: &otrios_interfaces::chat::Command,
+    ) -> bool {
+        self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Read)
+            && (matches!(command, otrios_interfaces::chat::Command::Leave)
+                || otrios_core::spaces::admit_human_action(
+                    scope.identity.as_deref(),
+                    &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
+                )
+                .is_ok())
+            && self.registry().is_ok_and(|registry| {
+                self.app_policy(&binding.app).is_ok_and(|policy| {
+                    otrios_core::spaces::authorize_chat(
+                        registry,
+                        scope.identity.as_deref(),
+                        binding,
+                        &policy,
+                        command,
+                    )
+                    .is_ok()
+                })
+            })
+    }
     fn revoke_scoped(&self, leases: &mut Leases, scope: &spaces::Scope) -> Vec<ServerMessage> {
         let mut messages = vec![];
         let mut revoked = vec![];
         for slot in [&mut leases.active, &mut leases.staged] {
-            if slot
-                .as_ref()
-                .and_then(|l| l.binding.as_ref())
-                .is_some_and(|b| {
-                    !self.allowed(scope, b, otrios_interfaces::spaces::Operation::Read)
-                })
-            {
+            if slot.as_ref().is_some_and(|lease| {
+                lease
+                    .binding
+                    .as_ref()
+                    .is_some_and(|binding| !self.grant_current(scope, binding, &lease.grant))
+            }) {
                 let lease = slot.take().expect("present lease");
                 messages.push(ServerMessage::AccessRequired { epoch: lease.epoch });
                 revoked.push(lease);
@@ -1422,7 +1491,10 @@ impl Hub {
                 )?)),
                 closed_only: private,
                 editable: description.state_schema.fields.iter().any(|f| f.writable),
-                comments: false,
+                comments: matches!(
+                    description.presentation,
+                    Some(otrios_interfaces::canvas::Presentation::Chat)
+                ),
             };
             let chat = matches!(
                 description.presentation,
@@ -1478,7 +1550,7 @@ impl Hub {
                     .map_err(|e| e.to_string())?,
                 closed_only: owned.iter().any(|p| p.private),
                 editable: owned.iter().any(|p| p.policy.editable || p.chat),
-                comments: false,
+                comments: owned.iter().any(|p| p.chat),
             };
             policies.insert(p.app.id.clone(), (policy, p.app.state_ref.clone()));
         }
@@ -1654,6 +1726,12 @@ impl Hub {
                         moderate: self.allowed(scope, b, Operation::Moderate),
                     }
                 });
+                let grant = Grant {
+                    principal: scope.identity.clone(),
+                    actions: binding
+                        .as_ref()
+                        .map_or(0, |binding| self.actions(scope, binding)),
+                };
                 let prepared_chat = if p.chat {
                     binding
                         .as_ref()
@@ -1746,6 +1824,7 @@ impl Hub {
                     sync,
                     view_id: vec![],
                     binding,
+                    grant,
                     _room: room.lease.clone(),
                     _chat: prepared_chat,
                     ink: p.ink,
@@ -1920,6 +1999,7 @@ pub(super) struct Packet {
     pub bytes: Vec<u8>,
     pub private: bool,
     pub binding: Option<otrios_interfaces::spaces::Binding>,
+    pub grant: Option<Grant>,
     pub activated: Option<Box<Activation>>,
 }
 pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
@@ -1936,6 +2016,7 @@ async fn emit(
     message: ServerMessage,
     private: bool,
     binding: Option<otrios_interfaces::spaces::Binding>,
+    grant: Option<Grant>,
     activated: Option<Activation>,
 ) -> bool {
     let Ok(mut bytes) = canvas::encode_server(&message) else {
@@ -1957,6 +2038,7 @@ async fn emit(
                 bytes,
                 private,
                 binding,
+                grant,
                 activated: activated.map(Box::new),
             })
         )
@@ -1991,7 +2073,7 @@ pub(super) async fn worker(
         };
         for revoked in leases.revoke_private(allowed) {
             leases.publish(&activation);
-            if !emit(&output, revoked, false, None, None).await {
+            if !emit(&output, revoked, false, None, None, None).await {
                 return;
             }
         }
@@ -2061,7 +2143,7 @@ pub(super) async fn worker(
                     if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
                             leases.publish(&activation);
-                            if !emit(&output, revoked, false, None, None).await {
+                            if !emit(&output, revoked, false, None, None, None).await {
                                 return;
                             }
                         }
@@ -2072,12 +2154,17 @@ pub(super) async fn worker(
                         .flatten()
                         .find(|l| l.epoch == epoch)
                         .and_then(|l| l.binding.clone());
+                    let grant = [leases.active.as_ref(), leases.staged.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .find(|lease| lease.epoch == epoch && lease.binding.is_some())
+                        .map(|lease| lease.grant.clone());
                     let activated = if matches!(message, ServerMessage::Activated { .. }) {
                         leases.activation()
                     } else {
                         None
                     };
-                    if !emit(&output, message, private, binding, activated).await {
+                    if !emit(&output, message, private, binding, grant, activated).await {
                         return;
                     }
                 }
@@ -2089,6 +2176,7 @@ pub(super) async fn worker(
                     &output,
                     ServerMessage::Error { epoch, message },
                     false,
+                    None,
                     None,
                     None,
                 )

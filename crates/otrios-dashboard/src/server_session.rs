@@ -161,13 +161,10 @@ impl ManagedInk {
             self.clear(subscription);
             return true;
         };
-        let Some(hub) = guard.as_mut().filter(|hub| {
-            hub.allowed(
-                &scope,
-                &active.binding,
-                otrios_interfaces::spaces::Operation::Read,
-            )
-        }) else {
+        let Some(hub) = guard
+            .as_mut()
+            .filter(|hub| hub.grant_current(&scope, &active.binding, &active.grant))
+        else {
             self.clear(subscription);
             return true;
         };
@@ -411,11 +408,7 @@ async fn peer(
                                 continue;
                             };
                             let Some(hub) = guard.as_ref().filter(|hub| {
-                                hub.allowed(
-                                    &scope,
-                                    &active.binding,
-                                    otrios_interfaces::spaces::Operation::Read,
-                                )
+                                hub.grant_current(&scope, &active.binding, &active.grant)
                             }) else {
                                 continue;
                             };
@@ -705,7 +698,10 @@ async fn peer(
                 };
                 if let Some(binding) = &packet.binding
                     && guard.as_ref().and_then(|g| g.as_ref()).is_none_or(|hub| {
-                        !hub.allowed(&scope, binding, otrios_interfaces::spaces::Operation::Read)
+                        packet
+                            .grant
+                            .as_ref()
+                            .is_none_or(|grant| !hub.grant_current(&scope, binding, grant))
                     })
                 {
                     continue;
@@ -752,11 +748,7 @@ async fn peer(
                 };
                 if managed_ink.current(&live) != Some(&peer.active)
                     || guard.as_ref().is_none_or(|hub| {
-                        !hub.allowed(
-                            &scope,
-                            &peer.active.binding,
-                            otrios_interfaces::spaces::Operation::Read,
-                        )
+                        !hub.grant_current(&scope, &peer.active.binding, &peer.active.grant)
                     })
                 {
                     continue;
@@ -790,11 +782,7 @@ async fn peer(
                 if managed_chat.as_ref().is_some_and(|peer| {
                     managed_ink.current(&live) == Some(&peer.active)
                         && guard.as_ref().is_some_and(|hub| {
-                            hub.allowed(
-                                &scope,
-                                &peer.active.binding,
-                                otrios_interfaces::spaces::Operation::Read,
-                            )
+                            hub.grant_current(&scope, &peer.active.binding, &peer.active.grant)
                         })
                 }) {
                     break;
@@ -879,11 +867,7 @@ async fn peer(
                         continue;
                     };
                     if guard.as_ref().is_none_or(|hub| {
-                        !hub.allowed(
-                            &scope,
-                            &active.binding,
-                            otrios_interfaces::spaces::Operation::Read,
-                        )
+                        !hub.grant_current(&scope, &active.binding, &active.grant)
                     }) {
                         continue;
                     }

@@ -147,10 +147,9 @@ When `OTRIOS_LOCAL_APPS` is configured, the Frame supervisor also passes the
 required `--local-apps` option to the verified executable. Older binaries reject
 that option; a rollback must use an executable that enforces the namespace.
 
-This increment admits Create, Membership, Attach, Remove and Closed audience changes.
-Deletion and public audience changes remain unavailable through HTTP until their
-lifecycle integrations are complete. Global chat/collection fallbacks
-and legacy presentation reads are disabled in managed mode; they cannot be used
+Managed mode admits Create, Membership, Attach, Remove, confirmed whole-collection
+deletion and Admin audience changes. Global chat/collection fallbacks and legacy
+presentation reads are disabled; they cannot be used
 as an unscoped fallback. Monitoring presentation uploads require an explicit
 collector identity and collection grant.
 
@@ -434,6 +433,33 @@ does not imply editing. Visitor comments require a verified identity and public
 comment policy; moderation requires membership. An app can disallow editing or
 comments. An attached closed-only app prevents a public audience, and a public
 Space rejects attachment of a closed-only app.
+
+## Public audiences and comments
+
+An Admin chooses Closed, Public view, or Public view & comment in Apps & Data /
+Sharing. Public choices require an explicit confirmation naming the Space and
+explaining that every attached app's content is included. Current closed-only
+code (including Monitoring) blocks public settings even if retained policy metadata
+predates that code. An explicit audience change adopts compatible installed app
+capabilities while preserving collection identity and data. Schema changes never
+silently replace a collection.
+
+The fixed Chat presentation declares separate comment operations. Read-only viewers
+receive the first transcript and bounded live windows without creating a profile,
+presence or writable document session. Signed-in visitors may join/post and manage
+their own app-local nickname/avatar/draft when public comments are enabled. These
+commands cannot edit the app document or grant moderation. Members moderate where
+supported; guest credentials and legacy app authentication cannot elevate managed
+participants. Configured service tokens cannot act as human commenters.
+
+Managed activations also bind the authenticated principal and effective action
+mask. Changes revoke active/staged views even when public read remains available,
+such as signing out of a public-comment Space. Queued state and auxiliary payloads
+recheck the same grant through send; the old writable document session and chat
+identity cannot survive an anonymous read grant. Role/audience restrictions apply
+to subsequent operations and reconnects.
+
+Publication and owned attachment copying remain the next S4 integration.
 
 ## Persistence
 

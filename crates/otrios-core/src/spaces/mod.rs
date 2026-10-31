@@ -176,6 +176,82 @@ fn admin(space: &Space, identity: &str) -> Result<()> {
     }
 }
 
+/// Services use explicit service bindings; their tokens do not become human
+/// editing/comment credentials merely because a Space permits signed-in visitors.
+pub fn admit_human_action(identity: Option<&str>, services: &[&str]) -> Result<()> {
+    if identity.is_none_or(|id| !valid_identity(id) || services.contains(&id)) {
+        return Err(Error::Denied);
+    }
+    Ok(())
+}
+
+/// Fixed chat commands remain separate from document edits and moderation.
+/// A publisher cannot relabel an arbitrary state write as a public comment.
+pub fn authorize_chat(
+    registry: &Registry,
+    identity: Option<&str>,
+    binding: &Binding,
+    installed: &AppPolicy,
+    command: &otrios_interfaces::chat::Command,
+) -> Result<()> {
+    use otrios_interfaces::chat::Command as Chat;
+    let allow = |operation| authorize_installed(registry, identity, binding, operation, installed);
+    match command {
+        Chat::Leave => allow(Operation::Read),
+        Chat::Join { credential: None }
+        | Chat::Profile { .. }
+        | Chat::Send { .. }
+        | Chat::ClaimDraft
+        | Chat::Draft { .. }
+        | Chat::ClearDraft { .. } => allow(Operation::Edit).or_else(|_| allow(Operation::Comment)),
+        Chat::Kick { .. } => allow(Operation::Moderate),
+        Chat::Join { .. } | Chat::Authenticate { .. } | Chat::SignOut => Err(Error::Denied),
+    }
+}
+
+/// An explicit Admin audience change adopts compatible, currently installed
+/// capability declarations without replacing collection identities or payloads.
+pub fn apply_catalog(
+    registry: &Registry,
+    actor: &str,
+    request: &Request,
+    installed: &[AppPolicy],
+) -> Result<Registry> {
+    if installed.len() > MAX_INSTALLED_APPS || installed.iter().any(|p| !valid_policy(p)) {
+        return Err(Error::Invalid);
+    }
+    if !valid_identity(actor) || request.version != VERSION {
+        return Err(Error::Invalid);
+    }
+    if request.expected_generation != registry.generation {
+        return Err(Error::Conflict);
+    }
+    let mut current = registry.clone();
+    if let Change::Audience { space, audience } = &request.change {
+        let selected = current
+            .spaces
+            .iter_mut()
+            .find(|s| &s.id == space)
+            .ok_or(Error::Denied)?;
+        admin(selected, actor)?;
+        for app in &mut selected.apps {
+            if let Some(policy) = installed.iter().find(|p| p.app == app.policy.app) {
+                if app.attached && *audience != Audience::Closed && policy.closed_only {
+                    return Err(Error::Incompatible);
+                }
+                if policy.schema == app.policy.schema {
+                    app.policy = policy.clone();
+                }
+            }
+        }
+    }
+    let attaching = match &request.change {
+        Change::Attach { app, .. } => installed.iter().find(|p| &p.app == app),
+        _ => None,
+    };
+    apply(&current, actor, request, attaching)
+}
+
 /// Builds an immutable candidate. Persist it before publishing its generation.
 /// `installed` is a verified host policy for Attach, never a client policy.
 pub fn apply(

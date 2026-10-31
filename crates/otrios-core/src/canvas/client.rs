@@ -609,6 +609,7 @@ impl Client {
                 };
                 let deleting =
                     matches!(change, otrios_interfaces::spaces::Change::DeleteData { .. });
+                let sharing = matches!(change, otrios_interfaces::spaces::Change::Audience { .. });
                 match self.spaces.request(change) {
                     Ok(_) => {
                         self.host.message = "Saving…".into();
@@ -618,6 +619,8 @@ impl Client {
                             self.host.pane = Pane::Members;
                         } else if deleting {
                             self.host.pane = Pane::Cleanup;
+                        } else if sharing {
+                            self.host.pane = Pane::Sharing;
                         }
                     }
                     Err(_) => {
@@ -1724,6 +1727,12 @@ impl Client {
                         .set_read_only(candidate.binding.as_ref().is_some_and(|b| !b.editable));
                     if let Some(chat) = &mut candidate.chat {
                         chat.managed(candidate.quit_control);
+                        chat.access(
+                            candidate
+                                .binding
+                                .as_ref()
+                                .is_none_or(|b| b.editable || b.comments),
+                        );
                     }
                     if let Some(bytes) = initial_view {
                         match candidate.ui.presentation {
@@ -2073,6 +2082,17 @@ impl Client {
         {
             return Ok(false);
         }
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|m| m.binding.as_ref().is_some_and(|b| !b.editable))
+            && !matches!(
+                h.operation,
+                Operation::Chat(_) | Operation::Back | Operation::SignOut
+            )
+        {
+            return Ok(false);
+        }
         match h.operation {
             Operation::Chat(command) => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
@@ -2147,6 +2167,9 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.editable) {
+            return Ok(false);
+        }
         let current = h
             .fields
             .first()
@@ -2579,7 +2602,11 @@ impl Client {
         let m = self.active.as_mut().ok_or("No Canvas")?;
         if let Some(chat) = &mut m.chat {
             chat.action(1)?;
-            m.keyboard.focus();
+            if chat.editing() {
+                m.keyboard.focus();
+            } else {
+                m.keyboard.hide();
+            }
             m.invalidate();
             return Ok(true);
         }
@@ -2611,6 +2638,9 @@ impl Client {
             }
             m.invalidate();
             return Ok(changed);
+        }
+        if m.binding.as_ref().is_some_and(|b| !b.editable) {
+            return Ok(false);
         }
         let Some(field) = m.focus else {
             return Ok(false);

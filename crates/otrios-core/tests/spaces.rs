@@ -1076,3 +1076,107 @@ fn cleanup_facts_are_admin_only_and_cannot_be_smuggled_into_member_snapshots() {
         .is_err()
     );
 }
+
+#[test]
+fn public_chat_comments_are_typed_operations_and_services_are_not_human_visitors() {
+    use otrios_interfaces::chat::Command as Chat;
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    attach(&mut registry, &space);
+    let publish = request(
+        &registry,
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicComment,
+        },
+    );
+    registry = spaces::apply_catalog(&registry, "alice", &publish, &[policy()]).unwrap();
+    let visitor = spaces::bind(
+        &registry,
+        Some("visitor"),
+        &space,
+        "notes",
+        &policy().schema,
+    )
+    .unwrap();
+    let send = Chat::Send {
+        epoch: 1,
+        nonce: "a".repeat(32),
+        text: "A public comment".into(),
+    };
+    spaces::authorize_chat(&registry, Some("visitor"), &visitor, &policy(), &send).unwrap();
+    assert_eq!(
+        spaces::authorize_installed(
+            &registry,
+            Some("visitor"),
+            &visitor,
+            Operation::Edit,
+            &policy()
+        ),
+        Err(Error::Denied)
+    );
+    assert_eq!(
+        spaces::authorize_chat(&registry, None, &visitor, &policy(), &send),
+        Err(Error::Denied)
+    );
+    assert_eq!(
+        spaces::authorize_chat(
+            &registry,
+            Some("visitor"),
+            &visitor,
+            &policy(),
+            &Chat::Kick {
+                participant: "b".repeat(32),
+                generation: 1,
+                reason: String::new()
+            }
+        ),
+        Err(Error::Denied)
+    );
+    assert_eq!(
+        spaces::admit_human_action(Some("collector"), &["collector"]),
+        Err(Error::Denied)
+    );
+    assert_eq!(spaces::admit_human_action(None, &[]), Err(Error::Denied));
+    spaces::admit_human_action(Some("frame"), &["collector"]).unwrap();
+    change(
+        &mut registry,
+        "alice",
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    assert_eq!(
+        spaces::authorize_chat(&registry, Some("visitor"), &visitor, &policy(), &send),
+        Err(Error::Denied)
+    );
+}
+
+#[test]
+fn public_audience_adopts_compatible_capabilities_and_rejects_current_closed_only_code() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let original = attach(&mut registry, &space);
+    registry.spaces[0].apps[0].policy.comments = false;
+    let request = request(
+        &registry,
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicComment,
+        },
+    );
+    let updated = spaces::apply_catalog(&registry, "alice", &request, &[policy()]).unwrap();
+    assert_eq!(updated.spaces[0].apps[0].collection, original.collection);
+    assert!(updated.spaces[0].apps[0].policy.comments);
+    let mut closed = policy();
+    closed.closed_only = true;
+    assert_eq!(
+        spaces::apply_catalog(&registry, "alice", &request, &[closed]),
+        Err(Error::Incompatible)
+    );
+    assert_eq!(
+        spaces::apply_catalog(&registry, "visitor", &request, &[policy()]),
+        Err(Error::Denied)
+    );
+}

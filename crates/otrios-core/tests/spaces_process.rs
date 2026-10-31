@@ -674,6 +674,9 @@ fn offline_provisioning_preserves_confirmed_legacy_data_and_does_not_regrant_rem
     }
 }
 fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
+    socket_auth(address, space, token, None)
+}
+fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&str>) -> Socket {
     let mut request = format!("ws://{address}/session?space={space}")
         .into_client_request()
         .unwrap();
@@ -687,6 +690,11 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
                 .parse()
                 .unwrap(),
         );
+    }
+    if let Some(cookie) = cookie {
+        request
+            .headers_mut()
+            .insert("Cookie", cookie.parse().unwrap());
     }
     let (mut socket, _) = tungstenite::connect(request).unwrap();
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
@@ -3520,4 +3528,342 @@ fn missing_owned_chat_is_unavailable_until_verified_payload_restore() {
         "Confirmed before storage repair"
     );
     assert_eq!(chat_join(&mut alice, 1).0, profile);
+}
+
+#[test]
+fn public_audiences_separate_read_comment_edit_and_moderation_across_clients() {
+    use otrios_interfaces::{
+        chat::{Command as Chat, Event as ChatEvent},
+        spaces::Audience,
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    // A real installed closed-only app, independent of the public app data.
+    let closed_ui = otrios_core::authoring::AppUi::new(
+        "monitoring",
+        "Closed monitor",
+        otrios_core::authoring::schema("closed-empty-v1", &[]),
+    )
+    .build("Closed monitor", vec![]);
+    let closed_bytes = canvas::encode_ui(&closed_ui).unwrap();
+    let closed_app = App {
+        id: "monitoring".into(),
+        title: "Closed monitor".into(),
+        ui_ref: closed_ui.ui_ref,
+        state_ref: "app:monitoring/state".into(),
+        status: "canvas-app".into(),
+        dependencies: vec![],
+    };
+    let package = rig.root.join("apps/monitoring/package");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(package.join("ui.flex"), &closed_bytes).unwrap();
+    fs::write(
+        package.join("app.flex"),
+        canvas::encode_app(&closed_app).unwrap(),
+    )
+    .unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    catalog.apps.push(CatalogEntry {
+        app: closed_app,
+        path: "monitoring".into(),
+        ui_hash: canvas::hash(&closed_bytes),
+        private: true,
+    });
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, true, true);
+    let public = rig.space("Public conversation");
+    let private = rig.space("Private operations");
+    for app in ["relay", "counter"] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: public.clone(),
+                app: app.into(),
+            },
+        );
+    }
+    rig.change(
+        'a',
+        Change::Attach {
+            space: private.clone(),
+            app: "monitoring".into(),
+        },
+    );
+    document_session(&rig, &public, "counter", schema(), Some(42));
+    let mut member = socket(&rig.public, &public, Some('a'));
+    let (collection, _) = chat_mount(&rig, &mut member, "relay", 1);
+    let (_, member_epoch) = chat_join(&mut member, 1);
+    chat_send(&mut member, 1, member_epoch, 1, "Visible public content");
+    rig.change(
+        'a',
+        Change::Audience {
+            space: public.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    let journal = rig.root.join(format!(
+        "state/collection-{collection}.data/chat-primary.journal"
+    ));
+    let before = fs::read(&journal).unwrap();
+    let mut anonymous = socket(&rig.public, &public, None);
+    let (_, initial) = chat_mount(&rig, &mut anonymous, "relay", 1);
+    assert_eq!(initial.messages[0].message.text, "Visible public content");
+    assert_eq!(chat_window(&mut anonymous, 1, 1).len(), 1);
+    chat_command(&mut anonymous, 1, Chat::Join { credential: None });
+    chat_event(&mut anonymous, 1, |event| {
+        matches!(event, ChatEvent::Error { .. })
+    });
+    assert_eq!(
+        fs::read(&journal).unwrap(),
+        before,
+        "read-only viewing cannot create a participant or writer receipt"
+    );
+    let mut readonly = socket(&rig.native, &public, Some('b'));
+    mount(&mut readonly, &rig.catalog);
+    let ServerMessage::Mounted {
+        binding: Some(binding),
+        ..
+    } = read(&mut readonly)
+    else {
+        panic!("read-only mount");
+    };
+    assert!(!binding.editable && !binding.comments && !binding.moderate);
+    send(&mut readonly, ClientMessage::AcceptMount { epoch: 1 });
+    assert!(matches!(
+        read(&mut readonly),
+        ServerMessage::Activated { .. }
+    ));
+    send(
+        &mut readonly,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 1,
+                values: vec![(1, Value::Number(99.))],
+            })
+            .unwrap(),
+        },
+    );
+    // A read-only state write closes the offending app transport, never commits.
+    loop {
+        match readonly.read() {
+            Ok(Message::Ping(_)) => readonly.flush().unwrap(),
+            Ok(Message::Binary(bytes)) if bytes.first() == Some(&1) => assert!(!matches!(
+                canvas::decode_server(&bytes[1..]).unwrap(),
+                ServerMessage::Sync { .. }
+            )),
+            Ok(Message::Close(_)) | Err(_) => break,
+            _ => (),
+        }
+    }
+    assert_eq!(
+        document_session(&rig, &public, "counter", schema(), None).0,
+        42
+    );
+    let (_, state) = http(&rig.public, "GET", Some('a'), None);
+    let request = Request {
+        version: 1,
+        expected_generation: state["generation"].as_u64().unwrap(),
+        change: Change::Audience {
+            space: private.clone(),
+            audience: Audience::PublicView,
+        },
+    };
+    assert_eq!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 409);
+    let request = Request {
+        version: 1,
+        expected_generation: state["generation"].as_u64().unwrap(),
+        change: Change::Attach {
+            space: public.clone(),
+            app: "monitoring".into(),
+        },
+    };
+    assert_ne!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 200);
+    rig.change(
+        'a',
+        Change::Audience {
+            space: public.clone(),
+            audience: Audience::PublicComment,
+        },
+    );
+    assert!(matches!(
+        chat_state(&mut anonymous),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    drop(anonymous);
+    let mut visitor = socket(&rig.public, &public, Some('b'));
+    chat_mount(&rig, &mut visitor, "relay", 1);
+    chat_command(&mut visitor, 1, Chat::Join { credential: None });
+    let ChatEvent::Welcome {
+        you,
+        credential,
+        epoch,
+        ..
+    } = chat_event(&mut visitor, 1, |e| matches!(e, ChatEvent::Welcome { .. }))
+    else {
+        unreachable!();
+    };
+    assert!(!you.admin && credential.is_none());
+    assert_eq!(
+        chat_send(&mut visitor, 1, epoch, 2, "Signed visitor comment"),
+        2
+    );
+    chat_command(
+        &mut visitor,
+        1,
+        Chat::Kick {
+            participant: you.profile.id.clone(),
+            generation: you.generation,
+            reason: String::new(),
+        },
+    );
+    chat_event(&mut visitor, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    chat_command(
+        &mut visitor,
+        1,
+        Chat::Authenticate {
+            username: "alice".into(),
+            password: "irrelevant".into(),
+        },
+    );
+    chat_event(&mut visitor, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    let messages = chat_window(&mut member, 1, 1);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[1].text, "Signed visitor comment");
+    rig.change(
+        'a',
+        Change::Audience {
+            space: public.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    assert!(matches!(
+        chat_state(&mut visitor),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    drop(visitor);
+    rig.change(
+        'a',
+        Change::Audience {
+            space: public.clone(),
+            audience: Audience::Closed,
+        },
+    );
+    let mut denied = socket(&rig.native, &public, Some('b'));
+    mount(&mut denied, &rig.catalog);
+    assert!(matches!(
+        read(&mut denied),
+        ServerMessage::AccessRequired { .. }
+    ));
+    let mut denied = socket(&rig.public, &private, None);
+    mount(&mut denied, &rig.catalog);
+    assert!(matches!(
+        read(&mut denied),
+        ServerMessage::AccessRequired { .. }
+    ));
+}
+
+fn browser_session(address: &str, method: &str, cookie: Option<&str>) -> Option<String> {
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let body = if method == "POST" {
+        r#"{"username":"visitor@spaces.test","password":"password"}"#
+    } else {
+        ""
+    };
+    write!(stream, "{method} /auth/session HTTP/1.1\r\nHost: spaces.test\r\nOrigin: {ORIGIN}\r\nX-OTriOS-Request: session\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n", body.len()).unwrap();
+    if let Some(cookie) = cookie {
+        write!(stream, "Cookie: {cookie}\r\n").unwrap();
+    }
+    write!(stream, "\r\n{body}").unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(
+        response.starts_with("HTTP/1.1 200"),
+        "session request failed"
+    );
+    response.lines().find_map(|line| {
+        line.split_once(':')
+            .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+            .map(|(_, value)| value.trim().split(';').next().unwrap().to_owned())
+    })
+}
+
+#[test]
+fn public_signout_revokes_the_old_identity_and_actions_even_when_read_access_remains() {
+    use otrios_interfaces::{
+        chat::{Command as Chat, Event as ChatEvent},
+        spaces::Audience,
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    let auth_path = rig.root.join("auth.json");
+    let mut auth: Json = serde_json::from_slice(&fs::read(&auth_path).unwrap()).unwrap();
+    auth["users"] = json!([{"username":"visitor@spaces.test","identity":"visitor","password_hash":"$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc"}]);
+    fs::write(&auth_path, serde_json::to_vec(&auth).unwrap()).unwrap();
+    rig.restart(&binary, true, true);
+    let space = rig.space("Public identity boundary");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "relay".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicComment,
+        },
+    );
+    let cookie = browser_session(&rig.public, "POST", None).unwrap();
+    let mut visitor = socket_auth(&rig.public, &space, None, Some(&cookie));
+    let (collection, _) = chat_mount(&rig, &mut visitor, "relay", 1);
+    chat_command(&mut visitor, 1, Chat::Join { credential: None });
+    let ChatEvent::Welcome { epoch, you, .. } =
+        chat_event(&mut visitor, 1, |e| matches!(e, ChatEvent::Welcome { .. }))
+    else {
+        unreachable!();
+    };
+    assert!(!you.admin);
+    chat_send(&mut visitor, 1, epoch, 1, "Before sign-out");
+    browser_session(&rig.public, "DELETE", Some(&cookie));
+    assert!(matches!(
+        chat_state(&mut visitor),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    // Read is still public, but this activation's identity and comment grant are gone.
+    chat_command(
+        &mut visitor,
+        1,
+        Chat::Send {
+            epoch,
+            nonce: format!("{:032x}", 2),
+            text: "Must not post after sign-out".into(),
+        },
+    );
+    send(&mut visitor, ClientMessage::Leave { epoch: 1 });
+    let (_, initial) = chat_mount(&rig, &mut visitor, "relay", 2);
+    assert_eq!(initial.messages.len(), 1);
+    assert_eq!(initial.messages[0].message.text, "Before sign-out");
+    assert_eq!(chat_window(&mut visitor, 2, 1).len(), 1);
+    assert!(
+        rig.root
+            .join(format!(
+                "state/collection-{collection}.data/chat-primary.journal"
+            ))
+            .exists()
+    );
 }

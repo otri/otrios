@@ -23,6 +23,11 @@ pub(super) enum Pane {
         remove: bool,
     },
     Cleanup,
+    Sharing,
+    AudienceConfirm {
+        space: String,
+        audience: otrios_interfaces::spaces::Audience,
+    },
     Installed,
     Members,
     Person(String),
@@ -184,6 +189,8 @@ pub(super) fn render(
             Pane::Data
                 | Pane::Delete { .. }
                 | Pane::Cleanup
+                | Pane::Sharing
+                | Pane::AudienceConfirm { .. }
                 | Pane::Installed
                 | Pane::Members
                 | Pane::Person(_)
@@ -206,6 +213,11 @@ pub(super) fn render(
         model.pane = Pane::Data;
         model.message = "Data changed; review the collection again.".into();
     }
+    if let Pane::AudienceConfirm { space, .. } = &model.pane
+        && selected.is_none_or(|selected| &selected.space != space)
+    {
+        model.pane = Pane::Home;
+    }
     let title = match model.pane {
         Pane::Home => "Home",
         Pane::Spaces => "Spaces",
@@ -213,6 +225,8 @@ pub(super) fn render(
         Pane::App(_) => "App data",
         Pane::Delete { .. } => "Confirm permanent deletion",
         Pane::Cleanup => "Deletion cleanup",
+        Pane::Sharing => "Space sharing",
+        Pane::AudienceConfirm { .. } => "Confirm public access",
         Pane::Installed => "Add app",
         Pane::Members => "Members",
         Pane::Person(_) => "Membership",
@@ -319,6 +333,11 @@ pub(super) fn render(
                         HostAction::Pane(Pane::Installed),
                     );
                     if data {
+                        b.button(
+                            "Sharing",
+                            [24., 728., 216., 48.],
+                            HostAction::Pane(Pane::Sharing),
+                        );
                         b.button(
                             "Cleanup",
                             [440., 160., 216., 64.],
@@ -503,6 +522,83 @@ pub(super) fn render(
                 HostAction::Pane(Pane::Data),
             );
         }
+        Pane::Sharing => {
+            if let Some(selected) = selected {
+                use otrios_interfaces::spaces::Audience;
+                let audience = summary.map_or(Audience::Closed, |s| s.audience);
+                b.text(
+                    match audience {
+                        Audience::Closed => "Closed: only Members and Admins have access.",
+                        Audience::PublicView => "Public view: visitors read; Members collaborate.",
+                        Audience::PublicComment => {
+                            "Public view and comment: signed-in visitors may comment."
+                        }
+                    },
+                    240.,
+                );
+                b.button(
+                    "Keep closed",
+                    [24., 320., 240., 64.],
+                    HostAction::Manage(Change::Audience {
+                        space: selected.space.clone(),
+                        audience: Audience::Closed,
+                    }),
+                );
+                b.button(
+                    "Public view",
+                    [24., 416., 280., 64.],
+                    HostAction::Pane(Pane::AudienceConfirm {
+                        space: selected.space.clone(),
+                        audience: Audience::PublicView,
+                    }),
+                );
+                b.button(
+                    "Public view & comment",
+                    [24., 512., 400., 64.],
+                    HostAction::Pane(Pane::AudienceConfirm {
+                        space: selected.space.clone(),
+                        audience: Audience::PublicComment,
+                    }),
+                );
+                b.text("Sharing applies to every attached app in this Space.", 624.);
+                b.text(
+                    "Closed-only apps must be removed before making it public.",
+                    672.,
+                );
+            }
+        }
+        Pane::AudienceConfirm { space, audience } => {
+            b.text(
+                &format!("Space: {}", summary.map_or("", |s| s.name.as_str())),
+                240.,
+            );
+            b.text(
+                "Anyone will be able to view its attached app content.",
+                320.,
+            );
+            b.text(
+                if *audience == otrios_interfaces::spaces::Audience::PublicComment {
+                    "Signed-in visitors may comment where the app supports it."
+                } else {
+                    "Visitors cannot edit documents or submit comments."
+                },
+                368.,
+            );
+            b.text("Members continue editing and moderating content.", 416.);
+            b.button(
+                "Cancel",
+                [24., 512., 216., 64.],
+                HostAction::Pane(Pane::Sharing),
+            );
+            b.button(
+                "Make public",
+                [264., 512., 280., 64.],
+                HostAction::Manage(Change::Audience {
+                    space: space.clone(),
+                    audience: *audience,
+                }),
+            );
+        }
         Pane::Installed => {
             if let Some(selected) = selected {
                 let apps = selected
@@ -656,6 +752,8 @@ pub(super) fn render(
             &model.message,
             if form {
                 440.
+            } else if model.pane == Pane::Sharing {
+                728.
             } else if matches!(model.pane, Pane::Delete { .. }) {
                 672.
             } else {

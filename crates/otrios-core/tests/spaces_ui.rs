@@ -281,6 +281,14 @@ fn unavailable_metadata_discards_the_private_host_view_and_switching_forgets_the
 }
 
 fn launch(client: &mut Client, ui: &Ui, authority: &mut Document) -> Session {
+    launch_access(client, ui, authority, true)
+}
+fn launch_access(
+    client: &mut Client,
+    ui: &Ui,
+    authority: &mut Document,
+    editable: bool,
+) -> Session {
     click(client, "Counter");
     let ClientMessage::Mount {
         epoch,
@@ -304,7 +312,7 @@ fn launch(client: &mut Client, ui: &Ui, authority: &mut Document) -> Session {
                 binding: Some(MountBinding {
                     version: 1,
                     collection: "d".repeat(32),
-                    editable: true,
+                    editable,
                     comments: false,
                     moderate: false,
                 }),
@@ -1075,4 +1083,73 @@ fn a_returning_offline_client_discards_pending_edits_when_the_collection_is_repl
             ));
         }
     }
+}
+
+#[test]
+fn only_admins_can_confirm_public_audiences_and_role_loss_cancels_the_dialog() {
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Apps & Data");
+    click(&mut client, "Sharing");
+    click(&mut client, "Public view & comment");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    assert!(labels(&client).contains(&"Make public".into()));
+    click(&mut client, "Cancel");
+    click(&mut client, "Public view");
+    click(&mut client, "Make public");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("audience request");
+    };
+    assert_eq!(
+        request.change,
+        Change::Audience {
+            space: SPACE.into(),
+            audience: Audience::PublicView
+        }
+    );
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Apps & Data");
+    click(&mut client, "Sharing");
+    click(&mut client, "Public view");
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: snapshot(Role::Member, 2),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!labels(&client).contains(&"Make public".into()));
+    assert!(!labels(&client).contains(&"Sharing".into()));
+}
+
+#[test]
+fn read_only_document_controls_do_not_queue_writes_or_fail_the_view() {
+    let (mut client, ui) = fixture(Role::Member);
+    let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    launch_access(&mut client, &ui, &mut authority, false);
+    let control = client
+        .scene()
+        .unwrap()
+        .controls()
+        .iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Increase")
+        .unwrap()
+        .node
+        .id;
+    assert!(!client.activate(client.epoch(), control).unwrap());
+    assert_eq!(client.value(1).unwrap(), 0);
+    assert!(client.confirmed());
+    while let Some(bytes) = client.outgoing().unwrap() {
+        if let ClientMessage::Sync { bytes, .. } = decode_client(&bytes).unwrap() {
+            assert!(!matches!(
+                decode_state_request(&bytes).unwrap(),
+                StateRequest::Write { .. }
+            ));
+        }
+    }
+    assert!(client.scene().is_ok());
 }
