@@ -293,5 +293,46 @@ protocol v13 and release-control v1 are unchanged.
 
 ![Imported legacy message retained after reattachment](data/spaces-chat-migration-2026-11-01.png)
 
-Device-local uninstall, permanent deletion and public sharing remain unfinished.
+Permanent deletion and public sharing remain unfinished.
 This is local process/browser migration evidence, not physical Frame acceptance.
+
+## Device-local uninstall and chat revocation
+
+Code checkpoint `ba4fe5f9919544ed1ee3b86966cc4fdce231826a` passed the full
+`bash scripts/check.sh` suite (`/tmp/otrios-spaces-check-24.log`). The authority
+binary SHA-256 was `b76c0d6622260b7c504c22d422b42b855407796d266c483d016842025cc69c82`.
+State protocol v13 and release-control v1 are unchanged: installation metadata
+and its notifications are device-local, not new shared-session messages.
+
+- Fourteen covered host UI tests pass. Uninstall preserves a pending edit through
+  confirmation, waits for captured release, cancels staged/accepted mounts, hides
+  removed roots despite newer remote discovery, preserves the collection and
+  signed catalog hash, leaves another participant usable, and reopens the same
+  data after reinstall. Offline uninstall discards unconfirmed RAM intents and
+  prevents them from resuming through reconnect or reinstall.
+- A covered namespace test rejects invalid IDs, duplicate/unsorted roots and
+  oversized root sets, removes child destinations, and keeps the trusted local
+  Home available while invalid input closes app launches.
+- Two native filesystem/IPC tests use independent Python writer processes and
+  a real Unix socket. Concurrent writes preserve both removals, notifications
+  resync the newest atomic snapshot, offline mutations survive observer restart,
+  a second observer cannot steal the socket, and invalid file/socket types and
+  permissions are rejected.
+- The real native-worker test holds the display's only frame credit while an
+  independent uninstall command runs. Its retained frame is revoked and redacted
+  before replacement credit returns. These checks pass in the full thirteen-test
+  native-owner suite; they do not use a physical display or touch device.
+- Supervisor tests confirm that configured installation policy is passed as a
+  required executable option, so an older binary cannot silently ignore it.
+
+An earlier full run caught a managed-chat shutdown race: policy revocation could
+end its auxiliary worker before the state worker delivered AccessRequired,
+closing the shared socket early. The original real-process scenario reproduced
+the failure on repetition 33. The adapter now distinguishes expected revocation
+from failure of a still-authorized worker. The strengthened scenario verifies
+that a revoked Member can refresh Home and that app removal still allows a new
+authorized activation on the same socket. All 100 repetitions passed after the
+fix, followed by the full suite, including all thirteen authority process tests.
+
+This completes the S2 software increment. Permanent deletion, public sharing,
+current ARM qualification and signed physical Frame acceptance remain outstanding.
