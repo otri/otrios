@@ -1227,12 +1227,8 @@ impl Client {
                 }
             }
             ServerMessage::AccessRequired { epoch } => {
-                if self
-                    .active
-                    .as_ref()
-                    .is_some_and(|m| m.epoch == epoch && m.private)
-                {
-                    let old = self.active.take().ok_or("Missing private activation")?;
+                if self.active.as_ref().is_some_and(|m| m.epoch == epoch) {
+                    let old = self.active.take().ok_or("Missing revoked activation")?;
                     // Revocation belongs to the old lease. A newer staged public
                     // navigation must still be able to qualify its Mounted reply.
                     if self.requested.is_none() {

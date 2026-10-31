@@ -37,6 +37,8 @@ mod collections;
 mod ink;
 #[path = "server_session.rs"]
 mod session;
+#[path = "server_spaces.rs"]
+mod spaces;
 #[path = "server_store.rs"]
 mod store;
 
@@ -46,6 +48,7 @@ struct StateConfig {
     state: Option<PathBuf>,
     presentation: Option<PathBuf>,
     bundle_key: PathBuf,
+    spaces: Option<PathBuf>,
 }
 struct App {
     collections: Arc<collections::Hub>,
@@ -191,6 +194,9 @@ async fn recover_state(app: Arc<App>) {
                 )?);
             }
             hub.refresh(&releases, &release)?;
+            if let Some(path) = config.spaces {
+                hub.enable_spaces(path)?;
+            }
             if let Some(path) = config.presentation.filter(|p| p.exists()) {
                 hub.set_view(fs::read(path).map_err(|e| e.to_string())?)?;
             }
@@ -278,6 +284,9 @@ async fn retired() -> Response {
     failure(StatusCode::GONE, "Use the app-scoped /apps/stream protocol")
 }
 async fn get_presentation(State(app): State<Arc<App>>) -> Response {
+    if app.state_config.spaces.is_some() {
+        return failure(StatusCode::FORBIDDEN, "Use an admitted Monitoring mount");
+    }
     let guard = app.apps.lock().await;
     match guard.as_ref() {
         Some(hub) => binary("application/octet-stream", hub.view().to_vec(), false),
@@ -289,6 +298,9 @@ async fn put_presentation(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Response {
+    if app.state_config.spaces.is_some() {
+        return failure(StatusCode::FORBIDDEN, "Explicit collector binding required");
+    }
     if !origin_ok(&app, &headers) {
         return failure(StatusCode::FORBIDDEN, "Origin rejected");
     }
@@ -680,6 +692,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut explicit_presentation = None;
     let mut releases = None;
     let mut bundle_key = PathBuf::from("/etc/otrios-authority/publisher.pem");
+    let mut spaces_registry = None;
     let mut origins = vec![];
     let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/canvas");
     let mut source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
@@ -699,6 +712,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
         "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release directory")?)),
         "--bundle-key"=>bundle_key=PathBuf::from(args.next().ok_or("Missing bundle publisher key")?),
+        "--spaces-registry"=>spaces_registry=Some(PathBuf::from(args.next().ok_or("Missing Space registry path")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
         "--origin"=>origins.push(args.next().ok_or("Missing origin")?),
         _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--trusted-peers COUNT] [--public-peers COUNT] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--presentation-file FILE] [--collection-fixture FILE] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
@@ -748,6 +762,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             state: app_state,
             presentation: presentation_file.clone(),
             bundle_key,
+            spaces: spaces_registry.clone(),
         },
         recovery: Mutex::new(()),
         state_available,
@@ -785,6 +800,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = listener.tap_io(interactive_socket);
         let routes = Router::new()
             .route("/session", get(session::public))
+            .route(
+                "/spaces",
+                get(spaces::list)
+                    .post(spaces::manage)
+                    .layer(DefaultBodyLimit::max(8192)),
+            )
             .route("/release/events", get(session::public_control))
             .route("/", get(root))
             .route("/release", get(current_release))
@@ -813,6 +834,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let routes = Router::new()
         .route("/session", get(session::trusted))
+        .route(
+            "/spaces",
+            get(spaces::list)
+                .post(spaces::manage)
+                .layer(DefaultBodyLimit::max(8192)),
+        )
         .route("/release/events", get(session::trusted_control))
         .route("/admin/activate", axum::routing::post(activate))
         .route("/demo/ink", get(retired))

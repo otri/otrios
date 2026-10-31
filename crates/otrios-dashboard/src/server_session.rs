@@ -14,34 +14,39 @@ use tokio::sync::mpsc;
 pub(super) async fn public(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, true, false).await
+    open(app, headers, uri, ws, true, false).await
 }
 pub(super) async fn trusted(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, false, false).await
+    open(app, headers, uri, ws, false, false).await
 }
 pub(super) async fn public_control(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, true, true).await
+    open(app, headers, uri, ws, true, true).await
 }
 pub(super) async fn trusted_control(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, false, true).await
+    open(app, headers, uri, ws, false, true).await
 }
 async fn open(
     app: Arc<App>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
     public: bool,
     control_only: bool,
@@ -65,7 +70,11 @@ async fn open(
     let Ok(permit) = slots.try_acquire_owned() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "Session limit");
     };
-    let key = if public && !control_only {
+    let space = match spaces::selected(&uri.0) {
+        Ok(space) => space,
+        Err(status) => return failure(status, "Invalid Space selection"),
+    };
+    let key = if !control_only {
         match &app.auth {
             Some(a) => a.key(&headers).await,
             None => None,
@@ -81,7 +90,7 @@ async fn open(
         .max_frame_size(otrios_core::canvas::MAX_BYTES + 1)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            peer(app, socket, public, key, control_only, guest).await
+            peer(app, socket, public, key, control_only, guest, space).await
         })
 }
 async fn send(output: &mut SplitSink<WebSocket, Message>, message: Message) -> bool {
@@ -128,6 +137,7 @@ async fn peer(
     key: Option<String>,
     control_only: bool,
     guest: Option<String>,
+    space: Option<String>,
 ) {
     let (mut output, mut input) = socket.split();
     let Ok(Some(Ok(Message::Text(bytes)))) =
@@ -181,6 +191,7 @@ async fn peer(
             app.clone(),
             public,
             key.clone(),
+            space.clone(),
             state_input,
             state_output,
         ))
@@ -253,6 +264,12 @@ async fn peer(
                 match message {
                     Message::Binary(bytes) => {
                         if !state_enabled || !*availability.borrow() {
+                            break;
+                        }
+                        // Until the auxiliary lanes are collection-owned, a
+                        // managed session cannot fall back to their global rooms.
+                        if app.state_config.spaces.is_some() && bytes.first() != Some(&wire::STATE)
+                        {
                             break;
                         }
                         match bytes.split_first() {
@@ -373,6 +390,9 @@ async fn peer(
                                 ink = None;
                             }
                             Ok(ClientControl::Ink { enabled: true }) if ink.is_none() => {
+                                if app.state_config.spaces.is_some() {
+                                    break;
+                                }
                                 let Ok((subscription, bytes)) = app.ink.subscribe().await else {
                                     break;
                                 };
@@ -420,6 +440,24 @@ async fn peer(
             }
             Event::Wire(_) => break,
             Event::State(Some(packet)) => {
+                // Hold the same lock as management through the bounded send:
+                // revocation cannot acknowledge ahead of an older queued payload.
+                let guard = if packet.binding.is_some() {
+                    Some(app.apps.lock().await)
+                } else {
+                    None
+                };
+                let scope = spaces::Scope {
+                    space: space.clone(),
+                    identity: spaces::identity(&app, &key).await,
+                };
+                if let Some(binding) = &packet.binding
+                    && guard.as_ref().and_then(|g| g.as_ref()).is_none_or(|hub| {
+                        !hub.allowed(&scope, binding, otrios_interfaces::spaces::Operation::Read)
+                    })
+                {
+                    continue;
+                }
                 if packet.private && !apps::private_allowed(&app, public, &key).await {
                     continue;
                 }
@@ -431,6 +469,7 @@ async fn peer(
                 {
                     break;
                 }
+                drop(guard);
             }
             Event::State(None) => break,
             Event::Collection(Some(packet)) => {
@@ -568,6 +607,7 @@ mod tests {
                 source: PathBuf::new(),
                 state: None,
                 presentation: None,
+                spaces: None,
             },
             recovery: Mutex::new(()),
             state_available,

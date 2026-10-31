@@ -2,10 +2,10 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {connectSession,validRelease} from '../web/shared/session.mjs';
 const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v8'});
-function rig({failOpen=false}={}){
+function rig({failOpen=false,base='https://otrios.example/releases/'+ 'a'.repeat(64)+'/web/index.html'}={}){
  const peers=[],timers=new Map(),seen=[],state=[],ink=[],status=[],errors=[];let serial=0;
  class Peer {constructor(url){this.url=String(url);this.sent=[];this.bufferedAmount=0;peers.push(this);}send(data){this.sent.push(typeof data==='string'?JSON.parse(data):[...data]);}close(){this.closed=true;this.onclose?.();}event(type='hello',r=release('a'),extra={}){this.onmessage({data:JSON.stringify({type,version:1,release:r,compatible:true,state_available:true,...extra})});}binary(bytes){this.onmessage({data:new Uint8Array(bytes).buffer});}}
- const session=connectSession({open:url=>{if(failOpen)throw Error('offline');return new Peer(url);},base:'https://otrios.example/releases/'+ 'a'.repeat(64)+'/web/index.html',onRelease:r=>seen.push(r),onState:(b,e)=>state.push([[...b],e]),onInk:(b,e)=>ink.push([[...b],e]),onStatus:(v,e)=>status.push([v,e]),onError:e=>errors.push(String(e)),schedule:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},cancel:id=>timers.delete(id)});
+ const session=connectSession({open:url=>{if(failOpen)throw Error('offline');return new Peer(url);},base,onRelease:r=>seen.push(r),onState:(b,e)=>state.push([[...b],e]),onInk:(b,e)=>ink.push([[...b],e]),onStatus:(v,e)=>status.push([v,e]),onError:e=>errors.push(String(e)),schedule:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},cancel:id=>timers.delete(id)});
  return {peers,timers,seen,state,ink,status,errors,session};
 }
 test('one socket negotiates before binary traffic and multiplexes subscribed ink',()=>{
@@ -91,4 +91,10 @@ test('collection lane negotiates, bounds payloads and uses two mailbox credits',
  bridge.handle({type:'collection-frame-ack',epoch:1});bridge.receive('collection',new Uint8Array([3]),2);assert.equal(reconnects,1);
  bridge.handle({type:'collection-frame-ack',epoch:2});bridge.receive('collection',new Uint8Array([4]),2);
  assert.equal(messages.filter(m=>m.type==='collection-frame').length,3);
+});
+
+test('selected Space stays on the shared session across reconnects',()=>{
+ const id='a'.repeat(32),r=rig({base:'https://otrios.example/counter?space='+id});
+ assert.equal(r.peers[0].url,'wss://otrios.example/session?space='+id);
+ r.session.reconnect();assert.equal(r.peers[1].url,r.peers[0].url);r.session.stop();
 });

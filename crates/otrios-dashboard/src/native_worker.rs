@@ -237,14 +237,63 @@ fn app_stream(url: &str) -> String {
     let url = url
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
+    let (url, query) = url
+        .split_once('?')
+        .map_or((url.as_str(), None), |(url, query)| (url, Some(query)));
     if url.ends_with("/session") {
-        return url;
+        return format!("{url}{}", query.map_or(String::new(), |q| format!("?{q}")));
     }
     let root = ["/apps/stream", "/demo/stream", "/stream", "/sync"]
         .iter()
         .find_map(|suffix| url.strip_suffix(suffix))
         .unwrap_or(url.trim_end_matches('/'));
-    format!("{root}/session")
+    format!(
+        "{root}/session{}",
+        query.map_or(String::new(), |q| format!("?{q}"))
+    )
+}
+
+fn authenticated_request(
+    url: &str,
+    identity: Option<&std::path::Path>,
+) -> Result<tungstenite::http::Request<()>, String> {
+    use tungstenite::client::IntoClientRequest;
+    let mut request = url
+        .into_client_request()
+        .map_err(|_| "Invalid session URL")?;
+    if let Some(path) = identity {
+        use std::io::Read;
+        let metadata = fs::symlink_metadata(path).map_err(|_| "Cannot inspect Frame identity")?;
+        if !metadata.is_file() || !(64..=65).contains(&metadata.len()) {
+            return Err("Invalid Frame identity file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err("Frame identity must be mode 0600".into());
+            }
+        }
+        let mut token = String::new();
+        fs::File::open(path)
+            .and_then(|f| f.take(66).read_to_string(&mut token))
+            .map_err(|_| "Cannot read Frame identity")?;
+        let token = token.trim();
+        if token.len() != 64
+            || !token
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err("Invalid Frame identity".into());
+        }
+        request.headers_mut().insert(
+            tungstenite::http::header::AUTHORIZATION,
+            format!("Bearer {token}")
+                .parse()
+                .map_err(|_| "Invalid Frame identity")?,
+        );
+    }
+    Ok(request)
 }
 fn save_identity(path: &std::path::Path, token: &str) -> Result<(), String> {
     use std::io::Write;
@@ -846,13 +895,28 @@ fn network(
     use otrios_interfaces::session::{self as wire, ServerControl};
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let url = app_stream(&url);
+    let mut url = app_stream(&url);
+    if let Ok(space) = std::env::var("OTRIOS_SPACE") {
+        if !otrios_core::spaces::valid_id(&space) || url.contains('?') {
+            eprintln!("Specify one valid Frame Space selection");
+            return;
+        }
+        url.push_str(&format!("?space={space}"));
+    }
+    let identity = std::env::var_os("OTRIOS_IDENTITY_FILE").map(std::path::PathBuf::from);
     let mut epoch = 0_u64;
     loop {
         stream_ready.store(false, Ordering::Release);
         connection.store(0, Ordering::Release);
+        let request = match authenticated_request(&url, identity.as_deref()) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("Frame session: {error}");
+                return;
+            }
+        };
         let mut socket = match tungstenite::client::connect_with_config(
-            url.as_str(),
+            request,
             Some(
                 tungstenite::protocol::WebSocketConfig::default()
                     .max_message_size(Some(otrios_interfaces::collection::MAX_EVENT_BYTES + 1))
@@ -1711,6 +1775,55 @@ mod tests {
         ] {
             assert_eq!(app_stream(input), "wss://host/session");
         }
+        for input in [
+            "https://host/session?space=abc",
+            "https://host/sync?space=abc",
+        ] {
+            assert_eq!(app_stream(input), "wss://host/session?space=abc");
+            assert_eq!(
+                app_stream(&app_stream(input)),
+                "wss://host/session?space=abc"
+            );
+        }
+    }
+    #[test]
+    fn native_credential_is_private_and_never_part_of_the_session_url() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!(
+            "otrios-native-identity-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let url = "ws://127.0.0.1:8876/session?space=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        assert!(authenticated_request(url, Some(&path)).is_err());
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options
+            .open(&path)
+            .unwrap()
+            .write_all("a".repeat(64).as_bytes())
+            .unwrap();
+        let request = authenticated_request(url, Some(&path)).unwrap();
+        assert_eq!(request.uri().to_string(), url);
+        assert_eq!(
+            request.headers()["Authorization"],
+            format!("Bearer {}", "a".repeat(64))
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+            assert!(authenticated_request(url, Some(&path)).is_err());
+        }
+        fs::remove_file(path).unwrap();
     }
     #[test]
     fn obsolete_client_state_path_is_rejected_before_any_read_or_write() {

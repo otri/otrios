@@ -10,6 +10,7 @@ export function connectSession({
 }={}){
   let stopped=false,peer,timer,deadline,last,delay=250,ready=false,wantsInk=false,subscribed=false,generation=0;
   const url=new URL('/session',base);url.protocol=url.protocol==='https:'?'wss:':'ws:';
+  const space=new URL(base).searchParams.get('space');if(space)url.searchParams.set('space',space);
   function status(value){if(ready!==value){ready=value;onStatus(value,generation);}if(value)syncInk();}
   function syncInk(){if(ready&&subscribed!==wantsInk){try{peer.send(JSON.stringify({type:'ink',enabled:wantsInk}));subscribed=wantsInk;}catch(error){onError(error);status(false);peer.close();}}}
   function retry(){if(stopped)return;timer=schedule(connect,delay);delay=Math.min(10000,delay*2);}

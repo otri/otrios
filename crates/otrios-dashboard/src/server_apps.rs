@@ -18,6 +18,7 @@ struct Package {
     private: bool,
     signal_fields: Vec<u16>,
     selection: canvas::StateSelection,
+    schema: otrios_interfaces::canvas::StateSchema,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -38,6 +39,7 @@ pub(super) struct Hub {
     active: Vec<u8>,
     active_release: String,
     publisher: Option<[u8; 32]>,
+    spaces: Option<otrios_core::spaces::Store>,
 }
 struct Lease {
     epoch: u32,
@@ -45,6 +47,7 @@ struct Lease {
     private: bool,
     sync: Session,
     view_id: Vec<u8>,
+    binding: Option<otrios_interfaces::spaces::Binding>,
 }
 #[derive(Default)]
 struct Leases {
@@ -103,10 +106,154 @@ impl Hub {
             active: vec![],
             active_release: String::new(),
             publisher: None,
+            spaces: None,
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
         self.publisher = Some(key);
+    }
+    pub(super) fn enable_spaces(&mut self, path: PathBuf) -> Result<()> {
+        self.spaces = Some(otrios_core::spaces::Store::open(path).map_err(|e| e.to_string())?);
+        Ok(())
+    }
+    pub(super) fn registry(
+        &self,
+    ) -> std::result::Result<&otrios_interfaces::spaces::Registry, otrios_core::spaces::Error> {
+        self.spaces
+            .as_ref()
+            .ok_or(otrios_core::spaces::Error::Unavailable)?
+            .registry()
+    }
+    pub(super) fn manage_space(
+        &mut self,
+        actor: &str,
+        request: &otrios_interfaces::spaces::Request,
+        policy: Option<&otrios_interfaces::spaces::AppPolicy>,
+    ) -> std::result::Result<u64, otrios_core::spaces::Error> {
+        Ok(self
+            .spaces
+            .as_mut()
+            .ok_or(otrios_core::spaces::Error::Unavailable)?
+            .commit(actor, request, policy)?
+            .generation)
+    }
+    pub(super) fn app_policy(&self, app: &str) -> Result<otrios_interfaces::spaces::AppPolicy> {
+        let p = self
+            .bundles
+            .get(&self.active)
+            .and_then(|b| b.packages.values().find(|p| p.app.id == app))
+            .ok_or("Installed app unavailable")?;
+        // A global chat/collection lane is never admitted into a scoped mount.
+        // Its collection-owned adapter is introduced separately in this milestone.
+        if matches!(
+            canvas::decode_ui(&p.ui)?.presentation,
+            Some(otrios_interfaces::canvas::Presentation::Chat)
+        ) {
+            return Err("Scoped chat adapter unavailable".into());
+        }
+        Ok(otrios_interfaces::spaces::AppPolicy {
+            app: app.into(),
+            schema: canvas::hex(&canvas::hash(&canvas::encode_schema(&p.schema)?)),
+            closed_only: p.private,
+            editable: p.schema.fields.iter().any(|f| f.writable),
+            comments: false,
+        })
+    }
+    fn binding(
+        &self,
+        scope: &spaces::Scope,
+        package: &Package,
+    ) -> Result<otrios_interfaces::spaces::Binding> {
+        let owner = package
+            .app
+            .id
+            .split('/')
+            .next()
+            .ok_or("Missing installed app")?;
+        let schema = canvas::hex(&canvas::hash(&canvas::encode_schema(&package.schema)?));
+        otrios_core::spaces::bind(
+            self.registry().map_err(|e| e.to_string())?,
+            scope.identity.as_deref(),
+            scope.space.as_deref().ok_or("Select a Space")?,
+            owner,
+            &schema,
+        )
+        .map_err(|e| e.to_string())
+    }
+    pub(super) fn allowed(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+        operation: otrios_interfaces::spaces::Operation,
+    ) -> bool {
+        scope.space.as_deref() == Some(binding.space.as_str())
+            && self.registry().is_ok_and(|registry| {
+                otrios_core::spaces::authorize(
+                    registry,
+                    scope.identity.as_deref(),
+                    binding,
+                    operation,
+                )
+                .is_ok()
+            })
+    }
+    fn revoke_scoped(&self, leases: &mut Leases, scope: &spaces::Scope) -> Vec<ServerMessage> {
+        let mut messages = vec![];
+        for slot in [&mut leases.active, &mut leases.staged] {
+            if slot
+                .as_ref()
+                .and_then(|l| l.binding.as_ref())
+                .is_some_and(|b| {
+                    !self.allowed(scope, b, otrios_interfaces::spaces::Operation::Read)
+                })
+            {
+                let lease = slot.take().expect("present lease");
+                messages.push(ServerMessage::AccessRequired { epoch: lease.epoch });
+            }
+        }
+        messages
+    }
+    fn scoped_room(
+        &mut self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<()> {
+        if self.rooms.contains_key(&binding.collection) {
+            return Ok(());
+        }
+        if self.rooms.len() >= 256 {
+            return Err("App root budget exhausted".into());
+        }
+        let file = self
+            .state
+            .as_ref()
+            .map(|root| root.join(format!("collection-{}.merkle", binding.collection)));
+        let mut doc = match file.as_ref().filter(|p| p.exists()) {
+            Some(path) => store::load(
+                path,
+                Document::load(
+                    package.schema.clone(),
+                    &package.app.state_ref,
+                    &bounded(path, canvas::MAX_BYTES)?,
+                )?,
+            )?,
+            None => Document::new(package.schema.clone(), &package.app.state_ref)?,
+        };
+        doc.set_signal_fields(&package.signal_fields)?;
+        if let Some(file) = &file
+            && !file.exists()
+        {
+            persist(file, &doc.save()?).map_err(|e| e.to_string())?;
+        }
+        self.rooms.insert(
+            binding.collection.clone(),
+            Room {
+                doc,
+                file,
+                failed: false,
+            },
+        );
+        Ok(())
     }
     pub(super) fn refresh(&mut self, releases: &Option<PathBuf>, release: &Value) -> Result<()> {
         let id = release["id"].as_str().unwrap_or("development");
@@ -311,7 +458,7 @@ impl Hub {
                         )?,
                     )?
                 } else {
-                    Document::new(description.state_schema, &a.state_ref)?
+                    Document::new(description.state_schema.clone(), &a.state_ref)?
                 };
                 doc.set_signal_fields(&signal_fields)?;
                 if let Some(path) = &file
@@ -339,6 +486,7 @@ impl Hub {
                         private,
                         signal_fields,
                         selection,
+                        schema: description.state_schema,
                     },
                 )
                 .is_some()
@@ -408,8 +556,10 @@ impl Hub {
         leases: &mut Leases,
         message: ClientMessage,
         allow_private: bool,
+        scope: &spaces::Scope,
     ) -> Result<(Vec<ServerMessage>, bool)> {
         let mut messages = leases.revoke_private(allow_private);
+        messages.extend(self.revoke_scoped(leases, scope));
         let mut changed = false;
         match message {
             ClientMessage::Mount {
@@ -433,6 +583,17 @@ impl Hub {
                 leases.last_epoch = epoch;
                 leases.staged = None;
                 let p = self.package(&catalog_hash, &ui_ref)?;
+                let binding = if self.spaces.is_some() {
+                    match self.binding(scope, &p) {
+                        Ok(binding) => Some(binding),
+                        Err(_) => {
+                            messages.push(ServerMessage::AccessRequired { epoch });
+                            return Ok((messages, false));
+                        }
+                    }
+                } else {
+                    None
+                };
                 if p.private && !allow_private {
                     messages.push(ServerMessage::AccessRequired { epoch });
                     return Ok((messages, false));
@@ -440,9 +601,15 @@ impl Hub {
                 if state_ref != p.app.state_ref {
                     return Err("State root is not granted by app catalog".into());
                 }
+                let room_key = if let Some(binding) = &binding {
+                    self.scoped_room(binding, &p)?;
+                    binding.collection.clone()
+                } else {
+                    state_ref.clone()
+                };
                 let room = self
                     .rooms
-                    .get_mut(&state_ref)
+                    .get_mut(&room_key)
                     .ok_or("Missing app State root")?;
                 if room.failed {
                     return Err("App persistence outcome uncertain; restart required".into());
@@ -485,10 +652,11 @@ impl Hub {
                 });
                 leases.staged = Some(Lease {
                     epoch,
-                    state_ref,
+                    state_ref: room_key,
                     private: p.private,
                     sync,
                     view_id: vec![],
+                    binding,
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.
@@ -516,6 +684,19 @@ impl Hub {
                 return Ok((messages, false));
             }
             ClientMessage::Sync { epoch, bytes } => {
+                if let Some(binding) = leases.active.as_ref().and_then(|l| l.binding.as_ref()) {
+                    // ACK/resync are reads; only actual write requests require Edit.
+                    if matches!(
+                        canvas::decode_state_request(&bytes)?,
+                        otrios_interfaces::canvas::StateRequest::Write { .. }
+                    ) && !self.allowed(
+                        scope,
+                        binding,
+                        otrios_interfaces::spaces::Operation::Edit,
+                    ) {
+                        return Err("Space edit denied".into());
+                    }
+                }
                 let Some(l) = leases.active.as_mut() else {
                     if !messages.is_empty() {
                         return Ok((messages, false));
@@ -561,11 +742,17 @@ impl Hub {
                 return Ok((messages, false));
             }
         }
-        messages.extend(self.updates(leases, allow_private)?);
+        messages.extend(self.updates(leases, allow_private, scope)?);
         Ok((messages, changed))
     }
-    fn updates(&mut self, leases: &mut Leases, allow_private: bool) -> Result<Vec<ServerMessage>> {
+    fn updates(
+        &mut self,
+        leases: &mut Leases,
+        allow_private: bool,
+        scope: &spaces::Scope,
+    ) -> Result<Vec<ServerMessage>> {
         let mut messages = leases.revoke_private(allow_private);
+        messages.extend(self.revoke_scoped(leases, scope));
         let Some(l) = &mut leases.active else {
             return Ok(messages);
         };
@@ -611,6 +798,7 @@ fn verify_asset(manifest: &Value, path: &str, bytes: &[u8]) -> Result<()> {
 pub(super) struct Packet {
     pub bytes: Vec<u8>,
     pub private: bool,
+    pub binding: Option<otrios_interfaces::spaces::Binding>,
 }
 pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
     if !public {
@@ -625,6 +813,7 @@ async fn emit(
     output: &tokio::sync::mpsc::Sender<Packet>,
     message: ServerMessage,
     private: bool,
+    binding: Option<otrios_interfaces::spaces::Binding>,
 ) -> bool {
     let Ok(mut bytes) = canvas::encode_server(&message) else {
         return false;
@@ -641,7 +830,11 @@ async fn emit(
     matches!(
         tokio::time::timeout(
             Duration::from_secs(2),
-            output.send(Packet { bytes, private })
+            output.send(Packet {
+                bytes,
+                private,
+                binding
+            })
         )
         .await,
         Ok(Ok(()))
@@ -651,6 +844,7 @@ pub(super) async fn worker(
     app: Arc<App>,
     public: bool,
     key: Option<String>,
+    space: Option<String>,
     mut input: tokio::sync::mpsc::Receiver<Vec<u8>>,
     output: tokio::sync::mpsc::Sender<Packet>,
 ) {
@@ -666,8 +860,12 @@ pub(super) async fn worker(
             _=expiry.tick()=>None,
         };
         let allowed = private_allowed(&app, public, &key).await;
+        let scope = spaces::Scope {
+            space: space.clone(),
+            identity: spaces::identity(&app, &key).await,
+        };
         for revoked in leases.revoke_private(allowed) {
-            if !emit(&output, revoked, false).await {
+            if !emit(&output, revoked, false, None).await {
                 return;
             }
         }
@@ -696,12 +894,14 @@ pub(super) async fn worker(
                 if matches!(message, ClientMessage::Mount { .. }) {
                     hub.refresh(&app.releases, &release)?;
                 }
-                hub.process(&mut leases, message, allowed)
+                hub.process(&mut leases, message, allowed, &scope)
             })
         } else {
             let mut guard = app.apps.lock().await;
             match guard.as_mut() {
-                Some(hub) => hub.updates(&mut leases, allowed).map(|m| (m, false)),
+                Some(hub) => hub
+                    .updates(&mut leases, allowed, &scope)
+                    .map(|m| (m, false)),
                 None => continue,
             }
         };
@@ -727,13 +927,18 @@ pub(super) async fn worker(
                     let private = private_epochs.contains(&epoch);
                     if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
-                            if !emit(&output, revoked, false).await {
+                            if !emit(&output, revoked, false, None).await {
                                 return;
                             }
                         }
                         continue;
                     }
-                    if !emit(&output, message, private).await {
+                    let binding = [leases.active.as_ref(), leases.staged.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .find(|l| l.epoch == epoch)
+                        .and_then(|l| l.binding.clone());
+                    if !emit(&output, message, private, binding).await {
                         return;
                     }
                 }
@@ -741,7 +946,14 @@ pub(super) async fn worker(
             Err(message) => {
                 let epoch = recoverable_epoch
                     .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
-                if !emit(&output, ServerMessage::Error { epoch, message }, false).await {
+                if !emit(
+                    &output,
+                    ServerMessage::Error { epoch, message },
+                    false,
+                    None,
+                )
+                .await
+                {
                     return;
                 }
                 if recoverable_epoch.is_none() {

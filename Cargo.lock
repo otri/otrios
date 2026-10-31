@@ -601,6 +601,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tungstenite 0.30.0",
  "unicode-segmentation",
  "wasmi",
  "wat",

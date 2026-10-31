@@ -1,10 +1,34 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Spaces management contract
 
-This specifies the first RFC 0027 implementation checkpoint. The covered
-`otrios_core::spaces` library implements registry transitions and admission;
-the existing browser/native serving paths have not yet been cut over. These
-library checks do not establish end-to-end Space isolation or deployment.
+The covered `otrios_core::spaces` library implements registry transitions and
+admission. The authority additionally supports an explicit managed mode via
+`--spaces-registry /ABS/PRIVATE/spaces.flex`. The live Frame has not been cut over.
+The default legacy mode remains for existing deployments during this transition;
+it does not implement Space admission.
+
+In managed mode, `/spaces` lists admitted Spaces and accepts versioned management
+requests with an allowed Origin and `X-OTriOS-Request: spaces`. It never returns
+closed Space records to strangers, or membership lists to ordinary Members.
+Clients select a Space with `/session?space=SPACE_ID`. The authority resolves
+the installed app's admitted collection, scopes its checkpoint/journal and writer
+receipts, and checks reads and writes against the current binding. Membership
+changes revoke staged/active mounts, and queued payloads revalidate under the same
+management lock before delivery. Native loopback grants no managed access.
+
+This increment admits Create, Membership, Attach and Closed audience changes.
+Removal, deletion and public audience changes remain unavailable through HTTP
+until their lifecycle integrations are complete. Global chat/collection/ink lanes
+and legacy presentation endpoints are disabled in managed mode; they cannot be
+used as an unscoped fallback. Monitoring's collection-bound collector and retained
+presentation integration are still required before its live cutover.
+
+Separate child clients exercise authority reads/writes, collection isolation,
+explicit Frame access, active revocation/reconnect, Member management denial and
+concurrent last-Admin protection. These are authority adapter checks, not Frame or
+browser qualification. `scripts/check.sh` supplies its freshly built authority to
+`otrios-core/tests/spaces_process.rs`. Its test-only `tungstenite` dependency reuses
+the pinned workspace WebSocket client; it adds no runtime dependency.
 
 ## Identity configuration
 
@@ -22,6 +46,12 @@ membership is checked independently and can be revoked without changing a
 credential. Multiple valid credential sources in one request are rejected. Existing
 single-login files remain readable, but authenticating a legacy login confers no
 Space membership or Admin role.
+
+The native host accepts `OTRIOS_SPACE` and a mode-0600 credential file selected by
+`OTRIOS_IDENTITY_FILE`. It sends the token in an Authorization header, never in a
+URL or state message. A Space query in the configured session URL is also accepted;
+specify the Space exactly once. The browser forwards the selected `space` query
+to its shared session owner. Neither host opens an extra state connection.
 
 ## Management v1
 
