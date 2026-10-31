@@ -48,24 +48,19 @@ resource API resolves logical locale/scale alternatives without install paths.
 
 ### Designated application roots
 
-The system namespace should expose `/Applications` for apps available without
-sign-in and `/PrivateApplications` for apps requiring authenticated admission.
-Monitoring belongs under `/PrivateApplications`. These are OTriOS conventions:
-macOS distinguishes shared `/Applications` and user-specific `~/Applications`,
-which is an ownership distinction rather than an application sign-in boundary.
-See [Apple's filesystem domains](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemOverview/FileSystemOverview.html).
-Apple also uses `PrivateFrameworks` for implementation-private frameworks; that
-is a comparable naming style, not a sign-in mechanism. See the
-[framework guide](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPFrameworks/Tasks/CreatingFrameworks.html).
+The proposed installed-bundle namespace is `/Applications`. The earlier proposal
+for a separate `/PrivateApplications` root is replaced by
+[RFC 0027: Spaces, membership and app data](0027-spaces-and-app-data.md).
+App attachments, Space membership and audience policy determine access; bundle
+placement does not. Monitoring is intended for a closed Operations Space.
 
-This names the next discovery/storage increment. The deployed signed release
-still stores both classes under `authority/bundles`; it has not created Linux
-root directories or a filesystem watcher. The signed `Info.flex.private` value
-and admitted catalog currently select the class. A future folder-based installer
-must check that placement agrees with signed policy, reject duplicate identities
-across roots and publish registry changes transactionally. Moving or renaming a
-folder must never grant access. Both roots can contribute discoverable launcher
-metadata while private UI, code and state stay behind admission.
+The deployed signed release still stores public and private bundles under
+`authority/bundles`; it has not created `/Applications`, Spaces or a filesystem
+watcher. The signed `Info.flex.private` value and admitted catalog retain their
+current bounded delivery classification until an explicit Space-aware cutover.
+A future folder-based installer must reject duplicate app identities and publish
+complete verified registry changes atomically. Moving or renaming a folder must
+never grant access. Protected UI, code and state stay behind admission.
 
 Home omits the generic "Installed app" subtitle. Private app cards carry a closed
 padlock and "Sign-in required" when access is absent, or an open padlock and

@@ -35,3 +35,4 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0024: Viewport-scoped collection synchronization](0024-viewport-scoped-collections.md) | Implemented and deployed |
 | [RFC 0025: Standalone app bundles](0025-standalone-app-bundles.md) | Signed bounded Canvas app installation, discovery, native/browser execution, upgrades and rollback qualified on Frame |
 | [RFC 0026: Target-specific Wasm compilation](0026-target-wasm-compilation.md) | Proposed experiment; no execution backend selected or integrated |
+| [RFC 0027: Spaces, membership and app data](0027-spaces-and-app-data.md) | Draft; Member/Admin roles, public audiences, Space-owned collections and app/data deletion lifecycle; replaces the proposed PrivateApplications namespace |
