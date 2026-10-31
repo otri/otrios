@@ -468,3 +468,48 @@ check 30 is the complete final run.
 These are local software checks. Authority timer/status integration, connected
 replica discard acknowledgements, deletion management/UI and S4 remain pending.
 No physical Frame deployment or new browser acceptance is claimed here.
+
+
+## Permanent-deletion software checkpoint
+
+Source checkpoint: `fc974e15e0e1eac6388e07a8a77d5b0bc33a9d26`.
+The authority SHA-256 after the required check is
+`58fc9d3a7783ae4c1e16320c861d59e938887859b23b33b054d0f56858ca0771`.
+
+`bash scripts/check.sh` passed in full (check 32). The run supplied the preserved
+OTSP4 writer through `OTRIOS_SPACES_OLD_SERVER`; its refusal to change an OTSP5
+root remains covered. Shared state protocol is now v14 for collection-specific
+delete confirmation and Admin-only cleanup summaries. Stable release-control v1
+and private control framing OTSP5 remain unchanged.
+
+Core qualification includes 191 library tests (39 storage tests), 67 canvas
+integration tests, 18 admission/management tests and 18 trusted-host UI tests.
+The UI identifies Space/app, distinguishes Delete from Remove & delete, requires
+a separate confirmation and invalidates stale dialogs after a collection or role
+change. Even a current-generation request cannot delete a successor using an old
+collection ID. A returning offline client discards its old pending RAM edits when
+the same app/reference is admitted with a replacement collection.
+
+All nineteen authority process tests pass. New cases exercise two TCP clients
+racing a write against deletion, Member denial, active invalidation, delayed
+replica disposal acknowledgement, malformed/late old-epoch packets, fresh empty
+binding, unrelated-Space isolation and old-primary/payload-backup recovery that
+keeps the replacement value 5 instead of resurrecting deleted value 42. A separate
+chat case deletes primary and subsidiary roots with live workers/windows, waits
+for both hosts' Leave acknowledgements, reclaims the full old namespace, and
+verifies that another Space keeps sending. Reattachment obtains empty transcripts
+and new app-local profiles. A missing owned journal is unavailable in discovery
+and direct launch until verified backup restore recovers its content/profile.
+
+Reclamation waits for producers and connected disposal pins, handles at most eight
+collections per turn and rotates past blocked work. Pending collection work retries
+once per second; backup/original retention is checked on startup and at most once
+per minute. Three maintenance tests separate these boundaries, check restart and
+bounded fairness, and prevent corrupt backup metadata from appearing complete.
+Admin-only discovery/HTTP summaries report retained-copy deadlines, unqualified
+migration originals and unknown inventory. Offline copies and user exports are
+explicitly unverified. Minimal tombstones do not expire.
+
+This checkpoint has local software qualification. Current browser, ARM and
+physical Frame evidence remains to be recorded; no signed Frame deployment is
+claimed. Public audiences/comments/publication remain gated for S4.
