@@ -84,14 +84,24 @@ fn fixture(editable: bool) -> Client {
 
 #[test]
 fn ink_uses_its_accepted_epoch_and_read_only_admission_cannot_publish_points() {
+    // Replay the same pointer positions after read-only admission, even though
+    // the current presentation no longer advertises the writable responder.
+    let reference = fixture(true).scene().unwrap();
+    let pad = reference
+        .controls()
+        .into_iter()
+        .find(|view| view.node.semantics.as_ref().unwrap().label == "Touch pad")
+        .unwrap();
     for editable in [true, false] {
         let mut client = fixture(editable);
-        let scene = client.scene().unwrap();
-        let pad = scene
-            .controls()
-            .into_iter()
-            .find(|view| view.node.semantics.as_ref().unwrap().label == "Touch pad")
-            .unwrap();
+        assert_eq!(
+            client.scene().unwrap().controls().iter().any(|view| view
+                .node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Touch pad")),
+            editable
+        );
         client
             .pointer(
                 client.epoch(),

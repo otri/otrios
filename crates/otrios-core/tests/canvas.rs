@@ -1461,7 +1461,19 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
         pump(&mut client, &mut authority, &mut Session::default());
         assert_eq!(authority.value(1).unwrap(), expected);
         if !editable {
-            edit(&mut client, "Linear slider", 100, 0);
+            assert!(!client.scene().unwrap().controls().iter().any(|node| {
+                node.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Linear slider")
+            }));
+            let old_control = ui
+                .handlers
+                .iter()
+                .find(|h| h.fields.contains(&1))
+                .unwrap()
+                .control;
+            assert!(!client.event(client.epoch(), old_control, 100, 0).unwrap());
             assert_eq!(client.value(1).unwrap(), 420);
             assert!(client.confirmed());
         }
