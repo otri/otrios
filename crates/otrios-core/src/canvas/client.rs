@@ -3641,6 +3641,29 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         }
         local_labels(&mut root, m.order_editing, &m.ui);
     }
+    if m.chat.is_none() && m.binding.as_ref().is_some_and(|b| !b.editable) {
+        fn disable(node: &mut SceneNode, ui: &Ui) {
+            let action = match node.responder {
+                Some(TouchResponder::Activate(action) | TouchResponder::Drag(action)) => {
+                    Some(action)
+                }
+                _ => None,
+            };
+            if let Some(Action::AppEvent(control)) = action
+                && ui.handlers.iter().any(|h| {
+                    h.control == control
+                        && !matches!(h.operation, Operation::Back | Operation::SignOut)
+                })
+            {
+                node.responder = None;
+                node.semantics = None;
+            }
+            for child in &mut node.children {
+                disable(child, ui);
+            }
+        }
+        disable(&mut root, &m.ui);
+    }
     if let Some(control) = m.quit_control
         && m.chat.is_none()
     {

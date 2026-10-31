@@ -1131,16 +1131,17 @@ fn read_only_document_controls_do_not_queue_writes_or_fail_the_view() {
     let (mut client, ui) = fixture(Role::Member);
     let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
     launch_access(&mut client, &ui, &mut authority, false);
-    let control = client
-        .scene()
-        .unwrap()
-        .controls()
-        .iter()
-        .find(|c| c.node.semantics.as_ref().unwrap().label == "Increase")
-        .unwrap()
-        .node
-        .id;
-    assert!(!client.activate(client.epoch(), control).unwrap());
+    assert!(!client.scene().unwrap().controls().iter().any(|c| {
+        c.node
+            .semantics
+            .as_ref()
+            .is_some_and(|s| s.label == "Increase")
+    }));
+    assert!(
+        !client
+            .event(client.epoch(), ui.handlers[0].control, 1000, 0)
+            .unwrap()
+    );
     assert_eq!(client.value(1).unwrap(), 0);
     assert!(client.confirmed());
     while let Some(bytes) = client.outgoing().unwrap() {

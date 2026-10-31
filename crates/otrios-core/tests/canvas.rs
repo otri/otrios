@@ -5067,6 +5067,10 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
         "read admission cannot create a guest profile"
     );
     assert!(
+        client.collection_outgoing().unwrap().is_some(),
+        "read-only hosts subscribe to live windows without joining"
+    );
+    assert!(
         !client
             .scene()
             .unwrap()

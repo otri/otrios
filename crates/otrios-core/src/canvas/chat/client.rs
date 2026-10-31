@@ -297,6 +297,9 @@ impl Client {
             .collect();
         self.members = initial.members;
         self.online = self.read_only; // read subscription, without a profile/presence
+        if self.read_only {
+            self.select_window(crate::collection::Anchor::Tail)?;
+        }
         self.older = initial.older;
         self.reset = true;
         self.tail = true;

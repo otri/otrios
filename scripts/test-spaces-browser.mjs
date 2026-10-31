@@ -132,6 +132,43 @@ try {
  assert(!await evaluate(a,hasMessage('Independent second Space continues')));
  assert(!await evaluate(a,hasMessage('Legacy household dispatch')));
  const freshShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/fresh-chat-collection.png',Buffer.from(freshShot.data,'base64'));
+ // Public audience controls apply across isolated anonymous and signed-in contexts.
+ await click(other,'Quit');await click(other,'Apps & Data');await click(other,'Sharing');
+ await click(other,'Public view');await wait(other,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('Anyone will be able to view')");
+ const sharing=await call('Page.captureScreenshot',{format:'png'},other);await writeFile(output+'/public-confirmation.png',Buffer.from(sharing.data,'base64'));
+ await click(other,'Make public');
+ const publicReader=await page(null,fixture.space_b);
+ await call('Page.navigate',{url:fixture.url+'/bundle-counter?space='+fixture.space_b},wrong);
+ for(const session of [publicReader,wrong]){
+  await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");
+  assert.equal(await count(session),isolated);
+  assert(!await evaluate(session,"!!document.querySelector('#controls button[aria-label=\"Increase counter\"]')"),'public viewers cannot invoke document edits');
+  await click(session,'Quit');await click(session,'The Brass Relay');
+  await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:brass-relay/ui'&&JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");
+  await wait(session,hasMessage('Independent second Space continues'));
+  assert.equal(await evaluate(session,"JSON.parse(document.querySelector('#revision').dataset.chat).participant"),'');
+  assert(!await evaluate(session,"!!document.querySelector('#controls button[aria-label=\"Message composer\"]')"));
+ }
+ const readOnlyShot=await call('Page.captureScreenshot',{format:'png'},publicReader);await writeFile(output+'/public-read-only.png',Buffer.from(readOnlyShot.data,'base64'));
+ await click(other,'Public view & comment');await click(other,'Make public');
+ for(const session of [publicReader,wrong])await call('Page.navigate',{url:fixture.url+'/brass-relay?space='+fixture.space_b},session);
+ await wait(wrong,"JSON.parse(document.querySelector('#revision')?.dataset.chat||'null')?.participant");
+ await wait(publicReader,"JSON.parse(document.querySelector('#revision')?.dataset.chat||'null')?.online");
+ assert(!await evaluate(publicReader,"!!document.querySelector('#controls button[aria-label=\"Message composer\"]')"),'anonymous viewers cannot comment');
+ await dispatch(wrong,'Signed-in visitor comment in public Space');await wait(publicReader,hasMessage('Signed-in visitor comment in public Space'));
+ await click(wrong,'Members');assert(!await evaluate(wrong,"[...document.querySelectorAll('#controls button')].some(button=>button.getAttribute('aria-label')?.startsWith('Kick '))"));await click(wrong,'Close dialog');
+ const commentShot=await call('Page.captureScreenshot',{format:'png'},wrong);await writeFile(output+'/public-comment.png',Buffer.from(commentShot.data,'base64'));
+ const commentRevoked=(revocations.get(wrong)||[]).length;
+ await click(other,'Public view');await click(other,'Make public');
+ await inkWait(()=>(revocations.get(wrong)||[]).length>commentRevoked);
+ await wait(wrong,"document.querySelector('#chat-log').children.length===0");
+ await call('Page.navigate',{url:fixture.url+'/brass-relay?space='+fixture.space_b},wrong);
+ await wait(wrong,hasMessage('Signed-in visitor comment in public Space'));
+ assert(!await evaluate(wrong,"!!document.querySelector('#controls button[aria-label=\"Message composer\"]')"));
+ await call('Page.navigate',{url:fixture.url+'/brass-relay?space='+fixture.space_b},publicReader);await wait(publicReader,hasMessage('Signed-in visitor comment in public Space'));
+ await click(other,'Keep closed');
+ for(const session of [wrong,publicReader])await wait(session,"document.querySelector('#chat-log').children.length===0&&document.querySelector('#revision')?.dataset.ui!=='app:brass-relay/ui'");
+ assert(await evaluate(a,hasMessage('Fresh transcript after permanent deletion')),'a closed unrelated Space remains available');
  assert.equal(errors.length,0,JSON.stringify(errors));assert(hellos.every(h=>h.version===1));
- const result={passed:true,initial,value:retainedValue,shared:expected,isolated,anonymousDenied:true,nonMemberDenied:true,activeRevoked:true,remainingMemberContinues:true,quitPreservesData:true,quitLeavesOtherParticipantEditing:true,removeRevokesAnotherClient:true,retainedDataVisible:true,reattachPreservesCollectionAndValue:true,spacePickerSwitchesScope:true,inkSharedAcrossClients:true,inkSpaceIsolation:true,inkParticipantContinuesAfterQuit:true,inkPointerCaptureLifecycle:true,chatSharedAcrossClients:true,chatSpaceIsolation:true,legacyChatHistoryMigratedAndIsolated:true,chatQuitLeavesOtherParticipantSending:true,chatProfileRestoredAfterQuit:true,chatRemovalRevokesAndRedacts:true,chatReattachmentRestoresTranscript:true,memberDeletionDenied:true,trustedDeletionConfirmation:true,connectedDisposalAckObserved:true,deletedNamespaceReclaimed:true,legacyCleanupPendingIsExplicit:true,freshCollectionAfterDelete:true,deletedTranscriptRedacted:true,otherSpaceContinuesAfterDelete:true,freshCollection,deletedCollection:deleting.collection,source:fixture.source,sourceDirty:fixture.source_dirty,authoritySha256:fixture.authority_sha256,wasmSha256:fixture.wasm_sha256,release:fixture.release,browserIdentities:'cookie sessions in isolated browser contexts',hello:hellos[0],runtimeErrors:errors};await writeFile(output+'/qualification.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+ const result={passed:true,publicViewReadable:true,publicDocumentEditsDisabled:true,publicChatWithoutProfile:true,anonymousCommentsDisabled:true,signedVisitorComments:true,visitorModerationDisabled:true,commentRestrictionRevokes:true,closingSpaceRevokesPublicReaders:true,initial,value:retainedValue,shared:expected,isolated,anonymousDenied:true,nonMemberDenied:true,activeRevoked:true,remainingMemberContinues:true,quitPreservesData:true,quitLeavesOtherParticipantEditing:true,removeRevokesAnotherClient:true,retainedDataVisible:true,reattachPreservesCollectionAndValue:true,spacePickerSwitchesScope:true,inkSharedAcrossClients:true,inkSpaceIsolation:true,inkParticipantContinuesAfterQuit:true,inkPointerCaptureLifecycle:true,chatSharedAcrossClients:true,chatSpaceIsolation:true,legacyChatHistoryMigratedAndIsolated:true,chatQuitLeavesOtherParticipantSending:true,chatProfileRestoredAfterQuit:true,chatRemovalRevokesAndRedacts:true,chatReattachmentRestoresTranscript:true,memberDeletionDenied:true,trustedDeletionConfirmation:true,connectedDisposalAckObserved:true,deletedNamespaceReclaimed:true,legacyCleanupPendingIsExplicit:true,freshCollectionAfterDelete:true,deletedTranscriptRedacted:true,otherSpaceContinuesAfterDelete:true,freshCollection,deletedCollection:deleting.collection,source:fixture.source,sourceDirty:fixture.source_dirty,authoritySha256:fixture.authority_sha256,wasmSha256:fixture.wasm_sha256,release:fixture.release,browserIdentities:'cookie sessions in isolated browser contexts',hello:hellos[0],runtimeErrors:errors};await writeFile(output+'/qualification.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
 }finally{socket?.close();if(chrome.pid&&chrome.exitCode===null){chrome.kill();await new Promise(r=>chrome.once('exit',r));}await rm(profile,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
