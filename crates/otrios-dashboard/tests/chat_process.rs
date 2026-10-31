@@ -71,8 +71,13 @@ fn restart(room: &mut Room) {
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while std::net::TcpStream::connect(&room.public).is_err() {
-        assert!(Instant::now() < deadline);
+    // The public listener starts before the private authority listener. Wait
+    // for both before the caller reconnects its trusted native participant.
+    while std::net::TcpStream::connect(&room.public).is_err()
+        || std::net::TcpStream::connect(&room.private).is_err()
+    {
+        assert!(room.child.try_wait().unwrap().is_none(), "authority exited");
+        assert!(Instant::now() < deadline, "authority restart timeout");
         std::thread::sleep(Duration::from_millis(10));
     }
 }

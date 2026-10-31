@@ -18,6 +18,9 @@ pub(super) struct Guest {
     #[serde(rename = "seen")]
     pub last_seen_unix_ms: u64,
     pub cooldown: u64,
+    /// Private authority principal; never included in room profiles or events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_identity: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Receipt {

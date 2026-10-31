@@ -1,6 +1,21 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Space admission qualification — 2026-11-01 JST
 
+## Authority-bound chat profile preparation
+
+The full `bash scripts/check.sh` suite passes for the authority-bound profile
+preparation, including 24 covered chat tests and both real chat process scenarios.
+Added tests preserve app-local profiles through restart and guest expiry, keep
+authority identities and resume secrets out of room events, reject duplicate or
+rebound saved actor mappings, and abandon revoked presence without writing an
+unlinked journal. The session adapter still rejects managed chat; this is a
+runtime prerequisite, not managed chat or physical Frame acceptance.
+
+An initial full run failed because the chat restart helper connected to the
+private listener after waiting only for the earlier public listener. The helper
+now waits for both listeners with a bounded deadline and child-exit check. The
+isolated recovery scenario and subsequent full suite pass.
+
 Qualified source: `cf43975fdc73e13c2f8aa46d903e1be6220a08d9` on
 `feat/spaces-and-app-data`, with a clean source tree. This is the authority and
 browser admission increment of [RFC 0027](../rfcs/0027-spaces-and-app-data.md), not

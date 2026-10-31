@@ -20,6 +20,186 @@ fn send(text: &str, nonce: u64, now: u64) -> Command {
         text: text.into(),
     }
 }
+fn admitted_profile(events: &[Delivery]) -> Profile {
+    let Event::Welcome {
+        you,
+        credential,
+        temporary,
+        ..
+    } = &events
+        .iter()
+        .find(|delivery| matches!(delivery.event, Event::Welcome { .. }))
+        .unwrap()
+        .event
+    else {
+        unreachable!()
+    };
+    assert!(
+        credential.is_none(),
+        "authority-bound profiles never issue a guest secret"
+    );
+    assert!(!temporary);
+    you.profile.clone()
+}
+
+#[test]
+fn admitted_profiles_are_private_actor_bindings_retained_through_restart_and_guest_expiry() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    let (legacy, token) = room.identity(None, now).unwrap();
+    let events = room
+        .join_admitted(1, "private-alice-authority-identity", true, now)
+        .unwrap();
+    let alice = admitted_profile(&events);
+    assert_ne!(alice.id, legacy.id);
+    for delivery in &events {
+        let encoded = encode_event(&delivery.event).unwrap();
+        for needle in ["private-alice-authority-identity", "authority_identity"] {
+            assert!(
+                !encoded
+                    .windows(needle.len())
+                    .any(|bytes| bytes == needle.as_bytes())
+            );
+        }
+    }
+    assert_eq!(
+        admitted_profile(
+            &room
+                .join_admitted(2, "private-alice-authority-identity", true, now + 1)
+                .unwrap()
+        )
+        .id,
+        alice.id
+    );
+    room.handle(
+        1,
+        Command::Profile {
+            name: "Engineer Alice".into(),
+            avatar: 7,
+        },
+        now + 2,
+    )
+    .unwrap();
+    let bob = admitted_profile(
+        &room
+            .join_admitted(3, "private-bob-authority-identity", false, now + 3)
+            .unwrap(),
+    );
+    assert_ne!(alice.id, bob.id);
+    assert_eq!(
+        room.members().len(),
+        2,
+        "multiple sessions share one admitted profile"
+    );
+    let guest_events = room.join(4, Some(&token), false, now + 4, true).unwrap();
+    assert!(guest_events.iter().any(
+        |delivery| matches!(&delivery.event,Event::Welcome { you, .. } if you.profile.id==legacy.id)
+    ));
+    let before = fs::read(&p).unwrap();
+    assert!(room.join_admitted(5, "", true, now + 5).is_err());
+    assert_eq!(fs::read(&p).unwrap(), before);
+    drop(room);
+    let late = now + 31 * 86_400_000;
+    let mut recovered = Room::open(Some(p.clone()), late).unwrap();
+    let restored = admitted_profile(
+        &recovered
+            .join_admitted(1, "private-alice-authority-identity", true, late)
+            .unwrap(),
+    );
+    assert_eq!(
+        (restored.id, restored.name, restored.avatar),
+        (alice.id.clone(), "Engineer Alice".into(), 7)
+    );
+    assert_eq!(
+        admitted_profile(
+            &recovered
+                .join_admitted(2, "private-bob-authority-identity", false, late)
+                .unwrap()
+        )
+        .id,
+        bob.id
+    );
+    assert!(
+        !recovered.valid_identity(&token),
+        "legacy guest expiry remains separate"
+    );
+    let mut other_collection = Room::open(None, late).unwrap();
+    assert_ne!(
+        admitted_profile(
+            &other_collection
+                .join_admitted(1, "private-alice-authority-identity", true, late)
+                .unwrap()
+        )
+        .id,
+        alice.id
+    );
+    drop(recovered);
+    let _ = fs::remove_file(p);
+}
+
+#[test]
+fn revoked_execution_abandons_only_ephemeral_presence_without_writing_a_deleted_journal() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    room.join_admitted(1, "alice", true, now).unwrap();
+    let admission = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    room.bind_admission(1, admission.clone()).unwrap();
+    assert!(admission.load(Ordering::Acquire));
+    let witness = fs::File::open(&p).unwrap();
+    let bytes = witness.metadata().unwrap().len();
+    fs::remove_file(&p).unwrap();
+    let events = room.abandon(1, now + 1000);
+    assert!(!admission.load(Ordering::Acquire));
+    assert!(!room.active(1));
+    assert!(room.members().is_empty());
+    assert!(events.iter().any(
+        |delivery| matches!(&delivery.event,Event::Members { members } if members.is_empty())
+    ));
+    assert_eq!(
+        witness.metadata().unwrap().len(),
+        bytes,
+        "even the unlinked inode receives no write"
+    );
+    assert!(!p.exists());
+}
+
+#[test]
+fn recovery_rejects_duplicate_or_rebound_authority_profiles() {
+    for duplicate_actor in [false, true] {
+        let p = path();
+        let (mut journal, _) = journal::Journal::open(p.clone()).unwrap();
+        for (id, identity) in [
+            ("a".repeat(32), "alice"),
+            (
+                if duplicate_actor {
+                    "b".repeat(32)
+                } else {
+                    "a".repeat(32)
+                },
+                if duplicate_actor { "alice" } else { "bob" },
+            ),
+        ] {
+            journal
+                .append(&journal::Entry::Guest(journal::Guest {
+                    profile: Profile {
+                        id,
+                        name: "Engineer".into(),
+                        avatar: 0,
+                    },
+                    digest: "c".repeat(64),
+                    last_seen_unix_ms: 1_000_000,
+                    cooldown: 0,
+                    authority_identity: Some(identity.into()),
+                }))
+                .unwrap();
+        }
+        drop(journal);
+        assert!(Room::open(Some(p.clone()), 1_000_000).is_err());
+        let _ = fs::remove_file(p);
+    }
+}
 #[test]
 fn sent_profiles_remain_immutable_across_collection_windows_and_journal_recovery() {
     use crate::collection as col;

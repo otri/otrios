@@ -126,6 +126,15 @@ reattaching retains durable app data and starts fresh trails. Managed chat and
 collection payloads use the same epoch framing on the host, but their authority
 adapters remain disabled until their separate collection-owned integration.
 
+The covered room authority can bind an app-local profile to an admitted human
+identity. This is a trusted host API requiring collaborative edit admission;
+client commands cannot choose the authority identity. It preserves the profile
+through restart without issuing a guest resume credential or exposing the
+authority identity in room events. Legacy guest credentials remain separate and
+retain their existing expiry. Revocation has a journal-free presence cleanup
+operation, so disposing execution cannot recreate a deleted journal path. These
+primitives do not yet enable managed chat through the session adapter.
+
 Separate child clients exercise authority reads/writes, collection isolation,
 explicit Frame access, active revocation/reconnect, Member management denial and
 concurrent last-Admin protection. These are authority adapter checks, not Frame or
