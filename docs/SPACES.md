@@ -484,6 +484,19 @@ shutdown, payload reclamation, the supported backup/restore workflow and client
 invalidation must be integrated before permanent deletion is exposed. HTTP and
 shared-session DeleteData requests remain unavailable during this preparation.
 
+The covered reclamation backend requires a durable tombstone and trusted
+producer-quiescence facts from the authority under its admission lock. Until
+producers stop it reports pending without changing payloads. Reclamation covers
+the exact collection's checkpoint, journal, presentation, child documents, chat
+history, migration receipts, derived files and interrupted-write temporary files.
+It never selects data by content hash alone. Unlinking a shared hard link preserves
+another collection's reference, and symlinks cannot redirect directory cleanup.
+Reclamation syncs directory removals, resumes idempotently after interruption,
+and processes at most 128 extra root files per turn. Tree depth/entry limits or
+filesystem failures keep cleanup pending. A reclaimed authority namespace says
+nothing about backup expiry, disconnected replicas or unmanaged exports.
+This backend is not yet connected to an exposed DeleteData operation.
+
 ## Rollout requirements
 
 Provision named human identities and the bootstrap Admin explicitly. A legacy

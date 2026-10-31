@@ -303,6 +303,17 @@ impl Store {
     pub fn storage_path(&self) -> Option<&Path> {
         self.current.storage.as_deref().map(Path::new)
     }
+    fn checked_storage(&self) -> Result<&Path> {
+        self.registry()?;
+        let path = self.storage_path().ok_or(Error::Unavailable)?;
+        directory(path)?;
+        if read(&path.join("spaces.root"), 32, true)?.as_deref()
+            != Some(self.current.root.as_bytes())
+        {
+            return Err(Error::Unavailable);
+        }
+        Ok(path)
+    }
     /// Pair an authority's app storage with its safety root once. Missing or
     /// substituted initialized storage must not silently become empty data.
     pub fn bind_storage(&mut self, path: &Path) -> Result<()> {
@@ -371,6 +382,9 @@ impl Store {
 #[cfg(test)]
 #[path = "store_tests.rs"]
 mod tests;
+
+#[path = "payloads.rs"]
+mod payloads;
 fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     write_at(path, bytes, |_| {})
 }
