@@ -81,6 +81,9 @@ fn record(entry: &Entry) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 impl Journal {
+    pub fn healthy(&self) -> bool {
+        !self.failed
+    }
     #[cfg(test)]
     pub(super) fn fail_writes(&mut self) {
         self.failed = true;

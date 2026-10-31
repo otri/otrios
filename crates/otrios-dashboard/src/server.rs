@@ -37,6 +37,8 @@ mod collections;
 mod ink;
 #[path = "server_session.rs"]
 mod session;
+#[path = "server_space_chat.rs"]
+mod space_chat;
 #[path = "server_spaces.rs"]
 mod spaces;
 #[path = "server_store.rs"]

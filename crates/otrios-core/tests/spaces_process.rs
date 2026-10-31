@@ -207,6 +207,7 @@ impl Rig {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if TcpStream::connect(&self.public).is_ok()
+                && TcpStream::connect(&self.native).is_ok()
                 && (!ready || http(&self.public, "GET", Some('a'), None).0 == 200)
             {
                 break;
@@ -645,7 +646,7 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v12","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v13","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -956,6 +957,398 @@ fn ink_control(socket: &mut Socket, enabled: bool) {
             json!({"type":"ink","enabled":enabled}).to_string().into(),
         ))
         .unwrap();
+}
+fn chat_fixture(rig: &mut Rig) {
+    use otrios_core::authoring as a;
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    for id in ["relay", "relay/other", "sibling"] {
+        let ui = a::AppUi::new(id, id, a::schema("chat-empty-v1", &[]))
+            .with_presentation(Presentation::Chat)
+            .build(id, vec![]);
+        let app = App {
+            id: id.into(),
+            title: id.into(),
+            ui_ref: ui.ui_ref.clone(),
+            state_ref: format!("app:{id}/state"),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        };
+        let bytes = canvas::encode_ui(&ui).unwrap();
+        let package = rig.root.join("apps").join(id).join("package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("app.flex"), canvas::encode_app(&app).unwrap()).unwrap();
+        fs::write(package.join("ui.flex"), &bytes).unwrap();
+        catalog.apps.push(CatalogEntry {
+            app,
+            path: id.into(),
+            private: false,
+            ui_hash: canvas::hash(&bytes),
+        });
+    }
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+}
+fn chat_state(socket: &mut Socket) -> ServerMessage {
+    loop {
+        match socket.read().unwrap() {
+            Message::Binary(bytes) if bytes.first() == Some(&1) => {
+                return canvas::decode_server(&bytes[1..]).unwrap();
+            }
+            Message::Ping(_) => socket.flush().unwrap(),
+            _ => (),
+        }
+    }
+}
+fn chat_mount(
+    rig: &Rig,
+    socket: &mut Socket,
+    id: &str,
+    epoch: u32,
+) -> (String, otrios_interfaces::chat::Initial) {
+    send(
+        socket,
+        ClientMessage::Mount {
+            epoch,
+            ui_ref: format!("app:{id}/ui"),
+            state_ref: format!("app:{id}/state"),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
+            collection: None,
+        },
+    );
+    loop {
+        match chat_state(socket) {
+            ServerMessage::Mounted {
+                epoch: found,
+                binding: Some(binding),
+                initial_view: Some(view),
+                ..
+            } => {
+                assert_eq!(found, epoch);
+                let initial = flexbuffers::from_slice(&view).unwrap();
+                send(socket, ClientMessage::AcceptMount { epoch });
+                loop {
+                    match chat_state(socket) {
+                        ServerMessage::Activated { epoch: found } => {
+                            assert_eq!(found, epoch);
+                            return (binding.collection, initial);
+                        }
+                        ServerMessage::Sync { .. } => (),
+                        other => panic!("chat activation: {other:?}"),
+                    }
+                }
+            }
+            ServerMessage::Sync { .. } => (),
+            other => panic!("chat mount: {other:?}"),
+        }
+    }
+}
+fn chat_command(socket: &mut Socket, epoch: u32, command: otrios_interfaces::chat::Command) {
+    use otrios_interfaces::channels::{frame, scoped};
+    socket
+        .send(Message::Binary(
+            frame(
+                3,
+                scoped(epoch, canvas::chat::encode_command(&command).unwrap()),
+            )
+            .into(),
+        ))
+        .unwrap();
+}
+fn chat_aux(socket: &mut Socket, channel: u8, epoch: u32) -> Vec<u8> {
+    loop {
+        match socket.read().unwrap() {
+            Message::Binary(bytes) if bytes.first() == Some(&channel) => {
+                let (scope, bytes) = otrios_interfaces::channels::scope(&bytes[1..]).unwrap();
+                assert_eq!(scope, epoch);
+                return bytes.to_vec();
+            }
+            Message::Ping(_) => socket.flush().unwrap(),
+            Message::Close(_) => panic!("chat session closed"),
+            _ => (),
+        }
+    }
+}
+fn chat_event(
+    socket: &mut Socket,
+    epoch: u32,
+    wanted: impl Fn(&otrios_interfaces::chat::Event) -> bool,
+) -> otrios_interfaces::chat::Event {
+    loop {
+        let event = canvas::chat::decode_event(&chat_aux(socket, 3, epoch)).unwrap();
+        if wanted(&event) {
+            return event;
+        }
+        assert!(
+            !matches!(event, otrios_interfaces::chat::Event::Error { .. }),
+            "{event:?}"
+        );
+    }
+}
+fn chat_join(socket: &mut Socket, epoch: u32) -> (String, u64) {
+    use otrios_interfaces::chat::{Command, Event};
+    chat_command(socket, epoch, Command::Join { credential: None });
+    let Event::Welcome {
+        you,
+        credential,
+        temporary,
+        epoch,
+        ..
+    } = chat_event(socket, epoch, |e| matches!(e, Event::Welcome { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(credential.is_none());
+    assert!(!temporary);
+    assert!(you.admin, "a Space Member may moderate app content");
+    (you.profile.id, epoch)
+}
+fn chat_send(socket: &mut Socket, mount: u32, epoch: u64, nonce: u64, text: &str) -> u64 {
+    use otrios_interfaces::chat::{Command, Event};
+    chat_command(
+        socket,
+        mount,
+        Command::Send {
+            epoch,
+            nonce: format!("{nonce:032x}"),
+            text: text.into(),
+        },
+    );
+    let Event::Receipt { sequence, .. } =
+        chat_event(socket, mount, |e| matches!(e, Event::Receipt { .. }))
+    else {
+        unreachable!()
+    };
+    sequence
+}
+fn chat_window(
+    socket: &mut Socket,
+    epoch: u32,
+    generation: u64,
+) -> Vec<otrios_interfaces::chat::Message> {
+    use otrios_core::collection as col;
+    use otrios_interfaces::channels::{frame, scoped};
+    let mut client = col::Client::new(canvas::chat::COLLECTION, canvas::chat::message_schema());
+    client
+        .select(canvas::chat::message_selection(col::Anchor::Tail))
+        .unwrap();
+    let mut counter = generation - 1;
+    loop {
+        while let Some(command) = client.outgoing(&mut counter).unwrap() {
+            socket
+                .send(Message::Binary(
+                    frame(4, scoped(epoch, col::encode_command(&command).unwrap())).into(),
+                ))
+                .unwrap();
+        }
+        if let Some(window) = client.window() {
+            return window
+                .keys
+                .iter()
+                .map(|key| canvas::chat::read_message(&window.record(*key).unwrap()).unwrap())
+                .collect();
+        }
+        client
+            .receive(col::Event::from_bytes(&chat_aux(socket, 4, epoch)).unwrap())
+            .unwrap();
+    }
+}
+
+#[test]
+fn managed_chat_isolates_owned_transcripts_and_preserves_them_after_quit_revocation_and_reattachment()
+ {
+    use otrios_interfaces::chat::{Command as C, Event as E};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let household = rig.space("Chat household");
+    let work = rig.space("Chat work");
+    for (space, app) in [
+        (&household, "relay"),
+        (&household, "sibling"),
+        (&work, "relay"),
+    ] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: app.into(),
+            },
+        );
+    }
+    for identity in ["bob", "frame"] {
+        rig.change(
+            'a',
+            Change::Membership {
+                space: household.clone(),
+                identity: identity.into(),
+                role: Some(Role::Member),
+            },
+        );
+    }
+    let mut alice = socket(&rig.public, &household, Some('a'));
+    let (collection, initial) = chat_mount(&rig, &mut alice, "relay", 1);
+    assert!(initial.messages.is_empty());
+    chat_command(
+        &mut alice,
+        1,
+        C::Join {
+            credential: Some("f".repeat(64)),
+        },
+    );
+    assert!(matches!(
+        chat_event(&mut alice, 1, |e| matches!(e, E::Error { .. })),
+        E::Error { .. }
+    ));
+    let (alice_profile, epoch) = chat_join(&mut alice, 1);
+    let mut bob = socket(&rig.public, &household, Some('b'));
+    chat_mount(&rig, &mut bob, "relay", 1);
+    chat_join(&mut bob, 1);
+    let mut frame = socket(&rig.native, &household, Some('c'));
+    chat_mount(&rig, &mut frame, "relay", 1);
+    let (frame_profile, _) = chat_join(&mut frame, 1);
+    assert_ne!(frame_profile, alice_profile);
+    assert_eq!(chat_send(&mut alice, 1, epoch, 1, "Household dispatch"), 1);
+    assert_eq!(chat_window(&mut bob, 1, 1)[0].text, "Household dispatch");
+    assert_eq!(chat_window(&mut frame, 1, 1)[0].text, "Household dispatch");
+    for (space, id) in [
+        (&work, "relay"),
+        (&household, "relay/other"),
+        (&household, "sibling"),
+    ] {
+        let mut peer = socket(&rig.public, space, Some('a'));
+        let (_, initial) = chat_mount(&rig, &mut peer, id, 1);
+        assert!(initial.messages.is_empty());
+        assert_ne!(chat_join(&mut peer, 1).0, alice_profile);
+        assert!(
+            chat_window(&mut peer, 1, 1).is_empty(),
+            "collection 22 cannot select a sibling transcript"
+        );
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    loop {
+        if matches!(
+            chat_state(&mut bob),
+            ServerMessage::AccessRequired { epoch: 1 }
+        ) {
+            break;
+        }
+    }
+    chat_command(
+        &mut bob,
+        1,
+        C::Send {
+            epoch,
+            nonce: format!("{:032x}", 99),
+            text: "Revoked dispatch".into(),
+        },
+    );
+    send(&mut alice, ClientMessage::Leave { epoch: 1 });
+    assert_eq!(
+        chat_send(&mut frame, 1, epoch, 2, "Frame continues after Quit"),
+        2
+    );
+    let (same, initial) = chat_mount(&rig, &mut alice, "relay", 2);
+    assert_eq!(same, collection);
+    assert_eq!(initial.messages.len(), 2);
+    assert_eq!(chat_join(&mut alice, 2).0, alice_profile);
+    rig.change(
+        'a',
+        Change::Remove {
+            space: household.clone(),
+            app: "relay".into(),
+        },
+    );
+    loop {
+        if matches!(
+            chat_state(&mut frame),
+            ServerMessage::AccessRequired { epoch: 1 }
+        ) {
+            break;
+        }
+    }
+    drop(alice);
+    drop(bob);
+    drop(frame);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    rig.change(
+        'a',
+        Change::Attach {
+            space: household.clone(),
+            app: "relay".into(),
+        },
+    );
+    let mut reopened = socket(&rig.native, &household, Some('c'));
+    let (same, initial) = chat_mount(&rig, &mut reopened, "relay", 1);
+    assert_eq!(same, collection);
+    assert_eq!(initial.messages.len(), 2);
+    assert_eq!(
+        initial.messages[1].message.text,
+        "Frame continues after Quit"
+    );
+    assert_eq!(chat_join(&mut reopened, 1).0, frame_profile);
+    assert_eq!(chat_window(&mut reopened, 1, 1).len(), 2);
+    drop(reopened);
+    rig.stop();
+    let damaged = rig.root.join(format!(
+        "state/collection-{collection}.data/chat-{}.journal",
+        canvas::hex(&canvas::hash(b"app:relay/other/state"))
+    ));
+    fs::write(&damaged, b"invalid saved transcript").unwrap();
+    rig.restart(&binary, true, true);
+    let mut survivor = socket(&rig.native, &household, Some('c'));
+    chat_mount(&rig, &mut survivor, "relay", 1);
+    let (_, epoch) = chat_join(&mut survivor, 1);
+    send(
+        &mut survivor,
+        ClientMessage::Mount {
+            epoch: 2,
+            ui_ref: "app:relay/other/ui".into(),
+            state_ref: "app:relay/other/state".into(),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
+            collection: Some(collection),
+        },
+    );
+    loop {
+        match chat_state(&mut survivor) {
+            ServerMessage::Error { epoch: 2, .. } => break,
+            ServerMessage::Sync { .. } => (),
+            other => panic!("unreadable chat candidate: {other:?}"),
+        }
+    }
+    chat_command(
+        &mut survivor,
+        2,
+        C::Send {
+            epoch,
+            nonce: format!("{:032x}", 100),
+            text: "Unaccepted candidate dispatch".into(),
+        },
+    );
+    assert_eq!(
+        chat_send(&mut survivor, 1, epoch, 3, "Previous app remains usable"),
+        3
+    );
+    assert_eq!(fs::read(damaged).unwrap(), b"invalid saved transcript");
 }
 fn ink_points(socket: &mut Socket, epoch: u32) -> Vec<otrios_interfaces::ink::Point> {
     use otrios_interfaces::{channels as session, ink};

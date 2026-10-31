@@ -14,11 +14,21 @@ function workerContext(fields){
     app.frame_presented??=s=>{if(s!==inFlight)return false;inFlight=null;return true;};
     app.prepare_frame??=()=>JSON.stringify({revisions:{content:app.text_generation?.()||1,placement:1,semantics:app.text_generation?.()||1,effects:1},order:['base']});
     app.scroll_text_input??=()=>false;app.text_inputs??=()=> '[]';app.effect_vertices??=()=>new Float32Array();app.chat_info??=()=> 'null';app.chat_messages??=()=> '[]';app.chat_outgoing??=()=>null;app.chat_disconnected??=()=>{};app.collection_outgoing??=()=>null;app.take_collection_revoked??=()=>false;app.screen??=()=> 'home';app.document_frame??=()=> 'null';
-    app.spaces_outgoing??=()=>null;app.spaces_ui??=()=>false;app.take_sign_in??=()=>false;app.take_space_switch??=()=>null;
+    app.rejected_mount_pending??=()=>false;app.space_managed??=()=>false;app.spaces_outgoing??=()=>null;app.spaces_ui??=()=>false;app.take_sign_in??=()=>false;app.take_space_switch??=()=>null;
     for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])app[key]??=()=>new Float32Array();app.overlay_draws??=()=>new Uint32Array();
   }
   return vm.createContext({DocumentTransfer,...fields});
 }
+test('managed chat uses the admitted Space actor without guest-cookie provisioning',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  for(const managed of [false,true]){
+    const messages=[],fake={screen:()=> 'brass-relay',space_managed:()=>managed,chat_outgoing:()=>new Uint8Array([1,2])};
+    const context=workerContext({fake,postMessage:m=>messages.push(m)});
+    vm.runInContext(source,context);vm.runInContext('app=fake;transportReady=true;pumpChat()',context);
+    assert.equal(messages[0].type,managed?'chat-send':'chat-identity');
+    assert.equal(messages.some(m=>m.type==='chat-identity'),!managed);
+  }
+});
 test('context loss pauses transfers and replay resends complete current resource dependencies',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const messages=[],fake={viewport_size:()=>[1280,800],path:()=> 'layout-lab/document',screen:()=> 'layout-document',epoch:()=>7,ui_ref:()=> 'app:layout-document/ui',state_ref:()=> 'app:layout-document/state',

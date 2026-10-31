@@ -17,11 +17,12 @@ let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collec
 let chatLogKey='',spacesSending=false,signingOut=false;
 function pumpSpaces(){if(transportReady&&!spacesSending){const bytes=app?.spaces_outgoing();if(bytes){spacesSending=true;postMessage({type:'spaces-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function pumpChat(){
-  if(app?.screen()==='brass-relay'&&!chatIdentityReady){if(!chatIdentityRequested){chatIdentityRequested=true;postMessage({type:'chat-identity'});}return;}
+  if(app?.screen()==='brass-relay'&&!app.space_managed()&&!chatIdentityReady){if(!chatIdentityRequested){chatIdentityRequested=true;postMessage({type:'chat-identity'});}return;}
   if(transportReady&&!chatSending){const bytes=app?.chat_outgoing();if(bytes){chatSending=true;postMessage({type:'chat-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 }
 function pumpCollection(){if(transportReady&&!collectionSending){const bytes=app?.collection_outgoing();if(bytes){collectionSending=true;postMessage({type:'collection-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function error(e){postMessage({type:'error',message:String(e)});}
+function tick(now,wall){const changed=app.tick(now,wall);if(app.rejected_mount_pending())postMessage({type:'warning',message:'The app update was rejected. The current app is still available.'});return changed;}
 // Input and network work continue while the renderer holds its single credit.
 // Coalesce dirty requests before crossing Wasm or assembling transferable arrays.
 function publish(geometry=true){pendingGeometry ||= geometry;app.request_frame();sendFrame();}
@@ -114,7 +115,7 @@ onmessage=async({data:m})=>{try{
     }});
     navigate(m.screen);connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
     if(discoveredRelease)release({release:discoveredRelease});
-    setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=app.tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
+    setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
   if(m.type==='frame-ack'){if(m.serial!==inFlight||!app.frame_presented(m.serial))return;documents.ack(m.documentToken);inFlight=null;sendFrame();return;}
   if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;return;}
@@ -140,7 +141,7 @@ onmessage=async({data:m})=>{try{
   if(m.type==='release-commit'){const r=pendingRelease;if(!r||r.web_entry!==m.entry){postMessage({type:'release-retry',entry:m.entry});return;}while(pendingRelease===r&&!reloadReady())await new Promise(resolve=>setTimeout(resolve,100));if(pendingRelease!==r){postMessage({type:'release-retry',entry:m.entry});return;}stopped=true;transportReady=false;syncInk();postMessage({type:'release',entry:r.web_entry});return;}
   const workerStarted=timings?timingNow():0;
   const pointerCommand=['pointer','pointer-batch'].includes(m.type);
-  if(!pointerCommand)app.tick(performance.now(),Date.now()/1000);let changed=false;
+  if(!pointerCommand)tick(performance.now(),Date.now()/1000);let changed=false;
   const applyPointer=args=>app.pointer(m.epoch??app.epoch(),...args.slice(0,4),Number.isFinite(args[4])?Math.max(0,args[4]-(performance.timeOrigin||0)):performance.now());
   if(['pointer','pointer-batch','activate','adjust'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
   switch(m.type){
@@ -167,7 +168,7 @@ onmessage=async({data:m})=>{try{
   }
   if(m.inputRevision){inputRevision=Math.max(inputRevision,m.inputRevision);changed=true;}
   if(composition&&composition.epoch!==app.epoch())composition=null;
-  if(pointerCommand)changed=app.tick(performance.now(),Date.now()/1000)||changed;
+  if(pointerCommand)changed=tick(performance.now(),Date.now()/1000)||changed;
   if(app.take_sign_out()){signOut();changed=true;}
   app.take_sign_in();
   const selectedSpace=app.take_space_switch();if(selectedSpace)postMessage({type:'space-switch',space:selectedSpace});

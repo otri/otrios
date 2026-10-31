@@ -283,7 +283,8 @@ pub enum ServerMessage {
         state: Vec<u8>,
         /// Authority-issued scope/actions; never an authorization credential.
         binding: Option<MountBinding>,
-        /// A declared aggregate presentation qualifies before accepting the mount.
+        /// A declared aggregate or managed chat presentation qualifies before
+        /// accepting the mount. Chat uses the bounded chat::Initial contract.
         initial_view: Option<Vec<u8>>,
     },
     Sync {

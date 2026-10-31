@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::journal::{Entry, Guest, Journal, Receipt};
-use super::{Command, Event, Kind, Member, Message, Profile, Result, err, random};
+use super::{
+    COLLECTION, Command, Event, Initial, InitialMessage, Kind, MAX_INITIAL_BYTES, MESSAGE_FIELD,
+    Member, Message, Profile, Result, err, random,
+};
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -80,7 +83,7 @@ fn generation() -> Result<u64> {
     getrandom::fill(&mut bytes).map_err(err)?;
     Ok(u64::from_le_bytes(bytes).max(1))
 }
-fn text(value: &str, bytes: usize, clusters: usize, lines: usize) -> Result<()> {
+pub(super) fn text(value: &str, bytes: usize, clusters: usize, lines: usize) -> Result<()> {
     if value.len() > bytes
         || value.graphemes(true).count() > clusters
         || value.graphemes(true).any(|g| g.len() > 256)
@@ -93,7 +96,7 @@ fn text(value: &str, bytes: usize, clusters: usize, lines: usize) -> Result<()> 
     }
     Ok(())
 }
-fn name(value: &str) -> Result<String> {
+pub(super) fn name(value: &str) -> Result<String> {
     let value = value.trim();
     text(value, 96, 24, 1)?;
     if value.is_empty() || value.starts_with(['@', '+', '/']) || value.chars().any(|c| c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
@@ -102,6 +105,48 @@ fn name(value: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 impl Room {
+    /// An uncertain durable outcome must remain poisoned, including while idle.
+    pub fn healthy(&self) -> bool {
+        !self.failed && self.journal.as_ref().is_none_or(Journal::healthy)
+    }
+    /// Capture one bounded immutable transcript without creating presence or a
+    /// profile. The caller must authorize Read on the owning app collection.
+    pub fn initial_snapshot(&self) -> Result<Vec<u8>> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        let snapshot = self.history.snapshot()?;
+        let window = snapshot
+            .select(
+                1,
+                &crate::collection::Grant {
+                    collection: COLLECTION,
+                    fields: vec![MESSAGE_FIELD],
+                },
+                &super::message_selection(crate::collection::Anchor::Tail),
+            )
+            .map_err(err)?;
+        let messages = window
+            .keys
+            .iter()
+            .map(|key| {
+                let row = window.record(*key).map_err(err)?;
+                Ok(InitialMessage {
+                    message: super::read_message(&row)?,
+                    revision: row.hash(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let bytes = flexbuffers::to_vec(&Initial {
+            version: 1,
+            members: self.members(),
+            messages,
+            older: window.more_before,
+        })
+        .map_err(err)?;
+        super::check(&bytes, MAX_INITIAL_BYTES)?;
+        Ok(bytes)
+    }
     #[cfg(test)]
     pub(super) fn fail_journal_writes(&mut self) {
         self.journal.as_mut().unwrap().fail_writes();

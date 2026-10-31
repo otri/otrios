@@ -10,6 +10,24 @@ pub const AVATARS: u8 = 64;
 pub const COLLECTION: u64 = 22;
 pub const MESSAGE_FIELD: u64 = 1;
 pub const MESSAGE_SCHEMA: &[u8] = b"otrios-brass-relay-message-v1";
+pub const MAX_INITIAL_BYTES: usize = 256 * 1024;
+
+/// Qualified first transcript window. No authority identity, guest secret,
+/// presence admission or writable collection session is conveyed by this view.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Initial {
+    pub version: u32,
+    pub members: Vec<Member>,
+    pub messages: Vec<InitialMessage>,
+    pub older: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitialMessage {
+    pub message: Message,
+    pub revision: [u8; 32],
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

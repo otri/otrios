@@ -211,6 +211,9 @@ pub struct Client {
     managed_transport: bool,
 }
 impl Client {
+    pub fn space_managed(&self) -> bool {
+        self.managed_transport || self.active.as_ref().is_some_and(|m| m.binding.is_some())
+    }
     pub fn configure_spaces(&mut self, selected: Option<&str>) -> Result<()> {
         self.spaces.configure(selected).map_err(err)?;
         self.selected_space = selected.map(str::to_owned);
@@ -599,7 +602,11 @@ impl Client {
             chat.native(self.chat_native);
             chat.quiet(self.chat_reduced_motion);
             return chat
-                .outgoing(self.chat_credential.clone())
+                .outgoing(if scope.managed {
+                    None
+                } else {
+                    self.chat_credential.clone()
+                })
                 .map(|bytes| bytes.map(|bytes| scope.wrap(bytes)));
         }
         if self.chat_enabled {
@@ -801,6 +808,10 @@ impl Client {
     }
     pub fn set_font(&mut self, font: Arc<crate::dashboard::font::Font>) {
         self.font = Some(font.clone());
+        if let Some(candidate) = &mut self.qualified {
+            candidate.mount.font = Some(font.clone());
+            candidate.mount.invalidate();
+        }
         if let Some(m) = &mut self.active {
             m.font = Some(font);
             m.invalidate();
@@ -1584,17 +1595,32 @@ impl Client {
                     candidate
                         .doc
                         .set_read_only(candidate.binding.as_ref().is_some_and(|b| !b.editable));
+                    if let Some(chat) = &mut candidate.chat {
+                        chat.managed(candidate.quit_control);
+                    }
                     if let Some(bytes) = initial_view {
-                        if !matches!(candidate.ui.presentation, Some(Presentation::View { .. })) {
-                            return Err("Undeclared initial aggregate view".into());
+                        match candidate.ui.presentation {
+                            Some(Presentation::View { .. }) => {
+                                let view = Layout::from_bytes(&bytes)?;
+                                view.resolve_slots(&BTreeMap::new())?;
+                                candidate.view = Some(view);
+                            }
+                            Some(Presentation::Chat) if candidate.binding.is_some() => {
+                                candidate
+                                    .chat
+                                    .as_mut()
+                                    .ok_or("Missing chat candidate")?
+                                    .receive_initial(&bytes)?;
+                            }
+                            _ => return Err("Undeclared initial app view".into()),
                         }
-                        let view = Layout::from_bytes(&bytes)?;
-                        view.resolve_slots(&BTreeMap::new())?;
-                        candidate.view = Some(view);
                     } else if candidate.binding.is_some()
-                        && matches!(candidate.ui.presentation, Some(Presentation::View { .. }))
+                        && matches!(
+                            candidate.ui.presentation,
+                            Some(Presentation::View { .. } | Presentation::Chat)
+                        )
                     {
-                        return Err("Missing initial aggregate view".into());
+                        return Err("Missing initial app view".into());
                     }
                     candidate.font = self.font.clone();
                     if let Some(chat) = &mut candidate.chat
@@ -1609,6 +1635,16 @@ impl Client {
                             self.layout_viewport.or(self.viewport)
                         }
                         .unwrap_or([1280., 800.]);
+                    if let Some(chat) = &mut candidate.chat {
+                        chat.prepare(
+                            candidate.viewport,
+                            candidate.keyboard.visible,
+                            candidate.font.clone(),
+                        );
+                        if let Some(reader) = &mut candidate.text_document {
+                            chat.synchronize_document(reader)?;
+                        }
+                    }
                     let scene = resolve_scene(&candidate)?;
                     if let Some(reader) = &mut candidate.text_document {
                         reader.sync(&scene, candidate.font.as_ref())?;
@@ -1675,7 +1711,13 @@ impl Client {
                             }
                             self.ui_cache_hits += u64::from(cached);
                         }
-                        self.decision = Some(MountDecision::Accept(epoch));
+                        self.decision = if candidate.binding.is_some() && candidate.chat.is_some() {
+                            // Warm the first transcript incrementally on owner
+                            // ticks while the previous activation stays visible.
+                            None
+                        } else {
+                            Some(MountDecision::Accept(epoch))
+                        };
                         if candidate.binding.is_some() {
                             self.qualified = Some(Qualified {
                                 mount: candidate,
@@ -1844,6 +1886,9 @@ impl Client {
                 )
             });
             self.collection_revoked = true;
+        }
+        if let Some(chat) = &mut candidate.chat {
+            chat.managed(candidate.quit_control);
         }
         self.active = Some(candidate);
         self.host_active = false;
@@ -2522,6 +2567,42 @@ impl Client {
         Ok(self.open_entry())
     }
     pub fn tick(&mut self, now: u64, wall: i64) -> Result<bool> {
+        if self.decision.is_none()
+            && let Some(candidate) = self.qualified.as_mut().filter(|q| !q.accepted)
+        {
+            let mount = &mut candidate.mount;
+            mount.viewport = self.viewport.unwrap_or(mount.viewport);
+            mount.font = self.font.clone();
+            if let Some(chat) = &mut mount.chat {
+                if let Some(viewport) = self.layout_viewport {
+                    chat.set_header_width(viewport[0]);
+                }
+                chat.prepare(mount.viewport, mount.keyboard.visible, mount.font.clone());
+            }
+            mount.invalidate();
+            let outcome = (|| {
+                let scene = resolve_scene(mount)?;
+                let reader = mount
+                    .text_document
+                    .as_mut()
+                    .ok_or("Missing candidate transcript")?;
+                reader.sync(&scene, mount.font.as_ref())?;
+                reader.tick(now)?;
+                Ok::<_, String>(reader.frame().is_some_and(|frame| !frame.loading))
+            })();
+            match outcome {
+                Ok(true) => self.decision = Some(MountDecision::Accept(mount.epoch)),
+                Ok(false) => (),
+                Err(_) => {
+                    // A candidate failure is recoverable. Owners report the
+                    // pending rejection and send Cancel before any activation.
+                    self.decision = Some(MountDecision::Cancel(mount.epoch));
+                    self.qualified = None;
+                    self.requested = None;
+                    self.auth_required = false;
+                }
+            }
+        }
         if self.host_requested && self.confirmed() && !self.input_busy() {
             return self.show_spaces();
         }
@@ -3370,7 +3451,9 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         }
         local_labels(&mut root, m.order_editing, &m.ui);
     }
-    if let Some(control) = m.quit_control {
+    if let Some(control) = m.quit_control
+        && m.chat.is_none()
+    {
         use crate::dashboard::components::{background, canvas, text};
         use otrios_interfaces::scene::{Rect, SwitchSemantics};
         let mut quit = canvas(

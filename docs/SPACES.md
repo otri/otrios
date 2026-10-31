@@ -19,7 +19,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v12` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v13` includes a version-1 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when both collection identity and effective
@@ -28,7 +28,7 @@ sequence zero; identical app and state references cannot restore old edits into
 it. Read admission does not allocate durable writer receipts even for editable
 schemas. The authority still checks every write independently.
 
-Aggregate presentations accompany the initial mount, so a managed candidate is
+Aggregate and managed chat presentations accompany the initial mount, so a candidate is
 qualified with its first usable view before acceptance. A missing or invalid
 view rejects the candidate and retains the previous activation. The release
 control v1 opening envelope remains unchanged across this protocol upgrade.
@@ -46,8 +46,9 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
 use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v12; v10 introduced discovery, v11 added the
-managed activation acknowledgement, and v12 scopes auxiliary payloads by mount.
+browser/native state protocol is v13; v10 introduced discovery, v11 added the
+managed activation acknowledgement, v12 scoped auxiliary payloads by mount, and
+v13 adds a qualified first chat transcript window.
 Release discovery remains on its unchanged control v1 envelope.
 
 Watch selects metadata for one Space and includes the previous authority/revision
@@ -103,7 +104,7 @@ uninstall, complete auxiliary-lane lifecycle or physical Frame qualification.
 
 This increment admits Create, Membership, Attach, Remove and Closed audience changes.
 Deletion and public audience changes remain unavailable through HTTP until their
-lifecycle integrations are complete. Global chat/collection lanes
+lifecycle integrations are complete. Global chat/collection fallbacks
 and legacy presentation reads are disabled in managed mode; they cannot be used
 as an unscoped fallback. Monitoring presentation uploads require an explicit
 collector identity and collection grant.
@@ -122,18 +123,43 @@ subscription preference and cannot choose a Space, app or collection.
 Trails remain ephemeral: each room retains at most 1024 recent points for five
 seconds, and at most 128 rooms are cached. Idle rooms may be evicted; active
 subscriptions pin their rooms. Removing an attachment discards its relay caches;
-reattaching retains durable app data and starts fresh trails. Managed chat and
-collection payloads use the same epoch framing on the host, but their authority
-adapters remain disabled until their separate collection-owned integration.
+reattaching retains durable app data and starts fresh trails.
 
-The covered room authority can bind an app-local profile to an admitted human
+Managed chat and its collection windows use channels 3 and 4 with the same
+accepted-mount epoch framing. Each owning document has its own paired room and
+collection channel; the fixed transcript collection number cannot select a
+sibling app, document or Space. Eight room pairs may be cached; staged and active
+leases and workers pin their pairs. Only healthy idle pairs may be evicted.
+An uncertain journal remains poisoned until recovery at restart.
+
+The first transcript is one immutable, indexed window of at most 64 messages and
+256 KiB. Capturing it creates no profile or presence and writes no journal. A
+missing, malformed or unreadable first view rejects launch while preserving the
+previous activation. The owner builds and lays out the first transcript in bounded
+ticks while the old view stays visible, and sends Accept only when its visible
+document frame is ready. Candidate layout failure cancels that candidate;
+renderer credit does not block this preparation. After Activated, the normal collection subscription selects
+the latest coherent window, covering changes made during launch qualification.
+
+The covered room authority binds an app-local profile to an admitted human
 identity. This is a trusted host API requiring collaborative edit admission;
 client commands cannot choose the authority identity. It preserves the profile
 through restart without issuing a guest resume credential or exposing the
 authority identity in room events. Legacy guest credentials remain separate and
 retain their existing expiry. Revocation has a journal-free presence cleanup
-operation, so disposing execution cannot recreate a deleted journal path. These
-primitives do not yet enable managed chat through the session adapter.
+operation, so disposing execution cannot recreate a deleted journal path. Browser
+managed sessions do not provision a guest cookie; native guest credentials are
+ignored. Room moderation is an ordinary Member action and the UI labels it
+Moderator; it does not grant Space administration. Authentication changes use
+the host controls, rather than the legacy room's Monitoring sign-in form.
+
+All room operations and collection output recheck the active binding under the
+management lock. Durable room writes finish within that lock's lifetime;
+cancelling a socket task cannot leave a detached write behind it. Quit and
+revocation release presence independently of renderer credit, and output rechecks
+admission through delivery. Removing and reattaching an app preserves its chat
+journal and profiles. Explicit import of pre-Space chat history remains a pending
+migration step; this checkpoint does not authorize a live cutover that omits it.
 
 Separate child clients exercise authority reads/writes, collection isolation,
 explicit Frame access, active revocation/reconnect, Member management denial and

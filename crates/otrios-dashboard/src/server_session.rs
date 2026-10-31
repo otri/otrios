@@ -202,6 +202,7 @@ enum Event {
     Collection(Option<collections::Packet>),
     Ink(Result<Vec<ink::Event>, tokio::sync::broadcast::error::RecvError>),
     Chat(Result<Arc<chat::Packet>, tokio::sync::broadcast::error::RecvError>),
+    ManagedChat(Option<space_chat::Packet>),
     Heartbeat,
     Activation,
 }
@@ -281,6 +282,7 @@ async fn peer(
     let mut spaces_peer: Option<spaces::Peer> = None;
     let mut admission = Arc::new(AtomicBool::new(false));
     let mut chat_peer: Option<chat::Peer> = None;
+    let mut managed_chat: Option<space_chat::Peer> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     heartbeat.tick().await;
     let mut heard = Instant::now();
@@ -301,6 +303,7 @@ async fn peer(
             value=async{match collection_peer.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::Collection(value),
             value=async{match ink.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Ink(value),
             value=async{match chat_peer.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Chat(value),
+            value=async{match managed_chat.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::ManagedChat(value),
         };
         match event {
             Event::Activation => {
@@ -308,6 +311,13 @@ async fn peer(
                 if managed && (!lease_open || managed_ink.active != current) {
                     managed_ink.clear(&mut ink);
                     managed_ink.active = None;
+                }
+                if !lease_open
+                    || managed_chat
+                        .as_ref()
+                        .is_some_and(|peer| current.as_ref() != Some(&peer.active))
+                {
+                    managed_chat = None;
                 }
             }
             Event::Release => {
@@ -356,16 +366,91 @@ async fn peer(
                         if !state_enabled || !*availability.borrow() {
                             break;
                         }
-                        // Chat/collection lanes cannot fall back to global rooms.
+                        // Auxiliary lanes cannot fall back to global rooms.
                         if managed
                             && !matches!(
                                 bytes.first(),
                                 Some(&wire::STATE)
                                     | Some(&otrios_interfaces::spaces::CHANNEL)
                                     | Some(&wire::INK)
+                                    | Some(&otrios_interfaces::chat::CHANNEL)
+                                    | Some(&otrios_interfaces::collection::CHANNEL)
                             )
                         {
                             break;
+                        }
+                        if managed
+                            && matches!(
+                                bytes.first(),
+                                Some(&otrios_interfaces::chat::CHANNEL)
+                                    | Some(&otrios_interfaces::collection::CHANNEL)
+                            )
+                        {
+                            let (channel, payload) = bytes.split_first().expect("channel");
+                            let Ok((epoch, payload)) = wire::scope(payload) else {
+                                break;
+                            };
+                            let bound = if *channel == otrios_interfaces::chat::CHANNEL {
+                                otrios_interfaces::chat::MAX_COMMAND_BYTES
+                            } else {
+                                otrios_interfaces::collection::MAX_COMMAND_BYTES
+                            };
+                            if payload.is_empty() || payload.len() > bound {
+                                break;
+                            }
+                            let guard = app.apps.lock().await;
+                            let scope = spaces::Scope {
+                                space: space.clone(),
+                                identity: spaces::identity(&app, &key).await,
+                            };
+                            let Some(active) = managed_ink
+                                .current(&live)
+                                .filter(|active| active.epoch == epoch && active.chat)
+                                .cloned()
+                            else {
+                                continue;
+                            };
+                            let Some(hub) = guard.as_ref().filter(|hub| {
+                                hub.allowed(
+                                    &scope,
+                                    &active.binding,
+                                    otrios_interfaces::spaces::Operation::Read,
+                                )
+                            }) else {
+                                continue;
+                            };
+                            if managed_chat
+                                .as_ref()
+                                .is_some_and(|peer| peer.active != active)
+                            {
+                                managed_chat = None;
+                            }
+                            if managed_chat.is_none() {
+                                let Ok(room) = hub.chat_room(&active) else {
+                                    break;
+                                };
+                                managed_chat = Some(space_chat::subscribe(
+                                    app.clone(),
+                                    room,
+                                    active,
+                                    live.clone(),
+                                    key.clone(),
+                                    space.clone(),
+                                ));
+                            }
+                            if managed_chat
+                                .as_ref()
+                                .expect("subscribed room")
+                                .input
+                                .try_send(space_chat::Packet {
+                                    channel: *channel,
+                                    bytes: payload.to_vec(),
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                            continue;
                         }
                         match bytes.split_first() {
                             Some((&otrios_interfaces::spaces::CHANNEL, payload))
@@ -656,6 +741,42 @@ async fn peer(
                 }
             }
             Event::State(None) => break,
+            Event::ManagedChat(Some(packet)) => {
+                let guard = app.apps.lock().await;
+                let scope = spaces::Scope {
+                    space: space.clone(),
+                    identity: spaces::identity(&app, &key).await,
+                };
+                let Some(peer) = managed_chat.as_ref() else {
+                    continue;
+                };
+                if managed_ink.current(&live) != Some(&peer.active)
+                    || guard.as_ref().is_none_or(|hub| {
+                        !hub.allowed(
+                            &scope,
+                            &peer.active.binding,
+                            otrios_interfaces::spaces::Operation::Read,
+                        )
+                    })
+                {
+                    continue;
+                }
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(
+                            packet.channel,
+                            wire::scoped(peer.active.epoch, packet.bytes),
+                        )
+                        .into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+            }
+            Event::ManagedChat(None) => break,
             Event::Spaces(Some(packet)) => {
                 let guard = app.apps.lock().await;
                 let principal = spaces::identity(&app, &key).await;

@@ -86,6 +86,8 @@ pub struct Client {
     pub(super) private: bool,
     pub(super) effects: u8,
     pub(super) native: bool,
+    pub(super) managed: bool,
+    pub(super) quit_control: Option<u8>,
     pub(super) online: bool,
     pub(super) temporary: bool,
     pub(super) kicked: Option<(String, u64)>,
@@ -165,6 +167,8 @@ impl Default for Client {
             private: false,
             effects: 2,
             native: false,
+            managed: false,
+            quit_control: None,
             online: false,
             temporary: false,
             kicked: None,
@@ -217,6 +221,67 @@ fn day_label(day: u64, today: u64) -> String {
     format!("{year:04}-{m:02}-{d:02}")
 }
 impl Client {
+    pub(crate) fn managed(&mut self, quit_control: Option<u8>) {
+        self.managed = quit_control.is_some();
+        self.quit_control = quit_control;
+    }
+    /// Install a candidate's first readable transcript without joining presence
+    /// or enabling collaborative actions. The enclosing mount owns activation.
+    pub fn receive_initial(&mut self, bytes: &[u8]) -> Result<()> {
+        super::check(bytes, MAX_INITIAL_BYTES)?;
+        let initial: Initial = flexbuffers::from_slice(bytes).map_err(err)?;
+        if initial.version != 1
+            || initial.members.len() > 68
+            || initial.messages.len() > 64
+            || self.online
+            || self.joining
+            || !self.messages.is_empty()
+        {
+            return Err("Invalid initial room view".into());
+        }
+        let profile = |profile: &Profile| -> Result<()> {
+            if !super::valid_hex(&profile.id, 16) || profile.avatar >= AVATARS {
+                return Err("Invalid initial room profile".into());
+            }
+            super::authority::name(&profile.name)?;
+            Ok(())
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for member in &initial.members {
+            profile(&member.profile)?;
+            if member.generation == 0 || !seen.insert(&member.profile.id) {
+                return Err("Invalid initial room roster".into());
+            }
+        }
+        let mut previous = 0;
+        for row in &initial.messages {
+            let message = &row.message;
+            profile(&message.sender)?;
+            super::authority::text(&message.text, 2304, 1200, 18)?;
+            if message.sequence <= previous
+                || (!message.nonce.is_empty() && !super::valid_hex(&message.nonce, 16))
+            {
+                return Err("Invalid initial room transcript".into());
+            }
+            previous = message.sequence;
+        }
+        self.message_revisions = initial
+            .messages
+            .iter()
+            .map(|row| (row.message.sequence, row.revision))
+            .collect();
+        self.messages = initial
+            .messages
+            .into_iter()
+            .map(|row| row.message)
+            .collect();
+        self.members = initial.members;
+        self.older = initial.older;
+        self.reset = true;
+        self.tail = true;
+        self.authors_revision = self.authors_revision.saturating_add(1);
+        Ok(())
+    }
     pub(crate) fn set_header_width(&mut self, width: f32) {
         self.header_width = Some(width);
     }
@@ -665,7 +730,13 @@ impl Client {
                 self.password.replace("");
                 self.panel = Panel::None;
                 self.focus = None;
-                self.say(if admin {
+                self.say(if self.managed {
+                    if admin {
+                        "Room moderation is available"
+                    } else {
+                        "Room moderation is unavailable"
+                    }
+                } else if admin {
                     "Monitoring admin signed in"
                 } else {
                     "Admin signed out"
@@ -963,7 +1034,7 @@ impl Client {
                 self.select_window(crate::collection::Anchor::Tail)?;
             }
             13 => self.older()?,
-            14 => {
+            14 if !self.managed => {
                 if self.you.as_ref().is_some_and(|y| y.admin) {
                     self.queue(Command::SignOut);
                 } else if self.native {
@@ -973,9 +1044,9 @@ impl Client {
                     return Ok(Action::BrowserLogin);
                 }
             }
-            15 => self.focus = Some(Focus::Username),
-            16 => self.focus = Some(Focus::Password),
-            17 => {
+            15 if !self.managed => self.focus = Some(Focus::Username),
+            16 if !self.managed => self.focus = Some(Focus::Password),
+            17 if !self.managed => {
                 self.queue(Command::Authenticate {
                     username: self.username.text().into(),
                     password: self.password.text().into(),

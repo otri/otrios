@@ -1546,6 +1546,207 @@ fn managed_candidates_remain_invisible_until_activation_and_are_discarded_on_den
 }
 
 #[test]
+fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resumes_a_guest() {
+    use otrios_core::canvas::chat;
+    let initial = chat::Initial {
+        version: 1,
+        members: vec![],
+        messages: vec![chat::InitialMessage {
+            message: chat::Message {
+                sequence: 1,
+                at: 1_000_000,
+                sender: chat::Profile {
+                    id: "a".repeat(32),
+                    name: "Captain Test".into(),
+                    avatar: 1,
+                },
+                kind: chat::Kind::Message,
+                text: "Qualified first transcript".into(),
+                nonce: "b".repeat(32),
+            },
+            revision: [7; 32],
+        }],
+        older: false,
+    };
+    let mut full = initial.clone();
+    for sequence in 2..=64 {
+        full.messages.push(chat::InitialMessage {
+            message: chat::Message {
+                sequence,
+                at: 1_000_000 + sequence * 1000,
+                sender: chat::Profile {
+                    id: format!("{sequence:032x}"),
+                    name: format!("Operator {sequence}"),
+                    avatar: sequence as u8 - 1,
+                },
+                kind: chat::Kind::Message,
+                text: "é".repeat(1100),
+                nonce: format!("{sequence:032x}"),
+            },
+            revision: [sequence as u8; 32],
+        });
+    }
+    for (view, revoke) in [
+        (None, false),
+        (Some(vec![255]), false),
+        (Some(flexbuffers::to_vec(&initial).unwrap()), false),
+        (Some(flexbuffers::to_vec(&full).unwrap()), false),
+        (Some(flexbuffers::to_vec(&initial).unwrap()), true),
+    ] {
+        let ui = brass_relay::ui(&[]);
+        let mut client = Client::default();
+        client.set_font(std::sync::Arc::new(
+            otrios_core::dashboard::font::Font::from_zstd(
+                include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        ));
+        client.set_chat_credential(&"c".repeat(64)).unwrap();
+        activate(&mut client, ui.clone(), "chat-candidate", vec![]);
+        let old_epoch = client.epoch();
+        client.reset_connection();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        let previous = client.scene().unwrap();
+        let bytes = encode_ui(&ui).unwrap();
+        let usable = view.as_ref().is_some_and(|v| v.len() > 1);
+        let result = client.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 1,
+                    collection: "d".repeat(32),
+                    editable: true,
+                    comments: false,
+                    moderate: true,
+                }),
+                initial_view: view,
+            })
+            .unwrap(),
+        );
+        assert_eq!(client.epoch(), old_epoch);
+        assert!(std::sync::Arc::ptr_eq(&previous, &client.scene().unwrap()));
+        assert!(
+            client.chat_messages().is_empty(),
+            "candidate transcript remains invisible"
+        );
+        let decision = client.outgoing().unwrap();
+        if usable {
+            assert!(!result.unwrap());
+            assert!(decision.is_none(), "first-view layout precedes acceptance");
+            if revoke {
+                client
+                    .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
+                    .unwrap();
+                assert!(matches!(
+                    decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+                    ClientMessage::CancelMount { .. }
+                ));
+                for turn in 1..=32 {
+                    client.tick(turn * 8, 1000).unwrap();
+                    assert!(client.outgoing().unwrap().is_none());
+                    assert_eq!(client.epoch(), old_epoch);
+                    assert!(
+                        client.chat_messages().is_empty(),
+                        "a revoked warming candidate cannot expose its transcript"
+                    );
+                }
+                continue;
+            }
+            let mut decision = None;
+            for turn in 1..=4096 {
+                client.tick(turn * 8, 1000).unwrap();
+                assert_eq!(client.epoch(), old_epoch);
+                assert!(client.chat_messages().is_empty(), "warming stays offscreen");
+                if let Some(bytes) = client.outgoing().unwrap() {
+                    decision = Some(decode_client(&bytes).unwrap());
+                    break;
+                }
+            }
+            let decision = decision.expect("bounded candidate text qualification");
+            assert!(matches!(decision, ClientMessage::AcceptMount { .. }));
+            client
+                .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+                .unwrap();
+            assert_eq!(client.chat_messages()[0].text, "Qualified first transcript");
+            let first = client
+                .document_frame()
+                .expect("first document before any active tick or Welcome");
+            assert!(
+                first
+                    .draws
+                    .iter()
+                    .any(|draw| !draw.chunk.mesh.glyph_vertices.is_empty()),
+                "the candidate must qualify readable text, not only transcript records"
+            );
+            assert!(!client.chat_info().unwrap().online);
+            assert!(client.space_managed());
+            let bytes = client.chat_outgoing().unwrap().unwrap();
+            let (scope, bytes) = otrios_interfaces::channels::scope(&bytes).unwrap();
+            assert_eq!(scope, epoch);
+            assert_eq!(
+                chat::decode_command(bytes).unwrap(),
+                chat::Command::Join { credential: None }
+            );
+            let scene = format!("{:?}", client.scene().unwrap());
+            assert!(!scene.contains("Monitoring admin sign-in"));
+            for viewport in [[1280., 800.], [800., 1280.], [393., 695.]] {
+                client.set_viewport(viewport).unwrap();
+                let scene = client.scene().unwrap();
+                let controls = scene.controls();
+                let quit = controls
+                    .iter()
+                    .filter(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == "Quit"))
+                    .collect::<Vec<_>>();
+                assert_eq!(quit.len(), 1, "one host-owned Quit control");
+                assert!(matches!(
+                    quit[0].node.responder,
+                    Some(otrios_interfaces::scene::TouchResponder::Activate(
+                        otrios_interfaces::scene::Action::AppEvent(255)
+                    ))
+                ));
+                let bounds = |c: &otrios_core::dashboard::scene::Located<'_>| {
+                    [
+                        c.origin[0],
+                        c.origin[1],
+                        c.node.frame.width * c.scale,
+                        c.node.frame.height * c.scale,
+                    ]
+                };
+                let q = bounds(quit[0]);
+                for c in controls.iter().filter(|c| {
+                    c.node
+                        .semantics
+                        .as_ref()
+                        .is_some_and(|s| matches!(s.label.as_str(), "Members" | "Edit profile"))
+                }) {
+                    let r = bounds(c);
+                    assert!(
+                        q[0] + q[2] <= r[0]
+                            || r[0] + r[2] <= q[0]
+                            || q[1] + q[3] <= r[1]
+                            || r[1] + r[3] <= q[1],
+                        "Quit must not cover another header action"
+                    );
+                }
+            }
+        } else {
+            assert!(result.is_err());
+            let decision = decode_client(&decision.unwrap()).unwrap();
+            assert!(matches!(decision, ClientMessage::CancelMount { .. }));
+        }
+    }
+}
+
+#[test]
 fn managed_aggregate_candidates_require_a_usable_initial_view_before_acceptance() {
     for view in [
         None,

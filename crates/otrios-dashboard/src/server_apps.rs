@@ -52,6 +52,7 @@ pub(super) struct Hub {
     discovery: otrios_interfaces::spaces::DiscoveryCursor,
     discovery_catalog: Vec<u8>,
     ink_rooms: BTreeMap<String, Arc<ink::Room>>,
+    chat_rooms: BTreeMap<String, Arc<space_chat::Hub>>,
 }
 struct Lease {
     epoch: u32,
@@ -61,7 +62,9 @@ struct Lease {
     view_id: Vec<u8>,
     binding: Option<otrios_interfaces::spaces::Binding>,
     _room: Arc<()>,
+    _chat: Option<Arc<space_chat::Hub>>,
     ink: bool,
+    chat: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Activation {
@@ -69,6 +72,7 @@ pub(super) struct Activation {
     pub binding: otrios_interfaces::spaces::Binding,
     pub room: String,
     pub ink: bool,
+    pub chat: bool,
 }
 #[derive(Default)]
 struct Leases {
@@ -84,6 +88,7 @@ impl Leases {
                 binding: binding.clone(),
                 room: lease.state_ref.clone(),
                 ink: lease.ink,
+                chat: lease.chat,
             })
         })
     }
@@ -187,6 +192,7 @@ impl Hub {
             discovery: otrios_core::spaces::discovery_cursor().map_err(|e| e.to_string())?,
             discovery_catalog: vec![],
             ink_rooms: BTreeMap::new(),
+            chat_rooms: BTreeMap::new(),
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
@@ -483,9 +489,12 @@ impl Hub {
                     .bundles
                     .get(&self.active)
                     .and_then(|b| b.packages.values().find(|p| p.app.id == a.policy.app));
-                let mut available = package.is_some_and(|p| !p.chat)
+                let mut available = package.is_some()
                     && !self.rooms.iter().any(|(key, r)| {
                         r.failed && key.split(':').next() == Some(a.collection.as_str())
+                    })
+                    && !self.chat_rooms.iter().any(|(key, room)| {
+                        key.split(':').next() == Some(a.collection.as_str()) && !room.healthy()
                     });
                 let stored_bytes = self.state.as_ref().and_then(|root| {
                     let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
@@ -533,11 +542,6 @@ impl Hub {
             .get(&self.active)
             .and_then(|b| b.packages.values().find(|p| p.app.id == app))
             .ok_or("Installed app unavailable")?;
-        // A global chat/collection lane is never admitted into a scoped mount.
-        // Its collection-owned adapter is introduced separately in this milestone.
-        if p.chat {
-            return Err("Scoped chat adapter unavailable".into());
-        }
         Ok(p.policy.clone())
     }
     fn binding(
@@ -689,6 +693,46 @@ impl Hub {
         let room = Arc::new(ink::Room::new(peers)?);
         self.ink_rooms.insert(activation.room.clone(), room.clone());
         Ok(room)
+    }
+    fn prepare_chat(
+        &mut self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<Arc<space_chat::Hub>> {
+        let key = collection_room(binding, package);
+        if let Some(room) = self.chat_rooms.get(&key) {
+            return Ok(room.clone());
+        }
+        if self.chat_rooms.len() >= 8 {
+            let idle = self
+                .chat_rooms
+                .iter()
+                .find_map(|(key, room)| {
+                    (Arc::strong_count(room) == 1 && room.healthy()).then(|| key.clone())
+                })
+                .ok_or("Chat room budget exhausted")?;
+            self.chat_rooms.remove(&idle);
+        }
+        let suffix = key.split_once(':').map_or("primary", |(_, hash)| hash);
+        let path = self
+            .state
+            .as_ref()
+            .ok_or("Durable chat storage required")?
+            .join(format!("collection-{}.data", binding.collection))
+            .join(format!("chat-{suffix}.journal"));
+        self.collection_parent(&path)?;
+        let room = space_chat::Hub::new(path)?;
+        self.chat_rooms.insert(key, room.clone());
+        Ok(room)
+    }
+    pub(super) fn chat_room(&self, active: &Activation) -> Result<Arc<space_chat::Hub>> {
+        if !active.chat {
+            return Err("App does not declare chat".into());
+        }
+        self.chat_rooms
+            .get(&active.room)
+            .cloned()
+            .ok_or("Chat room must be qualified before activation".into())
     }
     fn collection_file(
         &self,
@@ -1194,6 +1238,14 @@ impl Hub {
                         moderate: self.allowed(scope, b, Operation::Moderate),
                     }
                 });
+                let prepared_chat = if p.chat {
+                    binding
+                        .as_ref()
+                        .map(|binding| self.prepare_chat(binding, &p))
+                        .transpose()?
+                } else {
+                    None
+                };
                 let initial_view = if p.aggregate_view {
                     Some(if let Some(b) = &binding {
                         self.collection_views
@@ -1204,6 +1256,8 @@ impl Hub {
                     } else {
                         self.view.clone()
                     })
+                } else if let Some(chat) = &prepared_chat {
+                    Some(chat.chat.prepare()?)
                 } else {
                     None
                 };
@@ -1231,7 +1285,9 @@ impl Hub {
                         .unwrap_or_default()
                         .as_secs() as i64,
                 );
-                let (mut sync, changed) = if mount_binding.as_ref().is_some_and(|b| !b.editable) {
+                let (mut sync, changed) = if mount_binding.as_ref().is_some_and(|b| !b.editable)
+                    || !p.schema.fields.iter().any(|field| field.writable)
+                {
                     (candidate.open_read_session(&writer)?, false)
                 } else {
                     candidate.open_session(&writer, resume)?
@@ -1275,7 +1331,9 @@ impl Hub {
                     view_id: vec![],
                     binding,
                     _room: room.lease.clone(),
+                    _chat: prepared_chat,
                     ink: p.ink,
+                    chat: p.chat,
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.

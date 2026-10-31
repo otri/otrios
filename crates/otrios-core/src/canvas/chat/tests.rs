@@ -139,6 +139,66 @@ fn admitted_profiles_are_private_actor_bindings_retained_through_restart_and_gue
 }
 
 #[test]
+fn initial_transcript_is_a_read_only_bounded_pin_and_rejects_malformed_candidates_atomically() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    room.join_admitted(1, "private-alice", true, now).unwrap();
+    for i in 1..=70 {
+        let at = now + i * 1000;
+        room.handle(1, send(&format!("Dispatch {i}"), i, at), at)
+            .unwrap();
+    }
+    let before = fs::read(&p).unwrap();
+    let bytes = room.initial_snapshot().unwrap();
+    assert_eq!(fs::read(&p).unwrap(), before);
+    assert!(!bytes.windows(13).any(|s| s == b"private-alice"));
+    let initial: Initial = flexbuffers::from_slice(&bytes).unwrap();
+    assert_eq!(initial.messages.len(), 64);
+    assert_eq!(initial.messages[0].message.sequence, 7);
+    assert_eq!(initial.messages[63].message.sequence, 70);
+    assert!(initial.older);
+    let mut malformed = vec![vec![255], vec![0; MAX_INITIAL_BYTES + 1]];
+    for kind in 0..5 {
+        let mut invalid = initial.clone();
+        match kind {
+            0 => invalid.version = 2,
+            1 => invalid.messages[1].message.sequence = 7,
+            2 => invalid.messages[0].message.sender.avatar = AVATARS,
+            3 => invalid.members.push(invalid.members[0].clone()),
+            _ => invalid.messages[0].message.text = "x".repeat(2305),
+        }
+        malformed.push(flexbuffers::to_vec(&invalid).unwrap());
+    }
+    for invalid in malformed {
+        let mut client = Client::default();
+        assert!(client.receive_initial(&invalid).is_err());
+        assert!(client.recent_messages().is_empty());
+        assert!(!client.info().online);
+        assert!(client.info().participant.is_empty());
+    }
+    let mut client = Client::default();
+    client.receive_initial(&bytes).unwrap();
+    assert_eq!(client.info().last_sequence, 70);
+    assert!(!client.info().online);
+    assert!(client.info().participant.is_empty());
+    assert!(client.confirmed());
+    assert!(matches!(
+        decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap(),
+        Command::Join { credential: None }
+    ));
+    let at = now + 71_000;
+    room.handle(1, send("Later dispatch", 71, at), at).unwrap();
+    assert_eq!(client.info().last_sequence, 70, "immutable candidate pin");
+    assert_ne!(room.initial_snapshot().unwrap(), bytes);
+    room.fail_journal_writes();
+    assert!(!room.healthy());
+    assert!(room.initial_snapshot().is_err());
+    drop(room);
+    fs::remove_file(p).unwrap();
+}
+
+#[test]
 fn revoked_execution_abandons_only_ephemeral_presence_without_writing_a_deleted_journal() {
     let p = path();
     let now = 1_000_000;

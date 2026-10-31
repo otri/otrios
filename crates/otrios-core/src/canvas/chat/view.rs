@@ -13,6 +13,7 @@ struct Paint {
     next: u32,
     buttons: [u8; 201],
     line_height: f32,
+    moderator_label: &'static str,
 }
 impl Paint {
     fn id(&mut self) -> u32 {
@@ -144,7 +145,11 @@ impl Paint {
             [x, y, width, 52.],
             &format!(
                 "{}{}",
-                if member.admin { "Admin " } else { "" },
+                if member.admin {
+                    self.moderator_label
+                } else {
+                    ""
+                },
                 member.profile.name
             ),
             "",
@@ -188,6 +193,7 @@ impl Client {
             next: 9_000_000,
             buttons: [0; 201],
             line_height: self.line_height(),
+            moderator_label: if self.managed { "Moderator " } else { "Admin " },
         };
         for particle in &self.particles {
             let t = self.now.saturating_sub(particle.at) as f32 / 1000.;
@@ -225,6 +231,7 @@ impl Client {
             next: 2_000_000,
             buttons: [0; 201],
             line_height: self.line_height(),
+            moderator_label: if self.managed { "Moderator " } else { "Admin " },
         };
         p.rect([0., 0., w, full_h], BG, 0.);
         let header_start = p.nodes.len();
@@ -236,7 +243,8 @@ impl Client {
                     f.text_width(value, heading_scale as f32)
                 })
         };
-        let back_width = measure("< OTriOS");
+        let back_label = if self.managed { "< Quit" } else { "< OTriOS" };
+        let back_width = measure(back_label);
         let line_height = self
             .font
             .as_ref()
@@ -245,11 +253,20 @@ impl Client {
         p.button(
             0,
             [24., 24., back_width + 8., 60.],
-            "Back to OTriOS",
+            if self.managed {
+                "Quit"
+            } else {
+                "Back to OTriOS"
+            },
             "",
             false,
         );
         let back = p.nodes.last_mut().unwrap();
+        if let Some(control) = self.quit_control {
+            // This control comes from the host's reserved action table, never
+            // from a publisher handler. Reuse the breadcrumb's header space.
+            back.responder = Some(TouchResponder::Activate(Action::AppEvent(control)));
+        }
         for child in &mut back.children {
             if let Primitive::Superellipse { color, .. } = &mut child.primitive {
                 *color = BG;
@@ -258,7 +275,7 @@ impl Client {
         back.children.push(text(
             back.id + 3,
             Rect::new(0., heading_y - 24., back_width + 8., line_height),
-            "< OTriOS",
+            back_label,
             heading_scale,
             TEXT,
         ));
@@ -477,7 +494,7 @@ impl Client {
             p.rect([42., cy - 58., page_w - 36., 48.], BG, 6.);
             p.text(54., cy - 43., page_w - 60., &self.notice, 2, BRASS);
         }
-        if !self.online && self.kicked.is_none() {
+        if !self.online && self.kicked.is_none() && (!self.managed || self.you.is_some()) {
             p.button(
                 11,
                 [48., page_y + 100., 200., 52.],
@@ -721,7 +738,11 @@ impl Client {
                         x + 24.,
                         y + 82.,
                         pw - 48.,
-                        &format!("{} on the wire - @ means Admin", self.members.len()),
+                        &format!(
+                            "{} on the wire - @ means {}",
+                            self.members.len(),
+                            if self.managed { "Moderator" } else { "Admin" }
+                        ),
                         2,
                         MUTED,
                     );
@@ -754,21 +775,23 @@ impl Client {
                         ">",
                         false,
                     );
-                    p.button(
-                        14,
-                        [x + pw - 280., y + ph - 62., 256., 44.],
-                        if self.you.as_ref().is_some_and(|m| m.admin) {
-                            "Sign out admin"
-                        } else {
-                            "Monitoring admin sign-in"
-                        },
-                        if self.you.as_ref().is_some_and(|m| m.admin) {
-                            "Sign out admin"
-                        } else {
-                            "Admin sign-in"
-                        },
-                        false,
-                    );
+                    if !self.managed {
+                        p.button(
+                            14,
+                            [x + pw - 280., y + ph - 62., 256., 44.],
+                            if self.you.as_ref().is_some_and(|m| m.admin) {
+                                "Sign out admin"
+                            } else {
+                                "Monitoring admin sign-in"
+                            },
+                            if self.you.as_ref().is_some_and(|m| m.admin) {
+                                "Sign out admin"
+                            } else {
+                                "Admin sign-in"
+                            },
+                            false,
+                        );
+                    }
                 }
                 Panel::Person => {
                     p.button(
@@ -830,7 +853,11 @@ impl Client {
                         "/nick name - change your calling card",
                         "/avatar - choose your emblem",
                         "/who - see who is on the wire",
-                        "/kick name - admin: review a removal",
+                        if self.managed {
+                            "/kick name - moderator: review a removal"
+                        } else {
+                            "/kick name - admin: review a removal"
+                        },
                         "//text - send a literal slash",
                     ]
                     .iter()

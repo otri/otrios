@@ -39,6 +39,37 @@ pub(super) struct Peer {
     pub joined: bool,
 }
 impl Hub {
+    pub(super) fn run_inline<T>(
+        &self,
+        work: impl FnOnce(&mut core::Room) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut state = self.room.lock().map_err(|_| "Room lock unavailable")?;
+        work(recovered(&mut state, self.collections.clone())?)
+    }
+    pub(super) fn prepare(&self) -> Result<Vec<u8>, String> {
+        let mut state = self.room.lock().map_err(|_| "Room lock unavailable")?;
+        recovered(&mut state, self.collections.clone())?.initial_snapshot()
+    }
+    pub(super) fn healthy(&self) -> bool {
+        self.room.lock().is_ok_and(|state| match &*state {
+            RoomState::Ready(room) => room.healthy(),
+            RoomState::Unopened(_) => true,
+            RoomState::Failed => false,
+        })
+    }
+    pub(super) fn observe(&self) -> (u64, broadcast::Receiver<Arc<Packet>>) {
+        (
+            self.next.fetch_add(1, Ordering::Relaxed),
+            self.bus.subscribe(),
+        )
+    }
+    pub(super) fn abandon(&self, id: u64) {
+        if let Ok(mut state) = self.room.lock()
+            && let RoomState::Ready(room) = &mut *state
+        {
+            self.publish(room.abandon(id, now()));
+        }
+    }
     pub fn new(
         path: Option<PathBuf>,
         collections: Arc<StdMutex<otrios_core::collection::Channel>>,
@@ -63,7 +94,7 @@ impl Hub {
         window.1 = window.1.saturating_add(1);
         window.1 <= 128
     }
-    fn publish(&self, events: Vec<Delivery>) {
+    pub(super) fn publish(&self, events: Vec<Delivery>) {
         for event in events {
             let joined = match event.event {
                 Event::Welcome { .. } => Some(true),
@@ -82,7 +113,7 @@ impl Hub {
             }
         }
     }
-    async fn run<T: Send + 'static>(
+    pub(super) async fn run<T: Send + 'static>(
         &self,
         work: impl FnOnce(&mut core::Room) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
@@ -90,19 +121,7 @@ impl Hub {
         let collections = self.collections.clone();
         tokio::task::spawn_blocking(move || {
             let mut guard = room.lock().map_err(|_| "Room lock unavailable")?;
-            if let RoomState::Unopened(path) = &mut *guard {
-                *guard = match core::Room::open_in(path.take(), now(), collections) {
-                    Ok(room) => RoomState::Ready(Box::new(room)),
-                    Err(error) => {
-                        eprintln!("Chat recovery failed: {error}");
-                        RoomState::Failed
-                    }
-                };
-            }
-            match &mut *guard {
-                RoomState::Ready(room) => work(room),
-                _ => Err("Room history unavailable; operator recovery required".into()),
-            }
+            work(recovered(&mut guard, collections)?)
         })
         .await
         .map_err(|_| "Room task failed")?
@@ -188,6 +207,24 @@ impl Hub {
         }
     }
 }
+fn recovered(
+    state: &mut RoomState,
+    collections: Arc<StdMutex<otrios_core::collection::Channel>>,
+) -> Result<&mut core::Room, String> {
+    if let RoomState::Unopened(path) = state {
+        *state = match core::Room::open_in(path.take(), now(), collections) {
+            Ok(room) => RoomState::Ready(Box::new(room)),
+            Err(error) => {
+                eprintln!("Chat recovery failed: {error}");
+                RoomState::Failed
+            }
+        };
+    }
+    match state {
+        RoomState::Ready(room) => Ok(room),
+        _ => Err("Room history unavailable; operator recovery required".into()),
+    }
+}
 pub(super) fn cookie(headers: &HeaderMap) -> Option<String> {
     let mut result = None;
     for header in headers.get_all(header::COOKIE) {
@@ -210,6 +247,9 @@ pub(super) fn cookie(headers: &HeaderMap) -> Option<String> {
     result
 }
 pub(super) async fn identity(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if app.state_config.spaces.is_some() {
+        return failure(StatusCode::NOT_FOUND, "Guest room identity is unavailable");
+    }
     if !headers
         .get(header::ORIGIN)
         .and_then(|v| v.to_str().ok())

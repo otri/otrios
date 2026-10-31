@@ -772,6 +772,10 @@ pub(super) fn state_worker(
             }
         }
         dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        if client.rejected_mount_pending() {
+            catalog_candidate = None;
+            eprintln!("App candidate layout rejected; continuing current app");
+        }
         for bytes in ink_rx.try_iter().take(64) {
             dirty |= client.receive_ink(&bytes, now)?;
         }

@@ -58,6 +58,9 @@ impl CanvasApp {
     pub fn spaces_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.inner.spaces_outgoing()
     }
+    pub fn space_managed(&self) -> bool {
+        self.inner.space_managed()
+    }
     pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool, String> {
         self.inner.receive_spaces(bytes)
     }
