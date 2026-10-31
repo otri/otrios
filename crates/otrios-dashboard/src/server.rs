@@ -496,9 +496,10 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "State unavailable");
     };
     let (catalogs, roots) = hub.counts();
+    let ink_subscribers = app.ink.subscribers() + hub.ink_subscribers();
     let presentation = !hub.view().is_empty();
     drop(guard);
-    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":app.peer_limits[1]-app.public_peers.available_permits(),"trusted_sessions":app.peer_limits[0]-app.peers.available_permits(),"peer_limits":app.peer_limits,"ink_subscribers":app.ink.subscribers(),"ink_limit":app.peer_limits.iter().sum::<usize>(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
+    binary("application/json",json!({"status":"ok","catalogs":catalogs,"app_roots":roots,"presentation":presentation,"public_sessions":app.peer_limits[1]-app.public_peers.available_permits(),"trusted_sessions":app.peer_limits[0]-app.peers.available_permits(),"peer_limits":app.peer_limits,"ink_subscribers":ink_subscribers,"ink_limit":app.peer_limits.iter().sum::<usize>(),"release":app.release.read().await["id"]}).to_string().into_bytes(),false)
 }
 fn asset_type(path: &str) -> Option<&'static str> {
     if let Some(source) = path.strip_suffix(".gz")

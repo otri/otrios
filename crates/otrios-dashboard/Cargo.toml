@@ -102,6 +102,10 @@ name = "bundle_counter"
 required-features = ["canvas"]
 
 [[example]]
+name = "space_ink_probe"
+required-features = ["canvas"]
+
+[[example]]
 name = "bundle_app_probe"
 required-features = ["canvas", "host-sync"]
 

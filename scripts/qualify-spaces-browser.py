@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Qualify Space admission in Chromium with disposable state and test credentials.
 
-Requires built dashboard-server, examples/bundle_counter and wasm-bindgen web pkg.
+Requires dashboard-server, bundle_counter/space_ink_probe examples and web pkg.
 The signed fixture contains real browser/app bytes; it has no native artifact and
 does not establish ARM or Frame deployment acceptance. Never uses live state.
 """
@@ -49,6 +49,7 @@ def qualify(args):
     with tempfile.TemporaryDirectory(prefix='otrios-spaces-browser-') as temporary:
         root = pathlib.Path(temporary)
         subprocess.run([str(args.bin_dir / 'examples/bundle_counter'), str(root / 'apps')], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run([str(args.bin_dir / 'examples/space_ink_probe'), str(root / 'apps')], check=True)
         shutil.copytree(REPO / 'web/canvas', root / 'web', ignore=shutil.ignore_patterns('pkg'))
         shutil.copytree(REPO / 'web/shared', root / 'shared')
         shutil.copytree(args.wasm_pkg, root / 'web/pkg')
@@ -67,8 +68,8 @@ def qualify(args):
                 {'identity': 'alice', 'token_sha256': digest(('a' * 64).encode())}]}))
         private(root / 'admin.identity', 'a' * 64)
         private(root / 'provision.json', json.dumps({'version': 1, 'spaces': [
-            {'name': 'Browser A', 'admins': ['alice'], 'members': ['bob'], 'apps': [{'id': 'bundle-counter'}]},
-            {'name': 'Browser B', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'bundle-counter'}]}]}))
+            {'name': 'Browser A', 'admins': ['alice'], 'members': ['bob'], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}]},
+            {'name': 'Browser B', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}]}]}))
         command = [str(args.bin_dir / 'dashboard-server'), '--apps', str(root / 'apps'),
                    '--app-state', str(root / 'state'), '--spaces-registry', str(root / 'spaces.flex')]
         provision = subprocess.run(command + ['--provision-spaces', str(root / 'provision.json')], check=True, capture_output=True, text=True)
@@ -81,9 +82,9 @@ def qualify(args):
                     data = data.replace(b'href="/style.css"', b'href="./style.css"').replace(b'src="/app.js"', b'src="./app.js"')
                 files['web/' + file.relative_to(root / 'web').as_posix()] = data
         files['apps/catalog.flex'] = (root / 'apps/catalog.flex').read_bytes()
-        for file in (root / 'apps/bundle-counter/package').iterdir():
+        for file in (root / 'apps').glob('*/package/*'):
             if file.is_file():
-                files['authority/apps/bundle-counter/' + file.name] = file.read_bytes()
+                files['authority/apps/' + file.parent.parent.name + '/' + file.name] = file.read_bytes()
         item = lambda data: {'bytes': len(data), 'sha256': digest(data)}
         manifest = {'format': 'otrios-release-v1', 'state_schema': 'otrios-canvas-merkle-state-v1', 'sync_protocol': protocol,
                     'assets': {k: item(v) for k, v in files.items() if not k.startswith('authority/')},

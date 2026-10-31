@@ -120,6 +120,79 @@ fn refresh(version: u32, protocol: &str, release: &Option<release::Release>) -> 
                 .as_ref()
                 .map_or(STATE_PROTOCOL, |r| r.sync_protocol.as_str())
 }
+#[derive(Default)]
+struct ManagedInk {
+    wanted: bool,
+    active: Option<apps::Activation>,
+    room: Option<Arc<ink::Room>>,
+}
+impl ManagedInk {
+    fn current(
+        &self,
+        live: &watch::Receiver<Option<apps::Activation>>,
+    ) -> Option<&apps::Activation> {
+        if live.has_changed().is_err() {
+            return None;
+        }
+        self.active
+            .as_ref()
+            .filter(|active| live.borrow().as_ref() == Some(*active))
+    }
+    fn clear(&mut self, subscription: &mut Option<ink::Subscription>) {
+        *subscription = None;
+        self.room = None;
+    }
+    async fn refresh(
+        &mut self,
+        app: &App,
+        key: &Option<String>,
+        space: &Option<String>,
+        live: &watch::Receiver<Option<apps::Activation>>,
+        subscription: &mut Option<ink::Subscription>,
+        output: &mut SplitSink<WebSocket, Message>,
+    ) -> bool {
+        let mut guard = app.apps.lock().await;
+        let scope = spaces::Scope {
+            space: space.clone(),
+            identity: spaces::identity(app, key).await,
+        };
+        let active = self.current(live).cloned();
+        let Some(active) = active.filter(|active| self.wanted && active.ink) else {
+            self.clear(subscription);
+            return true;
+        };
+        let Some(hub) = guard.as_mut().filter(|hub| {
+            hub.allowed(
+                &scope,
+                &active.binding,
+                otrios_interfaces::spaces::Operation::Read,
+            )
+        }) else {
+            self.clear(subscription);
+            return true;
+        };
+        if self.room.is_some() && subscription.is_some() {
+            return true;
+        }
+        let Ok(room) = hub.ink_room(&active, app.peer_limits.iter().sum()) else {
+            return false;
+        };
+        let Ok((peer, bytes)) = room.subscribe().await else {
+            return false;
+        };
+        if !send(
+            output,
+            Message::Binary(wire::frame(wire::INK, wire::scoped(active.epoch, bytes)).into()),
+        )
+        .await
+        {
+            return false;
+        }
+        self.room = Some(room);
+        *subscription = Some(peer);
+        true
+    }
+}
 enum Event {
     Release,
     Availability,
@@ -130,6 +203,7 @@ enum Event {
     Ink(Result<Vec<ink::Event>, tokio::sync::broadcast::error::RecvError>),
     Chat(Result<Arc<chat::Packet>, tokio::sync::broadcast::error::RecvError>),
     Heartbeat,
+    Activation,
 }
 async fn peer(
     app: Arc<App>,
@@ -187,6 +261,7 @@ async fn peer(
     // Overflow still disconnects for resync; release control never awaits space.
     let (state_tx, state_input) = mpsc::channel(8);
     let (state_output, mut state_rx) = mpsc::channel(4);
+    let (activation, mut live) = watch::channel(None);
     let worker = state_enabled.then(|| {
         tokio::spawn(apps::worker(
             app.clone(),
@@ -195,9 +270,13 @@ async fn peer(
             space.clone(),
             state_input,
             state_output,
+            activation,
         ))
     });
     let mut ink: Option<ink::Subscription> = None;
+    let managed = app.state_config.spaces.is_some();
+    let mut managed_ink = ManagedInk::default();
+    let mut lease_open = state_enabled;
     let mut collection_peer: Option<collections::Peer> = None;
     let mut spaces_peer: Option<spaces::Peer> = None;
     let mut admission = Arc::new(AtomicBool::new(false));
@@ -214,6 +293,7 @@ async fn peer(
         let event = tokio::select! {biased;
             result=releases.changed()=>{if result.is_err(){break;}Event::Release},
             result=availability.changed(),if state_enabled=>{if result.is_err(){break;}Event::Availability},
+            result=live.changed(),if lease_open=>{if result.is_err(){lease_open=false;}Event::Activation},
             _=heartbeat.tick()=>Event::Heartbeat,
             value=input.next()=>Event::Wire(value),
             value=state_rx.recv(),if state_enabled=>Event::State(value),
@@ -223,6 +303,13 @@ async fn peer(
             value=async{match chat_peer.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Chat(value),
         };
         match event {
+            Event::Activation => {
+                let current = live.borrow_and_update().clone();
+                if managed && (!lease_open || managed_ink.active != current) {
+                    managed_ink.clear(&mut ink);
+                    managed_ink.active = None;
+                }
+            }
             Event::Release => {
                 let r = descriptor(&releases.borrow_and_update());
                 let available = *availability.borrow();
@@ -269,12 +356,13 @@ async fn peer(
                         if !state_enabled || !*availability.borrow() {
                             break;
                         }
-                        // Until the auxiliary lanes are collection-owned, a
-                        // managed session cannot fall back to their global rooms.
-                        if app.state_config.spaces.is_some()
+                        // Chat/collection lanes cannot fall back to global rooms.
+                        if managed
                             && !matches!(
                                 bytes.first(),
-                                Some(&wire::STATE) | Some(&otrios_interfaces::spaces::CHANNEL)
+                                Some(&wire::STATE)
+                                    | Some(&otrios_interfaces::spaces::CHANNEL)
+                                    | Some(&wire::INK)
                             )
                         {
                             break;
@@ -399,6 +487,40 @@ async fn peer(
                                 }
                             }
                             Some((&wire::INK, payload)) => {
+                                if managed {
+                                    let Ok((epoch, payload)) = wire::scope(payload) else {
+                                        break;
+                                    };
+                                    let guard = app.apps.lock().await;
+                                    let scope = spaces::Scope {
+                                        space: space.clone(),
+                                        identity: spaces::identity(&app, &key).await,
+                                    };
+                                    let Some(active) = managed_ink
+                                        .current(&live)
+                                        .filter(|active| active.epoch == epoch)
+                                    else {
+                                        continue;
+                                    };
+                                    if guard.as_ref().is_none_or(|hub| {
+                                        !hub.allowed(
+                                            &scope,
+                                            &active.binding,
+                                            otrios_interfaces::spaces::Operation::Edit,
+                                        )
+                                    }) {
+                                        continue;
+                                    }
+                                    let (Some(room), Some(peer)) =
+                                        (&managed_ink.room, ink.as_mut())
+                                    else {
+                                        continue;
+                                    };
+                                    if room.receive(peer, payload).await.is_err() {
+                                        break;
+                                    }
+                                    continue;
+                                }
                                 let Some(sub) = ink.as_mut() else {
                                     break;
                                 };
@@ -422,6 +544,15 @@ async fn peer(
                             break;
                         }
                         match serde_json::from_str(&text) {
+                            Ok(ClientControl::Ink { enabled }) if managed => {
+                                managed_ink.wanted = enabled;
+                                if !managed_ink
+                                    .refresh(&app, &key, &space, &live, &mut ink, &mut output)
+                                    .await
+                                {
+                                    break;
+                                }
+                            }
                             Ok(ClientControl::Ink { enabled: false }) => {
                                 ink = None;
                             }
@@ -497,6 +628,13 @@ async fn peer(
                 if packet.private && !apps::private_allowed(&app, public, &key).await {
                     continue;
                 }
+                if packet
+                    .activated
+                    .as_deref()
+                    .is_some_and(|active| live.borrow().as_ref() != Some(active))
+                {
+                    continue;
+                }
                 if !send(
                     &mut output,
                     Message::Binary(wire::frame(wire::STATE, packet.bytes).into()),
@@ -506,6 +644,16 @@ async fn peer(
                     break;
                 }
                 drop(guard);
+                if let Some(active) = packet.activated {
+                    managed_ink.clear(&mut ink);
+                    managed_ink.active = Some(*active);
+                    if !managed_ink
+                        .refresh(&app, &key, &space, &live, &mut ink, &mut output)
+                        .await
+                    {
+                        break;
+                    }
+                }
             }
             Event::State(None) => break,
             Event::Spaces(Some(packet)) => {
@@ -576,6 +724,37 @@ async fn peer(
             }
             Event::Ink(Ok(events)) => {
                 let bytes = ink::encode(&events);
+                if managed {
+                    let guard = app.apps.lock().await;
+                    let scope = spaces::Scope {
+                        space: space.clone(),
+                        identity: spaces::identity(&app, &key).await,
+                    };
+                    let Some(active) = managed_ink.current(&live) else {
+                        continue;
+                    };
+                    if guard.as_ref().is_none_or(|hub| {
+                        !hub.allowed(
+                            &scope,
+                            &active.binding,
+                            otrios_interfaces::spaces::Operation::Read,
+                        )
+                    }) {
+                        continue;
+                    }
+                    if !bytes.is_empty()
+                        && !send(
+                            &mut output,
+                            Message::Binary(
+                                wire::frame(wire::INK, wire::scoped(active.epoch, bytes)).into(),
+                            ),
+                        )
+                        .await
+                    {
+                        break;
+                    }
+                    continue;
+                }
                 if !bytes.is_empty()
                     && !send(
                         &mut output,

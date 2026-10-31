@@ -65,6 +65,20 @@ struct Mount {
     order_editing: bool,
     order_drag: Option<OrderDrag>,
 }
+#[derive(Clone, Copy)]
+struct AuxScope {
+    epoch: u32,
+    managed: bool,
+}
+impl AuxScope {
+    fn wrap(self, bytes: Vec<u8>) -> Vec<u8> {
+        if self.managed {
+            otrios_interfaces::channels::scoped(self.epoch, bytes)
+        } else {
+            bytes
+        }
+    }
+}
 struct Request {
     epoch: u32,
     pair: (String, String),
@@ -153,10 +167,11 @@ pub struct Client {
     chat_credential: Option<String>,
     chat_new_credential: Option<String>,
     chat_enabled: bool,
+    chat_scope: Option<AuxScope>,
     chat_native: bool,
     chat_reduced_motion: bool,
     collection_generation: u64,
-    collection_cancel: Option<crate::collection::Command>,
+    collection_cancel: Option<(AuxScope, crate::collection::Command)>,
     collection_revoked: bool,
     external_keyboard: bool,
     viewport: Option<[f32; 2]>,
@@ -193,6 +208,7 @@ pub struct Client {
     space_switch: Option<String>,
     sign_in_requested: bool,
     selected_space: Option<String>,
+    managed_transport: bool,
 }
 impl Client {
     pub fn configure_spaces(&mut self, selected: Option<&str>) -> Result<()> {
@@ -206,8 +222,28 @@ impl Client {
     pub fn spaces_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
         self.spaces.outgoing().map_err(err)
     }
+    fn pending_available(&self) -> bool {
+        self.requested.as_ref().is_some_and(|request| {
+            let owner = request
+                .pair
+                .1
+                .strip_prefix("app:")
+                .and_then(|reference| reference.split_once('/'))
+                .map(|(owner, _)| owner);
+            self.spaces
+                .snapshot()
+                .and_then(|snapshot| snapshot.selected.as_ref())
+                .is_some_and(|detail| {
+                    detail
+                        .apps
+                        .iter()
+                        .any(|app| Some(app.app.as_str()) == owner && app.launch.is_some())
+                })
+        })
+    }
     pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool> {
         let changed = self.spaces.receive(bytes).map_err(err)?;
+        self.managed_transport |= self.spaces.snapshot().is_some();
         let mut rendered = false;
         if self.host_active && self.spaces.snapshot().is_none() {
             self.active = None;
@@ -220,6 +256,9 @@ impl Client {
             self.host_requested = false;
             self.open_entry();
             return Ok(true);
+        }
+        if self.auth_required && self.pending_available() {
+            self.retry_mount();
         }
         if self.spaces.snapshot().is_some()
             && (self.host_active
@@ -235,22 +274,7 @@ impl Client {
                 || self.active.is_none() && self.requested.is_none()
                 || self.selected_space.is_none() && !self.auth_required
                 || self.auth_required
-                    && self.spaces.snapshot().is_some_and(|s| {
-                        s.identity.is_some()
-                            && !self.requested.as_ref().is_some_and(|request| {
-                                let owner = request
-                                    .pair
-                                    .1
-                                    .strip_prefix("app:")
-                                    .and_then(|reference| reference.split_once('/'))
-                                    .map(|(owner, _)| owner);
-                                s.selected.as_ref().is_some_and(|detail| {
-                                    detail.apps.iter().any(|app| {
-                                        Some(app.app.as_str()) == owner && app.launch.is_some()
-                                    })
-                                })
-                            })
-                    }))
+                    && self.spaces.snapshot().is_some_and(|s| s.identity.is_some()))
         {
             if self.host_active {
                 if changed {
@@ -548,22 +572,52 @@ impl Client {
             m.invalidate();
         }
     }
+    fn aux_payload<'a>(&self, bytes: &'a [u8]) -> Result<Option<&'a [u8]>> {
+        if !self.managed_transport && self.active.as_ref().is_none_or(|m| m.binding.is_none()) {
+            return Ok(Some(bytes));
+        }
+        let (epoch, payload) = otrios_interfaces::channels::scope(bytes).map_err(err)?;
+        Ok(self
+            .active
+            .as_ref()
+            .filter(|m| m.binding.is_some() && m.epoch == epoch)
+            .map(|_| payload))
+    }
     pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
         if let Some(m) = &mut self.active
             && let Some(chat) = &mut m.chat
         {
+            if self.managed_transport && m.binding.is_none() {
+                return Ok(None);
+            }
+            let scope = AuxScope {
+                epoch: m.epoch,
+                managed: m.binding.is_some(),
+            };
+            self.chat_scope = Some(scope);
             self.chat_enabled = true;
             chat.native(self.chat_native);
             chat.quiet(self.chat_reduced_motion);
-            return chat.outgoing(self.chat_credential.clone());
+            return chat
+                .outgoing(self.chat_credential.clone())
+                .map(|bytes| bytes.map(|bytes| scope.wrap(bytes)));
         }
         if self.chat_enabled {
             self.chat_enabled = false;
-            return super::chat::encode_command(&otrios_interfaces::chat::Command::Leave).map(Some);
+            if let Some(scope) = self.chat_scope.take() {
+                if self.managed_transport && !scope.managed {
+                    return Ok(None);
+                }
+                return super::chat::encode_command(&otrios_interfaces::chat::Command::Leave)
+                    .map(|bytes| Some(scope.wrap(bytes)));
+            }
         }
         Ok(None)
     }
     pub fn receive_chat(&mut self, bytes: &[u8]) -> Result<bool> {
+        let Some(bytes) = self.aux_payload(bytes)? else {
+            return Ok(false);
+        };
         let event = super::chat::decode_event(bytes)?;
         let cosmetic = matches!(event, otrios_interfaces::chat::Event::Effect { .. });
         let Some(m) = &mut self.active else {
@@ -590,19 +644,33 @@ impl Client {
         Ok(true)
     }
     pub fn collection_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
-        if let Some(command) = self.collection_cancel.take() {
+        if let Some((scope, command)) = self.collection_cancel.take() {
+            if self.managed_transport && !scope.managed {
+                return Ok(None);
+            }
             return crate::collection::encode_command(&command)
-                .map(Some)
+                .map(|bytes| Some(scope.wrap(bytes)))
                 .map_err(err);
         }
-        self.active
-            .as_mut()
-            .and_then(|mount| mount.chat.as_mut())
-            .map_or(Ok(None), |chat| {
-                chat.collection_outgoing(&mut self.collection_generation)
-            })
+        let Some(mount) = &mut self.active else {
+            return Ok(None);
+        };
+        if self.managed_transport && mount.binding.is_none() {
+            return Ok(None);
+        }
+        let scope = AuxScope {
+            epoch: mount.epoch,
+            managed: mount.binding.is_some(),
+        };
+        mount.chat.as_mut().map_or(Ok(None), |chat| {
+            chat.collection_outgoing(&mut self.collection_generation)
+                .map(|bytes| bytes.map(|bytes| scope.wrap(bytes)))
+        })
     }
     pub fn receive_collection(&mut self, bytes: &[u8]) -> Result<bool> {
+        let Some(bytes) = self.aux_payload(bytes)? else {
+            return Ok(false);
+        };
         let Some(mount) = &mut self.active else {
             return Ok(false);
         };
@@ -1186,10 +1254,17 @@ impl Client {
         }
     }
     pub fn retry_mount(&mut self) {
-        self.auth_required = false;
         if let Some(r) = &mut self.requested {
+            if r.sent {
+                let Some(epoch) = self.generation.checked_add(1) else {
+                    return;
+                };
+                self.generation = epoch;
+                r.epoch = epoch;
+            }
             r.sent = false
         }
+        self.auth_required = false;
     }
     /// The same catalog destination is used by browser URLs and native entry points.
     pub fn screen(&self) -> String {
@@ -1446,6 +1521,7 @@ impl Client {
                 binding,
                 initial_view,
             } => {
+                self.managed_transport |= binding.is_some();
                 let Some(r) = &self.requested else {
                     return Ok(false);
                 };
@@ -1655,6 +1731,7 @@ impl Client {
                         });
                         self.auth_required = true;
                     }
+                    self.spaces.forget();
                     return Ok(true);
                 }
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
@@ -1673,7 +1750,7 @@ impl Client {
                         return Err("UI update access rejected".into());
                     }
                     self.auth_required = true;
-                    self.spaces.reset();
+                    self.spaces.forget();
                 }
                 Ok(false)
             }
@@ -1757,7 +1834,15 @@ impl Client {
         if let Some(old) = &mut self.active
             && let Some(chat) = &mut old.chat
         {
-            self.collection_cancel = chat.cancel_collection();
+            self.collection_cancel = chat.cancel_collection().map(|command| {
+                (
+                    AuxScope {
+                        epoch: old.epoch,
+                        managed: old.binding.is_some(),
+                    },
+                    command,
+                )
+            });
             self.collection_revoked = true;
         }
         self.active = Some(candidate);
@@ -2523,11 +2608,28 @@ impl Client {
         Ok(changed || feedback_changed || paint != 0)
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
-        self.active
-            .as_mut()
-            .map_or_else(Vec::new, |m| m.ink.outgoing(now))
+        self.active.as_mut().map_or_else(Vec::new, |m| {
+            if self.managed_transport && m.binding.is_none()
+                || m.binding.as_ref().is_some_and(|b| !b.editable)
+            {
+                return vec![];
+            }
+            let bytes = m.ink.outgoing(now);
+            if bytes.is_empty() {
+                bytes
+            } else {
+                AuxScope {
+                    epoch: m.epoch,
+                    managed: m.binding.is_some(),
+                }
+                .wrap(bytes)
+            }
+        })
     }
     pub fn receive_ink(&mut self, bytes: &[u8], now: u64) -> Result<bool> {
+        let Some(bytes) = self.aux_payload(bytes)? else {
+            return Ok(false);
+        };
         let Some(m) = &mut self.active else {
             return Ok(false);
         };

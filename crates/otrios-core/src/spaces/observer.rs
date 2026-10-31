@@ -19,6 +19,7 @@ pub struct Observer {
     enabled: bool,
     selected: Option<String>,
     watched: bool,
+    observation: u32,
     fresh: bool,
     unavailable: bool,
     snapshot: Option<Discovery>,
@@ -105,8 +106,10 @@ impl Observer {
             return Ok(None);
         }
         if !self.watched {
+            self.observation = self.observation.checked_add(1).ok_or(Error::Capacity)?;
             let command = Command::Watch {
                 version: VERSION,
+                observation: self.observation,
                 selected: self.selected.clone(),
                 cursor: self.cursor.clone(),
             };
@@ -120,11 +123,22 @@ impl Observer {
             .transpose()
     }
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
-        if !self.enabled || !self.watched {
+        if !self.enabled {
             return Err(Error::Invalid);
         }
-        match decode_event(bytes)? {
-            Event::Snapshot { snapshot, .. } => {
+        let event = decode_event(bytes)?;
+        if !self.watched {
+            return Ok(false);
+        }
+        match event {
+            Event::Snapshot {
+                observation,
+                snapshot,
+                ..
+            } => {
+                if observation != self.observation {
+                    return Ok(false);
+                }
                 if snapshot
                     .selected
                     .as_ref()

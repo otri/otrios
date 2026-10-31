@@ -8,10 +8,12 @@ fn command_shape(command: &Command) -> Result<()> {
     match command {
         Command::Watch {
             version,
+            observation,
             selected,
             cursor,
         } => {
             if *version != VERSION
+                || *observation == 0
                 || selected.as_ref().is_some_and(|id| !valid_id(id))
                 || cursor.as_ref().is_some_and(|c| !valid_id(&c.authority))
             {
@@ -47,7 +49,16 @@ fn command_shape(command: &Command) -> Result<()> {
 }
 fn event_shape(event: &Event) -> Result<()> {
     match event {
-        Event::Snapshot { snapshot, .. } => discovery::validate_discovery(snapshot),
+        Event::Snapshot {
+            observation,
+            snapshot,
+            ..
+        } => {
+            if *observation == 0 {
+                return Err(Error::Invalid);
+            }
+            discovery::validate_discovery(snapshot)
+        }
         Event::Result {
             version,
             id,

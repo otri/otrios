@@ -38,6 +38,7 @@ pub enum SubscriptionEvent {
 pub const DASHBOARD_WIDTH: u32 = 1280;
 pub const DASHBOARD_HEIGHT: u32 = 800;
 
+pub mod channels;
 pub mod keyboard;
 
 #[cfg(feature = "layout")]

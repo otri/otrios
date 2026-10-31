@@ -64,6 +64,7 @@ async fn worker(
     let mut notice = app.changed.subscribe();
     let mut expiry = tokio::time::interval(Duration::from_secs(1));
     let mut selected: Option<Option<String>> = None;
+    let mut observation = 0;
     let mut last: Option<(contract::DiscoveryCursor, Option<String>)> = None;
     let mut window = std::time::Instant::now();
     let mut commands = 0_u16;
@@ -91,11 +92,13 @@ async fn worker(
             };
             match command {
                 contract::Command::Watch {
+                    observation: requested,
                     selected: wanted,
                     cursor,
                     ..
                 } => {
                     selected = Some(wanted);
+                    observation = requested;
                     force = true;
                     resync_requested = true;
                     since = cursor;
@@ -175,7 +178,11 @@ async fn worker(
                                 && cursor.revision.checked_add(1) != Some(snapshot.cursor.revision))
                     });
                 last = Some((snapshot.cursor.clone(), principal.clone()));
-                contract::Event::Snapshot { snapshot, resync }
+                contract::Event::Snapshot {
+                    observation,
+                    snapshot,
+                    resync,
+                }
             }
             Err(_) => {
                 last = None;

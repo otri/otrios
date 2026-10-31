@@ -19,7 +19,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v11` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v12` includes a version-1 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when both collection identity and effective
@@ -46,12 +46,17 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
 use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v11; v10 introduced discovery, and v11 adds the
-managed activation acknowledgement.
+browser/native state protocol is v12; v10 introduced discovery, v11 added the
+managed activation acknowledgement, and v12 scopes auxiliary payloads by mount.
 Release discovery remains on its unchanged control v1 envelope.
 
 Watch selects metadata for one Space and includes the previous authority/revision
-cursor where available. Every Watch explicitly replaces the snapshot through
+cursor where available. A nonzero observation ID advances on each Watch and is
+echoed by its snapshots. Revocation forgets the previous observation; delayed
+snapshots cannot satisfy the new refresh or repaint an old private roster. Fresh
+metadata can retry an available destination with a new mount epoch, while an
+unavailable destination returns an authenticated participant to Home.
+Every Watch explicitly replaces the snapshot through
 resync. Observation is registered before initial capture. The
 authority publishes catalog and management revisions under its admission lock,
 then emits complete, filtered snapshots. A changed incarnation or skipped revision
@@ -98,10 +103,28 @@ uninstall, complete auxiliary-lane lifecycle or physical Frame qualification.
 
 This increment admits Create, Membership, Attach, Remove and Closed audience changes.
 Deletion and public audience changes remain unavailable through HTTP until their
-lifecycle integrations are complete. Global chat/collection/ink lanes
+lifecycle integrations are complete. Global chat/collection lanes
 and legacy presentation reads are disabled in managed mode; they cannot be used
 as an unscoped fallback. Monitoring presentation uploads require an explicit
 collector identity and collection grant.
+
+Managed ink uses channel 2 on the shared session and a little-endian nonzero
+32-bit accepted-mount epoch before each auxiliary payload. The socket binds it to
+the accepted app's own document within its collection; staged candidates cannot
+subscribe or publish. A typed internal lease notification releases old resources
+on Quit, activation changes or revocation, independently of state output credits.
+Both reads (including welcome/history) and incoming points recheck current
+admission under the management lock through delivery/mutation. Stale epochs are
+ignored before decoding their payloads, including after the host returns Home.
+Read-only clients do not publish points. The unchanged v1 Ink control is a local
+subscription preference and cannot choose a Space, app or collection.
+
+Trails remain ephemeral: each room retains at most 1024 recent points for five
+seconds, and at most 128 rooms are cached. Idle rooms may be evicted; active
+subscriptions pin their rooms. Removing an attachment discards its relay caches;
+reattaching retains durable app data and starts fresh trails. Managed chat and
+collection payloads use the same epoch framing on the host, but their authority
+adapters remain disabled until their separate collection-owned integration.
 
 Separate child clients exercise authority reads/writes, collection isolation,
 explicit Frame access, active revocation/reconnect, Member management denial and
@@ -110,7 +133,8 @@ browser qualification. `scripts/check.sh` supplies its freshly built authority t
 `otrios-core/tests/spaces_process.rs`. Its test-only `tungstenite` dependency reuses
 the pinned workspace WebSocket client; it adds no runtime dependency.
 
-For real-browser qualification, build the authority, `bundle_counter` example and
+For real-browser qualification, build the authority, `bundle_counter` and
+`space_ink_probe` examples and
 Wasm package from the tested revision, then run
 `python3 scripts/qualify-spaces-browser.py --wasm-pkg /ABS/BUILT/pkg`. The probe uses
 disposable data and signing keys, normal sign-in and separate Chromium cookie
@@ -118,7 +142,10 @@ contexts. It checks shared edits, Space isolation, anonymous/non-Member denial,
 active revocation and continued use by an unaffected Member. It also exercises
 the host controls for Quit, retained-data inspection, removal, reattachment and
 Space switching, verifying that another participant can edit after Quit and that
-reattachment preserves the collection and value. Reports include the
+reattachment preserves the collection and value. Drawing qualification
+uses real pointer input in separate cookie contexts to check shared trails,
+Space isolation (including a new subscription's recent history), and continued
+drawing after another participant quits. Reports include the
 source revision, dirty-tree status and artifact digests. The fixture has no native
 artifact; it does not establish ARM execution or Frame deployment acceptance.
 

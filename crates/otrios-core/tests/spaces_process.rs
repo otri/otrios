@@ -645,7 +645,7 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v11","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v12","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -690,6 +690,7 @@ fn shared_session_discovery_observes_racing_changes_and_rechecks_management_and_
     send_spaces(
         &mut admin,
         SpaceCommand::Watch {
+            observation: 1,
             version: 1,
             selected: Some(space.clone()),
             cursor: None,
@@ -769,6 +770,7 @@ fn shared_session_discovery_observes_racing_changes_and_rechecks_management_and_
     send_spaces(
         &mut member,
         SpaceCommand::Watch {
+            observation: 1,
             version: 1,
             selected: Some(space.clone()),
             cursor: None,
@@ -815,6 +817,7 @@ fn shared_session_discovery_observes_racing_changes_and_rechecks_management_and_
     send_spaces(
         &mut stranger,
         SpaceCommand::Watch {
+            observation: 1,
             version: 1,
             selected: Some(space.clone()),
             cursor: None,
@@ -851,6 +854,7 @@ fn shared_session_discovery_observes_racing_changes_and_rechecks_management_and_
     send_spaces(
         &mut stranger,
         SpaceCommand::Watch {
+            observation: 1,
             version: 1,
             selected: Some(space),
             cursor: Some(stale),
@@ -944,6 +948,313 @@ fn document_session(
     }
     send(&mut socket, ClientMessage::Leave { epoch: 1 });
     (replica.value(1).unwrap(), binding.map(|b| b.collection))
+}
+
+fn ink_control(socket: &mut Socket, enabled: bool) {
+    socket
+        .send(Message::Text(
+            json!({"type":"ink","enabled":enabled}).to_string().into(),
+        ))
+        .unwrap();
+}
+fn ink_points(socket: &mut Socket, epoch: u32) -> Vec<otrios_interfaces::ink::Point> {
+    use otrios_interfaces::{channels as session, ink};
+    loop {
+        match socket.read().unwrap() {
+            Message::Binary(bytes) if bytes.first() == Some(&session::INK) => {
+                let (received, payload) = session::scope(&bytes[1..]).unwrap();
+                assert_eq!(received, epoch);
+                assert!(payload.len().is_multiple_of(ink::SERVER_BYTES));
+                return payload
+                    .chunks_exact(ink::SERVER_BYTES)
+                    .filter_map(|bytes| ink::decode_server(bytes).unwrap().2)
+                    .collect();
+            }
+            Message::Binary(bytes) if bytes.first() == Some(&session::STATE) => {
+                assert!(matches!(
+                    canvas::decode_server(&bytes[1..]).unwrap(),
+                    ServerMessage::Sync { .. }
+                ));
+            }
+            Message::Ping(_) => socket.flush().unwrap(),
+            other => panic!("unexpected ink event: {other:?}"),
+        }
+    }
+}
+fn ink_send(socket: &mut Socket, epoch: u32, point: otrios_interfaces::ink::Point) {
+    use otrios_interfaces::channels as session;
+    socket
+        .send(Message::Binary(
+            session::frame(session::INK, session::scoped(epoch, point.encode())).into(),
+        ))
+        .unwrap();
+}
+fn ink_mount(rig: &Rig, socket: &mut Socket, id: &str, epoch: u32) {
+    send(
+        socket,
+        ClientMessage::Mount {
+            epoch,
+            ui_ref: format!("app:{id}/ui"),
+            state_ref: format!("app:{id}/state"),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![epoch as u8 + 10; 16],
+            resume: 0,
+            collection: None,
+        },
+    );
+    loop {
+        match read(socket) {
+            ServerMessage::Mounted {
+                epoch: received,
+                binding: Some(_),
+                ..
+            } => {
+                assert_eq!(received, epoch);
+                return;
+            }
+            ServerMessage::Sync { .. } => (),
+            other => panic!("unexpected mount: {other:?}"),
+        }
+    }
+}
+fn ink_accept(socket: &mut Socket, epoch: u32) {
+    send(socket, ClientMessage::AcceptMount { epoch });
+    loop {
+        match read(socket) {
+            ServerMessage::Activated { epoch: received } => {
+                assert_eq!(received, epoch);
+                return;
+            }
+            ServerMessage::Sync { .. } => (),
+            other => panic!("unexpected activation: {other:?}"),
+        }
+    }
+}
+fn ink_barrier(socket: &mut Socket) {
+    socket
+        .send(Message::Ping(b"no-ink-before-activation".to_vec().into()))
+        .unwrap();
+    loop {
+        match socket.read().unwrap() {
+            Message::Pong(bytes) => {
+                assert_eq!(&bytes[..], b"no-ink-before-activation");
+                return;
+            }
+            Message::Ping(_) => socket.flush().unwrap(),
+            Message::Binary(bytes) if bytes.first() == Some(&1) => {
+                assert!(matches!(
+                    canvas::decode_server(&bytes[1..]).unwrap(),
+                    ServerMessage::Sync { .. }
+                ));
+            }
+            other => panic!("unexpected data without ink admission: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn managed_ink_follows_accepted_owned_documents_and_releases_revoked_or_quit_subscriptions() {
+    use otrios_core::authoring as a;
+    use otrios_interfaces::ink::Point;
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    let mut entries = vec![];
+    for id in ["counter", "counter/other", "sibling"] {
+        let x = a::StateField::normalized(1, "x", 0);
+        let y = a::StateField::normalized(2, "y", 0);
+        let ui = a::AppUi::new(id, id, a::schema("ink-v1", &[x, y]))
+            .with_touch_pad("pad")
+            .build(
+                id,
+                vec![
+                    a::canvas(vec![a::surface(a::CARD, 10.).pin_edges(0.)])
+                        .key("pad")
+                        .frame([24., 160., 1200., 600.])
+                        .on_drag("Touch pad", a::Event::pad(x, y)),
+                ],
+            );
+        let bytes = canvas::encode_ui(&ui).unwrap();
+        let app = App {
+            id: id.into(),
+            title: id.into(),
+            ui_ref: ui.ui_ref,
+            state_ref: format!("app:{id}/state"),
+            status: "canvas-app".into(),
+            dependencies: vec![],
+        };
+        let package = rig.root.join("apps").join(id).join("package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("ui.flex"), &bytes).unwrap();
+        fs::write(package.join("app.flex"), canvas::encode_app(&app).unwrap()).unwrap();
+        entries.push(CatalogEntry {
+            app,
+            path: id.into(),
+            ui_hash: canvas::hash(&bytes),
+            private: false,
+        });
+    }
+    rig.catalog = canvas::encode_catalog(&Catalog {
+        format: "otrios-app-catalog-v1".into(),
+        apps: entries,
+    })
+    .unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, true, true);
+    let household = rig.space("Ink household");
+    let work = rig.space("Ink work");
+    for (space, app) in [
+        (&household, "counter"),
+        (&household, "sibling"),
+        (&work, "counter"),
+    ] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: app.into(),
+            },
+        );
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let mut alice = socket(&rig.public, &household, Some('a'));
+    ink_control(&mut alice, true);
+    ink_barrier(&mut alice);
+    ink_mount(&rig, &mut alice, "counter", 1);
+    ink_barrier(&mut alice);
+    ink_accept(&mut alice, 1);
+    assert!(ink_points(&mut alice, 1).is_empty());
+    let mut peers = [
+        (socket(&rig.public, &household, Some('b')), "counter"),
+        (socket(&rig.public, &work, Some('a')), "counter"),
+        (socket(&rig.public, &household, Some('a')), "counter/other"),
+        (socket(&rig.public, &household, Some('a')), "sibling"),
+    ];
+    for (peer, id) in &mut peers {
+        ink_mount(&rig, peer, id, 1);
+        ink_accept(peer, 1);
+        ink_control(peer, true);
+        assert!(ink_points(peer, 1).is_empty());
+    }
+    let root = Point {
+        phase: 0,
+        stroke: 1,
+        position: [321, 654],
+    };
+    ink_send(&mut alice, 1, root);
+    assert_eq!(ink_points(&mut alice, 1), vec![root]);
+    assert_eq!(ink_points(&mut peers[0].0, 1), vec![root]);
+    for (peer, _) in &mut peers[1..] {
+        ink_control(peer, false);
+        ink_control(peer, true);
+        assert!(
+            ink_points(peer, 1).is_empty(),
+            "Space, document and app rooms must be isolated"
+        );
+    }
+    ink_mount(&rig, &mut alice, "counter/other", 2);
+    let staged = Point {
+        stroke: 2,
+        position: [200, 300],
+        ..root
+    };
+    ink_send(&mut alice, 1, staged);
+    assert_eq!(ink_points(&mut alice, 1), vec![staged]);
+    assert_eq!(ink_points(&mut peers[0].0, 1), vec![staged]);
+    ink_accept(&mut alice, 2);
+    assert!(ink_points(&mut alice, 2).is_empty());
+    let child = Point {
+        stroke: 3,
+        position: [800, 900],
+        ..root
+    };
+    ink_send(&mut alice, 1, Point { stroke: 99, ..root }); // late old-app traffic
+    ink_send(&mut alice, 2, child);
+    assert_eq!(ink_points(&mut alice, 2), vec![child]);
+    assert_eq!(ink_points(&mut peers[2].0, 1), vec![child]);
+    ink_control(&mut peers[0].0, false);
+    ink_control(&mut peers[0].0, true);
+    assert_eq!(ink_points(&mut peers[0].0, 1), vec![root, staged]);
+    send(&mut alice, ClientMessage::Leave { epoch: 2 });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if http_path(&rig.native, "/health", "GET", None, None).1["ink_subscribers"] == 4 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Quit did not release its relay subscription"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    ink_send(&mut alice, 2, Point { stroke: 98, ..root });
+    ink_control(&mut peers[2].0, false);
+    ink_control(&mut peers[2].0, true);
+    assert_eq!(ink_points(&mut peers[2].0, 1), vec![child]);
+    ink_mount(&rig, &mut alice, "counter", 3);
+    ink_accept(&mut alice, 3);
+    assert_eq!(ink_points(&mut alice, 3), vec![root, staged]);
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    assert!(matches!(
+        read(&mut peers[0].0),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    ink_send(&mut peers[0].0, 1, Point { stroke: 97, ..root });
+    ink_control(&mut alice, false);
+    ink_control(&mut alice, true);
+    assert_eq!(ink_points(&mut alice, 3), vec![root, staged]);
+    rig.change(
+        'a',
+        Change::Remove {
+            space: household.clone(),
+            app: "counter".into(),
+        },
+    );
+    assert!(matches!(
+        read(&mut alice),
+        ServerMessage::AccessRequired { epoch: 3 }
+    ));
+    assert!(matches!(
+        read(&mut peers[2].0),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    ink_send(&mut peers[3].0, 1, child);
+    assert_eq!(
+        ink_points(&mut peers[3].0, 1),
+        vec![child],
+        "sibling app continues"
+    );
+    rig.change(
+        'a',
+        Change::Attach {
+            space: household,
+            app: "counter".into(),
+        },
+    );
+    ink_mount(&rig, &mut alice, "counter", 4);
+    ink_accept(&mut alice, 4);
+    assert!(
+        ink_points(&mut alice, 4).is_empty(),
+        "removed attachments do not retain ephemeral trails"
+    );
 }
 
 #[test]

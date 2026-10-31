@@ -152,6 +152,7 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
         assert!(hidden.spaces.is_empty());
         assert!(hidden.selected.is_none());
         let bytes = spaces::encode_event(&Event::Snapshot {
+            observation: 1,
             snapshot: hidden,
             resync: true,
         })
@@ -166,6 +167,7 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
     }
     for snapshot in [admin, member] {
         let event = Event::Snapshot {
+            observation: 1,
             snapshot,
             resync: true,
         };
@@ -249,12 +251,14 @@ fn management_wire_bounds_versions_shapes_and_untrusted_flex_before_deserializat
     huge.resize(MAX_COMMAND_BYTES + 1, 0);
     assert_eq!(spaces::decode_command(&huge), Err(Error::Capacity));
     let invalid = Command::Watch {
+        observation: 1,
         version: 2,
         selected: None,
         cursor: None,
     };
     assert_eq!(spaces::encode_command(&invalid), Err(Error::Invalid));
     let invalid = Command::Watch {
+        observation: 1,
         version: 1,
         selected: Some("invalid".into()),
         cursor: None,
@@ -361,6 +365,7 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
     assert_eq!(detail.apps.len(), MAX_APPS);
     assert_eq!(detail.members.as_ref().unwrap().len(), MAX_MEMBERS);
     let event = Event::Snapshot {
+        observation: 1,
         snapshot,
         resync: true,
     };
@@ -384,6 +389,7 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
     )
     .unwrap();
     let event = spaces::encode_event(&Event::Snapshot {
+        observation: 1,
         snapshot: snapshot.clone(),
         resync: true,
     })
@@ -411,6 +417,10 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
         matches!(spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(), Command::Manage { id: actual, .. } if actual == id)
     );
     observer.reset();
+    assert!(
+        !observer.receive(&event).unwrap(),
+        "an old response cannot satisfy a new observation"
+    );
     assert_eq!(
         observer.take_outcome(),
         Some(spaces::Outcome::Unknown { id })
@@ -426,7 +436,17 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
         Err(Error::Unavailable)
     );
     assert!(observer.outgoing().unwrap().is_none());
-    observer.receive(&event).unwrap();
+    assert!(!observer.receive(&event).unwrap());
+    observer
+        .receive(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 2,
+                snapshot: snapshot.clone(),
+                resync: true,
+            })
+            .unwrap(),
+        )
+        .unwrap();
     let next = observer
         .request(Change::Create {
             name: "Deliberate retry".into(),

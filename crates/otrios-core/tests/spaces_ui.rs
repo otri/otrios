@@ -113,6 +113,7 @@ fn fixture(role: Role) -> (Client, Ui) {
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
                 snapshot: snapshot(role, 1),
                 resync: true,
             })
@@ -203,6 +204,7 @@ fn app_removal_is_an_explicit_generation_checked_host_request_and_member_rosters
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
                 snapshot: snapshot(Role::Member, 2),
                 resync: false,
             })
@@ -432,6 +434,7 @@ fn signed_in_discovery_does_not_cancel_an_admissible_deep_link() {
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
+                observation: 3,
                 snapshot: snapshot(Role::Member, 2),
                 resync: true,
             })
@@ -458,6 +461,7 @@ fn signed_in_discovery_does_not_cancel_an_admissible_deep_link() {
 fn unchanged_resync_keeps_live_controls_and_reopening_the_same_scope_reports_a_new_frame() {
     let (mut client, _) = fixture(Role::Admin);
     let bytes = spaces::encode_event(&Event::Snapshot {
+        observation: 1,
         snapshot: snapshot(Role::Admin, 1),
         resync: true,
     })
@@ -473,7 +477,17 @@ fn unchanged_resync_keeps_live_controls_and_reopening_the_same_scope_reports_a_n
     client.select_space(SPACE).unwrap();
     assert!(client.spaces_outgoing().unwrap().is_some());
     assert!(
-        client.receive_spaces(&bytes).unwrap(),
+        !client.receive_spaces(&bytes).unwrap(),
+        "old observation cannot reactivate controls"
+    );
+    let fresh = spaces::encode_event(&Event::Snapshot {
+        observation: 2,
+        snapshot: snapshot(Role::Admin, 1),
+        resync: true,
+    })
+    .unwrap();
+    assert!(
+        client.receive_spaces(&fresh).unwrap(),
         "a new local activation needs a presentation even when metadata is unchanged"
     );
     assert!(client.spaces_ui());
@@ -493,6 +507,7 @@ fn home_waits_for_discovery_instead_of_launching_the_first_installed_app() {
         assert!(client.spaces_outgoing().unwrap().is_some());
         let event = if managed {
             Event::Snapshot {
+                observation: 2,
                 snapshot: snapshot(Role::Admin, 2),
                 resync: true,
             }
@@ -513,5 +528,75 @@ fn home_waits_for_discovery_instead_of_launching_the_first_installed_app() {
             decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
             ClientMessage::Mount { .. }
         ));
+    }
+}
+
+#[test]
+fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
+    for reattached in [false, true] {
+        let (mut client, ui) = fixture(Role::Member);
+        let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+        launch(&mut client, &ui, &mut authority);
+        let epoch = client.epoch();
+        let mut removed = snapshot(Role::Member, 2);
+        removed.selected.as_mut().unwrap().apps.clear();
+        let removed_event = spaces::encode_event(&Event::Snapshot {
+            observation: 1,
+            snapshot: removed.clone(),
+            resync: false,
+        })
+        .unwrap();
+        client.receive_spaces(&removed_event).unwrap();
+        assert!(!client.spaces_ui());
+        client
+            .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
+            .unwrap();
+        assert!(client.take_collection_revoked());
+        assert!(client.spaces_snapshot().is_none());
+        let Command::Watch { observation, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("refresh")
+        };
+        assert_eq!(observation, 2);
+        assert!(
+            !client
+                .receive_spaces(
+                    &spaces::encode_event(&Event::Snapshot {
+                        observation: 1,
+                        snapshot: snapshot(Role::Admin, 1),
+                        resync: true,
+                    })
+                    .unwrap()
+                )
+                .unwrap()
+        );
+        assert!(
+            client.scene().is_err(),
+            "an old observer cannot repaint a private roster"
+        );
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation,
+                    snapshot: if reattached {
+                        snapshot(Role::Member, 3)
+                    } else {
+                        removed
+                    },
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        if reattached {
+            assert!(!client.auth_required());
+            assert!(
+                matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::Mount { epoch: next, .. } if next>epoch)
+            );
+        } else {
+            assert!(client.spaces_ui());
+            assert!(!labels(&client).contains(&"Counter".into()));
+        }
     }
 }

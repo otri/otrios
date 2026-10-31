@@ -183,6 +183,7 @@ pub struct DiscoveryCursor {
 pub enum Command {
     Watch {
         version: u32,
+        observation: u32,
         selected: Option<String>,
         cursor: Option<DiscoveryCursor>,
     },
@@ -274,6 +275,7 @@ pub enum Event {
         version: u32,
     },
     Snapshot {
+        observation: u32,
         snapshot: Discovery,
         resync: bool,
     },

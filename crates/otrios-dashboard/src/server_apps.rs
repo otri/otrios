@@ -22,6 +22,7 @@ struct Package {
     policy: otrios_interfaces::spaces::AppPolicy,
     chat: bool,
     aggregate_view: bool,
+    ink: bool,
     primary_ref: String,
 }
 struct Bundle {
@@ -50,6 +51,7 @@ pub(super) struct Hub {
     provisioning: bool,
     discovery: otrios_interfaces::spaces::DiscoveryCursor,
     discovery_catalog: Vec<u8>,
+    ink_rooms: BTreeMap<String, Arc<ink::Room>>,
 }
 struct Lease {
     epoch: u32,
@@ -59,6 +61,14 @@ struct Lease {
     view_id: Vec<u8>,
     binding: Option<otrios_interfaces::spaces::Binding>,
     _room: Arc<()>,
+    ink: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Activation {
+    pub epoch: u32,
+    pub binding: otrios_interfaces::spaces::Binding,
+    pub room: String,
+    pub ink: bool,
 }
 #[derive(Default)]
 struct Leases {
@@ -67,6 +77,27 @@ struct Leases {
     last_epoch: u32,
 }
 impl Leases {
+    fn activation(&self) -> Option<Activation> {
+        self.active.as_ref().and_then(|lease| {
+            lease.binding.as_ref().map(|binding| Activation {
+                epoch: lease.epoch,
+                binding: binding.clone(),
+                room: lease.state_ref.clone(),
+                ink: lease.ink,
+            })
+        })
+    }
+    fn publish(&self, sender: &watch::Sender<Option<Activation>>) {
+        let next = self.activation();
+        sender.send_if_modified(|current| {
+            if *current == next {
+                false
+            } else {
+                *current = next;
+                true
+            }
+        });
+    }
     fn revoke_private(&mut self, allowed: bool) -> Vec<ServerMessage> {
         if allowed {
             return vec![];
@@ -155,6 +186,7 @@ impl Hub {
             provisioning: false,
             discovery: otrios_core::spaces::discovery_cursor().map_err(|e| e.to_string())?,
             discovery_catalog: vec![],
+            ink_rooms: BTreeMap::new(),
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
@@ -404,6 +436,8 @@ impl Hub {
                 room.failed || key.split(':').next() != Some(collection.as_str())
             });
             self.collection_views.remove(&collection);
+            self.ink_rooms
+                .retain(|key, _| key.split(':').next() != Some(collection.as_str()));
         }
         Ok(generation)
     }
@@ -630,6 +664,31 @@ impl Hub {
             },
         );
         Ok(())
+    }
+    pub(super) fn ink_room(
+        &mut self,
+        activation: &Activation,
+        peers: usize,
+    ) -> Result<Arc<ink::Room>> {
+        if !activation.ink {
+            return Err("App does not declare ink".into());
+        }
+        if let Some(room) = self.ink_rooms.get(&activation.room) {
+            return Ok(room.clone());
+        }
+        if self.ink_rooms.len() >= 128 {
+            let idle = self
+                .ink_rooms
+                .iter()
+                .find_map(|(key, room)| {
+                    (Arc::strong_count(room) == 1 && room.subscribers() == 0).then(|| key.clone())
+                })
+                .ok_or("Ink room budget exhausted")?;
+            self.ink_rooms.remove(&idle);
+        }
+        let room = Arc::new(ink::Room::new(peers)?);
+        self.ink_rooms.insert(activation.room.clone(), room.clone());
+        Ok(room)
     }
     fn collection_file(
         &self,
@@ -931,6 +990,10 @@ impl Hub {
                         policy,
                         chat,
                         aggregate_view,
+                        ink: matches!(
+                            description.presentation,
+                            Some(otrios_interfaces::canvas::Presentation::TouchPad { .. })
+                        ),
                         primary_ref: String::new(),
                     },
                 )
@@ -1035,6 +1098,9 @@ impl Hub {
     }
     pub(super) fn counts(&self) -> (usize, usize) {
         (self.bundles.len(), self.rooms.len())
+    }
+    pub(super) fn ink_subscribers(&self) -> usize {
+        self.ink_rooms.values().map(|room| room.subscribers()).sum()
     }
     pub(super) fn view(&self) -> &[u8] {
         &self.view
@@ -1209,6 +1275,7 @@ impl Hub {
                     view_id: vec![],
                     binding,
                     _room: room.lease.clone(),
+                    ink: p.ink,
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.
@@ -1365,6 +1432,7 @@ pub(super) struct Packet {
     pub bytes: Vec<u8>,
     pub private: bool,
     pub binding: Option<otrios_interfaces::spaces::Binding>,
+    pub activated: Option<Box<Activation>>,
 }
 pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
     if !public {
@@ -1380,6 +1448,7 @@ async fn emit(
     message: ServerMessage,
     private: bool,
     binding: Option<otrios_interfaces::spaces::Binding>,
+    activated: Option<Activation>,
 ) -> bool {
     let Ok(mut bytes) = canvas::encode_server(&message) else {
         return false;
@@ -1399,7 +1468,8 @@ async fn emit(
             output.send(Packet {
                 bytes,
                 private,
-                binding
+                binding,
+                activated: activated.map(Box::new),
             })
         )
         .await,
@@ -1413,6 +1483,7 @@ pub(super) async fn worker(
     space: Option<String>,
     mut input: tokio::sync::mpsc::Receiver<Vec<u8>>,
     output: tokio::sync::mpsc::Sender<Packet>,
+    activation: watch::Sender<Option<Activation>>,
 ) {
     let mut leases = Leases::default();
     let mut notice = app.changed.subscribe();
@@ -1431,7 +1502,8 @@ pub(super) async fn worker(
             identity: spaces::identity(&app, &key).await,
         };
         for revoked in leases.revoke_private(allowed) {
-            if !emit(&output, revoked, false, None).await {
+            leases.publish(&activation);
+            if !emit(&output, revoked, false, None, None).await {
                 return;
             }
         }
@@ -1451,7 +1523,7 @@ pub(super) async fn worker(
             let Some(hub) = guard.as_mut() else {
                 continue;
             };
-            canvas::decode_client(&bytes).and_then(|message| {
+            let result = canvas::decode_client(&bytes).and_then(|message| {
                 recoverable_epoch = match &message {
                     ClientMessage::Mount { epoch, .. }
                     | ClientMessage::AcceptMount { epoch }
@@ -1462,16 +1534,20 @@ pub(super) async fn worker(
                     hub.refresh(&app.releases, &release)?;
                 }
                 hub.process(&mut leases, message, allowed, &scope)
-            })
+            });
+            leases.publish(&activation);
+            result
         } else {
             let mut guard = app.apps.lock().await;
             scope.identity = spaces::identity(&app, &key).await;
-            match guard.as_mut() {
+            let result = match guard.as_mut() {
                 Some(hub) => hub
                     .updates(&mut leases, allowed, &scope)
                     .map(|m| (m, false)),
                 None => continue,
-            }
+            };
+            leases.publish(&activation);
+            result
         };
         match result {
             Ok((messages, changed)) => {
@@ -1496,7 +1572,8 @@ pub(super) async fn worker(
                     let private = private_epochs.contains(&epoch);
                     if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
-                            if !emit(&output, revoked, false, None).await {
+                            leases.publish(&activation);
+                            if !emit(&output, revoked, false, None, None).await {
                                 return;
                             }
                         }
@@ -1507,7 +1584,12 @@ pub(super) async fn worker(
                         .flatten()
                         .find(|l| l.epoch == epoch)
                         .and_then(|l| l.binding.clone());
-                    if !emit(&output, message, private, binding).await {
+                    let activated = if matches!(message, ServerMessage::Activated { .. }) {
+                        leases.activation()
+                    } else {
+                        None
+                    };
+                    if !emit(&output, message, private, binding, activated).await {
                         return;
                     }
                 }
@@ -1519,6 +1601,7 @@ pub(super) async fn worker(
                     &output,
                     ServerMessage::Error { epoch, message },
                     false,
+                    None,
                     None,
                 )
                 .await
