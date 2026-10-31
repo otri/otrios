@@ -1,0 +1,222 @@
+{
+  "received": [
+    {
+      "epoch": 4,
+      "phase": 0,
+      "peer": 3751974180,
+      "x": 250,
+      "y": 250
+    },
+    {
+      "epoch": 4,
+      "phase": 1,
+      "peer": 3751974180,
+      "x": 700,
+      "y": 600
+    },
+    {
+      "epoch": 4,
+      "phase": 2,
+      "peer": 3751974180,
+      "x": 1000,
+      "y": 897
+    },
+    {
+      "epoch": 4,
+      "phase": 0,
+      "peer": 3751974180,
+      "x": 250,
+      "y": 250
+    },
+    {
+      "epoch": 4,
+      "phase": 1,
+      "peer": 3751974180,
+      "x": 700,
+      "y": 600
+    },
+    {
+      "epoch": 4,
+      "phase": 2,
+      "peer": 3751974180,
+      "x": 1000,
+      "y": 908
+    }
+  ],
+  "sent": [
+    {
+      "epoch": 4,
+      "phase": 0,
+      "stroke": 1,
+      "x": 250,
+      "y": 250
+    },
+    {
+      "epoch": 4,
+      "phase": 1,
+      "stroke": 1,
+      "x": 700,
+      "y": 600
+    },
+    {
+      "epoch": 4,
+      "phase": 2,
+      "stroke": 1,
+      "x": 1000,
+      "y": 897
+    },
+    {
+      "epoch": 4,
+      "phase": 0,
+      "stroke": 2,
+      "x": 250,
+      "y": 250
+    },
+    {
+      "epoch": 4,
+      "phase": 1,
+      "stroke": 2,
+      "x": 700,
+      "y": 600
+    },
+    {
+      "epoch": 4,
+      "phase": 2,
+      "stroke": 2,
+      "x": 1000,
+      "y": 908
+    }
+  ],
+  "trace": [
+    {
+      "at": 55.70000000298023,
+      "kind": "dom",
+      "type": "focus",
+      "target": "window",
+      "eventTime": 55.5,
+      "capture": false
+    },
+    {
+      "at": 1457,
+      "kind": "dom",
+      "type": "pointerdown",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 1,
+      "eventTime": 1455.6000000014901,
+      "capture": false,
+      "coalesced": []
+    },
+    {
+      "at": 1457.5,
+      "kind": "dom",
+      "type": "focus",
+      "target": "CANVAS",
+      "eventTime": 1457.5,
+      "capture": false
+    },
+    {
+      "at": 1496.300000000745,
+      "kind": "dom",
+      "type": "gotpointercapture",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 1,
+      "eventTime": 1483.6000000014901,
+      "capture": true,
+      "coalesced": []
+    },
+    {
+      "at": 1496.4000000022352,
+      "kind": "dom",
+      "type": "pointermove",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 1,
+      "eventTime": 1483.6000000014901,
+      "capture": true,
+      "coalesced": [
+        1483.6000000014901
+      ]
+    },
+    {
+      "at": 1536.4000000022352,
+      "kind": "dom",
+      "type": "pointerup",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 0,
+      "eventTime": 1535.1000000014901,
+      "capture": true,
+      "coalesced": []
+    },
+    {
+      "at": 1540.800000000745,
+      "kind": "dom",
+      "type": "lostpointercapture",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 0,
+      "eventTime": 1535.1000000014901,
+      "capture": false,
+      "coalesced": []
+    },
+    {
+      "at": 1887.4000000022352,
+      "kind": "dom",
+      "type": "pointerdown",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 1,
+      "eventTime": 1886.800000000745,
+      "capture": false,
+      "coalesced": []
+    },
+    {
+      "at": 1894.800000000745,
+      "kind": "dom",
+      "type": "gotpointercapture",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 1,
+      "eventTime": 1894.800000000745,
+      "capture": true,
+      "coalesced": []
+    },
+    {
+      "at": 1928.2000000029802,
+      "kind": "dom",
+      "type": "pointermove",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 1,
+      "eventTime": 1913.6000000014901,
+      "capture": true,
+      "coalesced": [
+        1913.6000000014901
+      ]
+    },
+    {
+      "at": 1967.4000000022352,
+      "kind": "dom",
+      "type": "pointerup",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 0,
+      "eventTime": 1967.1000000014901,
+      "capture": true,
+      "coalesced": []
+    },
+    {
+      "at": 1967.7000000029802,
+      "kind": "dom",
+      "type": "lostpointercapture",
+      "target": "CANVAS",
+      "pointer": 1,
+      "buttons": 0,
+      "eventTime": 1967.1000000014901,
+      "capture": false,
+      "coalesced": []
+    }
+  ]
+}

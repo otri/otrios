@@ -214,3 +214,53 @@ This is local authority/browser evidence. The earlier ARM-emulation report names
 its older source explicitly; physical Frame acceptance remains pending. Managed
 chat/collection integration, local uninstall, durable deletion and public sharing
 are still required before RFC completion.
+
+## Collection-owned chat and first transcript checkpoint
+
+Runtime source `1a169b07f5ad1898e4529d66f06a82dc5ef8ecac` passed the full
+`bash scripts/check.sh` suite. Clean source
+`a6f09f6dc130561364dbf6752945e93738f22ca6` additionally qualifies the browser
+driver correction described below. Its rebuilt authority/Wasm fixture passes
+Chromium acceptance with zero runtime exceptions; the
+[report](data/spaces-chat-2026-11-01.json) records exact source, artifact hashes
+and the signed disposable fixture. State protocol v13 adds the first transcript;
+release-control v1 remains unchanged.
+
+Twenty-five covered chat tests, 67 Canvas tests and eleven top-level Space process
+tests pass (ten authority scenarios and the child-client helper). Added checks
+qualify a bounded 64-message transcript without creating presence or writing a
+journal. Its text is prepared incrementally before Accept, remains offscreen
+until Activated, and is discarded if revoked while preparing. The first document
+frame already contains readable glyphs before any active tick or Welcome. Tests
+include a full Unicode/64-avatar window and header controls in landscape,
+portrait and phone-sized views. Chat uses one host-owned Quit control without
+covering Members or profile controls.
+
+The real authority scenario isolates transcripts by Space, app and owning
+document. Native access uses an explicit Frame identity; room commands cannot
+choose an authority actor or resume a guest credential. Quit leaves another
+participant sending, revoked sends are rejected, removal/restart/reattachment
+recover the same collection, messages and app-local profiles, and a corrupt
+replacement transcript leaves the previous activation usable. These are process
+adapter tests, not physical Frame execution. All 37 direct Node assertions pass
+across the worker, shared session and cookie-session checks.
+
+The Chromium probe uses independent cookie contexts and the real Brass Relay UI.
+Two clients share a transcript while another Space stays empty. A participant
+continues sending after the other quits; reopening restores that participant's
+profile. Removal clears the other client's transcript, and reattachment restores
+the retained messages. The counter, discovery, revocation and ink checks also pass.
+
+![Retained transcript after reattachment](data/spaces-chat-2026-11-01.png)
+
+An initial clean probe cancelled its second synthetic ink stroke. Outgoing and
+relayed samples matched; DOM tracing identified capture loss during a CDP drag
+move that omitted `button: 'left'`. The driver now supplies both the pressed
+button and bitmask and checks complete capture acquisition/release for both
+strokes. Two consecutive runs and the clean run pass without temporary dispatch
+hooks. The [input trace](data/spaces-chat-input-2026-11-01.json) records the clean
+pointer/capture sequence. No ink runtime change was needed for this correction.
+
+Explicit import of pre-Space chat history, device-local uninstall, durable
+deletion and public sharing remain pending. This checkpoint makes no v13 ARM,
+physical Frame or live-cutover claim.
