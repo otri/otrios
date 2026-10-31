@@ -97,3 +97,17 @@ edits only within matching bindings. A real authority scenario revokes membershi
 between qualification and acceptance, receives denial rather than activation,
 rejects the subsequent write and verifies unchanged data through another client.
 These results still do not establish physical Frame acceptance.
+
+## Owned-document collection checkpoint
+
+Clean source `707d8e98777550c337e05ec6fbc5568c39e97191` passed the full
+`scripts/check.sh` suite and rebuilt Chromium probe with zero runtime exceptions.
+The [report](data/spaces-owned-documents-2026-11-01.json) records its artifacts.
+Fifteen covered Space tests include the canonical collection schema; seven real
+process scenarios include two confirmed legacy documents migrating into one app
+collection, independent documents and Space isolation, restart without an explicit
+registry flag, and incompatible-code rejection without checkpoint replacement.
+Restoring compatible code reopens the original identities and values. Browser
+qualification retains the existing separate-client admission checks; the
+multi-document/migration scenario is authority process evidence. Frame and the
+remaining lifecycle controls are still pending.
