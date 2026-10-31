@@ -394,3 +394,40 @@ collection directory is rejected. Reclamation is idempotent after completion.
 This is backend evidence. Authority producer shutdown, cleanup reporting,
 backup/retention and restore integration remain unfinished, so DeleteData is
 still unavailable through management APIs. There is no physical Frame claim.
+
+## S3 managed snapshots and fenced restore
+
+Code checkpoint `4ce1dae437c95805a5eed88741fab532737c3d89` passed the full
+`bash scripts/check.sh` suite (`/tmp/otrios-spaces-check-27.log`). The authority
+binary SHA-256 was `4e2fe493ed927831f6d7b7c5f45ec9871b75bf16ab949627e0cc3a963815c31a`.
+Private framing is now OTSP4 so earlier writers cannot ignore a pending restore.
+State protocol v13, management v1 and release-control v1 are unchanged.
+
+All 27 covered store tests pass, including their separately invoked child
+helpers. Snapshot tests cover schema/history/asset retention, owner/control
+exclusion, deleted collections, seven-day expiry, corrupt manifests, quotas,
+symlink isolation and four real process-exit publication boundaries. Restore
+tests cover six process-exit boundaries, corrupt staging that keeps admission
+closed, safety snapshots, removal of later files, preservation of latest policy
+and unrelated new collections, OTSP3 upgrades, and skipping deleted collections
+whose old backup files have already been reclaimed.
+
+All fifteen authority process tests pass. The new offline CLI scenario confirms
+that a live authority excludes snapshotting; a confirmed value 42 can be backed
+up, edited to 73 and restored to 42; and restoring payloads keeps the later
+revocation of the separate Frame identity. A deliberately blocked replacement
+leaves the restore marker durable and the restarted authority unavailable.
+Repairing the target lets startup finish the plan before serving 42, without
+restoring revoked membership.
+
+This run also set `OTRIOS_SPACES_OLD_SERVER` to the preserved OTSP3 authority
+whose SHA-256 is `dea4ca868239ecf209fefbbb80cd88c197687678284b8aac6fd48a41d4f0c352`.
+It rejects the OTSP4 root and leaves primary/ledger bytes unchanged. That optional
+older-binary portion is not exercised when the environment variable is absent.
+The full run supplied it; this is a local process rollback check, not a signed
+physical Frame rollout.
+
+Snapshot/restore maintenance is available through the authority's offline
+`--spaces-storage` actions. Automatic retention scheduling, legacy-original
+retention/finalization, producer shutdown and management cleanup reporting remain
+unfinished. DeleteData remains unavailable while those integrations are pending.
