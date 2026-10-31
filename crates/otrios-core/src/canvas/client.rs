@@ -1228,6 +1228,9 @@ impl Client {
             }
             ServerMessage::AccessRequired { epoch } => {
                 if self.active.as_ref().is_some_and(|m| m.epoch == epoch) {
+                    // Revoke held presentation frames for every collection,
+                    // including a public app used inside a Closed Space.
+                    self.collection_revoked = true;
                     let old = self.active.take().ok_or("Missing revoked activation")?;
                     // Revocation belongs to the old lease. A newer staged public
                     // navigation must still be able to qualify its Mounted reply.

@@ -350,3 +350,80 @@ pub fn authorize(
     };
     if allowed { Ok(()) } else { Err(Error::Denied) }
 }
+
+/// Only a host-provisioned grant may call this entry point. Membership changes
+/// do not grant/revoke service identity; removal/deletion invalidate its binding.
+pub fn authorize_service(
+    registry: &Registry,
+    identity: &str,
+    service: &ServiceBinding,
+) -> Result<()> {
+    let b = &service.binding;
+    if !valid_identity(identity) || identity != service.identity || b.version != VERSION {
+        return Err(Error::Denied);
+    }
+    let s = registry
+        .spaces
+        .iter()
+        .find(|s| s.id == b.space)
+        .ok_or(Error::Denied)?;
+    if s.apps.iter().any(|a| {
+        a.attached
+            && a.collection == b.collection
+            && a.policy.app == b.app
+            && a.policy.schema == b.schema
+            && a.attachment_epoch == b.attachment_epoch
+    }) {
+        Ok(())
+    } else {
+        Err(Error::Denied)
+    }
+}
+
+/// The current verified installation can reduce availability/actions immediately;
+/// a cached old UI or an unchanged collection ID cannot bypass its constraints.
+pub fn authorize_installed(
+    registry: &Registry,
+    identity: Option<&str>,
+    binding: &Binding,
+    operation: Operation,
+    installed: &AppPolicy,
+) -> Result<()> {
+    installed_compatible(registry, binding, installed)?;
+    if (operation == Operation::Edit && !installed.editable)
+        || (matches!(operation, Operation::Comment | Operation::Moderate) && !installed.comments)
+    {
+        return Err(Error::Denied);
+    }
+    authorize(registry, identity, binding, operation)
+}
+pub fn authorize_service_installed(
+    registry: &Registry,
+    identity: &str,
+    service: &ServiceBinding,
+    installed: &AppPolicy,
+) -> Result<()> {
+    installed_compatible(registry, &service.binding, installed)?;
+    authorize_service(registry, identity, service)
+}
+fn installed_compatible(
+    registry: &Registry,
+    binding: &Binding,
+    installed: &AppPolicy,
+) -> Result<()> {
+    if !valid_policy(installed)
+        || installed.app != binding.app
+        || installed.schema != binding.schema
+    {
+        return Err(Error::Incompatible);
+    }
+    if installed.closed_only
+        && registry
+            .spaces
+            .iter()
+            .any(|s| s.id == binding.space && s.audience != Audience::Closed)
+    {
+        return Err(Error::Incompatible);
+    }
+    Ok(())
+}

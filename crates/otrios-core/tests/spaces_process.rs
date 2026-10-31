@@ -163,7 +163,67 @@ fn http(address: &str, method: &str, token: Option<char>, body: Option<&Request>
     )
 }
 impl Rig {
+    fn stop(&mut self) {
+        self.server.0.kill().unwrap();
+        self.server.0.wait().unwrap();
+    }
+    fn restart(&mut self, binary: &str, managed: bool, ready: bool) {
+        let mut command = Command::new(binary);
+        command
+            .args([
+                "--bind",
+                &self.native,
+                "--public-bind",
+                &self.public,
+                "--origin",
+                ORIGIN,
+            ])
+            .arg("--apps")
+            .arg(self.root.join("apps"))
+            .arg("--app-state")
+            .arg(self.root.join("state"))
+            .arg("--auth-file")
+            .arg(self.root.join("auth.json"));
+        if managed {
+            command
+                .arg("--spaces-registry")
+                .arg(self.root.join("spaces.flex"));
+            if self.root.join("collector-binding.json").exists() {
+                command
+                    .arg("--collector-binding")
+                    .arg(self.root.join("collector-binding.json"));
+            }
+        }
+        self.server = Guard(command.stdout(Stdio::null()).spawn().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if TcpStream::connect(&self.public).is_ok()
+                && (!ready || http(&self.public, "GET", Some('a'), None).0 == 200)
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            assert!(self.server.0.try_wait().unwrap().is_none());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    fn provision(&self, binary: &str, manifest: &Path) -> std::process::Output {
+        Command::new(binary)
+            .arg("--apps")
+            .arg(self.root.join("apps"))
+            .arg("--app-state")
+            .arg(self.root.join("state"))
+            .arg("--spaces-registry")
+            .arg(self.root.join("spaces.flex"))
+            .arg("--provision-spaces")
+            .arg(manifest)
+            .output()
+            .unwrap()
+    }
     fn start(binary: &str) -> Self {
+        Self::start_mode(binary, true)
+    }
+    fn start_mode(binary: &str, managed: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "otrios-spaces-process-{}-{}",
             std::process::id(),
@@ -191,7 +251,8 @@ impl Rig {
             .unwrap()
             .write_all(config.to_string().as_bytes())
             .unwrap();
-        let child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .args([
                 "--bind",
                 "127.0.0.1:0",
@@ -204,13 +265,14 @@ impl Rig {
             .arg(root.join("apps"))
             .arg("--app-state")
             .arg(root.join("state"))
-            .arg("--spaces-registry")
-            .arg(root.join("spaces.flex"))
             .arg("--auth-file")
-            .arg(root.join("auth.json"))
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .arg(root.join("auth.json"));
+        if managed {
+            command
+                .arg("--spaces-registry")
+                .arg(root.join("spaces.flex"));
+        }
+        let child = command.stdout(Stdio::piped()).spawn().unwrap();
         let mut server = Guard(child);
         let mut output = BufReader::new(server.0.stdout.take().unwrap());
         let mut addresses = vec![];
@@ -235,7 +297,7 @@ impl Rig {
             catalog,
         };
         let deadline = Instant::now() + Duration::from_secs(5);
-        while http(&rig.public, "GET", Some('a'), None).0 != 200 {
+        while managed && http(&rig.public, "GET", Some('a'), None).0 != 200 {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -294,6 +356,242 @@ impl Rig {
             assert!(Instant::now() < deadline, "client hung: {mode}");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+}
+
+fn private_json(path: &Path, value: &Json) {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(path)
+        .unwrap()
+        .write_all(value.to_string().as_bytes())
+        .unwrap();
+}
+
+fn presentation(address: &str, token: Option<char>, payload: &[u8]) -> u16 {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(socket,"POST /presentation HTTP/1.0\r\nHost: {address}\r\nOrigin: {ORIGIN}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n",payload.len()).unwrap();
+    if let Some(c) = token {
+        write!(
+            socket,
+            "Authorization: Bearer {}\r\n",
+            c.to_string().repeat(64)
+        )
+        .unwrap();
+    }
+    socket.write_all(b"\r\n").unwrap();
+    socket.write_all(payload).unwrap();
+    let mut response = String::new();
+    socket.read_to_string(&mut response).unwrap();
+    response.split_whitespace().nth(1).unwrap().parse().unwrap()
+}
+
+#[test]
+fn monitoring_collector_has_an_explicit_collection_grant_and_no_human_membership() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    let mut ui =
+        canvas::decode_ui(&fs::read(rig.root.join("apps/counter/package/ui.flex")).unwrap())
+            .unwrap();
+    let view = ui.layout.clone();
+    ui.ui_ref = "app:monitoring/ui".into();
+    ui.title = "Monitoring".into();
+    ui.state_schema.fields[0].writable = false;
+    ui.presentation = Some(Presentation::View {
+        frame: [0., 0., 1280., 800.],
+    });
+    let package = rig.root.join("apps/monitoring/package");
+    fs::create_dir_all(&package).unwrap();
+    let ui = canvas::encode_ui(&ui).unwrap();
+    fs::write(package.join("ui.flex"), &ui).unwrap();
+    let app = App {
+        id: "monitoring".into(),
+        title: "Monitoring".into(),
+        ui_ref: "app:monitoring/ui".into(),
+        state_ref: "app:monitoring/state".into(),
+        status: "canvas-app".into(),
+        dependencies: vec![],
+    };
+    fs::write(package.join("app.flex"), canvas::encode_app(&app).unwrap()).unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    catalog.apps.push(CatalogEntry {
+        app,
+        path: "monitoring".into(),
+        ui_hash: canvas::hash(&ui),
+        private: true,
+    });
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    let auth = rig.root.join("auth.json");
+    let mut config: Json = serde_json::from_slice(&fs::read(&auth).unwrap()).unwrap();
+    config["native"].as_array_mut().unwrap().push(json!({"identity":"collector","token_sha256":canvas::hex(&canvas::hash("d".repeat(64).as_bytes()))}));
+    fs::write(auth, config.to_string()).unwrap();
+    let manifest = rig.root.join("monitoring-provision.json");
+    private_json(
+        &manifest,
+        &json!({"version":1,"spaces":[
+        {"name":"Operations","admins":["alice"],"members":[],"apps":[{"id":"monitoring"}]},
+        {"name":"Other","admins":["alice"],"members":[],"apps":[{"id":"monitoring"}]}
+    ],"services":[{"identity":"collector","space":"Operations","app":"monitoring","output":rig.root.join("collector-binding.json")}]}),
+    );
+    let result = rig.provision(&binary, &manifest);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let record: Json = serde_json::from_slice(&result.stdout).unwrap();
+    let operations = record["spaces"][0]["space"].as_str().unwrap();
+    let other = record["spaces"][1]["space"].as_str().unwrap();
+    rig.restart(&binary, true, true);
+    assert_eq!(presentation(&rig.native, None, &view), 403);
+    assert_eq!(presentation(&rig.native, Some('a'), &view), 403);
+    assert_eq!(presentation(&rig.native, Some('d'), &view), 200);
+    let mount_monitoring = |socket: &mut Socket| {
+        send(
+            socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: "app:monitoring/ui".into(),
+                state_ref: "app:monitoring/state".into(),
+                catalog_hash: canvas::hash(&rig.catalog),
+                known_ui: None,
+                known_code: vec![],
+                writer: vec![1; 16],
+                resume: 0,
+            },
+        )
+    };
+    let mut human = socket(&rig.public, operations, Some('a'));
+    mount_monitoring(&mut human);
+    assert!(matches!(read(&mut human), ServerMessage::Mounted { .. }));
+    send(&mut human, ClientMessage::AcceptMount { epoch: 1 });
+    loop {
+        if let ServerMessage::View { bytes, .. } = read(&mut human) {
+            assert_eq!(bytes, view);
+            break;
+        }
+    }
+    let mut producer = socket(&rig.native, operations, Some('d'));
+    send(
+        &mut human,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 1,
+                values: vec![(1, Value::Number(100.))],
+            })
+            .unwrap(),
+        },
+    );
+    assert!(matches!(read(&mut human), ServerMessage::Error { .. }));
+    mount_monitoring(&mut producer);
+    assert!(matches!(
+        read(&mut producer),
+        ServerMessage::AccessRequired { .. }
+    ));
+    let mut isolated = socket(&rig.public, other, Some('a'));
+    mount_monitoring(&mut isolated);
+    assert!(matches!(read(&mut isolated), ServerMessage::Error { .. }));
+    rig.change(
+        'a',
+        Change::Membership {
+            space: operations.into(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    assert_eq!(presentation(&rig.native, Some('d'), &view), 200);
+    let grant: otrios_interfaces::spaces::ServiceBinding =
+        serde_json::from_slice(&fs::read(rig.root.join("collector-binding.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        fs::read(rig.root.join(format!(
+            "state/collection-{}.presentation.flex",
+            grant.binding.collection
+        )))
+        .unwrap(),
+        view
+    );
+}
+
+#[test]
+fn offline_provisioning_preserves_confirmed_legacy_data_and_does_not_regrant_removed_members() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start_mode(&binary, false);
+    rig.child(&rig.public, &"a".repeat(32), Some('a'), "write");
+    rig.stop();
+    let manifest = rig.root.join("provision.json");
+    private_json(
+        &manifest,
+        &json!({"version":1,"spaces":[
+            {"name":"Household","admins":["alice","bob"],"members":["frame"],
+                "apps":[{"id":"counter","legacy_state_ref":"app:counter/state"}]},
+            {"name":"Work","admins":["alice"],"members":[],"apps":[{"id":"counter"}]}
+        ]}),
+    );
+    let result = rig.provision(&binary, &manifest);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let record: Json = serde_json::from_slice(&result.stdout).unwrap();
+    let household = record["spaces"][0]["space"].as_str().unwrap().to_string();
+    let work = record["spaces"][1]["space"].as_str().unwrap().to_string();
+    assert!(
+        record["spaces"][0]["imports"][0]["source_root"]
+            .as_str()
+            .is_some_and(|s| s.len() == 64)
+    );
+    rig.restart(&binary, true, true);
+    rig.child(&rig.public, &household, Some('a'), "42");
+    rig.child(&rig.native, &household, Some('c'), "42");
+    rig.child(&rig.public, &work, Some('a'), "0");
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "frame".into(),
+            role: None,
+        },
+    );
+    rig.stop();
+    assert!(rig.provision(&binary, &manifest).status.success());
+    // Removing a CLI flag cannot reopen the legacy listener after migration.
+    rig.restart(&binary, false, true);
+    rig.child(&rig.native, &household, Some('c'), "deny");
+    rig.child(&rig.public, &household, Some('a'), "42");
+    rig.stop();
+    // A failed initial import leaves admission closed, never an empty replacement.
+    let broken = rig.root.join("broken-provision.json");
+    private_json(
+        &broken,
+        &json!({"version":1,"spaces":[{"name":"Incomplete","admins":["alice"],"members":[],
+        "apps":[{"id":"counter","legacy_state_ref":"app:unrelated/state"}]}]}),
+    );
+    assert!(!rig.provision(&binary, &broken).status.success());
+    rig.restart(&binary, false, false);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if http(&rig.public, "GET", Some('a'), None).0 == 503 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
     }
 }
 fn socket(address: &str, space: &str, token: Option<char>) -> Socket {

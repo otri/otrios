@@ -49,6 +49,8 @@ struct StateConfig {
     presentation: Option<PathBuf>,
     bundle_key: PathBuf,
     spaces: Option<PathBuf>,
+    provisioning: bool,
+    collector: Option<PathBuf>,
 }
 struct App {
     collections: Arc<collections::Hub>,
@@ -186,6 +188,10 @@ async fn recover_state(app: Arc<App>) {
                 return Err("No valid active release".into());
             }
             let mut hub = apps::Hub::new(config.source, config.state)?;
+            let managed = config.spaces.is_some();
+            if let Some(path) = config.spaces {
+                hub.enable_spaces(path, config.provisioning)?;
+            }
             if config.bundle_key.exists() {
                 hub.trust_publisher(bundle_files::public_key(
                     &config.bundle_key,
@@ -194,10 +200,13 @@ async fn recover_state(app: Arc<App>) {
                 )?);
             }
             hub.refresh(&releases, &release)?;
-            if let Some(path) = config.spaces {
-                hub.enable_spaces(path)?;
+            if let Some(path) = config.collector {
+                hub.configure_collector(&path)?;
             }
-            if let Some(path) = config.presentation.filter(|p| p.exists()) {
+            if let Some(path) = config
+                .presentation
+                .filter(|p| p.exists() && (!managed || config.provisioning))
+            {
                 hub.set_view(fs::read(path).map_err(|e| e.to_string())?)?;
             }
             Ok(hub)
@@ -298,9 +307,6 @@ async fn put_presentation(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> Response {
-    if app.state_config.spaces.is_some() {
-        return failure(StatusCode::FORBIDDEN, "Explicit collector binding required");
-    }
     if !origin_ok(&app, &headers) {
         return failure(StatusCode::FORBIDDEN, "Origin rejected");
     }
@@ -318,6 +324,26 @@ async fn put_presentation(
     let Some(hub) = guard.as_mut() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "State unavailable");
     };
+    if app.state_config.spaces.is_some() {
+        let key = match &app.auth {
+            Some(auth) => auth.key(&headers).await,
+            None => None,
+        };
+        let Some(identity) = spaces::identity(&app, &key).await else {
+            return failure(StatusCode::FORBIDDEN, "Collector identity required");
+        };
+        return match hub.set_collector_view(&identity, bytes.to_vec()) {
+            Ok(()) => {
+                announce(&app).await;
+                binary(
+                    "text/plain",
+                    otrios_core::canvas::hex(&otrios_core::canvas::hash(&bytes)).into_bytes(),
+                    false,
+                )
+            }
+            Err(_) => failure(StatusCode::FORBIDDEN, "Collector binding rejected"),
+        };
+    }
     // Validate before persisting, then publish this replaceable aggregate atomically.
     if !bytes.is_empty() {
         let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes).and_then(|l| {
@@ -693,6 +719,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut releases = None;
     let mut bundle_key = PathBuf::from("/etc/otrios-authority/publisher.pem");
     let mut spaces_registry = None;
+    let mut provision_spaces = None;
+    let mut collector_binding = None;
     let mut origins = vec![];
     let mut web = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/canvas");
     let mut source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps");
@@ -713,6 +741,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--releases"=>releases=Some(PathBuf::from(args.next().ok_or("Missing release directory")?)),
         "--bundle-key"=>bundle_key=PathBuf::from(args.next().ok_or("Missing bundle publisher key")?),
         "--spaces-registry"=>spaces_registry=Some(PathBuf::from(args.next().ok_or("Missing Space registry path")?)),
+        "--provision-spaces"=>provision_spaces=Some(PathBuf::from(args.next().ok_or("Missing provisioning manifest")?)),
+        "--collector-binding"=>collector_binding=Some(PathBuf::from(args.next().ok_or("Missing collector binding")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
         "--origin"=>origins.push(args.next().ok_or("Missing origin")?),
         _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--trusted-peers COUNT] [--public-peers COUNT] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--presentation-file FILE] [--collection-fixture FILE] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
@@ -725,6 +755,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err("Peer limits must be 1..=64 trusted and 1..=4096 public".into());
     }
     let app_state = app_state.or_else(|| state_file.as_ref().map(|p| p.with_extension("apps")));
+    if let Some(path) = spaces_registry.as_mut()
+        && !path.is_absolute()
+    {
+        *path = std::env::current_dir()?.join(&*path);
+    }
+    if let Some(marker) = app_state
+        .as_ref()
+        .map(|root| root.join("spaces.registry"))
+        .filter(|p| p.exists())
+    {
+        let bytes = spaces::private_bytes(&marker, 4096)?;
+        let saved = PathBuf::from(std::str::from_utf8(&bytes)?);
+        if !saved.is_absolute() || spaces_registry.as_ref().is_some_and(|path| path != &saved) {
+            return Err("State directory is already bound to a different Space registry".into());
+        }
+        spaces_registry = Some(saved);
+    }
+    if spaces_registry.is_some() && app_state.is_none() {
+        return Err("Managed Spaces require durable --app-state".into());
+    }
+    if (provision_spaces.is_some() || collector_binding.is_some()) && spaces_registry.is_none() {
+        return Err("Provisioning and collector bindings require --spaces-registry".into());
+    }
     let presentation_file = explicit_presentation.or_else(|| {
         state_file
             .as_ref()
@@ -763,6 +816,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             presentation: presentation_file.clone(),
             bundle_key,
             spaces: spaces_registry.clone(),
+            provisioning: provision_spaces.is_some(),
+            collector: collector_binding,
         },
         recovery: Mutex::new(()),
         state_available,
@@ -777,6 +832,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         public_peers: Arc::new(Semaphore::new(public_peers)),
         peer_limits: [trusted_peers, public_peers],
     });
+    if let Some(path) = provision_spaces {
+        recover_state(app.clone()).await;
+        spaces::provision(&app, &path).await?;
+        return Ok(());
+    }
     tokio::spawn(recover_state(app.clone()));
     if let Some(path) = collection_fixture {
         app.collections.fixture(path);

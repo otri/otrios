@@ -18,7 +18,7 @@ python3 scripts/test-clean-artifacts.py
 python3 scripts/test_app_publish.py
 
 cargo build -p otrios-dashboard --features server,canvas,host-sync --bin canvas-bundle --bin canvas-pack --bin dashboard-server --example bundle_counter --example bundle_app_probe --locked --offline
-OTRIOS_SPACES_SERVER="${CARGO_TARGET_DIR:-$PWD/target}/debug/dashboard-server" cargo test -p otrios-core --features canvas --test spaces_process --locked --offline
+OTRIOS_SPACES_SERVER="$(realpath "${CARGO_TARGET_DIR:-$PWD/target}/debug/dashboard-server")" cargo test -p otrios-core --features canvas --test spaces_process --locked --offline
 OTRIOS_TEST_BIN_DIR="${CARGO_TARGET_DIR:-$PWD/target}/debug" python3 scripts/test_app_bundles.py
 
 if [[ "$(uname -s)" == Linux ]]; then

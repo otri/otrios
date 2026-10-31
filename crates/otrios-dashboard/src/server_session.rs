@@ -608,6 +608,8 @@ mod tests {
                 state: None,
                 presentation: None,
                 spaces: None,
+                provisioning: false,
+                collector: None,
             },
             recovery: Mutex::new(()),
             state_available,

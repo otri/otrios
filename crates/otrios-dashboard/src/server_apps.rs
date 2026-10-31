@@ -19,6 +19,9 @@ struct Package {
     signal_fields: Vec<u16>,
     selection: canvas::StateSelection,
     schema: otrios_interfaces::canvas::StateSchema,
+    policy: otrios_interfaces::spaces::AppPolicy,
+    chat: bool,
+    aggregate_view: bool,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -40,6 +43,9 @@ pub(super) struct Hub {
     active_release: String,
     publisher: Option<[u8; 32]>,
     spaces: Option<otrios_core::spaces::Store>,
+    collector: Option<otrios_interfaces::spaces::ServiceBinding>,
+    collection_views: BTreeMap<String, (Vec<u8>, Vec<u8>)>,
+    provisioning: bool,
 }
 struct Lease {
     epoch: u32,
@@ -107,14 +113,199 @@ impl Hub {
             active_release: String::new(),
             publisher: None,
             spaces: None,
+            collector: None,
+            collection_views: BTreeMap::new(),
+            provisioning: false,
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
         self.publisher = Some(key);
     }
-    pub(super) fn enable_spaces(&mut self, path: PathBuf) -> Result<()> {
+    pub(super) fn enable_spaces(&mut self, path: PathBuf, provisioning: bool) -> Result<()> {
+        if path.with_extension("provisioning").exists() && !provisioning {
+            return Err(
+                "Space provisioning is incomplete; resume the explicit provisioning command".into(),
+            );
+        }
         self.spaces = Some(otrios_core::spaces::Store::open(path).map_err(|e| e.to_string())?);
+        let registry = self.registry_path()?.to_path_buf();
+        let marker = self
+            .state
+            .as_ref()
+            .ok_or("Durable app storage required")?
+            .join("spaces.registry");
+        if !marker.exists() {
+            persist(
+                &marker,
+                registry
+                    .to_str()
+                    .ok_or("Space registry path must be UTF-8")?
+                    .as_bytes(),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        self.provisioning = provisioning;
         Ok(())
+    }
+    pub(super) fn registry_path(&self) -> Result<&Path> {
+        self.spaces
+            .as_ref()
+            .map(|store| store.path())
+            .ok_or("Spaces unavailable".into())
+    }
+    pub(super) fn service_binding(
+        &self,
+        admin: &str,
+        space: &str,
+        app: &str,
+        identity: &str,
+    ) -> Result<otrios_interfaces::spaces::ServiceBinding> {
+        if !otrios_core::spaces::valid_identity(identity) {
+            return Err("Invalid service identity".into());
+        }
+        let p = self
+            .bundles
+            .get(&self.active)
+            .and_then(|b| b.packages.values().find(|p| p.app.id == app))
+            .ok_or("Installed app unavailable")?;
+        let binding = self.binding(
+            &spaces::Scope {
+                space: Some(space.into()),
+                identity: Some(admin.into()),
+            },
+            p,
+        )?;
+        Ok(otrios_interfaces::spaces::ServiceBinding {
+            identity: identity.into(),
+            binding,
+        })
+    }
+    pub(super) fn configure_collector(&mut self, path: &Path) -> Result<()> {
+        let grant: otrios_interfaces::spaces::ServiceBinding =
+            serde_json::from_slice(&spaces::private_bytes(path, 8192)?)
+                .map_err(|_| "Invalid collector binding")?;
+        if grant.binding.app != "monitoring"
+            || !otrios_core::spaces::valid_identity(&grant.identity)
+        {
+            return Err("Collector must be explicitly bound to Monitoring".into());
+        }
+        self.collector = Some(grant);
+        Ok(())
+    }
+    pub(super) fn set_collector_view(&mut self, identity: &str, bytes: Vec<u8>) -> Result<()> {
+        if bytes.len() > canvas::MAX_BYTES {
+            return Err("Collection presentation exceeds transport budget".into());
+        }
+        let service = self.collector.as_ref().ok_or("Collector unavailable")?;
+        otrios_core::spaces::authorize_service_installed(
+            self.registry().map_err(|e| e.to_string())?,
+            identity,
+            service,
+            &self.app_policy(&service.binding.app)?,
+        )
+        .map_err(|e| e.to_string())?;
+        let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes)?;
+        checked.resolve_slots(&BTreeMap::new())?;
+        let collection = service.binding.collection.clone();
+        let path = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?
+            .join(format!("collection-{collection}.presentation.flex"));
+        persist(&path, &bytes).map_err(|e| e.to_string())?;
+        if self.collection_views.len() >= 128
+            && !self.collection_views.contains_key(&collection)
+            && let Some(key) = self.collection_views.keys().next().cloned()
+        {
+            self.collection_views.remove(&key);
+        }
+        self.collection_views
+            .insert(collection, (canvas::hash(&bytes), bytes));
+        Ok(())
+    }
+    fn load_collection_view(&mut self, collection: &str) -> Result<()> {
+        if self.collection_views.contains_key(collection) {
+            return Ok(());
+        }
+        let path = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?
+            .join(format!("collection-{collection}.presentation.flex"));
+        let bytes = bounded(&path, canvas::MAX_BYTES)?;
+        let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes)?;
+        checked.resolve_slots(&BTreeMap::new())?;
+        if self.collection_views.len() >= 128
+            && let Some(key) = self.collection_views.keys().next().cloned()
+        {
+            self.collection_views.remove(&key);
+        }
+        self.collection_views
+            .insert(collection.into(), (canvas::hash(&bytes), bytes));
+        Ok(())
+    }
+    pub(super) fn import_legacy(
+        &mut self,
+        identity: &str,
+        space: &str,
+        app: &str,
+        source: &str,
+    ) -> Result<Value> {
+        let package = self
+            .bundles
+            .get(&self.active)
+            .and_then(|b| b.packages.values().find(|p| p.app.id == app))
+            .cloned()
+            .ok_or("Installed app unavailable")?;
+        if package.app.state_ref != source {
+            return Err("Legacy source differs from admitted app State".into());
+        }
+        let binding = self.binding(
+            &spaces::Scope {
+                space: Some(space.into()),
+                identity: Some(identity.into()),
+            },
+            &package,
+        )?;
+        let source = self
+            .rooms
+            .get(source)
+            .filter(|r| !r.failed)
+            .ok_or("Legacy root unavailable")?;
+        let bytes = source.doc.save()?;
+        let root = source.doc.root_hash();
+        let path = self
+            .state
+            .as_ref()
+            .ok_or("Durable app storage required")?
+            .join(format!("collection-{}.merkle", binding.collection));
+        if path.exists() {
+            let existing = store::load(
+                &path,
+                Document::load(
+                    package.schema,
+                    &package.app.state_ref,
+                    &bounded(&path, canvas::MAX_BYTES)?,
+                )?,
+            )?;
+            if existing.root_hash() != root {
+                return Err("Migration target already contains different confirmed data".into());
+            }
+        } else {
+            persist(&path, &bytes).map_err(|e| e.to_string())?;
+        }
+        if app == "monitoring" && !self.view.is_empty() {
+            let presentation = path.with_file_name(format!(
+                "collection-{}.presentation.flex",
+                binding.collection
+            ));
+            if !presentation.exists() {
+                persist(&presentation, &self.view).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(
+            json!({"collection":binding.collection,"source":package.app.state_ref,"source_root":canvas::hex(&root)}),
+        )
     }
     pub(super) fn registry(
         &self,
@@ -145,19 +336,10 @@ impl Hub {
             .ok_or("Installed app unavailable")?;
         // A global chat/collection lane is never admitted into a scoped mount.
         // Its collection-owned adapter is introduced separately in this milestone.
-        if matches!(
-            canvas::decode_ui(&p.ui)?.presentation,
-            Some(otrios_interfaces::canvas::Presentation::Chat)
-        ) {
+        if p.chat {
             return Err("Scoped chat adapter unavailable".into());
         }
-        Ok(otrios_interfaces::spaces::AppPolicy {
-            app: app.into(),
-            schema: canvas::hex(&canvas::hash(&canvas::encode_schema(&p.schema)?)),
-            closed_only: p.private,
-            editable: p.schema.fields.iter().any(|f| f.writable),
-            comments: false,
-        })
+        Ok(p.policy.clone())
     }
     fn binding(
         &self,
@@ -171,14 +353,24 @@ impl Hub {
             .next()
             .ok_or("Missing installed app")?;
         let schema = canvas::hex(&canvas::hash(&canvas::encode_schema(&package.schema)?));
-        otrios_core::spaces::bind(
+        let registry = self.registry().map_err(|e| e.to_string())?;
+        let binding = otrios_core::spaces::bind(
             self.registry().map_err(|e| e.to_string())?,
             scope.identity.as_deref(),
             scope.space.as_deref().ok_or("Select a Space")?,
             owner,
             &schema,
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        otrios_core::spaces::authorize_installed(
+            registry,
+            scope.identity.as_deref(),
+            &binding,
+            otrios_interfaces::spaces::Operation::Read,
+            &self.app_policy(owner)?,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(binding)
     }
     pub(super) fn allowed(
         &self,
@@ -188,13 +380,16 @@ impl Hub {
     ) -> bool {
         scope.space.as_deref() == Some(binding.space.as_str())
             && self.registry().is_ok_and(|registry| {
-                otrios_core::spaces::authorize(
-                    registry,
-                    scope.identity.as_deref(),
-                    binding,
-                    operation,
-                )
-                .is_ok()
+                self.app_policy(&binding.app).is_ok_and(|policy| {
+                    otrios_core::spaces::authorize_installed(
+                        registry,
+                        scope.identity.as_deref(),
+                        binding,
+                        operation,
+                        &policy,
+                    )
+                    .is_ok()
+                })
             })
     }
     fn revoke_scoped(&self, leases: &mut Leases, scope: &spaces::Scope) -> Vec<ServerMessage> {
@@ -428,53 +623,72 @@ impl Hub {
             } else {
                 vec![]
             };
-            if let Some(room) = self
-                .rooms
-                .get(&a.state_ref)
-                .or_else(|| new_rooms.get(&a.state_ref))
-            {
-                room.doc.clone().set_signal_fields(&signal_fields)?;
-                if room.doc.schema() != &description.state_schema {
-                    return Err("App schema requires a new State reference".into());
-                }
-            } else {
-                if self.rooms.len() + new_rooms.len() >= 128 {
-                    return Err("App root budget exhausted".into());
-                }
-                let file = self.state.as_ref().map(|p| {
-                    p.join(format!(
-                        "{}-{}.merkle",
-                        owner,
-                        canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
-                    ))
-                });
-                let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
-                    store::load(
-                        path,
-                        Document::load(
-                            description.state_schema.clone(),
-                            &a.state_ref,
-                            &bounded(path, canvas::MAX_BYTES)?,
-                        )?,
-                    )?
-                } else {
-                    Document::new(description.state_schema.clone(), &a.state_ref)?
-                };
-                doc.set_signal_fields(&signal_fields)?;
-                if let Some(path) = &file
-                    && !path.exists()
+            if self.spaces.is_none() || self.provisioning {
+                if let Some(room) = self
+                    .rooms
+                    .get(&a.state_ref)
+                    .or_else(|| new_rooms.get(&a.state_ref))
                 {
-                    persist(path, &doc.save()?).map_err(|e| e.to_string())?;
+                    room.doc.clone().set_signal_fields(&signal_fields)?;
+                    if room.doc.schema() != &description.state_schema {
+                        return Err("App schema requires a new State reference".into());
+                    }
+                } else {
+                    if self.rooms.len() + new_rooms.len() >= 128 {
+                        return Err("App root budget exhausted".into());
+                    }
+                    let file = self.state.as_ref().map(|p| {
+                        p.join(format!(
+                            "{}-{}.merkle",
+                            owner,
+                            canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
+                        ))
+                    });
+                    let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
+                        store::load(
+                            path,
+                            Document::load(
+                                description.state_schema.clone(),
+                                &a.state_ref,
+                                &bounded(path, canvas::MAX_BYTES)?,
+                            )?,
+                        )?
+                    } else {
+                        Document::new(description.state_schema.clone(), &a.state_ref)?
+                    };
+                    doc.set_signal_fields(&signal_fields)?;
+                    if let Some(path) = &file
+                        && !path.exists()
+                    {
+                        persist(path, &doc.save()?).map_err(|e| e.to_string())?;
+                    }
+                    new_rooms.insert(
+                        a.state_ref.clone(),
+                        Room {
+                            doc,
+                            file,
+                            failed: false,
+                        },
+                    );
                 }
-                new_rooms.insert(
-                    a.state_ref.clone(),
-                    Room {
-                        doc,
-                        file,
-                        failed: false,
-                    },
-                );
             }
+            let policy = otrios_interfaces::spaces::AppPolicy {
+                app: a.id.clone(),
+                schema: canvas::hex(&canvas::hash(&canvas::encode_schema(
+                    &description.state_schema,
+                )?)),
+                closed_only: private,
+                editable: description.state_schema.fields.iter().any(|f| f.writable),
+                comments: false,
+            };
+            let chat = matches!(
+                description.presentation,
+                Some(otrios_interfaces::canvas::Presentation::Chat)
+            );
+            let aggregate_view = matches!(
+                description.presentation,
+                Some(otrios_interfaces::canvas::Presentation::View { .. })
+            );
             if packages
                 .insert(
                     a.ui_ref.clone(),
@@ -487,6 +701,9 @@ impl Hub {
                         signal_fields,
                         selection,
                         schema: description.state_schema,
+                        policy,
+                        chat,
+                        aggregate_view,
                     },
                 )
                 .is_some()
@@ -512,7 +729,37 @@ impl Hub {
                 .or_default()
                 .extend(&package.signal_fields);
         }
+        let managed_refs = self
+            .spaces
+            .as_ref()
+            .map(|store| {
+                store.registry().map(|r| {
+                    r.spaces
+                        .iter()
+                        .flat_map(|s| s.apps.iter())
+                        .map(|a| (a.collection.clone(), a.policy.app.clone()))
+                        .collect::<BTreeMap<_, _>>()
+                })
+            })
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
         for (state_ref, room) in &mut self.rooms {
+            if let Some(owner) = managed_refs.get(state_ref) {
+                let fields = self
+                    .bundles
+                    .values()
+                    .flat_map(|b| b.packages.values())
+                    .filter(|p| {
+                        p.app.id.split('/').next() == Some(owner.as_str())
+                            && &p.schema == room.doc.schema()
+                    })
+                    .flat_map(|p| p.signal_fields.iter().copied())
+                    .collect::<std::collections::BTreeSet<_>>();
+                room.doc
+                    .set_signal_fields(&fields.into_iter().collect::<Vec<_>>())?;
+                continue;
+            }
             let fields = retained
                 .get(state_ref)
                 .map(|ids| ids.iter().copied().collect::<Vec<_>>())
@@ -603,6 +850,9 @@ impl Hub {
                 }
                 let room_key = if let Some(binding) = &binding {
                     self.scoped_room(binding, &p)?;
+                    if p.aggregate_view {
+                        self.load_collection_view(&binding.collection)?;
+                    }
                     binding.collection.clone()
                 } else {
                     state_ref.clone()
@@ -768,6 +1018,17 @@ impl Hub {
                 epoch: l.epoch,
                 bytes,
             });
+        }
+        if let Some(binding) = &l.binding
+            && binding.app == "monitoring"
+            && let Some((hash, bytes)) = self.collection_views.get(&binding.collection)
+            && &l.view_id != hash
+        {
+            messages.push(ServerMessage::View {
+                epoch: l.epoch,
+                bytes: bytes.clone(),
+            });
+            l.view_id = hash.clone();
         }
         if l.private && l.state_ref == "app:monitoring/state" && l.view_id != self.view_id {
             messages.push(ServerMessage::View {

@@ -1452,6 +1452,10 @@ mod tests {
     }
     #[test]
     fn app_transport_receives_remote_edits_reconnects_and_revokes_a_held_frame() {
+        check_transport_revocation(false);
+        check_transport_revocation(true);
+    }
+    fn check_transport_revocation(private: bool) {
         use otrios_core::canvas::{Document, Session, decode_client, encode_server};
         use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
         use tungstenite::Message;
@@ -1469,7 +1473,7 @@ mod tests {
             .iter_mut()
             .find(|entry| entry.app.id == "three-d-lab")
             .unwrap()
-            .private = true;
+            .private = private;
         fs::write(
             &catalog_path,
             otrios_core::canvas::encode_catalog(&catalog).unwrap(),

@@ -94,6 +94,14 @@ pub struct Binding {
     pub attachment_epoch: u64,
 }
 
+/// Provisioned host service grant, never a human membership role or client claim.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceBinding {
+    pub identity: String,
+    pub binding: Binding,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operation {
     Read,

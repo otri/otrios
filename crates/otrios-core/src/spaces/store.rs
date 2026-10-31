@@ -70,6 +70,9 @@ impl Store {
             Ok(&self.registry)
         }
     }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
     pub fn commit(
         &mut self,
         actor: &str,

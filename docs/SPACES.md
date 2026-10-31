@@ -4,8 +4,11 @@
 The covered `otrios_core::spaces` library implements registry transitions and
 admission. The authority additionally supports an explicit managed mode via
 `--spaces-registry /ABS/PRIVATE/spaces.flex`. The live Frame has not been cut over.
-The default legacy mode remains for existing deployments during this transition;
-it does not implement Space admission.
+Legacy mode remains for state directories that have never been bound to Spaces;
+it does not implement Space admission. Managed mode requires durable app storage.
+Its private `state.apps/spaces.registry` marker records the registry path. Later
+starts recover that binding even if the CLI flag is omitted, and reject attempts
+to substitute another registry. Do not remove that marker to roll back code.
 
 In managed mode, `/spaces` lists admitted Spaces and accepts versioned management
 requests with an allowed Origin and `X-OTriOS-Request: spaces`. It never returns
@@ -19,9 +22,9 @@ management lock before delivery. Native loopback grants no managed access.
 This increment admits Create, Membership, Attach and Closed audience changes.
 Removal, deletion and public audience changes remain unavailable through HTTP
 until their lifecycle integrations are complete. Global chat/collection/ink lanes
-and legacy presentation endpoints are disabled in managed mode; they cannot be
-used as an unscoped fallback. Monitoring's collection-bound collector and retained
-presentation integration are still required before its live cutover.
+and legacy presentation reads are disabled in managed mode; they cannot be used
+as an unscoped fallback. Monitoring presentation uploads require an explicit
+collector identity and collection grant.
 
 Separate child clients exercise authority reads/writes, collection isolation,
 explicit Frame access, active revocation/reconnect, Member management denial and
@@ -52,6 +55,73 @@ The native host accepts `OTRIOS_SPACE` and a mode-0600 credential file selected 
 URL or state message. A Space query in the configured session URL is also accepted;
 specify the Space exactly once. The browser forwards the selected `space` query
 to its shared session owner. Neither host opens an extra state connection.
+
+## Offline bootstrap and migration
+
+Stop the existing authority before provisioning; never run two authorities over
+the same state. Use the matching verified release, publisher public key, durable
+app directory and a private, explicit version-1 provisioning manifest:
+
+```json
+{
+  "version": 1,
+  "spaces": [
+    {
+      "name": "Household",
+      "admins": ["named-admin"],
+      "members": ["frame-household"],
+      "apps": [{"id": "home", "legacy_state_ref": "app:home/state"}]
+    },
+    {
+      "name": "Operations",
+      "admins": ["named-admin"],
+      "members": [],
+      "apps": [{"id": "monitoring", "legacy_state_ref": "app:monitoring/state"}]
+    }
+  ],
+  "services": [{
+    "identity": "monitoring-collector",
+    "space": "Operations",
+    "app": "monitoring",
+    "output": "/ABS/PRIVATE/collector-binding.json"
+  }]
+}
+```
+
+Declare every desired root deliberately. The example does not grant the Frame
+Operations access or infer membership from the old shared login. Provision named
+human credentials and separate Frame/collector tokens in the auth file.
+
+Run the authority with its normal `--releases`, `--bundle-key`, `--app-state` and
+`--presentation-file` arguments, plus `--spaces-registry /ABS/PRIVATE/spaces.flex`
+and `--provision-spaces /ABS/PRIVATE/provision.json`. This one-shot command binds
+no listeners. It verifies the installed app catalog, creates explicitly named
+Spaces/roles/attachments, imports each chosen legacy root after journal recovery,
+and syncs the complete snapshot including confirmed writer receipts. An existing
+different target root is rejected instead of overwritten. Monitoring's current
+complete presentation is copied into its admitted collection where available.
+
+A durable pending marker closes admission throughout provisioning. Failed or
+interrupted provisioning must resume the same manifest. Completion records the
+manifest digest, generated Space/collection IDs and source root digests before
+clearing the marker. Rerunning a completed manifest returns that record without
+reapplying initial memberships, so it cannot silently undo a later revocation.
+Preserve the original roots and operational rollback snapshot through validation;
+their later cleanup must follow the deletion/backup policy.
+
+Configure the authority with `--collector-binding /ABS/PRIVATE/collector-binding.json`
+and set the collector's private `authority_identity` token-file path. The service
+grant admits only uploads to its configured Monitoring collection. It grants no
+human membership, view admission or sibling collection access. Ordinary human
+Admin credentials cannot upload the view. Membership changes do not invent or
+revoke a service role; removal or collection replacement invalidates its grant.
+Current installed schema/closed-only constraints also apply to cached bindings.
+
+Monitoring views are stored as `collection-ID.presentation.flex` beside that
+collection's checkpoint/journal. A mount with no usable presentation remains
+unavailable. Presentation uploads never follow redirects with credentials. A
+collector grant must be explicitly rebound after attachment or collection identity
+changes; a stale producer cannot recreate deleted data.
 
 ## Management v1
 

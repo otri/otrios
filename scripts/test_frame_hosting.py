@@ -62,4 +62,28 @@ class FrameHosting(unittest.TestCase):
                 with self.assertRaises(ValueError):collector.refresh({'output':str(output)})
             self.assertEqual(output.read_bytes(),b'previous')
 
+    def test_bound_collector_keeps_token_out_of_urls_and_rejects_readable_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);output=root/'view.flex';output.write_bytes(b'previous')
+            identity=root/'collector.identity';identity.write_text('a'*64);identity.chmod(0o600)
+            requests=[]
+            class Response:
+                def __enter__(self):return self
+                def __exit__(self,*args):pass
+                def read(self,n):return b'view-digest'
+            class Opener:
+                def open(self,request,timeout):requests.append(request);return Response()
+            def render(args,**kwargs):pathlib.Path(args[1]).write_bytes(b'new-view')
+            config={'output':str(output),'renderer':'fixture-renderer','authority_identity':str(identity)}
+            with patch.object(collector,'collect',return_value=b'{"collected_label":"fixture"}'),patch.object(collector.subprocess,'run',side_effect=render),patch.object(collector.urllib.request,'build_opener',return_value=Opener()) as build:
+                collector.refresh(config)
+                self.assertIsInstance(build.call_args.args[0],collector.NoRedirect)
+                self.assertEqual(requests[0].full_url,'http://127.0.0.1:8876/presentation')
+                self.assertEqual(requests[0].get_header('Authorization'),'Bearer '+'a'*64)
+                self.assertEqual(output.read_bytes(),b'new-view')
+                identity.chmod(0o644)
+                with self.assertRaises(ValueError):collector.refresh(config)
+                self.assertEqual(len(requests),1)
+                self.assertEqual(output.read_bytes(),b'new-view')
+
 if __name__=='__main__':unittest.main()

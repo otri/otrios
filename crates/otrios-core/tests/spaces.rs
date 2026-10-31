@@ -343,3 +343,91 @@ fn deletion_is_atomic_replaces_identity_and_survives_registry_recovery() {
     assert!(Store::open(file).is_err());
     std::fs::remove_dir_all(path).unwrap();
 }
+
+#[test]
+fn service_bindings_are_distinct_from_membership_and_cannot_survive_collection_replacement() {
+    let mut r = fixture();
+    let space = r.spaces[0].id.clone();
+    let binding = attach(&mut r, &space);
+    let service = ServiceBinding {
+        identity: "collector".into(),
+        binding: binding.clone(),
+    };
+    assert_eq!(
+        spaces::authorize(&r, Some("collector"), &binding, Operation::Edit),
+        Err(Error::Denied)
+    );
+    spaces::authorize_service(&r, "collector", &service).unwrap();
+    assert_eq!(
+        spaces::authorize_service(&r, "publisher", &service),
+        Err(Error::Denied)
+    );
+    change(
+        &mut r,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    spaces::authorize_service(&r, "collector", &service).unwrap();
+    change(
+        &mut r,
+        "alice",
+        Change::DeleteData {
+            space,
+            app: "notes".into(),
+            remove: false,
+        },
+    );
+    assert_eq!(
+        spaces::authorize_service(&r, "collector", &service),
+        Err(Error::Denied)
+    );
+}
+
+#[test]
+fn old_bindings_cannot_bypass_current_installed_schema_or_closed_only_policy() {
+    let mut r = fixture();
+    let space = r.spaces[0].id.clone();
+    attach(&mut r, &space);
+    change(
+        &mut r,
+        "alice",
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    let b = spaces::bind(&r, Some("alice"), &space, "notes", &policy().schema).unwrap();
+    spaces::authorize_installed(&r, Some("alice"), &b, Operation::Read, &policy()).unwrap();
+    let closed = AppPolicy {
+        closed_only: true,
+        ..policy()
+    };
+    assert_eq!(
+        spaces::authorize_installed(&r, Some("alice"), &b, Operation::Read, &closed),
+        Err(Error::Incompatible)
+    );
+    assert_eq!(
+        spaces::authorize_installed(&r, None, &b, Operation::Read, &closed),
+        Err(Error::Incompatible)
+    );
+    let changed = AppPolicy {
+        schema: "b".repeat(64),
+        ..policy()
+    };
+    assert_eq!(
+        spaces::authorize_installed(&r, Some("alice"), &b, Operation::Edit, &changed),
+        Err(Error::Incompatible)
+    );
+    let readonly = AppPolicy {
+        editable: false,
+        ..policy()
+    };
+    assert_eq!(
+        spaces::authorize_installed(&r, Some("alice"), &b, Operation::Edit, &readonly),
+        Err(Error::Denied)
+    );
+}
