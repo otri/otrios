@@ -101,6 +101,9 @@ pub mod canvas;
 #[cfg(feature = "canvas")]
 pub mod bundle;
 
+#[cfg(feature = "canvas")]
+pub mod spaces;
+
 #[cfg(feature = "merkle")]
 pub mod merkle;
 

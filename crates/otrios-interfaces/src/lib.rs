@@ -46,6 +46,8 @@ pub mod bundle;
 pub mod canvas;
 #[cfg(feature = "layout")]
 pub mod chat;
+#[cfg(feature = "layout")]
+pub mod spaces;
 
 pub mod collection;
 pub mod merkle;
