@@ -577,3 +577,44 @@ This does not qualify direct display/touch hardware, the live Frame filesystem,
 its SSH identity, signed release trust or a physical rollout. S3 software/browser
 and emulated-authority checks are complete; physical Frame acceptance is pending.
 S4 implementation is the next independent milestone.
+
+
+## S4 public audiences and comments checkpoint
+
+The public audience implementation is `cecf805`; browser/live-read and disabled
+control qualification is `032d001afcd5518e7da3cf04e9cf16dc50a5dd17`.
+`bash scripts/check.sh` passed in full (check 36), with the preserved OTSP4 writer
+supplied for rollback refusal. Check 33 passed before the browser improvements;
+checks 34 and 35 exposed older tests that expected writable controls to remain
+present after read-only admission. Those tests now assert absent controls and
+replay late input from the former control to verify authority-side rejection.
+No failed intermediate run is counted as final qualification.
+
+All 21 authority process tests pass. Public visitors can read, signed-in visitors
+can comment only when enabled, and neither permission grants document editing or
+moderation. Current closed-only installed code blocks public settings. Sign-out
+revokes an old authenticated action grant even when anonymous read remains
+available; late old-epoch comments cannot preserve the previous identity.
+
+The [clean-source Chromium run](data/spaces-public-v14.json) repeats the S1–S3
+migration, lifecycle, ink and deletion acceptance and adds trusted public sharing
+confirmation, anonymous/signed-in read-only views, live public chat windows without
+profile creation, signed-in comments, disabled visitor moderation, comment
+restriction and closing-Space revocation. It found and corrected a missing live
+collection subscription for read-only chat. There are zero runtime exceptions.
+
+- Authority SHA-256: `afe51ae2964725defa74b714337aea937b053da546e4e141c9866ae75d9a806c`.
+- WASM SHA-256: `e593896f749bf6429d569f6c3495a13b96c300f3565d3cc008e2602f5fa506e9`.
+- Disposable signed browser fixture: `2fb6498dd2fee8735affd1d3280e935b90d7e99721eeed00721632ffe2272b72`.
+- State protocol v14; opening release-control v1 unchanged.
+
+![Explicit public sharing confirmation](data/spaces-public-confirmation-v14.png)
+
+![Anonymous public chat without a profile](data/spaces-public-read-only-v14.png)
+
+![Signed-in visitor comment](data/spaces-public-comment-v14.png)
+
+This qualifies public audiences/comments in local software and Chromium. S4
+publication with owned assets, current ARM qualification, signed live cutover and
+physical Frame acceptance remain outstanding. The disposable fixture does not
+establish Frame signing trust or SSH host identity.
