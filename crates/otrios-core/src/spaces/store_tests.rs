@@ -100,6 +100,7 @@ fn deletion(store: &Store) -> Record {
         change: Change::DeleteData {
             space: current.spaces[0].id.clone(),
             app: "notes".into(),
+            collection: current.spaces[0].apps[0].collection.clone(),
             remove: false,
         },
     };

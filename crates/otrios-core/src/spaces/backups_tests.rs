@@ -63,6 +63,7 @@ fn snapshot_retains_schema_and_assets_but_excludes_control_locks_and_deleted_col
         change: Change::DeleteData {
             space: binding.space.clone(),
             app: binding.app.clone(),
+            collection: binding.collection.clone(),
             remove: false,
         },
     };

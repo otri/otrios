@@ -19,7 +19,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v13` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v14` includes a version-1 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when both collection identity and effective
@@ -46,9 +46,11 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
 use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v13; v10 introduced discovery, v11 added the
-managed activation acknowledgement, v12 scoped auxiliary payloads by mount, and
-v13 adds a qualified first chat transcript window.
+browser/native state protocol is v14; v10 introduced discovery, v11 added the
+managed activation acknowledgement, v12 scoped auxiliary payloads by mount,
+v13 added a qualified first chat transcript window, and v14 adds collection-specific
+delete confirmations and Admin cleanup metadata. Managed hosts send Leave(epoch)
+after discarding revoked replicas; the authority holds cleanup pins until then.
 Release discovery remains on its unchanged control v1 envelope.
 
 Watch selects metadata for one Space and includes the previous authority/revision
@@ -451,7 +453,8 @@ to zero. The upgrade writes the latest decision ledger before replacing the
 primary. Older writers reject `OTSP5`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
 supports this framing and the current admission rules. Management request version
-1, state protocol v13 and release-control v1 are unchanged by this storage upgrade.
+1 and release-control v1 remain stable. Current state protocol v14 adds the
+collection-specific deletion confirmation and Admin-only cleanup metadata.
 
 A stable private `REGISTRY.owner.lock` inode carries an exclusive OS lock and
 the root identity. The registry's containing directory must not be writable by
@@ -480,13 +483,23 @@ rollbackable app payloads. A supported payload restore must retain the latest
 ledger and root identity; copying an old registry alone cannot regrant revoked
 membership or remove deletion decisions. Rolling all control metadata back to an
 old snapshot is unsupported and cannot recover later decisions. The managed
-payload backup/retention and reclamation workflows remain unfinished.
+payload backup/retention and reclamation workflows below preserve these decisions.
 
-DeleteData publishes the old collection's tombstone and a fresh replacement ID in
-one registry publication. This is still only the management decision: producer
-shutdown, payload reclamation, the supported backup/restore workflow and client
-invalidation must be integrated before permanent deletion is exposed. HTTP and
-shared-session DeleteData requests remain unavailable during this preparation.
+Admin-only DeleteData names the exact reviewed collection as well as Space/app
+and the expected registry generation. A stale confirmation cannot delete a newer
+replacement. The trusted host identifies Space and app, explains retained copies,
+and requires a separate confirmation. Delete and Remove & delete are distinct.
+One durable publication tombstones the old collection and creates its fresh ID
+before success is acknowledged. All writes serialize against that decision.
+
+Current policy fences old documents, chat workers, windows, ephemeral ink and
+staged mounts before further delivery or mutation. Hosts discard revoked replicas
+and then acknowledge disposal using Leave(epoch). The authority retains minimal
+lease pins until that acknowledgement or disconnection; sync snapshots are dropped
+immediately. At most two outstanding revoked mounts are accepted per session,
+with connection closure on further undischarged revocations. Old epoch packets
+cannot decode against or mutate the replacement. Returning clients only resume
+RAM edits when collection identity and effective actions still match.
 
 The covered reclamation backend requires a durable tombstone and trusted
 producer-quiescence facts from the authority under its admission lock. Until
@@ -499,7 +512,18 @@ Reclamation syncs directory removals, resumes idempotently after interruption,
 and processes at most 128 extra root files per turn. Tree depth/entry limits or
 filesystem failures keep cleanup pending. A reclaimed authority namespace says
 nothing about backup expiry, disconnected replicas or unmanaged exports.
-This backend is not yet connected to an exposed DeleteData operation.
+Startup and the authority maintenance timer reclaim tombstoned namespaces only
+after all local producers and connected disposal pins are gone. At most eight
+collections receive filesystem reclamation per turn; blocked/failed collections
+rotate so unrelated work continues. Pending work retries once per second.
+
+Apps & Data exposes an Admin-only Cleanup view. Its summaries distinguish pending
+collection/session cleanup, retained backup deadlines, migration originals awaiting
+qualification, original-retention deadlines and unknown storage inventory. Missing
+or corrupt retention metadata cannot produce a completed-inventory claim. Cleanup
+changes advance discovery without changing the durable registry generation.
+Disconnected replicas and user exports remain explicitly unverified; collection
+file reclamation is not a promise of erasing every copy.
 
 ## Managed snapshots and offline restore
 
@@ -534,8 +558,10 @@ most 512 MiB, 4096 files and 64 MiB per file, with a manifest at most 2 MiB. Cap
 failure leaves the source unchanged. Snapshots expire for restore access seven
 days after creation. Pruning removes expired bytes and incomplete snapshot copies;
 corrupt manifests cannot extend retention because expiry comes from the owned
-snapshot name. Pruning currently runs before a snapshot and through the explicit
-maintenance action. Authority timer/status integration remains unfinished.
+snapshot name. Pruning runs before a snapshot, through explicit maintenance,
+on authority startup and at most once per minute while serving. Expiry does not
+promise removal at the exact millisecond: pending/failed physical cleanup remains
+visible until verified.
 
 A restore verifies all selected payloads into private staging and first creates
 a safety snapshot of current data. It replaces only snapshot collections whose
@@ -568,10 +594,9 @@ unregistered originals are also refused after any deletion decision.
 
 Inventory independent legacy roots before finalizing migration; unattributed
 files are not silently classified or erased. Known interrupted checkpoint and chat-compaction temporaries expire with their
-originals in bounded cleanup turns. Authority timer and cleanup status remain
-unfinished. DeleteData remains
-unavailable until producer shutdown and managed cleanup/backup reporting are
-integrated.
+originals in bounded cleanup turns. The authority timer also prunes expired
+originals and reports remaining retained copies. Browser and physical Frame S3
+acceptance remain required before claiming the rollout complete.
 
 ## Rollout requirements
 

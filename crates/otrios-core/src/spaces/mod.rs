@@ -8,7 +8,9 @@ mod observer;
 mod schema;
 pub use schema::collection_schema;
 mod wire;
-pub use discovery::{CollectionFacts, advance_discovery, discovery, discovery_cursor};
+pub use discovery::{
+    CollectionFacts, advance_discovery, discovery, discovery_cursor, discovery_with_cleanup,
+};
 pub use observer::{Observer, Outcome};
 pub use wire::{decode_command, decode_event, encode_command, encode_event, management_status};
 
@@ -300,7 +302,12 @@ pub fn apply(
                 data.attached = false;
                 data.attachment_epoch = epoch;
             }
-            Change::DeleteData { app, remove, .. } => {
+            Change::DeleteData {
+                app,
+                collection,
+                remove,
+                ..
+            } => {
                 if next.deletions.len() == MAX_DELETIONS {
                     return Err(Error::Capacity);
                 }
@@ -309,6 +316,12 @@ pub fn apply(
                     .iter_mut()
                     .find(|a| &a.policy.app == app)
                     .ok_or(Error::Unavailable)?;
+                if !valid_id(collection) {
+                    return Err(Error::Invalid);
+                }
+                if &data.collection != collection {
+                    return Err(Error::Conflict);
+                }
                 next.deletions.push(Deletion {
                     space: s.id.clone(),
                     collection: data.collection.clone(),

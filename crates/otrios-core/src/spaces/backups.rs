@@ -426,11 +426,28 @@ impl Store {
                 backup_time(id)?;
                 continue;
             }
+            if ids.len() == MAX_BACKUPS {
+                return Err(Error::Capacity);
+            }
             self.read_snapshot(&name)?;
             ids.push(name);
         }
         ids.sort();
         Ok(ids)
+    }
+    pub(super) fn backup_deadlines(&self) -> Result<BTreeMap<String, u64>> {
+        let mut deadlines = BTreeMap::new();
+        for id in self.backup_ids()? {
+            let until = expiry(&id)?;
+            for file in self.read_snapshot(&id)?.files {
+                let collection = file_collection(&file.path)?.to_owned();
+                deadlines
+                    .entry(collection)
+                    .and_modify(|current: &mut u64| *current = (*current).max(until))
+                    .or_insert(until);
+            }
+        }
+        Ok(deadlines)
     }
     fn read_snapshot(&self, id: &str) -> Result<Snapshot> {
         expiry(id)?;

@@ -42,13 +42,19 @@ pub(super) enum Entry {
 pub(super) struct Journal {
     // A stable sidecar inode spans atomic data-file replacement during
     // compaction. Never unlink it while the authority is running.
-    _owner: fs::File,
+    _owner: Owner,
     path: PathBuf,
     file: fs::File,
     pub bytes: u64,
     failed: bool,
 }
-fn lock_owner(path: &Path) -> Result<fs::File> {
+struct Owner(fs::File);
+impl Drop for Owner {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+fn lock_owner(path: &Path) -> Result<Owner> {
     let lock = path.with_extension("journal.owner.lock");
     let mut options = fs::OpenOptions::new();
     options.create(true).truncate(false).read(true).write(true);
@@ -57,8 +63,9 @@ fn lock_owner(path: &Path) -> Result<fs::File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let file = options.open(lock).map_err(err)?;
-    file.try_lock()
+    let file = Owner(options.open(lock).map_err(err)?);
+    file.0
+        .try_lock()
         .map_err(|error| format!("Room journal already owned or unavailable: {error}"))?;
     Ok(file)
 }

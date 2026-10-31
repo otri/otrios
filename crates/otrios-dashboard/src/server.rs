@@ -895,6 +895,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             observer.ink.expire().await;
         }
     });
+    let maintainer = app.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tick.tick().await;
+            let changed = {
+                let mut guard = maintainer.apps.lock().await;
+                match guard.as_mut() {
+                    Some(hub) => match hub.maintain_storage(false) {
+                        Ok(changed) => changed,
+                        Err(error) => {
+                            eprintln!("Space cleanup pending: {error}");
+                            false
+                        }
+                    },
+                    None => false,
+                }
+            };
+            if changed {
+                announce(&maintainer).await;
+            }
+        }
+    });
     if let Some(public_bind) = public_bind {
         let address: std::net::SocketAddr = public_bind.parse()?;
         if !address.ip().is_loopback() {

@@ -1646,6 +1646,10 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
                 client
                     .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
                     .unwrap();
+                assert!(
+                    matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+                    ClientMessage::Leave { epoch: disposed } if disposed == epoch)
+                );
                 assert!(matches!(
                     decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
                     ClientMessage::CancelMount { .. }

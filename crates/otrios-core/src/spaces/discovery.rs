@@ -35,6 +35,26 @@ pub fn discovery(
     facts: &BTreeMap<String, CollectionFacts>,
     cursor: DiscoveryCursor,
 ) -> Result<Discovery> {
+    discovery_with_cleanup(
+        registry,
+        identity,
+        selected,
+        installed,
+        facts,
+        &BTreeMap::new(),
+        cursor,
+    )
+}
+
+pub fn discovery_with_cleanup(
+    registry: &Registry,
+    identity: Option<&str>,
+    selected: Option<&str>,
+    installed: &[InstalledApp],
+    facts: &BTreeMap<String, CollectionFacts>,
+    cleanup: &BTreeMap<String, CleanupSummary>,
+    cursor: DiscoveryCursor,
+) -> Result<Discovery> {
     if !valid_id(&cursor.authority)
         || identity.is_some_and(|id| !valid_identity(id))
         || installed.len() > MAX_INSTALLED_APPS
@@ -96,6 +116,11 @@ pub fn discovery(
                 .collect();
             SpaceDetail {
                 space: s.id.clone(),
+                cleanup: if admin {
+                    cleanup.get(&s.id).cloned().map(Box::new)
+                } else {
+                    None
+                },
                 apps,
                 members: admin.then(|| s.members.clone()),
                 installed: if admin { installed.to_vec() } else { vec![] },
@@ -149,7 +174,14 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
         let admin = summary.role == Some(Role::Admin);
         if detail.apps.len() > MAX_APPS
             || detail.installed.len() > MAX_INSTALLED_APPS
-            || (!admin && (detail.members.is_some() || !detail.installed.is_empty()))
+            || (!admin
+                && (detail.members.is_some()
+                    || !detail.installed.is_empty()
+                    || detail.cleanup.is_some()))
+            || detail.cleanup.as_ref().is_some_and(|c| {
+                c.deleted_collections > MAX_DELETIONS as u32
+                    || c.local_pending > c.deleted_collections
+            })
             || detail.installed.iter().any(|p| !valid_installed(p))
         {
             return Err(Error::Invalid);

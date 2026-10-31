@@ -70,6 +70,7 @@ fn a_deleted_import_cannot_be_replayed_into_the_fresh_collection() {
         change: Change::DeleteData {
             space: binding.space.clone(),
             app: binding.app.clone(),
+            collection: binding.collection.clone(),
             remove: false,
         },
     };

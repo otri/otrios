@@ -32,6 +32,9 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
             role: Some(role),
         }],
         selected: Some(SpaceDetail {
+            cleanup: (role == Role::Admin)
+                .then(CleanupSummary::default)
+                .map(Box::new),
             space: SPACE.into(),
             apps: vec![AppSummary {
                 app: "counter".into(),
@@ -689,6 +692,11 @@ fn denied_managed_reconnect_redacts_the_previous_replica_without_renderer_credit
     assert!(client.take_collection_revoked());
     assert!(client.scene().is_err());
     assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::Leave { epoch: disposed } if disposed == epoch),
+        "acknowledge only after the old replica and held view were discarded"
+    );
+    assert!(
         client.spaces_outgoing().unwrap().is_some(),
         "refresh admission metadata"
     );
@@ -708,6 +716,9 @@ fn signed_in_discovery_does_not_cancel_an_admissible_deep_link() {
     client
         .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
         .unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::Leave { epoch: disposed } if disposed == epoch)
+    );
     assert!(client.spaces_outgoing().unwrap().is_some());
     client
         .receive_spaces(
@@ -830,6 +841,9 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
             .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
             .unwrap();
         assert!(client.take_collection_revoked());
+        assert!(
+            matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::Leave { epoch: disposed } if disposed == epoch)
+        );
         assert!(client.spaces_snapshot().is_none());
         let Command::Watch { observation, .. } =
             spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
@@ -875,6 +889,190 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
         } else {
             assert!(client.spaces_ui());
             assert!(!labels(&client).contains(&"Counter".into()));
+        }
+    }
+}
+
+#[test]
+fn deletion_requires_trusted_confirmation_and_carries_the_reviewed_collection() {
+    for remove in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Apps & Data");
+        click(&mut client, "Counter");
+        click(
+            &mut client,
+            if remove {
+                "Remove & delete"
+            } else {
+                "Delete data"
+            },
+        );
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        assert!(labels(&client).contains(&"Permanently delete".into()));
+        let view = format!("{:?}", client.scene().unwrap());
+        assert!(view.contains("Household") && view.contains("Counter"));
+        click(&mut client, "Cancel");
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        click(
+            &mut client,
+            if remove {
+                "Remove & delete"
+            } else {
+                "Delete data"
+            },
+        );
+        click(&mut client, "Permanently delete");
+        let Command::Manage { request, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("delete request");
+        };
+        assert_eq!(request.expected_generation, 1);
+        assert_eq!(
+            request.change,
+            Change::DeleteData {
+                space: SPACE.into(),
+                app: "counter".into(),
+                collection: "d".repeat(32),
+                remove
+            }
+        );
+    }
+}
+
+#[test]
+fn changed_collection_or_lost_admin_role_invalidates_a_deletion_dialog() {
+    for member in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Apps & Data");
+        click(&mut client, "Counter");
+        click(&mut client, "Delete data");
+        let mut changed = snapshot(if member { Role::Member } else { Role::Admin }, 2);
+        changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: changed,
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!labels(&client).contains(&"Permanently delete".into()));
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        if !member {
+            click(&mut client, "Counter");
+            click(&mut client, "Delete data");
+            click(&mut client, "Permanently delete");
+            let Command::Manage { request, .. } =
+                spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("new confirmation");
+            };
+            assert_eq!(request.expected_generation, 2);
+            assert!(
+                matches!(request.change, Change::DeleteData { collection, .. } if collection == "e".repeat(32))
+            );
+        }
+    }
+}
+
+#[test]
+fn cleanup_ui_reports_retention_deadlines_without_claiming_an_offline_wipe() {
+    let (mut client, _) = fixture(Role::Admin);
+    let mut progress = snapshot(Role::Admin, 2);
+    progress.selected.as_mut().unwrap().cleanup = Some(Box::new(CleanupSummary {
+        deleted_collections: 1,
+        local_pending: 1,
+        backup_until_unix_ms: Some(1_735_689_600_000),
+        legacy_qualification_required: true,
+        ..CleanupSummary::default()
+    }));
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: progress,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Apps & Data");
+    click(&mut client, "Cleanup");
+    let view = format!("{:?}", client.scene().unwrap());
+    for text in [
+        "pending: 1",
+        "2025-01-01 00:00 UTC",
+        "await migration qualification",
+        "cannot be verified",
+    ] {
+        assert!(view.contains(text), "missing cleanup fact: {text}");
+    }
+}
+
+#[test]
+fn a_returning_offline_client_discards_pending_edits_when_the_collection_is_replaced() {
+    let (mut client, ui) = fixture(Role::Member);
+    let mut old = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    launch(&mut client, &ui, &mut old);
+    client
+        .event(client.epoch(), ui.handlers[0].control, 0, 0)
+        .unwrap();
+    assert_eq!(client.value(1).unwrap(), 1000);
+    assert!(!client.confirmed());
+    client.reset_connection();
+    let ClientMessage::Mount {
+        epoch,
+        writer,
+        collection,
+        ..
+    } = decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("returning mount");
+    };
+    assert_eq!(collection, Some("d".repeat(32)));
+    let mut replacement = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    let (mut session, _) = replacement.open_session(&writer, 0).unwrap();
+    let bytes = encode_ui(&ui).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: replacement.generate(&mut session).unwrap().unwrap(),
+                binding: Some(MountBinding {
+                    version: 1,
+                    collection: "e".repeat(32),
+                    editable: true,
+                    comments: false,
+                    moderate: false,
+                }),
+                initial_view: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::AcceptMount { epoch: accepted } if accepted == epoch)
+    );
+    client
+        .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+        .unwrap();
+    assert_eq!(
+        client.value(1).unwrap(),
+        0,
+        "same app/reference cannot rebase edits from a deleted collection"
+    );
+    while let Some(bytes) = client.outgoing().unwrap() {
+        if let ClientMessage::Sync { bytes, .. } = decode_client(&bytes).unwrap() {
+            assert!(!matches!(
+                decode_state_request(&bytes).unwrap(),
+                StateRequest::Write { .. }
+            ));
         }
     }
 }

@@ -34,10 +34,18 @@ fn command_shape(command: &Command) -> Result<()> {
                     space, identity, ..
                 } => valid_id(space) && valid_identity(identity),
                 Change::Audience { space, .. } => valid_id(space),
-                Change::Attach { space, app }
-                | Change::Remove { space, app }
-                | Change::DeleteData { space, app, .. } => {
+                Change::Attach { space, app } | Change::Remove { space, app } => {
                     valid_id(space) && otrios_interfaces::canvas::valid_destination(app)
+                }
+                Change::DeleteData {
+                    space,
+                    app,
+                    collection,
+                    ..
+                } => {
+                    valid_id(space)
+                        && valid_id(collection)
+                        && otrios_interfaces::canvas::valid_destination(app)
                 }
             };
             if !valid {

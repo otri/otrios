@@ -17,6 +17,12 @@ pub(super) enum Pane {
     Spaces,
     Data,
     App(String),
+    Delete {
+        app: String,
+        collection: String,
+        remove: bool,
+    },
+    Cleanup,
     Installed,
     Members,
     Person(String),
@@ -62,6 +68,24 @@ fn stored(value: Option<u64>) -> String {
         Some(n) => format!("{n} bytes stored"),
         None => "Storage usage unavailable".into(),
     }
+}
+fn deadline(unix_ms: u64) -> String {
+    let days = (unix_ms / 86_400_000) as i64 + 719_468;
+    let era = days / 146_097;
+    let doe = days - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    let minute = unix_ms / 60_000;
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        minute / 60 % 24,
+        minute % 60
+    )
 }
 fn availability(status: AppAvailability) -> &'static str {
     match status {
@@ -157,7 +181,13 @@ pub(super) fn render(
     if !admin
         && matches!(
             model.pane,
-            Pane::Data | Pane::Installed | Pane::Members | Pane::Person(_) | Pane::Invite
+            Pane::Data
+                | Pane::Delete { .. }
+                | Pane::Cleanup
+                | Pane::Installed
+                | Pane::Members
+                | Pane::Person(_)
+                | Pane::Invite
         )
     {
         model.pane = Pane::Home;
@@ -166,11 +196,23 @@ pub(super) fn render(
     if snapshot.identity.is_none() && matches!(model.pane, Pane::Create) {
         model.pane = Pane::Spaces;
     }
+    if let Pane::Delete {
+        app, collection, ..
+    } = &model.pane
+        && selected
+            .and_then(|s| s.apps.iter().find(|a| &a.app == app))
+            .is_none_or(|a| &a.collection != collection)
+    {
+        model.pane = Pane::Data;
+        model.message = "Data changed; review the collection again.".into();
+    }
     let title = match model.pane {
         Pane::Home => "Home",
         Pane::Spaces => "Spaces",
         Pane::Data => "Apps & Data",
         Pane::App(_) => "App data",
+        Pane::Delete { .. } => "Confirm permanent deletion",
+        Pane::Cleanup => "Deletion cleanup",
         Pane::Installed => "Add app",
         Pane::Members => "Members",
         Pane::Person(_) => "Membership",
@@ -278,6 +320,11 @@ pub(super) fn render(
                     );
                     if data {
                         b.button(
+                            "Cleanup",
+                            [440., 160., 216., 64.],
+                            HostAction::Pane(Pane::Cleanup),
+                        );
+                        b.button(
                             "Members",
                             [232., 160., 192., 64.],
                             HostAction::Pane(Pane::Members),
@@ -324,8 +371,137 @@ pub(super) fn render(
                         );
                     }
                     b.text("Removing an app retains its data in this Space.", 496.);
+                    if selected.cleanup.is_some() {
+                        b.button(
+                            "Delete data",
+                            [24., 540., 280., 56.],
+                            HostAction::Pane(Pane::Delete {
+                                app: app.app.clone(),
+                                collection: app.collection.clone(),
+                                remove: false,
+                            }),
+                        );
+                        if app.attached {
+                            b.button(
+                                "Remove & delete",
+                                [328., 540., 312., 56.],
+                                HostAction::Pane(Pane::Delete {
+                                    app: app.app.clone(),
+                                    collection: app.collection.clone(),
+                                    remove: true,
+                                }),
+                            );
+                        }
+                    }
                 }
             }
+        }
+        Pane::Delete {
+            app,
+            collection,
+            remove,
+        } => {
+            if let Some((selected, app)) =
+                selected.and_then(|s| s.apps.iter().find(|a| &a.app == app).map(|a| (s, a)))
+            {
+                b.text(
+                    &format!("Space: {}", summary.map_or("", |s| s.name.as_str())),
+                    240.,
+                );
+                b.text(&format!("App: {}", app.title), 288.);
+                b.text(
+                    "Deletes this collection's content, assets and history.",
+                    352.,
+                );
+                b.text(
+                    if *remove {
+                        "The app will also be removed from this Space."
+                    } else {
+                        "A fresh, empty collection replaces this one."
+                    },
+                    400.,
+                );
+                b.text(
+                    "Backups and qualified originals expire under the seven-day policy.",
+                    448.,
+                );
+                b.text(
+                    "Offline device copies and user exports cannot be verified.",
+                    496.,
+                );
+                b.button(
+                    "Cancel",
+                    [24., 560., 216., 64.],
+                    HostAction::Pane(Pane::App(app.app.clone())),
+                );
+                if selected.cleanup.is_some() {
+                    b.button(
+                        "Permanently delete",
+                        [264., 560., 336., 64.],
+                        HostAction::Manage(Change::DeleteData {
+                            space: selected.space.clone(),
+                            app: app.app.clone(),
+                            collection: collection.clone(),
+                            remove: *remove,
+                        }),
+                    );
+                }
+            }
+        }
+        Pane::Cleanup => {
+            if let Some(cleanup) = selected.and_then(|s| s.cleanup.as_ref()) {
+                b.text(
+                    &format!("Deleted collections: {}", cleanup.deleted_collections),
+                    240.,
+                );
+                b.text(
+                    &if cleanup.local_pending > 0 {
+                        format!(
+                            "Authority/session cleanup pending: {}",
+                            cleanup.local_pending
+                        )
+                    } else {
+                        "Deleted collection files and sessions cleared.".into()
+                    },
+                    288.,
+                );
+                b.text(
+                    &match cleanup.backup_until_unix_ms {
+                        Some(until) => format!("Backup copies expire: {}", deadline(until)),
+                        None if cleanup.storage_unknown => {
+                            "Backup retention could not be verified.".into()
+                        }
+                        None => "No managed backup copies retained.".into(),
+                    },
+                    352.,
+                );
+                b.text(
+                    &if cleanup.legacy_qualification_required {
+                        "Imported originals await migration qualification.".into()
+                    } else if let Some(until) = cleanup.legacy_until_unix_ms {
+                        format!("Imported originals expire: {}", deadline(until))
+                    } else if cleanup.storage_unknown {
+                        "Migration-original retention is unverified.".into()
+                    } else {
+                        "No imported originals retained.".into()
+                    },
+                    400.,
+                );
+                if cleanup.storage_unknown {
+                    b.text("Storage inventory needs operator attention.", 448.);
+                }
+                b.text(
+                    "Offline device copies and user exports cannot be verified.",
+                    496.,
+                );
+            } else {
+                b.text("Cleanup status unavailable.", 240.);
+            }
+            b.button(
+                "Apps & Data",
+                [24., 640., 240., 64.],
+                HostAction::Pane(Pane::Data),
+            );
         }
         Pane::Installed => {
             if let Some(selected) = selected {
@@ -476,7 +652,16 @@ pub(super) fn render(
     }
     let form = matches!(model.pane, Pane::Create | Pane::Invite);
     if !model.message.is_empty() {
-        b.text(&model.message, if form { 440. } else { 596. });
+        b.text(
+            &model.message,
+            if form {
+                440.
+            } else if matches!(model.pane, Pane::Delete { .. }) {
+                672.
+            } else {
+                596.
+            },
+        );
     }
     if matches!(model.pane, Pane::Home | Pane::Spaces) {
         if sign_out && snapshot.identity.is_some() {

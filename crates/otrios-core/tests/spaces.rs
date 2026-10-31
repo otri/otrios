@@ -790,6 +790,7 @@ fn deletion_is_atomic_replaces_identity_and_survives_registry_recovery() {
                 Change::DeleteData {
                     space: space.clone(),
                     app: "notes".into(),
+                    collection: b.collection.clone(),
                     remove: false,
                 },
             ),
@@ -852,6 +853,7 @@ fn service_bindings_are_distinct_from_membership_and_cannot_survive_collection_r
         Change::DeleteData {
             space,
             app: "notes".into(),
+            collection: binding.collection.clone(),
             remove: false,
         },
     );
@@ -985,4 +987,92 @@ fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
         .unwrap();
     assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP5");
     std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn stale_confirmation_cannot_delete_a_replacement_even_with_a_current_generation() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let binding = attach(&mut registry, &space);
+    let change = Change::DeleteData {
+        space: space.clone(),
+        app: "notes".into(),
+        collection: binding.collection.clone(),
+        remove: false,
+    };
+    let member = request(&registry, change.clone());
+    assert_eq!(
+        spaces::apply(&registry, "bob", &member, None),
+        Err(Error::Denied)
+    );
+    registry = spaces::apply(&registry, "alice", &member, None).unwrap();
+    assert_ne!(registry.spaces[0].apps[0].collection, binding.collection);
+    let stale = request(&registry, change);
+    assert_eq!(
+        spaces::apply(&registry, "alice", &stale, None),
+        Err(Error::Conflict)
+    );
+    assert_eq!(registry.deletions.len(), 1);
+    assert_eq!(registry.deletions[0].space, space);
+}
+
+#[test]
+fn cleanup_facts_are_admin_only_and_cannot_be_smuggled_into_member_snapshots() {
+    use std::collections::BTreeMap;
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let facts = BTreeMap::from([(
+        space.clone(),
+        CleanupSummary {
+            deleted_collections: 2,
+            local_pending: 1,
+            legacy_qualification_required: true,
+            ..CleanupSummary::default()
+        },
+    )]);
+    let capture = |identity| {
+        spaces::discovery_with_cleanup(
+            &registry,
+            Some(identity),
+            Some(&space),
+            &[],
+            &BTreeMap::new(),
+            &facts,
+            spaces::discovery_cursor().unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        capture("alice").selected.unwrap().cleanup,
+        facts.get(&space).cloned().map(Box::new)
+    );
+    let mut member = capture("bob");
+    assert!(member.selected.as_ref().unwrap().cleanup.is_none());
+    member.selected.as_mut().unwrap().cleanup = facts.get(&space).cloned().map(Box::new);
+    assert!(
+        spaces::encode_event(&Event::Snapshot {
+            observation: 1,
+            snapshot: member,
+            resync: false
+        })
+        .is_err()
+    );
 }

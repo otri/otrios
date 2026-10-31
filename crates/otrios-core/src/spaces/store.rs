@@ -27,6 +27,7 @@ pub struct Store {
     _owner: Owner,
     failed: bool,
     restoring: bool,
+    maintenance: cleanup::Maintenance,
 }
 // Release locks explicitly on every exit, including rejected recovery before a
 // Store exists. Concurrent fork-before-exec children can briefly inherit a file
@@ -313,6 +314,7 @@ impl Store {
             _owner: owner,
             failed: false,
             restoring,
+            maintenance: Default::default(),
         })
     }
     pub fn registry(&self) -> Result<&Registry> {
@@ -463,3 +465,6 @@ fn write_at(path: &Path, bytes: &[u8], mut step: impl FnMut(FileStep)) -> Result
     }
     result
 }
+
+#[path = "cleanup.rs"]
+mod cleanup;

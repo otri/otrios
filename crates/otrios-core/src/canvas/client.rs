@@ -607,6 +607,8 @@ impl Client {
                     },
                     _ => unreachable!(),
                 };
+                let deleting =
+                    matches!(change, otrios_interfaces::spaces::Change::DeleteData { .. });
                 match self.spaces.request(change) {
                     Ok(_) => {
                         self.host.message = "Saving…".into();
@@ -614,6 +616,8 @@ impl Client {
                             self.host.pane = Pane::Spaces;
                         } else if self.host.pane == Pane::Invite {
                             self.host.pane = Pane::Members;
+                        } else if deleting {
+                            self.host.pane = Pane::Cleanup;
                         }
                     }
                     Err(_) => {
@@ -1876,48 +1880,16 @@ impl Client {
                 }
             }
             ServerMessage::AccessRequired { epoch } => {
-                if self.active.as_ref().is_some_and(|m| m.epoch == epoch) {
-                    // Revoke held presentation frames for every collection,
-                    // including a public app used inside a Closed Space.
-                    self.collection_revoked = true;
-                    let old = self.active.take().ok_or("Missing revoked activation")?;
-                    // Revocation belongs to the old lease. A newer staged public
-                    // navigation must still be able to qualify its Mounted reply.
-                    if self.requested.is_none() {
-                        self.generation = self
-                            .generation
-                            .checked_add(1)
-                            .ok_or("Canvas epoch exhausted")?;
-                        self.requested = Some(Request {
-                            epoch: self.generation,
-                            pair: (old.ui.ui_ref, old.state_ref),
-                            sent: false,
-                            reconnecting: false,
-                        });
-                        self.auth_required = true;
-                    }
-                    self.spaces.forget();
-                    return Ok(true);
+                let result = self.discard_revoked(epoch);
+                if (self.managed_transport || self.selected_space.is_some())
+                    && !self
+                        .host_wire
+                        .iter()
+                        .any(|m| matches!(m, ClientMessage::Leave { epoch: old } if *old == epoch))
+                {
+                    self.host_wire.push_back(ClientMessage::Leave { epoch });
                 }
-                if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
-                    if self.requested.as_ref().is_some_and(|r| r.reconnecting)
-                        && self.active.as_ref().is_some_and(|m| m.binding.is_some())
-                    {
-                        self.active = None;
-                        self.collection_revoked = true;
-                    }
-                    self.qualified = None;
-                    self.decision = Some(MountDecision::Cancel(epoch));
-                    if self.previous_catalog.is_some() {
-                        self.reject_catalog_update();
-                        self.decision = Some(MountDecision::Cancel(epoch));
-                        self.requested = None;
-                        return Err("UI update access rejected".into());
-                    }
-                    self.auth_required = true;
-                    self.spaces.forget();
-                }
-                Ok(false)
+                result
             }
             ServerMessage::Error { epoch, message } => {
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
@@ -1931,6 +1903,50 @@ impl Client {
                 Ok(false)
             }
         }
+    }
+    fn discard_revoked(&mut self, epoch: u32) -> Result<bool> {
+        if self.active.as_ref().is_some_and(|m| m.epoch == epoch) {
+            // Revoke held presentation frames for every collection,
+            // including a public app used inside a Closed Space.
+            self.collection_revoked = true;
+            let old = self.active.take().ok_or("Missing revoked activation")?;
+            // Revocation belongs to the old lease. A newer staged public
+            // navigation must still be able to qualify its Mounted reply.
+            if self.requested.is_none() {
+                self.generation = self
+                    .generation
+                    .checked_add(1)
+                    .ok_or("Canvas epoch exhausted")?;
+                self.requested = Some(Request {
+                    epoch: self.generation,
+                    pair: (old.ui.ui_ref, old.state_ref),
+                    sent: false,
+                    reconnecting: false,
+                });
+                self.auth_required = true;
+            }
+            self.spaces.forget();
+            return Ok(true);
+        }
+        if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+            if self.requested.as_ref().is_some_and(|r| r.reconnecting)
+                && self.active.as_ref().is_some_and(|m| m.binding.is_some())
+            {
+                self.active = None;
+                self.collection_revoked = true;
+            }
+            self.qualified = None;
+            self.decision = Some(MountDecision::Cancel(epoch));
+            if self.previous_catalog.is_some() {
+                self.reject_catalog_update();
+                self.decision = Some(MountDecision::Cancel(epoch));
+                self.requested = None;
+                return Err("UI update access rejected".into());
+            }
+            self.auth_required = true;
+            self.spaces.forget();
+        }
+        Ok(false)
     }
     fn activate_candidate(
         &mut self,

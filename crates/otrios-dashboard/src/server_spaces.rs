@@ -68,7 +68,7 @@ pub async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
         let role = core::role(s, identity.as_deref());
         let mut value = json!({"id":s.id,"name":s.name,"audience":s.audience,"role":role,
             "apps":s.apps.iter().filter(|a| a.attached || role == Some(Role::Admin)).collect::<Vec<_>>()});
-        if role == Some(Role::Admin) { value["members"] = json!(s.members); }
+        if role == Some(Role::Admin) { value["members"] = json!(s.members); value["cleanup"] = json!(hub.cleanup(&s.id)); }
         value
     }).collect::<Vec<_>>();
     response(
@@ -121,9 +121,8 @@ pub(super) fn manage_request(
     actor: &str,
     request: &contract::Request,
 ) -> std::result::Result<u64, core::Error> {
-    // Later lifecycle/public stages remain unavailable on every management path.
-    if matches!(&request.change, Change::DeleteData { .. })
-        || matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
+    // Public audiences remain gated until comment/publication enforcement is qualified.
+    if matches!(&request.change, Change::Audience { audience, .. } if *audience != contract::Audience::Closed)
     {
         return Err(core::Error::Unavailable);
     }

@@ -160,6 +160,8 @@ pub enum Change {
     DeleteData {
         space: String,
         app: String,
+        /// The collection shown in the trusted confirmation, never its successor.
+        collection: String,
         remove: bool,
     },
 }
@@ -238,10 +240,23 @@ pub struct AppSummary {
     pub launch: Option<InstalledApp>,
 }
 
+/// Admin-only deletion progress. Unmanaged/offline copies cannot be verified.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupSummary {
+    pub deleted_collections: u32,
+    pub local_pending: u32,
+    pub backup_until_unix_ms: Option<u64>,
+    pub legacy_until_unix_ms: Option<u64>,
+    pub legacy_qualification_required: bool,
+    pub storage_unknown: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpaceDetail {
     pub space: String,
+    pub cleanup: Option<Box<CleanupSummary>>,
     pub apps: Vec<AppSummary>,
     pub members: Option<Vec<Member>>,
     pub installed: Vec<InstalledApp>,

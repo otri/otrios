@@ -223,6 +223,7 @@ mod tests {
                 Change::DeleteData {
                     space: first,
                     app: "notes".into(),
+                    collection: deleted.clone(),
                     remove: false,
                 },
                 None,

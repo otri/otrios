@@ -5,7 +5,7 @@ use otrios_core::canvas::{self, Behavior, Document, Session};
 use otrios_interfaces::canvas::{App as AppContract, ClientMessage, ServerMessage};
 use otrios_interfaces::session::STATE_PROTOCOL;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::Read,
 };
 
@@ -53,6 +53,8 @@ pub(super) struct Hub {
     discovery_catalog: Vec<u8>,
     ink_rooms: BTreeMap<String, Arc<ink::Room>>,
     chat_rooms: BTreeMap<String, Arc<space_chat::Hub>>,
+    cleanup: BTreeMap<String, otrios_interfaces::spaces::CleanupSummary>,
+    next_maintenance: Option<std::time::Instant>,
 }
 struct Lease {
     epoch: u32,
@@ -74,11 +76,19 @@ pub(super) struct Activation {
     pub ink: bool,
     pub chat: bool,
 }
+// Minimal pins survive revocation until the trusted host confirms disposal by
+// sending Leave(epoch), or its connection closes. No old sync snapshot is kept.
+struct Retired {
+    epoch: u32,
+    _room: Arc<()>,
+    _chat: Option<Arc<space_chat::Hub>>,
+}
 #[derive(Default)]
 struct Leases {
     active: Option<Lease>,
     staged: Option<Lease>,
     last_epoch: u32,
+    retired: Vec<Retired>,
 }
 impl Leases {
     fn activation(&self) -> Option<Activation> {
@@ -103,16 +113,30 @@ impl Leases {
             }
         });
     }
+    fn retire(&mut self, lease: Lease) {
+        if lease.binding.is_some() {
+            self.retired.push(Retired {
+                epoch: lease.epoch,
+                _room: lease._room,
+                _chat: lease._chat,
+            });
+        }
+    }
     fn revoke_private(&mut self, allowed: bool) -> Vec<ServerMessage> {
         if allowed {
             return vec![];
         }
         let mut messages = vec![];
+        let mut revoked = vec![];
         for slot in [&mut self.active, &mut self.staged] {
             if slot.as_ref().is_some_and(|l| l.private) {
                 let l = slot.take().expect("present lease");
                 messages.push(ServerMessage::AccessRequired { epoch: l.epoch });
+                revoked.push(l);
             }
+        }
+        for lease in revoked {
+            self.retire(lease);
         }
         messages
     }
@@ -193,6 +217,8 @@ impl Hub {
             discovery_catalog: vec![],
             ink_rooms: BTreeMap::new(),
             chat_rooms: BTreeMap::new(),
+            cleanup: BTreeMap::new(),
+            next_maintenance: None,
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
@@ -236,7 +262,91 @@ impl Hub {
             .map_err(|e| e.to_string())?;
         }
         self.provisioning = provisioning;
+        self.maintain_storage(true)?;
         Ok(())
+    }
+    pub(super) fn cleanup(
+        &self,
+        space: &str,
+    ) -> Option<&otrios_interfaces::spaces::CleanupSummary> {
+        self.cleanup.get(space)
+    }
+    pub(super) fn maintain_storage(&mut self, force: bool) -> Result<bool> {
+        if self.spaces.is_none() {
+            return Ok(false);
+        }
+        let now = std::time::Instant::now();
+        if !force && self.next_maintenance.is_some_and(|next| now < next) {
+            return Ok(false);
+        }
+        self.next_maintenance = Some(now + Duration::from_secs(60));
+        let deleted = self
+            .registry()
+            .map_err(|e| e.to_string())?
+            .deletions
+            .iter()
+            .map(|d| d.collection.clone())
+            .collect::<BTreeSet<_>>();
+        let mut active = BTreeSet::new();
+        self.rooms.retain(|key, room| {
+            let collection = key.split(':').next().unwrap_or_default();
+            if !deleted.contains(collection) {
+                return true;
+            }
+            if Arc::strong_count(&room.lease) > 1 {
+                active.insert(collection.to_owned());
+                return true;
+            }
+            false
+        });
+        self.chat_rooms.retain(|key, room| {
+            let collection = key.split(':').next().unwrap_or_default();
+            if !deleted.contains(collection) {
+                return true;
+            }
+            if Arc::strong_count(room) > 1 {
+                active.insert(collection.to_owned());
+                return true;
+            }
+            false
+        });
+        self.ink_rooms.retain(|key, room| {
+            let collection = key.split(':').next().unwrap_or_default();
+            if !deleted.contains(collection) {
+                return true;
+            }
+            if Arc::strong_count(room) > 1 {
+                active.insert(collection.to_owned());
+                return true;
+            }
+            false
+        });
+        self.collection_views
+            .retain(|collection, _| !deleted.contains(collection));
+        let unix_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_millis(),
+        )
+        .map_err(|e| e.to_string())?;
+        let summary = self
+            .spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .maintain_deleted(unix_ms, &active)
+            .map_err(|e| e.to_string())?;
+        if summary.values().any(|s| s.local_pending > 0) {
+            self.next_maintenance = Some(now + Duration::from_secs(1));
+        }
+        if summary == self.cleanup {
+            return Ok(false);
+        }
+        let cursor =
+            otrios_core::spaces::advance_discovery(&self.discovery).map_err(|e| e.to_string())?;
+        self.cleanup = summary;
+        self.discovery = cursor;
+        Ok(true)
     }
     pub(super) fn registry_path(&self) -> Result<&Path> {
         self.spaces
@@ -660,11 +770,18 @@ impl Hub {
         self.discovery = cursor;
         if let Some(collection) = removed {
             self.rooms.retain(|key, room| {
-                room.failed || key.split(':').next() != Some(collection.as_str())
+                room.failed
+                    || Arc::strong_count(&room.lease) > 1
+                    || key.split(':').next() != Some(collection.as_str())
             });
             self.collection_views.remove(&collection);
             self.ink_rooms
                 .retain(|key, _| key.split(':').next() != Some(collection.as_str()));
+        }
+        // A newly created Space must have storage status immediately; discovery
+        // must not wait for the next periodic maintenance pass to offer controls.
+        if let Err(error) = self.maintain_storage(true) {
+            eprintln!("Space cleanup pending: {error}");
         }
         Ok(generation)
     }
@@ -717,6 +834,19 @@ impl Hub {
                     && !self.chat_rooms.iter().any(|(key, room)| {
                         key.split(':').next() == Some(a.collection.as_str()) && !room.healthy()
                     });
+                if available {
+                    available = self.bundles.get(&self.active).is_some_and(|bundle| {
+                        bundle
+                            .packages
+                            .values()
+                            .filter(|p| p.policy.app == a.policy.app && p.chat)
+                            .all(|p| {
+                                self.chat_path(&a.collection, p)
+                                    .and_then(|path| self.missing_owned_chat(&path, p))
+                                    .is_ok_and(|missing| !missing)
+                            })
+                    });
+                }
                 let stored_bytes = self.state.as_ref().and_then(|root| {
                     let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
                     let presentation =
@@ -748,12 +878,13 @@ impl Hub {
                 );
             }
         }
-        otrios_core::spaces::discovery(
+        otrios_core::spaces::discovery_with_cleanup(
             registry,
             identity,
             selected,
             &installed,
             &facts,
+            &self.cleanup,
             self.discovery.clone(),
         )
     }
@@ -818,6 +949,7 @@ impl Hub {
     }
     fn revoke_scoped(&self, leases: &mut Leases, scope: &spaces::Scope) -> Vec<ServerMessage> {
         let mut messages = vec![];
+        let mut revoked = vec![];
         for slot in [&mut leases.active, &mut leases.staged] {
             if slot
                 .as_ref()
@@ -828,7 +960,11 @@ impl Hub {
             {
                 let lease = slot.take().expect("present lease");
                 messages.push(ServerMessage::AccessRequired { epoch: lease.epoch });
+                revoked.push(lease);
             }
+        }
+        for lease in revoked {
+            leases.retire(lease);
         }
         messages
     }
@@ -935,6 +1071,9 @@ impl Hub {
             self.chat_rooms.remove(&idle);
         }
         let path = self.chat_file(binding, package)?;
+        if self.missing_owned_chat(&path, package)? {
+            return Err("Missing owned chat journal; verified storage repair required".into());
+        }
         self.collection_parent(&path)?;
         let room = space_chat::Hub::new(path)?;
         self.chat_rooms.insert(key, room.clone());
@@ -945,14 +1084,46 @@ impl Hub {
         binding: &otrios_interfaces::spaces::Binding,
         package: &Package,
     ) -> Result<PathBuf> {
-        let key = collection_room(binding, package);
-        let suffix = key.split_once(':').map_or("primary", |(_, hash)| hash);
+        self.chat_path(&binding.collection, package)
+    }
+    fn chat_path(&self, collection: &str, package: &Package) -> Result<PathBuf> {
+        let suffix = if package.app.state_ref == package.primary_ref {
+            "primary".into()
+        } else {
+            canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
+        };
         Ok(self
             .state
             .as_ref()
             .ok_or("Durable chat storage required")?
-            .join(format!("collection-{}.data", binding.collection))
+            .join(format!("collection-{collection}.data"))
             .join(format!("chat-{suffix}.journal")))
+    }
+    fn missing_owned_chat(&self, path: &Path, package: &Package) -> Result<bool> {
+        if path.exists() {
+            return Ok(false);
+        }
+        if path.with_extension("journal.owner.lock").exists() {
+            return Ok(true);
+        }
+        let receipt = path.with_file_name("legacy-chat-import.json");
+        if !receipt.exists() {
+            return Ok(false);
+        }
+        let record: Value = serde_json::from_slice(&spaces::private_bytes(&receipt, 4096)?)
+            .map_err(|_| "Invalid chat import receipt")?;
+        if record.as_object().is_none_or(|object| object.len() != 9)
+            || record["version"] != 1
+            || record["kind"] != "legacy-chat"
+            || !record["root"]
+                .as_str()
+                .is_some_and(|root| root.starts_with("app:") && root.len() <= 128)
+        {
+            return Err("Invalid chat import receipt".into());
+        }
+        // One import receipt can name a subsidiary root. It does not establish
+        // prior data for an uninitialized sibling in the same collection.
+        Ok(record["root"] == package.app.state_ref)
     }
     pub(super) fn chat_room(&self, active: &Activation) -> Result<Arc<space_chat::Hub>> {
         if !active.chat {
@@ -1419,6 +1590,9 @@ impl Hub {
     ) -> Result<(Vec<ServerMessage>, bool)> {
         let mut messages = leases.revoke_private(allow_private);
         messages.extend(self.revoke_scoped(leases, scope));
+        if leases.retired.len() > 2 {
+            return Err("Revoked mounts were not discarded".into());
+        }
         let mut changed = false;
         match message {
             ClientMessage::Mount {
@@ -1606,6 +1780,16 @@ impl Hub {
                 return Ok((messages, false));
             }
             ClientMessage::Sync { epoch, bytes } => {
+                // Retired epochs cannot decode or mutate the replacement. Keep
+                // the shared socket usable while disposal acknowledgement drains.
+                if leases.retired.iter().any(|old| old.epoch == epoch)
+                    || leases
+                        .active
+                        .as_ref()
+                        .is_some_and(|live| live.epoch != epoch)
+                {
+                    return Ok((messages, false));
+                }
                 if let Some(binding) = leases.active.as_ref().and_then(|l| l.binding.as_ref()) {
                     // ACK/resync are reads; only actual write requests require Edit.
                     if matches!(
@@ -1655,6 +1839,7 @@ impl Hub {
                 l.sync = session;
             }
             ClientMessage::Leave { epoch } => {
+                leases.retired.retain(|lease| lease.epoch != epoch);
                 if leases.active.as_ref().is_some_and(|l| l.epoch == epoch) {
                     leases.active = None;
                 }
@@ -1675,6 +1860,9 @@ impl Hub {
     ) -> Result<Vec<ServerMessage>> {
         let mut messages = leases.revoke_private(allow_private);
         messages.extend(self.revoke_scoped(leases, scope));
+        if leases.retired.len() > 2 {
+            return Err("Revoked mounts were not discarded".into());
+        }
         let Some(l) = &mut leases.active else {
             return Ok(messages);
         };

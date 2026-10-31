@@ -692,7 +692,7 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v13","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v14","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -890,7 +890,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v13","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v14","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -997,6 +997,7 @@ fn shared_session_discovery_observes_racing_changes_and_rechecks_management_and_
     assert!(detail.apps[0].launch.is_some());
     assert_eq!(detail.members.as_ref().unwrap().len(), 1);
     let collection = detail.apps[0].collection.clone();
+    assert!(snapshot.selected.as_ref().unwrap().cleanup.is_some());
     send_spaces(
         &mut admin,
         SpaceCommand::Manage {
@@ -1162,10 +1163,13 @@ fn read(socket: &mut Socket) -> ServerMessage {
     }
 }
 fn mount(socket: &mut Socket, catalog: &[u8]) {
+    mount_epoch(socket, catalog, 1);
+}
+fn mount_epoch(socket: &mut Socket, catalog: &[u8], epoch: u32) {
     send(
         socket,
         ClientMessage::Mount {
-            epoch: 1,
+            epoch,
             ui_ref: "app:counter/ui".into(),
             state_ref: "app:counter/state".into(),
             catalog_hash: canvas::hash(catalog),
@@ -2743,7 +2747,12 @@ fn removing_an_attachment_revokes_sessions_retains_admin_visible_data_and_reatta
             .unwrap(),
         },
     );
-    assert!(matches!(read(&mut active), ServerMessage::Error { .. }));
+    mount_epoch(&mut active, &rig.catalog, 2);
+    assert!(matches!(
+        read(&mut active),
+        ServerMessage::AccessRequired { epoch: 2 }
+    ));
+    send(&mut active, ClientMessage::Leave { epoch: 1 });
     let (_, admin) = http(&rig.public, "GET", Some('a'), None);
     let retained = admin["spaces"]
         .as_array()
@@ -2835,8 +2844,13 @@ fn revocation_between_qualification_and_acceptance_cannot_activate_a_staged_coll
             .unwrap(),
         },
     );
-    // An activation ack queued ahead of this error would fail the assertion.
-    assert!(matches!(read(&mut candidate), ServerMessage::Error { .. }));
+    // A queued activation or stale-write response would fail this barrier.
+    mount_epoch(&mut candidate, &rig.catalog, 2);
+    assert!(matches!(
+        read(&mut candidate),
+        ServerMessage::AccessRequired { epoch: 2 }
+    ));
+    send(&mut candidate, ClientMessage::Leave { epoch: 1 });
     rig.child(&rig.public, &space, Some('a'), "0");
 }
 
@@ -2989,7 +3003,15 @@ fn an_explicit_missing_legacy_checkpoint_never_becomes_an_empty_import() {
         "state/counter-{}.merkle",
         canvas::hex(&canvas::hash(b"app:counter/state"))
     ));
-    assert!(!original.exists());
+    // Recovery runs asynchronously after listener startup. Stop it first, then
+    // establish a genuinely absent source regardless of how far startup got.
+    for path in [&original, &original.with_extension("merkle.log")] {
+        match fs::remove_file(path) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => panic!("missing-source fixture: {error}"),
+        }
+    }
     let manifest = rig.root.join("provision-missing-checkpoint.json");
     private_json(
         &manifest,
@@ -3029,4 +3051,473 @@ fn assert_legacy_attribution(rig: &Rig) {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn durable_deletion_orders_racing_writes_waits_for_disposal_and_cannot_be_undone_by_restore() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let household = rig.space("Delete household");
+    let work = rig.space("Delete isolation");
+    for space in [&household, &work] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "counter".into(),
+            },
+        );
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "frame".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let (_, original) = document_session(&rig, &household, "counter", schema(), Some(42));
+    let original = original.unwrap();
+    document_session(&rig, &work, "counter", schema(), Some(73));
+    rig.stop();
+    let backed_up = rig.storage_action(&binary, "backup");
+    assert!(
+        backed_up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&backed_up.stderr)
+    );
+    let backup: Json = serde_json::from_slice(&backed_up.stdout).unwrap();
+    let backup = backup["backup"].as_str().unwrap().to_owned();
+    let older_primary = fs::read(rig.root.join("spaces.flex")).unwrap();
+    rig.restart(&binary, true, true);
+    let mut bob = socket(&rig.public, &household, Some('b'));
+    mount(&mut bob, &rig.catalog);
+    let ServerMessage::Mounted { state, binding, .. } = read(&mut bob) else {
+        panic!("old mount");
+    };
+    assert_eq!(binding.unwrap().collection, original);
+    let old_replica =
+        canvas::StateAdapter::new(schema(), "app:counter/state", &state, [9; 16]).unwrap();
+    assert_eq!(old_replica.value(1).unwrap(), 42);
+    send(&mut bob, ClientMessage::AcceptMount { epoch: 1 });
+    assert!(matches!(
+        read(&mut bob),
+        ServerMessage::Activated { epoch: 1 }
+    ));
+    let (_, current) = http(&rig.public, "GET", Some('a'), None);
+    let delete = Request {
+        version: 1,
+        expected_generation: current["generation"].as_u64().unwrap(),
+        change: Change::DeleteData {
+            space: household.clone(),
+            app: "counter".into(),
+            collection: original.clone(),
+            remove: false,
+        },
+    };
+    assert_eq!(http(&rig.public, "POST", Some('b'), Some(&delete)).0, 403);
+    // Two separate TCP clients race an ordinary write against serialized deletion.
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let writer_barrier = barrier.clone();
+    let writer = std::thread::spawn(move || {
+        writer_barrier.wait();
+        send(
+            &mut bob,
+            ClientMessage::Sync {
+                epoch: 1,
+                bytes: canvas::encode_state_request(&StateRequest::Write {
+                    sequence: 1,
+                    values: vec![(1, Value::Number(99.))],
+                })
+                .unwrap(),
+            },
+        );
+        bob
+    });
+    barrier.wait();
+    assert_eq!(http(&rig.public, "POST", Some('a'), Some(&delete)).0, 200);
+    let mut bob = writer.join().unwrap();
+    loop {
+        match read(&mut bob) {
+            ServerMessage::AccessRequired { epoch: 1 } => break,
+            ServerMessage::Sync { .. } => (), // the write may commit before deletion
+            other => panic!("revocation: {other:?}"),
+        }
+    }
+    let old_path = rig.root.join(format!("state/collection-{original}.merkle"));
+    assert!(
+        old_path.exists(),
+        "keep files until the reachable host confirms disposal"
+    );
+    let (_, state) = http(&rig.public, "GET", Some('a'), None);
+    let space = state["spaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == household)
+        .unwrap();
+    assert_eq!(space["cleanup"]["local_pending"], 1);
+    assert!(space["cleanup"]["backup_until_unix_ms"].as_u64().is_some());
+    let replacement = space["apps"][0]["collection"].as_str().unwrap().to_owned();
+    assert_ne!(replacement, original);
+    let (_, member) = http(&rig.public, "GET", Some('b'), None);
+    assert!(member["spaces"][0].get("cleanup").is_none());
+    // A stale write cannot recreate the old collection or enter its successor.
+    send(
+        &mut bob,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 2,
+                values: vec![(1, Value::Number(77.))],
+            })
+            .unwrap(),
+        },
+    );
+    send(
+        &mut bob,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: vec![0],
+        },
+    );
+    send(
+        &mut bob,
+        ClientMessage::Mount {
+            epoch: 2,
+            ui_ref: "app:counter/ui".into(),
+            state_ref: "app:counter/state".into(),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![9; 16],
+            resume: 99,
+            collection: Some(original.clone()),
+        },
+    );
+    let ServerMessage::Mounted { state, binding, .. } = read(&mut bob) else {
+        panic!("replacement mount");
+    };
+    assert_eq!(binding.unwrap().collection, replacement);
+    let fresh = canvas::StateAdapter::new(schema(), "app:counter/state", &state, [9; 16]).unwrap();
+    assert_eq!(fresh.value(1).unwrap(), 0);
+    send(&mut bob, ClientMessage::AcceptMount { epoch: 2 });
+    assert!(matches!(
+        read(&mut bob),
+        ServerMessage::Activated { epoch: 2 }
+    ));
+    drop(old_replica);
+    send(&mut bob, ClientMessage::Leave { epoch: 1 });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let (_, state) = http(&rig.public, "GET", Some('a'), None);
+        let space = state["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == household)
+            .unwrap();
+        if space["cleanup"]["local_pending"] == 0 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cleanup did not follow disposal acknowledgement"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!old_path.exists());
+    rig.child(&rig.native, &household, Some('c'), "0");
+    let (_, state) = http(&rig.public, "GET", Some('a'), None);
+    let mut stale_confirmation = delete;
+    stale_confirmation.expected_generation = state["generation"].as_u64().unwrap();
+    assert_eq!(
+        http(&rig.public, "POST", Some('a'), Some(&stale_confirmation)).0,
+        409
+    );
+    assert_eq!(
+        document_session(&rig, &work, "counter", schema(), None).0,
+        73
+    );
+    document_session(&rig, &household, "counter", schema(), Some(5));
+    drop(bob);
+    rig.stop();
+    // Neither an older primary nor an older payload snapshot can resurrect it.
+    fs::write(rig.root.join("spaces.flex"), older_primary).unwrap();
+    let restored = rig.storage_action(&binary, &format!("restore:{backup}"));
+    assert!(
+        restored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &household, "counter", schema(), None),
+        (5, Some(replacement))
+    );
+    assert_eq!(
+        document_session(&rig, &work, "counter", schema(), None).0,
+        73
+    );
+    assert!(!old_path.exists());
+}
+
+#[test]
+fn deleting_chat_stops_all_owned_producers_and_retains_another_spaces_transcript() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let household = rig.space("Chat deletion");
+    let work = rig.space("Retained chat");
+    for space in [&household, &work] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "relay".into(),
+            },
+        );
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: household.clone(),
+            identity: "frame".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let mut alice = socket(&rig.public, &household, Some('a'));
+    let mut frame = socket(&rig.native, &household, Some('c'));
+    let mut retained = socket(&rig.public, &work, Some('a'));
+    chat_mount(&rig, &mut alice, "relay", 1);
+    let (alice_profile, alice_epoch) = chat_join(&mut alice, 1);
+    chat_send(
+        &mut alice,
+        1,
+        alice_epoch,
+        1,
+        "Retired household transcript",
+    );
+    assert_eq!(chat_window(&mut alice, 1, 1).len(), 1);
+    chat_mount(&rig, &mut frame, "relay/other", 1);
+    let (frame_profile, frame_epoch) = chat_join(&mut frame, 1);
+    chat_send(
+        &mut frame,
+        1,
+        frame_epoch,
+        2,
+        "Retired subsidiary transcript",
+    );
+    chat_mount(&rig, &mut retained, "relay", 1);
+    let (_, retained_epoch) = chat_join(&mut retained, 1);
+    chat_send(
+        &mut retained,
+        1,
+        retained_epoch,
+        3,
+        "Independent work transcript",
+    );
+    let (_, before) = http(&rig.public, "GET", Some('a'), None);
+    let space = before["spaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == household)
+        .unwrap();
+    let old = space["apps"][0]["collection"].as_str().unwrap().to_owned();
+    rig.change(
+        'a',
+        Change::DeleteData {
+            space: household.clone(),
+            app: "relay".into(),
+            collection: old.clone(),
+            remove: true,
+        },
+    );
+    for peer in [&mut alice, &mut frame] {
+        assert!(matches!(
+            chat_state(peer),
+            ServerMessage::AccessRequired { epoch: 1 }
+        ));
+    }
+    let path = rig.root.join(format!("state/collection-{old}.data"));
+    assert!(path.exists());
+    // Old chat and collection-window packets are fenced before decoding.
+    chat_command(
+        &mut frame,
+        1,
+        otrios_interfaces::chat::Command::Draft {
+            generation: 1,
+            revision: 1,
+            text: "stale draft".into(),
+        },
+    );
+    for peer in [&mut alice, &mut frame] {
+        send(peer, ClientMessage::Leave { epoch: 1 });
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let (_, current) = http(&rig.public, "GET", Some('a'), None);
+        let space = current["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == household)
+            .unwrap();
+        assert_eq!(space["apps"][0]["attached"], false);
+        if space["cleanup"]["local_pending"] == 0 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !path.exists(),
+        "all owned journals, histories and caches were reclaimed"
+    );
+    chat_send(&mut retained, 1, retained_epoch, 4, "Work continues");
+    let messages = chat_window(&mut retained, 1, 1);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].text, "Independent work transcript");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: household.clone(),
+            app: "relay".into(),
+        },
+    );
+    let (_, first) = chat_mount(&rig, &mut alice, "relay", 2);
+    assert!(first.messages.is_empty());
+    let (new_alice, new_epoch) = chat_join(&mut alice, 2);
+    assert_ne!(new_alice, alice_profile);
+    assert_eq!(
+        chat_send(&mut alice, 2, new_epoch, 5, "Fresh household transcript"),
+        1
+    );
+    let (_, subsidiary) = chat_mount(&rig, &mut frame, "relay/other", 2);
+    assert!(subsidiary.messages.is_empty());
+    assert_ne!(chat_join(&mut frame, 2).0, frame_profile);
+    assert!(
+        !path.exists(),
+        "late producers cannot recreate the tombstoned namespace"
+    );
+}
+
+#[test]
+fn missing_owned_chat_is_unavailable_until_verified_payload_restore() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let space = rig.space("Chat storage repair");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "relay".into(),
+        },
+    );
+    let mut alice = socket(&rig.public, &space, Some('a'));
+    chat_mount(&rig, &mut alice, "relay", 1);
+    let (profile, epoch) = chat_join(&mut alice, 1);
+    chat_send(&mut alice, 1, epoch, 1, "Confirmed before storage repair");
+    drop(alice);
+    let (_, state) = http(&rig.public, "GET", Some('a'), None);
+    let collection = state["spaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == space)
+        .unwrap()["apps"][0]["collection"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.stop();
+    let backup = rig.storage_action(&binary, "backup");
+    assert!(backup.status.success());
+    let backup: Json = serde_json::from_slice(&backup.stdout).unwrap();
+    let path = rig.root.join(format!(
+        "state/collection-{collection}.data/chat-primary.journal"
+    ));
+    fs::remove_file(&path).unwrap();
+    rig.restart(&binary, true, true);
+    let mut rejected = socket(&rig.public, &space, Some('a'));
+    send_spaces(
+        &mut rejected,
+        otrios_interfaces::spaces::Command::Watch {
+            version: 1,
+            observation: 1,
+            selected: Some(space.clone()),
+            cursor: None,
+        },
+    );
+    let otrios_interfaces::spaces::Event::Snapshot { snapshot, .. } = read_spaces(&mut rejected)
+    else {
+        panic!("discovery");
+    };
+    let app = &snapshot.selected.unwrap().apps[0];
+    assert_eq!(
+        app.availability,
+        otrios_interfaces::spaces::AppAvailability::Unavailable
+    );
+    assert!(app.launch.is_none());
+    send(
+        &mut rejected,
+        ClientMessage::Mount {
+            epoch: 1,
+            ui_ref: "app:relay/ui".into(),
+            state_ref: "app:relay/state".into(),
+            catalog_hash: canvas::hash(&rig.catalog),
+            known_ui: None,
+            known_code: vec![],
+            writer: vec![9; 16],
+            resume: 0,
+            collection: Some(collection),
+        },
+    );
+    assert!(matches!(
+        read(&mut rejected),
+        ServerMessage::Error { epoch: 1, .. }
+    ));
+    assert!(
+        !path.exists(),
+        "never replace missing confirmed history with an empty room"
+    );
+    drop(rejected);
+    rig.stop();
+    let restored = rig.storage_action(
+        &binary,
+        &format!("restore:{}", backup["backup"].as_str().unwrap()),
+    );
+    assert!(
+        restored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    rig.restart(&binary, true, true);
+    let mut alice = socket(&rig.public, &space, Some('a'));
+    let (_, initial) = chat_mount(&rig, &mut alice, "relay", 1);
+    assert_eq!(initial.messages.len(), 1);
+    assert_eq!(
+        initial.messages[0].message.text,
+        "Confirmed before storage repair"
+    );
+    assert_eq!(chat_join(&mut alice, 1).0, profile);
 }
