@@ -163,6 +163,7 @@ fn read_epoch(socket: &mut Socket, wanted: u32) -> ServerMessage {
             | ServerMessage::View { epoch, .. }
             | ServerMessage::AccessRequired { epoch }
             | ServerMessage::Error { epoch, .. } => *epoch,
+            ServerMessage::Activated { epoch } => *epoch,
         };
         if epoch == wanted {
             return m;

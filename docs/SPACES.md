@@ -19,7 +19,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v10` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v11` includes a version-1 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when both collection identity and effective
@@ -33,11 +33,21 @@ qualified with its first usable view before acceptance. A missing or invalid
 view rejects the candidate and retains the previous activation. The release
 control v1 opening envelope remains unchanged across this protocol upgrade.
 
+A qualified managed candidate stays invisible until the authority replies to
+AcceptMount with Activated under current policy. Revocation between qualification
+and acceptance clears the staged candidate and cannot produce that acknowledgement.
+Queued activation replies revalidate before delivery. The previous view remains
+visible while qualification/activation is pending; denied, disconnected or locally
+cancelled candidates are discarded. RAM edits made in a reconnecting view during
+the round trip are restored only into the same collection with the same actions.
+Legacy/local mounts retain their existing handshake until explicit cutover.
+
 ## Discovery on the shared session
 
 Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
 use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v10 because v9 peers do not know this channel.
+browser/native state protocol is v11; v10 introduced discovery, and v11 adds the
+managed activation acknowledgement.
 Release discovery remains on its unchanged control v1 envelope.
 
 Watch selects metadata for one Space and includes the previous authority/revision

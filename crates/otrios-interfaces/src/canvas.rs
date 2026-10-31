@@ -266,6 +266,10 @@ pub enum ClientMessage {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerMessage {
+    /// Managed candidates stay invisible until current-policy activation succeeds.
+    Activated {
+        epoch: u32,
+    },
     View {
         epoch: u32,
         bytes: Vec<u8>,

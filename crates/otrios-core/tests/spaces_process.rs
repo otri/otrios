@@ -478,8 +478,20 @@ fn monitoring_collector_has_an_explicit_collection_grant_and_no_human_membership
     };
     let mut human = socket(&rig.public, operations, Some('a'));
     mount_monitoring(&mut human);
-    assert!(matches!(read(&mut human), ServerMessage::Mounted { .. }));
+    let ServerMessage::Mounted {
+        binding: Some(_),
+        initial_view: Some(initial_view),
+        ..
+    } = read(&mut human)
+    else {
+        panic!("complete managed mount")
+    };
+    assert_eq!(initial_view, view);
     send(&mut human, ClientMessage::AcceptMount { epoch: 1 });
+    assert!(matches!(
+        read(&mut human),
+        ServerMessage::Activated { epoch: 1 }
+    ));
     loop {
         if let ServerMessage::View { bytes, .. } = read(&mut human) {
             assert_eq!(bytes, view);
@@ -615,7 +627,7 @@ fn socket(address: &str, space: &str, token: Option<char>) -> Socket {
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v10","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v11","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -903,7 +915,7 @@ fn space_client() {
         assert!(matches!(read(&mut socket), ServerMessage::Error { .. }));
         return;
     }
-    let ServerMessage::Mounted { state, .. } = message else {
+    let ServerMessage::Mounted { state, binding, .. } = message else {
         panic!("mount rejected: {message:?}");
     };
     let mut replica =
@@ -911,6 +923,12 @@ fn space_client() {
     replica.receive(&state).unwrap();
     if mode == "write" {
         send(&mut socket, ClientMessage::AcceptMount { epoch: 1 });
+        if binding.is_some() {
+            assert!(matches!(
+                read(&mut socket),
+                ServerMessage::Activated { epoch: 1 }
+            ));
+        }
         while let Some(bytes) = replica.generate().unwrap() {
             send(&mut socket, ClientMessage::Sync { epoch: 1, bytes });
         }
@@ -937,6 +955,66 @@ fn space_client() {
         assert_eq!(replica.value(1).unwrap(), mode.parse::<u16>().unwrap());
     }
 }
+#[test]
+fn revocation_between_qualification_and_acceptance_cannot_activate_a_staged_collection() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let rig = Rig::start(&binary);
+    let space = rig.space("Launch race");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let mut candidate = socket(&rig.public, &space, Some('b'));
+    mount(&mut candidate, &rig.catalog);
+    assert!(matches!(
+        read(&mut candidate),
+        ServerMessage::Mounted {
+            binding: Some(_),
+            ..
+        }
+    ));
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    send(&mut candidate, ClientMessage::AcceptMount { epoch: 1 });
+    assert!(matches!(
+        read(&mut candidate),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    send(
+        &mut candidate,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 1,
+                values: vec![(1, Value::Number(99.))],
+            })
+            .unwrap(),
+        },
+    );
+    // An activation ack queued ahead of this error would fail the assertion.
+    assert!(matches!(read(&mut candidate), ServerMessage::Error { .. }));
+    rig.child(&rig.public, &space, Some('a'), "0");
+}
+
 #[test]
 fn separate_clients_isolate_spaces_and_never_trust_native_loopback() {
     let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {

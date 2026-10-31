@@ -1057,6 +1057,9 @@ impl Hub {
                     return Err("No matching staged Canvas mount".into());
                 }
                 leases.active = leases.staged.take();
+                if leases.active.as_ref().is_some_and(|l| l.binding.is_some()) {
+                    messages.push(ServerMessage::Activated { epoch });
+                }
             }
             ClientMessage::CancelMount { epoch } => {
                 if leases.staged.as_ref().is_some_and(|l| l.epoch == epoch) {
@@ -1313,6 +1316,7 @@ pub(super) async fn worker(
                 for message in messages {
                     let epoch = match &message {
                         ServerMessage::Mounted { epoch, .. }
+                        | ServerMessage::Activated { epoch }
                         | ServerMessage::Sync { epoch, .. }
                         | ServerMessage::View { epoch, .. }
                         | ServerMessage::AccessRequired { epoch }

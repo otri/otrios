@@ -70,6 +70,12 @@ struct Request {
     sent: bool,
     reconnecting: bool,
 }
+struct Qualified {
+    mount: Mount,
+    reconnecting: bool,
+    code: Vec<u8>,
+    accepted: bool,
+}
 enum MountDecision {
     Accept(u32),
     Cancel(u32),
@@ -158,6 +164,7 @@ pub struct Client {
     decode_budget: DecodeBudget,
     generation: u32,
     requested: Option<Request>,
+    qualified: Option<Qualified>,
     decision: Option<MountDecision>,
     active: Option<Mount>,
     cache: VecDeque<(Vec<u8>, Vec<u8>)>,
@@ -637,7 +644,13 @@ impl Client {
         self.auth_required
     }
     pub fn private(&self) -> bool {
-        self.active.as_ref().is_some_and(|m| m.private)
+        self.active
+            .as_ref()
+            .is_some_and(|m| m.private || m.binding.is_some())
+            || self
+                .qualified
+                .as_ref()
+                .is_some_and(|q| q.mount.private || q.mount.binding.is_some())
     }
     pub fn input_busy(&self) -> bool {
         self.active.as_ref().is_some_and(|m| {
@@ -842,6 +855,7 @@ impl Client {
     }
     pub fn reset_connection(&mut self) {
         self.spaces.reset();
+        self.qualified = None;
         self.chat_disconnected();
         self.decision = None;
         self.auth_required = false;
@@ -911,8 +925,19 @@ impl Client {
         self.navigate("").is_ok()
     }
     pub fn clear_private(&mut self) {
-        if self.private() {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|m| m.private || m.binding.is_some())
+        {
             self.active = None;
+        }
+        self.qualified = None;
+        self.reject_catalog_update();
+        if let Some(request) = self.requested.take()
+            && request.sent
+        {
+            self.decision = Some(MountDecision::Cancel(request.epoch));
         }
         self.auth_required = false;
         self.open_entry();
@@ -931,7 +956,14 @@ impl Client {
         };
         if let Some(decision) = self.decision.take() {
             let message = match decision {
-                MountDecision::Accept(epoch) => ClientMessage::AcceptMount { epoch },
+                MountDecision::Accept(epoch) => {
+                    if let Some(candidate) = &mut self.qualified
+                        && candidate.mount.epoch == epoch
+                    {
+                        candidate.accepted = true;
+                    }
+                    ClientMessage::AcceptMount { epoch }
+                }
                 MountDecision::Cancel(epoch) => ClientMessage::CancelMount { epoch },
             };
             return encode_client(&message).map(Some);
@@ -1008,6 +1040,7 @@ impl Client {
         code: &[u8],
         state: &[u8],
     ) -> Result<bool> {
+        self.qualified = None;
         let description = decode_ui(ui)?;
         self.generation = self.generation.checked_add(1).ok_or("Epoch exhausted")?;
         if self.writer.is_none() {
@@ -1036,6 +1069,21 @@ impl Client {
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
         self.decode_budget.admit(bytes, self.wire_clock)?;
         match decode_server(bytes)? {
+            ServerMessage::Activated { epoch } => {
+                if self.requested.as_ref().is_none_or(|r| r.epoch != epoch)
+                    || self
+                        .qualified
+                        .as_ref()
+                        .is_none_or(|q| q.mount.epoch != epoch)
+                {
+                    return Ok(false);
+                }
+                if !self.qualified.as_ref().is_some_and(|q| q.accepted) {
+                    return Err("Activation before candidate acceptance".into());
+                }
+                let candidate = self.qualified.take().ok_or("Missing qualified candidate")?;
+                self.activate_candidate(candidate.mount, candidate.reconnecting, candidate.code)
+            }
             ServerMessage::View { epoch, bytes } => {
                 let Some(m) = &mut self.active else {
                     return Ok(false);
@@ -1065,6 +1113,9 @@ impl Client {
                     return Ok(false);
                 };
                 if r.epoch != epoch {
+                    return Ok(false);
+                }
+                if self.qualified.is_some() {
                     return Ok(false);
                 }
                 let reconnecting = r.reconnecting;
@@ -1182,7 +1233,7 @@ impl Client {
                     Ok(candidate)
                 })();
                 match candidate {
-                    Ok(mut candidate) => {
+                    Ok(candidate) => {
                         if !candidate.private {
                             // Move the qualified bytes, including on a cache hit.
                             // Repeated mounts must not clone an entire UI document.
@@ -1206,66 +1257,18 @@ impl Client {
                             }
                             self.ui_cache_hits += u64::from(cached);
                         }
-                        if self.previous_catalog.take().is_some()
-                            && self
-                                .active
-                                .as_ref()
-                                .is_some_and(|old| old.binding == candidate.binding)
-                        {
-                            let mut current = self.active.take().ok_or("Missing app activation")?;
-                            if current.ui.behavior != candidate.ui.behavior {
-                                current.behavior = candidate.behavior;
-                            }
-                            current.ui = candidate.ui;
-                            current.layout = candidate.layout;
-                            current.doc = candidate.doc;
-                            current.epoch = candidate.epoch;
-                            current.visible = candidate.visible;
-                            current.view = candidate.view;
-                            current.invalidate();
-                            candidate = current;
-                        }
-                        if reconnecting
-                            && self.active.as_ref().is_some_and(|old| {
-                                old.ui == candidate.ui
-                                    && old.state_ref == candidate.state_ref
-                                    && old.binding == candidate.binding
-                            })
-                        {
-                            let mut current =
-                                self.active.take().ok_or("Missing reconnect activation")?;
-                            current.doc = candidate.doc;
-                            current.epoch = candidate.epoch;
-                            current.session_controls = candidate.session_controls;
-                            current.private_access = candidate.private_access;
-                            if candidate.view.is_some() {
-                                current.view = candidate.view;
-                            }
-                            current.refresh()?;
-                            current.invalidate();
-                            candidate = current;
-                        }
-                        if let Some(reference) = &candidate.ui.behavior
-                            && !code.is_empty()
-                            && !self.cache.iter().any(|v| v.0 == reference.sha256)
-                        {
-                            self.cache.push_back((reference.sha256.clone(), code));
-                            while self.cache.len() > 8 {
-                                self.cache.pop_front();
-                            }
-                        }
-                        if let Some(old) = &mut self.active
-                            && let Some(chat) = &mut old.chat
-                        {
-                            self.collection_cancel = chat.cancel_collection();
-                            self.collection_revoked = true;
-                        }
-                        self.active = Some(candidate);
                         self.decision = Some(MountDecision::Accept(epoch));
-                        self.local = false;
-                        self.requested = None;
-                        self.auth_required = false;
-                        Ok(true)
+                        if candidate.binding.is_some() {
+                            self.qualified = Some(Qualified {
+                                mount: candidate,
+                                reconnecting,
+                                code,
+                                accepted: false,
+                            });
+                            Ok(false)
+                        } else {
+                            self.activate_candidate(candidate, reconnecting, code)
+                        }
                     }
                     Err(e) => {
                         self.reject_catalog_update();
@@ -1313,6 +1316,8 @@ impl Client {
                     return Ok(true);
                 }
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    self.qualified = None;
+                    self.decision = Some(MountDecision::Cancel(epoch));
                     if self.previous_catalog.is_some() {
                         self.reject_catalog_update();
                         self.decision = Some(MountDecision::Cancel(epoch));
@@ -1325,6 +1330,7 @@ impl Client {
             }
             ServerMessage::Error { epoch, message } => {
                 if self.requested.as_ref().is_some_and(|r| r.epoch == epoch) {
+                    self.qualified = None;
                     self.reject_catalog_update();
                     self.decision = Some(MountDecision::Cancel(epoch));
                     self.requested = None;
@@ -1334,6 +1340,81 @@ impl Client {
                 Ok(false)
             }
         }
+    }
+    fn activate_candidate(
+        &mut self,
+        mut candidate: Mount,
+        reconnecting: bool,
+        code: Vec<u8>,
+    ) -> Result<bool> {
+        // Reconnecting views stay editable during the activation round trip.
+        // Capture any later RAM intents only within the same admitted collection.
+        if let Some(old) = &self.active
+            && old.state_ref == candidate.state_ref
+            && old.ui.state_schema == candidate.ui.state_schema
+            && old.binding == candidate.binding
+        {
+            candidate.doc.restore_pending(&old.doc)?;
+            candidate.refresh()?;
+        }
+        if self.previous_catalog.take().is_some()
+            && self
+                .active
+                .as_ref()
+                .is_some_and(|old| old.binding == candidate.binding)
+        {
+            let mut current = self.active.take().ok_or("Missing app activation")?;
+            if current.ui.behavior != candidate.ui.behavior {
+                current.behavior = candidate.behavior;
+            }
+            current.ui = candidate.ui;
+            current.layout = candidate.layout;
+            current.doc = candidate.doc;
+            current.epoch = candidate.epoch;
+            current.visible = candidate.visible;
+            current.view = candidate.view;
+            current.invalidate();
+            candidate = current;
+        }
+        if reconnecting
+            && self.active.as_ref().is_some_and(|old| {
+                old.ui == candidate.ui
+                    && old.state_ref == candidate.state_ref
+                    && old.binding == candidate.binding
+            })
+        {
+            let mut current = self.active.take().ok_or("Missing reconnect activation")?;
+            current.doc = candidate.doc;
+            current.epoch = candidate.epoch;
+            current.session_controls = candidate.session_controls;
+            current.private_access = candidate.private_access;
+            if candidate.view.is_some() {
+                current.view = candidate.view;
+            }
+            current.refresh()?;
+            current.invalidate();
+            candidate = current;
+        }
+        if let Some(reference) = &candidate.ui.behavior
+            && !code.is_empty()
+            && !self.cache.iter().any(|v| v.0 == reference.sha256)
+        {
+            self.cache.push_back((reference.sha256.clone(), code));
+            while self.cache.len() > 8 {
+                self.cache.pop_front();
+            }
+        }
+        if let Some(old) = &mut self.active
+            && let Some(chat) = &mut old.chat
+        {
+            self.collection_cancel = chat.cancel_collection();
+            self.collection_revoked = true;
+        }
+        self.active = Some(candidate);
+        self.local = false;
+        self.requested = None;
+        self.auth_required = false;
+        Ok(true)
     }
     pub fn scene(&self) -> Result<Arc<Scene>> {
         cached_scene(self.active.as_ref().ok_or("No Canvas")?)

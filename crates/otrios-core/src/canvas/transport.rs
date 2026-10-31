@@ -490,6 +490,7 @@ pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()
         ServerMessage::Sync { .. } => 19,
         ServerMessage::AccessRequired { .. } => 20,
         ServerMessage::Error { .. } => 21,
+        ServerMessage::Activated { .. } => 22,
     };
     write(out, tag, |w| match value {
         ServerMessage::View { epoch, bytes } | ServerMessage::Sync { epoch, bytes } => {
@@ -528,7 +529,9 @@ pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()
             }
             Ok(())
         }
-        ServerMessage::AccessRequired { epoch } => w.u32(*epoch),
+        ServerMessage::AccessRequired { epoch } | ServerMessage::Activated { epoch } => {
+            w.u32(*epoch)
+        }
         ServerMessage::Error { epoch, message } => {
             w.u32(*epoch)?;
             w.text(message, 2048)
@@ -583,6 +586,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
                 epoch,
                 message: r.text(2048)?,
             },
+            22 => ServerMessage::Activated { epoch },
             _ => return Err("Unknown Canvas server tag".into()),
         };
         Ok(message)
@@ -749,6 +753,7 @@ mod tests {
             check_roundtrip(&value, encode_client, decode_client);
         }
         for value in [
+            ServerMessage::Activated { epoch: 1 },
             ServerMessage::View {
                 epoch: 1,
                 bytes: vec![1; 256],

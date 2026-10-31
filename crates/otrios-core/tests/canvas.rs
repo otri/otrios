@@ -1387,7 +1387,7 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
 #[test]
 fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions() {
     for (same_collection, editable, expected) in
-        [(true, true, 800), (false, true, 420), (true, false, 420)]
+        [(true, true, 700), (false, true, 420), (true, false, 420)]
     {
         let code = code();
         let ui = playground::ui(&code);
@@ -1404,6 +1404,7 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
             })
         };
         let remount = |client: &mut Client, binding, expected_hint| {
+            let old_epoch = client.epoch();
             client.reset_connection();
             let ClientMessage::Mount {
                 epoch, collection, ..
@@ -1412,6 +1413,7 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
                 panic!("mount")
             };
             assert_eq!(collection, expected_hint);
+            let returning = expected_hint.is_some();
             let bytes = encode_ui(&ui).unwrap();
             client
                 .receive(
@@ -1427,13 +1429,27 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
                     .unwrap(),
                 )
                 .unwrap();
+            assert_eq!(
+                client.epoch(),
+                old_epoch,
+                "qualified candidate is not yet visible"
+            );
+            assert!(
+                matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::AcceptMount { epoch: accepted } if accepted == epoch)
+            );
+            if returning {
+                edit(client, "Linear slider", 730, 0);
+                assert_eq!(
+                    client.value(1).unwrap(),
+                    700,
+                    "current reconnecting view remains editable until activation"
+                );
+            }
+            client
+                .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+                .unwrap();
         };
         remount(&mut client, binding("a", true), None);
-        // Consume Accept before creating an unconfirmed preview.
-        assert!(matches!(
-            decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
-            ClientMessage::AcceptMount { .. }
-        ));
         edit(&mut client, "Linear slider", 870, 0);
         assert_eq!(client.value(1).unwrap(), 800);
         remount(
@@ -1448,6 +1464,144 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
             edit(&mut client, "Linear slider", 100, 0);
             assert_eq!(client.value(1).unwrap(), 420);
             assert!(client.confirmed());
+        }
+    }
+}
+
+#[test]
+fn managed_candidates_remain_invisible_until_activation_and_are_discarded_on_denial_or_disconnect()
+{
+    for finish in ["activate", "deny", "disconnect", "logout"] {
+        let code = code();
+        let ui = playground::ui(&code);
+        let mut client = Client::default();
+        activate(&mut client, ui.clone(), "candidate-race", code.clone());
+        let old_epoch = client.epoch();
+        let old_scene = client.scene().unwrap();
+        client.reset_connection();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        let mut state = Document::new(ui.state_schema.clone(), "candidate-race").unwrap();
+        state.set(&[(1, 999)]).unwrap();
+        let bytes = encode_ui(&ui).unwrap();
+        assert!(
+            !client
+                .receive(
+                    &encode_server(&ServerMessage::Mounted {
+                        epoch,
+                        ui_hash: hash(&bytes),
+                        ui: bytes,
+                        code,
+                        state: state.save().unwrap(),
+                        binding: Some(MountBinding {
+                            version: 1,
+                            collection: "a".repeat(32),
+                            editable: true,
+                            comments: false,
+                            moderate: false
+                        }),
+                        initial_view: None,
+                    })
+                    .unwrap()
+                )
+                .unwrap()
+        );
+        assert_eq!(client.epoch(), old_epoch);
+        assert_eq!(client.value(1).unwrap(), 420);
+        assert!(std::sync::Arc::ptr_eq(&old_scene, &client.scene().unwrap()));
+        assert!(!client.confirmed());
+        // Even a well-formed acknowledgement cannot precede local acceptance.
+        let activated = encode_server(&ServerMessage::Activated { epoch }).unwrap();
+        assert!(client.receive(&activated).is_err());
+        assert!(
+            matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::AcceptMount { epoch: accepted } if accepted == epoch)
+        );
+        match finish {
+            "activate" => {
+                assert!(client.receive(&activated).unwrap());
+                assert_eq!(client.epoch(), epoch);
+                assert_eq!(client.value(1).unwrap(), 999);
+                assert!(!client.receive(&activated).unwrap());
+            }
+            "deny" => {
+                client
+                    .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
+                    .unwrap();
+                assert!(client.auth_required());
+            }
+            "disconnect" => client.reset_connection(),
+            "logout" => client.clear_private(),
+            _ => unreachable!(),
+        }
+        if finish != "activate" {
+            assert!(!client.receive(&activated).unwrap());
+            assert_eq!(client.epoch(), old_epoch);
+            assert_eq!(client.value(1).unwrap(), 420);
+            assert!(std::sync::Arc::ptr_eq(&old_scene, &client.scene().unwrap()));
+        }
+    }
+}
+
+#[test]
+fn managed_aggregate_candidates_require_a_usable_initial_view_before_acceptance() {
+    for view in [
+        None,
+        Some(vec![255]),
+        Some(
+            authoring::AppUi::new("feed", "Feed", authoring::schema("empty", &[]))
+                .build("Qualified aggregate", vec![])
+                .layout,
+        ),
+    ] {
+        let ui = monitoring_app::ui(&[]);
+        let mut client = Client::default();
+        activate_access(&mut client, ui.clone(), "aggregate-candidate", vec![], true);
+        let previous = client.scene().unwrap();
+        let old_epoch = client.epoch();
+        client.reset_connection();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        let bytes = encode_ui(&ui).unwrap();
+        let usable = view.as_ref().is_some_and(|v| v.len() > 1);
+        let result = client.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 1,
+                    collection: "b".repeat(32),
+                    editable: false,
+                    comments: false,
+                    moderate: false,
+                }),
+                initial_view: view,
+            })
+            .unwrap(),
+        );
+        assert_eq!(client.epoch(), old_epoch);
+        assert!(std::sync::Arc::ptr_eq(&previous, &client.scene().unwrap()));
+        let decision = decode_client(&client.outgoing().unwrap().unwrap()).unwrap();
+        if usable {
+            assert!(!result.unwrap());
+            assert!(matches!(decision, ClientMessage::AcceptMount { .. }));
+            assert!(
+                client
+                    .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+                    .unwrap()
+            );
+            assert!(format!("{:?}", client.scene().unwrap()).contains("Qualified aggregate"));
+        } else {
+            assert!(result.is_err());
+            assert!(matches!(decision, ClientMessage::CancelMount { .. }));
         }
     }
 }
