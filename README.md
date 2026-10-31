@@ -38,13 +38,62 @@ see [maintenance](docs/MAINTENANCE.md) for scope and builder checks.
 
 | Path | Purpose | License |
 | --- | --- | --- |
-| `crates/otrios-core` | Covered runtime implementation | LGPL-3.0-only |
-| `crates/otrios-interfaces` | Experimental shared contract types | Apache-2.0 |
-| `crates/otrios-sdk` | Client-facing SDK, currently contract reexports | Apache-2.0 |
-| `crates/otrios-dashboard` | Thin native/browser hosts and demo sync server | Apache-2.0 |
-| `web/canvas` | Browser host for the shared compositor | Apache-2.0 |
-| `interfaces` | IDL requirements before choosing a generator | Apache-2.0 |
-| `docs` | Architecture, RFCs, experiment evidence, and development guides | Apache-2.0 |
+| [apps/](apps/README.md) | App manifests, declarative UI, state schemas and optional Wasm reducers; includes Home and Monitoring | Apache-2.0 |
+| [tools/canvas/](tools/canvas) | App authoring helpers and reusable UI components | Apache-2.0 |
+| [crates/otrios-core/](crates/otrios-core) | Runtime implementation: Canvas, layout/compositor, Merkle state, collections and bundle validation | LGPL-3.0-only |
+| [crates/otrios-interfaces/](crates/otrios-interfaces) | Shared contracts and wire types | Apache-2.0 |
+| [crates/otrios-sdk/](crates/otrios-sdk) | Client-facing SDK, currently contract reexports | Apache-2.0 |
+| [crates/otrios-dashboard/](crates/otrios-dashboard) | Authority server, native host, app packer and bundle CLI | Apache-2.0 |
+| [crates/otrios-linux-display/](crates/otrios-linux-display) | Linux DRM/GBM/EGL display and device integration | Apache-2.0 |
+| [crates/otrios-web-host/](crates/otrios-web-host) | Wasm bindings for the shared runtime | Apache-2.0 |
+| [web/canvas/](web/canvas) and [web/shared/](web/shared) | Browser shell, worker, rendering adapters, session and artifact transport | Apache-2.0; third-party files retain their notices |
+| [scripts/](scripts) | Checks, packaging, signed publication, app installation, deployment and probes | Apache-2.0 |
+| [tools/dashboard/](tools/dashboard) | Frame service definitions and host provisioning files | Apache-2.0 |
+| [interfaces/](interfaces) | IDL requirements before choosing a generator | Apache-2.0 |
+| [docs/](docs/README.md) | Current guides, RFCs, milestone history and qualification evidence | Apache-2.0 |
+
+Useful entry points are [canvas_bundle.rs](crates/otrios-dashboard/src/canvas_bundle.rs)
+for package export/signing and Home composition,
+[install-app.py](scripts/install-app.py) for installing/removing signed apps,
+[watch-dashboard.py](scripts/watch-dashboard.py) for complete builds, and
+[deploy-dashboard-frame.py](scripts/deploy-dashboard-frame.py) for Frame transfer.
+Generated Cargo/build outputs live under ignored `target/`; they are not app source.
+
+## Live system map
+
+The **Frame** owns the authority and durable app state. It also runs the native
+display and the public HTTPS tunnel. The **Mac** builds and signs releases; it is
+not the live state server. The **browser** loads the shared Wasm runtime and keeps
+its unconfirmed edits in RAM. See [Frame hosting](docs/FRAME_HOSTING.md) for operation.
+
+| Location | Contents |
+| --- | --- |
+| Frame: `/opt/otrios-authority/` | Authority and Monitoring binaries, bundle checker and management helpers |
+| Frame: `/opt/otrios-dashboard/` | Native supervisor and session bootstrap helper |
+| Frame: `/etc/otrios-authority/` | Private service/auth/tunnel configuration and publisher public key |
+| Frame: `/etc/otrios-dashboard.conf` | Native host endpoints; touch calibration remains in `/etc/udev/rules.d/99-spd-touch.rules` |
+| Frame: `/var/lib/otrios-authority/releases/current.json` | Pointer to the complete active signed release |
+| Frame: `/var/lib/otrios-authority/releases/<release-id>/authority/bundles/` | Installed `.otapp` trees, including private apps; the release also carries the catalog and host assets |
+| Frame: `/var/lib/otrios-authority/state.apps/` | Durable app checkpoints and journals, separate from bundles |
+| Frame: `/var/lib/otrios-authority/state.presentation.flex` | Latest complete Monitoring presentation |
+| Frame: `/var/lib/otrios-dashboard/` | Disposable native release cache and `last-good.json` |
+| Frame: `/run/otrios-direct-console/otrios/` | Ephemeral native readiness reports, update sockets and first-frame capture |
+| Frame: `/root/.bashrc` and `/root/.inputrc` | Interactive SSH prompt, aliases and completion preferences |
+| Mac: `~/Library/Application Support/OTriOSDashboard/` | Private builder config, source inbox, build outputs, signing publisher and signed release staging |
+
+`/Applications` and `/PrivateApplications` are the proposed system namespaces in
+[RFC 0025](docs/rfcs/0025-standalone-app-bundles.md#designated-application-roots).
+They are **not live Linux directories yet**; use the release-store path above to
+find installed bundles today.
+
+With a local `frame` SSH alias configured, connect and inspect the services with:
+
+```sh
+ssh frame
+systemctl status otrios-authority otrios-dashboard-direct otrios-tunnel
+journalctl -u otrios-authority -u otrios-dashboard-direct --since today
+cat /var/lib/otrios-authority/releases/current.json
+```
 
 Start with [the PoC plan](docs/POC.md), [architecture](docs/ARCHITECTURE.md), and [development instructions](AGENTS.md). Follow the [contribution instructions](CONTRIBUTING.md) for scoped changes and review.
 
