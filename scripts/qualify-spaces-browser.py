@@ -50,7 +50,7 @@ def qualify(args):
         root = pathlib.Path(temporary)
         subprocess.run([str(args.bin_dir / 'examples/bundle_counter'), str(root / 'apps')], check=True, stdout=subprocess.DEVNULL)
         subprocess.run([str(args.bin_dir / 'examples/space_ink_probe'), str(root / 'apps')], check=True)
-        subprocess.run([str(args.bin_dir / 'examples/space_chat_probe'), str(root / 'apps')], check=True)
+        subprocess.run([str(args.bin_dir / 'examples/space_chat_probe'), str(root / 'apps'), str(root / 'state/brass-relay.journal')], check=True)
         shutil.copytree(REPO / 'web/canvas', root / 'web', ignore=shutil.ignore_patterns('pkg'))
         shutil.copytree(REPO / 'web/shared', root / 'shared')
         shutil.copytree(args.wasm_pkg, root / 'web/pkg')
@@ -68,8 +68,8 @@ def qualify(args):
             for name in ['alice', 'bob']], 'native': [
                 {'identity': 'alice', 'token_sha256': digest(('a' * 64).encode())}]}))
         private(root / 'admin.identity', 'a' * 64)
-        private(root / 'provision.json', json.dumps({'version': 1, 'spaces': [
-            {'name': 'Browser A', 'admins': ['alice'], 'members': ['bob'], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}, {'id': 'brass-relay'}]},
+        private(root / 'provision.json', json.dumps({'version': 2, 'spaces': [
+            {'name': 'Browser A', 'admins': ['alice'], 'members': ['bob'], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}, {'id': 'brass-relay', 'legacy_chat_root': 'app:brass-relay/state'}]},
             {'name': 'Browser B', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}, {'id': 'brass-relay'}]}]}))
         command = [str(args.bin_dir / 'dashboard-server'), '--apps', str(root / 'apps'),
                    '--app-state', str(root / 'state'), '--spaces-registry', str(root / 'spaces.flex')]
