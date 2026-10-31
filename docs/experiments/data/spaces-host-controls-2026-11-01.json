@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "initial": 0,
+  "value": 3,
+  "shared": 1,
+  "isolated": 0,
+  "anonymousDenied": true,
+  "nonMemberDenied": true,
+  "activeRevoked": true,
+  "remainingMemberContinues": true,
+  "quitPreservesData": true,
+  "quitLeavesOtherParticipantEditing": true,
+  "removeRevokesAnotherClient": true,
+  "retainedDataVisible": true,
+  "reattachPreservesCollectionAndValue": true,
+  "spacePickerSwitchesScope": true,
+  "source": "fa29e9aa0b7778cd73d066ffb812b24e09e75350",
+  "sourceDirty": false,
+  "authoritySha256": "f974ffa6ef75d14f635c754877d3778a76ee5aeee695fd70edf1695b3adfa4c0",
+  "wasmSha256": "59fcd1dd87df44902a7f10b3c8a4a14b055fe806d5a6ca8bb3b598910c027be9",
+  "release": "fca200cf1d69730981343847a9e98c625ead1e4e921ab63162be0afec2c02835",
+  "browserIdentities": "cookie sessions in isolated browser contexts",
+  "hello": {
+    "version": 1,
+    "state_protocol": "otrios-canvas-sync-v11"
+  },
+  "runtimeErrors": []
+}

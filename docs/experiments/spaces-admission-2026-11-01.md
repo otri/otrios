@@ -111,3 +111,33 @@ Restoring compatible code reopens the original identities and values. Browser
 qualification retains the existing separate-client admission checks; the
 multi-document/migration scenario is authority process evidence. Frame and the
 remaining lifecycle controls are still pending.
+
+## Shared host controls and retained removal checkpoint
+
+Clean source `fa29e9aa0b7778cd73d066ffb812b24e09e75350` passed the full
+`scripts/check.sh` suite and rebuilt Chromium qualification with zero runtime
+exceptions. The [report](data/spaces-host-controls-2026-11-01.json) identifies the
+source, authority/Wasm bytes and signed disposable fixture. State protocol v11
+and release-control v1 remain unchanged.
+
+Sixteen covered Space tests, nine host UI tests and eight real authority process
+scenarios pass. The UI checks cover role-filtered controls, responsive bounds,
+local-only forms, stale roster redaction, publisher/host action separation,
+confirmation before Quit, reconnect denial and Home/discovery ordering. The
+process scenarios prove removal revokes an active client, preserves Admin-visible
+data and restores the same collection/value after restart and reattachment.
+Configured collector principals cannot create Spaces or acquire human roles.
+The ten native owner tests also pass, including held-frame revocation and the
+Space-selection helper; these are adapter tests without physical Frame hardware.
+
+The browser probe uses the shared host controls to Quit while another participant
+continues editing, remove the app and revoke that participant, inspect retained
+data, reattach the original collection/value, and switch to the isolated second
+Space. Space A ends at 3 while Space B remains 0.
+
+![Admin-visible retained app data](data/spaces-retained-data-2026-11-01.png)
+
+An intermediate full run encountered a connection reset in the existing
+release-bootstrap integration test. Its isolated rerun and the final complete
+suite passed. Local uninstall, collection-owned auxiliary channels, durable
+deletion, public sharing and physical Frame deployment remain pending.
