@@ -81,10 +81,11 @@ its unconfirmed edits in RAM. See [Frame hosting](docs/FRAME_HOSTING.md) for ope
 | Frame: `/root/.bashrc` and `/root/.inputrc` | Interactive SSH prompt, aliases and completion preferences |
 | Mac: `~/Library/Application Support/OTriOSDashboard/` | Private builder config, source inbox, build outputs, signing publisher and signed release staging |
 
-`/Applications` and `/PrivateApplications` are the proposed system namespaces in
-[RFC 0025](docs/rfcs/0025-standalone-app-bundles.md#designated-application-roots).
-They are **not live Linux directories yet**; use the release-store path above to
-find installed bundles today.
+`/Applications` is the proposed installed-bundle namespace. The
+[Spaces RFC draft](docs/rfcs/0027-spaces-and-app-data.md) replaces the earlier
+`/PrivateApplications` proposal with Space membership and audience policy.
+`/Applications` is **not a live Linux directory yet**; use the release-store path
+above to find installed bundles today. Spaces are not implemented yet.
 
 With a local `frame` SSH alias configured, connect and inspect the services with:
 
