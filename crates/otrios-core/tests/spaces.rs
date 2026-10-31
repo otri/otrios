@@ -138,7 +138,7 @@ fn serialized_admin_race_and_member_denial_preserve_last_admin() {
 }
 
 #[test]
-fn policy_changes_and_removal_revoke_old_bindings_reattach_preserves_data() {
+fn revocation_is_scoped_and_removal_reattach_preserves_data() {
     let mut r = fixture();
     let space = r.spaces[0].id.clone();
     let old = attach(&mut r, &space);
@@ -153,7 +153,7 @@ fn policy_changes_and_removal_revoke_old_bindings_reattach_preserves_data() {
     );
     assert_eq!(
         spaces::authorize(&r, Some("alice"), &old, Operation::Read),
-        Err(Error::Denied)
+        Ok(())
     );
     let current = spaces::bind(&r, Some("bob"), &space, "notes", &policy().schema).unwrap();
     spaces::authorize(&r, Some("bob"), &current, Operation::Edit).unwrap();
@@ -430,4 +430,85 @@ fn old_bindings_cannot_bypass_current_installed_schema_or_closed_only_policy() {
         spaces::authorize_installed(&r, Some("alice"), &b, Operation::Edit, &readonly),
         Err(Error::Denied)
     );
+}
+
+#[test]
+fn removing_and_readmitting_a_member_cannot_reactivate_their_previous_mount() {
+    let mut r = fixture();
+    let space = r.spaces[0].id.clone();
+    attach(&mut r, &space);
+    change(
+        &mut r,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let old = spaces::bind(&r, Some("bob"), &space, "notes", &policy().schema).unwrap();
+    let admin = spaces::bind(&r, Some("alice"), &space, "notes", &policy().schema).unwrap();
+    change(
+        &mut r,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    change(
+        &mut r,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    assert_eq!(
+        spaces::authorize(&r, Some("bob"), &old, Operation::Read),
+        Err(Error::Denied)
+    );
+    spaces::authorize(&r, Some("alice"), &admin, Operation::Edit).unwrap();
+    let fresh = spaces::bind(&r, Some("bob"), &space, "notes", &policy().schema).unwrap();
+    spaces::authorize(&r, Some("bob"), &fresh, Operation::Edit).unwrap();
+}
+
+#[test]
+fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
+    let path = std::env::temp_dir().join(format!("otrios-spaces-legacy-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    let file = path.join("registry.flex");
+    let mut value = serde_json::to_value(fixture()).unwrap();
+    for space in value["spaces"].as_array_mut().unwrap() {
+        for member in space["members"].as_array_mut().unwrap() {
+            member.as_object_mut().unwrap().remove("joined_generation");
+        }
+    }
+    let payload = flexbuffers::to_vec(&value).unwrap();
+    let mut bytes = b"OTSP1".to_vec();
+    bytes.extend(otrios_core::canvas::hash(&payload));
+    bytes.extend(payload);
+    std::fs::write(&file, bytes).unwrap();
+    let mut store = Store::open(file.clone()).unwrap();
+    let r = store.registry().unwrap();
+    assert_eq!(r.spaces[0].members[0].joined_generation, 0);
+    let space = r.spaces[0].id.clone();
+    store
+        .commit(
+            "alice",
+            &request(
+                r,
+                Change::Membership {
+                    space,
+                    identity: "bob".into(),
+                    role: Some(Role::Member),
+                },
+            ),
+            None,
+        )
+        .unwrap();
+    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP2");
+    std::fs::remove_dir_all(path).unwrap();
 }

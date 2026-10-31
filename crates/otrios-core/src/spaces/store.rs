@@ -23,7 +23,7 @@ pub fn encode(registry: &Registry) -> Result<Vec<u8>> {
     if payload.len() > MAX_REGISTRY_BYTES {
         return Err(Error::Capacity);
     }
-    let mut bytes = b"OTSP1".to_vec();
+    let mut bytes = b"OTSP2".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -31,7 +31,7 @@ pub fn encode(registry: &Registry) -> Result<Vec<u8>> {
 pub fn decode(bytes: &[u8]) -> Result<Registry> {
     if bytes.len() < 40
         || bytes.len() > MAX_REGISTRY_BYTES + 37
-        || &bytes[..5] != b"OTSP1"
+        || !matches!(&bytes[..5], b"OTSP1" | b"OTSP2")
         || crate::canvas::hash(&bytes[37..]) != bytes[5..37]
     {
         return Err(Error::Invalid);

@@ -30,6 +30,10 @@ pub enum Audience {
 pub struct Member {
     pub identity: String,
     pub role: Role,
+    /// Current continuous membership interval. Zero is an older registry member;
+    /// live authority-issued bindings are RAM-only and renewed after restart.
+    #[serde(default)]
+    pub joined_generation: u64,
 }
 
 /// Admitted installed-app policy, supplied by the host after bundle verification.

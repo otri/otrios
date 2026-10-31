@@ -96,7 +96,10 @@ pub fn validate(registry: &Registry) -> Result<()> {
         }
         let mut members = BTreeSet::new();
         for m in &s.members {
-            if !valid_identity(&m.identity) || !members.insert(&m.identity) {
+            if !valid_identity(&m.identity)
+                || !members.insert(&m.identity)
+                || m.joined_generation > s.admission_epoch
+            {
                 return Err(Error::Invalid);
             }
         }
@@ -165,6 +168,7 @@ pub fn apply(
             members: vec![Member {
                 identity: actor.into(),
                 role: Role::Admin,
+                joined_generation: epoch,
             }],
             apps: vec![],
             admission_epoch: epoch,
@@ -194,6 +198,11 @@ pub fn apply(
                 if !valid_identity(identity) {
                     return Err(Error::Invalid);
                 }
+                let joined = s
+                    .members
+                    .iter()
+                    .find(|m| &m.identity == identity)
+                    .map_or(epoch, |m| m.joined_generation);
                 s.members.retain(|m| &m.identity != identity);
                 if let Some(role) = requested {
                     if s.members.len() == MAX_MEMBERS {
@@ -202,6 +211,7 @@ pub fn apply(
                     s.members.push(Member {
                         identity: identity.clone(),
                         role: *role,
+                        joined_generation: joined,
                     });
                 }
                 if !s.members.iter().any(|m| m.role == Role::Admin) {
@@ -333,8 +343,15 @@ pub fn authorize(
                 && a.policy.schema == binding.schema
         })
         .ok_or(Error::Denied)?;
-    if s.admission_epoch != binding.admission_epoch
+    let membership = s
+        .members
+        .iter()
+        .find(|m| Some(m.identity.as_str()) == identity);
+    if binding.admission_epoch == 0
+        || binding.admission_epoch > s.admission_epoch
         || a.attachment_epoch != binding.attachment_epoch
+        || (s.admission_epoch != binding.admission_epoch
+            && membership.is_none_or(|m| m.joined_generation > binding.admission_epoch))
     {
         return Err(Error::Denied);
     }

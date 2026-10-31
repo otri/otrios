@@ -33,6 +33,15 @@ browser qualification. `scripts/check.sh` supplies its freshly built authority t
 `otrios-core/tests/spaces_process.rs`. Its test-only `tungstenite` dependency reuses
 the pinned workspace WebSocket client; it adds no runtime dependency.
 
+For real-browser qualification, build the authority, `bundle_counter` example and
+Wasm package from the tested revision, then run
+`python3 scripts/qualify-spaces-browser.py --wasm-pkg /ABS/BUILT/pkg`. The probe uses
+disposable data and signing keys, normal sign-in and separate Chromium cookie
+contexts. It checks shared edits, Space isolation, anonymous/non-Member denial,
+active revocation and continued use by an unaffected Member. Reports include the
+source revision, dirty-tree status and artifact digests. The fixture has no native
+artifact; it does not establish ARM execution or Frame deployment acceptance.
+
 ## Identity configuration
 
 The mode-0600 authority auth file additionally accepts version 1 with up to 64
@@ -163,6 +172,12 @@ the compatible retained collection, while requiring a fresh binding. Quit and
 device uninstall do not mutate this registry. Schema incompatibility rejects
 reattachment without changing the retained collection.
 
+Members retain the generation at which their continuous membership began. A
+membership change revokes the removed participant while leaving uninterrupted
+Members' mounts usable. Removing and readmitting someone starts a new interval;
+their earlier mount cannot reactivate. Older registry members default to interval
+zero on recovery; live bindings are RAM-only and always renewed after restart.
+
 Read, Edit, Comment and Moderate are distinct runtime operations. Public read
 does not imply editing. Visitor comments require a verified identity and public
 comment policy; moderation requires membership. An app can disallow editing or
@@ -171,11 +186,16 @@ Space rejects attachment of a closed-only app.
 
 ## Persistence
 
-The native Store writes `OTSP1`, a 32-byte SHA-256 payload digest, and a FlexBuffers
+The native Store writes `OTSP2`, a 32-byte SHA-256 payload digest, and a FlexBuffers
 Registry. Collections are encoded as bounded vectors, not unbounded map keys.
 Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
+
+Recovery also accepts the initial `OTSP1` prototype, defaulting older members'
+continuous-membership generation to zero. The next commit writes `OTSP2`; older
+prototype writers reject it. Rollback must use a reader/writer that supports this
+framing and the current admission rules. Management request version 1 is unchanged.
 
 A commit builds a private candidate, writes a mode-0600 temporary file, syncs it,
 renames it over the registry and syncs the containing directory before publication.
