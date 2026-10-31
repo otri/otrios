@@ -72,3 +72,15 @@ aggregate view before candidate acceptance. Added runtime tests distinguish
 same-collection pending-intent recovery from replacement-collection or read-only
 admission, and prove read admission cannot allocate writer receipts or gain write
 capability. This checkpoint also remains local qualification only.
+
+## Shared-session discovery checkpoint
+
+Clean source `9f94f26142c1280fa7e3b649704fa352072abebb` passed the full
+`scripts/check.sh` suite, 14 direct Node session tests, and the rebuilt Chromium
+probe with zero runtime exceptions. The [v10 report](data/spaces-discovery-2026-11-01.json)
+records its exact artifacts. Added covered checks exercise metadata filtering,
+the maximum-size snapshot, malformed management frames and lost-reply recovery
+without management replay. A real shared-session scenario races initial capture
+with attachment, observes subsequent changes, rejects Member management and
+removes a revoked Member's closed-Space metadata. This qualifies the channel and
+host adapters; shared Apps & Data controls and physical Frame remain pending.
