@@ -264,3 +264,34 @@ pointer/capture sequence. No ink runtime change was needed for this correction.
 Explicit import of pre-Space chat history, device-local uninstall, durable
 deletion and public sharing remain pending. This checkpoint makes no v13 ARM,
 physical Frame or live-cutover claim.
+
+## Explicit legacy chat migration checkpoint
+
+Runtime source `c16f588bf4651119526c59e40e106808bf33de4e` passed the full
+`bash scripts/check.sh` suite, including thirteen top-level Space process tests
+(twelve authority scenarios plus the child helper). Two added migration scenarios
+cover 70 confirmed legacy messages, older-window reads, source ownership across
+processes, torn-tail recovery, independent fresh roots/Spaces, subsequent confirmed
+writes, restart and no membership regrant. Missing/corrupt sources, conflicting
+destinations and missing completed destinations fail without empty replacement.
+Pending provisioning keeps admission unavailable after failure.
+
+Chat import requires manifest version 2; v1 with an import declaration is rejected
+before provisioning starts. A completed private import receipt validates the
+current destination without replaying old data, including when the old source is
+gone. Historical sender snapshots remain intact while an admitted Frame identity
+gets its own profile.
+
+Clean source `53ce0c5c12395f07e076ceaaca848a5caa52ea34` adds the migration browser
+fixture. Its example passed targeted strict Clippy/build checks, and the fixture
+tools passed syntax checks and real Chromium acceptance. The
+[report](data/spaces-chat-migration-2026-11-01.json) records zero runtime exceptions,
+exact artifacts and the signed disposable fixture. Both Members see the imported
+legacy message in Space A; Space B receives none of that history. The probe also
+repeats live sharing, Quit, removal and reattachment. Runtime/browser state
+protocol v13 and release-control v1 are unchanged.
+
+![Imported legacy message retained after reattachment](data/spaces-chat-migration-2026-11-01.png)
+
+Device-local uninstall, permanent deletion and public sharing remain unfinished.
+This is local process/browser migration evidence, not physical Frame acceptance.
