@@ -548,3 +548,32 @@ No Worker or DOM prototype is replaced by the harness.
 ![Fresh transcript after deletion](data/spaces-deletion-fresh-chat-v14.png)
 
 Physical Frame and current ARM qualification remain separate outstanding checks.
+
+
+## S3 ARMv7 process qualification
+
+The isolated Rust 1.90 builder compiled the clean source
+`21c13c78337a4ccdd8cbbc327aac8326ff1e661f` for ARMv7 hard-float, using the configured
+`arm-linux-gnueabihf-gcc`/`ar` toolchain. Five unsigned artifacts are retained locally
+under `target/dashboard-armv7/checkpoint-21c13c7`:
+
+| Program | SHA-256 |
+| --- | --- |
+| dashboard-direct | `da0d97c45bdf4a9078197d1233562093b70e4cee57ee9707e29534529b97a70b` |
+| dashboard-server | `412bfa6d94bb2ccfba2e622ba07e157833e5a1d0d547212a46f1876489c6cffb` |
+| dashboard-monitoring | `7a8562bcd58ab80da79b7db8c40551cd1f668dcfb0bff2edccc23171f4ff1702` |
+| session-bootstrap | `5db52cd4f1c8833b6d02840b489eb2e2714487385ed5e5b9f64d40d83bb1cd93` |
+| canvas-pack | `22c7ca891e228f5f9cf19994e7bb095195b15e15cc5a3d7edcf528de8d25f8b9` |
+
+A native x86_64 process driver built in the same compatible container runs the
+ARM authority through `qemu-arm -L /`. All nineteen process tests pass with two
+concurrent tests, including write/delete ordering, disposal-gated reclamation,
+chat/subsidiary roots, migration, native-listener identity enforcement and fenced
+payload restore. The optional older-writer environment variable was absent in
+this ARM run; the actual OTSP4 rollback refusal is separately covered by the
+required x86 check 32.
+
+This does not qualify direct display/touch hardware, the live Frame filesystem,
+its SSH identity, signed release trust or a physical rollout. S3 software/browser
+and emulated-authority checks are complete; physical Frame acceptance is pending.
+S4 implementation is the next independent milestone.
