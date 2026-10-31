@@ -435,18 +435,21 @@ Space rejects attachment of a closed-only app.
 
 ## Persistence
 
-The native Store writes `OTSP4`, a 32-byte SHA-256 payload digest, and a bounded
+The native Store writes `OTSP5`, a 32-byte SHA-256 payload digest, and a bounded
 FlexBuffers record containing the registry, a stable authority-root identity and
-its paired app-storage path. Collections are bounded vectors, not unbounded map keys.
+its paired app-storage path and migration-original retention decisions. The
+registry remains bounded at 2 MiB; attribution metadata adds at most 2 MiB and
+the private record has an additional 8 KiB framing/path budget. Collections are
+bounded vectors, not unbounded map keys.
 Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
 
-Recovery upgrades `OTSP1`, `OTSP2` and `OTSP3` registries while preserving their decisions;
+Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3` and `OTSP4` registries while preserving their decisions;
 the initial prototype defaults older members' continuous-membership generation
 to zero. The upgrade writes the latest decision ledger before replacing the
-primary. Older writers reject `OTSP4`, including OTSP3 writers that cannot honor
-an incomplete payload restore. Rollback must use a reader/writer that
+primary. Older writers reject `OTSP5`, including writers that cannot honor
+an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
 supports this framing and the current admission rules. Management request version
 1, state protocol v13 and release-control v1 are unchanged by this storage upgrade.
 
@@ -509,6 +512,7 @@ dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRI
 dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage list
 dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage restore:BACKUP_ID
 dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage prune
+dashboard-server --spaces-registry /ABS/PRIVATE/spaces.flex --app-state /ABS/PRIVATE/state.apps --spaces-storage finalize-legacy
 ```
 
 These actions finish without opening listeners or loading app execution. Pending
@@ -550,10 +554,24 @@ reclaimed; an interrupted published plan resumes idempotently. `--spaces-storage
 resume` also completes a pending plan. Code rollback keeps payloads and current
 control metadata; payload restore is a separate explicit maintenance action.
 
-This workflow covers named Space collections. Legacy migration originals still
-need their retention/finalization integration. DeleteData remains unavailable
-until producer shutdown, managed cleanup/backup reporting and these remaining
-lifecycle integrations are complete.
+Imported migration originals are attributed inside the private latest decision ledger; completed import receipts can repair this attribution
+without replaying data or granting admission. Originals stay protected until the
+operator records migration acceptance and runs `finalize-legacy` offline. That
+sets a fixed seven-day retention deadline and closes further legacy imports.
+Repeating finalization cannot extend it. `prune` removes attributed originals
+after expiry only after checking every retained original against its recorded
+length/hash and acquiring the legacy chat owner's lock. A changed source leaves
+all remaining originals intact. Collection payloads and stable owner locks are
+preserved. Missing originals are treated idempotently during pruning. A source
+associated with a tombstoned collection cannot be imported into a fresh collection;
+unregistered originals are also refused after any deletion decision.
+
+Inventory independent legacy roots before finalizing migration; unattributed
+files are not silently classified or erased. Known interrupted checkpoint and chat-compaction temporaries expire with their
+originals in bounded cleanup turns. Authority timer and cleanup status remain
+unfinished. DeleteData remains
+unavailable until producer shutdown and managed cleanup/backup reporting are
+integrated.
 
 ## Rollout requirements
 

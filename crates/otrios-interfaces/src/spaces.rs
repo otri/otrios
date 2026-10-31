@@ -87,6 +87,9 @@ pub struct Space {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Deletion {
+    /// Administrative cleanup scope. Empty only for earlier private registries.
+    #[serde(default)]
+    pub space: String,
     pub collection: String,
     pub generation: u64,
 }

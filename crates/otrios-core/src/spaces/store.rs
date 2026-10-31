@@ -9,29 +9,32 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 8192;
+const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 2 * 1024 * 1024 + 8192;
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
     root: String,
     storage: Option<String>,
     registry: Registry,
+    #[serde(default)]
+    legacy_sources: Option<backups::legacy_sources::Originals>,
 }
 pub struct Store {
     current: Record,
     path: PathBuf,
     latest: PathBuf,
     // Stable inode, including across atomic replacement of both state files.
-    _owner: fs::File,
+    _owner: Owner,
     failed: bool,
     restoring: bool,
 }
-impl Drop for Store {
+// Release locks explicitly on every exit, including rejected recovery before a
+// Store exists. Concurrent fork-before-exec children can briefly inherit a file
+// description, so close alone need not release ownership immediately.
+struct Owner(fs::File);
+impl Drop for Owner {
     fn drop(&mut self) {
-        // Concurrent process spawning may briefly inherit an open-file
-        // description before exec closes it. Release ownership explicitly,
-        // rather than waiting for every inherited descriptor to disappear.
-        let _ = self._owner.unlock();
+        let _ = self.0.unlock();
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +67,11 @@ fn validate_record(record: &Record) -> Result<()> {
     {
         return Err(Error::Capacity);
     }
+    if record.legacy_sources.as_ref().is_some_and(|originals| {
+        flexbuffers::to_vec(originals).map_or(true, |bytes| bytes.len() > 2 * 1024 * 1024)
+    }) {
+        return Err(Error::Capacity);
+    }
     if !valid_id(&record.root)
         || record
             .storage
@@ -81,7 +89,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP4".to_vec();
+    let mut bytes = b"OTSP5".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -95,18 +103,18 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
         return Err(Error::Invalid);
     }
     let payload = &bytes[37..];
-    crate::flex_guard::validate(payload, 18, MAX_STORE_BYTES, MAX_DELETIONS)
+    crate::flex_guard::validate(payload, 18, MAX_STORE_BYTES, MAX_SPACES * MAX_APPS)
         .map_err(|_| Error::Invalid)?;
     Ok(payload)
 }
 fn decode(bytes: &[u8]) -> Result<Record> {
-    let record: Record = flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4"])?)
+    let record: Record = flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4", b"OTSP5"])?)
         .map_err(|_| Error::Invalid)?;
     validate_record(&record)?;
     Ok(record)
 }
 fn current_framing(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"OTSP3") || bytes.starts_with(b"OTSP4")
+    bytes.starts_with(b"OTSP3") || bytes.starts_with(b"OTSP4") || bytes.starts_with(b"OTSP5")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
@@ -198,9 +206,9 @@ impl Store {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut owner = options.open(&lock_path).map_err(io_error)?;
-        private(&owner.metadata().map_err(io_error)?)?;
-        owner.try_lock().map_err(io_error)?;
+        let mut owner = Owner(options.open(&lock_path).map_err(io_error)?);
+        private(&owner.0.metadata().map_err(io_error)?)?;
+        owner.0.try_lock().map_err(io_error)?;
         // Re-read after acquiring ownership: a preceding owner may have finished
         // initialization between our inspection and lock acquisition.
         let anchor = read(&lock_path, 37, true)?.or(anchor).unwrap_or_default();
@@ -262,6 +270,7 @@ impl Store {
             Record {
                 root: fresh()?,
                 storage: None,
+                legacy_sources: None,
                 registry: primary
                     .as_ref()
                     .map(|b| legacy(b))
@@ -274,14 +283,16 @@ impl Store {
             write(&latest, &bytes)?;
         }
         if root.is_none() {
-            owner.rewind().map_err(io_error)?;
+            owner.0.rewind().map_err(io_error)?;
             owner
+                .0
                 .write_all(b"OTSO1")
-                .and_then(|()| owner.write_all(current.root.as_bytes()))
+                .and_then(|()| owner.0.write_all(current.root.as_bytes()))
                 .map_err(io_error)?;
             owner
+                .0
                 .set_len(37)
-                .and_then(|()| owner.sync_all())
+                .and_then(|()| owner.0.sync_all())
                 .map_err(io_error)?;
         }
         if primary.as_ref() != Some(&bytes) {

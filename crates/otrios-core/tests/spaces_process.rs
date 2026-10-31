@@ -594,6 +594,16 @@ fn offline_provisioning_preserves_confirmed_legacy_data_and_does_not_regrant_rem
         String::from_utf8_lossy(&result.stderr)
     );
     let record: Json = serde_json::from_slice(&result.stdout).unwrap();
+    // A completed pre-retention import receipt repairs attribution without
+    // replaying payloads or restoring historical admission.
+    remove_legacy_attribution(&rig);
+    let recovered = rig.provision(&binary, &manifest);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_legacy_attribution(&rig);
     let household = record["spaces"][0]["space"].as_str().unwrap().to_string();
     let work = record["spaces"][1]["space"].as_str().unwrap().to_string();
     assert!(
@@ -614,6 +624,32 @@ fn offline_provisioning_preserves_confirmed_legacy_data_and_does_not_regrant_rem
         },
     );
     rig.stop();
+    // Completed historical receipts do not require currently installed code.
+    let original_catalog = rig.catalog.clone();
+    chat_fixture(&mut rig);
+    let mut without_counter = canvas::decode_catalog(&rig.catalog).unwrap();
+    without_counter
+        .apps
+        .retain(|entry| entry.app.id == "sibling");
+    fs::write(
+        rig.root.join("apps/catalog.flex"),
+        canvas::encode_catalog(&without_counter).unwrap(),
+    )
+    .unwrap();
+    rig.catalog = original_catalog;
+    let repeated = rig.provision(&binary, &manifest);
+    assert!(
+        repeated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    let finalized = rig.storage_action(&binary, "finalize-legacy");
+    assert!(
+        finalized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&finalized.stderr)
+    );
     assert!(rig.provision(&binary, &manifest).status.success());
     // Removing a CLI flag cannot reopen the legacy listener after migration.
     rig.restart(&binary, false, true);
@@ -769,7 +805,7 @@ fn offline_backup_restore_preserves_latest_revocation_and_older_writers_cannot_a
     if let Ok(older) = std::env::var("OTRIOS_SPACES_OLD_SERVER") {
         let primary = fs::read(rig.root.join("spaces.flex")).unwrap();
         let latest = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
-        assert_eq!(&primary[..5], b"OTSP4");
+        assert_eq!(&primary[..5], b"OTSP5");
         rig.restart(&older, true, false);
         assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
         std::thread::sleep(Duration::from_millis(100));
@@ -1490,6 +1526,14 @@ fn offline_chat_import_preserves_full_history_and_never_replays_over_later_confi
         String::from_utf8_lossy(&completed.stderr)
     );
     let record: Json = serde_json::from_slice(&completed.stdout).unwrap();
+    remove_legacy_attribution(&rig);
+    let recovered = rig.provision(&binary, &manifest);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_legacy_attribution(&rig);
     let household = record["spaces"][0]["space"].as_str().unwrap().to_string();
     let work = record["spaces"][1]["space"].as_str().unwrap().to_string();
     let import = &record["spaces"][0]["imports"][0];
@@ -2931,5 +2975,58 @@ fn separate_clients_isolate_spaces_and_never_trust_native_loopback() {
         )
         .0,
         409
+    );
+}
+
+#[test]
+fn an_explicit_missing_legacy_checkpoint_never_becomes_an_empty_import() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start_mode(&binary, false);
+    rig.stop();
+    let original = rig.root.join(format!(
+        "state/counter-{}.merkle",
+        canvas::hex(&canvas::hash(b"app:counter/state"))
+    ));
+    assert!(!original.exists());
+    let manifest = rig.root.join("provision-missing-checkpoint.json");
+    private_json(
+        &manifest,
+        &json!({"version":1,"spaces":[{
+        "name":"Missing original","admins":["alice"],"members":[],
+        "apps":[{"id":"counter","legacy_state_ref":"app:counter/state"}]}]}),
+    );
+    let result = rig.provision(&binary, &manifest);
+    assert!(!result.status.success());
+    assert!(
+        !original.exists(),
+        "never create an empty replacement for the declared original"
+    );
+    assert!(rig.root.join("spaces.provisioning").exists());
+    rig.restart(&binary, false, false);
+    assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
+}
+
+fn remove_legacy_attribution(rig: &Rig) {
+    let path = rig.root.join("spaces.flex");
+    let bytes = fs::read(&path).unwrap();
+    let mut record: Json = flexbuffers::from_slice(&bytes[37..]).unwrap();
+    record.as_object_mut().unwrap().remove("legacy_sources");
+    let payload = flexbuffers::to_vec(&record).unwrap();
+    let mut old = b"OTSP4".to_vec();
+    old.extend(canvas::hash(&payload));
+    old.extend(payload);
+    fs::write(path, &old).unwrap();
+    fs::write(rig.root.join("spaces.flex.latest"), old).unwrap();
+}
+fn assert_legacy_attribution(rig: &Rig) {
+    let bytes = fs::read(rig.root.join("spaces.flex")).unwrap();
+    let record: Json = flexbuffers::from_slice(&bytes[37..]).unwrap();
+    assert!(
+        !record["legacy_sources"]["files"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
 }

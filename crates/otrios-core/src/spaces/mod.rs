@@ -79,9 +79,16 @@ pub fn validate(registry: &Registry) -> Result<()> {
         return Err(Error::Invalid);
     }
     let mut spaces = BTreeSet::new();
+    let declared_spaces = registry
+        .spaces
+        .iter()
+        .map(|s| s.id.as_str())
+        .collect::<BTreeSet<_>>();
     let mut collections = BTreeSet::new();
     for d in &registry.deletions {
         if !valid_id(&d.collection)
+            || !d.space.is_empty()
+                && (!valid_id(&d.space) || !declared_spaces.contains(d.space.as_str()))
             || d.generation == 0
             || d.generation > registry.generation
             || !collections.insert(&d.collection)
@@ -303,6 +310,7 @@ pub fn apply(
                     .find(|a| &a.policy.app == app)
                     .ok_or(Error::Unavailable)?;
                 next.deletions.push(Deletion {
+                    space: s.id.clone(),
                     collection: data.collection.clone(),
                     generation: epoch,
                 });

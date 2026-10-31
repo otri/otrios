@@ -240,6 +240,11 @@ pub(super) async fn provision(app: &App, path: &Path) -> Result<(), String> {
         if record["manifest_sha256"] != digest {
             return Err("Provisioning record mismatch".into());
         }
+        for space in entries(&record, "spaces", contract::MAX_SPACES)? {
+            for import in entries(space, "imports", contract::MAX_APPS)? {
+                hub.recover_legacy_original(import)?;
+            }
+        }
         if pending.exists() {
             fs::remove_file(&pending).map_err(|e| e.to_string())?;
             fs::File::open(parent)

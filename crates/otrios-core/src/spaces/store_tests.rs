@@ -293,7 +293,7 @@ fn corrupt_or_foreign_latest_never_rolls_back_and_partial_initial_anchor_can_fin
     write_private(&latest, &fs::read(other.latest_path()).unwrap());
     assert!(Store::open(fixture.path()).is_err());
     write_private(&latest, &ledger);
-    assert!(Store::open(fixture.path()).is_ok());
+    drop(Store::open(fixture.path()).unwrap());
 }
 
 #[cfg(unix)]

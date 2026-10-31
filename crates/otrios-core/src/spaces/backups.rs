@@ -496,6 +496,8 @@ impl Store {
     }
 }
 
+#[path = "legacy_sources.rs"]
+pub(super) mod legacy_sources;
 #[path = "restore.rs"]
 mod restore;
 #[cfg(test)]

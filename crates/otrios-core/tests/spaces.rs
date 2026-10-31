@@ -983,6 +983,6 @@ fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
             None,
         )
         .unwrap();
-    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP4");
+    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP5");
     std::fs::remove_dir_all(path).unwrap();
 }

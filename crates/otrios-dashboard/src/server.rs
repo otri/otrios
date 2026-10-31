@@ -808,12 +808,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = match action.as_str() {
             "backup" => json!({"backup":store.create_backup(now, true)?}),
             "list" => json!({"backups":store.backup_ids()?}),
-            "prune" => json!({"removed":store.prune_backups(now)?}),
+            "prune" => json!({"removed":store.prune_backups(now)?,
+                "legacy_originals_removed":store.prune_legacy_sources(now)?}),
+            "finalize-legacy" => {
+                json!({"legacy_originals_expire_unix_ms":store.finalize_legacy_sources(now, true)?})
+            }
             "resume" => json!({"recovered":true}),
             _ => {
                 let id = action
                     .strip_prefix("restore:")
-                    .ok_or("Storage action must be backup, list, prune, resume or restore:ID")?;
+                    .ok_or("Storage action must be backup, list, prune, finalize-legacy, resume or restore:ID")?;
                 json!({"restored_files":store.restore_backup(id, now, true)?})
             }
         };

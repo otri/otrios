@@ -321,7 +321,7 @@ fn initial_ledger_framing_upgrades_without_changing_root_or_membership() {
     let recovered = Store::open(fixture.path()).unwrap();
     assert_eq!(recovered.root_id(), root);
     assert_eq!(recovered.registry().unwrap(), &registry);
-    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP4");
+    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP5");
     assert_eq!(
         fs::read(recovered.path()).unwrap(),
         fs::read(latest).unwrap()

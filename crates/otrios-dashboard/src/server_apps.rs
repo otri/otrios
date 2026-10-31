@@ -379,6 +379,19 @@ impl Hub {
             .ok_or("Legacy root unavailable")?;
         let bytes = source.doc.save()?;
         let root = source.doc.root_hash();
+        let original = source
+            .file
+            .clone()
+            .ok_or("Legacy source has no durable checkpoint")?;
+        self.spaces
+            .as_ref()
+            .ok_or("Spaces unavailable")?
+            .check_legacy_import(&binding.collection, &original)
+            .map_err(|e| e.to_string())?;
+        let mut originals = vec![original.clone()];
+        if original.with_extension("merkle.log").exists() {
+            originals.push(original.with_extension("merkle.log"));
+        }
         let path = self.collection_file(&binding, &package)?;
         if !path.exists() && path.with_extension("merkle.log").exists() {
             return Err("Missing migration checkpoint with retained journal".into());
@@ -408,9 +421,93 @@ impl Hub {
                 persist(&presentation, &self.view).map_err(|e| e.to_string())?;
             }
         }
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .register_legacy_sources(&binding.collection, &originals)
+            .map_err(|e| e.to_string())?;
         Ok(
             json!({"collection":binding.collection,"source":package.app.state_ref,"source_root":canvas::hex(&root)}),
         )
+    }
+    /// Recover cleanup attribution from a completed private import receipt.
+    /// Never replay payloads or change current admission from historical records.
+    pub(super) fn recover_legacy_original(&mut self, record: &Value) -> Result<()> {
+        let collection = record["collection"]
+            .as_str()
+            .ok_or("Missing import collection")?;
+        let source = record["source"].as_str().ok_or("Missing import source")?;
+        let chat = record["kind"] == "legacy-chat";
+        let original = if chat {
+            if source != "brass-relay.journal" {
+                return Err("Unknown legacy journal source".into());
+            }
+            self.state
+                .as_ref()
+                .ok_or("Durable storage required")?
+                .join(source)
+        } else {
+            if self
+                .spaces
+                .as_ref()
+                .ok_or("Spaces unavailable")?
+                .legacy_document_registered(collection, source)
+                .map_err(|e| e.to_string())?
+            {
+                return Ok(());
+            }
+            self.rooms
+                .get(source)
+                .and_then(|room| room.file.clone())
+                .ok_or("Legacy owning app unavailable")?
+        };
+        if self
+            .spaces
+            .as_ref()
+            .ok_or("Spaces unavailable")?
+            .legacy_source_registered(collection, &original)
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(());
+        }
+        match fs::symlink_metadata(&original) {
+            Ok(_) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.to_string()),
+        }
+        let mut originals = vec![original.clone()];
+        let _owner;
+        if chat {
+            _owner = Some(otrios_core::canvas::chat::Room::open(
+                Some(original.clone()),
+                chat::now(),
+            )?);
+            let bytes = spaces::private_bytes(&original, 64 * 1024 * 1024)?;
+            if record["bytes"].as_u64() != Some(bytes.len() as u64)
+                || record["source_sha256"] != canvas::hex(&canvas::hash(&bytes))
+            {
+                return Err("Legacy journal differs from its completed import receipt".into());
+            }
+        } else {
+            _owner = None;
+            let room = self
+                .rooms
+                .get(source)
+                .filter(|r| !r.failed)
+                .ok_or("Legacy root unavailable")?;
+            if record["source_root"] != canvas::hex(&room.doc.root_hash()) {
+                return Err("Legacy root differs from its completed import receipt".into());
+            }
+            let log = original.with_extension("merkle.log");
+            if log.exists() {
+                originals.push(log);
+            }
+        }
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .register_legacy_sources(collection, &originals)
+            .map_err(|e| e.to_string())
     }
     pub(super) fn registry(
         &self,
@@ -487,6 +584,7 @@ impl Hub {
             // edits. Validate its current journal even if the old source is gone.
             spaces::private_metadata(&path, LIMIT)?;
             let _target = otrios_core::canvas::chat::Room::open(Some(path), chat::now())?;
+            self.recover_legacy_original(&record)?;
             return Ok(record);
         }
         let source = self
@@ -494,6 +592,11 @@ impl Hub {
             .as_ref()
             .ok_or("Durable chat storage required")?
             .join("brass-relay.journal");
+        self.spaces
+            .as_ref()
+            .ok_or("Spaces unavailable")?
+            .check_legacy_import(&binding.collection, &source)
+            .map_err(|e| e.to_string())?;
         spaces::private_metadata(&source, LIMIT)?;
         // This owns the old journal's stable sidecar lock through the copy.
         // Recovery validates every complete record and only trims a torn tail.
@@ -517,6 +620,11 @@ impl Hub {
             persist(&path, &bytes).map_err(|e| e.to_string())?;
         }
         persist(&receipt, &record_bytes).map_err(|e| e.to_string())?;
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .register_legacy_sources(&binding.collection, &[source])
+            .map_err(|e| e.to_string())?;
         Ok(record)
     }
     pub(super) fn manage_space(
@@ -1073,7 +1181,13 @@ impl Hub {
             } else {
                 vec![]
             };
-            if self.spaces.is_none() || self.provisioning {
+            if self.spaces.is_none()
+                || self.provisioning
+                    && self
+                        .spaces
+                        .as_ref()
+                        .is_some_and(|store| store.legacy_imports_open().unwrap_or(false))
+            {
                 if let Some(room) = self
                     .rooms
                     .get(&a.state_ref)
@@ -1104,11 +1218,18 @@ impl Hub {
                             )?,
                         )?
                     } else {
+                        if file
+                            .as_ref()
+                            .is_some_and(|p| p.with_extension("merkle.log").exists())
+                        {
+                            return Err("Missing legacy checkpoint with retained journal".into());
+                        }
                         Document::new(description.state_schema.clone(), &a.state_ref)?
                     };
                     doc.set_signal_fields(&signal_fields)?;
                     if let Some(path) = &file
                         && !path.exists()
+                        && self.spaces.is_none()
                     {
                         persist(path, &doc.save()?).map_err(|e| e.to_string())?;
                     }
