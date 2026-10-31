@@ -1565,6 +1565,7 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
         members: vec![],
         messages: vec![chat::InitialMessage {
             message: chat::Message {
+                assets: vec![],
                 sequence: 1,
                 at: 1_000_000,
                 sender: chat::Profile {
@@ -1584,6 +1585,7 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
     for sequence in 2..=64 {
         full.messages.push(chat::InitialMessage {
             message: chat::Message {
+                assets: vec![],
                 sequence,
                 at: 1_000_000 + sequence * 1000,
                 sender: chat::Profile {
@@ -4210,6 +4212,7 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
     };
     let messages = (1..=40)
         .map(|i| Message {
+            assets: vec![],
             sequence: i,
             at: 1_700_000_000_000,
             sender: member.profile.clone(),
@@ -5021,6 +5024,7 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
         members: vec![],
         messages: vec![chat::InitialMessage {
             message: chat::Message {
+                assets: vec![],
                 sequence: 1,
                 at: 1_000_000,
                 sender: chat::Profile {

@@ -29,6 +29,7 @@ impl Client {
         self.collection.stop();
         self.collection_revoked = true;
         self.messages.clear();
+        self.download = None;
         self.message_revisions.clear();
         self.source_blocks.clear();
         self.reset = true;

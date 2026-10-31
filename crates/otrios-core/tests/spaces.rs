@@ -1180,3 +1180,161 @@ fn public_audience_adopts_compatible_capabilities_and_rejects_current_closed_onl
         Err(Error::Denied)
     );
 }
+
+#[test]
+fn publication_requires_current_source_read_destination_edit_and_reviewed_generation() {
+    let mut registry = fixture();
+    let source_space = registry.spaces[0].id.clone();
+    attach(&mut registry, &source_space);
+    change(
+        &mut registry,
+        "alice",
+        Change::Create {
+            name: "Publication".into(),
+        },
+    );
+    let destination_space = registry.spaces[1].id.clone();
+    attach(&mut registry, &destination_space);
+    let source = spaces::bind(
+        &registry,
+        Some("alice"),
+        &source_space,
+        "notes",
+        &policy().schema,
+    )
+    .unwrap();
+    assert!(
+        spaces::publication_destination(
+            &registry,
+            "alice",
+            &source,
+            &destination_space,
+            registry.generation,
+            &policy()
+        )
+        .is_ok()
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Audience {
+            space: destination_space.clone(),
+            audience: Audience::PublicComment,
+        },
+    );
+    // A visitor's ability to comment is not permission to publish content.
+    assert_eq!(
+        spaces::publication_destination(
+            &registry,
+            "visitor",
+            &source,
+            &destination_space,
+            registry.generation,
+            &policy()
+        ),
+        Err(Error::Denied)
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: source_space.clone(),
+            identity: "reader".into(),
+            role: Some(Role::Member),
+        },
+    );
+    assert_eq!(
+        spaces::publication_destination(
+            &registry,
+            "reader",
+            &source,
+            &destination_space,
+            registry.generation,
+            &policy()
+        ),
+        Err(Error::Denied)
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: destination_space.clone(),
+            identity: "reader".into(),
+            role: Some(Role::Member),
+        },
+    );
+    assert!(
+        spaces::publication_destination(
+            &registry,
+            "reader",
+            &source,
+            &destination_space,
+            registry.generation,
+            &policy()
+        )
+        .is_err(),
+        "an old source binding cannot cross a new membership interval"
+    );
+    let reader_source = spaces::bind(
+        &registry,
+        Some("reader"),
+        &source_space,
+        "notes",
+        &policy().schema,
+    )
+    .unwrap();
+    assert!(
+        spaces::publication_destination(
+            &registry,
+            "reader",
+            &reader_source,
+            &destination_space,
+            registry.generation,
+            &policy()
+        )
+        .is_ok()
+    );
+    let reviewed = registry.generation;
+    let destination_collection = registry.spaces[1].apps[0].collection.clone();
+    change(
+        &mut registry,
+        "alice",
+        Change::DeleteData {
+            space: destination_space.clone(),
+            app: "notes".into(),
+            collection: destination_collection,
+            remove: false,
+        },
+    );
+    assert_eq!(
+        spaces::publication_destination(
+            &registry,
+            "alice",
+            &source,
+            &destination_space,
+            reviewed,
+            &policy()
+        ),
+        Err(Error::Conflict)
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: source_space,
+            identity: "reader".into(),
+            role: None,
+        },
+    );
+    assert_eq!(
+        spaces::publication_destination(
+            &registry,
+            "reader",
+            &reader_source,
+            &destination_space,
+            registry.generation,
+            &policy()
+        ),
+        Err(Error::Denied)
+    );
+}

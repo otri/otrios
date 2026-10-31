@@ -38,6 +38,7 @@ pub(super) enum Entry {
     Message(Message),
     Receipt(Receipt),
     Sequence(u64),
+    Redacted { sequence: u64, revision: [u8; 32] },
 }
 pub(super) struct Journal {
     // A stable sidecar inode spans atomic data-file replacement during
@@ -46,6 +47,7 @@ pub(super) struct Journal {
     path: PathBuf,
     file: fs::File,
     pub bytes: u64,
+    pub legacy: bool,
     failed: bool,
 }
 struct Owner(fs::File);
@@ -113,7 +115,7 @@ impl Journal {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let mut file = create(&path)?;
-                file.write_all(b"OTCHAT01")
+                file.write_all(b"OTCHAT02")
                     .and_then(|_| file.sync_all())
                     .map_err(err)?;
                 if let Some(parent) = path.parent() {
@@ -132,7 +134,7 @@ impl Journal {
         file.rewind().map_err(err)?;
         let mut magic = [0; 8];
         file.read_exact(&mut magic).map_err(err)?;
-        if &magic != b"OTCHAT01" {
+        if &magic != b"OTCHAT01" && &magic != b"OTCHAT02" {
             return Err("Chat journal format".into());
         }
         let mut at = 8_u64;
@@ -171,6 +173,7 @@ impl Journal {
             path,
             file,
             bytes: at,
+            legacy: &magic == b"OTCHAT01",
             failed: false,
         })
     }
@@ -202,7 +205,7 @@ impl Journal {
             .with_extension(format!("{}.compact", super::random(8)?));
         let result = (|| {
             let mut file = create(&next)?;
-            file.write_all(b"OTCHAT01").map_err(err)?;
+            file.write_all(b"OTCHAT02").map_err(err)?;
             let mut size = 8;
             for entry in entries {
                 let bytes = record(&entry?)?;
@@ -223,6 +226,7 @@ impl Journal {
             }
             self.file = file;
             self.bytes = size;
+            self.legacy = false;
             self.failed = false;
             Ok(())
         })();

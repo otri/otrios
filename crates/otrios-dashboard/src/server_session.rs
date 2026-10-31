@@ -434,11 +434,7 @@ async fn peer(
                             if managed_chat
                                 .as_ref()
                                 .expect("subscribed room")
-                                .input
-                                .try_send(space_chat::Packet {
-                                    channel: *channel,
-                                    bytes: payload.to_vec(),
-                                })
+                                .send(*channel, payload.to_vec())
                                 .is_err()
                             {
                                 break;

@@ -14,6 +14,16 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+#[path = "publication.rs"]
+mod publication;
+#[cfg(not(target_arch = "wasm32"))]
+pub use publication::{Publication, publish};
+struct PreparedSend {
+    epoch: u64,
+    nonce: String,
+    body: String,
+    assets: Vec<super::Asset>,
+}
 const DAY: u64 = 86_400_000;
 const EPOCH: u64 = 600_000;
 const MAX_RECEIPTS: usize = 65_536;
@@ -223,6 +233,10 @@ impl Room {
                     );
                 }
             }
+            Entry::Redacted { sequence, revision } => {
+                self.history
+                    .commit(self.history.prepare_removal(sequence, revision)?)?;
+            }
             Entry::Sequence(sequence) => self.sequence = self.sequence.max(sequence),
         }
         if self.guests.len() > 4096 || self.receipts.len() > MAX_RECEIPTS {
@@ -256,6 +270,7 @@ impl Room {
         Ok(())
     }
     fn prepare_message(&self, message: &Message) -> Result<super::history::Prepared> {
+        super::validate_message_assets(&message.assets)?;
         text(&message.text, 2304, 1200, 18)?;
         name(&message.sender.name)?;
         if !super::valid_hex(&message.sender.id, 16)
@@ -275,7 +290,17 @@ impl Room {
         Ok(())
     }
     fn persist_message(&mut self, message: &Message, entry: &Entry, now: u64) -> Result<()> {
+        self.persist_message_with(message, entry, now, || Ok(()))
+    }
+    fn persist_message_with(
+        &mut self,
+        message: &Message,
+        entry: &Entry,
+        now: u64,
+        durable: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         let prepared = self.prepare_message(message)?;
+        durable()?;
         self.persist(entry, now)?;
         // Room is the sole writer for this resource. A publication failure after
         // fsync must stop further writes, since retry deduplication is durable
@@ -315,7 +340,7 @@ impl Room {
         if self
             .journal
             .as_ref()
-            .is_some_and(|j| j.bytes > 48 * 1024 * 1024)
+            .is_some_and(|j| j.legacy || j.bytes > 48 * 1024 * 1024)
         {
             let snapshot = self.history.snapshot()?;
             let entries = self
@@ -825,6 +850,7 @@ impl Room {
                 guest.cooldown = now + 60_000;
                 guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
                 let message = Message {
+                    assets: vec![],
                     sequence: self
                         .sequence
                         .checked_add(1)
@@ -878,115 +904,165 @@ impl Room {
                 epoch,
                 nonce,
                 text: body,
-            } => {
-                text(&body, 2048, 1024, 16)?;
-                if body.trim().is_empty() {
-                    return Err("Write a message first".into());
-                }
-                if !super::valid_hex(&nonce, 16)
-                    || epoch > now / EPOCH
-                    || epoch.saturating_add(2).saturating_mul(EPOCH) <= now
-                {
-                    return Err("Send expired; send again with a fresh receipt epoch".into());
-                }
-                let hash = super::super::hash(body.as_bytes());
-                let receipt_key = (id.clone(), epoch, nonce.clone());
-                if let Some(r) = self.receipts.get(&receipt_key) {
-                    if r.digest != hash {
-                        return Err("Message nonce conflicts with its original text".into());
-                    }
-                    return Ok(vec![Delivery::one(
-                        connection,
-                        Event::Receipt {
-                            nonce,
-                            sequence: r.sequence,
-                        },
-                    )]);
-                }
-                self.prune(now);
-                if self.receipts.len() >= MAX_RECEIPTS {
-                    return Err("Receipt capacity reached; try later".into());
-                }
-                let rate = self.rates.entry(id.clone()).or_insert(Rate {
-                    at: now,
-                    tokens: 5.,
-                    effect_at: now,
-                    effects: 0,
-                });
-                rate.tokens = (rate.tokens + now.saturating_sub(rate.at) as f64 / 1000.).min(5.);
-                rate.at = now;
-                if rate.tokens < 1. {
-                    return Err("A little slower, please; try again shortly".into());
-                }
-                rate.tokens -= 1.;
-                let (kind, content, effect) = self.parse(&id, &body, admin)?;
-                if effect.is_some() {
-                    let rate = self.rates.get_mut(&id).unwrap();
-                    if now.saturating_sub(rate.effect_at) >= 1000 {
-                        rate.effect_at = now;
-                        rate.effects = 0;
-                    }
-                    if rate.effects >= 2 {
-                        return Err("Let the steam settle before another effect".into());
-                    }
-                    rate.effects += 1;
-                }
-                let message = Message {
-                    sequence: self
-                        .sequence
-                        .checked_add(1)
-                        .ok_or("Room message sequence exhausted")?,
-                    at: now,
-                    sender: self.guests[&id].profile.clone(),
-                    kind,
-                    text: content,
-                    nonce: nonce.clone(),
-                };
-                let receipt = Receipt {
-                    participant: id.clone(),
+            } => self.send_prepared(
+                connection,
+                PreparedSend {
                     epoch,
-                    nonce: nonce.clone(),
-                    digest: hash,
-                    sequence: message.sequence,
-                };
-                self.persist_message(
-                    &message,
-                    &Entry::Sent {
-                        message: message.clone(),
-                        receipt: receipt.clone(),
-                    },
-                    now,
-                )?;
-                self.receipts.insert(receipt_key, receipt);
-                let mut events = vec![Delivery::one(
+                    nonce,
+                    body,
+                    assets: vec![],
+                },
+                now,
+                || Ok(()),
+            ),
+            Command::Redact { sequence, revision } => {
+                if !admin {
+                    return Err("Space moderation is required".into());
+                }
+                self.redact_message(sequence, revision, now)?;
+                Ok(vec![Delivery::one(
                     connection,
-                    Event::Receipt {
-                        nonce,
-                        sequence: message.sequence,
-                    },
-                )];
-                if let Some(d) = self.drafts.get_mut(&id) {
-                    d.text.clear();
-                    d.revision = d.revision.saturating_add(1);
-                    events.push(Delivery::all(Event::Draft {
-                        participant: id.clone(),
-                        generation: d.generation,
-                        revision: d.revision,
-                        text: String::new(),
-                        expires: now,
-                    }));
-                }
-                if let Some((kind, target)) = effect {
-                    events.push(Delivery::all(Event::Effect {
-                        participant: id,
-                        kind,
-                        target,
-                    }));
-                }
-                Ok(events)
+                    Event::Redacted { sequence },
+                )])
             }
             _ => Err("Unexpected room command".into()),
         }
+    }
+    fn send_prepared(
+        &mut self,
+        connection: u64,
+        request: PreparedSend,
+        now: u64,
+        durable: impl FnOnce() -> Result<()>,
+    ) -> Result<Vec<Delivery>> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        let PreparedSend {
+            epoch,
+            nonce,
+            body,
+            assets,
+        } = request;
+        let c = self
+            .connections
+            .get(&connection)
+            .ok_or("Join the room first")?;
+        let id = c.id.clone();
+        let admin = c.admin;
+
+        text(&body, 2048, 1024, 16)?;
+        if body.trim().is_empty() && assets.is_empty() {
+            return Err("Write a message first".into());
+        }
+        if !super::valid_hex(&nonce, 16)
+            || epoch > now / EPOCH
+            || epoch.saturating_add(2).saturating_mul(EPOCH) <= now
+        {
+            return Err("Send expired; send again with a fresh receipt epoch".into());
+        }
+        super::validate_message_assets(&assets)?;
+        let hash = if assets.is_empty() {
+            super::super::hash(body.as_bytes())
+        } else {
+            super::super::hash(&flexbuffers::to_vec((body.as_str(), &assets)).map_err(err)?)
+        };
+        let receipt_key = (id.clone(), epoch, nonce.clone());
+        if let Some(r) = self.receipts.get(&receipt_key) {
+            if r.digest != hash {
+                return Err("Message nonce conflicts with its original text".into());
+            }
+            return Ok(vec![Delivery::one(
+                connection,
+                Event::Receipt {
+                    nonce,
+                    sequence: r.sequence,
+                },
+            )]);
+        }
+        self.prune(now);
+        if self.receipts.len() >= MAX_RECEIPTS {
+            return Err("Receipt capacity reached; try later".into());
+        }
+        let rate = self.rates.entry(id.clone()).or_insert(Rate {
+            at: now,
+            tokens: 5.,
+            effect_at: now,
+            effects: 0,
+        });
+        rate.tokens = (rate.tokens + now.saturating_sub(rate.at) as f64 / 1000.).min(5.);
+        rate.at = now;
+        if rate.tokens < 1. {
+            return Err("A little slower, please; try again shortly".into());
+        }
+        rate.tokens -= 1.;
+        let (kind, content, effect) = self.parse(&id, &body, admin)?;
+        if effect.is_some() {
+            let rate = self.rates.get_mut(&id).unwrap();
+            if now.saturating_sub(rate.effect_at) >= 1000 {
+                rate.effect_at = now;
+                rate.effects = 0;
+            }
+            if rate.effects >= 2 {
+                return Err("Let the steam settle before another effect".into());
+            }
+            rate.effects += 1;
+        }
+        let message = Message {
+            assets,
+            sequence: self
+                .sequence
+                .checked_add(1)
+                .ok_or("Room message sequence exhausted")?,
+            at: now,
+            sender: self.guests[&id].profile.clone(),
+            kind,
+            text: content,
+            nonce: nonce.clone(),
+        };
+        let receipt = Receipt {
+            participant: id.clone(),
+            epoch,
+            nonce: nonce.clone(),
+            digest: hash,
+            sequence: message.sequence,
+        };
+        self.persist_message_with(
+            &message,
+            &Entry::Sent {
+                message: message.clone(),
+                receipt: receipt.clone(),
+            },
+            now,
+            durable,
+        )?;
+        self.receipts.insert(receipt_key, receipt);
+        let mut events = vec![Delivery::one(
+            connection,
+            Event::Receipt {
+                nonce,
+                sequence: message.sequence,
+            },
+        )];
+        if let Some(d) = self.drafts.get_mut(&id) {
+            d.text.clear();
+            d.revision = d.revision.saturating_add(1);
+            events.push(Delivery::all(Event::Draft {
+                participant: id.clone(),
+                generation: d.generation,
+                revision: d.revision,
+                text: String::new(),
+                expires: now,
+            }));
+        }
+        if let Some((kind, target)) = effect {
+            events.push(Delivery::all(Event::Effect {
+                participant: id,
+                kind,
+                target,
+            }));
+        }
+        Ok(events)
     }
     fn parse(&self, id: &str, body: &str, admin: bool) -> Result<Parsed> {
         let who = &self.guests[id].profile.name;

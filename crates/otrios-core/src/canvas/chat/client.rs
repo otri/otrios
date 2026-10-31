@@ -103,6 +103,7 @@ pub struct Client {
     pub(super) history_wait: bool,
     pub(super) pending: VecDeque<Pending>,
     queue: VecDeque<Command>,
+    pub(super) download: Option<(Asset, Vec<u8>)>,
     pub(super) joining: bool,
     epoch: u64,
     draft_generation: u64,
@@ -185,6 +186,7 @@ impl Default for Client {
             history_wait: false,
             pending: VecDeque::new(),
             queue: VecDeque::new(),
+            download: None,
             joining: false,
             epoch: 0,
             draft_generation: 0,
@@ -277,6 +279,7 @@ impl Client {
         for row in &initial.messages {
             let message = &row.message;
             profile(&message.sender)?;
+            super::validate_message_assets(&message.assets)?;
             super::authority::text(&message.text, 2304, 1200, 18)?;
             if message.sequence <= previous
                 || (!message.nonce.is_empty() && !super::valid_hex(&message.nonce, 16))
@@ -500,9 +503,14 @@ impl Client {
                 } else {
                     message.text.clone()
                 };
+                let attachments = message
+                    .assets
+                    .iter()
+                    .map(|a| format!("\n[Attachment: {} ({} bytes)]", a.name, a.bytes))
+                    .collect::<String>();
                 Block::new(
                     id,
-                    format!("{header}\n{}\n\n", body.replace('\r', "")),
+                    format!("{header}\n{}{attachments}\n\n", body.replace('\r', "")),
                     64.,
                     Some(self.avatar_inline(message.sender.avatar)?),
                 )?
@@ -528,6 +536,7 @@ impl Client {
         }
     }
     pub fn disconnected(&mut self) {
+        self.download = None;
         self.collection.disconnected();
         self.online = false;
         self.joining = false;
@@ -619,6 +628,29 @@ impl Client {
     pub fn receive(&mut self, event: Event, follow: bool) -> Result<Option<String>> {
         let mut credential = None;
         match event {
+            Event::Published { .. } => self.say("Copy published in the destination Space"),
+            Event::Redacted { .. } => self.say("Dispatch deleted"),
+            Event::Asset {
+                sequence,
+                revision,
+                asset,
+                bytes,
+            } => {
+                super::validate_asset(&asset)?;
+                if bytes.len() != asset.bytes as usize
+                    || super::super::hex(&super::super::hash(&bytes)) != asset.sha256
+                {
+                    return Err("Attachment integrity mismatch".into());
+                }
+                if self.message_revisions.get(&sequence) == Some(&revision)
+                    && self
+                        .messages
+                        .iter()
+                        .any(|m| m.sequence == sequence && m.assets.contains(&asset))
+                {
+                    self.download = Some((asset, bytes));
+                }
+            }
             Event::Left => {
                 self.clear_collection();
                 self.disconnected();
@@ -1339,6 +1371,7 @@ mod tests {
     use super::*;
     fn message(sequence: u64, day: u64) -> Message {
         Message {
+            assets: vec![],
             sequence,
             at: day * 86_400_000 + 12 * 3_600_000,
             sender: Profile {

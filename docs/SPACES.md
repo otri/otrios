@@ -19,7 +19,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v14` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v15` includes a version-1 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when both collection identity and effective
@@ -46,10 +46,11 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
 use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v14; v10 introduced discovery, v11 added the
+browser/native state protocol is v15; v10 introduced discovery, v11 added the
 managed activation acknowledgement, v12 scoped auxiliary payloads by mount,
-v13 added a qualified first chat transcript window, and v14 adds collection-specific
-delete confirmations and Admin cleanup metadata. Managed hosts send Leave(epoch)
+v13 added a qualified first chat transcript window, and v14 added collection-specific
+delete confirmations and Admin cleanup metadata. V15 adds owned attachments,
+reviewed publication and message moderation. Managed hosts send Leave(epoch)
 after discarding revoked replicas; the authority holds cleanup pins until then.
 Release discovery remains on its unchanged control v1 envelope.
 
@@ -459,7 +460,62 @@ recheck the same grant through send; the old writable document session and chat
 identity cannot survive an anonymous read grant. Role/audience restrictions apply
 to subsequent operations and reconnects.
 
-Publication and owned attachment copying remain the next S4 integration.
+## Selected publication and owned attachments
+
+The fixed Chat adapter copies one reviewed confirmed dispatch into the same app in
+another Space. The authority requires current source Read, destination Edit and
+the reviewed management generation under one lock. Public commenting alone cannot
+publish. The source row revision prevents copying a removed or changed selection.
+Other presentations have no publication adapter; this is not a general cross-app
+transaction API. Trusted publication/file controls and browser/Frame acceptance
+are the next integration step for this backend.
+
+The destination gets its own sequence, timestamp, nonce and app-local sender ID.
+Only the selected display name, icon, message content and owned attachment bytes
+are copied. No source binding, original profile ID, authority identity, guest secret,
+live draft or private source URL appears in destination messages. Required assets
+are copied and synced into the destination collection before its one journal
+record is committed. Later private changes do not update the copy. A subsequent
+publication is another explicit copy; a durable receipt deduplicates retries of
+the same nonce and selection. Source and destination deletion are independent.
+Destination comments remain in the destination's transcript.
+
+Each attachment is at most 256 KiB. A message has at most four attachment
+references; the first upload command supplies one file. A collection owns at most
+32 immutable blobs (8 MiB), stored as flat `asset-SHA256.blob` files in its owned
+`.data` namespace. The digest identifies bytes and is never a capability.
+Scoped channel-3 ReadAsset requires a current admitted message and exact row
+revision. Anonymous readers can download public attachments; known hashes and old
+row references cannot read another Space's data or unreferenced bytes. Large
+binary replies use a bounded direct peer queue, not broadcast history. Input keeps
+eight control-message slots and holds byte credits through processing, bounded
+by 384 KiB plus eight collection-command allowances per peer. Identity,
+policy and mount epochs are rechecked through shared-session delivery.
+
+Files are private, integrity checked and synced before a confirmed message can
+reference them. Interrupted `.asset-RANDOM.tmp` stages are unreachable and removed
+on the next new-blob write or collection deletion. Completed unreferenced blobs
+remain within the quota until collection deletion; no early cleanup success is
+claimed. Remove, Quit and uninstall retain these bytes. Paired snapshots include
+them; permanent deletion reclaims only their owning collection. An admitted
+in-flight download or user export is outside a universal erasure claim.
+
+Members/Admins with app moderation can remove a reviewed dispatch; visitors cannot.
+Removal publishes a new coherent collection root after its journal record is
+synced, preserving committed sequence identities and send/publication receipts.
+Old pins remain bounded until replaced/released; retries do not re-add removed
+rows. Ordinary message moderation can still have retained journal/backups. The
+non-expiring deletion barrier and retention/cleanup reporting apply to permanent
+collection deletion, not an unqualified per-message wipe claim.
+
+The message collection schema is v2. Empty attachment lists retain the legacy
+serialized message shape; old confirmed records are read without replacing app
+collections or their schema fingerprints. New chat journals use `OTCHAT02`.
+An `OTCHAT01` journal is recovered completely, then atomically compacted into
+`OTCHAT02` before its next durable write. Older writers reject the new framing
+without truncating it. Registry framing remains `OTSP5`; release-control v1 remains
+independent. State protocol v15 declares the changed live command/event format.
+
 
 ## Persistence
 
@@ -479,8 +535,9 @@ to zero. The upgrade writes the latest decision ledger before replacing the
 primary. Older writers reject `OTSP5`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
 supports this framing and the current admission rules. Management request version
-1 and release-control v1 remain stable. Current state protocol v14 adds the
-collection-specific deletion confirmation and Admin-only cleanup metadata.
+1 and release-control v1 remain stable. Current state protocol v15 retains the
+collection-specific deletion confirmation and Admin-only cleanup metadata and adds
+reviewed publication, attachment blobs and message moderation.
 
 A stable private `REGISTRY.owner.lock` inode carries an exclusive OS lock and
 the root identity. The registry's containing directory must not be writable by

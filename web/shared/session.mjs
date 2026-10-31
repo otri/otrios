@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Stable bootstrap/network owner. No dependency on Wasm or the CRDT decoder.
-export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v14',STATE=1,INK=2,CHAT=3,COLLECTION=4,SPACES=5;
+export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v15',STATE=1,INK=2,CHAT=3,COLLECTION=4,SPACES=5;
 export function validRelease(r){return r&&/^[0-9a-f]{64}$/.test(r.id)&&r.web_entry===`/releases/${r.id}/web/index.html`;}
 export function connectSession({
   onRelease=()=>{},onState=()=>{},onInk=()=>{},onChat=()=>{},onCollection=()=>{},onSpaces=()=>{},onStatus=()=>{},onError=()=>{},
@@ -40,7 +40,7 @@ export function connectSession({
         if(!greeted||!ready||!(data instanceof ArrayBuffer)||data.byteLength<2)throw Error('Binary data before compatible negotiation');
         const frame=new Uint8Array(data),payload=frame.subarray(1);
         if(frame[0]===STATE&&payload.length<=512*1024)onState(payload,epoch);
-        else if(frame[0]===CHAT&&payload.length<=192*1024)onChat(payload,epoch);
+        else if(frame[0]===CHAT&&payload.length<=384*1024+4)onChat(payload,epoch);
         else if(frame[0]===COLLECTION&&payload.length<=1024*1024+512)onCollection(payload,epoch);
         else if(frame[0]===SPACES&&payload.length<=128*1024)onSpaces(payload,epoch);
         else if(frame[0]===INK&&payload.length<=1025*21){if(wantsInk)onInk(payload,epoch);}
@@ -52,7 +52,7 @@ export function connectSession({
   }
   function send(channel,bytes,epoch=generation){
     if(epoch!==generation||!ready||!peer||bytes.length===0)return false;
-    if(bytes.length>(channel===STATE?512*1024:channel===CHAT||channel===SPACES?8192:channel===COLLECTION?1024:32*15))throw Error('Session payload exceeds limit');
+    if(bytes.length>(channel===STATE?512*1024:channel===CHAT?384*1024+4:channel===SPACES?8192:channel===COLLECTION?1024:32*15))throw Error('Session payload exceeds limit');
     if(peer.bufferedAmount>1024*1024){peer.close();return false;}
     const frame=new Uint8Array(bytes.length+1);frame[0]=channel;frame.set(bytes,1);try{peer.send(frame);return true;}catch(error){onError(error);status(false);peer.close();return false;}
   }

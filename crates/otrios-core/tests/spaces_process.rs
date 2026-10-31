@@ -700,7 +700,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v14","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v15","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -898,7 +898,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v14","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v15","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -3866,4 +3866,384 @@ fn public_signout_revokes_the_old_identity_and_actions_even_when_read_access_rem
             ))
             .exists()
     );
+}
+
+#[test]
+fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_access_or_deletion_links()
+ {
+    use otrios_interfaces::{
+        chat::{Command as Chat, Event as ChatEvent},
+        spaces::Audience,
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let source = rig.space("Private drafts");
+    let destination = rig.space("Public copies");
+    for space in [&source, &destination] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "relay".into(),
+            },
+        );
+    }
+    rig.change(
+        'a',
+        Change::Membership {
+            space: source.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Audience {
+            space: destination.clone(),
+            audience: Audience::PublicComment,
+        },
+    );
+    let mut author = socket(&rig.public, &source, Some('a'));
+    let (source_collection, _) = chat_mount(&rig, &mut author, "relay", 1);
+    let (source_profile, receipt_epoch) = chat_join(&mut author, 1);
+    let payload = (0..=255).cycle().take(200_000).collect::<Vec<u8>>();
+    chat_command(
+        &mut author,
+        1,
+        Chat::SendAsset {
+            epoch: receipt_epoch,
+            nonce: format!("{:032x}", 1),
+            text: "Selected confirmed draft with private bytes".into(),
+            name: "diagram.bin".into(),
+            bytes: payload.clone(),
+        },
+    );
+    chat_event(&mut author, 1, |e| {
+        matches!(e, ChatEvent::Receipt { sequence: 1, .. })
+    });
+    let mut reader = socket(&rig.public, &source, Some('b'));
+    let (_, selected) = chat_mount(&rig, &mut reader, "relay", 1);
+    let selection = selected.messages[0].clone();
+    if let Ok(old) = std::env::var("OTRIOS_SPACES_OLD_CHAT_SERVER") {
+        // Exercise the real pre-attachment writer against a private copy of the
+        // new journal. Its failure must never truncate a complete new record.
+        let rollback = rig.root.join("old-chat-writer");
+        fs::create_dir_all(rollback.join("state")).unwrap();
+        let bytes = fs::read(rig.root.join(format!(
+            "state/collection-{source_collection}.data/chat-primary.journal"
+        )))
+        .unwrap();
+        assert_eq!(&bytes[..8], b"OTCHAT02");
+        let original = rollback.join("state/brass-relay.journal");
+        fs::write(&original, &bytes).unwrap();
+        let manifest = rollback.join("provision.json");
+        fs::write(&manifest, serde_json::to_vec(&json!({"version":2,"spaces":[{"name":"Rollback probe","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}]})).unwrap()).unwrap();
+        let output = Command::new(old)
+            .arg("--apps")
+            .arg(rig.root.join("apps"))
+            .arg("--app-state")
+            .arg(rollback.join("state"))
+            .arg("--spaces-registry")
+            .arg(rollback.join("spaces.flex"))
+            .arg("--provision-spaces")
+            .arg(manifest)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Chat journal format"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read(original).unwrap(), bytes);
+    }
+    assert_eq!(selection.message.assets.len(), 1);
+    let mut public = socket(&rig.public, &destination, None);
+    let (first_destination_collection, empty) = chat_mount(&rig, &mut public, "relay", 1);
+    assert!(empty.messages.is_empty());
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: selection.revision,
+            index: 0,
+        },
+    );
+    chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    let generation = http(&rig.public, "GET", Some('a'), None).1["generation"]
+        .as_u64()
+        .unwrap();
+    let publication = Chat::Publish {
+        epoch: receipt_epoch,
+        nonce: format!("{:032x}", 2),
+        sequence: 1,
+        revision: selection.revision,
+        destination_space: destination.clone(),
+        expected_generation: generation,
+    };
+    // Source membership and destination public-comment access do not confer Edit.
+    chat_command(&mut reader, 1, publication.clone());
+    chat_event(&mut reader, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    chat_command(&mut author, 1, publication.clone());
+    chat_event(&mut author, 1, |e| {
+        matches!(e, ChatEvent::Published { sequence: 1, .. })
+    });
+    chat_command(&mut author, 1, publication);
+    chat_event(&mut author, 1, |e| {
+        matches!(e, ChatEvent::Published { sequence: 1, .. })
+    });
+    drop(public);
+    let mut public = socket(&rig.public, &destination, None);
+    let (_, copied) = chat_mount(&rig, &mut public, "relay", 1);
+    assert_eq!(copied.messages.len(), 1);
+    let copy = copied.messages[0].clone();
+    assert_eq!(copy.message.text, selection.message.text);
+    assert_eq!(copy.message.assets, selection.message.assets);
+    assert_ne!(copy.message.sender.id, source_profile);
+    assert_ne!(copy.message.nonce, selection.message.nonce);
+    let exposed = serde_json::to_string(&copied).unwrap();
+    assert!(
+        !exposed.contains(&source_collection)
+            && !exposed.contains(&source_profile)
+            && !exposed.contains("authority_identity")
+    );
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: copy.revision,
+            index: 0,
+        },
+    );
+    let ChatEvent::Asset { bytes, .. } =
+        chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Asset { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: selection.revision,
+            index: 0,
+        },
+    );
+    chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    let mut visitor = socket(&rig.public, &destination, Some('b'));
+    chat_mount(&rig, &mut visitor, "relay", 1);
+    chat_command(&mut visitor, 1, Chat::Join { credential: None });
+    let ChatEvent::Welcome {
+        epoch: visitor_epoch,
+        you,
+        ..
+    } = chat_event(&mut visitor, 1, |e| matches!(e, ChatEvent::Welcome { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(!you.admin);
+    chat_send(
+        &mut visitor,
+        1,
+        visitor_epoch,
+        3,
+        "Comment belongs only to the public destination",
+    );
+    chat_command(
+        &mut visitor,
+        1,
+        Chat::Redact {
+            sequence: 1,
+            revision: copy.revision,
+        },
+    );
+    chat_event(&mut visitor, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    let mut source_probe = socket(&rig.public, &source, Some('a'));
+    let (_, unchanged) = chat_mount(&rig, &mut source_probe, "relay", 1);
+    assert_eq!(unchanged.messages.len(), 1);
+    assert_eq!(unchanged.messages[0], selection);
+    drop(source_probe);
+    let mut moderator = socket(&rig.public, &destination, Some('a'));
+    let (_, moderation_view) = chat_mount(&rig, &mut moderator, "relay", 1);
+    chat_join(&mut moderator, 1);
+    for row in moderation_view.messages.iter().rev() {
+        chat_command(
+            &mut moderator,
+            1,
+            Chat::Redact {
+                sequence: row.message.sequence,
+                revision: row.revision,
+            },
+        );
+        chat_event(&mut moderator, 1, |event| {
+            matches!(event, ChatEvent::Redacted { .. })
+        });
+    }
+    // Knowing a former reference never grants access to unreferenced blobs.
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: copy.revision,
+            index: 0,
+        },
+    );
+    chat_event(&mut public, 1, |event| {
+        matches!(event, ChatEvent::Error { .. })
+    });
+    drop(moderator);
+    // Deleting the published collection leaves its private source readable.
+    rig.change(
+        'a',
+        Change::DeleteData {
+            space: destination.clone(),
+            app: "relay".into(),
+            collection: first_destination_collection.clone(),
+            remove: false,
+        },
+    );
+    drop(public);
+    drop(visitor);
+    chat_command(
+        &mut author,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: selection.revision,
+            index: 0,
+        },
+    );
+    let ChatEvent::Asset { bytes, .. } =
+        chat_event(&mut author, 1, |e| matches!(e, ChatEvent::Asset { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
+    // An old reviewed destination cannot target the replacement, even with the
+    // same app/Space names and still-current source epoch.
+    let stale = Chat::Publish {
+        epoch: receipt_epoch,
+        nonce: format!("{:032x}", 4),
+        sequence: 1,
+        revision: selection.revision,
+        destination_space: destination.clone(),
+        expected_generation: generation,
+    };
+    chat_command(&mut author, 1, stale);
+    chat_event(&mut author, 1, |e| matches!(e, ChatEvent::Error { .. }));
+    let generation = http(&rig.public, "GET", Some('a'), None).1["generation"]
+        .as_u64()
+        .unwrap();
+    chat_command(
+        &mut author,
+        1,
+        Chat::Publish {
+            epoch: receipt_epoch,
+            nonce: format!("{:032x}", 5),
+            sequence: 1,
+            revision: selection.revision,
+            destination_space: destination.clone(),
+            expected_generation: generation,
+        },
+    );
+    chat_event(&mut author, 1, |e| {
+        matches!(e, ChatEvent::Published { sequence: 1, .. })
+    });
+    let mut public = socket(&rig.public, &destination, None);
+    let (destination_collection, new_copy) = chat_mount(&rig, &mut public, "relay", 1);
+    assert_ne!(destination_collection, first_destination_collection);
+    let copy = new_copy.messages[0].clone();
+    assert_eq!(new_copy.messages.len(), 1);
+    // Conversely, permanent source deletion never follows a link into the copy.
+    rig.change(
+        'a',
+        Change::DeleteData {
+            space: source.clone(),
+            app: "relay".into(),
+            collection: source_collection.clone(),
+            remove: false,
+        },
+    );
+    drop(author);
+    drop(reader);
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: copy.revision,
+            index: 0,
+        },
+    );
+    let ChatEvent::Asset { bytes, .. } =
+        chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Asset { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
+    let mut fresh_source = socket(&rig.public, &source, Some('a'));
+    let (fresh_collection, empty) = chat_mount(&rig, &mut fresh_source, "relay", 1);
+    assert_ne!(fresh_collection, source_collection);
+    assert!(empty.messages.is_empty());
+    let generation = http(&rig.public, "GET", Some('a'), None).1["generation"]
+        .as_u64()
+        .unwrap();
+    chat_command(
+        &mut fresh_source,
+        1,
+        Chat::Publish {
+            epoch: receipt_epoch,
+            nonce: format!("{:032x}", 6),
+            sequence: 1,
+            revision: selection.revision,
+            destination_space: destination.clone(),
+            expected_generation: generation,
+        },
+    );
+    chat_event(&mut fresh_source, 1, |e| {
+        matches!(e, ChatEvent::Error { .. })
+    });
+    drop(fresh_source);
+    drop(public);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while rig
+        .root
+        .join(format!("state/collection-{source_collection}.data"))
+        .exists()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "deleted source namespace remained pinned"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    rig.stop();
+    rig.restart(&binary, true, true);
+    let mut public = socket(&rig.public, &destination, None);
+    let (_, recovered) = chat_mount(&rig, &mut public, "relay", 1);
+    assert_eq!(recovered.messages[0], copy);
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            sequence: 1,
+            revision: copy.revision,
+            index: 0,
+        },
+    );
+    let ChatEvent::Asset { bytes, .. } =
+        chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Asset { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
 }

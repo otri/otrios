@@ -181,7 +181,7 @@ fn collection_data_usage(root: &Path, collection: &str) -> Option<u64> {
     };
     let mut total = 0_u64;
     for (count, entry) in entries.enumerate() {
-        if count == 64 {
+        if count == 128 {
             return None;
         }
         let entry = entry.ok()?;
@@ -998,12 +998,15 @@ impl Hub {
         command: &otrios_interfaces::chat::Command,
     ) -> bool {
         self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Read)
-            && (matches!(command, otrios_interfaces::chat::Command::Leave)
-                || otrios_core::spaces::admit_human_action(
-                    scope.identity.as_deref(),
-                    &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
-                )
-                .is_ok())
+            && (matches!(
+                command,
+                otrios_interfaces::chat::Command::Leave
+                    | otrios_interfaces::chat::Command::ReadAsset { .. }
+            ) || otrios_core::spaces::admit_human_action(
+                scope.identity.as_deref(),
+                &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
+            )
+            .is_ok())
             && self.registry().is_ok_and(|registry| {
                 self.app_policy(&binding.app).is_ok_and(|policy| {
                     otrios_core::spaces::authorize_chat(
@@ -1202,6 +1205,85 @@ impl Hub {
             .get(&active.room)
             .cloned()
             .ok_or("Chat room must be qualified before activation".into())
+    }
+    pub(super) fn owned_assets(
+        &self,
+        binding: &otrios_interfaces::spaces::Binding,
+    ) -> Result<otrios_core::canvas::chat::assets::Assets> {
+        otrios_core::canvas::chat::assets::Assets::new(
+            self.state
+                .as_deref()
+                .ok_or("Durable asset storage required")?,
+            &binding.collection,
+        )
+    }
+    pub(super) fn publish_chat(
+        &mut self,
+        scope: &spaces::Scope,
+        active: &Activation,
+        source: &space_chat::Hub,
+        command: &otrios_interfaces::chat::Command,
+        now: u64,
+    ) -> Result<u64> {
+        use otrios_core::canvas::chat::{Publication, publish};
+        let otrios_interfaces::chat::Command::Publish {
+            epoch,
+            nonce,
+            sequence,
+            revision,
+            destination_space,
+            expected_generation,
+        } = command
+        else {
+            return Err("Expected a publication command".into());
+        };
+        if !self.chat_allowed(scope, &active.binding, command) {
+            return Err("Publication admission required".into());
+        }
+        let actor = scope.identity.as_deref().ok_or("Sign in first")?;
+        let policy = self.app_policy(&active.binding.app)?;
+        let destination = otrios_core::spaces::publication_destination(
+            self.registry().map_err(|e| e.to_string())?,
+            actor,
+            &active.binding,
+            destination_space,
+            *expected_generation,
+            &policy,
+        )
+        .map_err(|_| "Publication access or reviewed destination changed")?;
+        let package = self
+            .bundles
+            .get(&self.active)
+            .and_then(|bundle| {
+                bundle.packages.values().find(|p| {
+                    p.app.id == active.binding.app && p.chat && p.app.state_ref == p.primary_ref
+                })
+            })
+            .cloned()
+            .ok_or("App has no primary chat publication adapter")?;
+        let destination_room = self.prepare_chat(&destination, &package)?;
+        let source_assets = self.owned_assets(&active.binding)?;
+        let destination_assets = self.owned_assets(&destination)?;
+        source.chat.run_inline(|source| {
+            destination_room.chat.run_inline(|target| {
+                publish(
+                    source,
+                    target,
+                    &source_assets,
+                    &destination_assets,
+                    Publication {
+                        source: &active.binding,
+                        destination: &destination,
+                        actor,
+                        sequence: *sequence,
+                        revision: *revision,
+                        epoch: *epoch,
+                        nonce,
+                    },
+                    now,
+                )
+            })
+        })
     }
     fn collection_file(
         &self,

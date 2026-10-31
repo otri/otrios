@@ -834,3 +834,41 @@ fn exhausted_recovered_message_sequence_rejects_before_appending() {
     drop(room);
     fs::remove_file(p).unwrap();
 }
+
+#[test]
+fn binary_attachment_codec_is_bounded_and_does_not_expand_each_byte_into_a_scalar() {
+    let bytes = (0..=255).cycle().take(MAX_ASSET_BYTES).collect::<Vec<u8>>();
+    let command = Command::SendAsset {
+        epoch: 1,
+        nonce: "a".repeat(32),
+        text: "Binary canary".into(),
+        name: "file.bin".into(),
+        bytes: bytes.clone(),
+    };
+    let encoded = encode_command(&command).unwrap();
+    assert!(encoded.len() < MAX_ASSET_BYTES + 1024);
+    assert_eq!(decode_command(&encoded).unwrap(), command);
+    let event = Event::Asset {
+        sequence: 1,
+        revision: [1; 32],
+        asset: Asset {
+            name: "file.bin".into(),
+            sha256: super::super::hex(&super::super::hash(&bytes)),
+            bytes: bytes.len() as u32,
+        },
+        bytes,
+    };
+    let encoded = encode_event(&event).unwrap();
+    assert!(encoded.len() < MAX_ASSET_BYTES + 1024);
+    assert_eq!(decode_event(&encoded).unwrap(), event);
+    assert!(
+        encode_command(&Command::SendAsset {
+            epoch: 1,
+            nonce: "a".repeat(32),
+            text: String::new(),
+            name: "large.bin".into(),
+            bytes: vec![0; MAX_ASSET_BYTES + 1]
+        })
+        .is_err()
+    );
+}

@@ -197,14 +197,15 @@ pub fn authorize_chat(
     use otrios_interfaces::chat::Command as Chat;
     let allow = |operation| authorize_installed(registry, identity, binding, operation, installed);
     match command {
-        Chat::Leave => allow(Operation::Read),
+        Chat::Leave | Chat::ReadAsset { .. } | Chat::Publish { .. } => allow(Operation::Read),
         Chat::Join { credential: None }
         | Chat::Profile { .. }
         | Chat::Send { .. }
+        | Chat::SendAsset { .. }
         | Chat::ClaimDraft
         | Chat::Draft { .. }
         | Chat::ClearDraft { .. } => allow(Operation::Edit).or_else(|_| allow(Operation::Comment)),
-        Chat::Kick { .. } => allow(Operation::Moderate),
+        Chat::Kick { .. } | Chat::Redact { .. } => allow(Operation::Moderate),
         Chat::Join { .. } | Chat::Authenticate { .. } | Chat::SignOut => Err(Error::Denied),
     }
 }
@@ -570,4 +571,38 @@ fn installed_compatible(
         return Err(Error::Incompatible);
     }
     Ok(())
+}
+
+/// Explicit cross-Space copy: references grant no destination write permission.
+/// A reviewed management generation also fences destination removal/replacement.
+pub fn publication_destination(
+    registry: &Registry,
+    actor: &str,
+    source: &Binding,
+    destination_space: &str,
+    expected_generation: u64,
+    installed: &AppPolicy,
+) -> Result<Binding> {
+    if expected_generation != registry.generation {
+        return Err(Error::Conflict);
+    }
+    if source.space == destination_space || !valid_identity(actor) {
+        return Err(Error::Denied);
+    }
+    authorize_installed(registry, Some(actor), source, Operation::Read, installed)?;
+    let destination = bind(
+        registry,
+        Some(actor),
+        destination_space,
+        &source.app,
+        &installed.schema,
+    )?;
+    authorize_installed(
+        registry,
+        Some(actor),
+        &destination,
+        Operation::Edit,
+        installed,
+    )?;
+    Ok(destination)
 }
