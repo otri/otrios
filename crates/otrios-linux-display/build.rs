@@ -12,10 +12,26 @@ fn main() {
     {
         return;
     }
-    let target = env::var("TARGET").unwrap().replace('-', "_");
+    let cargo_target = env::var("TARGET").unwrap();
+    let target = cargo_target.replace('-', "_");
+    for variable in [
+        format!("CC_{target}"),
+        format!("AR_{target}"),
+        "CC".into(),
+        "AR".into(),
+    ] {
+        println!("cargo:rerun-if-env-changed={variable}");
+    }
     let compiler = env::var(format!("CC_{target}"))
         .or_else(|_| env::var("CC"))
-        .unwrap_or_else(|_| "cc".into());
+        .unwrap_or_else(|_| {
+            assert_eq!(
+                env::var("HOST").unwrap(),
+                cargo_target,
+                "Set CC_{target} to the target C compiler when cross-compiling the display adapter"
+            );
+            "cc".into()
+        });
     let archiver = env::var(format!("AR_{target}"))
         .or_else(|_| env::var("AR"))
         .unwrap_or_else(|_| {
