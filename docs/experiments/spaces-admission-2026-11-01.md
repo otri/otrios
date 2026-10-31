@@ -513,3 +513,38 @@ explicitly unverified. Minimal tombstones do not expire.
 This checkpoint has local software qualification. Current browser, ARM and
 physical Frame evidence remains to be recorded; no signed Frame deployment is
 claimed. Public audiences/comments/publication remain gated for S4.
+
+
+## S3 Chromium qualification
+
+The clean source `21c13c78337a4ccdd8cbbc327aac8326ff1e661f` passed the extended
+`qualify-spaces-browser.py` probe against real Chromium contexts. The fixture
+verifies a disposable test-key-signed release; it has no native artifact and is
+not the Frame's trusted release or a physical deployment.
+
+- Authority SHA-256: `58fc9d3a7783ae4c1e16320c861d59e938887859b23b33b054d0f56858ca0771`.
+- WASM SHA-256: `254671f7028f595a194aa82db83c5ead38f57a0c178871c02d4dd8e307540720`.
+- Fixture release: `6064208321bc01b4fd9225ee73ac1b551318e10683e5473c840d9de072b10e12`.
+- State protocol v14; opening release-control v1; zero runtime exceptions.
+
+[Raw qualification](data/spaces-deletion-v14.json) records the cookie-authenticated
+Member's 403 deletion response and the Admin's actual trusted confirmation. Passive
+CDP observations match the revoked epoch to the browser's Leave acknowledgement.
+The old owned namespace is absent after collection/session cleanup reaches zero.
+The Cleanup view still explicitly reports protected migration originals awaiting
+qualification. Reopening obtains a fresh collection, empty transcript and a new
+app-local profile; the old imported/history messages remain absent. Two clients
+then share new messages while another Space continues independently.
+
+The same run repeats retained-data/reattachment, confirmed migration, Quit,
+revocation, closed-Space isolation and pointer-capture/ink checks. Its bounded
+passive input trace is [retained here](data/spaces-deletion-ink-trace-v14.json).
+No Worker or DOM prototype is replaced by the harness.
+
+![Space and app identified before confirmation](data/spaces-deletion-confirmation-v14.png)
+
+![Collection reclaimed while migration originals remain pending](data/spaces-deletion-cleanup-v14.png)
+
+![Fresh transcript after deletion](data/spaces-deletion-fresh-chat-v14.png)
+
+Physical Frame and current ARM qualification remain separate outstanding checks.
