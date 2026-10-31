@@ -431,3 +431,40 @@ Snapshot/restore maintenance is available through the authority's offline
 `--spaces-storage` actions. Automatic retention scheduling, legacy-original
 retention/finalization, producer shutdown and management cleanup reporting remain
 unfinished. DeleteData remains unavailable while those integrations are pending.
+
+
+## Migration-original retention checkpoint
+
+Source checkpoint: `eeccf4a5317e022cd710aedd5b6566c3758be1bd`.
+The authority SHA-256 after the required check is
+`37760056fc00c12780ae30ee2ccb24497f6a809963b74f8115c1098721d09167`.
+
+`bash scripts/check.sh` passed with the preserved OTSP4 authority supplied as
+`OTRIOS_SPACES_OLD_SERVER`. Its SHA-256 is
+`4e2fe493ed927831f6d7b7c5f45ec9871b75bf16ab949627e0cc3a963815c31a`.
+The real process test confirms that this older writer rejects OTSP5 without
+changing the primary or latest ledger. Shared state protocol v13 and stable
+release-control v1 are unchanged at this checkpoint.
+
+Nine retention tests cover qualification before expiry, a fixed seven-day
+finalization deadline, source fingerprint conflicts, active chat-owner exclusion,
+missing originals, prevention of deleted-source reimport, older-primary recovery,
+and bounded reclamation of interrupted checkpoint/chat-compaction files. The
+retention inventory and finalization decision use the latest decision ledger;
+losing a separate optional sidecar cannot reopen imports. The 36 storage tests
+pass, including existing process-exit recovery boundaries. Lock ownership is
+explicitly released on rejected recovery paths as well as successful Store drop.
+
+All sixteen authority process cases pass. A new missing-checkpoint case verifies
+that explicitly requesting a missing legacy original never creates an empty
+replacement and leaves provisioning closed. Document and chat receipts recover
+cleanup attribution without replaying confirmed data. The document case removes
+the app from the installed catalog, reruns its completed historical manifest,
+finalizes migration, and verifies that confirmed value 42 and the separate Frame
+identity's later revocation survive. Existing full-history chat recovery remains
+covered. Earlier intermediate validation was corrected before this checkpoint;
+check 30 is the complete final run.
+
+These are local software checks. Authority timer/status integration, connected
+replica discard acknowledgements, deletion management/UI and S4 remain pending.
+No physical Frame deployment or new browser acceptance is claimed here.
