@@ -13,7 +13,7 @@ import shlex
 import subprocess
 
 REMOTE = r'''
-import fcntl,hashlib,json,os,pathlib,re,struct,time,urllib.request
+import fcntl,hashlib,json,os,pathlib,re,struct,time,urllib.request,subprocess
 base=pathlib.Path('/run/otrios-direct-console/otrios')
 def ready():
  return json.loads(max(base.glob('ready-*.json'),key=lambda p:p.stat().st_mtime).read_text())
@@ -55,30 +55,39 @@ def bound(bottom):
   touch(20,start,True);time.sleep(.04);touch(20,end,True);time.sleep(.12);touch(20,end,False)
   wait(lambda q: home(q) and not scroll(q)['active'])
  raise RuntimeError('Map did not reach scroll bound')
+def title_points(metadata):
+ assert runtime_probe,'Use --runtime-probe for edit acceptance'
+ root=pathlib.Path('/var/lib/otrios-authority')
+ result=subprocess.run([runtime_probe,str(root/'releases'/expected/'apps/catalog.flex')],input=json.dumps(metadata).encode(),capture_output=True)
+ assert result.returncode==0,'Private runtime coordinate probe failed'
+ points=json.loads(result.stdout)
+ return {k:[v[0]+16,v[1]+24]for k,v in points.items()if k in ['start','end']}
+
 try:
- if q['ui_ref']!='app:spaces-host/ui':tap(5,5)
- q=wait(home);epoch=q['epoch'];limit=scroll(q)['limit'][1]
- assert limit>0,'Use a home map with content below the viewport'
- for _ in range(3):
-  bound(True)
-  touch(20,600,True);time.sleep(.04);touch(20,200,True)
-  wait(lambda q: abs(scroll(q)['offset'][1]-limit)<1)
-  touch(20,220,True)
-  wait(lambda q: 10<limit-scroll(q)['offset'][1]<30)
-  touch(20,200,True);time.sleep(.12);touch(20,200,False);wait(home)
-  bound(False)
-  touch(20,200,True);time.sleep(.04);touch(20,600,True)
-  wait(lambda q: scroll(q)['offset'][1]<1)
-  touch(20,580,True)
-  wait(lambda q: 10<scroll(q)['offset'][1]<30)
-  touch(20,600,True);time.sleep(.12);touch(20,600,False)
-  q=wait(home);assert q['epoch']==epoch,'Scroll remounted the map'
- # Known public app position is explicit so this never guesses a private tile.
- tap(*app_point)
- wait(lambda q:q['ui_ref']==app_ui and idle(q))
- tap(5,5)
- wait(home)
- reorder_passed=False
+ if not skip_navigation:
+  if q['ui_ref']!='app:spaces-host/ui':tap(5,5)
+  q=wait(home);epoch=q['epoch'];limit=scroll(q)['limit'][1]
+  assert limit>0,'Use a home map with content below the viewport'
+  for _ in range(3):
+   bound(True)
+   touch(20,600,True);time.sleep(.04);touch(20,200,True)
+   wait(lambda q: abs(scroll(q)['offset'][1]-limit)<1)
+   touch(20,220,True)
+   wait(lambda q: 10<limit-scroll(q)['offset'][1]<30)
+   touch(20,200,True);time.sleep(.12);touch(20,200,False);wait(home)
+   bound(False)
+   touch(20,200,True);time.sleep(.04);touch(20,600,True)
+   wait(lambda q: scroll(q)['offset'][1]<1)
+   touch(20,580,True)
+   wait(lambda q: 10<scroll(q)['offset'][1]<30)
+   touch(20,600,True);time.sleep(.12);touch(20,600,False)
+   q=wait(home);assert q['epoch']==epoch,'Scroll remounted the map'
+  # Known public app position is explicit so this never guesses a private tile.
+  tap(*app_point)
+  wait(lambda q:q['ui_ref']==app_ui and idle(q))
+  tap(5,5)
+  wait(home)
+ reorder_passed=False;reorder_changed=False
  if reorder:
   token=pathlib.Path('/etc/otrios-dashboard.identity').read_text().strip()
   def metadata():
@@ -88,39 +97,54 @@ try:
   source=next(s for s in before['spaces']if s['name']==source_name)
   destination=next(s for s in before['spaces']if s['name']==destination_name)
   assert source['role']==destination['role']=='admin','Both Spaces must be administered by Frame'
-  before_edit=ready()['epoch'];tap(1220,756)
-  q=wait(lambda q:home(q)and q['epoch']>before_edit)
-  edit_epoch=q['epoch']
-  skyline=[0.]*6;points={}
-  for space in before['spaces'][:4]:
-   width=min(space['layout']['width'],6);count=sum(a['attached']for a in space['apps'])
-   height=68+max((max(count,1)+width-1)//width,space['layout']['height'])*152+60
-   col,y=min(((c,max(skyline[c:c+width]))for c in range(7-width)),key=lambda v:(v[1],v[0]))
-   for c in range(col,col+width):skyline[c]=y+height+20
-   points[space['id']]=[28+col*(1244/6)+20,y+116]
-  # Use a title's blank padding, not a painted glyph. This also checks hit geometry.
-  start=points[source['id']];end=points[destination['id']]
-  assert 104<=start[1]<660 and 104<=end[1]<660,'Use visible title positions for this native probe'
-  touch(*start,True);time.sleep(.1)
-  for step in range(1,13):
-   touch(*(start[i]+(end[i]-start[i])*step/12 for i in range(2)),True)
-   time.sleep(.06)
-   q=ready();assert q['epoch']==edit_epoch,'Edit preview remounted and cancelled native capture'
-  touch(*end,False)
-  deadline=time.monotonic()+10
-  while time.monotonic()<deadline:
-   current=metadata();order=[s['id']for s in current['spaces']]
-   if current['generation']>before['generation']and order.index(source['id'])<order.index(destination['id']):break
-   time.sleep(.1)
-  else:raise RuntimeError('Native title drag did not place source before destination')
-  tap(1220,756);wait(home);reorder_passed=True
+  order=[space['id']for space in before['spaces']]
+  if order.index(source['id'])<order.index(destination['id']):reorder_passed=True
+  else:
+   before_edit=ready()['epoch'];tap(1220,756)
+   q=wait(lambda q:home(q)and q['epoch']>before_edit)
+   edit_epoch=q['epoch']
+   points=title_points(before)
+   # Use a title's blank padding, not a painted glyph. This also checks hit geometry.
+   start=points['start'];end=points['end']
+   assert 104<=start[1]<660 and 104<=end[1]<660,'Use visible title positions for this native probe'
+   touch(*start,True);wait(lambda q:q['input_busy']and q['epoch']==edit_epoch)
+   for step in range(1,13):
+    touch(*(start[i]+(end[i]-start[i])*step/12 for i in range(2)),True)
+    time.sleep(.06)
+    q=ready();assert q['epoch']==edit_epoch,'Edit preview remounted and cancelled native capture'
+   touch(*end,False)
+   deadline=time.monotonic()+10
+   while time.monotonic()<deadline:
+    current=metadata();order=[s['id']for s in current['spaces']]
+    if current['generation']>before['generation']and order.index(source['id'])<order.index(destination['id']):break
+    time.sleep(.1)
+   else:raise RuntimeError('Native title drag did not place source before destination')
+   tap(1220,756);wait(home);reorder_passed=True;reorder_changed=True
+ if edit_capture:
+  token=pathlib.Path('/etc/otrios-dashboard.identity').read_text().strip()
+  def metadata():
+   req=urllib.request.Request('http://127.0.0.1:8877/spaces',headers={'Authorization':'Bearer '+token,'Origin':'https://otrios.otri.ca'})
+   return json.load(urllib.request.urlopen(req,timeout=5))
+  initial=metadata();before_edit=ready()['epoch'];tap(1220,756)
+  q=wait(lambda q:home(q)and q['epoch']>before_edit);edit_epoch=q['epoch']
+  start=title_points(initial)['start']
+  touch(*start,True);wait(lambda q:q['input_busy']and q['epoch']==edit_epoch)
+  for dx in [15,30,45,30,15,0]:
+   touch(start[0]+dx,start[1]+16,True);time.sleep(.12)
+   assert ready()['epoch']==edit_epoch,'Edit feedback broke native capture'
+  touch(*start,False);wait(lambda q:home(q)and q['epoch']==edit_epoch)
+  assert ready()['epoch']==edit_epoch and not ready()['input_busy'],'Same-title drop should release without a write'
+  assert metadata()['generation']==initial['generation'],'Cancelled title drag changed metadata'
+  tap(1220,756);wait(home)
  assert rule.read_bytes()==calibration,'Calibration changed'
- print(json.dumps({'passed':True,'release':expected,'scroll_round_trips':3,
-  'stable_map_epoch':True,'immediate_bound_reversal':True,'corner_return':[5,5],
+ print(json.dumps({'passed':True,'release':expected,'scroll_round_trips':0 if skip_navigation else 3,'navigation_exercised':not skip_navigation,
+  'stable_map_epoch':True,'immediate_bound_reversal':None if skip_navigation else True,
+  'corner_return':None if skip_navigation else [5,5],
   'app_ui':app_ui,'input':'synthetic evdev through calibrated physical-device reader',
   'human_touch_observation':False,'app_writes':0,'pixels_exported':False,
-  'calibration_unchanged':True,'space_title_reorder':reorder_passed,
-  'space_order_changed':reorder_passed,'readiness_wait_ms_max':max(latencies)}))
+  'calibration_unchanged':True,'space_title_reorder':reorder_changed,'requested_order_verified':reorder_passed,'admin_title_capture':edit_capture,
+  'capture_probe_metadata_unchanged':edit_capture,
+  'space_order_changed':reorder_changed,'readiness_wait_ms_max':max(latencies)}))
 finally:
  touch(20,600,False);os.close(fd)
 '''
@@ -131,17 +155,24 @@ def main():
     parser.add_argument('--config', type=pathlib.Path, required=True)
     parser.add_argument('--pointer', type=pathlib.Path)
     parser.add_argument('--output', type=pathlib.Path, required=True)
-    parser.add_argument('--app-point', default='700,132')
+    parser.add_argument('--app-point', default='120,132')
     parser.add_argument('--app-ui', default='app:brass-relay/ui')
     parser.add_argument('--device', default='/dev/input/by-path/platform-2005a000.i2c-event')
     parser.add_argument('--reorder-spaces', action='store_true',
                         help='Also drag Brass Relay before Household, retaining that requested order')
+    parser.add_argument('--edit-capture', action='store_true',
+                        help='Exercise a visible administrable title and drop it back without a metadata write')
+    parser.add_argument('--runtime-probe', help='Private on-Frame space_map_probe executable')
+    parser.add_argument('--skip-navigation', action='store_true', help='Exercise only the open map edit flow')
     args = parser.parse_args()
+    if (args.reorder_spaces or args.edit_capture) and not args.runtime_probe:
+        parser.error('Edit probes require --runtime-probe')
     config = json.loads(args.config.read_text())
     pointer = args.pointer or pathlib.Path(config['runtime']) / 'build/staged-release.json'
     values = {'expected': json.loads(pointer.read_text())['id'], 'device': args.device,
               'app_point': list(map(float, args.app_point.split(','))), 'app_ui': args.app_ui,
-              'reorder': args.reorder_spaces, 'source_name': 'Brass Relay', 'destination_name': 'Household'}
+              'reorder': args.reorder_spaces, 'edit_capture': args.edit_capture,
+              'runtime_probe': args.runtime_probe, 'skip_navigation': args.skip_navigation, 'source_name': 'Brass Relay', 'destination_name': 'Household'}
     script = '\n'.join(k + '=' + repr(v) for k, v in values.items()) + '\n' + REMOTE
     result = subprocess.run(config['frame']['ssh'] + ['python3 -c ' + shlex.quote(script)],
                             capture_output=True, text=True, timeout=180)

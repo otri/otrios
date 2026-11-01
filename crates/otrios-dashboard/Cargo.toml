@@ -106,6 +106,10 @@ name = "space_ink_probe"
 required-features = ["canvas"]
 
 [[example]]
+name = "space_map_probe"
+required-features = ["canvas", "host-sync"]
+
+[[example]]
 name = "space_chat_probe"
 required-features = ["canvas"]
 

@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "release": "bc1aa7847a6a4f4f42b7cc4482f7dc2adef9a20c2c199a278ec1a93aeb7a146f",
+  "scroll_round_trips": 0,
+  "navigation_exercised": false,
+  "stable_map_epoch": true,
+  "immediate_bound_reversal": null,
+  "corner_return": null,
+  "app_ui": "app:brass-relay/ui",
+  "input": "synthetic evdev through calibrated physical-device reader",
+  "human_touch_observation": false,
+  "app_writes": 0,
+  "pixels_exported": false,
+  "calibration_unchanged": true,
+  "space_title_reorder": false,
+  "admin_title_capture": true,
+  "capture_probe_metadata_unchanged": true,
+  "space_order_changed": false,
+  "readiness_wait_ms_max": 204.3
+}

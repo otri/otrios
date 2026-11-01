@@ -802,12 +802,20 @@ REPORT` checks the signed pointer, native readiness and services in one SSH call
 three scroll round trips, immediate reversal at each bound, stable mount epochs,
 and a public app's return target at logical `(5,5)` through the calibrated evdev
 reader. Its explicit `--app-point` defaults to the existing Frame's public Brass
-Relay Space at `(700,132)`; adjust that point when the layout changes. It writes
+Relay Space at `(120,132)`; adjust that point when the layout changes. It writes
 no app data and exports neither pixels nor private state. Synthetic device-input
 acceptance does not establish human touch quality or a measured frame rate.
 The optional `--reorder-spaces` probe additionally drags the existing Brass Relay
 before Household, verifies the authoritative order and retains that arrangement.
 It changes presentation metadata only and requires their titles to be visible.
+Edit probes require `--runtime-probe` naming a private on-Frame build of the
+`space_map_probe` example. That read-only wrapper derives title coordinates through
+the same runtime from local metadata; it does not export them. `--edit-capture
+--skip-navigation` checks a same-title drop without a management write. Run that
+mode from the ordinary map. Reordering requires Admin in both named Spaces.
+The explicitly invoked `grant-frame-admin.py` operator tool uses the existing
+offline provisioner for authorized membership grants; it is not a routine
+deployment step. Its private plan and pre-change metadata remain on Frame.
 
 The populated browser probe uses four synthetic Spaces and 14 app previews:
 `python3 scripts/qualify-spaces-browser.py --wasm-pkg BUILT_PKG --populated
