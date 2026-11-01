@@ -3,8 +3,8 @@
 
 Date: 2026-10-31. Status: implementation in progress. Authority, browser and ARM
 emulation checkpoints are recorded in the [qualification report](../experiments/spaces-admission-2026-11-01.md).
-The [runtime guide](../SPACES.md) records the implemented contracts and remaining
-lifecycle stages; physical Frame cutover remains pending. Records the agreed
+The [runtime guide](../SPACES.md) records the implemented contracts and physical
+rollout requirements; physical Frame cutover remains pending. Records the agreed
 product model and bounded implementation milestones. Builds on [standalone bundles](0025-standalone-app-bundles.md),
 [durable app state](0006-durable-canvas-merkle-adapter.md) and the
 [shared session](0009-unified-server-session.md).

@@ -703,8 +703,9 @@ unregistered originals are also refused after any deletion decision.
 Inventory independent legacy roots before finalizing migration; unattributed
 files are not silently classified or erased. Known interrupted checkpoint and chat-compaction temporaries expire with their
 originals in bounded cleanup turns. The authority timer also prunes expired
-originals and reports remaining retained copies. Browser and physical Frame S3
-acceptance remain required before claiming the rollout complete.
+originals and reports remaining retained copies. Browser lifecycle and publication
+acceptance are recorded in the qualification report. Physical Frame acceptance
+remains required before claiming the rollout complete.
 
 ## Rollout requirements
 

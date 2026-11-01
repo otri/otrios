@@ -663,3 +663,103 @@ signed Frame rollback.
 The trusted publication chooser, browser file controls and current protocol
 browser/ARM/physical Frame acceptance remain pending. The earlier Chromium public
 sharing evidence is protocol v14 and is not claimed as v15 publication acceptance.
+
+
+## S4 trusted publication and browser attachment acceptance
+
+Qualified source: `f473efd1d44a0eccc393fe2f25f63364b60ad071` on
+`feat/spaces-and-app-data`, with a clean source tree. `bash scripts/check.sh`
+passed, including strict Clippy, all workspace tests, 38 JavaScript worker/session
+cases, signed bundle checks, 22 real authority/client process cases, and Linux
+input fixtures. Core library tests number 207; Canvas 69; Space transitions 22;
+trusted Space UI 20. The complete check log SHA-256 is
+`1bb26e4bfa2a35a976e41c06c4fa5f85f364c839d4f138eb48104d0b2e083dc6`.
+Both preserved pre-OTSP5 and pre-OTCHAT02 authorities were supplied to the process
+suite for actual old-writer rejection probes.
+
+The trusted Chat host offers confirmed-dispatch selection, explicit destination
+review, publication, attachment upload/download and reviewed moderation. Fixed
+host controls work with older Chat descriptions and reject publisher remapping.
+Request-correlated download and moderation replies cannot satisfy another
+operation. Version-2 mount bindings add an opaque actor context so a different
+person, membership interval or attachment cannot inherit previous pending input.
+The unchanged release-control opening envelope remains v1; state protocol is v16.
+
+The extended process case rejects a legacy journal-only import containing owned
+attachment references, restores verified attachment bytes from a paired backup,
+and confirms that a later collection deletion blocks resurrection from that same
+backup. Existing confirmed legacy history survives the message-schema and journal
+transition; publication/deletion still serialize against current authorization.
+
+The repeatable [Chromium report](data/spaces-publication-2026-11-01.json) passes
+with no runtime exceptions. It exercises real file selection and pointer input,
+including a portrait publication confirmation, without replacing Worker or DOM
+prototypes. A 200,000-byte private attachment survives app removal/reattachment,
+then an explicit selected publication copies it into the public Space. An
+anonymous reader downloads the public copy and verifies SHA-256
+`c7a7d73b68d21102bf7d6d9be27b4106497efc8119224bebfbd26b375541bde7`.
+Unselected private dispatches and later private changes do not appear there.
+Deleting the source while two private previews are open clears both hosts before
+their observed disposal acknowledgements; the destination attachment still
+downloads with the same digest afterward. The public reader has no durable chat
+profile, and public discovery does not reveal the closed source Space.
+
+Exploratory qualification exposed an initial anonymous-auth response incorrectly
+returning an already admitted public app to Home, and command text covering the
+file action in a short viewport. The worker now distinguishes initial status from
+a signed-in session ending. Dialog layout and pointer regression checks cover six
+dispatches/destinations and four attachments in short and portrait views.
+
+![Trusted portrait publication review](data/spaces-publication-portrait-2026-11-01.png)
+
+![Public attachment after private source deletion](data/spaces-published-attachment-2026-11-01.png)
+
+The native authority SHA-256 is
+`fa9874dfd8b920a6b84a5c4ba381181027ba0a11ff2387d7a1cce37e125bf3b5`;
+Wasm is `227f4e6f8a3e801c91c8480699693cd1c5373e18b446eab29b13067b0b5479b2`.
+The disposable signed browser fixture is
+`4e4d755efb6fdab0782a5521981358486273f96de94388d26d658eac47dcb092`;
+it contains no native executable and was not deployed. Native file picking and
+downloading are not offered; native hosts list attachments and can publish their
+owned bytes. Physical Frame identity/migration, signed activation, display/touch
+acceptance and a qualified rollback remain required. No final-review PR has been
+opened.
+
+
+## S4 ARM authority and final fixture qualification
+
+The clean `f473efd1d44a0eccc393fe2f25f63364b60ad071` runtime archive builds all ARMv7 release targets using
+Rust 1.90.0 with explicit ARM CC/AR and linker settings. ELF inspection confirms
+32-bit ARM EABI5 executables. The [machine-readable report](data/spaces-publication-arm-emulated-2026-11-01.json)
+records the source archive, six unsigned artifact digests, toolchain, emulator and
+commands. The authority SHA-256 is `31c357fc34be3dc54c8e4b621582686538ae1dbbfeae0a5e393de9484e893d82`;
+the native direct host is `276040309751b6b48f44af903f0aacb03c49cd6a26ccc27bfe95f2be4f3d4e05`.
+These artifacts are preserved locally under `target/dashboard-armv7/checkpoint-f473efd`.
+
+All 22 authority/client process cases pass against the ARM authority under QEMU
+in 24.49 seconds with two test threads. This includes selected publication,
+owned attachment retrieval, public restrictions, source deletion independence,
+paired backup recovery, restore after deletion, confirmed legacy migration,
+explicit Frame identity and active revocation. The process driver runs on x86_64;
+its authority subprocesses execute real ARM code through `qemu-arm -L /`.
+A separate publication case supplies the preserved `21c13c7` ARM authority as the
+actual older chat writer. It rejects a copied `OTCHAT02` journal without changing
+its bytes. This is a format refusal probe, not a physical rollback acceptance.
+
+The first ARM attempt correctly rejected new fixture manifests and copied journals
+whose permissions depended on the ambient umask. The fixtures now use the existing
+private-file creation pattern for both kinds of input. This reaches the intended
+legacy owned-asset rejection and actual old-writer probe without weakening any
+permission checks. Fixture-only source `2114db2945692040d91c9f1c010911f3bb077843` passes the full required
+`bash scripts/check.sh` suite, including all 22 native process cases with both
+preserved native older writers. That final check log SHA-256 is
+`1393b1239995962950adf7b889f24ce423b4d49b1988057b55f518cc54c1fc5b`. Runtime and browser code are unchanged
+from the clean Chromium-qualified `f473efd` source above.
+
+The native host was compiled for ARM; it was not exercised against physical KMS,
+touch input or Frame's installed libraries. No unsigned binary or disposable
+browser release was activated on Frame. Production cutover still requires the
+pinned SSH host key and existing Mac builder/signer access, followed by explicit
+identity/migration provisioning, signed verification and physical acceptance with
+a qualified rollback. The goal remains open for those steps; no progress Issue or
+PR is used to track them.
