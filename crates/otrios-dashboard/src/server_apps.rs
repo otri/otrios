@@ -845,35 +845,41 @@ impl Hub {
         for s in registry.spaces.iter().filter(|s| {
             Some(s.id.as_str()) == selected && otrios_core::spaces::visible(s, identity)
         }) {
-            for a in &s.apps {
+            for (policy, collection) in s.apps.iter().map(|a| (&a.policy, &a.collection)).chain(
+                registry
+                    .retained
+                    .iter()
+                    .filter(|d| d.space == s.id)
+                    .map(|d| (&d.policy, &d.collection)),
+            ) {
                 let package = self
                     .bundles
                     .get(&self.active)
-                    .and_then(|b| b.packages.values().find(|p| p.app.id == a.policy.app));
+                    .and_then(|b| b.packages.values().find(|p| p.app.id == policy.app));
                 let mut available = package.is_some()
                     && !self.rooms.iter().any(|(key, r)| {
-                        r.failed && key.split(':').next() == Some(a.collection.as_str())
+                        r.failed && key.split(':').next() == Some(collection.as_str())
                     })
                     && !self.chat_rooms.iter().any(|(key, room)| {
-                        key.split(':').next() == Some(a.collection.as_str()) && !room.healthy()
+                        key.split(':').next() == Some(collection.as_str()) && !room.healthy()
                     });
                 if available {
                     available = self.bundles.get(&self.active).is_some_and(|bundle| {
                         bundle
                             .packages
                             .values()
-                            .filter(|p| p.policy.app == a.policy.app && p.chat)
+                            .filter(|p| p.policy.app == policy.app && p.chat)
                             .all(|p| {
-                                self.chat_path(&a.collection, p)
+                                self.chat_path(collection, p)
                                     .and_then(|path| self.missing_owned_chat(&path, p))
                                     .is_ok_and(|missing| !missing)
                             })
                     });
                 }
                 let stored_bytes = self.state.as_ref().and_then(|root| {
-                    let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
+                    let checkpoint = root.join(format!("collection-{}.merkle", collection));
                     let presentation =
-                        root.join(format!("collection-{}.presentation.flex", a.collection));
+                        root.join(format!("collection-{}.presentation.flex", collection));
                     if package.is_some_and(|p| p.aggregate_view) && !presentation.is_file() {
                         available = false;
                     }
@@ -884,7 +890,7 @@ impl Hub {
                     ]
                     .iter()
                     .try_fold(
-                        collection_data_usage(root, &a.collection)?,
+                        collection_data_usage(root, collection)?,
                         |sum, p| match fs::metadata(p) {
                             Ok(m) if m.is_file() => sum.checked_add(m.len()),
                             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(sum),
@@ -893,7 +899,7 @@ impl Hub {
                     )
                 });
                 facts.insert(
-                    a.collection.clone(),
+                    collection.clone(),
                     otrios_core::spaces::CollectionFacts {
                         stored_bytes,
                         available,

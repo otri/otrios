@@ -39,13 +39,28 @@ pub(super) enum Pane {
     SpaceSettings,
     AppSettings(String),
     Profile,
+    RemoveApp(String),
+    Dataset(String),
+    DeleteDataset(String),
+    RestoreDataset(String),
+    DeleteSpace,
+    Datasets,
 }
+#[derive(Clone)]
+pub(super) struct Review {
+    pub space: String,
+    pub generation: u64,
+    pub collection: Option<String>,
+}
+
 #[derive(Default)]
 pub(super) struct Model {
     pub pane: Pane,
     pub page: usize,
     pub message: String,
     pub editing: bool,
+    pub remove_data: bool,
+    pub review: Option<Review>,
     pub scroll: f32,
     pub scroll_limit: f32,
     pub drag: Option<Drag>,
@@ -76,6 +91,8 @@ pub(super) enum HostAction {
     Resize(String),
     Background(otrios_interfaces::spaces::Background),
     SaveSpace,
+    ToggleRemoveData,
+    Reviewed(Change, u64),
     Unavailable(&'static str),
 }
 pub(super) struct Rendered {
@@ -213,6 +230,12 @@ pub(super) fn render(
             | Pane::AppSettings(_)
             | Pane::Profile
             | Pane::Installed
+            | Pane::RemoveApp(_)
+            | Pane::Dataset(_)
+            | Pane::DeleteDataset(_)
+            | Pane::RestoreDataset(_)
+            | Pane::DeleteSpace
+            | Pane::Datasets
     ) {
         return map::render(snapshot, model, draft, sign_in, sign_out, viewport, font);
     }
@@ -273,7 +296,15 @@ pub(super) fn render(
         Pane::Person(_) => "Membership",
         Pane::Create => "Create Space",
         Pane::Invite => "Add member",
-        Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile => unreachable!(),
+        Pane::SpaceSettings
+        | Pane::AppSettings(_)
+        | Pane::Profile
+        | Pane::RemoveApp(_)
+        | Pane::Dataset(_)
+        | Pane::DeleteDataset(_)
+        | Pane::RestoreDataset(_)
+        | Pane::DeleteSpace
+        | Pane::Datasets => unreachable!(),
     };
     let mut b = Builder {
         nodes: vec![],
@@ -787,7 +818,15 @@ pub(super) fn render(
                 HostAction::Invite(Role::Admin),
             );
         }
-        Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile => unreachable!(),
+        Pane::SpaceSettings
+        | Pane::AppSettings(_)
+        | Pane::Profile
+        | Pane::RemoveApp(_)
+        | Pane::Dataset(_)
+        | Pane::DeleteDataset(_)
+        | Pane::RestoreDataset(_)
+        | Pane::DeleteSpace
+        | Pane::Datasets => unreachable!(),
     }
     let form = matches!(model.pane, Pane::Create | Pane::Invite);
     if !model.message.is_empty() {

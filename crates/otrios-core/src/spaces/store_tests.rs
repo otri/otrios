@@ -353,7 +353,7 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
     let mut upgraded = Store::open(fixture.path()).unwrap();
     original.registry.spaces[0].layout.width = 1;
     assert!(upgraded.current == original);
-    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP6"));
+    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP7"));
     let request = Request {
         version: VERSION,
         expected_generation: upgraded.registry().unwrap().generation,
@@ -374,4 +374,59 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
     assert_eq!(registry.spaces[0].layout.width, 1);
     assert_eq!(registry.spaces[0].apps[0].collection, binding.collection);
     authorize(registry, Some("alice"), &binding, Operation::Edit).unwrap();
+}
+
+#[test]
+fn otsp6_migration_keeps_user_layout_and_does_not_rebind_any_confirmed_data() {
+    let fixture = Fixture::new();
+    let (mut store, binding) = fixture.seeded();
+    let layout = SpaceLayout {
+        width: 1,
+        height: 1,
+        background: Background::None,
+    };
+    let generation = store.registry().unwrap().generation;
+    store
+        .commit(
+            "alice",
+            &Request {
+                version: VERSION,
+                expected_generation: generation,
+                change: Change::ConfigureSpace {
+                    space: binding.space.clone(),
+                    name: "User layout".into(),
+                    layout,
+                },
+            },
+            None,
+        )
+        .unwrap();
+    let expected = store.current.clone();
+    let latest = store.latest_path().to_path_buf();
+    drop(store);
+    let mut historical = serde_json::to_value(&expected).unwrap();
+    historical["registry"]
+        .as_object_mut()
+        .unwrap()
+        .remove("retained");
+    for space in historical["registry"]["spaces"].as_array_mut().unwrap() {
+        space.as_object_mut().unwrap().remove("archived");
+    }
+    let payload = flexbuffers::to_vec(&historical).unwrap();
+    let mut bytes = b"OTSP6".to_vec();
+    bytes.extend(crate::canvas::hash(&payload));
+    bytes.extend(payload);
+    for path in [fixture.path(), latest] {
+        write(&path, &bytes).unwrap();
+    }
+    let upgraded = Store::open(fixture.path()).unwrap();
+    assert!(upgraded.current == expected);
+    assert_eq!(upgraded.registry().unwrap().spaces[0].layout, layout);
+    authorize(
+        upgraded.registry().unwrap(),
+        Some("alice"),
+        &binding,
+        Operation::Edit,
+    )
+    .unwrap();
 }

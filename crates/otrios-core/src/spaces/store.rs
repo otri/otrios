@@ -90,7 +90,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP6".to_vec();
+    let mut bytes = b"OTSP7".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -109,10 +109,12 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
     Ok(payload)
 }
 fn decode(bytes: &[u8]) -> Result<Record> {
-    let mut record: Record =
-        flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6"])?)
-            .map_err(|_| Error::Invalid)?;
-    if !bytes.starts_with(b"OTSP6") {
+    let mut record: Record = flexbuffers::from_slice(payload(
+        bytes,
+        &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6", b"OTSP7"],
+    )?)
+    .map_err(|_| Error::Invalid)?;
+    if !bytes.starts_with(b"OTSP6") && !bytes.starts_with(b"OTSP7") {
         initial_layouts(&mut record.registry);
     }
     validate_record(&record)?;
@@ -123,6 +125,7 @@ fn current_framing(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"OTSP4")
         || bytes.starts_with(b"OTSP5")
         || bytes.starts_with(b"OTSP6")
+        || bytes.starts_with(b"OTSP7")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let mut registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
@@ -410,12 +413,7 @@ impl Store {
         installed: Option<&AppPolicy>,
     ) -> Result<&Registry> {
         let registry = apply(self.registry()?, actor, request, installed)?;
-        let next = Record {
-            registry,
-            ..self.current.clone()
-        };
-        self.publish(next, |_| {})?;
-        self.registry()
+        self.commit_decision(request, registry)
     }
     pub fn commit_catalog(
         &mut self,
@@ -424,13 +422,33 @@ impl Store {
         installed: &[AppPolicy],
     ) -> Result<&Registry> {
         let registry = apply_catalog(self.registry()?, actor, request, installed)?;
-        self.publish(
-            Record {
-                registry,
-                ..self.current.clone()
-            },
-            |_| {},
-        )?;
+        self.commit_decision(request, registry)
+    }
+    fn commit_decision(&mut self, request: &Request, registry: Registry) -> Result<&Registry> {
+        let next = Record {
+            registry,
+            ..self.current.clone()
+        };
+        if let Change::RestoreDataset {
+            space,
+            app,
+            collection,
+        } = &request.change
+        {
+            if self
+                .current
+                .registry
+                .retained
+                .iter()
+                .any(|d| d.space == *space && d.policy.app == *app && d.collection == *collection)
+            {
+                self.clone_retained(next, space, app, collection)?;
+            } else {
+                self.publish(next, |_| {})?;
+            }
+        } else {
+            self.publish(next, |_| {})?;
+        }
         self.registry()
     }
     fn publish(&mut self, next: Record, mut boundary: impl FnMut(Boundary)) -> Result<()> {

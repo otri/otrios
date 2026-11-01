@@ -5,6 +5,7 @@ use otrios_interfaces::{
     layout::Expr,
     spaces::{Background, Discovery, Role},
 };
+mod retained;
 const PAPER: [u8; 4] = [247, 246, 240, 255];
 const INK: [u8; 4] = [44, 50, 43, 255];
 const SOFT: [u8; 4] = [109, 116, 105, 255];
@@ -265,7 +266,15 @@ pub(super) fn render(
     if !admin
         && matches!(
             model.pane,
-            Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Installed
+            Pane::SpaceSettings
+                | Pane::AppSettings(_)
+                | Pane::Installed
+                | Pane::RemoveApp(_)
+                | Pane::Dataset(_)
+                | Pane::DeleteDataset(_)
+                | Pane::RestoreDataset(_)
+                | Pane::DeleteSpace
+                | Pane::Datasets
         )
     {
         model.pane = Pane::Home;
@@ -301,7 +310,9 @@ pub(super) fn render(
         let shown = snapshot
             .spaces
             .iter()
-            .filter(|s| s.attached_count > 0 || model.editing && s.role == Some(Role::Admin))
+            .filter(|s| {
+                !s.archived && s.attached_count > 0 || model.editing && s.role == Some(Role::Admin)
+            })
             .collect::<Vec<_>>();
         let margin = if w < 500. { 16. } else { 28. };
         let gap = 20.;
@@ -317,7 +328,13 @@ pub(super) fn render(
         let mut skyline = vec![0.; cols];
         for space in shown.iter().skip(model.page * page_size).take(page_size) {
             let width = usize::from(space.layout.width).min(cols);
-            let count = space.apps.len();
+            let count = (space.apps.len()
+                + if model.editing {
+                    space.retained.len()
+                } else {
+                    0
+                })
+            .min(otrios_interfaces::spaces::MAX_INSTALLED_APPS);
             let rows = count
                 .max(1)
                 .div_ceil(width)
@@ -363,7 +380,12 @@ pub(super) fn render(
                     .corner_radius(24.0.into()),
             );
             let title_width = width - if editable { 64. } else { 16. };
-            let title_lines = caption_lines(&space.name, title_width - 20., font);
+            let displayed_name = if space.archived {
+                format!("{} (deleted)", space.name)
+            } else {
+                space.name.clone()
+            };
+            let title_lines = caption_lines(&displayed_name, title_width - 20., font);
             let title_nodes = title_lines
                 .iter()
                 .enumerate()
@@ -432,17 +454,64 @@ pub(super) fn render(
                 card.actions
                     .push(HostAction::MapApp(space.id.clone(), app.app.clone()));
                 if editable {
-                    card.nodes
-                        .push(text("···", [tx + tile - 32., ty + 4., 28., 24.], 1.).color(SOFT));
+                    card.minus(
+                        &format!("Delete App: {} in {}", app.title, space.name),
+                        [tx + tile - 44., ty - 8., 44., 44.],
+                        HostAction::Settings(space.id.clone(), Pane::RemoveApp(app.app.clone())),
+                    );
                 }
             }
             if editable {
-                card.flat(
-                    &format!("Add app: {}", space.name),
-                    "+",
-                    [12., height - 56., 48., 48.],
-                    HostAction::Settings(space.id.clone(), Pane::Installed),
-                );
+                for (offset, data) in space
+                    .retained
+                    .iter()
+                    .take(
+                        otrios_interfaces::spaces::MAX_INSTALLED_APPS
+                            .saturating_sub(space.apps.len()),
+                    )
+                    .enumerate()
+                {
+                    let index = space.apps.len() + offset;
+                    let tx = 12. + (index % columns) as f32 * tile;
+                    let ty = 64. + (index / columns) as f32 * 152.;
+                    let title = format!("{} (data)", data.title);
+                    card.nodes.push(
+                        a::canvas(retained::ghost_tile(&data.app, &title, tile, font))
+                            .frame([tx, ty, tile, 144.])
+                            .semantic_label(&short(&format!("{} in {}", title, space.name), 94))
+                            .on_press(a::Event::back()),
+                    );
+                    card.actions.push(HostAction::Settings(
+                        space.id.clone(),
+                        Pane::Dataset(data.collection.clone()),
+                    ));
+                    card.minus(
+                        &format!("Delete data: {} in {}", data.title, space.name),
+                        [tx + tile - 44., ty - 8., 44., 44.],
+                        HostAction::Settings(
+                            space.id.clone(),
+                            Pane::DeleteDataset(data.collection.clone()),
+                        ),
+                    );
+                }
+                if !space.retained.is_empty() {
+                    card.flat(
+                        "All retained data",
+                        "Data…",
+                        [72., height - 56., (width - 128.).max(48.), 48.],
+                        HostAction::Settings(space.id.clone(), Pane::Datasets),
+                    );
+                }
+            }
+            if editable {
+                if !space.archived {
+                    card.flat(
+                        &format!("Add app: {}", space.name),
+                        "+",
+                        [12., height - 56., 48., 48.],
+                        HostAction::Settings(space.id.clone(), Pane::Installed),
+                    );
+                }
                 card.flat(
                     &format!("Resize: {}", space.name),
                     "",
@@ -683,7 +752,11 @@ pub(super) fn render(
                 let used = selected.and_then(|s| {
                     s.apps
                         .iter()
-                        .try_fold(0u64, |sum, a| sum.checked_add(a.stored_bytes?))
+                        .map(|a| (&a.collection, a.stored_bytes))
+                        .chain(s.retained.iter().map(|d| (&d.collection, d.stored_bytes)))
+                        .collect::<BTreeMap<_, _>>()
+                        .values()
+                        .try_fold(0u64, |sum, bytes| sum.checked_add((*bytes)?))
                 });
                 b.nodes.push(text(
                     &format!(
@@ -715,6 +788,23 @@ pub(super) fn render(
                         label,
                         [left, top + 244. + i as f32 * 54., width, 50.],
                         HostAction::Pane(pane),
+                    );
+                }
+                if space.archived {
+                    b.flat(
+                        "Restore Space",
+                        "Restore Space",
+                        [left, top + 464., width, 50.],
+                        HostAction::Manage(Change::RestoreSpace {
+                            space: space.id.clone(),
+                        }),
+                    );
+                } else {
+                    b.flat(
+                        "Delete Space",
+                        "Delete Space",
+                        [left, top + 464., width, 50.],
+                        HostAction::Pane(Pane::DeleteSpace),
                     );
                 }
                 b.flat(
@@ -779,7 +869,9 @@ pub(super) fn render(
                 }
             }
         }
-        _ => {}
+        _ => {
+            retained::render(&mut b, snapshot, model, [left, top, width, h], font);
+        }
     }
     if !model.message.is_empty() {
         for (line, caption) in caption_lines(&model.message, width, font)
@@ -798,11 +890,13 @@ pub(super) fn render(
             ));
         }
     }
-    b.flat(
-        "Close",
-        "Close",
-        [left, (h - 88.).min(top + 544.), 100., 56.],
-        HostAction::Pane(Pane::Home),
-    );
+    if !retained::is_confirmation(&model.pane) {
+        b.flat(
+            "Close",
+            "Close",
+            [left, (h - 88.).min(top + 544.), 100., 56.],
+            HostAction::Pane(Pane::Home),
+        );
+    }
     finish(b, &value, "OTriOS", form, false)
 }

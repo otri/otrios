@@ -323,9 +323,232 @@ fn initial_ledger_framing_upgrades_without_changing_root_or_membership() {
     let recovered = Store::open(fixture.path()).unwrap();
     assert_eq!(recovered.root_id(), root);
     assert_eq!(recovered.registry().unwrap(), &registry);
-    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP6");
+    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP7");
     assert_eq!(
         fs::read(recovered.path()).unwrap(),
         fs::read(latest).unwrap()
     );
+}
+
+fn retained_prepared() -> (Fixture, Store, Binding, String, AppPolicy) {
+    let fixture = Fixture::new();
+    let (mut store, binding) = fixture.seeded();
+    super::super::tests::data(&fixture, &binding);
+    let policy = store.registry().unwrap().spaces[0].apps[0].policy.clone();
+    let source = "f".repeat(32);
+    let mut registry = store.registry().unwrap().clone();
+    registry.retained.push(RetainedDataset {
+        space: binding.space.clone(),
+        policy: policy.clone(),
+        collection: source.clone(),
+        label: "Earlier Notes".into(),
+        origin: DatasetOrigin::BeforeReplacement,
+        generation: registry.generation,
+    });
+    store
+        .publish(
+            Record {
+                registry,
+                ..store.current.clone()
+            },
+            |_| {},
+        )
+        .unwrap();
+    let path = fixture
+        .storage()
+        .join(format!("collection-{source}.merkle"));
+    write(&path, b"sealed confirmed checkpoint").unwrap();
+    let data = fixture.storage().join(format!("collection-{source}.data"));
+    new_directory(&data).unwrap();
+    write(&data.join("blob.bin"), b"sealed asset").unwrap();
+    (fixture, store, binding, source, policy)
+}
+fn retained_next(store: &Store, binding: &Binding, source: &str, policy: &AppPolicy) -> Record {
+    let registry = apply(
+        store.registry().unwrap(),
+        "alice",
+        &Request {
+            version: VERSION,
+            expected_generation: store.registry().unwrap().generation,
+            change: Change::RestoreDataset {
+                space: binding.space.clone(),
+                app: policy.app.clone(),
+                collection: source.into(),
+            },
+        },
+        Some(policy),
+    )
+    .unwrap();
+    Record {
+        registry,
+        ..store.current.clone()
+    }
+}
+#[test]
+fn retained_restore_copies_confirmed_data_and_assets_into_a_fresh_binding_and_keeps_both_originals()
+{
+    let (fixture, mut store, binding, source, policy) = retained_prepared();
+    let generation = store.registry().unwrap().generation;
+    let next = retained_next(&store, &binding, &source, &policy);
+    store
+        .clone_retained(next, &binding.space, &policy.app, &source)
+        .unwrap();
+    let registry = store.registry().unwrap();
+    assert_eq!(registry.generation, generation + 1);
+    let target = &registry.spaces[0].apps[0].collection;
+    assert_ne!(target, &source);
+    assert_ne!(target, &binding.collection);
+    assert_eq!(
+        fs::read(
+            fixture
+                .storage()
+                .join(format!("collection-{target}.merkle"))
+        )
+        .unwrap(),
+        b"sealed confirmed checkpoint"
+    );
+    assert_eq!(
+        fs::read(
+            fixture
+                .storage()
+                .join(format!("collection-{target}.data/blob.bin"))
+        )
+        .unwrap(),
+        b"sealed asset"
+    );
+    assert_eq!(
+        fs::read(primary(&fixture, &binding)).unwrap(),
+        b"confirmed document"
+    );
+    assert_eq!(
+        fs::read(
+            fixture
+                .storage()
+                .join(format!("collection-{source}.merkle"))
+        )
+        .unwrap(),
+        b"sealed confirmed checkpoint"
+    );
+    assert!(
+        registry
+            .retained
+            .iter()
+            .any(|d| d.collection == binding.collection)
+    );
+    assert!(registry.retained.iter().any(|d| d.collection == source));
+    assert!(authorize(registry, Some("alice"), &binding, Operation::Edit).is_err());
+    let backup = store.create_backup(NOW, true).unwrap();
+    let snapshot = store.read_snapshot(&backup).unwrap();
+    assert_eq!(snapshot.collections.len(), 3);
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|f| f.path == format!("collection-{source}.data/blob.bin"))
+    );
+}
+const RETAINED_STEPS: [RestoreStep; 6] = [
+    RestoreStep::Staged,
+    RestoreStep::Fenced,
+    RestoreStep::FilePromoted,
+    RestoreStep::DecisionPublished,
+    RestoreStep::StageRemoved,
+    RestoreStep::Unfenced,
+];
+#[test]
+fn retained_child() {
+    let Ok(path) = std::env::var("OTRIOS_RETAINED_TEST_PATH") else {
+        return;
+    };
+    let mut store = Store::open(path.into()).unwrap();
+    let space = &store.registry().unwrap().spaces[0];
+    let policy = space.apps[0].policy.clone();
+    let binding = bind(
+        store.registry().unwrap(),
+        Some("alice"),
+        &space.id,
+        &policy.app,
+        &policy.schema,
+    )
+    .unwrap();
+    let source = store.registry().unwrap().retained[0].collection.clone();
+    let next = retained_next(&store, &binding, &source, &policy);
+    let index: usize = std::env::var("OTRIOS_RETAINED_TEST_BOUNDARY")
+        .unwrap()
+        .parse()
+        .unwrap();
+    store
+        .clone_retained_at(next, &binding.space, &policy.app, &source, |step| {
+            if step == RETAINED_STEPS[index] {
+                std::process::exit(77)
+            }
+        })
+        .unwrap();
+    panic!("retained restore boundary not reached");
+}
+#[test]
+fn process_exits_never_admit_partial_retained_restore_or_lose_current_data() {
+    for index in 0..RETAINED_STEPS.len() {
+        let (fixture, store, binding, source, _) = retained_prepared();
+        let generation = store.registry().unwrap().generation;
+        drop(store);
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "spaces::store::backups::restore::tests::retained_child",
+                "--nocapture",
+            ])
+            .env("OTRIOS_RETAINED_TEST_PATH", fixture.path())
+            .env("OTRIOS_RETAINED_TEST_BOUNDARY", index.to_string())
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(77),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+        let mut store = Store::open(fixture.path()).unwrap();
+        if (1..5).contains(&index) {
+            assert!(store.registry().is_err());
+        }
+        store.recover_storage().unwrap();
+        let registry = store.registry().unwrap();
+        assert_eq!(registry.generation, generation + u64::from(index > 0));
+        assert_eq!(
+            fs::read(primary(&fixture, &binding)).unwrap(),
+            b"confirmed document"
+        );
+        assert_eq!(
+            fs::read(
+                fixture
+                    .storage()
+                    .join(format!("collection-{source}.merkle"))
+            )
+            .unwrap(),
+            b"sealed confirmed checkpoint"
+        );
+        if index > 0 {
+            let target = &registry.spaces[0].apps[0].collection;
+            assert_eq!(
+                fs::read(
+                    fixture
+                        .storage()
+                        .join(format!("collection-{target}.data/blob.bin"))
+                )
+                .unwrap(),
+                b"sealed asset"
+            );
+            assert_eq!(
+                fs::read(
+                    fixture
+                        .storage()
+                        .join(format!("collection-{target}.merkle"))
+                )
+                .unwrap(),
+                b"sealed confirmed checkpoint"
+            );
+        }
+        assert!(!suffix(store.path(), ".restore").exists());
+    }
 }

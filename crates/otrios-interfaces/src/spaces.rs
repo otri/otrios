@@ -13,6 +13,7 @@ pub const MAX_COMMAND_BYTES: usize = 8192;
 pub const MAX_EVENT_BYTES: usize = 128 * 1024;
 pub const MAX_INSTALLED_APPS: usize = 16;
 pub const MAX_ROOTS: usize = 16;
+pub const MAX_RETAINED_DATASETS: usize = 512;
 pub const MAX_COLLECTION_SCHEMA_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +117,28 @@ pub struct Space {
     pub admission_epoch: u64,
     #[serde(default)]
     pub layout: SpaceLayout,
+    /// A recoverable Space keeps its current authorization and data references.
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DatasetOrigin {
+    BeforeReplacement,
+    BeforeRestore,
+}
+
+/// An inactive sealed dataset is distinct from the bundle's single app slot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedDataset {
+    pub space: String,
+    pub policy: AppPolicy,
+    pub collection: String,
+    pub label: String,
+    pub origin: DatasetOrigin,
+    pub generation: u64,
 }
 
 /// Minimal permanent stale-reference rejection record. No deleted payload.
@@ -136,6 +159,8 @@ pub struct Registry {
     pub generation: u64,
     pub spaces: Vec<Space>,
     pub deletions: Vec<Deletion>,
+    #[serde(default)]
+    pub retained: Vec<RetainedDataset>,
 }
 
 /// A host-issued scope. Every operation must revalidate it against current policy.
@@ -183,6 +208,23 @@ pub enum Change {
     PlaceSpace {
         space: String,
         before: Option<String>,
+    },
+    DeleteSpace {
+        space: String,
+        remove_data: bool,
+    },
+    RestoreSpace {
+        space: String,
+    },
+    RestoreDataset {
+        space: String,
+        app: String,
+        collection: String,
+    },
+    DeleteDataset {
+        space: String,
+        app: String,
+        collection: String,
     },
     LabelApp {
         space: String,
@@ -274,6 +316,21 @@ pub struct SpaceSummary {
     /// Attached app previews only. Collection IDs and retained data are excluded.
     pub apps: Vec<MapApp>,
     pub attached_count: u16,
+    pub archived: bool,
+    /// Only an authenticated current Admin receives retained identities.
+    pub retained: Vec<DatasetSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatasetSummary {
+    pub app: String,
+    pub collection: String,
+    pub title: String,
+    pub availability: AppAvailability,
+    pub stored_bytes: Option<u64>,
+    /// None identifies the preferred dataset retained by ordinary app removal.
+    pub origin: Option<DatasetOrigin>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -323,6 +380,7 @@ pub struct CleanupSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpaceDetail {
+    pub retained: Vec<DatasetSummary>,
     pub space: String,
     pub cleanup: Option<Box<CleanupSummary>>,
     pub apps: Vec<AppSummary>,

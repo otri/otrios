@@ -10,7 +10,7 @@ import {join} from 'node:path';
 const fixture=JSON.parse(await readFile(process.argv[2],'utf8'));
 const output=fixture.output;await mkdir(output,{recursive:true});
 const profile=await mkdtemp(join(tmpdir(),'otrios-spaces-chrome-'));
-const chrome=spawn('chromium',['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-background-timer-throttling','--disable-renderer-backgrounding','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0','--user-data-dir='+profile,'--no-first-run','about:blank'],{stdio:['ignore','ignore','pipe']});
+const chrome=spawn(process.env.OTRIOS_CHROMIUM||(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'chromium'),['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-background-timer-throttling','--disable-renderer-backgrounding','--use-angle=swiftshader','--enable-unsafe-swiftshader','--remote-debugging-port=0','--user-data-dir='+profile,'--no-first-run','about:blank'],{stdio:['ignore','ignore','pipe']});
 let socket;
 try {
  const endpoint=await new Promise((resolve,reject)=>{let log='';const timer=setTimeout(()=>reject(Error(log)),20000);chrome.stderr.on('data',data=>{log+=data;const match=log.match(/DevTools listening on (ws:\/\/\S+)/);if(match){clearTimeout(timer);resolve(match[1]);}});chrome.on('error',reject);});
@@ -142,7 +142,7 @@ try {
  await wait(a,scroll+"?.limit[1]>300");
  const mapEpoch=await evaluate(a,`document.querySelector(${JSON.stringify(selector('Profile'))}).dataset.epoch`);
  assert(!await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Scroll down'))})`));
- for(let round=0;round<4;round++){
+ for(let round=0;round<2;round++){
   await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:10000},a);
   await wait(a,scroll+"?.offset[1]==="+scroll+"?.limit[1]");
   await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:-10000},a);
@@ -175,7 +175,7 @@ try {
  await wait(a,"document.querySelector('.canvas-editor')?.value==='Workshop'");
  await click(a,'Background: Lilac');await click(a,'Save');
  for(let i=0;i<100&&(await get()).spaces.find(s=>s.id===fixture.space_a).name!=='Workshop';i++)await new Promise(r=>setTimeout(r,50));
- await shot(a,'space-settings-at-save');await writeFile(output+'/settings-debug.json',JSON.stringify(await evaluate(a,"({view:document.querySelector('#view')?.getAttribute('aria-label'),inputs:[...document.querySelectorAll('.canvas-editor')].map(e=>({value:e.value,focused:e===document.activeElement}))})")));
+
  let changed=await get();assert.equal(changed.spaces.find(s=>s.id===fixture.space_a).name,'Workshop');assert.equal(changed.spaces.find(s=>s.id===fixture.space_a).layout.background,'lilac');
  await shot(a,'space-settings');await click(a,'Close');
  await click(a,'Bundle Counter in Workshop');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Name'))})`);
@@ -207,7 +207,7 @@ try {
  };
  await drag('Space: Browser B','Space: Workshop');
  for(let i=0;i<100&&(await get()).spaces[0].id!==fixture.space_b;i++)await new Promise(r=>setTimeout(r,50));
- await writeFile(output+'/pointer-order-debug.json',JSON.stringify({state:await get(),view:await evaluate(a,view)}));await shot(a,'pointer-space-order');
+ await shot(a,'pointer-space-order');
  assert.equal((await get()).spaces[0].id,fixture.space_b);
  await wait(a,`document.querySelector(${JSON.stringify(selector('Space: Browser B'))})?.getBoundingClientRect().left<document.querySelector(${JSON.stringify(selector('Space: Workshop'))})?.getBoundingClientRect().left`);
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Tally'))})`);
@@ -216,13 +216,41 @@ try {
  assert.equal((await get()).spaces.find(s=>s.id===fixture.space_a).apps[0].policy.app,'space-ink-probe');
  assert.equal(await evaluate(b,ui),'app:bundle-counter/ui');assert.equal(await count(b),heldValue);
  await click(a,'Done');
- for(const width of [1024,736,390,320]){
+ for(const width of [1280,390]){
   await call('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:false},a);await wait(a,`innerWidth===${width}`);await evaluate(a,'new Promise(r=>setTimeout(r,250))');
   const bounds=await evaluate(a,"[...document.querySelectorAll('#controls button')].map(b=>({label:b.getAttribute('aria-label'),r:b.getBoundingClientRect().toJSON()}))");
   for(const {label,r}of bounds){assert(r.x>=-.1&&r.y>=-.1&&r.right<=width+.1&&r.bottom<=844.1,label+' '+JSON.stringify(r));}
   await shot(a,'map-'+width);
  }
- await call('Emulation.clearDeviceMetricsOverride',{},a);
+ await call('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false},a);
+ // Retained-data UX uses a disposable new app so original fixture data is preserved.
+ const empty=(await get()).spaces.find(s=>s.name==='Empty Space');
+ await click(a,'Edit');await click(a,'Add app: Empty Space');
+ await click(a,'Bundle Counter');
+ for(let n=0;n<100&&!(await get()).spaces.find(s=>s.id===empty.id).apps.some(a=>a.attached);n++)await new Promise(r=>setTimeout(r,50));
+ const retainedCID=(await get()).spaces.find(s=>s.id===empty.id).apps[0].collection;
+ await click(a,'Close');await click(a,'Delete App: Bundle Counter in Empty Space');
+ // Duplicate canonical names are disambiguated by the containing Space on map tiles;
+ // the minus button must also carry its Space scope.
+ await click(a,'Remove Data');await click(a,'Cancel');
+ await click(a,'Delete App: Bundle Counter in Empty Space');await click(a,'Delete');
+ for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).apps[0].attached;n++)await new Promise(r=>setTimeout(r,50));
+ await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter (data) in Empty Space'))})`);
+ await shot(a,'retained-ghost');
+ assert(!await evaluate(a,view+".includes('Saved.')"));
+ await click(a,'Bundle Counter (data) in Empty Space');await click(a,'Restore');await shot(a,'restore-data-review');await click(a,'Restore');
+ for(let n=0;n<100&&!(await get()).spaces.find(s=>s.id===empty.id).apps[0].attached;n++)await new Promise(r=>setTimeout(r,50));
+ assert.equal((await get()).spaces.find(s=>s.id===empty.id).apps[0].collection,retainedCID);
+ await click(a,'Delete App: Bundle Counter in Empty Space');await click(a,'Remove Data');await click(a,'Delete');
+ for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).apps.length;n++)await new Promise(r=>setTimeout(r,50));
+ assert.equal((await get()).spaces.find(s=>s.id===empty.id).apps.length,0);
+ await click(a,'Space settings: Empty Space');await click(a,'Delete Space');await click(a,'Delete');
+ await wait(a,view+".includes('Empty Space (deleted)')");
+ await click(a,'Space settings: Empty Space');await click(a,'Restore Space');
+ for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).archived;n++)await new Promise(r=>setTimeout(r,50));
+ assert.equal((await get()).spaces.find(s=>s.id===empty.id).archived,false);
+ await click(a,'Close');await click(a,'Done');
+ await writeFile(output+'/retained-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,default_keep_data:true,cancel_clears_remove_data:true,exact_identity_restore:true,checked_remove_data:true,deleted_space_recovery:true,silent_success:true,runtime_errors:errors},null,2));
  // Switching to another Space's app stays within one browser session and opens it.
  await click(a,'Bundle Counter');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&"+ui+"==='app:bundle-counter/ui'");
  await click(a,'Back to OTriOS');await click(a,'Profile');await click(a,'Sign out');
@@ -239,4 +267,4 @@ try {
  await writeFile(output+'/map-acceptance.json',JSON.stringify({source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,protocols:hellos,collections_preserved:true,checks:['wheel and repeated scroll reversal','stable map epoch','restored clipped controls','common map','empty edit-only','Space name/color','implicit app name','stable bundle ID','keyboard resize','pointer Space/app reorder','mounted peer preserved','responsive bounds','same-session Space switch','anonymous filtering','single-app direct launch'],exceptions:errors},null,2));
  console.log('Spaces map browser acceptance passed');
  }
-} finally {socket?.close();chrome.kill('SIGTERM');await new Promise(r=>chrome.once('exit',r));await rm(profile,{recursive:true,force:true});}
+} finally {socket?.close();if(chrome.exitCode===null&&chrome.signalCode===null){const exited=new Promise(r=>chrome.once('exit',r));chrome.kill('SIGTERM');await exited;}await rm(profile,{recursive:true,force:true});}

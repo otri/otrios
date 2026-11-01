@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Management v1 uses a separate bounded channel on the negotiated shared session.
 use super::*;
-const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v2\0";
-const EVENT: &[u8] = b"OTriOS\0spaces-event\0v2\0";
+const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v3\0";
+const EVENT: &[u8] = b"OTriOS\0spaces-event\0v3\0";
 
 fn command_shape(command: &Command) -> Result<()> {
     match command {
@@ -37,6 +37,23 @@ fn command_shape(command: &Command) -> Result<()> {
                 } => valid_id(space) && valid_name(name) && valid_layout(*layout),
                 Change::PlaceSpace { space, before } => {
                     valid_id(space) && before.as_ref().is_none_or(|id| valid_id(id) && id != space)
+                }
+                Change::DeleteSpace { space, .. } | Change::RestoreSpace { space } => {
+                    valid_id(space)
+                }
+                Change::RestoreDataset {
+                    space,
+                    app,
+                    collection,
+                }
+                | Change::DeleteDataset {
+                    space,
+                    app,
+                    collection,
+                } => {
+                    valid_id(space)
+                        && valid_id(collection)
+                        && otrios_interfaces::canvas::valid_destination(app)
                 }
                 Change::LabelApp { space, app, name } => {
                     valid_id(space)

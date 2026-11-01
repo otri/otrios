@@ -526,7 +526,7 @@ impl Client {
                     "Reply lost. Check the refreshed Space before trying again.".into()
                 }
                 crate::spaces::Outcome::Decided { status, .. } => match status {
-                    otrios_interfaces::spaces::ManagementStatus::Applied => "Saved.",
+                    otrios_interfaces::spaces::ManagementStatus::Applied => "",
                     otrios_interfaces::spaces::ManagementStatus::Denied => {
                         "Admin access is required."
                     }
@@ -665,6 +665,8 @@ impl Client {
                 if !matches!(pane, Pane::AppSettings(_)) {
                     self.commit_host_label()?;
                 }
+                self.host.review = None;
+                self.host.remove_data = false;
                 self.host.pane = pane;
                 self.host.page = 0;
                 self.host.field_owner = None;
@@ -704,7 +706,25 @@ impl Client {
                 }
             }
             HostAction::Settings(space, pane) => {
+                self.host.review = None;
+                self.host.remove_data = false;
                 self.host_destination(space, pane, None)?;
+            }
+            HostAction::ToggleRemoveData => {
+                self.host.remove_data = !self.host.remove_data;
+                self.build_host(true)?;
+            }
+            HostAction::Reviewed(change, generation) => {
+                if self
+                    .spaces
+                    .snapshot()
+                    .is_none_or(|s| s.generation != generation)
+                {
+                    self.host.message = "The Space changed. Close and review it again.".into();
+                    self.build_host(true)?;
+                } else {
+                    return self.host_action(HostAction::Manage(change));
+                }
             }
             HostAction::Resize(_) => {}
             HostAction::Background(color) => {
@@ -788,10 +808,21 @@ impl Client {
                 let deleting =
                     matches!(change, otrios_interfaces::spaces::Change::DeleteData { .. });
                 let sharing = matches!(change, otrios_interfaces::spaces::Change::Audience { .. });
+                let retained = matches!(
+                    self.host.pane,
+                    Pane::RemoveApp(_)
+                        | Pane::DeleteDataset(_)
+                        | Pane::RestoreDataset(_)
+                        | Pane::DeleteSpace
+                        | Pane::Dataset(_)
+                );
                 match self.spaces.request(change) {
                     Ok(_) => {
                         self.host.message = "Saving…".into();
-                        if self.host.pane == Pane::Create {
+                        if retained {
+                            self.host.pane = Pane::Home;
+                            self.host.review = None;
+                        } else if self.host.pane == Pane::Create {
                             self.host.pane = Pane::Spaces;
                         } else if self.host.pane == Pane::Invite {
                             self.host.pane = Pane::Members;

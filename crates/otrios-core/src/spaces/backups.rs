@@ -346,6 +346,12 @@ impl Store {
             .iter()
             .flat_map(|s| &s.apps)
             .map(|a| (a.collection.clone(), a.policy.schema.clone()))
+            .chain(
+                self.registry()?
+                    .retained
+                    .iter()
+                    .map(|d| (d.collection.clone(), d.policy.schema.clone())),
+            )
             .collect::<BTreeMap<_, _>>();
         let files = snapshot_files(storage, &collections)?;
         let id = format!("{now_unix_ms:016x}-{}", fresh()?);

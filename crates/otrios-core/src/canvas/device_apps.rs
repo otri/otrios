@@ -53,6 +53,11 @@ impl LocalApps {
     pub(super) fn project(&self, snapshot: &Discovery) -> Discovery {
         let mut snapshot = snapshot.clone();
         for space in &mut snapshot.spaces {
+            for data in &mut space.retained {
+                if !self.allows(&data.app) {
+                    data.availability = otrios_interfaces::spaces::AppAvailability::Unavailable;
+                }
+            }
             for app in &mut space.apps {
                 if !self.allows(&app.app) {
                     app.availability = otrios_interfaces::spaces::AppAvailability::Unavailable;
@@ -61,6 +66,11 @@ impl LocalApps {
         }
         if let Some(detail) = &mut snapshot.selected {
             detail.installed.retain(|app| self.allows(&app.policy.app));
+            for data in &mut detail.retained {
+                if !self.allows(&data.app) {
+                    data.availability = otrios_interfaces::spaces::AppAvailability::Unavailable;
+                }
+            }
             for app in &mut detail.apps {
                 if !self.allows(&app.app) {
                     app.launch = None;

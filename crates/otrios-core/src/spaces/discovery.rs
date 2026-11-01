@@ -71,22 +71,31 @@ pub fn discovery_with_cleanup(
             let preview_count = s
                 .apps
                 .iter()
-                .filter(|a| a.attached)
+                .filter(|a| a.attached && !s.archived)
                 .count()
                 .min(MAX_INSTALLED_APPS)
                 .min(previews_left);
             previews_left -= preview_count;
+            let mut retained = if role(s, identity) == Some(Role::Admin) {
+                retained_summaries(registry, s, installed, facts)
+            } else {
+                vec![]
+            };
+            retained.truncate(previews_left);
+            previews_left -= retained.len();
             SpaceSummary {
+                archived: s.archived,
+                retained,
                 id: s.id.clone(),
                 name: s.name.clone(),
                 audience: s.audience,
                 role: role(s, identity),
                 layout: s.layout,
-                attached_count: s.apps.iter().filter(|a| a.attached).count() as u16,
+                attached_count: s.apps.iter().filter(|a| a.attached && !s.archived).count() as u16,
                 apps: s
                     .apps
                     .iter()
-                    .filter(|a| a.attached)
+                    .filter(|a| a.attached && !s.archived)
                     .take(preview_count)
                     .map(|a| {
                         let app = installed.iter().find(|p| p.policy.app == a.policy.app);
@@ -123,7 +132,10 @@ pub fn discovery_with_cleanup(
                         stored_bytes: admin
                             .then(|| storage.and_then(|f| f.stored_bytes))
                             .flatten(),
-                        launch: if a.attached && availability == AppAvailability::Available {
+                        launch: if !s.archived
+                            && a.attached
+                            && availability == AppAvailability::Available
+                        {
                             app.cloned()
                         } else {
                             None
@@ -132,6 +144,11 @@ pub fn discovery_with_cleanup(
                 })
                 .collect();
             SpaceDetail {
+                retained: if admin {
+                    retained_summaries(registry, s, installed, facts)
+                } else {
+                    vec![]
+                },
                 space: s.id.clone(),
                 cleanup: if admin {
                     cleanup.get(&s.id).cloned().map(Box::new)
@@ -196,7 +213,12 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
     if snapshot.version != VERSION
         || !valid_id(&snapshot.cursor.authority)
         || snapshot.spaces.len() > MAX_SPACES
-        || snapshot.spaces.iter().map(|s| s.apps.len()).sum::<usize>() > MAX_APPS
+        || snapshot
+            .spaces
+            .iter()
+            .map(|s| s.apps.len() + s.retained.len())
+            .sum::<usize>()
+            > MAX_APPS
         || snapshot
             .identity
             .as_ref()
@@ -205,12 +227,25 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
         return Err(Error::Invalid);
     }
     let mut ids = BTreeSet::new();
+    let mut datasets = BTreeSet::new();
     for s in &snapshot.spaces {
         if !valid_id(&s.id)
             || !ids.insert(&s.id)
             || s.name.trim().is_empty()
             || s.name.len() > 128
             || !valid_layout(s.layout)
+            || s.archived && s.role != Some(Role::Admin)
+            || !s.retained.is_empty() && s.role != Some(Role::Admin)
+            || s.retained.len() > MAX_APPS
+            || s.retained
+                .iter()
+                .any(|d| !valid_dataset(d) || !datasets.insert(&d.collection))
+            || s.retained
+                .iter()
+                .map(|d| &d.collection)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != s.retained.len()
             || s.apps.len() > MAX_INSTALLED_APPS
             || usize::from(s.attached_count) > MAX_APPS
             || s.apps.len() > usize::from(s.attached_count)
@@ -230,6 +265,16 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
             .ok_or(Error::Invalid)?;
         let admin = summary.role == Some(Role::Admin);
         if detail.apps.len() > MAX_APPS
+            || detail.retained.len() > MAX_APPS
+            || !admin && !detail.retained.is_empty()
+            || detail.retained.iter().any(|d| !valid_dataset(d))
+            || detail
+                .retained
+                .iter()
+                .map(|d| &d.collection)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != detail.retained.len()
             || detail.installed.len() > MAX_INSTALLED_APPS
             || (!admin
                 && (detail.members.is_some()
@@ -268,4 +313,75 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn valid_dataset(dataset: &DatasetSummary) -> bool {
+    valid_id(&dataset.collection)
+        && otrios_interfaces::canvas::valid_destination(&dataset.app)
+        && valid_name(&dataset.title)
+}
+fn retained_summaries(
+    registry: &Registry,
+    space: &Space,
+    installed: &[InstalledApp],
+    facts: &BTreeMap<String, CollectionFacts>,
+) -> Vec<DatasetSummary> {
+    let mut result = space
+        .apps
+        .iter()
+        .filter(|a| !a.attached || space.archived)
+        .map(|a| {
+            let app = installed.iter().find(|p| p.policy.app == a.policy.app);
+            DatasetSummary {
+                app: a.policy.app.clone(),
+                collection: a.collection.clone(),
+                title: title(a, app),
+                availability: availability(a, app, facts, space.audience, true),
+                stored_bytes: facts.get(&a.collection).and_then(|f| f.stored_bytes),
+                origin: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut backups = registry
+        .retained
+        .iter()
+        .filter(|d| d.space == space.id)
+        .collect::<Vec<_>>();
+    backups.sort_by(|a, b| {
+        a.generation
+            .cmp(&b.generation)
+            .then(a.collection.cmp(&b.collection))
+    });
+    result.extend(backups.into_iter().map(|d| {
+        let app = installed.iter().find(|p| p.policy.app == d.policy.app);
+        let data = AppData {
+            policy: d.policy.clone(),
+            collection: d.collection.clone(),
+            label: d.label.clone(),
+            attached: false,
+            attachment_epoch: d.generation,
+        };
+        let suffix = match d.origin {
+            DatasetOrigin::BeforeRestore => "before restore",
+            DatasetOrigin::BeforeReplacement => "before replacement",
+        };
+        let base = title(&data, app);
+        let mut caption = format!(
+            "{} {suffix} · {}",
+            base.chars().take(70).collect::<String>(),
+            d.generation
+        );
+        while caption.len() > 128 {
+            caption.pop();
+        }
+        DatasetSummary {
+            app: d.policy.app.clone(),
+            collection: d.collection.clone(),
+            title: caption,
+            availability: availability(&data, app, facts, space.audience, true),
+            stored_bytes: facts.get(&d.collection).and_then(|f| f.stored_bytes),
+            origin: Some(d.origin),
+        }
+    }));
+    result
 }

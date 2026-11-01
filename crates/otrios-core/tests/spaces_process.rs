@@ -702,7 +702,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v17","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v18","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -815,7 +815,7 @@ fn offline_backup_restore_preserves_latest_revocation_and_older_writers_cannot_a
     if let Ok(older) = std::env::var("OTRIOS_SPACES_OLD_SERVER") {
         let primary = fs::read(rig.root.join("spaces.flex")).unwrap();
         let latest = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
-        assert_eq!(&primary[..5], b"OTSP6");
+        assert_eq!(&primary[..5], b"OTSP7");
         rig.restart(&older, true, false);
         assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
         std::thread::sleep(Duration::from_millis(100));
@@ -900,7 +900,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v17","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v18","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -3388,7 +3388,7 @@ fn deleting_chat_stops_all_owned_producers_and_retains_another_spaces_transcript
             .iter()
             .find(|s| s["id"] == household)
             .unwrap();
-        assert_eq!(space["apps"][0]["attached"], false);
+        assert!(space["apps"].as_array().unwrap().is_empty());
         if space["cleanup"]["local_pending"] == 0 {
             break;
         }
@@ -4381,4 +4381,202 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         },
     );
     chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Error { .. }));
+}
+
+#[test]
+fn retained_data_and_deleted_spaces_recover_real_confirmed_state_across_authority_restart() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("Recovery Home");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let (value, cid) = document_session(&rig, &space, "counter", schema(), Some(41));
+    assert_eq!(value, 41);
+    let cid = cid.unwrap();
+    rig.change(
+        'a',
+        Change::Remove {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let member = http(&rig.public, "GET", Some('b'), None).1;
+    assert!(member["spaces"][0]["apps"].as_array().unwrap().is_empty());
+    assert!(member["spaces"][0].get("retained").is_none());
+    rig.stop();
+    rig.restart(&binary, true, true);
+    rig.change(
+        'a',
+        Change::RestoreDataset {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: cid.clone(),
+        },
+    );
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (41, Some(cid.clone()))
+    );
+    rig.change(
+        'a',
+        Change::DeleteSpace {
+            space: space.clone(),
+            remove_data: false,
+        },
+    );
+    assert!(
+        http(&rig.public, "GET", Some('b'), None).1["spaces"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        http(&rig.public, "GET", None, None).1["spaces"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        http(&rig.public, "GET", Some('a'), None).1["spaces"][0]["archived"],
+        true
+    );
+    rig.stop();
+    rig.restart(&binary, true, true);
+    rig.child(&rig.public, &space, Some('b'), "deny");
+    rig.change(
+        'a',
+        Change::RestoreSpace {
+            space: space.clone(),
+        },
+    );
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (41, Some(cid.clone()))
+    );
+    rig.change(
+        'a',
+        Change::Remove {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::DeleteDataset {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: cid.clone(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let (value, fresh) = document_session(&rig, &space, "counter", schema(), None);
+    assert_eq!(value, 0);
+    assert_ne!(fresh.as_deref(), Some(cid.as_str()));
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (0, fresh)
+    );
+}
+#[test]
+fn sealed_restore_uses_complete_durable_state_and_keeps_outgoing_data_after_restart() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("Backup Home");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let (_, old) = document_session(&rig, &space, "counter", schema(), Some(41));
+    let old = old.unwrap();
+    rig.stop();
+    // Seed the immutable backup that the later replacement milestone will create.
+    // No public management operation can inject a caller-selected collection ID.
+    let source = "f".repeat(32);
+    for entry in fs::read_dir(rig.root.join("state")).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        if let Some(tail) = name.strip_prefix(&format!("collection-{old}.")) {
+            assert!(entry.metadata().unwrap().is_file());
+            if !tail.ends_with("owner.lock") {
+                fs::copy(
+                    entry.path(),
+                    rig.root.join(format!("state/collection-{source}.{tail}")),
+                )
+                .unwrap();
+            }
+        }
+    }
+    let raw = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
+    let mut record: Json = flexbuffers::from_slice(&raw[37..]).unwrap();
+    let app = record["registry"]["spaces"][0]["apps"][0].clone();
+    let generation = record["registry"]["generation"].clone();
+    record["registry"]["retained"].as_array_mut().unwrap().push(json!({"space":space,"policy":app["policy"],"collection":source,"label":"Earlier Counter","origin":"before-replacement","generation":generation}));
+    let payload = flexbuffers::to_vec(&record).unwrap();
+    let mut raw = b"OTSP7".to_vec();
+    raw.extend(canvas::hash(&payload));
+    raw.extend(payload);
+    for file in ["spaces.flex", "spaces.flex.latest"] {
+        fs::write(rig.root.join(file), &raw).unwrap();
+    }
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), Some(73)).0,
+        73
+    );
+    let before = fs::read(rig.root.join(format!("state/collection-{old}.merkle"))).unwrap();
+    rig.change(
+        'a',
+        Change::RestoreDataset {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: source.clone(),
+        },
+    );
+    let (value, new) = document_session(&rig, &space, "counter", schema(), None);
+    assert_eq!(value, 41);
+    assert_ne!(new.as_deref(), Some(old.as_str()));
+    assert_ne!(new.as_deref(), Some(source.as_str()));
+    let state = http(&rig.public, "GET", Some('a'), None).1;
+    let backups = state["spaces"][0]["retained"].as_array().unwrap();
+    assert_eq!(backups.len(), 2);
+    assert!(backups.iter().any(|d| d["collection"] == old));
+    assert!(backups.iter().any(|d| d["collection"] == source));
+    assert_eq!(
+        fs::read(rig.root.join(format!("state/collection-{old}.merkle"))).unwrap(),
+        before
+    );
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (41, new)
+    );
 }

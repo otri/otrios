@@ -11,6 +11,8 @@ struct RestorePlan {
     collections: Vec<SavedCollection>,
     files: Vec<SavedFile>,
     remove: Vec<String>,
+    #[serde(default)]
+    decision: Option<Record>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RestoreStep {
@@ -19,6 +21,7 @@ enum RestoreStep {
     FilePromoted,
     FileRemoved,
     StageRemoved,
+    DecisionPublished,
     Unfenced,
 }
 fn parents(root: &Path, relative: &str, create: bool) -> Result<PathBuf> {
@@ -70,6 +73,116 @@ fn verify_file(path: &Path, expected: &SavedFile) -> Result<()> {
     Ok(())
 }
 impl Store {
+    pub(in crate::spaces::store) fn clone_retained(
+        &mut self,
+        next: Record,
+        space: &str,
+        app: &str,
+        source: &str,
+    ) -> Result<()> {
+        self.clone_retained_at(next, space, app, source, |_| {})
+    }
+    fn clone_retained_at(
+        &mut self,
+        next: Record,
+        space: &str,
+        app: &str,
+        source: &str,
+        mut step: impl FnMut(RestoreStep),
+    ) -> Result<()> {
+        self.registry()?;
+        let retained = self
+            .current
+            .registry
+            .retained
+            .iter()
+            .find(|d| d.space == space && d.policy.app == app && d.collection == source)
+            .ok_or(Error::Conflict)?;
+        let target = next
+            .registry
+            .spaces
+            .iter()
+            .find(|s| s.id == space)
+            .and_then(|s| s.apps.iter().find(|a| a.policy.app == app))
+            .ok_or(Error::Invalid)?;
+        if target.collection == source || target.policy.schema != retained.policy.schema {
+            return Err(Error::Invalid);
+        }
+        let target_id = target.collection.clone();
+        let schema = target.policy.schema.clone();
+        let storage = self.checked_storage()?.to_path_buf();
+        let prefix = format!("collection-{target_id}.");
+        for (visited, entry) in fs::read_dir(&storage).map_err(io_error)?.enumerate() {
+            if visited == 65536 {
+                return Err(Error::Capacity);
+            }
+            if entry
+                .map_err(io_error)?
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&prefix)
+            {
+                return Err(Error::Conflict);
+            }
+        }
+        let files = snapshot_files(
+            &storage,
+            &BTreeMap::from([(source.to_owned(), schema.clone())]),
+        )?;
+        let stage_id = fresh()?;
+        let stage = storage.join(format!(".spaces-restore-{stage_id}"));
+        new_directory(&stage)?;
+        let result = (|| {
+            let mut remaining = MAX_BACKUP_BYTES;
+            let mut copied = vec![];
+            for relative in files {
+                parents(&storage, &relative, false)?;
+                let destination = format!("collection-{target_id}{}", &relative[43..]);
+                parents(&stage, &destination, true)?;
+                let mut file = copy_file(
+                    &storage.join(relative),
+                    &stage.join(&destination),
+                    &mut remaining,
+                )?;
+                file.path = destination;
+                copied.push(file);
+            }
+            sync_tree(&stage)?;
+            sync_directory(&storage)?;
+            step(RestoreStep::Staged);
+            let plan = RestorePlan {
+                version: 2,
+                root: self.current.root.clone(),
+                stage: stage_id,
+                collections: vec![SavedCollection {
+                    collection: target_id,
+                    schema,
+                }],
+                files: copied,
+                remove: vec![],
+                decision: Some(next),
+            };
+            let bytes = flexbuffers::to_vec(&plan).map_err(io_error)?;
+            if bytes.len() > MAX_MANIFEST_BYTES {
+                return Err(Error::Capacity);
+            }
+            let mut framed = b"OTSR2".to_vec();
+            framed.extend(crate::canvas::hash(&bytes));
+            framed.extend(bytes);
+            self.restoring = true;
+            if let Err(error) = write(&suffix(self.path(), ".restore"), &framed) {
+                self.failed = true;
+                return Err(error);
+            }
+            step(RestoreStep::Fenced);
+            self.resume_restore(&mut step)?;
+            Ok(())
+        })();
+        if result.is_err() && !self.restoring {
+            let _ = fs::remove_dir_all(stage);
+        }
+        result
+    }
     /// Restore only snapshot collections whose identities and schemas still
     /// match latest policy. Deleted/replaced collections never become sources.
     /// A safety snapshot preserves current payloads before any replacement.
@@ -100,6 +213,13 @@ impl Store {
             .iter()
             .flat_map(|s| &s.apps)
             .map(|a| (a.collection.clone(), a.policy.schema.clone()))
+            .chain(
+                self.current
+                    .registry
+                    .retained
+                    .iter()
+                    .map(|d| (d.collection.clone(), d.policy.schema.clone())),
+            )
             .collect::<BTreeMap<_, _>>();
         let deleted = self
             .current
@@ -164,6 +284,7 @@ impl Store {
                     .collect(),
                 files,
                 remove,
+                decision: None,
             };
             let bytes = flexbuffers::to_vec(&plan).map_err(io_error)?;
             if bytes.len() > MAX_MANIFEST_BYTES {
@@ -228,16 +349,17 @@ impl Store {
         let marker = suffix(self.path(), ".restore");
         let bytes = read(&marker, MAX_MANIFEST_BYTES + 37, true)?.ok_or(Error::Unavailable)?;
         if bytes.len() < 40
-            || &bytes[..5] != b"OTSR1"
+            || ![b"OTSR1".as_slice(), b"OTSR2".as_slice()].contains(&&bytes[..5])
             || crate::canvas::hash(&bytes[37..]) != bytes[5..37]
         {
             return Err(Error::Invalid);
         }
-        crate::flex_guard::validate(&bytes[37..], 12, MAX_MANIFEST_BYTES, MAX_SPACES * MAX_APPS)
+        crate::flex_guard::validate(&bytes[37..], 24, MAX_MANIFEST_BYTES, MAX_SPACES * MAX_APPS)
             .map_err(|_| Error::Invalid)?;
         let plan: RestorePlan =
             flexbuffers::from_slice(&bytes[37..]).map_err(|_| Error::Invalid)?;
-        if plan.version != 1
+        if !(plan.version == 1 && plan.decision.is_none() && bytes.starts_with(b"OTSR1")
+            || plan.version == 2 && plan.decision.is_some() && bytes.starts_with(b"OTSR2"))
             || plan.root != self.current.root
             || !valid_id(&plan.stage)
             || plan.collections.len() > MAX_SPACES * MAX_APPS
@@ -246,13 +368,39 @@ impl Store {
         {
             return Err(Error::Invalid);
         }
-        let current = self
-            .current
-            .registry
+        let selected_registry = if let Some(next) = &plan.decision {
+            validate_record(next)?;
+            if next.root != self.current.root
+                || next.storage != self.current.storage
+                || next.legacy_sources != self.current.legacy_sources
+                || !(next == &self.current
+                    || next.registry.generation
+                        == self
+                            .current
+                            .registry
+                            .generation
+                            .checked_add(1)
+                            .ok_or(Error::Capacity)?)
+                || !plan.remove.is_empty()
+                || plan.collections.len() != 1
+            {
+                return Err(Error::Invalid);
+            }
+            &next.registry
+        } else {
+            &self.current.registry
+        };
+        let current = selected_registry
             .spaces
             .iter()
             .flat_map(|s| &s.apps)
             .map(|a| (a.collection.as_str(), a.policy.schema.as_str()))
+            .chain(
+                selected_registry
+                    .retained
+                    .iter()
+                    .map(|d| (d.collection.as_str(), d.policy.schema.as_str())),
+            )
             .collect::<BTreeMap<_, _>>();
         let deleted = self
             .current
@@ -342,6 +490,17 @@ impl Store {
                 sync_directory(&parent)?;
             }
             step(RestoreStep::FileRemoved);
+        }
+        // All fresh collection files are durable before its binding is published.
+        // A crash at either publication file resumes the exact same decision.
+        if let Some(next) = plan.decision {
+            if next != self.current {
+                self.restoring = false;
+                let result = self.publish(next, |_| {});
+                self.restoring = true;
+                result?;
+            }
+            step(RestoreStep::DecisionPublished);
         }
         if stage_exists {
             super::super::payloads::check_tree(&stage, 0, &mut 65536)?;

@@ -26,6 +26,8 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
         generation: revision,
         identity: Some("alice".into()),
         spaces: vec![SpaceSummary {
+            archived: false,
+            retained: vec![],
             layout: Default::default(),
             apps: vec![MapApp {
                 app: "counter".into(),
@@ -39,6 +41,7 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
             role: Some(role),
         }],
         selected: Some(SpaceDetail {
+            retained: vec![],
             cleanup: (role == Role::Admin)
                 .then(CleanupSummary::default)
                 .map(Box::new),
@@ -944,91 +947,6 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
 }
 
 #[test]
-fn deletion_requires_trusted_confirmation_and_carries_the_reviewed_collection() {
-    for remove in [false, true] {
-        let (mut client, _) = fixture(Role::Admin);
-        open_data(&mut client);
-        click(&mut client, "Counter");
-        click(
-            &mut client,
-            if remove {
-                "Remove & delete"
-            } else {
-                "Delete data"
-            },
-        );
-        assert!(client.spaces_outgoing().unwrap().is_none());
-        assert!(labels(&client).contains(&"Permanently delete".into()));
-        let view = format!("{:?}", client.scene().unwrap());
-        assert!(view.contains("Household") && view.contains("Counter"));
-        click(&mut client, "Cancel");
-        assert!(client.spaces_outgoing().unwrap().is_none());
-        click(
-            &mut client,
-            if remove {
-                "Remove & delete"
-            } else {
-                "Delete data"
-            },
-        );
-        click(&mut client, "Permanently delete");
-        let Command::Manage { request, .. } =
-            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
-        else {
-            panic!("delete request");
-        };
-        assert_eq!(request.expected_generation, 1);
-        assert_eq!(
-            request.change,
-            Change::DeleteData {
-                space: SPACE.into(),
-                app: "counter".into(),
-                collection: "d".repeat(32),
-                remove
-            }
-        );
-    }
-}
-
-#[test]
-fn changed_collection_or_lost_admin_role_invalidates_a_deletion_dialog() {
-    for member in [false, true] {
-        let (mut client, _) = fixture(Role::Admin);
-        open_data(&mut client);
-        click(&mut client, "Counter");
-        click(&mut client, "Delete data");
-        let mut changed = snapshot(if member { Role::Member } else { Role::Admin }, 2);
-        changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
-        client
-            .receive_spaces(
-                &spaces::encode_event(&Event::Snapshot {
-                    observation: 1,
-                    snapshot: changed,
-                    resync: false,
-                })
-                .unwrap(),
-            )
-            .unwrap();
-        assert!(!labels(&client).contains(&"Permanently delete".into()));
-        assert!(client.spaces_outgoing().unwrap().is_none());
-        if !member {
-            click(&mut client, "Counter");
-            click(&mut client, "Delete data");
-            click(&mut client, "Permanently delete");
-            let Command::Manage { request, .. } =
-                spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
-            else {
-                panic!("new confirmation");
-            };
-            assert_eq!(request.expected_generation, 2);
-            assert!(
-                matches!(request.change, Change::DeleteData { collection, .. } if collection == "e".repeat(32))
-            );
-        }
-    }
-}
-
-#[test]
 fn cleanup_ui_reports_retention_deadlines_without_claiming_an_offline_wipe() {
     let (mut client, _) = fixture(Role::Admin);
     let mut progress = snapshot(Role::Admin, 2);
@@ -1863,5 +1781,226 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
     assert_eq!(
         client.resource_usage().map_scroll.unwrap().offset[1],
         offset
+    );
+}
+
+#[test]
+fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_collection() {
+    for remove_data in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Edit");
+        click(&mut client, "Delete App: Counter in Household");
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        assert!(labels(&client).contains(&"Remove Data".into()));
+        if remove_data {
+            click(&mut client, "Remove Data");
+            assert!(client.spaces_outgoing().unwrap().is_none());
+        }
+        click(&mut client, "Delete");
+        let Command::Manage { request, id, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("delete request")
+        };
+        assert_eq!(request.expected_generation, 1);
+        assert_eq!(
+            request.change,
+            if remove_data {
+                Change::DeleteData {
+                    space: SPACE.into(),
+                    app: "counter".into(),
+                    collection: "d".repeat(32),
+                    remove: true,
+                }
+            } else {
+                Change::Remove {
+                    space: SPACE.into(),
+                    app: "counter".into(),
+                }
+            }
+        );
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Result {
+                    version: VERSION,
+                    id,
+                    status: ManagementStatus::Applied,
+                    created: None,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!format!("{:?}", client.scene().unwrap()).contains("Saved."));
+    }
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Edit");
+    click(&mut client, "Delete App: Counter in Household");
+    click(&mut client, "Remove Data");
+    click(&mut client, "Cancel");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Delete App: Counter in Household");
+    click(&mut client, "Delete");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("remove")
+    };
+    assert!(matches!(request.change, Change::Remove { .. }));
+}
+#[test]
+fn map_delete_review_cannot_follow_generation_changes_or_lost_admin_access() {
+    for role in [Role::Admin, Role::Member] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Edit");
+        click(&mut client, "Delete App: Counter in Household");
+        let mut changed = snapshot(role, 2);
+        changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: changed,
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!labels(&client).contains(&"Delete".into()));
+        assert!(client.spaces_outgoing().unwrap().is_none());
+    }
+}
+fn with_retained(mut snapshot: Discovery, backup: bool) -> Discovery {
+    let data = DatasetSummary {
+        app: "counter".into(),
+        collection: if backup {
+            "e".repeat(32)
+        } else {
+            "d".repeat(32)
+        },
+        title: if backup {
+            "Earlier Counter".into()
+        } else {
+            "Counter".into()
+        },
+        availability: AppAvailability::Available,
+        stored_bytes: Some(1234),
+        origin: backup.then_some(DatasetOrigin::BeforeReplacement),
+    };
+    if !backup {
+        snapshot.spaces[0].apps.clear();
+        snapshot.spaces[0].attached_count = 0;
+        let app = &mut snapshot.selected.as_mut().unwrap().apps[0];
+        app.attached = false;
+        app.launch = None;
+    }
+    snapshot.spaces[0].retained.push(data.clone());
+    snapshot.selected.as_mut().unwrap().retained.push(data);
+    snapshot
+}
+#[test]
+fn retained_tiles_are_edit_only_and_restore_and_delete_name_the_exact_dataset() {
+    for backup in [false, true] {
+        for delete in [false, true] {
+            let (mut client, _) = fixture(Role::Admin);
+            client
+                .receive_spaces(
+                    &spaces::encode_event(&Event::Snapshot {
+                        observation: 1,
+                        snapshot: with_retained(snapshot(Role::Admin, 2), backup),
+                        resync: false,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let title = if backup { "Earlier Counter" } else { "Counter" };
+            let label = format!("{title} (data) in Household");
+            assert!(!labels(&client).contains(&label));
+            click(&mut client, "Edit");
+            assert!(labels(&client).contains(&label));
+            if delete {
+                click(&mut client, &format!("Delete data: {title} in Household"));
+            } else {
+                click(&mut client, &label);
+                click(&mut client, "Restore");
+            }
+            assert!(client.spaces_outgoing().unwrap().is_none());
+            click(&mut client, if delete { "Delete" } else { "Restore" });
+            let Command::Manage { request, .. } =
+                spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("dataset action")
+            };
+            let cid = if backup {
+                "e".repeat(32)
+            } else {
+                "d".repeat(32)
+            };
+            assert_eq!(request.expected_generation, 2);
+            assert_eq!(
+                request.change,
+                if delete {
+                    Change::DeleteDataset {
+                        space: SPACE.into(),
+                        app: "counter".into(),
+                        collection: cid,
+                    }
+                } else {
+                    Change::RestoreDataset {
+                        space: SPACE.into(),
+                        app: "counter".into(),
+                        collection: cid,
+                    }
+                }
+            );
+        }
+    }
+}
+#[test]
+fn deleted_space_is_edit_only_and_requires_current_admin_for_recovery() {
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Edit");
+    click(&mut client, "Space settings: Household");
+    click(&mut client, "Delete Space");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Delete");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("space deletion")
+    };
+    assert_eq!(
+        request.change,
+        Change::DeleteSpace {
+            space: SPACE.into(),
+            remove_data: false
+        }
+    );
+    let (mut client, _) = fixture(Role::Admin);
+    let mut deleted = with_retained(snapshot(Role::Admin, 2), false);
+    deleted.spaces[0].archived = true;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: deleted,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!labels(&client).contains(&"Space: Household".into()));
+    click(&mut client, "Edit");
+    click(&mut client, "Space settings: Household");
+    click(&mut client, "Restore Space");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("space restoration")
+    };
+    assert_eq!(
+        request.change,
+        Change::RestoreSpace {
+            space: SPACE.into()
+        }
     );
 }

@@ -66,9 +66,12 @@ pub async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     };
     let records = registry.spaces.iter().filter(|s| core::visible(s, identity.as_deref())).map(|s| {
         let role = core::role(s, identity.as_deref());
-        let mut value = json!({"id":s.id,"name":s.name,"layout":s.layout,"audience":s.audience,"role":role,
+        let mut value = json!({"id":s.id,"name":s.name,"archived":s.archived,"layout":s.layout,"audience":s.audience,"role":role,
             "apps":s.apps.iter().filter(|a| a.attached || role == Some(Role::Admin)).collect::<Vec<_>>()});
-        if role == Some(Role::Admin) { value["members"] = json!(s.members); value["cleanup"] = json!(hub.cleanup(&s.id)); }
+        if role == Some(Role::Admin) {
+            value["members"] = json!(s.members); value["cleanup"] = json!(hub.cleanup(&s.id));
+            value["retained"] = json!(registry.retained.iter().filter(|d| d.space == s.id).collect::<Vec<_>>());
+        }
         value
     }).collect::<Vec<_>>();
     response(
@@ -121,14 +124,15 @@ pub(super) fn manage_request(
     actor: &str,
     request: &contract::Request,
 ) -> std::result::Result<u64, core::Error> {
-    let policy = if let Change::Attach { app, .. } = &request.change {
-        match hub.app_policy(app) {
-            Ok(policy) => Some(policy),
-            Err(_) => return Err(core::Error::Unavailable),
-        }
-    } else {
-        None
-    };
+    let policy =
+        if let Change::Attach { app, .. } | Change::RestoreDataset { app, .. } = &request.change {
+            match hub.app_policy(app) {
+                Ok(policy) => Some(policy),
+                Err(_) => return Err(core::Error::Unavailable),
+            }
+        } else {
+            None
+        };
     hub.manage_space(actor, request, policy.as_ref())
 }
 
@@ -174,7 +178,7 @@ fn entries<'a>(value: &'a Value, field: &str, max: usize) -> Result<&'a [Value],
     Ok(values)
 }
 fn apply(hub: &mut apps::Hub, actor: &str, change: Change) -> Result<(), String> {
-    let policy = if let Change::Attach { app, .. } = &change {
+    let policy = if let Change::Attach { app, .. } | Change::RestoreDataset { app, .. } = &change {
         Some(hub.app_policy(app)?)
     } else {
         None

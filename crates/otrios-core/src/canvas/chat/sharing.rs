@@ -333,6 +333,8 @@ mod tests {
             identity: Some("reader".into()),
             spaces: vec![
                 SpaceSummary {
+                    archived: false,
+                    retained: vec![],
                     layout: Default::default(),
                     apps: vec![],
                     attached_count: 0,
@@ -342,6 +344,8 @@ mod tests {
                     role: None,
                 },
                 SpaceSummary {
+                    archived: false,
+                    retained: vec![],
                     layout: Default::default(),
                     apps: vec![],
                     attached_count: 0,
@@ -352,6 +356,7 @@ mod tests {
                 },
             ],
             selected: Some(SpaceDetail {
+                retained: vec![],
                 space: SOURCE.into(),
                 apps: vec![],
                 installed: vec![],
