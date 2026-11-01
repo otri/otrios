@@ -128,15 +128,24 @@ fn app_tile(
     nodes
 }
 impl Builder {
-    fn profile(&mut self, avatar: &str, width: f32) {
-        self.nodes
-            .push(a::circle(color(Background::Sand)).frame([width - 76., 22., 52., 52.]));
-        self.flat(
-            "Profile",
-            avatar,
-            [width - 72., 22., 44., 52.],
-            HostAction::Pane(Pane::Profile),
+    fn profile(&mut self, avatar: &str, width: f32, font: Option<&crate::dashboard::font::Font>) {
+        let (x, y) = font.map_or((19.5, 18.), |font| {
+            let [left, bottom, right, top] = font.measure_text(avatar, 2.).ink_bounds;
+            (
+                26. - (left + right) / 2.,
+                26. - font.metrics().baseline_from_top(2.) + (bottom + top) / 2.,
+            )
+        });
+        self.nodes.push(
+            a::canvas(vec![
+                a::circle(color(Background::Sand)).frame([0., 0., 52., 52.]),
+                text(avatar, [x, y, (52. - x).max(1.), 32.], 2.),
+            ])
+            .frame([width - 76., 22., 52., 52.])
+            .semantic_label("Profile")
+            .on_press(a::Event::back()),
         );
+        self.actions.push(HostAction::Pane(Pane::Profile));
     }
     fn flat(&mut self, label: &str, caption: &str, frame: [f32; 4], action: HostAction) {
         self.nodes.push(
@@ -305,7 +314,7 @@ pub(super) fn render(
         .and_then(|s| s.chars().next())
         .map(|s| s.to_uppercase().to_string());
     if let Some(avatar) = avatar {
-        b.profile(&avatar, w);
+        b.profile(&avatar, w, font);
     } else if sign_in {
         b.flat(
             "Sign in",
@@ -510,7 +519,7 @@ pub(super) fn render(
                 .unwrap_or('?')
                 .to_uppercase()
                 .to_string();
-            b.profile(&avatar, w);
+            b.profile(&avatar, w, font);
         } else if sign_in {
             b.flat(
                 "Sign in",
