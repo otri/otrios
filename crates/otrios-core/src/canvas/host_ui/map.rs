@@ -5,6 +5,9 @@ use otrios_interfaces::{
     layout::Expr,
     spaces::{Background, Discovery, Role},
 };
+mod access;
+mod moves;
+mod panel;
 mod retained;
 const PAPER: [u8; 4] = [247, 246, 240, 255];
 const INK: [u8; 4] = [44, 50, 43, 255];
@@ -16,6 +19,7 @@ pub(super) const FOOT: f32 = 80.;
 pub(in crate::canvas) enum DragKind {
     Space(String),
     App(String, String),
+    Dataset(String, String, String),
     Resize(String),
     Pan,
 }
@@ -40,6 +44,7 @@ fn color(value: Background) -> [u8; 4] {
         Background::Sky => [223, 233, 238, 255],
         Background::Lilac => [232, 225, 239, 255],
         Background::Rose => [241, 224, 221, 255],
+        Background::Rgb([r, g, b]) => [r, g, b, 255],
     }
 }
 fn text(value: &str, frame: [f32; 4], scale: f32) -> a::Element {
@@ -128,7 +133,7 @@ fn app_tile(
     }
     nodes
 }
-impl Builder {
+impl Builder<'_> {
     fn profile(&mut self, avatar: &str, width: f32, font: Option<&crate::dashboard::font::Font>) {
         let (x, y) = font.map_or((19.5, 18.), |font| {
             let [left, bottom, right, top] = font.measure_text(avatar, 2.).ink_bounds;
@@ -149,29 +154,137 @@ impl Builder {
         self.actions.push(HostAction::Pane(Pane::Profile));
     }
     fn flat(&mut self, label: &str, caption: &str, frame: [f32; 4], action: HostAction) {
-        self.nodes.push(
-            a::canvas(vec![text(
+        let primary = matches!(
+            &action,
+            HostAction::ProfileSave
+                | HostAction::BackgroundApply
+                | HostAction::AccessSave
+                | HostAction::AccessApply
+                | HostAction::MoveConfirm
+                | HostAction::Create
+                | HostAction::Reviewed(Change::RestoreDataset { .. }, _)
+                | HostAction::Manage(Change::RestoreSpace { .. })
+        ) || label == "Done";
+        let outline = matches!(label, "Close" | "Cancel")
+            || matches!(
+                &action,
+                HostAction::AccessRole(_) | HostAction::Pane(Pane::AccessAudience)
+            );
+        let danger = matches!(&action, HostAction::Pane(Pane::DeleteSpace));
+        let mut nodes = vec![];
+        if primary || outline {
+            nodes.push(
+                a::rounded_rect(if primary {
+                    [52, 77, 61, 255]
+                } else {
+                    [221, 223, 212, 255]
+                })
+                .frame([0., 0., frame[2], frame[3]])
+                .corner_radius(12.0.into()),
+            );
+            if !primary {
+                nodes.push(
+                    a::rounded_rect(WHITE)
+                        .frame([1., 1., frame[2] - 2., frame[3] - 2.])
+                        .corner_radius(11.0.into()),
+                );
+            }
+        }
+        let measured = self.font.map_or(caption.chars().count() as f32 * 13., |f| {
+            f.text_width(caption, 2.)
+        });
+        let x = if primary || outline {
+            ((frame[2] - measured) / 2.).max(8.)
+        } else {
+            10.
+        };
+        let line = self.font.map_or(32., |f| f.metrics().line_height(2.));
+        nodes.push(
+            text(
                 caption,
-                [10., 12., (frame[2] - 20.).max(1.), 32.],
+                [x, (frame[3] - line) / 2., (frame[2] - x - 8.).max(1.), line],
                 2.,
-            )])
-            .frame(frame)
-            .semantic_label(&short(label, 94))
-            .on_press(a::Event::back()),
+            )
+            .color(if primary {
+                WHITE
+            } else if danger {
+                [187, 57, 51, 255]
+            } else {
+                INK
+            }),
+        );
+        self.nodes.push(
+            a::canvas(nodes)
+                .frame(frame)
+                .semantic_label(&short(label, 94))
+                .on_press(a::Event::back()),
         );
         self.actions.push(action);
     }
+    fn stats(&mut self, bytes: Option<u64>, users: Option<u16>, frame: [f32; 4]) {
+        let [x, y, width, _] = frame;
+        for (i, (label, value)) in [
+            (
+                "Data used",
+                bytes.map_or_else(
+                    || "Unavailable".into(),
+                    |n| stored(Some(n)).replace(" stored", ""),
+                ),
+            ),
+            (
+                "Active users",
+                users.map_or_else(|| "Unavailable".into(), |n| n.to_string()),
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let x = x + i as f32 * width / 2.;
+            self.nodes
+                .push(text(label, [x, y, width / 2. - 12., 28.], 1.3).color(SOFT));
+            self.nodes
+                .push(text(&value, [x, y + 36., width / 2. - 12., 40.], 2.));
+        }
+    }
+    fn info(&mut self, label: &str, value: &str, frame: [f32; 4]) {
+        let [x, y, width, height] = frame;
+        self.nodes
+            .push(text(label, [x, y, width * 0.4, height], 1.3).color(SOFT));
+        for (line, value) in caption_lines(value, width * 0.58, None)
+            .iter()
+            .take(2)
+            .enumerate()
+        {
+            let measured = self.font.map_or(value.chars().count() as f32 * 6.5, |f| {
+                f.text_width(value, 1.)
+            });
+            let right = x + width - measured.min(width * 0.58);
+            self.nodes.push(text(
+                value,
+                [right, y + line as f32 * 24., width * 0.58, 24.],
+                1.3,
+            ));
+        }
+    }
+    fn divider(&mut self, frame: [f32; 4]) {
+        self.nodes
+            .push(a::rectangle([221, 223, 212, 255]).frame(frame));
+    }
     fn name(&mut self, frame: [f32; 4]) {
+        self.entry("Name", frame);
+    }
+    fn entry(&mut self, label: &str, frame: [f32; 4]) {
         self.nodes.push(
             a::canvas(vec![
-                a::surface(WHITE, 12.).pin_edges(0.),
+                a::surface([221, 223, 212, 255], 12.).pin_edges(0.),
+                a::surface(PAPER, 11.).pin_edges(1.),
                 a::text(FIELD.value())
                     .frame([14., 15., frame[2] - 28., 40.])
                     .font_scale(2.)
                     .color(INK),
             ])
             .frame(frame)
-            .semantic_label("Name")
+            .semantic_label(label)
             .on_press(a::Event::focus(FIELD)),
         );
     }
@@ -238,12 +351,35 @@ fn finish(mut b: Builder, draft: &str, title: &str, form: bool, is_map: bool) ->
         for child in &mut map.children {
             bodies(child);
         }
+        // Custom dark backgrounds retain readable titles, labels and controls.
+        fn contrast(node: &mut otrios_interfaces::layout::TemplateNode, dark: bool) {
+            if dark
+                && let otrios_interfaces::layout::Shape::Text {
+                    color: Expr::Literal(Value::Color(color)),
+                    ..
+                } = &mut node.shape
+                && (*color == INK || *color == SOFT)
+            {
+                *color = WHITE;
+            }
+            for child in &mut node.children {
+                contrast(child, dark);
+            }
+        }
+        for card in &mut map.children {
+            let dark = card.children.first().is_some_and(|fill| {
+                matches!(&fill.shape, otrios_interfaces::layout::Shape::Superellipse { color: Expr::Literal(Value::Color([r,g,b,_])), .. } if u32::from(*r)*299 + u32::from(*g)*587 + u32::from(*b)*114 < 128_000)
+            });
+            contrast(card, dark);
+        }
     }
     ui.layout = crate::dashboard::layout::Layout::encode(&blueprint)?;
     Ok(Rendered {
         ui,
+        backdrop: None,
         actions: controls.into_iter().zip(b.actions).collect(),
         map_viewport,
+        panel_viewport: None,
     })
 }
 pub(super) fn render(
@@ -267,6 +403,7 @@ pub(super) fn render(
         && matches!(
             model.pane,
             Pane::SpaceSettings
+                | Pane::BackgroundColor
                 | Pane::AppSettings(_)
                 | Pane::Installed
                 | Pane::RemoveApp(_)
@@ -275,348 +412,204 @@ pub(super) fn render(
                 | Pane::RestoreDataset(_)
                 | Pane::DeleteSpace
                 | Pane::Datasets
+                | Pane::Members
+                | Pane::AccessAudience
+                | Pane::AudienceConfirm { .. }
         )
     {
         model.pane = Pane::Home;
     }
-    let mut b = Builder {
-        nodes: vec![],
-        actions: vec![],
-    };
-    b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
-    let avatar = snapshot
-        .identity
-        .as_ref()
-        .and_then(|s| s.chars().next())
-        .map(|s| s.to_uppercase().to_string());
-    if let Some(avatar) = avatar {
-        b.profile(&avatar, w, font);
-    } else if sign_in {
-        b.flat(
-            "Sign in",
-            "Sign in",
-            [w - 136., 22., 112., 52.],
-            HostAction::SignIn,
-        );
+    if snapshot.identity.is_none() && matches!(model.pane, Pane::ProfileEdit | Pane::Create) {
+        model.pane = Pane::Home;
     }
     let is_map = matches!(model.pane, Pane::Home | Pane::Spaces);
     if is_map {
-        b.nodes.clear();
-        b.actions.clear();
-        let mut content = Builder {
-            nodes: vec![],
-            actions: vec![],
-        };
-        let shown = snapshot
-            .spaces
-            .iter()
-            .filter(|s| {
-                !s.archived && s.attached_count > 0 || model.editing && s.role == Some(Role::Admin)
-            })
-            .collect::<Vec<_>>();
-        let margin = if w < 500. { 16. } else { 28. };
-        let gap = 20.;
-        let available = (w - margin * 2.).max(1.);
-        let cols = ((available + gap) / 160.).floor().clamp(1., 6.) as usize;
-        // Keep even four maximally tall previews within the layout coordinate
-        // budget; a one-column viewport uses three Spaces per page.
-        let page_size = if cols == 1 { 3 } else { PAGE };
-        let foot = if shown.len() > page_size { 136. } else { FOOT };
-        model.page = model.page.min(shown.len().saturating_sub(1) / page_size);
-        let cell = (available - gap * (cols - 1) as f32) / cols as f32;
-        let mut positions = vec![];
-        let mut skyline = vec![0.; cols];
-        for space in shown.iter().skip(model.page * page_size).take(page_size) {
-            let width = usize::from(space.layout.width).min(cols);
-            let count = (space.apps.len()
-                + if model.editing {
-                    space.retained.len()
-                } else {
-                    0
-                })
-            .min(otrios_interfaces::spaces::MAX_INSTALLED_APPS);
-            let rows = count
-                .max(1)
-                .div_ceil(width)
-                .max(usize::from(space.layout.height));
-            let height = 68.
-                + rows as f32 * 152.
-                + if model.editing && space.role == Some(Role::Admin) {
-                    60.
-                } else {
-                    16.
-                };
-            let (column, y) = (0..=cols - width)
-                .map(|c| (c, skyline[c..c + width].iter().copied().fold(0., f32::max)))
-                .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
-                .unwrap();
-            for v in &mut skyline[column..column + width] {
-                *v = y + height + gap;
-            }
-            positions.push((
-                *space,
-                [
-                    margin + column as f32 * (cell + gap),
-                    y,
-                    cell * width as f32 + gap * (width - 1) as f32,
-                    height,
-                ],
-                width,
-            ));
-        }
-        let total = skyline.into_iter().fold(0., f32::max);
-        model.scroll_limit = (total - (h - TOP - foot)).max(0.);
-        model.scroll = model.scroll.clamp(0., model.scroll_limit);
-        for (space, frame, columns) in positions {
-            let [x, y, width, height] = frame;
-            let editable = model.editing && space.role == Some(Role::Admin);
-            let mut card = Builder {
-                nodes: vec![],
-                actions: vec![],
-            };
-            card.nodes.push(
-                a::rounded_rect(color(space.layout.background))
-                    .frame([0., 0., width, height])
-                    .corner_radius(24.0.into()),
-            );
-            let title_width = width - if editable { 64. } else { 16. };
-            let displayed_name = if space.archived {
-                format!("{} (deleted)", space.name)
-            } else {
-                space.name.clone()
-            };
-            let title_lines = caption_lines(&displayed_name, title_width - 20., font);
-            let title_nodes = title_lines
-                .iter()
-                .enumerate()
-                .map(|(line, value)| {
-                    text(
-                        value,
-                        [
-                            10.,
-                            if title_lines.len() == 1 {
-                                12.
-                            } else {
-                                line as f32 * 28.
-                            },
-                            title_width - 20.,
-                            28.,
-                        ],
-                        2.,
-                    )
-                })
-                .collect();
-            card.nodes.push(
-                a::canvas(title_nodes)
-                    .frame([8., 4., title_width, 56.])
-                    .semantic_label(&short(&format!("Space: {}", space.name), 94))
-                    .on_press(a::Event::back()),
-            );
-            card.actions.push(HostAction::MapSpace(space.id.clone()));
-            if editable {
-                card.flat(
-                    &format!("Space settings: {}", space.name),
-                    "•••",
-                    [width - 56., 4., 48., 48.],
-                    HostAction::Settings(space.id.clone(), Pane::SpaceSettings),
-                );
-            }
-            let tile = (width - 24.) / columns as f32;
-            for (index, app) in space.apps.iter().enumerate() {
-                let tx = 12. + (index % columns) as f32 * tile;
-                let ty = 64. + (index / columns) as f32 * 152.;
-                let label = if snapshot
-                    .spaces
-                    .iter()
-                    .flat_map(|s| &s.apps)
-                    .filter(|a| a.title == app.title)
-                    .take(2)
-                    .count()
-                    > 1
-                {
-                    format!("{} in {}", app.title, space.name)
-                } else {
-                    app.title.clone()
-                };
-                let tile_nodes = app_tile(
-                    &app.app,
-                    &app.title,
-                    tile,
-                    app.availability == AppAvailability::Available,
-                    font,
-                );
-                card.nodes.push(
-                    a::canvas(tile_nodes)
-                        .frame([tx, ty, tile, 144.])
-                        .semantic_label(&short(&label, 94))
-                        .on_press(a::Event::back()),
-                );
-                card.actions
-                    .push(HostAction::MapApp(space.id.clone(), app.app.clone()));
-                if editable {
-                    card.minus(
-                        &format!("Delete App: {} in {}", app.title, space.name),
-                        [tx + tile - 44., ty - 8., 44., 44.],
-                        HostAction::Settings(space.id.clone(), Pane::RemoveApp(app.app.clone())),
-                    );
-                }
-            }
-            if editable {
-                for (offset, data) in space
-                    .retained
-                    .iter()
-                    .take(
-                        otrios_interfaces::spaces::MAX_INSTALLED_APPS
-                            .saturating_sub(space.apps.len()),
-                    )
-                    .enumerate()
-                {
-                    let index = space.apps.len() + offset;
-                    let tx = 12. + (index % columns) as f32 * tile;
-                    let ty = 64. + (index / columns) as f32 * 152.;
-                    let title = format!("{} (data)", data.title);
-                    card.nodes.push(
-                        a::canvas(retained::ghost_tile(&data.app, &title, tile, font))
-                            .frame([tx, ty, tile, 144.])
-                            .semantic_label(&short(&format!("{} in {}", title, space.name), 94))
-                            .on_press(a::Event::back()),
-                    );
-                    card.actions.push(HostAction::Settings(
-                        space.id.clone(),
-                        Pane::Dataset(data.collection.clone()),
-                    ));
-                    card.minus(
-                        &format!("Delete data: {} in {}", data.title, space.name),
-                        [tx + tile - 44., ty - 8., 44., 44.],
-                        HostAction::Settings(
-                            space.id.clone(),
-                            Pane::DeleteDataset(data.collection.clone()),
-                        ),
-                    );
-                }
-                if !space.retained.is_empty() {
-                    card.flat(
-                        "All retained data",
-                        "Data…",
-                        [72., height - 56., (width - 128.).max(48.), 48.],
-                        HostAction::Settings(space.id.clone(), Pane::Datasets),
-                    );
-                }
-            }
-            if editable {
-                if !space.archived {
-                    card.flat(
-                        &format!("Add app: {}", space.name),
-                        "+",
-                        [12., height - 56., 48., 48.],
-                        HostAction::Settings(space.id.clone(), Pane::Installed),
-                    );
-                }
-                card.flat(
-                    &format!("Resize: {}", space.name),
-                    "",
-                    [width - 48., height - 48., 44., 44.],
-                    HostAction::Resize(space.id.clone()),
-                );
-                card.nodes
-                    .push(a::rectangle(SOFT).frame([width - 18., height - 30., 2., 14.]));
-                card.nodes
-                    .push(a::rectangle(SOFT).frame([width - 30., height - 18., 14., 2.]));
-            }
-            // A clipped map viewport keeps scrolled tiles clear of the header/footer.
-            content.nodes.push(
-                a::canvas(card.nodes)
-                    .frame([x, y, width, height])
-                    .semantic_label("Space body")
-                    .on_press(a::Event::back()),
-            );
-            content
-                .actions
-                .push(HostAction::SpaceBody(space.id.clone()));
-            content.actions.extend(card.actions);
-        }
-        b.nodes.push(
-            a::canvas(content.nodes)
-                .frame([0., TOP, w, (h - TOP - foot).max(1.)])
-                .semantic_label("Spaces map"),
-        );
-        b.actions.extend(content.actions);
-        // Fixed header and footer stay clear of the clipped map content.
-        b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, TOP]));
-        b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
-        b.nodes
-            .push(a::rectangle(PAPER).frame([0., h - foot, w, foot]));
-        // Profile is appended again here so overflow masking cannot hide it.
-        if let Some(identity) = &snapshot.identity {
-            let avatar = identity
-                .chars()
-                .next()
-                .unwrap_or('?')
-                .to_uppercase()
-                .to_string();
-            b.profile(&avatar, w, font);
-        } else if sign_in {
-            b.flat(
-                "Sign in",
-                "Sign in",
-                [w - 136., 22., 112., 52.],
-                HostAction::SignIn,
-            );
-        }
-        if shown.is_empty() {
-            b.nodes.push(text(
-                "No apps yet.",
-                [margin, TOP + 20., available, 40.],
-                2.,
-            ));
-        }
-        if model.page > 0 {
-            b.flat(
-                "Previous",
-                "‹",
-                [margin, h - 124., 48., 48.],
-                HostAction::Page(-1),
-            );
-        }
-        if (model.page + 1) * page_size < shown.len() {
-            b.flat(
-                "Next",
-                "›",
-                [margin + 56., h - 124., 48., 48.],
-                HostAction::Page(1),
-            );
-        }
-        if model.editing {
-            b.flat(
-                "Add Space",
-                "+ Space",
-                [margin, h - 68., 112., 48.],
-                HostAction::Pane(Pane::Create),
-            );
-        }
-        if any_admin {
-            b.flat(
-                if model.editing { "Done" } else { "Edit" },
-                if model.editing { "Done" } else { "Edit" },
-                [w - 100., h - 68., 80., 48.],
-                HostAction::Edit,
-            );
-        }
-        if !model.message.is_empty() {
-            b.nodes.push(text(
-                &model.message,
-                [margin, h - 108., (available - 100.).max(1.), 32.],
-                1.5,
-            ));
-        }
+        model.map_page = model.page;
+        let b = map_body(snapshot, model, sign_in, viewport, font);
         return finish(b, "", "OTriOS", false, true);
     }
-    let left = if w < 600. { 20. } else { (w - 500.) / 2. };
+    let mut background_model = Model {
+        editing: model.editing,
+        scroll: model.scroll,
+        page: model.map_page,
+        ..Model::default()
+    };
+    let backdrop = map_body(snapshot, &mut background_model, sign_in, viewport, font);
+    let mut b = Builder {
+        font,
+        nodes: vec![],
+        actions: vec![],
+    };
+
+    let left = if w < 600. { 40. } else { (w - 500.) / 2. };
     let width = (w - left * 2.).min(500.);
     let top = 112.;
     let mut value = draft.to_owned();
     let mut form = false;
     match &model.pane {
+        Pane::Create => {
+            form = true;
+            b.nodes.push(text("New Space", [left, top, width, 40.], 2.));
+            b.entry("Space name", [left, top + 72., width, 64.]);
+            b.flat(
+                "Create Space",
+                "Add",
+                [left + width - 100., top + 176., 100., 56.],
+                HostAction::Create,
+            );
+        }
+        Pane::Apps => {
+            if let Some(detail) = selected {
+                b.nodes.push(text(
+                    summary.map_or("Apps", |s| s.name.as_str()),
+                    [left, top, width, 40.],
+                    2.,
+                ));
+                let apps = detail
+                    .apps
+                    .iter()
+                    .filter(|a| a.attached)
+                    .collect::<Vec<_>>();
+                model.page = model.page.min(apps.len().saturating_sub(1) / PAGE);
+                for (i, app) in apps.iter().skip(model.page * PAGE).take(PAGE).enumerate() {
+                    let tile = width / 2.;
+                    b.nodes.push(
+                        a::canvas(app_tile(
+                            &app.app,
+                            &app.title,
+                            tile,
+                            app.launch.is_some(),
+                            font,
+                        ))
+                        .frame([
+                            left + (i % 2) as f32 * tile,
+                            top + 64. + (i / 2) as f32 * 152.,
+                            tile,
+                            144.,
+                        ])
+                        .semantic_label(&app.title)
+                        .on_press(a::Event::back()),
+                    );
+                    b.actions.push(if let Some(launch) = &app.launch {
+                        HostAction::Launch(launch.ui_ref.clone(), launch.state_ref.clone())
+                    } else {
+                        HostAction::Unavailable("This app is unavailable on this device.")
+                    });
+                }
+                if model.page > 0 {
+                    b.flat(
+                        "Previous",
+                        "‹",
+                        [left, top + 380., 48., 48.],
+                        HostAction::Page(-1),
+                    );
+                }
+                if (model.page + 1) * PAGE < apps.len() {
+                    b.flat(
+                        "Next",
+                        "›",
+                        [left + 56., top + 380., 48., 48.],
+                        HostAction::Page(1),
+                    );
+                }
+            }
+        }
+        Pane::DeletedSpaces => {
+            b.nodes
+                .push(text("Deleted Spaces", [left, top, width, 40.], 2.));
+            let deleted = snapshot
+                .spaces
+                .iter()
+                .filter(|s| s.archived && s.role == Some(Role::Admin))
+                .collect::<Vec<_>>();
+            model.page = model.page.min(deleted.len().saturating_sub(1) / PAGE);
+            for (i, space) in deleted
+                .iter()
+                .skip(model.page * PAGE)
+                .take(PAGE)
+                .enumerate()
+            {
+                b.nodes.push(text(
+                    &space.name,
+                    [left, top + 72. + i as f32 * 64., width - 112., 48.],
+                    1.5,
+                ));
+                b.flat(
+                    &format!("Restore Space: {}", space.name),
+                    "Restore",
+                    [left + width - 104., top + 64. + i as f32 * 64., 104., 56.],
+                    HostAction::Manage(Change::RestoreSpace {
+                        space: space.id.clone(),
+                    }),
+                );
+            }
+            if deleted.is_empty() {
+                b.nodes
+                    .push(text("Nothing here.", [left, top + 72., width, 40.], 1.5).color(SOFT));
+            }
+            if model.page > 0 {
+                b.flat(
+                    "Previous",
+                    "‹",
+                    [left, top + 348., 48., 48.],
+                    HostAction::Page(-1),
+                );
+            }
+            if (model.page + 1) * PAGE < deleted.len() {
+                b.flat(
+                    "Next",
+                    "›",
+                    [left + 56., top + 348., 48., 48.],
+                    HostAction::Page(1),
+                );
+            }
+        }
+        Pane::Cleanup => {
+            b.nodes
+                .push(text("Data removal", [left, top, width, 40.], 2.));
+            if let Some(cleanup) = selected.and_then(|s| s.cleanup.as_ref()) {
+                let notes = [
+                    format!("{} deleted collections", cleanup.deleted_collections),
+                    format!("{} sessions awaiting disposal", cleanup.local_pending),
+                    cleanup.backup_until_unix_ms.map_or_else(
+                        || "No managed backup copies retained.".into(),
+                        |until| format!("Backups expire {}", deadline(until)),
+                    ),
+                    if cleanup.legacy_qualification_required {
+                        "Imported originals await migration qualification.".into()
+                    } else {
+                        "Imported originals follow the retention policy.".into()
+                    },
+                    "Offline copies and user exports cannot be verified.".into(),
+                ];
+                let mut y = top + 72.;
+                for note in notes {
+                    for line in caption_lines(&note, width, font) {
+                        b.nodes.push(text(&line, [left, y, width, 28.], 1.3));
+                        y += 28.;
+                    }
+                    y += 16.;
+                }
+                if cleanup.storage_unknown {
+                    b.nodes.push(text(
+                        "Storage inventory needs operator attention.",
+                        [left, y, width, 64.],
+                        1.3,
+                    ));
+                }
+            }
+        }
+        Pane::Members | Pane::AccessAudience | Pane::AudienceConfirm { .. } => {
+            if let Some(entry) =
+                access::render(&mut b, snapshot, model, draft, [left, top, width, h], font)
+            {
+                value = entry;
+                form = true;
+            }
+        }
+        Pane::BeginMove { .. } | Pane::MoveDestinations | Pane::MoveReview => {
+            moves::render(&mut b, snapshot, model, [left, top, width, h], font);
+        }
         Pane::Installed => {
             b.nodes.push(text("Add App", [left, top, width, 40.], 2.));
             if let Some(selected) = selected {
@@ -688,17 +681,72 @@ pub(super) fn render(
             }
         }
         Pane::Profile => {
-            b.nodes.push(text(
-                snapshot.identity.as_deref().unwrap_or("Visitor"),
-                [left, top, width, 40.],
-                2.,
-            ));
+            let name = snapshot
+                .profile
+                .as_ref()
+                .map(|p| p.name.as_str())
+                .or(snapshot.identity.as_deref())
+                .unwrap_or("Visitor");
+            b.nodes.push(text(name, [left, top, width, 40.], 2.));
+            if snapshot.identity.as_deref() != Some(name) {
+                b.nodes.push(
+                    text(
+                        snapshot.identity.as_deref().unwrap_or(""),
+                        [left, top + 48., width, 32.],
+                        1.3,
+                    )
+                    .color(SOFT),
+                );
+            }
+            if snapshot.identity.is_some() {
+                b.flat(
+                    "Edit profile",
+                    "Edit profile",
+                    [left, top + 104., width, 56.],
+                    HostAction::Pane(Pane::ProfileEdit),
+                );
+                b.flat(
+                    "Deleted Spaces",
+                    "Deleted Spaces",
+                    [left, top + 168., width, 56.],
+                    HostAction::Pane(Pane::DeletedSpaces),
+                );
+            }
             if sign_out && snapshot.identity.is_some() {
                 b.flat(
                     "Sign out",
                     "Sign out",
-                    [left, top + 72., width, 56.],
+                    [left, top + 232., width, 56.],
                     HostAction::SignOut,
+                );
+            }
+        }
+        Pane::ProfileEdit => {
+            b.nodes.push(text("Profile", [left, top, width, 40.], 2.));
+            if let Some(identity) = &snapshot.identity {
+                form = true;
+                let key = format!("profile:{identity}");
+                if model.field_owner.as_ref() != Some(&key) {
+                    value = snapshot
+                        .profile
+                        .as_ref()
+                        .map_or_else(|| identity.clone(), |p| p.name.clone());
+                    model.field_owner = Some(key);
+                    model.form_value = value.clone();
+                    model.profile_revision = snapshot.profile.as_ref().map_or(0, |p| p.revision);
+                }
+                b.entry("Display name", [left, top + 72., width, 64.]);
+                b.flat(
+                    "Cancel",
+                    "Cancel",
+                    [left + width - 216., top + 176., 100., 56.],
+                    HostAction::Pane(Pane::Profile),
+                );
+                b.flat(
+                    "Save",
+                    "Save",
+                    [left + width - 100., top + 176., 100., 56.],
+                    HostAction::ProfileSave,
                 );
             }
         }
@@ -723,18 +771,21 @@ pub(super) fn render(
                     Background::Rose,
                 ];
                 let chosen = model.background.unwrap_or(space.layout.background);
-                let step = width / 7.;
+                let columns = ((width + 8.) / 56.).floor().clamp(1., 8.) as usize;
+                let palette_shift = ((palette.len() + 1).div_ceil(columns) - 1) as f32 * 56.;
+                let step = width / columns as f32;
                 for (i, c) in palette.into_iter().enumerate() {
                     let label = format!("Background: {c:?}");
-                    let x = left + i as f32 * step;
+                    let x = left + (i % columns) as f32 * step;
+                    let y = top + 84. + (i / columns) as f32 * 56.;
                     b.nodes.push(
                         a::rounded_rect(if chosen == c { INK } else { color(c) })
-                            .frame([x, top + 84., step - 6., 44.])
+                            .frame([x, y, step - 6., 44.])
                             .corner_radius(14.0.into()),
                     );
                     b.nodes.push(
                         a::rounded_rect(color(c))
-                            .frame([x + 3., top + 87., step - 12., 38.])
+                            .frame([x + 3., y + 3., step - 12., 38.])
                             .corner_radius(11.0.into()),
                     );
                     b.nodes.push(
@@ -743,12 +794,52 @@ pub(super) fn render(
                             [4., 10., step - 14., 24.],
                             1.,
                         )])
-                        .frame([x, top + 84., step - 6., 44.])
+                        .frame([x, y, step - 6., 44.])
                         .semantic_label(&label)
                         .on_press(a::Event::back()),
                     );
                     b.actions.push(HostAction::Background(c));
                 }
+                let i = palette.len();
+                let custom = if matches!(chosen, Background::Rgb(_)) {
+                    chosen
+                } else {
+                    Background::Sage
+                };
+                let x = left + (i % columns) as f32 * step;
+                let y = top + 84. + (i / columns) as f32 * 56.;
+                b.nodes.push(
+                    a::rounded_rect(color(custom))
+                        .frame([x, y, step - 6., 44.])
+                        .corner_radius(14.0.into()),
+                );
+                let [r, g, blue, _] = color(custom);
+                let ink =
+                    if u32::from(r) * 299 + u32::from(g) * 587 + u32::from(blue) * 114 < 128_000 {
+                        WHITE
+                    } else {
+                        INK
+                    };
+                let plus_width = font.map_or(18., |f| f.text_width("+", 2.));
+                b.nodes.push(
+                    a::canvas(vec![
+                        text(
+                            "+",
+                            [
+                                ((step - 6. - plus_width) / 2.).max(0.),
+                                8.,
+                                plus_width + 2.,
+                                28.,
+                            ],
+                            2.,
+                        )
+                        .color(ink),
+                    ])
+                    .frame([x, y, step - 6., 44.])
+                    .semantic_label("Custom background color")
+                    .on_press(a::Event::back()),
+                );
+                b.actions.push(HostAction::Pane(Pane::BackgroundColor));
                 let used = selected.and_then(|s| {
                     s.apps
                         .iter()
@@ -758,43 +849,47 @@ pub(super) fn render(
                         .values()
                         .try_fold(0u64, |sum, bytes| sum.checked_add((*bytes)?))
                 });
-                b.nodes.push(text(
-                    &format!(
-                        "Data used   {}",
-                        used.map_or_else(
-                            || "Unavailable".into(),
-                            |v| stored(Some(v)).replace(" stored", "")
-                        )
-                    ),
-                    [left, top + 156., width, 32.],
-                    1.5,
-                ));
-                b.nodes.push(text(
-                    "Active users   Unavailable",
-                    [left, top + 194., width, 32.],
-                    1.5,
-                ));
-                for (i, (label, pane)) in [
-                    ("People & access", Pane::Members),
-                    ("Sharing", Pane::Sharing),
-                    ("Apps & Data", Pane::Data),
-                    ("Cleanup", Pane::Cleanup),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    b.flat(
-                        label,
-                        label,
-                        [left, top + 244. + i as f32 * 54., width, 50.],
-                        HostAction::Pane(pane),
+                b.stats(
+                    used,
+                    selected.and_then(|s| s.active_users),
+                    [left, top + palette_shift + 156., width, 76.],
+                );
+                b.info(
+                    "Access",
+                    match space.audience {
+                        otrios_interfaces::spaces::Audience::Closed => "Private",
+                        otrios_interfaces::spaces::Audience::PublicView => "Public · Read only",
+                        otrios_interfaces::spaces::Audience::PublicComment => {
+                            "Public · Signed-in comments"
+                        }
+                    },
+                    [left, top + palette_shift + 260., width, 40.],
+                );
+                b.info(
+                    "Apps",
+                    &space.attached_count.to_string(),
+                    [left, top + palette_shift + 310., width, 32.],
+                );
+                let count = selected.map_or(0, |s| s.retained.len());
+                if count > 0 {
+                    b.info(
+                        "Retained datasets",
+                        &count.to_string(),
+                        [left, top + palette_shift + 356., width, 32.],
                     );
                 }
+                b.divider([left, top + palette_shift + 412., width, 1.]);
+                b.flat(
+                    "People & access",
+                    "People & access",
+                    [left, top + palette_shift + 440., width, 50.],
+                    HostAction::Pane(Pane::Members),
+                );
                 if space.archived {
                     b.flat(
                         "Restore Space",
                         "Restore Space",
-                        [left, top + 464., width, 50.],
+                        [left, top + palette_shift + 496., width, 50.],
                         HostAction::Manage(Change::RestoreSpace {
                             space: space.id.clone(),
                         }),
@@ -803,15 +898,38 @@ pub(super) fn render(
                     b.flat(
                         "Delete Space",
                         "Delete Space",
-                        [left, top + 464., width, 50.],
+                        [left, top + palette_shift + 496., width, 50.],
                         HostAction::Pane(Pane::DeleteSpace),
                     );
                 }
+            }
+        }
+        Pane::BackgroundColor => {
+            if let Some(space) = summary {
+                form = true;
+                let key = format!("color:{}", space.id);
+                if model.field_owner.as_deref() != Some(&key) {
+                    let [r, g, b, _] = color(space.layout.background);
+                    value = format!("#{r:02X}{g:02X}{b:02X}");
+                    model.form_value = value.clone();
+                    model.field_owner = Some(key);
+                    model.form_generation = snapshot.generation;
+                    model.form_blocked = false;
+                }
+                b.nodes
+                    .push(text("Background color", [left, top, width, 40.], 2.));
+                b.entry("Hex color", [left, top + 72., width, 64.]);
                 b.flat(
-                    "Save",
-                    "Save",
-                    [left + width - 100., (h - 88.).min(top + 544.), 100., 56.],
-                    HostAction::SaveSpace,
+                    "Cancel",
+                    "Cancel",
+                    [left + width - 216., top + 176., 100., 56.],
+                    HostAction::Pane(Pane::SpaceSettings),
+                );
+                b.flat(
+                    "Apply color",
+                    "Apply",
+                    [left + width - 100., top + 176., 100., 56.],
+                    HostAction::BackgroundApply,
                 );
             }
         }
@@ -830,19 +948,34 @@ pub(super) fn render(
                 b.nodes.push(
                     text(&app.app, [left + 8., top + 74., width - 16., 32.], 1.3).color(SOFT),
                 );
-                b.nodes.push(text(
-                    &format!(
-                        "Data used   {}",
-                        stored(app.stored_bytes).replace(" stored", "")
+                b.stats(
+                    app.stored_bytes,
+                    app.active_users,
+                    [left, top + 132., width, 76.],
+                );
+                let code =
+                    selected.and_then(|s| s.installed.iter().find(|p| p.policy.app == app.app));
+                b.info(
+                    "App size",
+                    &code.and_then(|p| p.code_bytes).map_or_else(
+                        || "Unavailable".into(),
+                        |n| stored(Some(n)).replace(" stored", ""),
                     ),
-                    [left, top + 132., width, 32.],
-                    1.5,
-                ));
-                b.nodes.push(text(
-                    "Active users   Unavailable",
-                    [left, top + 172., width, 32.],
-                    1.5,
-                ));
+                    [left, top + 244., width, 32.],
+                );
+                b.info(
+                    "Revision",
+                    &code
+                        .and_then(|p| p.revision)
+                        .map_or_else(|| "Unavailable".into(), |n| n.to_string()),
+                    [left, top + 286., width, 32.],
+                );
+                b.info(
+                    "Space",
+                    &summary.unwrap().name,
+                    [left, top + 328., width, 40.],
+                );
+                b.divider([left, top + 386., width, 1.]);
                 for (i, (label, message)) in [
                     (
                         "Share App",
@@ -863,13 +996,27 @@ pub(super) fn render(
                     b.flat(
                         label,
                         label,
-                        [left, top + 232. + i as f32 * 60., width, 56.],
+                        [left, top + 408. + i as f32 * 60., width, 56.],
                         HostAction::Unavailable(message),
                     );
                 }
             }
         }
         _ => {
+            if let Pane::Dataset(cid) = &model.pane
+                && let Some(data) =
+                    selected.and_then(|s| s.retained.iter().find(|d| d.collection == *cid))
+            {
+                form = true;
+                let key = format!("{}:dataset:{cid}", selected.unwrap().space);
+                if model.field_owner.as_ref() != Some(&key) {
+                    value = data.title.clone();
+                    model.field_owner = Some(key);
+                    model.form_value = value.clone();
+                    model.form_generation = snapshot.generation;
+                    model.form_blocked = false;
+                }
+            }
             retained::render(&mut b, snapshot, model, [left, top, width, h], font);
         }
     }
@@ -878,19 +1025,34 @@ pub(super) fn render(
             .iter()
             .enumerate()
         {
-            b.nodes.push(text(
-                caption,
-                [
-                    left,
-                    (h - 152.).min(top + 464.) + line as f32 * 28.,
-                    width,
-                    28.,
-                ],
-                2.,
-            ));
+            b.nodes.push(
+                text(
+                    caption,
+                    [
+                        left,
+                        (h - 152.).min(top + 464.) + line as f32 * 28.,
+                        width,
+                        28.,
+                    ],
+                    2.,
+                )
+                .color([187, 57, 51, 255]),
+            );
         }
     }
-    if !retained::is_confirmation(&model.pane) {
+    if !retained::is_confirmation(&model.pane)
+        && !matches!(
+            model.pane,
+            Pane::ProfileEdit
+                | Pane::BackgroundColor
+                | Pane::Members
+                | Pane::AccessAudience
+                | Pane::AudienceConfirm { .. }
+                | Pane::BeginMove { .. }
+                | Pane::MoveDestinations
+                | Pane::MoveReview
+        )
+    {
         b.flat(
             "Close",
             "Close",
@@ -898,5 +1060,361 @@ pub(super) fn render(
             HostAction::Pane(Pane::Home),
         );
     }
-    finish(b, &value, "OTriOS", form, false)
+    panel::finish(
+        backdrop,
+        b,
+        &value,
+        form,
+        (viewport, [left - 24., top - 24.]),
+        background_model.scroll,
+        &caption_lines(&model.message, width, font),
+    )
+}
+
+fn map_body<'a>(
+    snapshot: &Discovery,
+    model: &mut Model,
+    sign_in: bool,
+    viewport: [f32; 2],
+    font: Option<&'a crate::dashboard::font::Font>,
+) -> Builder<'a> {
+    let [w, h] = viewport;
+    let any_admin = snapshot.spaces.iter().any(|s| s.role == Some(Role::Admin));
+    let mut b = Builder {
+        font,
+        nodes: vec![],
+        actions: vec![],
+    };
+    let mut content = Builder {
+        font,
+        nodes: vec![],
+        actions: vec![],
+    };
+    let shown = snapshot
+        .spaces
+        .iter()
+        .filter(|s| {
+            !s.archived && (s.attached_count > 0 || model.editing && s.role == Some(Role::Admin))
+        })
+        .collect::<Vec<_>>();
+    let margin = if w < 500. { 16. } else { 28. };
+    let gap = 20.;
+    let available = (w - margin * 2.).max(1.);
+    let cols = ((available + gap) / 160.).floor().clamp(1., 6.) as usize;
+    // Keep even four maximally tall previews within the layout coordinate
+    // budget; a one-column viewport uses three Spaces per page.
+    let page_size = if cols == 1 { 3 } else { PAGE };
+    let mut pages = vec![vec![]];
+    let mut tiles = 0;
+    for space in &shown {
+        let count = (space.apps.len()
+            + if model.editing {
+                space.retained.len()
+            } else {
+                0
+            })
+        .clamp(1, 16);
+        if pages
+            .last()
+            .is_some_and(|page| !page.is_empty() && (page.len() == page_size || tiles + count > 16))
+        {
+            pages.push(vec![]);
+            tiles = 0;
+        }
+        pages.last_mut().unwrap().push(*space);
+        tiles += count;
+    }
+    let foot = if pages.len() > 1 { 136. } else { FOOT };
+    model.page = model.page.min(pages.len() - 1);
+    let cell = (available - gap * (cols - 1) as f32) / cols as f32;
+    let mut positions = vec![];
+    let mut skyline = vec![0.; cols];
+    for space in &pages[model.page] {
+        let width = usize::from(space.layout.width).min(cols);
+        let count = (space.apps.len()
+            + if model.editing {
+                space.retained.len()
+            } else {
+                0
+            })
+        .min(otrios_interfaces::spaces::MAX_INSTALLED_APPS);
+        let rows = count
+            .max(1)
+            .div_ceil(width)
+            .max(usize::from(space.layout.height));
+        let height = 68.
+            + rows as f32 * 152.
+            + if model.editing && space.role == Some(Role::Admin) {
+                60.
+            } else {
+                16.
+            };
+        let (column, y) = (0..=cols - width)
+            .map(|c| (c, skyline[c..c + width].iter().copied().fold(0., f32::max)))
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+            .unwrap();
+        for v in &mut skyline[column..column + width] {
+            *v = y + height + gap;
+        }
+        positions.push((
+            *space,
+            [
+                margin + column as f32 * (cell + gap),
+                y,
+                cell * width as f32 + gap * (width - 1) as f32,
+                height,
+            ],
+            width,
+        ));
+    }
+    let total = skyline.into_iter().fold(0., f32::max);
+    model.scroll_limit = (total - (h - TOP - foot)).max(0.);
+    model.scroll = model.scroll.clamp(0., model.scroll_limit);
+    for (space, frame, columns) in positions {
+        let [x, y, width, height] = frame;
+        let editable = model.editing && space.role == Some(Role::Admin);
+        let mut card = Builder {
+            font,
+            nodes: vec![],
+            actions: vec![],
+        };
+        card.nodes.push(
+            a::rounded_rect(color(space.layout.background))
+                .frame([0., 0., width, height])
+                .corner_radius(24.0.into()),
+        );
+        let title_width = width - if editable { 64. } else { 16. };
+        let displayed_name = if space.archived {
+            format!("{} (deleted)", space.name)
+        } else {
+            space.name.clone()
+        };
+        let title_lines = caption_lines(&displayed_name, title_width - 20., font);
+        let title_nodes = title_lines
+            .iter()
+            .enumerate()
+            .map(|(line, value)| {
+                text(
+                    value,
+                    [
+                        10.,
+                        if title_lines.len() == 1 {
+                            12.
+                        } else {
+                            line as f32 * 28.
+                        },
+                        title_width - 20.,
+                        28.,
+                    ],
+                    2.,
+                )
+            })
+            .collect();
+        card.nodes.push(
+            a::canvas(title_nodes)
+                .frame([8., 4., title_width, 56.])
+                .semantic_label(&short(&format!("Space: {}", space.name), 94))
+                .on_press(a::Event::back()),
+        );
+        card.actions.push(HostAction::MapSpace(space.id.clone()));
+        if editable {
+            card.flat(
+                &format!("Space settings: {}", space.name),
+                "•••",
+                [width - 56., 4., 48., 48.],
+                HostAction::Settings(space.id.clone(), Pane::SpaceSettings),
+            );
+        }
+        let tile = (width - 24.) / columns as f32;
+        for (index, app) in space.apps.iter().enumerate() {
+            let tx = 12. + (index % columns) as f32 * tile;
+            let ty = 64. + (index / columns) as f32 * 152.;
+            let label = if snapshot
+                .spaces
+                .iter()
+                .flat_map(|s| &s.apps)
+                .filter(|a| a.title == app.title)
+                .take(2)
+                .count()
+                > 1
+            {
+                format!("{} in {}", app.title, space.name)
+            } else {
+                app.title.clone()
+            };
+            let tile_nodes = app_tile(
+                &app.app,
+                &app.title,
+                tile,
+                app.availability == AppAvailability::Available,
+                font,
+            );
+            card.nodes.push(
+                a::canvas(tile_nodes)
+                    .frame([tx, ty, tile, 144.])
+                    .semantic_label(&short(&label, 94))
+                    .on_press(a::Event::back()),
+            );
+            card.actions
+                .push(HostAction::MapApp(space.id.clone(), app.app.clone()));
+            if editable {
+                card.minus(
+                    &format!("Delete App: {} in {}", app.title, space.name),
+                    [tx + tile - 44., ty - 8., 44., 44.],
+                    HostAction::Settings(space.id.clone(), Pane::RemoveApp(app.app.clone())),
+                );
+            }
+        }
+        if editable {
+            for (offset, data) in space
+                .retained
+                .iter()
+                .take(
+                    otrios_interfaces::spaces::MAX_INSTALLED_APPS.saturating_sub(space.apps.len()),
+                )
+                .enumerate()
+            {
+                let index = space.apps.len() + offset;
+                let tx = 12. + (index % columns) as f32 * tile;
+                let ty = 64. + (index / columns) as f32 * 152.;
+                let title = format!("{} (data)", data.title);
+                card.nodes.push(
+                    a::canvas(retained::ghost_tile(&data.app, &title, tile, font))
+                        .frame([tx, ty, tile, 144.])
+                        .semantic_label(&short(&format!("{} in {}", title, space.name), 94))
+                        .on_press(a::Event::back()),
+                );
+                card.actions.push(HostAction::MapDataset(
+                    space.id.clone(),
+                    data.app.clone(),
+                    data.collection.clone(),
+                ));
+                card.minus(
+                    &format!("Delete data: {} in {}", data.title, space.name),
+                    [tx + tile - 44., ty - 8., 44., 44.],
+                    HostAction::Settings(
+                        space.id.clone(),
+                        Pane::DeleteDataset(data.collection.clone()),
+                    ),
+                );
+            }
+            if !space.retained.is_empty() {
+                card.flat(
+                    "All retained data",
+                    "Data…",
+                    [72., height - 56., (width - 128.).max(48.), 48.],
+                    HostAction::Settings(space.id.clone(), Pane::Datasets),
+                );
+            }
+        }
+        if editable {
+            if !space.archived {
+                card.flat(
+                    &format!("Add app: {}", space.name),
+                    "+",
+                    [12., height - 56., 48., 48.],
+                    HostAction::Settings(space.id.clone(), Pane::Installed),
+                );
+            }
+            card.flat(
+                &format!("Resize: {}", space.name),
+                "",
+                [width - 48., height - 48., 44., 44.],
+                HostAction::Resize(space.id.clone()),
+            );
+            card.nodes
+                .push(a::rectangle(SOFT).frame([width - 18., height - 30., 2., 14.]));
+            card.nodes
+                .push(a::rectangle(SOFT).frame([width - 30., height - 18., 14., 2.]));
+        }
+        // A clipped map viewport keeps scrolled tiles clear of the header/footer.
+        content.nodes.push(
+            a::canvas(card.nodes)
+                .frame([x, y, width, height])
+                .semantic_label("Space body")
+                .on_press(a::Event::back()),
+        );
+        content
+            .actions
+            .push(HostAction::SpaceBody(space.id.clone()));
+        content.actions.extend(card.actions);
+    }
+    b.nodes.push(
+        a::canvas(content.nodes)
+            .frame([0., TOP, w, (h - TOP - foot).max(1.)])
+            .semantic_label("Spaces map"),
+    );
+    b.actions.extend(content.actions);
+    // Fixed header and footer stay clear of the clipped map content.
+    b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, TOP]));
+    b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
+    b.nodes
+        .push(a::rectangle(PAPER).frame([0., h - foot, w, foot]));
+    // Profile is appended again here so overflow masking cannot hide it.
+    if let Some(identity) = &snapshot.identity {
+        let avatar = snapshot
+            .profile
+            .as_ref()
+            .map_or(identity.as_str(), |p| p.name.as_str())
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string();
+        b.profile(&avatar, w, font);
+    } else if sign_in {
+        b.flat(
+            "Sign in",
+            "Sign in",
+            [w - 136., 22., 112., 52.],
+            HostAction::SignIn,
+        );
+    }
+    if shown.is_empty() {
+        b.nodes.push(text(
+            "No apps yet.",
+            [margin, TOP + 20., available, 40.],
+            2.,
+        ));
+    }
+    if model.page > 0 {
+        b.flat(
+            "Previous",
+            "‹",
+            [margin, h - 124., 48., 48.],
+            HostAction::Page(-1),
+        );
+    }
+    if model.page + 1 < pages.len() {
+        b.flat(
+            "Next",
+            "›",
+            [margin + 56., h - 124., 48., 48.],
+            HostAction::Page(1),
+        );
+    }
+    if model.editing {
+        b.flat(
+            "Add Space",
+            "+ Space",
+            [margin, h - 68., 112., 48.],
+            HostAction::Pane(Pane::Create),
+        );
+    }
+    if any_admin {
+        b.flat(
+            if model.editing { "Done" } else { "Edit" },
+            if model.editing { "Done" } else { "Edit" },
+            [w - 100., h - 68., 80., 48.],
+            HostAction::Edit,
+        );
+    }
+    if !model.message.is_empty() {
+        b.nodes.push(text(
+            &model.message,
+            [margin, h - 108., (available - 100.).max(1.), 32.],
+            1.5,
+        ));
+    }
+    b
 }

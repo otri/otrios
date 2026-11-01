@@ -124,15 +124,29 @@ pub(super) fn manage_request(
     actor: &str,
     request: &contract::Request,
 ) -> std::result::Result<u64, core::Error> {
-    let policy =
-        if let Change::Attach { app, .. } | Change::RestoreDataset { app, .. } = &request.change {
-            match hub.app_policy(app) {
-                Ok(policy) => Some(policy),
-                Err(_) => return Err(core::Error::Unavailable),
-            }
-        } else {
-            None
-        };
+    if let Change::Move {
+        operation,
+        source,
+        destination,
+        ..
+    } = &request.change
+        && hub
+            .move_committed(actor, source, destination, operation)?
+            .is_some()
+    {
+        return hub.manage_space(actor, request, None);
+    }
+    let policy = if let Change::Attach { app, .. }
+    | Change::RestoreDataset { app, .. }
+    | Change::Move { app, .. } = &request.change
+    {
+        match hub.app_policy(app) {
+            Ok(policy) => Some(policy),
+            Err(_) => return Err(core::Error::Unavailable),
+        }
+    } else {
+        None
+    };
     hub.manage_space(actor, request, policy.as_ref())
 }
 
@@ -178,7 +192,10 @@ fn entries<'a>(value: &'a Value, field: &str, max: usize) -> Result<&'a [Value],
     Ok(values)
 }
 fn apply(hub: &mut apps::Hub, actor: &str, change: Change) -> Result<(), String> {
-    let policy = if let Change::Attach { app, .. } | Change::RestoreDataset { app, .. } = &change {
+    let policy = if let Change::Attach { app, .. }
+    | Change::RestoreDataset { app, .. }
+    | Change::Move { app, .. } = &change
+    {
         Some(hub.app_policy(app)?)
     } else {
         None

@@ -91,6 +91,46 @@ async fn worker(
                 return;
             };
             match command {
+                contract::Command::MoveStatus {
+                    id,
+                    operation,
+                    source,
+                    destination,
+                    ..
+                } => {
+                    let result = {
+                        let guard = app.apps.lock().await;
+                        let current = identity(&app, &key).await;
+                        match (guard.as_ref(), current.as_deref()) {
+                            (Some(hub), Some(actor)) => {
+                                hub.move_committed(actor, &source, &destination, &operation)
+                            }
+                            (Some(_), None) => Err(core::Error::Denied),
+                            _ => Err(core::Error::Unavailable),
+                        }
+                    };
+                    let (status, generation) = match result {
+                        Ok(Some(g)) => (contract::ManagementStatus::Applied, Some(g)),
+                        Ok(None) => (contract::ManagementStatus::Conflict, None),
+                        Err(e) => (core::management_status(&e), None),
+                    };
+                    if !emit(
+                        &output,
+                        contract::Event::MoveStatus {
+                            version: contract::VERSION,
+                            id,
+                            operation,
+                            status,
+                            generation,
+                        },
+                        principal.clone(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                    force = true;
+                }
                 contract::Command::Watch {
                     observation: requested,
                     selected: wanted,
@@ -152,8 +192,12 @@ async fn worker(
             continue;
         };
         let snapshot = {
-            let guard = app.apps.lock().await;
+            let mut guard = app.apps.lock().await;
+            let presence_ready = guard
+                .as_mut()
+                .is_some_and(|hub| hub.refresh_presence().is_ok());
             match guard.as_ref() {
+                _ if !presence_ready => Err(core::Error::Unavailable),
                 Some(hub)
                     if !force
                         && last.as_ref().is_some_and(|(cursor, identity)| {
@@ -180,7 +224,7 @@ async fn worker(
                 last = Some((snapshot.cursor.clone(), principal.clone()));
                 contract::Event::Snapshot {
                     observation,
-                    snapshot,
+                    snapshot: Box::new(snapshot),
                     resync,
                 }
             }

@@ -110,6 +110,8 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
         },
     );
     let installed = vec![InstalledApp {
+        code_bytes: None,
+        revision: None,
         policy: policy(),
         title: "Notes".into(),
         ui_ref: "app:notes/ui".into(),
@@ -153,7 +155,7 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
         assert!(hidden.selected.is_none());
         let bytes = spaces::encode_event(&Event::Snapshot {
             observation: 1,
-            snapshot: hidden,
+            snapshot: Box::new(hidden),
             resync: true,
         })
         .unwrap();
@@ -168,7 +170,7 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
     for snapshot in [admin, member] {
         let event = Event::Snapshot {
             observation: 1,
-            snapshot,
+            snapshot: Box::new(snapshot),
             resync: true,
         };
         assert_eq!(
@@ -185,6 +187,8 @@ fn discovery_preserves_unavailable_or_incompatible_collections_without_a_launch_
     let space = registry.spaces[0].id.clone();
     let binding = attach(&mut registry, &space);
     let mut installed = InstalledApp {
+        code_bytes: None,
+        revision: None,
         policy: policy(),
         title: "Notes".into(),
         ui_ref: "app:notes/ui".into(),
@@ -336,6 +340,8 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
         );
         if index < MAX_INSTALLED_APPS {
             installed.push(InstalledApp {
+                code_bytes: None,
+                revision: None,
                 policy,
                 title: "T".repeat(96),
                 ui_ref: format!("app:{app}/ui"),
@@ -374,7 +380,7 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
     assert_eq!(detail.members.as_ref().unwrap().len(), MAX_MEMBERS);
     let event = Event::Snapshot {
         observation: 1,
-        snapshot,
+        snapshot: Box::new(snapshot),
         resync: true,
     };
     let bytes = spaces::encode_event(&event).unwrap();
@@ -398,7 +404,7 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
     .unwrap();
     let event = spaces::encode_event(&Event::Snapshot {
         observation: 1,
-        snapshot: snapshot.clone(),
+        snapshot: Box::new(snapshot.clone()),
         resync: true,
     })
     .unwrap();
@@ -449,7 +455,7 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
         .receive(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 2,
-                snapshot: snapshot.clone(),
+                snapshot: Box::new(snapshot.clone()),
                 resync: true,
             })
             .unwrap(),
@@ -993,7 +999,7 @@ fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
             None,
         )
         .unwrap();
-    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP7");
+    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP8");
     std::fs::remove_dir_all(path).unwrap();
 }
 
@@ -1078,7 +1084,7 @@ fn cleanup_facts_are_admin_only_and_cannot_be_smuggled_into_member_snapshots() {
     assert!(
         spaces::encode_event(&Event::Snapshot {
             observation: 1,
-            snapshot: member,
+            snapshot: Box::new(member),
             resync: false
         })
         .is_err()
@@ -1582,4 +1588,261 @@ fn legacy_registry_metadata_defaults_and_invalid_sizes_do_not_modify_collections
             .is_err()
         );
     }
+}
+
+#[test]
+fn uncertain_moves_query_the_durable_outcome_without_replaying_and_forget_on_identity_change() {
+    use std::collections::BTreeMap;
+    for changed_identity in [false, true] {
+        let registry = fixture();
+        let source = registry.spaces[0].id.clone();
+        let operation = "e".repeat(32);
+        let mut snapshot = spaces::discovery(
+            &registry,
+            Some("alice"),
+            Some(&source),
+            &[],
+            &BTreeMap::new(),
+            spaces::discovery_cursor().unwrap(),
+        )
+        .unwrap();
+        let mut observer = spaces::Observer::default();
+        observer.configure(Some(&source)).unwrap();
+        observer.outgoing().unwrap().unwrap();
+        observer
+            .receive(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(snapshot.clone()),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        observer
+            .request(Change::Move {
+                operation: operation.clone(),
+                source: source.clone(),
+                destination: "f".repeat(32),
+                app: "counter".into(),
+                collection: "d".repeat(32),
+                destination_collection: None,
+                mode: MoveMode::AppAndData,
+            })
+            .unwrap();
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::Manage { .. }
+        ));
+        observer.reset();
+        assert!(
+            !observer.pending(),
+            "offline outcome uncertainty must not block release discovery"
+        );
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::Watch { .. }
+        ));
+        assert!(observer.outgoing().unwrap().is_none());
+        if changed_identity {
+            snapshot.identity = Some("bob".into());
+        }
+        observer
+            .receive(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 2,
+                    snapshot: Box::new(snapshot),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        if changed_identity {
+            assert!(!observer.pending());
+            assert!(observer.outgoing().unwrap().is_none());
+        } else {
+            let Command::MoveStatus {
+                id,
+                operation: actual,
+                ..
+            } = spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("read-only status query")
+            };
+            assert_eq!(actual, operation);
+            observer
+                .receive(
+                    &spaces::encode_event(&Event::MoveStatus {
+                        version: 1,
+                        id,
+                        operation: operation.clone(),
+                        status: ManagementStatus::Applied,
+                        generation: Some(42),
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(!observer.pending());
+            assert!(matches!(
+                observer.take_outcome(),
+                Some(spaces::Outcome::MoveStatus {
+                    status: ManagementStatus::Applied,
+                    generation: Some(42),
+                    ..
+                })
+            ));
+            assert!(observer.outgoing().unwrap().is_none());
+        }
+    }
+}
+
+#[test]
+fn one_space_access_publication_checks_final_admins_epochs_services_and_current_code_policy() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let binding = attach(&mut registry, &space);
+    let joined = registry.spaces[0].members[0].joined_generation;
+    let request = Request {
+        version: 1,
+        expected_generation: registry.generation,
+        change: Change::Access {
+            space: space.clone(),
+            audience: Audience::PublicComment,
+            changes: vec![
+                MembershipEdit {
+                    identity: "alice".into(),
+                    role: Some(Role::Member),
+                },
+                MembershipEdit {
+                    identity: "bob".into(),
+                    role: Some(Role::Admin),
+                },
+            ],
+        },
+    };
+    let next = spaces::apply_catalog(&registry, "alice", &request, &[policy()]).unwrap();
+    assert_eq!(next.spaces[0].audience, Audience::PublicComment);
+    assert_eq!(next.spaces[0].apps[0].collection, binding.collection);
+    assert_eq!(
+        next.spaces[0]
+            .members
+            .iter()
+            .find(|m| m.identity == "alice")
+            .unwrap()
+            .joined_generation,
+        joined
+    );
+    assert_eq!(
+        next.spaces[0]
+            .members
+            .iter()
+            .find(|m| m.identity == "bob")
+            .unwrap()
+            .joined_generation,
+        next.generation
+    );
+    assert_eq!(
+        spaces::apply_catalog(&next, "alice", &request, &[policy()]),
+        Err(Error::Conflict)
+    );
+    let mut no_admin = request.clone();
+    let Change::Access { changes, .. } = &mut no_admin.change else {
+        unreachable!()
+    };
+    changes.pop();
+    assert_eq!(
+        spaces::apply_catalog(&registry, "alice", &no_admin, &[policy()]),
+        Err(Error::LastAdmin)
+    );
+    let mut closed_only = policy();
+    closed_only.closed_only = true;
+    assert_eq!(
+        spaces::apply_catalog(&registry, "alice", &request, &[closed_only]),
+        Err(Error::Incompatible)
+    );
+    assert_eq!(
+        spaces::admit_human_management("alice", &request, &["bob"]),
+        Err(Error::Denied)
+    );
+    assert_eq!(registry.spaces[0].members.len(), 1);
+    assert_eq!(registry.spaces[0].audience, Audience::Closed);
+}
+
+#[test]
+fn self_profiles_persist_with_revision_conflicts_without_renaming_principals_or_registry_bindings()
+{
+    let path = std::env::temp_dir().join(format!("otrios-profiles-test-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    let file = path.join("registry.flex");
+    let mut store = Store::open(file.clone()).unwrap();
+    let generation = store.registry().unwrap().generation;
+    let registry = std::fs::read(&file).unwrap();
+    let request = Request {
+        version: 1,
+        expected_generation: generation,
+        change: Change::Profile {
+            name: "Aaron Hilton".into(),
+            expected_revision: 0,
+        },
+    };
+    assert_eq!(store.profile("aaron@spaces.test").unwrap(), None);
+    store.commit("aaron@spaces.test", &request, None).unwrap();
+    assert_eq!(
+        store.profile("aaron@spaces.test").unwrap(),
+        Some(UserProfile {
+            name: "Aaron Hilton".into(),
+            revision: 1
+        })
+    );
+    assert_eq!(store.profile("bob").unwrap(), None);
+    assert_eq!(std::fs::read(&file).unwrap(), registry);
+    assert_eq!(
+        store.commit("aaron@spaces.test", &request, None),
+        Err(Error::Conflict)
+    );
+    drop(store);
+    let mut recovered = Store::open(file.clone()).unwrap();
+    assert_eq!(
+        recovered
+            .profile("aaron@spaces.test")
+            .unwrap()
+            .unwrap()
+            .name,
+        "Aaron Hilton"
+    );
+    let mut changed = request;
+    changed.change = Change::Profile {
+        name: "Aaron".into(),
+        expected_revision: 1,
+    };
+    recovered
+        .commit("aaron@spaces.test", &changed, None)
+        .unwrap();
+    assert_eq!(
+        recovered
+            .profile("aaron@spaces.test")
+            .unwrap()
+            .unwrap()
+            .revision,
+        2
+    );
+    assert_eq!(recovered.registry().unwrap().generation, generation);
+    let data = std::fs::read_dir(path.join("registry.flex.profiles"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let corrupt = b"OTSU1corrupted";
+    std::fs::write(&data, corrupt).unwrap();
+    assert!(recovered.profile("aaron@spaces.test").is_err());
+    assert!(
+        recovered
+            .commit("aaron@spaces.test", &changed, None)
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&data).unwrap(), corrupt);
+    assert_eq!(std::fs::read(&file).unwrap(), registry);
+    drop(recovered);
+    std::fs::remove_dir_all(path).unwrap();
 }

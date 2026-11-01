@@ -353,7 +353,7 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
     let mut upgraded = Store::open(fixture.path()).unwrap();
     original.registry.spaces[0].layout.width = 1;
     assert!(upgraded.current == original);
-    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP7"));
+    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP8"));
     let request = Request {
         version: VERSION,
         expected_generation: upgraded.registry().unwrap().generation,
@@ -363,7 +363,7 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
             layout: SpaceLayout {
                 width: 1,
                 height: 2,
-                background: Background::Sage,
+                background: Background::Rgb([20, 40, 60]),
             },
         },
     };
@@ -372,6 +372,10 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
     let recovered = Store::open(fixture.path()).unwrap();
     let registry = recovered.registry().unwrap();
     assert_eq!(registry.spaces[0].layout.width, 1);
+    assert_eq!(
+        registry.spaces[0].layout.background,
+        Background::Rgb([20, 40, 60])
+    );
     assert_eq!(registry.spaces[0].apps[0].collection, binding.collection);
     authorize(registry, Some("alice"), &binding, Operation::Edit).unwrap();
 }

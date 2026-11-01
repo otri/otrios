@@ -3,7 +3,11 @@
 //! before calling this module and hold one authority lock through writes/reads.
 use otrios_interfaces::spaces::*;
 use std::collections::BTreeSet;
+mod access;
+mod usage;
+pub use usage::{AcceptedUser, active_users};
 mod discovery;
+mod moves;
 mod observer;
 mod retained;
 mod schema;
@@ -192,6 +196,7 @@ pub fn admit_service_identity(registry: &Registry, identity: &str) -> Result<()>
 pub fn admit_human_management(actor: &str, request: &Request, services: &[&str]) -> Result<()> {
     if services.contains(&actor)
         || matches!(&request.change, Change::Membership { identity, .. } if services.contains(&identity.as_str()))
+        || matches!(&request.change, Change::Access { changes, .. } if changes.iter().any(|c| services.contains(&c.identity.as_str())))
     {
         return Err(Error::Denied);
     }
@@ -257,7 +262,11 @@ pub fn apply_catalog(
         return Err(Error::Conflict);
     }
     let mut current = registry.clone();
-    if let Change::Audience { space, audience } = &request.change {
+    if let Change::Audience { space, audience }
+    | Change::Access {
+        space, audience, ..
+    } = &request.change
+    {
         let selected = current
             .spaces
             .iter_mut()
@@ -276,9 +285,9 @@ pub fn apply_catalog(
         }
     }
     let attaching = match &request.change {
-        Change::Attach { app, .. } | Change::RestoreDataset { app, .. } => {
-            installed.iter().find(|p| &p.app == app)
-        }
+        Change::Attach { app, .. }
+        | Change::RestoreDataset { app, .. }
+        | Change::Move { app, .. } => installed.iter().find(|p| &p.app == app),
         _ => None,
     };
     apply(&current, actor, request, attaching)
@@ -298,10 +307,16 @@ pub fn apply(
     if request.expected_generation != registry.generation {
         return Err(Error::Conflict);
     }
+    if matches!(request.change, Change::Profile { .. }) {
+        return Err(Error::Unavailable);
+    }
     let mut next = registry.clone();
     next.generation = next.generation.checked_add(1).ok_or(Error::Capacity)?;
     let epoch = next.generation;
-    if retained::mutate(&mut next, actor, &request.change, installed)? {
+    if access::mutate(&mut next, actor, &request.change)?
+        || moves::mutate(&mut next, actor, &request.change, installed)?
+        || retained::mutate(&mut next, actor, &request.change, installed)?
+    {
         validate(&next)?;
         return Ok(next);
     }
@@ -358,12 +373,16 @@ pub fn apply(
             | Change::ConfigureSpace { space, .. }
             | Change::LabelApp { space, .. }
             | Change::PlaceApp { space, .. } => space,
-            Change::Create { .. }
+            Change::Profile { .. }
+            | Change::Access { .. }
+            | Change::Create { .. }
             | Change::PlaceSpace { .. }
+            | Change::Move { .. }
             | Change::DeleteSpace { .. }
             | Change::RestoreSpace { .. }
             | Change::RestoreDataset { .. }
-            | Change::DeleteDataset { .. } => unreachable!(),
+            | Change::DeleteDataset { .. }
+            | Change::LabelDataset { .. } => unreachable!(),
         };
         // Denied conceals whether an inaccessible Space exists.
         let s = next
@@ -523,12 +542,16 @@ pub fn apply(
                     s.apps.retain(|a| a.policy.app != *app);
                 }
             }
-            Change::Create { .. }
+            Change::Profile { .. }
+            | Change::Access { .. }
+            | Change::Create { .. }
             | Change::PlaceSpace { .. }
+            | Change::Move { .. }
             | Change::DeleteSpace { .. }
             | Change::RestoreSpace { .. }
             | Change::RestoreDataset { .. }
-            | Change::DeleteDataset { .. } => unreachable!(),
+            | Change::DeleteDataset { .. }
+            | Change::LabelDataset { .. } => unreachable!(),
         }
     }
     validate(&next)?;

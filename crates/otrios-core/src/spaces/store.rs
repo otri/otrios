@@ -90,7 +90,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP7".to_vec();
+    let mut bytes = b"OTSP8".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -111,10 +111,11 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
 fn decode(bytes: &[u8]) -> Result<Record> {
     let mut record: Record = flexbuffers::from_slice(payload(
         bytes,
-        &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6", b"OTSP7"],
+        &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6", b"OTSP7", b"OTSP8"],
     )?)
     .map_err(|_| Error::Invalid)?;
-    if !bytes.starts_with(b"OTSP6") && !bytes.starts_with(b"OTSP7") {
+    if !bytes.starts_with(b"OTSP6") && !bytes.starts_with(b"OTSP7") && !bytes.starts_with(b"OTSP8")
+    {
         initial_layouts(&mut record.registry);
     }
     validate_record(&record)?;
@@ -126,6 +127,7 @@ fn current_framing(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"OTSP5")
         || bytes.starts_with(b"OTSP6")
         || bytes.starts_with(b"OTSP7")
+        || bytes.starts_with(b"OTSP8")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let mut registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
@@ -412,8 +414,15 @@ impl Store {
         request: &Request,
         installed: Option<&AppPolicy>,
     ) -> Result<&Registry> {
+        if matches!(request.change, Change::Profile { .. }) {
+            self.commit_profile(actor, request)?;
+            return self.registry();
+        }
+        if self.replayed_move(actor, request)? {
+            return self.registry();
+        }
         let registry = apply(self.registry()?, actor, request, installed)?;
-        self.commit_decision(request, registry)
+        self.commit_decision(actor, request, registry)
     }
     pub fn commit_catalog(
         &mut self,
@@ -421,15 +430,29 @@ impl Store {
         request: &Request,
         installed: &[AppPolicy],
     ) -> Result<&Registry> {
+        if matches!(request.change, Change::Profile { .. }) {
+            self.commit_profile(actor, request)?;
+            return self.registry();
+        }
+        if self.replayed_move(actor, request)? {
+            return self.registry();
+        }
         let registry = apply_catalog(self.registry()?, actor, request, installed)?;
-        self.commit_decision(request, registry)
+        self.commit_decision(actor, request, registry)
     }
-    fn commit_decision(&mut self, request: &Request, registry: Registry) -> Result<&Registry> {
+    fn commit_decision(
+        &mut self,
+        actor: &str,
+        request: &Request,
+        registry: Registry,
+    ) -> Result<&Registry> {
         let next = Record {
             registry,
             ..self.current.clone()
         };
-        if let Change::RestoreDataset {
+        if matches!(request.change, Change::Move { .. }) {
+            self.stage_move(next, actor, request)?;
+        } else if let Change::RestoreDataset {
             space,
             app,
             collection,
@@ -477,6 +500,11 @@ mod tests;
 
 #[path = "backups.rs"]
 mod backups;
+#[path = "move_receipts.rs"]
+mod move_receipts;
+#[path = "profiles.rs"]
+mod profiles;
+use move_receipts::MoveReceipt;
 #[path = "payloads.rs"]
 mod payloads;
 fn write(path: &Path, bytes: &[u8]) -> Result<()> {

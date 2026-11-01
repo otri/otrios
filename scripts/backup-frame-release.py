@@ -33,7 +33,7 @@ try:
  pointer=(root/'releases/current.json').read_bytes();release=json.loads(pointer)['id']
  (snap/'current.json').write_bytes(pointer)
  shutil.copytree(root/'releases'/release,snap/'release')
- for name in ['state.apps','state.presentation.flex','monitoring.flex','spaces.flex','spaces.flex.latest','spaces.flex.owner.lock','collector-binding.json']:
+ for name in ['state.apps','state.presentation.flex','monitoring.flex','spaces.flex','spaces.flex.latest','spaces.flex.owner.lock','spaces.flex.moves','spaces.flex.profiles','spaces.flex.restore','collector-binding.json']:
   path=root/name
   if path.is_dir():shutil.copytree(path,snap/name,symlinks=True)
   elif path.exists():shutil.copy2(path,snap/name)

@@ -124,6 +124,7 @@ pub fn discovery_with_cleanup(
                     let storage = facts.get(&a.collection);
                     let availability = availability(a, app, facts, s.audience, true);
                     AppSummary {
+                        active_users: None,
                         app: a.policy.app.clone(),
                         title: title(a, app),
                         collection: a.collection.clone(),
@@ -144,6 +145,7 @@ pub fn discovery_with_cleanup(
                 })
                 .collect();
             SpaceDetail {
+                active_users: None,
                 retained: if admin {
                     retained_summaries(registry, s, installed, facts)
                 } else {
@@ -161,6 +163,8 @@ pub fn discovery_with_cleanup(
             }
         });
     let snapshot = Discovery {
+        profile: None,
+        catalog: vec![],
         version: VERSION,
         cursor,
         generation: registry.generation,
@@ -205,12 +209,18 @@ fn valid_installed(app: &InstalledApp) -> bool {
         && !app.title.is_empty()
         && app.title.len() <= 96
         && app.ui_ref == format!("app:{}/ui", app.policy.app)
+        && app.revision.is_none_or(|r| r > 0)
         && !app.state_ref.is_empty()
         && app.state_ref.len() <= 128
 }
 
 pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
-    if snapshot.version != VERSION
+    if (!snapshot.catalog.is_empty() && snapshot.catalog.len() != 32)
+        || snapshot.version != VERSION
+        || snapshot
+            .profile
+            .as_ref()
+            .is_some_and(|p| snapshot.identity.is_none() || p.revision == 0 || !valid_name(&p.name))
         || !valid_id(&snapshot.cursor.authority)
         || snapshot.spaces.len() > MAX_SPACES
         || snapshot
@@ -277,7 +287,9 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
                 != detail.retained.len()
             || detail.installed.len() > MAX_INSTALLED_APPS
             || (!admin
-                && (detail.members.is_some()
+                && (detail.active_users.is_some()
+                    || detail.apps.iter().any(|a| a.active_users.is_some())
+                    || detail.members.is_some()
                     || !detail.installed.is_empty()
                     || detail.cleanup.is_some()))
             || detail.cleanup.as_ref().is_some_and(|c| {

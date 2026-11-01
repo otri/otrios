@@ -702,7 +702,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v18","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v19","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -815,7 +815,7 @@ fn offline_backup_restore_preserves_latest_revocation_and_older_writers_cannot_a
     if let Ok(older) = std::env::var("OTRIOS_SPACES_OLD_SERVER") {
         let primary = fs::read(rig.root.join("spaces.flex")).unwrap();
         let latest = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
-        assert_eq!(&primary[..5], b"OTSP7");
+        assert_eq!(&primary[..5], b"OTSP8");
         rig.restart(&older, true, false);
         assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
         std::thread::sleep(Duration::from_millis(100));
@@ -900,7 +900,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v18","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v19","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -4578,5 +4578,423 @@ fn sealed_restore_uses_complete_durable_state_and_keeps_outgoing_data_after_rest
     assert_eq!(
         document_session(&rig, &space, "counter", schema(), None),
         (41, new)
+    );
+}
+
+#[test]
+fn scoped_moves_preserve_confirmed_state_back_up_occupied_targets_and_resolve_after_restart() {
+    use otrios_interfaces::spaces::{Command as SpaceCommand, Event, ManagementStatus, MoveMode};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    for (index, mode) in [MoveMode::AppAndData, MoveMode::AppOnly, MoveMode::DataOnly]
+        .into_iter()
+        .enumerate()
+    {
+        let source = rig.space(&format!("Move source {index}"));
+        let destination = rig.space(&format!("Move destination {index}"));
+        for space in [&source, &destination] {
+            rig.change(
+                'a',
+                Change::Attach {
+                    space: space.clone(),
+                    app: "counter".into(),
+                },
+            );
+        }
+        let (_, original) = document_session(&rig, &source, "counter", schema(), Some(41));
+        let original = original.unwrap();
+        let (_, outgoing) = document_session(&rig, &destination, "counter", schema(), Some(73));
+        let outgoing = outgoing.unwrap();
+        let current = http(&rig.public, "GET", Some('a'), None).1;
+        let operation = format!("{index:032x}");
+        let request = Request {
+            version: 1,
+            expected_generation: current["generation"].as_u64().unwrap(),
+            change: Change::Move {
+                operation: operation.clone(),
+                source: source.clone(),
+                destination: destination.clone(),
+                app: "counter".into(),
+                collection: original.clone(),
+                destination_collection: Some(outgoing.clone()),
+                mode,
+            },
+        };
+        assert_eq!(http(&rig.public, "POST", Some('b'), Some(&request)).0, 403);
+        let mut acknowledged_race = false;
+        if mode == MoveMode::DataOnly {
+            let mut writer = socket(&rig.public, &source, Some('a'));
+            mount(&mut writer, &rig.catalog);
+            assert!(matches!(read(&mut writer), ServerMessage::Mounted { .. }));
+            send(&mut writer, ClientMessage::AcceptMount { epoch: 1 });
+            assert!(matches!(read(&mut writer), ServerMessage::Activated { .. }));
+            let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let writer_gate = gate.clone();
+            let writing = std::thread::spawn(move || {
+                writer_gate.wait();
+                send(
+                    &mut writer,
+                    ClientMessage::Sync {
+                        epoch: 1,
+                        bytes: canvas::encode_state_request(&StateRequest::Write {
+                            sequence: 1,
+                            values: vec![(1, Value::Number(99.))],
+                        })
+                        .unwrap(),
+                    },
+                );
+                writer
+            });
+            gate.wait();
+            assert_eq!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 200);
+            let mut writer = writing.join().unwrap();
+            loop {
+                match read(&mut writer) {
+                    ServerMessage::Sync { .. } => acknowledged_race = true,
+                    ServerMessage::AccessRequired { .. } => break,
+                    other => panic!("move revocation: {other:?}"),
+                }
+            }
+            send(
+                &mut writer,
+                ClientMessage::Sync {
+                    epoch: 1,
+                    bytes: canvas::encode_state_request(&StateRequest::Write {
+                        sequence: 2,
+                        values: vec![(1, Value::Number(88.))],
+                    })
+                    .unwrap(),
+                },
+            );
+            send(&mut writer, ClientMessage::Leave { epoch: 1 });
+        } else {
+            assert_eq!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 200);
+        }
+        let after = http(&rig.public, "GET", Some('a'), None).1;
+        let generation = after["generation"].as_u64().unwrap();
+        let target = after["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == destination)
+            .unwrap();
+        assert_eq!(target["apps"].as_array().unwrap().len(), 1);
+        let (value, target_cid) = document_session(&rig, &destination, "counter", schema(), None);
+        if mode == MoveMode::AppOnly {
+            assert_eq!((value, target_cid), (73, Some(outgoing)));
+            let source_state = after["spaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == source)
+                .unwrap();
+            assert_eq!(source_state["apps"][0]["attached"], false);
+            assert_eq!(source_state["apps"][0]["collection"], original);
+        } else {
+            assert!(value == 41 || mode == MoveMode::DataOnly && value == 99);
+            if acknowledged_race {
+                assert_eq!(
+                    value, 99,
+                    "every acknowledged write must reach the destination"
+                );
+            }
+            assert_ne!(target_cid.as_ref(), Some(&original));
+            assert_ne!(target_cid.as_ref(), Some(&outgoing));
+            assert!(
+                target["retained"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["collection"] == outgoing && d["origin"] == "before-replacement")
+            );
+            if mode == MoveMode::DataOnly {
+                let (value, replacement) =
+                    document_session(&rig, &source, "counter", schema(), None);
+                assert_eq!(value, 0);
+                assert_ne!(replacement, Some(original));
+            }
+        }
+        rig.stop();
+        rig.restart(&binary, true, true);
+        assert_eq!(
+            http(&rig.public, "POST", Some('a'), Some(&request)).0,
+            200,
+            "known operation must not execute again"
+        );
+        assert_eq!(
+            http(&rig.public, "GET", Some('a'), None).1["generation"],
+            generation
+        );
+        let mut control = socket(&rig.public, &destination, Some('a'));
+        send_spaces(
+            &mut control,
+            SpaceCommand::Watch {
+                version: 1,
+                observation: 1,
+                selected: Some(destination.clone()),
+                cursor: None,
+            },
+        );
+        assert!(matches!(read_spaces(&mut control), Event::Snapshot { .. }));
+        send_spaces(
+            &mut control,
+            SpaceCommand::MoveStatus {
+                version: 1,
+                id: 1,
+                operation,
+                source,
+                destination: destination.clone(),
+            },
+        );
+        assert!(
+            matches!(read_spaces(&mut control), Event::MoveStatus { status: ManagementStatus::Applied, generation: Some(g), .. } if g == generation)
+        );
+        assert_eq!(
+            document_session(&rig, &destination, "counter", schema(), None).0,
+            value
+        );
+    }
+}
+
+#[test]
+fn scoped_chat_move_copies_owned_assets_and_revokes_old_producers_without_mutable_links() {
+    use otrios_interfaces::{
+        chat::{Command as Chat, Event as ChatEvent},
+        spaces::MoveMode,
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let source = rig.space("Move private transcript");
+    let destination = rig.space("Move transcript destination");
+    for space in [&source, &destination] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "relay".into(),
+            },
+        );
+    }
+    let mut producer = socket(&rig.public, &source, Some('a'));
+    let (old, _) = chat_mount(&rig, &mut producer, "relay", 1);
+    let (_, epoch) = chat_join(&mut producer, 1);
+    let payload = vec![37; 8192];
+    chat_command(
+        &mut producer,
+        1,
+        Chat::SendAsset {
+            epoch,
+            nonce: "1".repeat(32),
+            text: "Confirmed owned attachment".into(),
+            name: "asset.bin".into(),
+            bytes: payload.clone(),
+        },
+    );
+    chat_event(&mut producer, 1, |e| {
+        matches!(e, ChatEvent::Receipt { sequence: 1, .. })
+    });
+    let mut outgoing = socket(&rig.public, &destination, Some('a'));
+    let (prior, _) = chat_mount(&rig, &mut outgoing, "relay", 1);
+    let (_, prior_epoch) = chat_join(&mut outgoing, 1);
+    chat_send(&mut outgoing, 1, prior_epoch, 2, "Destination backup");
+    rig.change(
+        'a',
+        Change::Move {
+            operation: "2".repeat(32),
+            source: source.clone(),
+            destination: destination.clone(),
+            app: "relay".into(),
+            collection: old.clone(),
+            destination_collection: Some(prior),
+            mode: MoveMode::AppAndData,
+        },
+    );
+    loop {
+        if matches!(
+            chat_state(&mut producer),
+            ServerMessage::AccessRequired { epoch: 1 }
+        ) {
+            break;
+        }
+    }
+    // A delayed old producer cannot enter the moved dataset or resurrect its source.
+    chat_command(
+        &mut producer,
+        1,
+        Chat::Send {
+            epoch,
+            nonce: "3".repeat(32),
+            text: "Delayed old write".into(),
+        },
+    );
+    send(&mut producer, ClientMessage::Leave { epoch: 1 });
+    send(&mut outgoing, ClientMessage::Leave { epoch: 1 });
+    drop(producer);
+    drop(outgoing);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    let mut reader = socket(&rig.public, &destination, Some('a'));
+    let (fresh, initial) = chat_mount(&rig, &mut reader, "relay", 1);
+    assert_ne!(fresh, old);
+    assert_eq!(initial.messages.len(), 1);
+    let message = &initial.messages[0];
+    assert_eq!(message.message.text, "Confirmed owned attachment");
+    chat_command(
+        &mut reader,
+        1,
+        Chat::ReadAsset {
+            nonce: "4".repeat(32),
+            sequence: 1,
+            revision: message.revision,
+            index: 0,
+        },
+    );
+    let event = chat_event(&mut reader, 1, |e| matches!(e, ChatEvent::Asset { .. }));
+    let ChatEvent::Asset { bytes, .. } = event else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
+    let old_assets = rig.root.join(format!("state/collection-{old}.data"));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while old_assets.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "old source cleanup must not retain writable files"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        rig.root
+            .join(format!("state/collection-{fresh}.data"))
+            .is_dir()
+    );
+}
+
+#[test]
+fn admin_usage_counts_only_accepted_current_mounts_deduplicates_people_and_counts_anonymous_connections()
+ {
+    use otrios_interfaces::spaces::{Audience, Command as SpaceCommand, Event};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let rig = Rig::start(&binary);
+    let space = rig.space("Accepted participants");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    let mut control = socket(&rig.public, &space, Some('a'));
+    let mut observation = 0;
+    let mut snapshot = |control: &mut Socket| {
+        observation += 1;
+        send_spaces(
+            control,
+            SpaceCommand::Watch {
+                version: 1,
+                observation,
+                selected: Some(space.clone()),
+                cursor: None,
+            },
+        );
+        loop {
+            if let Event::Snapshot {
+                observation: actual,
+                snapshot,
+                ..
+            } = read_spaces(control)
+                && actual == observation
+            {
+                break snapshot;
+            }
+        }
+    };
+    let mut peers = vec![];
+    for token in [Some('a'), Some('a'), Some('b'), None, None] {
+        let mut peer = socket(&rig.public, &space, token);
+        mount(&mut peer, &rig.catalog);
+        assert!(matches!(read(&mut peer), ServerMessage::Mounted { .. }));
+        let staged = snapshot(&mut control);
+        assert_eq!(
+            staged.selected.as_ref().unwrap().active_users,
+            Some(match peers.len() {
+                0 => 0,
+                1 | 2 => 1,
+                3 => 2,
+                _ => 3,
+            })
+        );
+        send(&mut peer, ClientMessage::AcceptMount { epoch: 1 });
+        assert!(matches!(read(&mut peer), ServerMessage::Activated { .. }));
+        peers.push(peer);
+    }
+    let active = snapshot(&mut control);
+    let generation = active.generation;
+    let detail = active.selected.as_ref().unwrap();
+    assert_eq!(detail.active_users, Some(4));
+    assert_eq!(detail.apps[0].active_users, Some(4));
+    let mut visitor = socket(&rig.public, &space, Some('b'));
+    send_spaces(
+        &mut visitor,
+        SpaceCommand::Watch {
+            version: 1,
+            observation: 1,
+            selected: Some(space.clone()),
+            cursor: None,
+        },
+    );
+    let Event::Snapshot {
+        snapshot: member, ..
+    } = read_spaces(&mut visitor)
+    else {
+        panic!("visitor snapshot")
+    };
+    assert_eq!(member.selected.as_ref().unwrap().active_users, None);
+    assert_eq!(member.selected.as_ref().unwrap().apps[0].active_users, None);
+    drop(peers.pop());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let current = snapshot(&mut control);
+        assert_eq!(
+            current.generation, generation,
+            "presence never changes registry decisions"
+        );
+        if current.selected.as_ref().unwrap().active_users == Some(3) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    rig.change(
+        'a',
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::Closed,
+        },
+    );
+    assert_eq!(
+        snapshot(&mut control)
+            .selected
+            .as_ref()
+            .unwrap()
+            .active_users,
+        Some(1),
+        "current admission excludes revoked visitors immediately"
     );
 }

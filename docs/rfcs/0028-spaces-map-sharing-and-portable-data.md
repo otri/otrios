@@ -372,6 +372,64 @@ This RFC defines the minimum semantics and file/URL shape, not an implemented or
 already stabilized wire format. Current runtime limits must not be relaxed merely
 because an archive can contain a larger file.
 
+## Admin UI completion and execution order
+
+The 2026-11-01 plan adjustment prioritizes completing the unified admin UI before
+the next deployment. The visual and interaction reference is the
+[approved interactive prototype](../experiments/data/spaces-map-2026-11-01/admin-ui-reference.html),
+snapshotted from `target/design-exploration/otrios-spaces-map-settings.html` and
+reviewed in Safari. Its SHA-256 is `9ffabba5c5704f8d9817923aad35abc7cf8f352a83b9f02c6b7927e45864adf5`.
+This prototype is a design fixture; its simulated counts, transfer previews and
+local mutations are not implementation or acceptance evidence. Later user
+instructions remain authoritative, including no visible Saved success message.
+
+The user also authorized resetting app/Space data where useful for this rollout.
+That authorization does not relax the product's confirmed-data invariants or its
+move/replacement/crash-recovery acceptance requirements.
+
+Complete this refinement of M1/M2 while finishing M3, then implement M4:
+
+1. **Shared panel presentation.** Keep the Spaces map visible beneath one dimmed,
+   rounded settings/dialog surface. Use consistent spacing, editable headings,
+   paired usage statistics, information rows, separators and action placement.
+   Focus stays inside the panel; closing/Escape restores the initiating control.
+   Short and narrow viewports scroll panel content without obscuring actions.
+   Native Frame and Web share the same authored controls and hit geometry.
+2. **Space and access.** Implicit name editing and the palette (including None)
+   lead the Space panel. Follow with data used, active users, access, app count
+   and retained-dataset count where present. Keep People & access and Delete
+   Space as the essential actions. Consolidate audience choice, member roles,
+   addition and removal into People & access; retain explicit access-change
+   review, current-role checks and last-Admin protection. Remove the old
+   Apps & Data/Sharing/Members/Cleanup navigation from the primary Space panel;
+   expose necessary recovery/deletion facts in the relevant data/review panels.
+3. **App, dataset and profile.** Use the same information pattern for active apps
+   and exact retained datasets: editable local name, immutable bundle ID,
+   statistics and current Space. Active apps include verified app size and
+   revision with Share App, Export Data and Replace Data. Dataset information
+   includes Restore App, Export Data and Replace Data. Keep deletion on tile
+   minus controls. Put profile editing, Deleted Spaces and Sign out together;
+   recover archived Spaces from Deleted Spaces. Display-name changes must not
+   rename authenticated principals. Unknown measurements remain unknown.
+4. **Moves in this UI.** Preserve the completed scoped-move backend and its data
+   invariants. Use the shared review for pointer/touch drops and keyboard
+   pickup, destination selection, drop and Escape cancellation. Name both
+   Spaces, expose destination access, preserve occupied-destination backups,
+   and require explicit public-data publication. No Move action is added to
+   app settings. Keep success quiet and stale reviews non-destructive.
+5. **Transfers in this UI.** Finish M4's real Share App/download page, Upload by
+   payload or shared URL, Export Data and reviewed Replace Data inside these
+   same panels. Preserve confirmed content and owned assets; retain outgoing
+   data before replacement. Prototype preview messages do not satisfy M4.
+
+Use a small critical-path UI set: panel opening/closing and focus, one access
+review, exact retained-data actions, one move review, and transfer round trips.
+Update or remove superseded management-page assertions. Keep storage/crash/race
+coverage for the underlying data invariants. Qualify the populated Web map in
+Safari and the physical Frame, then deploy through the existing signed-release
+and verified-host workflow. Record actual acceptance, commit/push completed
+changes, and create the final PR only after the full scope is ready for review.
+
 ## Implementation and acceptance
 
 Select and implement one milestone at a time. The concept screens are fixtures,
@@ -407,3 +465,15 @@ M1 must not require deploying unfinished portable import, cross-Space movement o
 public sharing. Keep unavailable actions truthful until their milestone qualifies.
 This documentation proposal itself requires no deployment, data migration, new
 publisher trust, public share or change to the existing Frame's confirmed data.
+
+### Shared admin implementation details (2026-11-01)
+
+Admin panels share one modal renderer, local scrolling and input isolation on
+Web and Frame. The map backdrop is an inert scene composed separately from the
+panel layout, so a populated map plus the native keyboard does not exceed one
+layout admission budget. Appearance includes presets, None and a custom
+six-digit RGB hex field, with light labels on dark backgrounds. The registry
+writer advances to OTSP8; OTSP1–7 migration preserves collections and decisions.
+M2 rejects OTSP8. Rollback requires a compatible current writer, or an explicit
+state-reset decision using the paired pre-deployment backup. Release-control v1
+and the unpublished v19 / Spaces envelope v4 remain the protocol boundary.

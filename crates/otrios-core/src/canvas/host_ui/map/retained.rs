@@ -7,7 +7,7 @@ pub(super) fn is_confirmation(pane: &Pane) -> bool {
         Pane::RemoveApp(_) | Pane::DeleteDataset(_) | Pane::RestoreDataset(_) | Pane::DeleteSpace
     )
 }
-impl Builder {
+impl Builder<'_> {
     fn destructive(&mut self, label: &str, frame: [f32; 4], action: HostAction) {
         self.nodes.push(
             a::canvas(vec![
@@ -138,7 +138,7 @@ pub(super) fn render(
         Pane::DeleteSpace => None,
         _ => return,
     };
-    if model.review.is_none() {
+    if model.review.is_none() || matches!(pane, Pane::Dataset(_)) {
         model.review = Some(Review {
             space: space.id.clone(),
             generation: snapshot.generation,
@@ -216,24 +216,23 @@ pub(super) fn render(
                 .iter()
                 .find(|d| d.collection == cid)
                 .unwrap();
-            b.nodes.push(text(
-                &format!("{} (data)", data.title),
-                [left, top, width, 64.],
-                2.,
-            ));
-            b.nodes
-                .push(text(&data.app, [left, top + 72., width, 32.], 1.));
-            b.nodes.push(text(
-                &stored(data.stored_bytes),
-                [left, top + 120., width, 32.],
-                2.,
-            ));
-            b.nodes.push(text(&cid, [left, top + 160., width, 32.], 1.));
+            b.name([left, top, width, 64.]);
+            b.nodes.push(
+                text(
+                    &format!("{} · data", data.app),
+                    [left + 8., top + 74., width - 16., 32.],
+                    1.3,
+                )
+                .color(SOFT),
+            );
+            b.stats(data.stored_bytes, Some(0), [left, top + 132., width, 76.]);
+            b.info("Space", &space.name, [left, top + 244., width, 40.]);
+            b.divider([left, top + 306., width, 1.]);
             if !space.archived && data.availability == AppAvailability::Available {
                 b.flat(
-                    "Restore",
-                    "Restore",
-                    [left, top + 224., width, 56.],
+                    "Restore App",
+                    "Restore App",
+                    [left, top + 328., width, 56.],
                     HostAction::Pane(Pane::RestoreDataset(cid.clone())),
                 );
             } else {
@@ -243,15 +242,21 @@ pub(super) fn render(
                     } else {
                         availability(data.availability)
                     },
-                    [left, top + 224., width, 64.],
-                    1.5,
+                    [left, top + 328., width, 64.],
+                    1.3,
                 ));
             }
             b.flat(
-                "Delete data",
-                "Delete data",
-                [left, top + 300., width, 56.],
-                HostAction::Pane(Pane::DeleteDataset(cid)),
+                "Export Data",
+                "Export Data",
+                [left, top + 388., width, 56.],
+                HostAction::Unavailable("Data export is not available for this dataset yet."),
+            );
+            b.flat(
+                "Replace Data",
+                "Replace Data",
+                [left, top + 448., width, 56.],
+                HostAction::Unavailable("Data replacement is not available for this dataset yet."),
             );
         }
         Pane::DeleteDataset(cid) | Pane::RestoreDataset(cid) => {

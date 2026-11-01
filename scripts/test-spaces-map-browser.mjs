@@ -173,7 +173,7 @@ try {
  // Supported browser atomic input replacement, followed by a real input event.
  await evaluate(a,"(()=>{const e=document.activeElement;e.value='Workshop';e.setSelectionRange(e.value.length,e.value.length);e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertReplacementText'}));})()");
  await wait(a,"document.querySelector('.canvas-editor')?.value==='Workshop'");
- await click(a,'Background: Lilac');await click(a,'Save');
+ await click(a,'Background: Lilac');
  for(let i=0;i<100&&(await get()).spaces.find(s=>s.id===fixture.space_a).name!=='Workshop';i++)await new Promise(r=>setTimeout(r,50));
 
  let changed=await get();assert.equal(changed.spaces.find(s=>s.id===fixture.space_a).name,'Workshop');assert.equal(changed.spaces.find(s=>s.id===fixture.space_a).layout.background,'lilac');
@@ -238,19 +238,37 @@ try {
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter (data) in Empty Space'))})`);
  await shot(a,'retained-ghost');
  assert(!await evaluate(a,view+".includes('Saved.')"));
- await click(a,'Bundle Counter (data) in Empty Space');await click(a,'Restore');await shot(a,'restore-data-review');await click(a,'Restore');
+ await click(a,'Bundle Counter (data) in Empty Space');await click(a,'Restore App');await shot(a,'restore-data-review');await click(a,'Restore');
  for(let n=0;n<100&&!(await get()).spaces.find(s=>s.id===empty.id).apps[0].attached;n++)await new Promise(r=>setTimeout(r,50));
  assert.equal((await get()).spaces.find(s=>s.id===empty.id).apps[0].collection,retainedCID);
  await click(a,'Delete App: Bundle Counter in Empty Space');await click(a,'Remove Data');await click(a,'Delete');
  for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).apps.length;n++)await new Promise(r=>setTimeout(r,50));
  assert.equal((await get()).spaces.find(s=>s.id===empty.id).apps.length,0);
  await click(a,'Space settings: Empty Space');await click(a,'Delete Space');await click(a,'Delete');
- await wait(a,view+".includes('Empty Space (deleted)')");
- await click(a,'Space settings: Empty Space');await click(a,'Restore Space');
+ await click(a,'Profile');await click(a,'Deleted Spaces');await click(a,'Restore Space: Empty Space');
  for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).archived;n++)await new Promise(r=>setTimeout(r,50));
  assert.equal((await get()).spaces.find(s=>s.id===empty.id).archived,false);
  await click(a,'Close');await click(a,'Done');
  await writeFile(output+'/retained-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,default_keep_data:true,cancel_clears_remove_data:true,exact_identity_restore:true,checked_remove_data:true,deleted_space_recovery:true,silent_success:true,runtime_errors:errors},null,2));
+ // One transfer path covers the browser keyboard pickup, shared review and fresh binding.
+ await manage({type:'create',name:'Transfer target'});
+ const transferTarget=(await get()).spaces.find(s=>s.name==='Transfer target');
+ await manage({type:'audience',space:transferTarget.id,audience:'public-view'});
+ await manage({type:'attach',space:empty.id,app:'bundle-counter'});
+ const movingCID=(await get()).spaces.find(s=>s.id===empty.id).apps[0].collection;
+ await click(a,'Edit');
+ await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter in Empty Space'))})`);
+ await evaluate(a,`document.querySelector(${JSON.stringify(selector('Bundle Counter in Empty Space'))}).dispatchEvent(new KeyboardEvent('keydown',{key:' ',code:'Space',bubbles:true,cancelable:true}))`);
+ await click(a,'Move to Transfer target');await wait(a,view+".includes('Public · read only')");
+ await shot(a,'cross-space-public-review');await click(a,'Move and publish data');
+ for(let n=0;n<100&&!(await get()).spaces.find(s=>s.id===transferTarget.id).apps.length;n++)await new Promise(r=>setTimeout(r,50));
+ const moved=(await get()).spaces.find(s=>s.id===transferTarget.id).apps;
+ assert.equal(moved.length,1);assert.notEqual(moved[0].collection,movingCID);
+ assert.equal((await get()).spaces.find(s=>s.id===empty.id).apps.length,0);
+ assert(!await evaluate(a,view+".includes('Saved.')"));
+ await manage({type:'delete-space',space:transferTarget.id,remove_data:true});
+ await click(a,'Done');
+ await writeFile(output+'/moves-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,keyboard_pickup:true,public_exposure_review:true,fresh_destination_binding:true,source_retired:true,silent_success:true,runtime_errors:errors},null,2));
  // Switching to another Space's app stays within one browser session and opens it.
  await click(a,'Bundle Counter');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&"+ui+"==='app:bundle-counter/ui'");
  await click(a,'Back to OTriOS');await click(a,'Profile');await click(a,'Sign out');

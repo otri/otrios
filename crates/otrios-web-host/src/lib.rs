@@ -5,10 +5,22 @@ use otrios_core::canvas::{
     presentation::{Composer, Demand, Frame},
 };
 use otrios_core::dashboard::{Mesh, font::Font};
-use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive};
+use otrios_interfaces::scene::{PointerEvent, PointerPhase};
 use otrios_interfaces::{canvas::Presentation, keyboard::Edit};
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn report_panic(message: &str);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn install_panic_reporter() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| std::panic::set_hook(Box::new(|info| report_panic(&info.to_string()))));
+}
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct CanvasApp {
@@ -21,6 +33,8 @@ pub struct CanvasApp {
 impl CanvasApp {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        install_panic_reporter();
         let mut app = Self::default();
         app.inner.set_software_keyboard(false);
         app
@@ -509,17 +523,7 @@ impl CanvasApp {
     }
 
     pub fn text(&self) -> Result<String, String> {
-        fn visit(n: &otrios_interfaces::scene::SceneNode, out: &mut Vec<String>) {
-            if let Primitive::Text { value, .. } = &n.primitive {
-                out.push(value.clone())
-            }
-            for c in &n.children {
-                visit(c, out)
-            }
-        }
-        let mut out = vec![];
-        visit(self.inner.scene()?.root(), &mut out);
-        Ok(out.join(". "))
+        self.inner.accessibility_text()
     }
     pub fn controls(&self) -> Result<Vec<u32>, String> {
         Ok(self

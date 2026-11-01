@@ -56,9 +56,10 @@ def rebuild(config,wanted,activate=True):
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
     feature,binary='direct,server,canvas','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--target','armv7-unknown-linux-gnueabihf'])
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--example','space_map_probe','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
+    run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/examples/space_map_probe',build/'frame-space-map-probe'])
     for program in ['dashboard-server','dashboard-monitoring','canvas-bundle']:
         run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+program,build/('frame-'+program)])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')

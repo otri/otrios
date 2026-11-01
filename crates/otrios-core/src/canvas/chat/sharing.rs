@@ -324,6 +324,8 @@ mod tests {
     const SOURCE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     fn snapshot() -> Discovery {
         Discovery {
+            profile: None,
+            catalog: vec![],
             version: 1,
             generation: 1,
             cursor: DiscoveryCursor {
@@ -356,6 +358,7 @@ mod tests {
                 },
             ],
             selected: Some(SpaceDetail {
+                active_users: None,
                 retained: vec![],
                 space: SOURCE.into(),
                 apps: vec![],

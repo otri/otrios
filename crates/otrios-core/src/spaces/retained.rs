@@ -12,6 +12,7 @@ pub(super) fn mutate(
         Change::DeleteSpace { space, .. }
         | Change::RestoreSpace { space }
         | Change::RestoreDataset { space, .. }
+        | Change::LabelDataset { space, .. }
         | Change::DeleteDataset { space, .. } => space,
         _ => return Ok(false),
     };
@@ -23,6 +24,31 @@ pub(super) fn mutate(
     admin(&registry.spaces[index], actor)?;
     let generation = registry.generation;
     match change {
+        Change::LabelDataset {
+            app,
+            collection,
+            name,
+            ..
+        } => {
+            if !valid_name(name) {
+                return Err(Error::Invalid);
+            }
+            let space = &mut registry.spaces[index];
+            if let Some(data) = space.apps.iter_mut().find(|a| {
+                a.policy.app == *app
+                    && a.collection == *collection
+                    && (!a.attached || space.archived)
+            }) {
+                data.label = name.trim().into();
+            } else {
+                registry
+                    .retained
+                    .iter_mut()
+                    .find(|d| d.space == *id && d.policy.app == *app && d.collection == *collection)
+                    .ok_or(Error::Conflict)?
+                    .label = name.trim().into();
+            }
+        }
         Change::DeleteSpace { remove_data, .. } => {
             let space = &mut registry.spaces[index];
             if space.archived && !remove_data {

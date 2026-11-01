@@ -323,7 +323,7 @@ fn initial_ledger_framing_upgrades_without_changing_root_or_membership() {
     let recovered = Store::open(fixture.path()).unwrap();
     assert_eq!(recovered.root_id(), root);
     assert_eq!(recovered.registry().unwrap(), &registry);
-    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP7");
+    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP8");
     assert_eq!(
         fs::read(recovered.path()).unwrap(),
         fs::read(latest).unwrap()
@@ -548,6 +548,264 @@ fn process_exits_never_admit_partial_retained_restore_or_lose_current_data() {
                 .unwrap(),
                 b"sealed confirmed checkpoint"
             );
+        }
+        assert!(!suffix(store.path(), ".restore").exists());
+    }
+}
+
+fn move_prepared(
+    mode: MoveMode,
+    occupied: bool,
+) -> (Fixture, Store, Binding, String, AppPolicy, Request) {
+    let f = Fixture::new();
+    let (mut store, binding) = f.seeded();
+    super::super::tests::data(&f, &binding);
+    let policy = store.registry().unwrap().spaces[0].apps[0].policy.clone();
+    store
+        .commit(
+            "alice",
+            &Request {
+                version: VERSION,
+                expected_generation: store.registry().unwrap().generation,
+                change: Change::Create {
+                    name: "Destination".into(),
+                },
+            },
+            None,
+        )
+        .unwrap();
+    let destination = store.registry().unwrap().spaces[1].id.clone();
+    if occupied {
+        store
+            .commit(
+                "alice",
+                &Request {
+                    version: VERSION,
+                    expected_generation: store.registry().unwrap().generation,
+                    change: Change::Attach {
+                        space: destination.clone(),
+                        app: policy.app.clone(),
+                    },
+                },
+                Some(&policy),
+            )
+            .unwrap();
+        let cid = &store.registry().unwrap().spaces[1].apps[0].collection;
+        write(
+            &f.storage().join(format!("collection-{cid}.merkle")),
+            b"outgoing confirmed checkpoint",
+        )
+        .unwrap();
+    }
+    let r = store.registry().unwrap();
+    let req = Request {
+        version: VERSION,
+        expected_generation: r.generation,
+        change: Change::Move {
+            operation: "d".repeat(32),
+            source: binding.space.clone(),
+            destination: destination.clone(),
+            app: policy.app.clone(),
+            collection: binding.collection.clone(),
+            destination_collection: r.spaces[1].apps.first().map(|a| a.collection.clone()),
+            mode,
+        },
+    };
+    (f, store, binding, destination, policy, req)
+}
+#[test]
+fn moves_publish_owned_bytes_and_outcomes_once_and_source_cleanup_cannot_remove_the_destination() {
+    for mode in [MoveMode::AppAndData, MoveMode::AppOnly, MoveMode::DataOnly] {
+        for occupied in [false, true] {
+            let (f, mut store, binding, destination, p, request) = move_prepared(mode, occupied);
+            let outgoing = store.registry().unwrap().spaces[1]
+                .apps
+                .first()
+                .map(|a| a.collection.clone());
+            store.commit("alice", &request, Some(&p)).unwrap();
+            let generation = store.registry().unwrap().generation;
+            let target = store.registry().unwrap().spaces[1].apps[0]
+                .collection
+                .clone();
+            assert_eq!(
+                store
+                    .move_committed("alice", &binding.space, &destination, &"d".repeat(32))
+                    .unwrap(),
+                Some(generation)
+            );
+            assert!(
+                store
+                    .move_committed("bob", &binding.space, &destination, &"d".repeat(32))
+                    .is_err()
+            );
+            assert!(
+                store
+                    .move_committed("alice", &binding.space, &binding.space, &"d".repeat(32))
+                    .is_err()
+            );
+            store.commit("alice", &request, None).unwrap();
+            assert_eq!(store.registry().unwrap().generation, generation);
+            if mode != MoveMode::AppOnly {
+                assert_eq!(
+                    fs::read(f.storage().join(format!("collection-{target}.merkle"))).unwrap(),
+                    b"confirmed document"
+                );
+                store.reclaim_deleted(&binding.collection, true).unwrap();
+                assert!(!primary(&f, &binding).exists());
+                assert_eq!(
+                    fs::read(
+                        f.storage()
+                            .join(format!("collection-{target}.data/asset-digest.bin"))
+                    )
+                    .unwrap(),
+                    b"private asset bytes"
+                );
+            } else {
+                assert_eq!(
+                    fs::read(primary(&f, &binding)).unwrap(),
+                    b"confirmed document"
+                );
+            }
+            if let Some(old) = outgoing {
+                assert_eq!(
+                    fs::read(f.storage().join(format!("collection-{old}.merkle"))).unwrap(),
+                    b"outgoing confirmed checkpoint"
+                );
+            }
+            let mut changed = request.clone();
+            if let Change::Move { mode, .. } = &mut changed.change {
+                *mode = if *mode == MoveMode::AppOnly {
+                    MoveMode::DataOnly
+                } else {
+                    MoveMode::AppOnly
+                };
+            }
+            assert!(matches!(
+                store.commit("alice", &changed, Some(&p)),
+                Err(Error::Conflict)
+            ));
+            drop(store);
+            let mut store = Store::open(f.path()).unwrap();
+            store.recover_storage().unwrap();
+            assert_eq!(
+                store
+                    .move_committed("alice", &binding.space, &destination, &"d".repeat(32))
+                    .unwrap(),
+                Some(generation)
+            );
+            assert_eq!(
+                store.registry().unwrap().spaces[1].apps[0].collection,
+                target
+            );
+        }
+    }
+}
+const MOVE_STEPS: [RestoreStep; 7] = [
+    RestoreStep::Staged,
+    RestoreStep::Fenced,
+    RestoreStep::FilePromoted,
+    RestoreStep::DecisionPublished,
+    RestoreStep::ReceiptPublished,
+    RestoreStep::StageRemoved,
+    RestoreStep::Unfenced,
+];
+#[test]
+fn move_child() {
+    let Ok(path) = std::env::var("OTRIOS_MOVE_TEST_PATH") else {
+        return;
+    };
+    let mut store = Store::open(path.into()).unwrap();
+    let r = store.registry().unwrap();
+    let source = &r.spaces[0];
+    let destination = &r.spaces[1];
+    let a = &source.apps[0];
+    let request = Request {
+        version: VERSION,
+        expected_generation: r.generation,
+        change: Change::Move {
+            operation: "d".repeat(32),
+            source: source.id.clone(),
+            destination: destination.id.clone(),
+            app: a.policy.app.clone(),
+            collection: a.collection.clone(),
+            destination_collection: destination.apps.first().map(|a| a.collection.clone()),
+            mode: MoveMode::AppAndData,
+        },
+    };
+    let registry = apply(r, "alice", &request, Some(&a.policy)).unwrap();
+    let next = Record {
+        registry,
+        ..store.current.clone()
+    };
+    let index: usize = std::env::var("OTRIOS_MOVE_TEST_BOUNDARY")
+        .unwrap()
+        .parse()
+        .unwrap();
+    store
+        .stage_move_at(next, "alice", &request, |step| {
+            if step == MOVE_STEPS[index] {
+                std::process::exit(78)
+            }
+        })
+        .unwrap();
+    panic!("move boundary not reached");
+}
+#[test]
+fn process_exits_recover_one_move_decision_and_its_durable_operation_outcome_before_admission() {
+    for index in 0..MOVE_STEPS.len() {
+        let (f, store, binding, destination, p, request) =
+            move_prepared(MoveMode::AppAndData, true);
+        let generation = store.registry().unwrap().generation;
+        drop(store);
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "spaces::store::backups::restore::tests::move_child",
+                "--nocapture",
+            ])
+            .env("OTRIOS_MOVE_TEST_PATH", f.path())
+            .env("OTRIOS_MOVE_TEST_BOUNDARY", index.to_string())
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(78),
+            "{}",
+            String::from_utf8_lossy(&child.stdout)
+        );
+        let mut store = Store::open(f.path()).unwrap();
+        if (1..6).contains(&index) {
+            assert!(store.registry().is_err());
+        }
+        store.recover_storage().unwrap();
+        assert_eq!(
+            store.registry().unwrap().generation,
+            generation + u64::from(index > 0)
+        );
+        let outcome = store
+            .move_committed("alice", &binding.space, &destination, &"d".repeat(32))
+            .unwrap();
+        if index == 0 {
+            assert_eq!(outcome, None);
+            assert_eq!(
+                store.registry().unwrap().spaces[0].apps[0].collection,
+                binding.collection
+            );
+        } else {
+            assert_eq!(outcome, Some(generation + 1));
+            let target = store.registry().unwrap().spaces[1].apps[0]
+                .collection
+                .clone();
+            assert_eq!(
+                fs::read(
+                    f.storage()
+                        .join(format!("collection-{target}.data/asset-digest.bin"))
+                )
+                .unwrap(),
+                b"private asset bytes"
+            );
+            store.commit("alice", &request, Some(&p)).unwrap();
+            assert_eq!(store.registry().unwrap().generation, generation + 1);
         }
         assert!(!suffix(store.path(), ".restore").exists());
     }

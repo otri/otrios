@@ -23,6 +23,17 @@ impl Client {
                     .title
                     .clone(),
                 DragKind::Resize(_) => "Resize Space".into(),
+                DragKind::Dataset(space, _, cid) => format!(
+                    "{} (data)",
+                    snapshot
+                        .spaces
+                        .iter()
+                        .find(|s| s.id == *space)?
+                        .retained
+                        .iter()
+                        .find(|d| d.collection == *cid)?
+                        .title
+                ),
                 DragKind::Pan => return None,
             };
             Some(Preview {
@@ -41,7 +52,12 @@ impl Client {
         };
         let dt = now.saturating_sub(drag.last_tick).min(50) as f32 / 1000.;
         drag.last_tick = now;
-        if !drag.moving || !matches!(drag.kind, DragKind::Space(_) | DragKind::App(..)) {
+        if !drag.moving
+            || !matches!(
+                drag.kind,
+                DragKind::Space(_) | DragKind::App(..) | DragKind::Dataset(..)
+            )
+        {
             return Ok(false);
         }
         let Some(mount) = &mut self.active else {
@@ -120,6 +136,14 @@ impl Client {
         let Some(mount) = &mut self.active else {
             return Ok(false);
         };
+        if let Some(scroll) = &mut mount.panel_scroll {
+            let before = scroll.info().offset;
+            scroll.set_offset([0., before[1] + delta]);
+            self.host.panel_scroll = scroll.info().offset[1];
+            let changed = before != scroll.info().offset;
+            mount.invalidate_presentation();
+            return Ok(changed);
+        }
         let Some(scroll) = &mut mount.map_scroll else {
             return Ok(false);
         };
@@ -158,14 +182,17 @@ impl Client {
         self.host.editing
             && match self.map_action_for(id) {
                 Some(
-                    HostAction::MapSpace(s) | HostAction::MapApp(s, _) | HostAction::Resize(s),
+                    HostAction::MapSpace(s)
+                    | HostAction::MapApp(s, _)
+                    | HostAction::MapDataset(s, _, _)
+                    | HostAction::Resize(s),
                 ) => self.map_admin(s),
                 _ => false,
             }
     }
     fn send_map_change(&mut self, change: Change) -> Result<bool> {
         self.host.message = if self.spaces.request(change).is_ok() {
-            "Saving…"
+            ""
         } else {
             "Wait for the current change, then try again."
         }
@@ -180,6 +207,13 @@ impl Client {
         let Some(action) = self.map_action_for(id).cloned() else {
             return Ok(false);
         };
+        if dx == 0 && dy == 0 {
+            return match action {
+                HostAction::MapApp(s, a) => self.begin_host_move(s, a, None, None),
+                HostAction::MapDataset(s, a, cid) => self.begin_host_move(s, a, Some(cid), None),
+                _ => Ok(false),
+            };
+        }
         let direction = if dx != 0 { dx.signum() } else { -dy.signum() };
         let snapshot = self.spaces.snapshot().ok_or("Spaces unavailable")?;
         let change = match action {
@@ -187,7 +221,9 @@ impl Client {
                 let visible = snapshot
                     .spaces
                     .iter()
-                    .filter(|s| s.attached_count > 0 || s.role == Some(Role::Admin))
+                    .filter(|s| {
+                        !s.archived && (s.attached_count > 0 || s.role == Some(Role::Admin))
+                    })
                     .map(|s| s.id.clone())
                     .collect::<Vec<_>>();
                 let index = visible
@@ -263,7 +299,7 @@ impl Client {
         at: u64,
     ) -> Result<Option<bool>> {
         if !matches!(self.host.pane, Pane::Home | Pane::Spaces) {
-            return Ok(None);
+            return self.host_panel_pointer(epoch, event, at);
         }
         let viewport = self
             .viewport
@@ -287,6 +323,11 @@ impl Client {
                 }
                 Some(HostAction::MapApp(s, a)) if self.host.editing && self.map_admin(s) => {
                     DragKind::App(s.clone(), a.clone())
+                }
+                Some(HostAction::MapDataset(s, a, cid))
+                    if self.host.editing && self.map_admin(s) =>
+                {
+                    DragKind::Dataset(s.clone(), a.clone(), cid.clone())
                 }
                 Some(HostAction::Resize(s)) if self.host.editing && self.map_admin(s) => {
                     DragKind::Resize(s.clone())
@@ -386,6 +427,7 @@ impl Client {
                         HostAction::MapSpace(s)
                         | HostAction::SpaceBody(s)
                         | HostAction::MapApp(s, _)
+                        | HostAction::MapDataset(s, _, _)
                         | HostAction::Settings(s, _),
                     ) if s != space => Some(s),
                     _ => return Ok(Some(true)),
@@ -411,6 +453,18 @@ impl Client {
                 Change::PlaceSpace { space, before }
             }
             DragKind::App(space, app) => {
+                if let Some(destination) = target
+                    .as_ref()
+                    .and_then(target_space)
+                    .filter(|s| *s != space)
+                {
+                    if self.map_admin(destination) {
+                        return self
+                            .begin_host_move(space, app, None, Some(destination.into()))
+                            .map(Some);
+                    }
+                    return Ok(Some(true));
+                }
                 let before = match target {
                     Some(HostAction::MapApp(s, a)) if s == space && a == app => {
                         return Ok(Some(true));
@@ -442,16 +496,27 @@ impl Client {
                     Some(
                         HostAction::MapSpace(s)
                         | HostAction::SpaceBody(s)
+                        | HostAction::MapDataset(s, _, _)
                         | HostAction::Settings(s, _),
                     ) if s == space => None,
                     _ => {
-                        self.host.message =
-                            "Moving apps between Spaces is not available yet.".into();
-                        self.build_host(true)?;
                         return Ok(Some(true));
                     }
                 };
                 Change::PlaceApp { space, app, before }
+            }
+            DragKind::Dataset(space, app, cid) => {
+                if let Some(destination) = target
+                    .as_ref()
+                    .and_then(target_space)
+                    .filter(|s| *s != space)
+                    && self.map_admin(destination)
+                {
+                    return self
+                        .begin_host_move(space, app, Some(cid), Some(destination.into()))
+                        .map(Some);
+                }
+                return Ok(Some(true));
             }
             DragKind::Resize(space) => {
                 let summary = self
@@ -472,6 +537,17 @@ impl Client {
             }
         };
         self.send_map_change(change).map(Some)
+    }
+}
+
+fn target_space(action: &HostAction) -> Option<&str> {
+    match action {
+        HostAction::MapSpace(s)
+        | HostAction::SpaceBody(s)
+        | HostAction::MapApp(s, _)
+        | HostAction::MapDataset(s, _, _)
+        | HostAction::Settings(s, _) => Some(s),
+        _ => None,
     }
 }
 

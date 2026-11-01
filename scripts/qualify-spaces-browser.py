@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Qualify Space admission in Chromium with disposable state and test credentials.
+"""Preview/qualify Spaces with disposable state and test credentials.
 
 Requires dashboard-server, bundle_counter/space_ink_probe examples and web pkg.
 The signed fixture contains real browser/app bytes; it has no native artifact and
@@ -37,6 +37,47 @@ def port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         return listener.getsockname()[1]
+
+
+def refresh(args):
+    """Re-sign current Web bytes without restarting the disposable authority."""
+    fixture_path = args.output.resolve() / 'fixture.json'
+    fixture = json.loads(fixture_path.read_text())
+    root = pathlib.Path(fixture['root']).resolve()
+    if not root.name.startswith('otrios-spaces-browser-') or not (root / 'fixture-private.pem').is_file():
+        raise ValueError('Only a running disposable fixture can be refreshed')
+    current = root / 'releases' / fixture['release']
+    staged = root / 'releases' / 'refreshing'
+    if staged.exists():
+        shutil.rmtree(staged)
+    shutil.copytree(current, staged)
+    manifest = json.loads((current / 'manifest.json').read_bytes())
+    for name in manifest['assets']:
+        if not name.startswith('web/') or name == 'web/index.html':
+            continue
+        relative = name.removeprefix('web/')
+        source = args.wasm_pkg / relative.removeprefix('pkg/') if relative.startswith('pkg/') else REPO / 'web/canvas' / relative
+        if not source.is_file():
+            source = REPO / 'web/shared' / relative
+        if source.is_file():
+            data = source.read_bytes()
+            (staged / name).write_bytes(data)
+            manifest['assets'][name] = {'bytes': len(data), 'sha256': digest(data)}
+    raw = json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()
+    (staged / 'manifest.json').write_bytes(raw)
+    subprocess.run(['openssl', 'pkeyutl', '-sign', '-rawin', '-inkey', str(root / 'fixture-private.pem'), '-in', str(staged / 'manifest.json'), '-out', str(staged / 'manifest.sig')], check=True, capture_output=True)
+    release = digest(raw)
+    if (root / 'releases' / release).exists():
+        shutil.rmtree(staged)
+    else:
+        staged.rename(root / 'releases' / release)
+    pointer = {'id': release, 'web_entry': f'/releases/{release}/web/index.html', 'sync_protocol': manifest['sync_protocol']}
+    temporary = root / 'releases/current.tmp'
+    temporary.write_text(json.dumps(pointer))
+    temporary.replace(root / 'releases/current.json')
+    fixture.update(release=release, wasm_sha256=digest((args.wasm_pkg / 'otrios_dashboard_bg.wasm').read_bytes()))
+    fixture_path.write_text(json.dumps(fixture, indent=2) + '\n')
+    print(json.dumps({'refreshed': True, 'url': fixture['url'], 'release': release}))
 
 
 def qualify(args):
@@ -115,6 +156,9 @@ def qualify(args):
         public, internal = port(), port()
         while internal == public:
             internal = port()
+        authority_public = port() if args.serve else public
+        while authority_public == internal or (args.serve and authority_public == public):
+            authority_public = port()
         url = f'http://127.0.0.1:{public}'
         attachment = root / 'selected-attachment.bin'
         attachment.write_bytes((bytes(range(256)) * 782)[:200000])
@@ -125,7 +169,11 @@ def qualify(args):
                    'wasm_sha256': digest((args.wasm_pkg / 'otrios_dashboard_bg.wasm').read_bytes())}
         (root / 'fixture.json').write_text(json.dumps(fixture))
         with (output / 'authority.log').open('wb') as log:
-            server = subprocess.Popen(command + ['--bind', f'127.0.0.1:{internal}', '--public-bind', f'127.0.0.1:{public}',
+            preview = None
+            if args.serve:
+                from spaces_preview import start
+                preview = start(public, authority_public)
+            server = subprocess.Popen(command + ['--bind', f'127.0.0.1:{internal}', '--public-bind', f'127.0.0.1:{authority_public}',
                                      '--auth-file', str(root / 'auth.json'), '--origin', url, '--web-dir', str(root / 'web'),
                                      '--releases', str(root / 'releases'), '--bundle-key', str(root / 'fixture-public.pem')], stdout=log, stderr=log)
             try:
@@ -143,11 +191,19 @@ def qualify(args):
                     if server.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Disposable authority failed to become ready; see authority.log')
                     time.sleep(.05)
-                subprocess.run(['node', str(args.driver), str(root / 'fixture.json')], check=True)
+                if args.serve:
+                    (output / 'fixture.json').write_text(json.dumps(fixture, indent=2) + '\n')
+                    print(json.dumps({'serving': True, 'url': url, 'fixture': str(output / 'fixture.json'), 'browser': 'Safari', 'data': 'synthetic disposable fixture'}), flush=True)
+                    server.wait()
+                else:
+                    subprocess.run(['node', str(args.driver), str(root / 'fixture.json')], check=True)
             finally:
                 if server.poll() is None:
                     server.terminate()
                 server.wait(timeout=10)
+                if preview:
+                    preview.shutdown()
+                    preview.server_close()
 
 
 if __name__ == '__main__':
@@ -156,5 +212,8 @@ if __name__ == '__main__':
     parser.add_argument('--wasm-pkg', type=pathlib.Path, default=REPO / 'target/spaces-web/pkg')
     parser.add_argument('--output', type=pathlib.Path, default=REPO / 'target/spaces-browser')
     parser.add_argument('--populated', action='store_true')
-    parser.add_argument('--driver', type=pathlib.Path, default=REPO / 'scripts/test-spaces-browser.mjs')
-    qualify(parser.parse_args())
+    parser.add_argument('--serve', action='store_true', help='Serve the disposable fixture for Safari acceptance until interrupted')
+    parser.add_argument('--refresh', action='store_true', help='Re-sign updated Web bytes in the existing disposable preview, retaining fixture data and login')
+    parser.add_argument('--driver', type=pathlib.Path, default=REPO / 'scripts/test-spaces-map-browser.mjs')
+    arguments = parser.parse_args()
+    refresh(arguments) if arguments.refresh else qualify(arguments)

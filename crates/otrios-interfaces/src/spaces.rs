@@ -42,6 +42,19 @@ pub struct Member {
     #[serde(default)]
     pub joined_generation: u64,
 }
+/// One explicitly edited row in the bounded, single-Space access form.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MembershipEdit {
+    pub identity: String,
+    pub role: Option<Role>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserProfile {
+    pub name: String,
+    pub revision: u64,
+}
 
 /// Admitted installed-app policy, supplied by the host after bundle verification.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +100,7 @@ pub enum Background {
     Sky,
     Lilac,
     Rose,
+    Rgb([u8; 3]),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,11 +206,29 @@ pub enum Operation {
     Moderate,
 }
 
+/// A cross-Space move never creates a second active instance of one bundle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MoveMode {
+    AppAndData,
+    AppOnly,
+    DataOnly,
+}
+
 /// Mutations are serialized by one authority and require an expected generation.
 /// Identity is supplied by authentication, never by this request body.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Change {
+    Profile {
+        name: String,
+        expected_revision: u64,
+    },
+    Access {
+        space: String,
+        audience: Audience,
+        changes: Vec<MembershipEdit>,
+    },
     Create {
         name: String,
     },
@@ -208,6 +240,15 @@ pub enum Change {
     PlaceSpace {
         space: String,
         before: Option<String>,
+    },
+    Move {
+        operation: String,
+        source: String,
+        destination: String,
+        app: String,
+        collection: String,
+        destination_collection: Option<String>,
+        mode: MoveMode,
     },
     DeleteSpace {
         space: String,
@@ -229,6 +270,12 @@ pub enum Change {
     LabelApp {
         space: String,
         app: String,
+        name: String,
+    },
+    LabelDataset {
+        space: String,
+        app: String,
+        collection: String,
         name: String,
     },
     PlaceApp {
@@ -282,6 +329,13 @@ pub struct DiscoveryCursor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
+    MoveStatus {
+        version: u32,
+        id: u32,
+        operation: String,
+        source: String,
+        destination: String,
+    },
     Watch {
         version: u32,
         observation: u32,
@@ -299,6 +353,8 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstalledApp {
+    pub code_bytes: Option<u64>,
+    pub revision: Option<u64>,
     pub policy: AppPolicy,
     pub title: String,
     pub ui_ref: String,
@@ -354,6 +410,7 @@ pub enum AppAvailability {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSummary {
+    pub active_users: Option<u16>,
     pub app: String,
     pub title: String,
     pub collection: String,
@@ -380,6 +437,7 @@ pub struct CleanupSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpaceDetail {
+    pub active_users: Option<u16>,
     pub retained: Vec<DatasetSummary>,
     pub space: String,
     pub cleanup: Option<Box<CleanupSummary>>,
@@ -391,6 +449,9 @@ pub struct SpaceDetail {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Discovery {
+    pub profile: Option<UserProfile>,
+    /// Verified installed catalog identity, independent of presence revisions.
+    pub catalog: Vec<u8>,
     pub version: u32,
     pub cursor: DiscoveryCursor,
     pub generation: u64,
@@ -415,12 +476,19 @@ pub enum ManagementStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Event {
+    MoveStatus {
+        version: u32,
+        id: u32,
+        operation: String,
+        status: ManagementStatus,
+        generation: Option<u64>,
+    },
     ResyncRequired {
         version: u32,
     },
     Snapshot {
         observation: u32,
-        snapshot: Discovery,
+        snapshot: Box<Discovery>,
         resync: bool,
     },
     Result {

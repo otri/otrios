@@ -21,7 +21,8 @@ function pumpChat(){
   if(transportReady&&!chatSending){const bytes=app?.chat_outgoing();if(bytes){chatSending=true;postMessage({type:'chat-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}
 }
 function pumpCollection(){if(transportReady&&!collectionSending){const bytes=app?.collection_outgoing();if(bytes){collectionSending=true;postMessage({type:'collection-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
-function error(e){postMessage({type:'error',message:String(e)});}
+let firstError=null;
+function error(e){if(firstError)return;firstError=String(e);console.error(e);postMessage({type:'error',message:firstError});}
 function tick(now,wall){const changed=app.tick(now,wall);if(app.rejected_mount_pending())postMessage({type:'warning',message:'The app update was rejected. The current app is still available.'});return changed;}
 // Input and network work continue while the renderer holds its single credit.
 // Coalesce dirty requests before crossing Wasm or assembling transferable arrays.

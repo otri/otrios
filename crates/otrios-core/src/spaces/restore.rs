@@ -13,6 +13,8 @@ struct RestorePlan {
     remove: Vec<String>,
     #[serde(default)]
     decision: Option<Record>,
+    #[serde(default)]
+    receipt: Option<MoveReceipt>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RestoreStep {
@@ -22,6 +24,7 @@ enum RestoreStep {
     FileRemoved,
     StageRemoved,
     DecisionPublished,
+    ReceiptPublished,
     Unfenced,
 }
 fn parents(root: &Path, relative: &str, create: bool) -> Result<PathBuf> {
@@ -88,7 +91,7 @@ impl Store {
         space: &str,
         app: &str,
         source: &str,
-        mut step: impl FnMut(RestoreStep),
+        step: impl FnMut(RestoreStep),
     ) -> Result<()> {
         self.registry()?;
         let retained = self
@@ -108,27 +111,100 @@ impl Store {
         if target.collection == source || target.policy.schema != retained.policy.schema {
             return Err(Error::Invalid);
         }
-        let target_id = target.collection.clone();
-        let schema = target.policy.schema.clone();
+        let copying = Some((
+            source.to_owned(),
+            target.collection.clone(),
+            target.policy.schema.clone(),
+        ));
+        self.stage_scoped(next, copying, None, step)
+    }
+    pub(in crate::spaces::store) fn stage_move(
+        &mut self,
+        next: Record,
+        actor: &str,
+        request: &Request,
+    ) -> Result<()> {
+        self.stage_move_at(next, actor, request, |_| {})
+    }
+    fn stage_move_at(
+        &mut self,
+        next: Record,
+        actor: &str,
+        request: &Request,
+        step: impl FnMut(RestoreStep),
+    ) -> Result<()> {
+        let Change::Move {
+            operation,
+            source,
+            destination,
+            app,
+            collection,
+            mode,
+            ..
+        } = &request.change
+        else {
+            return Err(Error::Invalid);
+        };
+        self.move_receipt_capacity()?;
+        let copying = if *mode == MoveMode::AppOnly {
+            None
+        } else {
+            let target = next
+                .registry
+                .spaces
+                .iter()
+                .find(|s| s.id == *destination)
+                .and_then(|s| s.apps.iter().find(|a| a.policy.app == *app))
+                .ok_or(Error::Invalid)?;
+            Some((
+                collection.clone(),
+                target.collection.clone(),
+                target.policy.schema.clone(),
+            ))
+        };
+        let receipt = MoveReceipt {
+            version: 1,
+            root: self.current.root.clone(),
+            operation: operation.clone(),
+            actor: actor.into(),
+            source: source.clone(),
+            destination: destination.clone(),
+            request_sha256: crate::spaces::store::move_receipts::digest(actor, request)?,
+            generation: next.registry.generation,
+        };
+        self.stage_scoped(next, copying, Some(receipt), step)
+    }
+    fn stage_scoped(
+        &mut self,
+        next: Record,
+        copying: Option<(String, String, String)>,
+        receipt: Option<MoveReceipt>,
+        mut step: impl FnMut(RestoreStep),
+    ) -> Result<()> {
+        self.registry()?;
         let storage = self.checked_storage()?.to_path_buf();
-        let prefix = format!("collection-{target_id}.");
-        for (visited, entry) in fs::read_dir(&storage).map_err(io_error)?.enumerate() {
-            if visited == 65536 {
-                return Err(Error::Capacity);
+        let files = if let Some((source, target_id, schema)) = &copying {
+            let prefix = format!("collection-{target_id}.");
+            for (visited, entry) in fs::read_dir(&storage).map_err(io_error)?.enumerate() {
+                if visited == 65536 {
+                    return Err(Error::Capacity);
+                }
+                if entry
+                    .map_err(io_error)?
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&prefix)
+                {
+                    return Err(Error::Conflict);
+                }
             }
-            if entry
-                .map_err(io_error)?
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&prefix)
-            {
-                return Err(Error::Conflict);
-            }
-        }
-        let files = snapshot_files(
-            &storage,
-            &BTreeMap::from([(source.to_owned(), schema.clone())]),
-        )?;
+            snapshot_files(
+                &storage,
+                &BTreeMap::from([(source.clone(), schema.clone())]),
+            )?
+        } else {
+            vec![]
+        };
         let stage_id = fresh()?;
         let stage = storage.join(format!(".spaces-restore-{stage_id}"));
         new_directory(&stage)?;
@@ -137,6 +213,7 @@ impl Store {
             let mut copied = vec![];
             for relative in files {
                 parents(&storage, &relative, false)?;
+                let (_, target_id, _) = copying.as_ref().ok_or(Error::Invalid)?;
                 let destination = format!("collection-{target_id}{}", &relative[43..]);
                 parents(&stage, &destination, true)?;
                 let mut file = copy_file(
@@ -150,23 +227,29 @@ impl Store {
             sync_tree(&stage)?;
             sync_directory(&storage)?;
             step(RestoreStep::Staged);
+            let version = if receipt.is_some() { 3 } else { 2 };
             let plan = RestorePlan {
-                version: 2,
+                version,
                 root: self.current.root.clone(),
                 stage: stage_id,
-                collections: vec![SavedCollection {
-                    collection: target_id,
-                    schema,
-                }],
+                collections: copying
+                    .into_iter()
+                    .map(|(_, collection, schema)| SavedCollection { collection, schema })
+                    .collect(),
                 files: copied,
                 remove: vec![],
                 decision: Some(next),
+                receipt,
             };
             let bytes = flexbuffers::to_vec(&plan).map_err(io_error)?;
             if bytes.len() > MAX_MANIFEST_BYTES {
                 return Err(Error::Capacity);
             }
-            let mut framed = b"OTSR2".to_vec();
+            let mut framed = if version == 3 {
+                b"OTSR3".to_vec()
+            } else {
+                b"OTSR2".to_vec()
+            };
             framed.extend(crate::canvas::hash(&bytes));
             framed.extend(bytes);
             self.restoring = true;
@@ -285,6 +368,7 @@ impl Store {
                 files,
                 remove,
                 decision: None,
+                receipt: None,
             };
             let bytes = flexbuffers::to_vec(&plan).map_err(io_error)?;
             if bytes.len() > MAX_MANIFEST_BYTES {
@@ -349,7 +433,12 @@ impl Store {
         let marker = suffix(self.path(), ".restore");
         let bytes = read(&marker, MAX_MANIFEST_BYTES + 37, true)?.ok_or(Error::Unavailable)?;
         if bytes.len() < 40
-            || ![b"OTSR1".as_slice(), b"OTSR2".as_slice()].contains(&&bytes[..5])
+            || ![
+                b"OTSR1".as_slice(),
+                b"OTSR2".as_slice(),
+                b"OTSR3".as_slice(),
+            ]
+            .contains(&&bytes[..5])
             || crate::canvas::hash(&bytes[37..]) != bytes[5..37]
         {
             return Err(Error::Invalid);
@@ -358,8 +447,18 @@ impl Store {
             .map_err(|_| Error::Invalid)?;
         let plan: RestorePlan =
             flexbuffers::from_slice(&bytes[37..]).map_err(|_| Error::Invalid)?;
-        if !(plan.version == 1 && plan.decision.is_none() && bytes.starts_with(b"OTSR1")
-            || plan.version == 2 && plan.decision.is_some() && bytes.starts_with(b"OTSR2"))
+        if !(plan.version == 1
+            && plan.decision.is_none()
+            && plan.receipt.is_none()
+            && bytes.starts_with(b"OTSR1")
+            || plan.version == 2
+                && plan.decision.is_some()
+                && plan.receipt.is_none()
+                && bytes.starts_with(b"OTSR2")
+            || plan.version == 3
+                && plan.decision.is_some()
+                && plan.receipt.is_some()
+                && bytes.starts_with(b"OTSR3"))
             || plan.root != self.current.root
             || !valid_id(&plan.stage)
             || plan.collections.len() > MAX_SPACES * MAX_APPS
@@ -382,9 +481,26 @@ impl Store {
                             .checked_add(1)
                             .ok_or(Error::Capacity)?)
                 || !plan.remove.is_empty()
-                || plan.collections.len() != 1
+                || plan.collections.len() > 1
+                || plan.version == 2 && plan.collections.len() != 1
             {
                 return Err(Error::Invalid);
+            }
+            if let Some(receipt) = &plan.receipt {
+                self.validate_move_receipt(receipt, next.registry.generation)?;
+                if receipt.generation != next.registry.generation {
+                    return Err(Error::Invalid);
+                }
+                for id in [&receipt.source, &receipt.destination] {
+                    admin(
+                        next.registry
+                            .spaces
+                            .iter()
+                            .find(|s| s.id == *id)
+                            .ok_or(Error::Invalid)?,
+                        &receipt.actor,
+                    )?;
+                }
             }
             &next.registry
         } else {
@@ -501,6 +617,10 @@ impl Store {
                 result?;
             }
             step(RestoreStep::DecisionPublished);
+        }
+        if let Some(receipt) = plan.receipt {
+            self.publish_move_receipt(&receipt)?;
+            step(RestoreStep::ReceiptPublished);
         }
         if stage_exists {
             super::super::payloads::check_tree(&stage, 0, &mut 65536)?;

@@ -1,11 +1,28 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Management v1 uses a separate bounded channel on the negotiated shared session.
 use super::*;
-const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v3\0";
-const EVENT: &[u8] = b"OTriOS\0spaces-event\0v3\0";
+const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v4\0";
+const EVENT: &[u8] = b"OTriOS\0spaces-event\0v4\0";
 
 fn command_shape(command: &Command) -> Result<()> {
     match command {
+        Command::MoveStatus {
+            version,
+            id,
+            operation,
+            source,
+            destination,
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(operation)
+                || !valid_id(source)
+                || !valid_id(destination)
+                || source == destination
+            {
+                return Err(Error::Invalid);
+            }
+        }
         Command::Watch {
             version,
             observation,
@@ -29,6 +46,12 @@ fn command_shape(command: &Command) -> Result<()> {
                 return Err(Error::Invalid);
             }
             let valid = match &request.change {
+                Change::Profile { name, .. } => valid_name(name),
+                Change::Access { space, changes, .. } => {
+                    valid_id(space)
+                        && changes.len() <= 16
+                        && changes.iter().all(|c| valid_identity(&c.identity))
+                }
                 Change::Create { name } => !name.trim().is_empty() && name.len() <= 128,
                 Change::ConfigureSpace {
                     space,
@@ -37,6 +60,25 @@ fn command_shape(command: &Command) -> Result<()> {
                 } => valid_id(space) && valid_name(name) && valid_layout(*layout),
                 Change::PlaceSpace { space, before } => {
                     valid_id(space) && before.as_ref().is_none_or(|id| valid_id(id) && id != space)
+                }
+                Change::Move {
+                    operation,
+                    source,
+                    destination,
+                    app,
+                    collection,
+                    destination_collection,
+                    ..
+                } => {
+                    valid_id(operation)
+                        && valid_id(source)
+                        && valid_id(destination)
+                        && source != destination
+                        && valid_id(collection)
+                        && destination_collection
+                            .as_ref()
+                            .is_none_or(|id| valid_id(id))
+                        && otrios_interfaces::canvas::valid_destination(app)
                 }
                 Change::DeleteSpace { space, .. } | Change::RestoreSpace { space } => {
                     valid_id(space)
@@ -54,6 +96,17 @@ fn command_shape(command: &Command) -> Result<()> {
                     valid_id(space)
                         && valid_id(collection)
                         && otrios_interfaces::canvas::valid_destination(app)
+                }
+                Change::LabelDataset {
+                    space,
+                    app,
+                    collection,
+                    name,
+                } => {
+                    valid_id(space)
+                        && valid_id(collection)
+                        && otrios_interfaces::canvas::valid_destination(app)
+                        && valid_name(name)
                 }
                 Change::LabelApp { space, app, name } => {
                     valid_id(space)
@@ -94,6 +147,24 @@ fn command_shape(command: &Command) -> Result<()> {
 }
 fn event_shape(event: &Event) -> Result<()> {
     match event {
+        Event::MoveStatus {
+            version,
+            id,
+            operation,
+            status,
+            generation,
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(operation)
+                || (*status == ManagementStatus::Applied) != generation.is_some()
+                || generation == &Some(0)
+            {
+                Err(Error::Invalid)
+            } else {
+                Ok(())
+            }
+        }
         Event::Snapshot {
             observation,
             snapshot,

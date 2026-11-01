@@ -59,7 +59,7 @@ fn expiry(id: &str) -> Result<u64> {
         .checked_add(RETENTION_MS)
         .ok_or(Error::Invalid)
 }
-fn new_directory(path: &Path) -> Result<()> {
+pub(super) fn new_directory(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
@@ -68,7 +68,7 @@ fn new_directory(path: &Path) -> Result<()> {
     }
     builder.create(path).map_err(io_error)
 }
-fn sync_directory(path: &Path) -> Result<()> {
+pub(super) fn sync_directory(path: &Path) -> Result<()> {
     fs::File::open(path)
         .and_then(|d| d.sync_all())
         .map_err(io_error)
