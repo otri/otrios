@@ -79,6 +79,10 @@ def cached(cache,release,key,openssl):
 def cache_size(path):
     if path.is_symlink():raise ValueError('Cache symlink rejected')
     if path.is_file():return path.stat().st_size
+    # Device-local installation metadata may keep its notification socket here.
+    # It carries no retained artifact bytes and must survive cache eviction.
+    if path.is_socket():return 0
+    if not path.is_dir():raise ValueError('Unexpected cache entry type')
     return sum(cache_size(p) for p in path.iterdir())
 
 def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):

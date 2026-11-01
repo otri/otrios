@@ -244,13 +244,15 @@ impl Rig {
         Self::start_mode(binary, true)
     }
     fn start_mode(binary: &str, managed: bool) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "otrios-spaces-process-{}-{}",
+            "otrios-spaces-process-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         fs::create_dir_all(&root).unwrap();
         let catalog = fixture(&root.join("apps"));

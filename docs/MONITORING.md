@@ -1,8 +1,11 @@
 # Prometheus monitoring view
 
-Open **Monitoring** from the [Home Screen](HOME_AND_INPUT.md), or use the browser `#/monitoring` route. Back/Home navigate locally while the collector continues refreshing.
+Select **Operations**, then **Monitoring**, from the [Spaces launcher](SPACES.md).
+Operations membership is required. The unattended Frame has no Operations
+membership; a signed-in authorized browser can view the presentation. Back/Home
+navigate locally while the collector continues refreshing.
 
-This read-only dashboard recreates a subset of Grafana's **SPD & M3D — Overall Service Status** in the shared primitive compositor. The native GLES2 photo frame and authorized Wasm/WebGL browser sessions receive the same complete FlexBuffers presentation. Public demo visitors receive none of that view. The frame does not run Grafana or a browser.
+This read-only dashboard recreates a subset of Grafana's **SPD & M3D — Overall Service Status** in the shared primitive compositor. Native GLES2 and browser WebGL support the same complete FlexBuffers presentation for authorized viewers. The live Frame's unattended identity and public visitors receive none of the Operations view. The frame does not run Grafana or a browser.
 
 ## Panels and query semantics
 
@@ -28,7 +31,10 @@ external adapter boundary and an optional private evidence cache.
 
 `dashboard-monitoring` consumes the window on stdin and authors typed component/instance data directly into FlexBuffers. It reuses Screen, Text and Panel templates and adds Path/Circle templates for plots. It formats units, normalizes plotted values against labelled axes and resolves data into a complete presentation; raw metric values are not a general client-queryable telemetry schema in this PoC. The same existing primitive interpreter expands and validates the result on both hosts. There is no JSON scene representation or JavaScript chart renderer.
 
-The collector posts the complete binary view to trusted `/presentation`. The
+The collector posts the complete binary view to trusted `/presentation` with its
+separate service token. The authority's `--collector-binding` restricts that
+producer to the current Operations Monitoring collection; human Admins cannot
+upload a view. The
 server persists only the latest complete aggregate, validates it before replacing
 the current view and sends it as a replaceable Canvas `View` on an authorized
 Monitoring lease. It uses channel 1 of the same negotiated `/session` connection;
@@ -57,7 +63,8 @@ Private config example (`/etc/otrios-authority/monitoring-config.json`):
   "prometheus_url": "https://monitoring.steampunk.digital/prometheus",
   "prometheus_credentials": "/etc/otrios-authority/prometheus-credentials.json",
   "renderer": "/opt/otrios-authority/dashboard-monitoring",
-  "output": "/var/lib/otrios-authority/monitoring.flex"
+  "output": "/var/lib/otrios-authority/monitoring.flex",
+  "authority_identity": "/etc/otrios-authority/collector.identity"
 }
 ```
 

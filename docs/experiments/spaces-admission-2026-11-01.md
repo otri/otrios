@@ -763,3 +763,12 @@ pinned SSH host key and existing Mac builder/signer access, followed by explicit
 identity/migration provisioning, signed verification and physical acceptance with
 a qualified rollback. The goal remains open for those steps; no progress Issue or
 PR is used to track them.
+
+## Live Frame completion
+
+The later [Frame rollout record](spaces-frame-2026-11-01.md) completes the signed
+live cutover, confirmed-data migration, explicit device/collector identities,
+physical hardware-path acceptance and compatible code rollback. Earlier pending
+Frame statements above describe their individual software checkpoints. The
+rollout also records the private Mac backups and retained migration originals;
+no old registry or state backup was restored over later confirmed data.

@@ -42,6 +42,15 @@ paths through sliders, the dial and the touch pad.
 
 ## Apps and collections
 
+[Spaces](rfcs/0027-spaces-and-app-data.md) now own the live app collections.
+The [2026-11-01 Frame rollout](experiments/spaces-frame-2026-11-01.md) preserved
+12 legacy document roots and all 48 Brass Relay messages. Household is closed,
+Brass Relay permits public reading and signed-in visitor comments, and Operations
+contains private Monitoring. Separate Frame/collector identities, native
+uninstall/reinstall, active membership revocation and compatible signed rollback
+were qualified on the physical device. Input acceptance used synthetic calibrated
+evdev taps, without claiming human touch testing.
+
 A [public module host with private Monitoring](PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 
 The [Canvas app packages](../apps/README.md) are the dashboard runtime on both hosts. Home opens The Brass Relay, Test Playground and private Monitoring. All apps share the brass palette, outlined surfaces and clickable breadcrumb header. Test Playground groups Components, Layouts, Long Document, Text Panning, Text Input, 2D Animations and 3D Animations through independently admitted UI/State references, with portrait and landscape layouts. Each app owns its source dependencies and scoped state; animation clocks, editing focus and ephemeral trails stay in RAM. See [RFC 0004](rfcs/0004-canvas-behavior-and-app-packages.md) for scope and execution limits.

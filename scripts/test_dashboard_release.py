@@ -235,6 +235,25 @@ class ArtifactBudget(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=pathlib.Path(tmp);(root/('a'*64)).symlink_to('/etc')
             with self.assertRaises(ValueError):agent.trim_cache(root,1000)
+    def test_local_apps_socket_survives_budgeted_release_eviction(self):
+        import socket
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp);namespace=root/'local-apps.json';namespace.write_bytes(b'{}')
+            notification=root/'local-apps.json.notify'
+            with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as observer:
+                observer.bind(str(notification));observer.settimeout(1)
+                for index in range(2):
+                    release=root/(str(index)*64);release.mkdir();(release/'payload').write_bytes(b'1234')
+                agent.trim_cache(root,6,pins=('0'*64,))
+                self.assertEqual(agent.cache_size(root),6)
+                self.assertTrue((root/('0'*64)/'payload').exists())
+                self.assertFalse((root/('1'*64)).exists())
+                self.assertEqual(namespace.read_bytes(),b'{}')
+                with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as writer:
+                    writer.sendto(b'!',str(notification))
+                self.assertEqual(observer.recv(1),b'!')
+            os.mkfifo(root/'unexpected-fifo')
+            with self.assertRaisesRegex(ValueError,'Unexpected cache entry type'):agent.trim_cache(root,1000)
     def test_reload_waits_for_server_and_finished_gesture(self):
         good={'stream_ready':True,'state_confirmed':True,'pending_commands':0,'input_busy':False}
         self.assertTrue(agent.hot_reload_ready(good))

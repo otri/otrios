@@ -1307,13 +1307,15 @@ mod tests {
     }
     fn fixture() -> Fixture {
         use otrios_interfaces::{canvas::*, layout::*};
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "otrios-canvas-worker-{}-{}",
+            "otrios-canvas-worker-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let schema = StateSchema {
             id: "worker-motion-v1".into(),

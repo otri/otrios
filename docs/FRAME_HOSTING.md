@@ -95,6 +95,13 @@ unlimited messages. They cannot eliminate TCP head-of-line blocking.
 
 ## Installation layout
 
+The live authority uses [Spaces](SPACES.md). Its unit explicitly selects
+`/var/lib/otrios-authority/spaces.flex` and `collector-binding.json`. Household
+is closed and admits the Frame's separate identity; Brass Relay is public with
+signed-in visitor comments; Operations is closed and contains Monitoring.
+Authentication alone grants no membership. The collector has a service grant
+for the Operations presentation, independently of human viewing permissions.
+
 - `/opt/otrios-authority`: ARM `dashboard-server`, `dashboard-monitoring`, verified
   ARM `cloudflared`, collector and activation helpers.
 - `/etc/otrios-authority`: service-owned mode-0600 Monitoring login hash,
@@ -191,8 +198,8 @@ Qualify that exact candidate before adding the established `--deploy-config` for
 Frame installation. It preserves every public runtime asset and native binary,
 generates Home from installed entries, and uses the expected-baseline activation
 lock. Registry changes use a safe browser/native handoff after confirmed edits and
-idle gestures. Code/state stay on the existing session; control v1 and state v8
-are unchanged. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
+idle gestures. Code/state stay on the existing session. The current managed
+session uses state v16 and retains control v1. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
 outside the host source registry.
 
 `--remove APP_ID` removes registration, retaining authority state. Refused revisions,
@@ -200,6 +207,14 @@ bad signatures, unresolved navigation or state-schema changes leave the pointer
 unchanged. For rollback, restore a complete verified release with matching host
 bytes/helpers and notify activation; never copy an old state backup over confirmed
 data. Keep the private operational rollback snapshot before pruning cached releases.
+
+After the Spaces cutover, code rollback must enforce OTSP5, OTCHAT02 and the
+device-local installed namespace. Retain the current registry, latest-decision
+ledger, stable owner locks and paired app storage. Pre-Spaces binaries and an
+older registry copied over current decisions are not supported rollback paths.
+Use [Spaces migration and payload restore](SPACES.md), and the
+[dated Frame qualification](experiments/spaces-frame-2026-11-01.md), for the
+qualified code fallback and retained private backups.
 
 ### Release verification
 

@@ -3,7 +3,8 @@
 
 The covered `otrios_core::spaces` library implements registry transitions and
 admission. The authority additionally supports an explicit managed mode via
-`--spaces-registry /ABS/PRIVATE/spaces.flex`. The live Frame has not been cut over.
+`--spaces-registry /ABS/PRIVATE/spaces.flex`. The live Frame was migrated on
+2026-11-01; see the [Frame rollout record](experiments/spaces-frame-2026-11-01.md).
 Legacy mode remains for state directories that have never been bound to Spaces;
 it does not implement Space admission. Managed mode requires durable app storage.
 Its private `state.apps/spaces.registry` marker records the registry path. Later
@@ -717,7 +718,8 @@ as a service identity; human Monitoring views remain read-only.
 
 The installed authority unit must explicitly pass
 `--spaces-registry /var/lib/otrios-authority/spaces.flex`, matching the checked-in
-unit. Provision that registry and migrate the declared legacy roots while the
+unit, and `--collector-binding /var/lib/otrios-authority/collector-binding.json`.
+Provision that registry and migrate the declared legacy roots while the
 authority is stopped, before activating the unit. The explicit argument also
 prevents pre-Spaces binaries from silently reopening legacy admission during a
 rollback; use only a rollback binary qualified for the current registry and chat

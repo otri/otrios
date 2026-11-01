@@ -6,13 +6,15 @@ use std::process::{Command, Output};
 pub(super) struct Fixture(pub(super) PathBuf);
 impl Fixture {
     pub(super) fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "otrios-space-ledger-{}-{}",
+            "otrios-space-ledger-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         fs::create_dir(&root).unwrap();
         #[cfg(unix)]
@@ -192,7 +194,9 @@ fn every_publication_boundary_recovers_latest_decision_before_serving_old_primar
         );
         let recovered = Store::open(fixture.path()).unwrap();
         assert_eq!(recovered.root_id(), root);
-        assert_eq!(recovered.storage_path(), Some(fixture.storage().as_path()));
+        // The persisted pairing resolves aliases such as macOS /var -> /private/var.
+        let storage = fs::canonicalize(fixture.storage()).unwrap();
+        assert_eq!(recovered.storage_path(), Some(storage.as_path()));
         if index < 2 {
             assert!(recovered.registry().unwrap().deletions.is_empty());
             assert!(

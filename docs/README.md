@@ -11,7 +11,7 @@
 | Linux object-model research backlog | [PoC plan](POC.md), [architecture](ARCHITECTURE.md) |
 | Design decisions and status | [RFC index](rfcs/README.md) |
 | Standalone app bundles and native Wasm compilation plan | [Bundle RFC](rfcs/0025-standalone-app-bundles.md), [compilation RFC](rfcs/0026-target-wasm-compilation.md) |
-| Spaces, membership and app data lifecycle | [Spaces RFC](rfcs/0027-spaces-and-app-data.md), [management contract and rollout](SPACES.md) |
+| Spaces, membership and app data lifecycle | [Spaces RFC](rfcs/0027-spaces-and-app-data.md), [management contract](SPACES.md), [qualified Frame rollout](experiments/spaces-frame-2026-11-01.md) |
 | Measurements and qualification | [Experiment index](experiments/README.md), [milestone history](HISTORY.md) |
 | Artifact cleanup and documentation retention | [Maintenance](MAINTENANCE.md) |
 

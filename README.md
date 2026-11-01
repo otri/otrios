@@ -75,6 +75,7 @@ its unconfirmed edits in RAM. See [Frame hosting](docs/FRAME_HOSTING.md) for ope
 | Frame: `/var/lib/otrios-authority/releases/current.json` | Pointer to the complete active signed release |
 | Frame: `/var/lib/otrios-authority/releases/<release-id>/authority/bundles/` | Installed `.otapp` trees, including private apps; the release also carries the catalog and host assets |
 | Frame: `/var/lib/otrios-authority/state.apps/` | Durable app checkpoints and journals, separate from bundles |
+| Frame: `/var/lib/otrios-authority/spaces.flex` and its `.latest` / `.owner.lock` sidecars | Space membership, audiences, collection identities and durable safety decisions |
 | Frame: `/var/lib/otrios-authority/state.presentation.flex` | Latest complete Monitoring presentation |
 | Frame: `/var/lib/otrios-dashboard/` | Disposable native release cache and `last-good.json` |
 | Frame: `/run/otrios-direct-console/otrios/` | Ephemeral native readiness reports, update sockets and first-frame capture |
@@ -82,10 +83,12 @@ its unconfirmed edits in RAM. See [Frame hosting](docs/FRAME_HOSTING.md) for ope
 | Mac: `~/Library/Application Support/OTriOSDashboard/` | Private builder config, source inbox, build outputs, signing publisher and signed release staging |
 
 `/Applications` is the proposed installed-bundle namespace. The
-[Spaces RFC draft](docs/rfcs/0027-spaces-and-app-data.md) replaces the earlier
+[Spaces RFC](docs/rfcs/0027-spaces-and-app-data.md) replaces the earlier
 `/PrivateApplications` proposal with Space membership and audience policy.
 `/Applications` is **not a live Linux directory yet**; use the release-store path
-above to find installed bundles today. Spaces are not implemented yet.
+above to find installed bundles today. [Spaces](docs/SPACES.md) now govern the
+live Frame: Household contains the private shared apps, Brass Relay allows public
+reading and signed-in visitor comments, and Operations contains Monitoring.
 
 With a local `frame` SSH alias configured, connect and inspect the services with:
 
