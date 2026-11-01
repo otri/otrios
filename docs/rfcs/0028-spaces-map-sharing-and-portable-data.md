@@ -1,14 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028: Spaces map, app sharing and portable data
 
-Date: 2026-11-01. Status: **Proposed**. Records the agreed interaction design
-and a proposed minimum transfer contract. The browser concept is illustrative;
-it does not implement bundle downloads, installation, export or data replacement.
-Nothing in this RFC changes the deployed Frame or authorizes implementation of
-every milestone at once.
-
-M1 now has an implementation candidate under [qualification](../experiments/spaces-map-frame-2026-11-01.md).
-The later milestones remain proposed; transfer controls report unavailable.
+Date: 2026-11-01. Status: **M1 deployed; M2–M4 proposed**. Records the agreed
+interaction design and a proposed minimum transfer contract. The shared map and
+consolidated settings are deployed in browsers and on Frame; see the
+[M1 qualification](../experiments/spaces-map-frame-2026-11-01.md).
+The browser concept remains illustrative for later milestones. Bundle downloads,
+portable installation, export and data replacement are not implemented; transfer
+controls report unavailable. Approval does not authorize every milestone at once.
 
 Builds on [Spaces and app data](0027-spaces-and-app-data.md),
 [signed app bundles](0025-standalone-app-bundles.md),
@@ -32,7 +31,9 @@ position while editing. Keep it reachable without overlapping content.
 Names, grouping, app icons and spacing establish hierarchy. Put information in
 settings when someone asks for it. Show confirmation, permission, connectivity
 and failure details when they affect the next action, rather than as permanent
-decoration. Browser and native Frame share these semantics.
+decoration. Center each app name beneath its icon, including each line of a
+wrapped name. Use the same artwork and label arrangement in Add App. Browser
+and native Frame share these semantics.
 
 ## Common entrance and navigation
 

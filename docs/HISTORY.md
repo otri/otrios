@@ -5,6 +5,13 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Spaces map M1](rfcs/0028-spaces-map-sharing-and-portable-data.md) provides the
+common browser/native entrance, editable Space layouts and consolidated settings.
+The [Frame acceptance record](experiments/spaces-map-frame-2026-11-01.md) records
+signed deployment, exact metadata migration, confirmed-data preservation, physical
+GLES2/input checks and an OTSP6-compatible code rollback. Retained-data map UX,
+cross-Space dragging and portable app/data transfers remain later milestones.
+
 [Standalone app bundles](rfcs/0025-standalone-app-bundles.md) install independently
 of the host source registry. The [Frame qualification](experiments/app-bundle-frame-2026-10-29.md)
 records signed Counter installation, generated Home discovery, native/browser Wasm

@@ -1,0 +1,12 @@
+{
+  "source": "e2a782a76f11d339c09281714bfd587b7b04d81b",
+  "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+  "complete_signature_and_bundle_closure_verified": true,
+  "all_frozen_runtime_inputs_match_commit": true,
+  "frozen_files_compared": 360,
+  "remote_fetchable": true,
+  "state_protocol": "otrios-canvas-sync-v17",
+  "registry": "OTSP6",
+  "wasm_sha256": "315813d6a4037c4db038d185daa4b14739c9f9017731e2baae7d758362c470c8",
+  "build_log_sha256": "d75eb2faaf57912bb55c6e9dcf17ae31a045e8e47d68410f34503a87c2fa572d"
+}

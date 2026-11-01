@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "from": "OTSP5",
+  "to": "OTSP6",
+  "registry_generation": 22,
+  "space_count": 4,
+  "collection_count": 14,
+  "only_legacy_presentation_defaults_added": true,
+  "ids_epochs_memberships_policies_and_deletion_decisions_preserved": true,
+  "root_storage_and_original_retention_preserved": true,
+  "brass_relay": "public-comment",
+  "aaron_admin_original_three_spaces": true,
+  "frame_memberships_and_existing_owned_space_preserved": true
+}

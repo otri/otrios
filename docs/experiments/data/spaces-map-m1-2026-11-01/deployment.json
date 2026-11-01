@@ -1,0 +1,556 @@
+{
+  "fallback": {
+    "source": "85a784592912a0608b515fba55bd3625a8d9fb6a",
+    "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+    "verified": true,
+    "state_protocol": "otrios-canvas-sync-v17",
+    "registry": "OTSP6"
+  },
+  "fallback-frame": {
+    "fallback_release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+    "verified_on_frame": true,
+    "registry": "OTSP6",
+    "state_protocol": "otrios-canvas-sync-v17",
+    "separate_from_pruned_release_store": true
+  },
+  "final-code-frame": {
+    "passed": true,
+    "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "signature_and_closure_verified": true,
+    "final_code_preserved_separately": true,
+    "files": 136
+  },
+  "rollback-code": {
+    "fallback_release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+    "signature_verified": true,
+    "health": "ok",
+    "latest_safety_metadata_preserved": true,
+    "registry_header": "OTSP6",
+    "data_restored_from_backup": false
+  },
+  "reactivate-code": {
+    "active_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "signature_verified": true,
+    "health": "ok",
+    "latest_safety_metadata_preserved": true,
+    "registry_header": "OTSP6",
+    "data_restored_from_backup": false
+  },
+  "audit-before-rollback": {
+    "passed": true,
+    "phase": "before-rollback",
+    "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "documents": 12,
+    "other_state_files_byte_identical": 38,
+    "confirmed_values_signals_and_payloads_preserved": true,
+    "preexisting_writer_receipts_preserved": 269,
+    "new_unused_writer_registrations": 0,
+    "chat": {
+      "messages": 48,
+      "sha256": "9f18c6fa23acffcc8c15f194316c9d5813ab776cefd6cbead76b1a0dbc3fcf5b"
+    },
+    "counter": 4,
+    "paired_roots_and_owner_preserved": true,
+    "auth_config_and_password_verifier_preserved": true,
+    "touch_calibration_preserved": true,
+    "registry_header": "OTSP6",
+    "code_rollback_kept_latest_safety_metadata": false,
+    "data_restored_from_backup": false
+  },
+  "audit-on-fallback": {
+    "passed": true,
+    "phase": "on-fallback",
+    "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+    "documents": 12,
+    "other_state_files_byte_identical": 38,
+    "confirmed_values_signals_and_payloads_preserved": true,
+    "preexisting_writer_receipts_preserved": 269,
+    "new_unused_writer_registrations": 0,
+    "chat": {
+      "messages": 48,
+      "sha256": "9f18c6fa23acffcc8c15f194316c9d5813ab776cefd6cbead76b1a0dbc3fcf5b"
+    },
+    "counter": 4,
+    "paired_roots_and_owner_preserved": true,
+    "auth_config_and_password_verifier_preserved": true,
+    "touch_calibration_preserved": true,
+    "registry_header": "OTSP6",
+    "code_rollback_kept_latest_safety_metadata": true,
+    "data_restored_from_backup": false
+  },
+  "audit-final": {
+    "passed": true,
+    "phase": "final",
+    "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "documents": 12,
+    "other_state_files_byte_identical": 37,
+    "collector_presentation_updates": 1,
+    "collector_binding_verified_on_frame": true,
+    "confirmed_values_signals_and_payloads_preserved": true,
+    "preexisting_writer_receipts_preserved": 269,
+    "new_unused_writer_registrations": 0,
+    "chat": {
+      "messages": 48
+    },
+    "counter": 4,
+    "paired_roots_and_owner_preserved": true,
+    "auth_config_and_password_verifier_preserved": true,
+    "touch_calibration_preserved": true,
+    "registry_header": "OTSP6",
+    "code_rollback_kept_latest_safety_metadata": true,
+    "data_restored_from_backup": false,
+    "existing_private_post_reactivation_snapshot_checked": true,
+    "production_services_stopped_for_this_check": false,
+    "private_file_metadata_exported": false
+  },
+  "registry-audit": {
+    "passed": true,
+    "registry": "OTSP6",
+    "all_registry_ledger_owner_and_pairing_bytes_preserved": true,
+    "derived_from": "audit-final.json",
+    "no_state_restore": true
+  },
+  "native-first-ready": {
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "native_last_good": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active"
+    }
+  },
+  "native-fallback-ready": {
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+      "runtime_release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "native_last_good": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active"
+    }
+  },
+  "native-reactivated-ready": {
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "native_last_good": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active"
+    }
+  },
+  "native-final-ready": {
+    "passed": true,
+    "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "state_protocol": "otrios-canvas-sync-v17",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 11.561
+  },
+  "native-map": {
+    "passed": true,
+    "input": "synthetic evdev taps through the existing calibrated physical-device reader",
+    "human_visual_or_touch_observation": false,
+    "counter_writes": 0,
+    "paths": [
+      "map to Household app list to Counter",
+      "Counter to map",
+      "Brass Relay single-app Space direct launch",
+      "Brass Relay to map"
+    ],
+    "frames": [
+      {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      },
+      {
+        "ui_ref": "app:bundle-counter/ui",
+        "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      },
+      {
+        "ui_ref": "app:brass-relay/ui",
+        "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      },
+      {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      }
+    ],
+    "touch_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+  },
+  "fallback-files-verified": {
+    "passed": true,
+    "kit_files_verified": 137,
+    "matching_fallback_host_helpers_verified": true
+  },
+  "resumed": {
+    "passed": true,
+    "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "state_protocol": "otrios-canvas-sync-v17",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "runtime_release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 11.561
+  },
+  "mac-promoted": {
+    "passed": true,
+    "source_pin": "e2a782a76f11d339c09281714bfd587b7b04d81b",
+    "active_pointer": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+    "previous_config_and_pointer_preserved_privately": true,
+    "frame_pointer_matches": true
+  },
+  "public_conformance": {
+    "passed": true,
+    "checks": 171,
+    "anonymous_only": true
+  },
+  "live_browser": {
+    "initial": {
+      "passed": true,
+      "label": "initial",
+      "public": {
+        "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "messages": 48,
+        "visible_rows": 48,
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "on-fallback": {
+      "passed": true,
+      "label": "on-fallback",
+      "public": {
+        "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c",
+        "messages": 48,
+        "visible_rows": 48,
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "after-reactivation": {
+      "passed": true,
+      "label": "after-reactivation",
+      "public": {
+        "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b",
+        "messages": 48,
+        "visible_rows": 48,
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "3a8da73e44410d7a3852e64f8cdd2068f33d59a84000bc7946ee1d9fb593298c"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v17",
+          "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "fresh-root": {
+      "passed": true,
+      "fresh_anonymous_root_opens_map": true,
+      "single_app_space_direct_launch": true,
+      "edit_absent": true,
+      "visible_error": "",
+      "runtime_exceptions": [],
+      "release": "df40326c5dd7b2391beae584bb79a10f4c0bb7482b4a61e8b62468388ae0408b"
+    }
+  },
+  "live_probe_limitation": "Restart probe reached a new hello and online chat but queried discovery during recovery; no additional restart was performed. Exact signed fixture socket-drop recovery passed."
+}
