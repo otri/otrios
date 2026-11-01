@@ -58,6 +58,9 @@ try {
  await shot(a,'map');
  await click(a,'Edit');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Space settings: Empty Space'))})`);
  await shot(a,'map-edit');
+ await click(a,'Add app: Empty Space');
+ await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter'))})`);
+ await shot(a,'add-app');await click(a,'Close');
  await click(a,'Space settings: Browser A');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Name'))})`);
  await press(a,'Name');await wait(a,"document.activeElement?.classList.contains('canvas-editor')");
  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:4},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:4},a);

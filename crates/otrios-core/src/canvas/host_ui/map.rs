@@ -97,6 +97,36 @@ fn caption_lines(
     }
     lines
 }
+fn app_tile(
+    app: &str,
+    title: &str,
+    width: f32,
+    available: bool,
+    font: Option<&crate::dashboard::font::Font>,
+) -> Vec<a::Element> {
+    let mut nodes = vec![
+        a::rounded_rect(if available {
+            WHITE
+        } else {
+            [220, 221, 213, 255]
+        })
+        .frame([(width - 72.) / 2., 0., 72., 72.])
+        .corner_radius(20.0.into()),
+        crate::components::app_icon(app).frame([(width - 48.) / 2., 12., 48., 48.]),
+    ];
+    for (line, caption) in caption_lines(title, width - 8., font).iter().enumerate() {
+        let measured = font.map_or(caption.chars().count() as f32 * 13., |f| {
+            f.text_width(caption, 2.)
+        });
+        let x = ((width - measured) / 2.).max(4.);
+        nodes.push(text(
+            caption,
+            [x, 84. + line as f32 * 28., width - x - 4., 28.],
+            2.,
+        ));
+    }
+    nodes
+}
 impl Builder {
     fn profile(&mut self, avatar: &str, width: f32) {
         self.nodes
@@ -256,7 +286,12 @@ pub(super) fn render(
     let selected = snapshot.selected.as_ref();
     let summary = selected.and_then(|d| snapshot.spaces.iter().find(|s| s.id == d.space));
     let admin = summary.is_some_and(|s| s.role == Some(Role::Admin));
-    if !admin && matches!(model.pane, Pane::SpaceSettings | Pane::AppSettings(_)) {
+    if !admin
+        && matches!(
+            model.pane,
+            Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Installed
+        )
+    {
         model.pane = Pane::Home;
     }
     let mut b = Builder {
@@ -393,18 +428,6 @@ pub(super) fn render(
             for (index, app) in space.apps.iter().enumerate() {
                 let tx = 12. + (index % columns) as f32 * tile;
                 let ty = 64. + (index / columns) as f32 * 152.;
-                let mark = app
-                    .title
-                    .chars()
-                    .next()
-                    .unwrap_or('?')
-                    .to_uppercase()
-                    .to_string();
-                let icon = if app.availability == AppAvailability::Available {
-                    WHITE
-                } else {
-                    [220, 221, 213, 255]
-                };
                 let label = if snapshot
                     .spaces
                     .iter()
@@ -418,22 +441,13 @@ pub(super) fn render(
                 } else {
                     app.title.clone()
                 };
-                let mut tile_nodes = vec![
-                    a::rounded_rect(icon)
-                        .frame([(tile - 72.) / 2., 0., 72., 72.])
-                        .corner_radius(20.0.into()),
-                    text(&mark, [(tile - 30.) / 2., 22., 30., 40.], 2.).color(SOFT),
-                ];
-                for (line, caption) in caption_lines(&app.title, tile - 8., font)
-                    .iter()
-                    .enumerate()
-                {
-                    tile_nodes.push(text(
-                        caption,
-                        [4., 84. + line as f32 * 28., tile - 8., 28.],
-                        2.,
-                    ));
-                }
+                let tile_nodes = app_tile(
+                    &app.app,
+                    &app.title,
+                    tile,
+                    app.availability == AppAvailability::Available,
+                    font,
+                );
                 card.nodes.push(
                     a::canvas(tile_nodes)
                         .frame([tx, ty, tile, 144.])
@@ -611,6 +625,76 @@ pub(super) fn render(
     let mut value = draft.to_owned();
     let mut form = false;
     match &model.pane {
+        Pane::Installed => {
+            b.nodes.push(text("Add App", [left, top, width, 40.], 2.));
+            if let Some(selected) = selected {
+                let apps = selected
+                    .installed
+                    .iter()
+                    .filter(|app| {
+                        !selected
+                            .apps
+                            .iter()
+                            .any(|a| a.attached && a.app == app.policy.app)
+                    })
+                    .collect::<Vec<_>>();
+                model.page = model.page.min(apps.len().saturating_sub(1) / PAGE);
+                for (index, app) in apps.iter().skip(model.page * PAGE).take(PAGE).enumerate() {
+                    let compatible = selected
+                        .apps
+                        .iter()
+                        .find(|a| a.app == app.policy.app)
+                        .is_none_or(|a| a.availability == AppAvailability::Available);
+                    let public = summary
+                        .is_some_and(|s| s.audience != otrios_interfaces::spaces::Audience::Closed);
+                    let allowed = compatible && !(public && app.policy.closed_only);
+                    let tile = width / 2.;
+                    let node =
+                        a::canvas(app_tile(&app.policy.app, &app.title, tile, allowed, font))
+                            .frame([
+                                left + (index % 2) as f32 * tile,
+                                top + 64. + (index / 2) as f32 * 152.,
+                                tile,
+                                144.,
+                            ]);
+                    if allowed {
+                        b.nodes.push(
+                            node.semantic_label(&short(&app.title, 94))
+                                .on_press(a::Event::back()),
+                        );
+                        b.actions.push(HostAction::Manage(Change::Attach {
+                            space: selected.space.clone(),
+                            app: app.policy.app.clone(),
+                        }));
+                    } else {
+                        b.nodes.push(node);
+                    }
+                }
+                if apps.is_empty() {
+                    b.nodes.push(text(
+                        "All installed apps are attached.",
+                        [left, top + 72., width, 64.],
+                        2.,
+                    ));
+                }
+                if model.page > 0 {
+                    b.flat(
+                        "Previous",
+                        "‹",
+                        [left, top + 380., 48., 48.],
+                        HostAction::Page(-1),
+                    );
+                }
+                if (model.page + 1) * PAGE < apps.len() {
+                    b.flat(
+                        "Next",
+                        "›",
+                        [left + 56., top + 380., 48., 48.],
+                        HostAction::Page(1),
+                    );
+                }
+            }
+        }
         Pane::Profile => {
             b.nodes.push(text(
                 snapshot.identity.as_deref().unwrap_or("Visitor"),

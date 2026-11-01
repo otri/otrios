@@ -75,6 +75,7 @@ pub enum LaunchIcon {
     Animation2d,
     Animation3d,
     Monitoring,
+    Counter,
 }
 fn launch_icon(kind: LaunchIcon) -> Element {
     let bar = |x, y, w, h| {
@@ -154,8 +155,25 @@ fn launch_icon(kind: LaunchIcon) -> Element {
             bar(19., 20., 10., 28.),
             bar(38., 0., 10., 48.),
         ],
+        LaunchIcon::Counter => vec![bar(6., 22., 36., 4.), bar(22., 6., 4., 36.)],
     };
     component([48., 48.], parts).frame([24., 20., 48., 48.])
+}
+/// Launcher artwork follows the stable bundle identity, including after renaming.
+pub fn app_icon(app: &str) -> Element {
+    launch_icon(match app {
+        "brass-relay" => LaunchIcon::Chat,
+        "component-playground" => LaunchIcon::Components,
+        "layout-lab" => LaunchIcon::Layouts,
+        "layout-document" => LaunchIcon::Document,
+        "layout-text-scroll" => LaunchIcon::Panning,
+        "input-lab" => LaunchIcon::Input,
+        "animation-lab" => LaunchIcon::Animation2d,
+        "three-d-lab" => LaunchIcon::Animation3d,
+        "monitoring" => LaunchIcon::Monitoring,
+        "bundle-counter" | "counter" => LaunchIcon::Counter,
+        _ => LaunchIcon::Playground,
+    })
 }
 pub fn launch_card(
     id: &str,

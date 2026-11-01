@@ -207,7 +207,12 @@ pub(super) fn render(
 ) -> Result<Rendered> {
     if matches!(
         model.pane,
-        Pane::Home | Pane::Spaces | Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile
+        Pane::Home
+            | Pane::Spaces
+            | Pane::SpaceSettings
+            | Pane::AppSettings(_)
+            | Pane::Profile
+            | Pane::Installed
     ) {
         return map::render(snapshot, model, draft, sign_in, sign_out, viewport, font);
     }
