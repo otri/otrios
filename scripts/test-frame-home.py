@@ -13,7 +13,7 @@ import shlex
 import subprocess
 
 REMOTE = r'''
-import fcntl,hashlib,json,os,pathlib,re,struct,time
+import fcntl,hashlib,json,os,pathlib,re,struct,time,urllib.request
 base=pathlib.Path('/run/otrios-direct-console/otrios')
 def ready():
  return json.loads(max(base.glob('ready-*.json'),key=lambda p:p.stat().st_mtime).read_text())
@@ -78,12 +78,49 @@ try:
  wait(lambda q:q['ui_ref']==app_ui and idle(q))
  tap(5,5)
  wait(home)
+ reorder_passed=False
+ if reorder:
+  token=pathlib.Path('/etc/otrios-dashboard.identity').read_text().strip()
+  def metadata():
+   req=urllib.request.Request('http://127.0.0.1:8877/spaces',headers={'Authorization':'Bearer '+token,'Origin':'https://otrios.otri.ca'})
+   return json.load(urllib.request.urlopen(req,timeout=5))
+  before=metadata()
+  source=next(s for s in before['spaces']if s['name']==source_name)
+  destination=next(s for s in before['spaces']if s['name']==destination_name)
+  assert source['role']==destination['role']=='admin','Both Spaces must be administered by Frame'
+  before_edit=ready()['epoch'];tap(1220,756)
+  q=wait(lambda q:home(q)and q['epoch']>before_edit)
+  edit_epoch=q['epoch']
+  skyline=[0.]*6;points={}
+  for space in before['spaces'][:4]:
+   width=min(space['layout']['width'],6);count=sum(a['attached']for a in space['apps'])
+   height=68+max((max(count,1)+width-1)//width,space['layout']['height'])*152+60
+   col,y=min(((c,max(skyline[c:c+width]))for c in range(7-width)),key=lambda v:(v[1],v[0]))
+   for c in range(col,col+width):skyline[c]=y+height+20
+   points[space['id']]=[28+col*(1244/6)+20,y+116]
+  # Use a title's blank padding, not a painted glyph. This also checks hit geometry.
+  start=points[source['id']];end=points[destination['id']]
+  assert 104<=start[1]<660 and 104<=end[1]<660,'Use visible title positions for this native probe'
+  touch(*start,True);time.sleep(.1)
+  for step in range(1,13):
+   touch(*(start[i]+(end[i]-start[i])*step/12 for i in range(2)),True)
+   time.sleep(.06)
+   q=ready();assert q['epoch']==edit_epoch,'Edit preview remounted and cancelled native capture'
+  touch(*end,False)
+  deadline=time.monotonic()+10
+  while time.monotonic()<deadline:
+   current=metadata();order=[s['id']for s in current['spaces']]
+   if current['generation']>before['generation']and order.index(source['id'])<order.index(destination['id']):break
+   time.sleep(.1)
+  else:raise RuntimeError('Native title drag did not place source before destination')
+  tap(1220,756);wait(home);reorder_passed=True
  assert rule.read_bytes()==calibration,'Calibration changed'
  print(json.dumps({'passed':True,'release':expected,'scroll_round_trips':3,
   'stable_map_epoch':True,'immediate_bound_reversal':True,'corner_return':[5,5],
   'app_ui':app_ui,'input':'synthetic evdev through calibrated physical-device reader',
   'human_touch_observation':False,'app_writes':0,'pixels_exported':False,
-  'calibration_unchanged':True,'readiness_wait_ms_max':max(latencies)}))
+  'calibration_unchanged':True,'space_title_reorder':reorder_passed,
+  'space_order_changed':reorder_passed,'readiness_wait_ms_max':max(latencies)}))
 finally:
  touch(20,600,False);os.close(fd)
 '''
@@ -97,11 +134,14 @@ def main():
     parser.add_argument('--app-point', default='700,132')
     parser.add_argument('--app-ui', default='app:brass-relay/ui')
     parser.add_argument('--device', default='/dev/input/by-path/platform-2005a000.i2c-event')
+    parser.add_argument('--reorder-spaces', action='store_true',
+                        help='Also drag Brass Relay before Household, retaining that requested order')
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     pointer = args.pointer or pathlib.Path(config['runtime']) / 'build/staged-release.json'
     values = {'expected': json.loads(pointer.read_text())['id'], 'device': args.device,
-              'app_point': list(map(float, args.app_point.split(','))), 'app_ui': args.app_ui}
+              'app_point': list(map(float, args.app_point.split(','))), 'app_ui': args.app_ui,
+              'reorder': args.reorder_spaces, 'source_name': 'Brass Relay', 'destination_name': 'Household'}
     script = '\n'.join(k + '=' + repr(v) for k, v in values.items()) + '\n' + REMOTE
     result = subprocess.run(config['frame']['ssh'] + ['python3 -c ' + shlex.quote(script)],
                             capture_output=True, text=True, timeout=180)

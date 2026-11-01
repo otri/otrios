@@ -1698,3 +1698,170 @@ fn common_entry_sign_in_survives_viewport_and_metadata_rebuilds() {
     client.retry_mount();
     assert!(!client.auth_required());
 }
+
+#[test]
+fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    for width in [390., 1280.] {
+        let (mut client, _) = fixture(Role::Admin);
+        client.set_viewport([width, 600.]).unwrap();
+        let mut next = snapshot(Role::Admin, 2);
+        next.spaces[0].layout.width = 6;
+        next.spaces[0].layout.height = 6;
+        let mut relay = next.spaces[0].clone();
+        relay.id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into();
+        relay.name = "Brass Relay".into();
+        relay.layout.height = 1;
+        next.spaces.push(relay);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: next,
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        click(&mut client, "Edit");
+        let epoch = client.epoch();
+        assert!(client.scroll_map(epoch, 100000.).unwrap());
+        assert!(!labels(&client).contains(&"Space: Household".into()));
+        let scene = client.scene().unwrap();
+        let title = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.semantics.as_ref().unwrap().label == "Space: Brass Relay")
+            .unwrap();
+        // Touch blank title padding, then emulate native frames between samples.
+        let start = [title.origin[0] + 4., title.origin[1] + 4.];
+        for (phase, point, at) in [(Down, start, 100), (Move, [start[0], 108.], 120)] {
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 7,
+                        phase,
+                        position: point,
+                    },
+                    at,
+                )
+                .unwrap();
+            client.scene().unwrap();
+            assert_eq!(
+                client.epoch(),
+                epoch,
+                "native capture must survive preview frames"
+            );
+        }
+        assert!(client.input_busy());
+        for at in (128..10000).step_by(16) {
+            client.tick(at, 0).unwrap();
+            client.scene().unwrap();
+            assert_eq!(client.epoch(), epoch);
+            if client.resource_usage().map_scroll.unwrap().offset[1] == 0. {
+                break;
+            }
+        }
+        assert_eq!(client.resource_usage().map_scroll.unwrap().offset[1], 0.);
+        assert!(labels(&client).contains(&"Space: Household".into()));
+        // The title is stationary at the edge throughout autoscroll.
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 7,
+                    phase: Up,
+                    position: [start[0], 108.],
+                },
+                10000,
+            )
+            .unwrap();
+        let Command::Manage { request, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("Space reorder")
+        };
+        assert_eq!(
+            request.change,
+            Change::PlaceSpace {
+                space: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                before: Some(SPACE.into())
+            }
+        );
+        assert_eq!(request.expected_generation, 2);
+        assert!(!client.input_busy());
+        assert!(client.outgoing().unwrap().is_none());
+    }
+}
+
+#[test]
+fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 600.]).unwrap();
+    let mut next = snapshot(Role::Admin, 2);
+    next.spaces[0].layout.height = 6;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: next,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    let epoch = client.epoch();
+    let scene = client.scene().unwrap();
+    let title = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Space: Household")
+        .unwrap();
+    let start = [title.origin[0] + 10., title.origin[1] + 10.];
+    for (phase, position, at) in [(Down, start, 100), (Move, [100., 510.], 120)] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 3,
+                    phase,
+                    position,
+                },
+                at,
+            )
+            .unwrap();
+    }
+    for at in (128..512).step_by(16) {
+        client.tick(at, 0).unwrap();
+    }
+    let offset = client.resource_usage().map_scroll.unwrap().offset[1];
+    assert!(offset > 80.);
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 3,
+                phase: Move,
+                position: [100., 300.],
+            },
+            520,
+        )
+        .unwrap();
+    client.tick(600, 0).unwrap();
+    assert_eq!(
+        client.resource_usage().map_scroll.unwrap().offset[1],
+        offset
+    );
+    client.cancel().unwrap();
+    client.tick(1000, 0).unwrap();
+    assert_eq!(client.epoch(), epoch);
+    assert!(!client.input_busy());
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    assert_eq!(
+        client.resource_usage().map_scroll.unwrap().offset[1],
+        offset
+    );
+}

@@ -111,6 +111,10 @@ sample-time momentum physics on Web and Frame, retaining the mount throughout a
 gesture. Web also supports wheel/trackpad and Arrow/Page/Home/End keys. Partly
 visible content and a subtle lower-edge fade indicate more below; the fade
 vanishes at the bottom. Up to four Spaces per page bound the local scene.
+Edit previews also retain the mount so native touch capture survives every
+frame. While dragging a title or app, hold near the map's upper or lower edge
+to scroll toward an offscreen destination; move into the middle to stop.
+Cancel and drops back onto the same item leave metadata unchanged.
 Managed apps return through `< OTriOS • App name`; the breadcrumb uses the host's
 reserved return action and includes the top-left padding in its touch target.
 
@@ -801,6 +805,9 @@ reader. Its explicit `--app-point` defaults to the existing Frame's public Brass
 Relay Space at `(700,132)`; adjust that point when the layout changes. It writes
 no app data and exports neither pixels nor private state. Synthetic device-input
 acceptance does not establish human touch quality or a measured frame rate.
+The optional `--reorder-spaces` probe additionally drags the existing Brass Relay
+before Household, verifies the authoritative order and retains that arrangement.
+It changes presentation metadata only and requires their titles to be visible.
 
 The populated browser probe uses four synthetic Spaces and 14 app previews:
 `python3 scripts/qualify-spaces-browser.py --wasm-pkg BUILT_PKG --populated

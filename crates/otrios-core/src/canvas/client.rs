@@ -50,6 +50,7 @@ struct Mount {
     text_bounds_dirty: bool,
     text_scroll: Option<super::text_scroll::Scroll>,
     map_scroll: Option<super::text_scroll::Scroll>,
+    map_drag: Option<host_map::Preview>,
     text_document: Option<super::document::Viewport>,
     chat: Option<super::chat::Client>,
     font: Option<Arc<crate::dashboard::font::Font>>,
@@ -485,6 +486,9 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
+        // Only metadata/navigation rebuild the host. Local drag feedback must
+        // retain the mount; an external rebuild invalidates the captured drag.
+        self.host.drag = None;
         let awaiting_sign_in = self.host_active && self.auth_required;
         let draft = if preserve && self.host_active {
             self.typed_value(1)
@@ -2994,14 +2998,8 @@ impl Client {
     }
     pub fn cancel(&mut self) -> Result<bool> {
         if self.host_active {
-            let edit_drag = self
-                .host
-                .drag
-                .take()
-                .is_some_and(|d| !matches!(d.kind, super::host_ui::DragKind::Pan));
-            if edit_drag {
-                self.build_host(true)?;
-            }
+            self.host.drag = None;
+            self.preview_map_drag();
             if let Some(m) = &mut self.active {
                 if let Some(s) = &mut m.map_scroll {
                     s.cancel();
@@ -3037,7 +3035,7 @@ impl Client {
     pub fn back(&mut self) -> Result<bool> {
         if self.host_active {
             if self.host.drag.take().is_some() {
-                self.build_host(true)?;
+                self.preview_map_drag();
                 return Ok(true);
             }
             return self.host_action(super::host_ui::HostAction::Pane(super::host_ui::Pane::Home));
@@ -3112,6 +3110,7 @@ impl Client {
             return self.show_spaces();
         }
         self.wire_clock = self.wire_clock.max(now);
+        let map_changed = self.tick_map_drag(now)?;
         let Some(m) = &mut self.active else {
             return Ok(false);
         };
@@ -3181,7 +3180,7 @@ impl Client {
         if paint & 1 != 0 {
             m.invalidate_local_scene();
         }
-        let changed = m.ink.tick(now) || clock || scrolled;
+        let changed = m.ink.tick(now) || clock || scrolled || map_changed;
         let keyboard_feedback = m.keyboard.feedback_key();
         let edit = m.keyboard.tick(now);
         let feedback_changed = keyboard_feedback != m.keyboard.feedback_key();
@@ -3774,6 +3773,7 @@ fn qualify(
         },
         text_scroll,
         map_scroll: None,
+        map_drag: None,
         epoch,
         viewport: [1280., 800.],
         ui,
@@ -3927,6 +3927,9 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     if let Some(scroll) = &m.map_scroll {
         scroll.present(&mut root);
         host_map::present_map(&mut root, scroll.node(), scroll.info());
+    }
+    if let Some(preview) = &m.map_drag {
+        host_map::present_drag(&mut root, preview, m.viewport);
     }
     if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {

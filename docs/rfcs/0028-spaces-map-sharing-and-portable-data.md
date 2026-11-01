@@ -7,7 +7,9 @@ consolidated settings are deployed in browsers and on Frame; see the
 [M1 qualification](../experiments/spaces-map-frame-2026-11-01.md).
 The browser concept remains illustrative for later milestones. Bundle downloads,
 portable installation, export and data replacement are not implemented; transfer
-controls report unavailable. Approval does not authorize every milestone at once.
+controls report unavailable. Aaron authorized completion of M2–M4 in milestone
+order on 2026-11-01; each milestone still requires its own implementation,
+validation and deployment acceptance before advancing to the next.
 
 Builds on [Spaces and app data](0027-spaces-and-app-data.md),
 [signed app bundles](0025-standalone-app-bundles.md),

@@ -27,6 +27,7 @@ pub(in crate::canvas) struct Drag {
     pub start: [f32; 2],
     pub position: [f32; 2],
     pub moving: bool,
+    pub last_tick: u64,
     pub action: Option<HostAction>,
 }
 fn color(value: Background) -> [u8; 4] {
@@ -538,40 +539,6 @@ pub(super) fn render(
                 [margin, h - 108., (available - 100.).max(1.), 32.],
                 1.5,
             ));
-        }
-        if let Some(drag) = model
-            .drag
-            .as_ref()
-            .filter(|d| d.moving && !matches!(d.kind, DragKind::Pan))
-        {
-            let caption = match &drag.kind {
-                DragKind::Space(id) => snapshot
-                    .spaces
-                    .iter()
-                    .find(|s| &s.id == id)
-                    .map_or("Space", |s| s.name.as_str()),
-                DragKind::App(s, id) => snapshot
-                    .spaces
-                    .iter()
-                    .find(|v| &v.id == s)
-                    .and_then(|s| s.apps.iter().find(|a| &a.app == id))
-                    .map_or("App", |a| a.title.as_str()),
-                DragKind::Resize(_) => "Resize Space",
-                DragKind::Pan => "",
-            };
-            let x = (drag.position[0] - 90.).clamp(0., (w - 180.).max(0.));
-            let y = if drag.position[1] + 76. < h - FOOT {
-                drag.position[1] + 20.
-            } else {
-                drag.position[1] - 76.
-            };
-            b.nodes.push(
-                a::canvas(vec![
-                    a::surface(WHITE, 14.).pin_edges(0.),
-                    text(&short(caption, 24), [12., 14., 156., 32.], 2.),
-                ])
-                .frame([x, y, 180., 56.]),
-            );
         }
         return finish(b, "", "OTriOS", false, true);
     }

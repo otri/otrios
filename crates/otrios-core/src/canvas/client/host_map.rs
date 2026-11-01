@@ -3,7 +3,79 @@
 use super::*;
 use crate::canvas::host_ui::{Drag, DragKind, HostAction, Pane};
 use otrios_interfaces::spaces::{Change, Role};
+pub(super) struct Preview {
+    caption: String,
+    position: [f32; 2],
+}
 impl Client {
+    pub(super) fn preview_map_drag(&mut self) {
+        let preview = self.host.drag.as_ref().filter(|d| d.moving).and_then(|d| {
+            let snapshot = self.spaces.snapshot()?;
+            let caption = match &d.kind {
+                DragKind::Space(id) => snapshot.spaces.iter().find(|s| &s.id == id)?.name.clone(),
+                DragKind::App(space, id) => snapshot
+                    .spaces
+                    .iter()
+                    .find(|s| &s.id == space)?
+                    .apps
+                    .iter()
+                    .find(|a| &a.app == id)?
+                    .title
+                    .clone(),
+                DragKind::Resize(_) => "Resize Space".into(),
+                DragKind::Pan => return None,
+            };
+            Some(Preview {
+                caption,
+                position: d.position,
+            })
+        });
+        if let Some(mount) = &mut self.active {
+            mount.map_drag = preview;
+            mount.invalidate_presentation();
+        }
+    }
+    pub(super) fn tick_map_drag(&mut self, now: u64) -> Result<bool> {
+        let Some(drag) = &mut self.host.drag else {
+            return Ok(false);
+        };
+        let dt = now.saturating_sub(drag.last_tick).min(50) as f32 / 1000.;
+        drag.last_tick = now;
+        if !drag.moving || !matches!(drag.kind, DragKind::Space(_) | DragKind::App(..)) {
+            return Ok(false);
+        }
+        let Some(mount) = &mut self.active else {
+            return Ok(false);
+        };
+        let scene = cached_layout(mount)?;
+        let Some(scroll) = &mut mount.map_scroll else {
+            return Ok(false);
+        };
+        let path = scene.path(scroll.node()).ok_or("Missing map viewport")?;
+        let frame = path.last().ok_or("Missing map frame")?;
+        let [x, y] = drag.position;
+        let top = frame.origin[1];
+        let bottom = top + frame.node.frame.height * frame.scale;
+        if x < frame.origin[0] || x > frame.origin[0] + frame.node.frame.width * frame.scale {
+            return Ok(false);
+        }
+        let edge = 64_f32.min((bottom - top) / 3.);
+        let direction = if y < top + edge {
+            -((top + edge - y) / edge).clamp(0., 1.)
+        } else if y > bottom - edge {
+            ((y - bottom + edge) / edge).clamp(0., 1.)
+        } else {
+            0.
+        };
+        let before = scroll.info().offset;
+        scroll.set_offset([0., before[1] + direction * 480. * dt]);
+        self.host.scroll = scroll.info().offset[1];
+        let changed = before != scroll.info().offset;
+        if changed {
+            mount.invalidate_presentation();
+        }
+        Ok(changed)
+    }
     pub(super) fn prepare_map_scroll(
         &self,
         mount: &mut Mount,
@@ -223,6 +295,8 @@ impl Client {
             };
             if matches!(kind, DragKind::Pan) {
                 self.pan_map(event, at)?;
+            } else if let Some(scroll) = self.active.as_mut().and_then(|m| m.map_scroll.as_mut()) {
+                scroll.cancel();
             }
             self.host.drag = Some(Drag {
                 pointer: event.id,
@@ -232,6 +306,7 @@ impl Client {
                 start: event.position,
                 position: event.position,
                 moving: false,
+                last_tick: at,
                 action,
             });
             return Ok(Some(true));
@@ -258,22 +333,21 @@ impl Client {
             self.pan_map(event, at)?;
         }
         if event.phase == PointerPhase::Cancel {
-            if !pan {
-                self.build_host(true)?;
-            }
+            self.preview_map_drag();
             return Ok(Some(true));
         }
         if event.phase == PointerPhase::Move {
             let moving = drag.moving;
             self.host.drag = Some(drag);
             if !pan && moving {
-                self.build_host(true)?;
+                self.preview_map_drag();
             }
             return Ok(Some(pan || moving));
         }
         if event.phase != PointerPhase::Up {
             return Ok(Some(false));
         }
+        self.preview_map_drag();
         if self
             .spaces
             .snapshot()
@@ -288,7 +362,22 @@ impl Client {
                 None => Ok(Some(false)),
             };
         }
-        let target = self.map_action_at(event.position)?;
+        let target = if let Some(mount) = &self.active
+            && let Some(scroll) = &mount.map_scroll
+        {
+            let scene = cached_layout(mount)?;
+            let path = scene.path(scroll.node()).ok_or("Missing map viewport")?;
+            let frame = path.last().ok_or("Missing map frame")?;
+            self.map_action_at([
+                event.position[0],
+                event.position[1].clamp(
+                    frame.origin[1] + 1.,
+                    frame.origin[1] + frame.node.frame.height * frame.scale - 1.,
+                ),
+            ])?
+        } else {
+            None
+        };
         let change = match drag.kind {
             DragKind::Pan => return Ok(Some(true)),
             DragKind::Space(space) => {
@@ -299,7 +388,7 @@ impl Client {
                         | HostAction::MapApp(s, _)
                         | HostAction::Settings(s, _),
                     ) if s != space => Some(s),
-                    _ => None,
+                    _ => return Ok(Some(true)),
                 };
                 let before = if let Some(target) = before {
                     let spaces = &self.spaces.snapshot().ok_or("Spaces unavailable")?.spaces;
@@ -323,6 +412,9 @@ impl Client {
             }
             DragKind::App(space, app) => {
                 let before = match target {
+                    Some(HostAction::MapApp(s, a)) if s == space && a == app => {
+                        return Ok(Some(true));
+                    }
                     Some(HostAction::MapApp(s, a)) if s == space && a != app => {
                         let apps = &self
                             .spaces
@@ -381,6 +473,33 @@ impl Client {
         };
         self.send_map_change(change).map(Some)
     }
+}
+
+pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f32; 2]) {
+    use crate::dashboard::components::{background, canvas, text};
+    use otrios_interfaces::scene::Rect;
+    let [w, h] = viewport;
+    let x = (preview.position[0] - 90.).clamp(0., (w - 180.).max(0.));
+    let y = if preview.position[1] + 76. < h - 80. {
+        preview.position[1] + 20.
+    } else {
+        preview.position[1] - 76.
+    };
+    let caption: String = preview.caption.chars().take(24).collect();
+    root.children.push(canvas(
+        4_210_000_000,
+        Rect::new(x, y, 180., 56.),
+        vec![
+            background(4_210_000_001, 180., 56., [255, 254, 250, 255], 14.),
+            text(
+                4_210_000_002,
+                Rect::new(12., 14., 156., 32.),
+                &caption,
+                2,
+                [44, 50, 43, 255],
+            ),
+        ],
+    ));
 }
 
 /// Clip semantic controls on the presented clone, never the canonical layout.

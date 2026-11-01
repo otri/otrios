@@ -80,8 +80,43 @@ try {
    }
    samples.push((await evaluate(a,scroll)).offset[1]);await writeFile(output+'/populated-'+samples.length+'.png',bytes);
   }
+  // Drag the second Space over a full-screen first Space without releasing.
+  // Exercise a narrow touch viewport and desktop pointer frames with one epoch.
+  const reorderChecks=[];
+  await click(a,'Edit');
+  for(const [width,touch]of [[390,true],[1280,false]]){
+   await manage({type:'configure-space',space:fixture.space_a,name:'Browser A',layout:{width:6,height:6,background:'sage'}});
+   if((await get()).spaces[0].id!==fixture.space_a)await manage({type:'place-space',space:fixture.space_a,before:fixture.space_b});
+   await call('Emulation.setDeviceMetricsOverride',{width,height:700,deviceScaleFactor:1,mobile:false},a);
+   await call('Emulation.setTouchEmulationEnabled',{enabled:touch,maxTouchPoints:1},a);
+   await wait(a,'innerWidth==='+width);
+   await wait(a,scroll+'?.limit[1]>500');
+   await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:100000},a);
+   await wait(a,scroll+'?.offset[1]==='+scroll+'?.limit[1]');
+   for(let n=0;n<30&&!await bounds('Space: Browser B');n++){
+    const old=(await evaluate(a,scroll)).offset[1];
+    await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:-80},a);
+    await wait(a,scroll+'?.offset[1]<'+old);
+   }
+   const rect=await bounds('Space: Browser B');assert(rect,'source title becomes visible');
+   assert(!await bounds('Space: Browser A'),'destination title starts above the viewport');
+   const epoch=await evaluate(a,`document.querySelector(${JSON.stringify(selector('Done'))}).dataset.epoch`);
+   const start={x:rect.x+4,y:rect.y+4},edge={x:start.x,y:108};
+   const input=async(phase,p)=>touch
+    ?call('Input.dispatchTouchEvent',{type:phase,touchPoints:phase==='touchEnd'?[]:[{...p,id:0,radiusX:1,radiusY:1,force:1}]},a)
+    :call('Input.dispatchMouseEvent',{type:phase,button:'left',buttons:phase==='mouseReleased'?0:1,clickCount:1,...p},a);
+   await input(touch?'touchStart':'mousePressed',start);
+   await input(touch?'touchMove':'mouseMoved',edge);
+   await wait(a,scroll+'?.offset[1]===0');
+   assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Done'))}).dataset.epoch`),epoch,'preview and autoscroll retain native capture epoch');
+   await shot(a,'reorder-edge-'+width);
+   await input(touch?'touchEnd':'mouseReleased',edge);
+   for(let n=0;n<100&&(await get()).spaces[0].id!==fixture.space_b;n++)await new Promise(r=>setTimeout(r,50));
+   assert.equal((await get()).spaces[0].id,fixture.space_b);
+   reorderChecks.push({width,input:touch?'touch':'mouse',offscreen_destination:true,stationary_edge_scroll:true,stable_epoch:true});
+  }
   assert.equal(errors.length,0,JSON.stringify(errors));
-  await writeFile(output+'/populated-acceptance.json',JSON.stringify({passed:true,spaces:4,apps:14,first_attempt_sign_in:true,sign_in_ms:signInMs,viewport_resize_preserves_sign_in:true,fixed_header_footer:true,fade_and_footer_pixels:true,scroll_samples:samples,source:fixture.source,source_dirty:fixture.source_dirty,wasm_sha256:fixture.wasm_sha256,runtime_errors:errors},null,2));
+  await writeFile(output+'/populated-acceptance.json',JSON.stringify({passed:true,spaces:4,apps:14,first_attempt_sign_in:true,sign_in_ms:signInMs,viewport_resize_preserves_sign_in:true,fixed_header_footer:true,fade_and_footer_pixels:true,scroll_samples:samples,reorder_checks:reorderChecks,source:fixture.source,source_dirty:fixture.source_dirty,wasm_sha256:fixture.wasm_sha256,runtime_errors:errors},null,2));
   console.log('Populated map pixels, scrolling and first-attempt sign-in passed');
  }else{
  const a=await page('alice@spaces.test',fixture.space_a);
