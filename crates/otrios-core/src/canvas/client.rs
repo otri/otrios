@@ -954,6 +954,9 @@ impl Client {
         self.active.as_mut()?.chat.as_mut()?.take_download()
     }
     pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.managed_transport && self.requested.as_ref().is_some_and(|r| r.reconnecting) {
+            return Ok(None);
+        }
         if let Some(m) = &mut self.active
             && let Some(chat) = &mut m.chat
         {
@@ -1018,6 +1021,11 @@ impl Client {
         Ok(true)
     }
     pub fn collection_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
+        // Reconnect first qualifies a fresh mount epoch. Sending a new lane
+        // selection under the retained mount's old epoch would strand its reply.
+        if self.managed_transport && self.requested.as_ref().is_some_and(|r| r.reconnecting) {
+            return Ok(None);
+        }
         if let Some((scope, command)) = self.collection_cancel.take() {
             if self.managed_transport && !scope.managed {
                 return Ok(None);

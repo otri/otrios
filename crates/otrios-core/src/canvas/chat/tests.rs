@@ -139,6 +139,50 @@ fn admitted_profiles_are_private_actor_bindings_retained_through_restart_and_gue
 }
 
 #[test]
+fn anonymous_reader_reconnects_only_after_a_valid_current_collection_view_without_joining() {
+    use crate::collection as col;
+    let channel = std::sync::Arc::new(std::sync::Mutex::new(col::Channel::new(42)));
+    let room = Room::open_in(None, 1_000_000, channel.clone()).unwrap();
+    let mut client = Client::default();
+    client.access(false);
+    client
+        .receive_initial(&room.initial_snapshot().unwrap())
+        .unwrap();
+    assert!(client.info().online);
+    client.disconnected();
+    assert!(!client.info().online);
+    assert!(client.receive_collection(&[255], true).is_err());
+    assert!(!client.info().online);
+    assert!(client.outgoing(None).unwrap().is_none(), "no presence join");
+    let mut counter = 0;
+    let select =
+        col::decode_command(&client.collection_outgoing(&mut counter).unwrap().unwrap()).unwrap();
+    let view = channel
+        .lock()
+        .unwrap()
+        .handle(
+            &mut col::ChannelSession::default(),
+            col::Access {
+                admitted: true,
+                authenticated: false,
+            },
+            select,
+        )
+        .unwrap();
+    assert!(
+        client
+            .receive_collection(&view.to_bytes().unwrap(), true)
+            .unwrap()
+    );
+    assert!(client.info().online);
+    assert!(client.info().participant.is_empty());
+    assert!(
+        client.outgoing(None).unwrap().is_none(),
+        "still no presence join or write"
+    );
+}
+
+#[test]
 fn initial_transcript_is_a_read_only_bounded_pin_and_rejects_malformed_candidates_atomically() {
     let p = path();
     let now = 1_000_000;

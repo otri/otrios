@@ -14,6 +14,20 @@ impl Client {
         Ok(())
     }
     pub fn collection_outgoing(&mut self, counter: &mut u64) -> Result<Option<Vec<u8>>> {
+        if self.read_only
+            && !self.online
+            && !self.joining
+            && self.kicked.is_none()
+            && self.collection.plan().is_none()
+        {
+            // Disconnect drops the old authority's cursor/replica. Readers do
+            // not send Join, so reselect by stable identity on the new lane.
+            let anchor = match self.collection_anchor {
+                col::Anchor::Before(cursor) => col::Anchor::Around(cursor.key),
+                anchor => anchor,
+            };
+            self.select_window(anchor)?;
+        }
         self.collection
             .outgoing(counter)
             .map_err(err)?
@@ -63,9 +77,14 @@ impl Client {
                     })
                     .collect::<Result<std::collections::VecDeque<_>>>()?;
                 let changed = self.messages != messages;
-                let metadata = self.older != window.more_before
+                let reconnected_reader = self.read_only && !self.online;
+                let metadata = reconnected_reader
+                    || self.older != window.more_before
                     || self.more_after != window.more_after
                     || self.history_wait;
+                // Read-only clients never join presence. A validated view in
+                // their current selection is the reconnect admission boundary.
+                self.online |= self.read_only;
                 self.older = window.more_before;
                 self.more_after = window.more_after;
                 self.history_wait = false;
