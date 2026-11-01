@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Shared room authority, durable journal and common native/browser presentation.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod assets;
 mod authority;
+#[cfg(not(target_arch = "wasm32"))]
+pub use authority::{Publication, publish};
 mod client;
 mod collections;
 mod history;
@@ -53,3 +57,32 @@ pub(crate) fn random(bytes: usize) -> Result<String> {
 
 #[cfg(test)]
 mod tests;
+pub fn validate_asset(asset: &Asset) -> Result<()> {
+    if asset.name.is_empty()
+        || asset.name.len() > 96
+        || asset.name.starts_with('.')
+        || !asset
+            .name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b" _-.".contains(&b))
+        || !valid_hex(&asset.sha256, 32)
+        || asset.bytes == 0
+        || asset.bytes as usize > MAX_ASSET_BYTES
+    {
+        return Err("Invalid owned attachment".into());
+    }
+    Ok(())
+}
+pub fn validate_message_assets(assets: &[Asset]) -> Result<()> {
+    if assets.len() > MAX_MESSAGE_ASSETS {
+        return Err("Dispatch attachment limit".into());
+    }
+    for asset in assets {
+        validate_asset(asset)?;
+    }
+    Ok(())
+}
+
+pub fn valid_request_nonce(value: &str) -> bool {
+    valid_hex(value, 16)
+}

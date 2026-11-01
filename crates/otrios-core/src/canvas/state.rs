@@ -335,6 +335,9 @@ impl Document {
     pub fn schema(&self) -> &StateSchema {
         &self.schema
     }
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
     pub fn set_wall_time(&mut self, time: i64) {
         self.wall = time.max(0);
     }
@@ -549,8 +552,22 @@ impl Document {
         )
     }
     pub fn open_session(&mut self, writer: &[u8], resume: u64) -> Result<(Session, bool)> {
+        self.open_admitted_session(writer, resume, true)
+    }
+    /// Read admission does not allocate durable writer receipts, even when the
+    /// app schema supports edits for other participants.
+    pub fn open_read_session(&mut self, writer: &[u8]) -> Result<Session> {
+        self.open_admitted_session(writer, 0, false)
+            .map(|(session, _)| session)
+    }
+    fn open_admitted_session(
+        &mut self,
+        writer: &[u8],
+        resume: u64,
+        edit: bool,
+    ) -> Result<(Session, bool)> {
         let writer: [u8; 16] = writer.try_into().map_err(|_| "Invalid writer nonce")?;
-        let writable = self.schema.fields.iter().any(|field| field.writable);
+        let writable = edit && self.schema.fields.iter().any(|field| field.writable);
         if !writable && resume != 0 {
             return Err("Read-only scope cannot resume an issued write".into());
         }
@@ -777,6 +794,7 @@ pub struct StateUsage {
 /// RAM-only pending intents, separate from authoritative causal metadata.
 pub struct StateAdapter {
     doc: Document,
+    read_only: bool,
     writer: [u8; 16],
     replica: Option<merkle::Replica>,
     pending: BTreeMap<u16, Value>,
@@ -823,6 +841,7 @@ impl StateAdapter {
         doc.required_fields = selection.fields;
         let mut result = Self {
             doc,
+            read_only: false,
             writer,
             replica: None,
             pending: BTreeMap::new(),
@@ -844,6 +863,9 @@ impl StateAdapter {
         Ok(result)
     }
     pub fn restore_pending(&mut self, old: &Self) -> Result<()> {
+        if self.read_only {
+            return Ok(());
+        }
         if self.writer != old.writer || self.doc.scope != old.doc.scope {
             return Err("Pending intent scope mismatch".into());
         }
@@ -878,6 +900,16 @@ impl StateAdapter {
     }
     pub fn resume_sequence(&self) -> u64 {
         self.flight.as_ref().map_or(0, |f| f.sequence)
+    }
+    /// Presentation policy only. The authority independently enforces each write.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+        if read_only {
+            self.pending.clear();
+            self.pending_since = None;
+            self.flight = None;
+            self.deadline = None;
+        }
     }
     pub fn reconnect(&mut self) {
         if let Some(f) = &mut self.flight {
@@ -998,6 +1030,9 @@ impl StateAdapter {
         Ok(changed)
     }
     fn queue(&mut self, values: &[(u16, Value)]) -> Result<bool> {
+        if self.read_only {
+            return Ok(false);
+        }
         self.doc.validate_commands(values, false)?;
         // Check the whole candidate before copying payloads into the queue or
         // changing the overlay. Replacement frees its previous pending payload in this budget;
@@ -1373,6 +1408,42 @@ mod tests {
         c.set_typed(&[(17, large)]).unwrap();
         assert_eq!(c.dispatch_usage().pending_fields, 1);
     }
+    #[test]
+    fn read_admission_of_editable_documents_has_no_receipts_or_write_capability() {
+        let schema = StateSchema {
+            id: "editable".into(),
+            fields: vec![Field {
+                id: 1,
+                name: "value".into(),
+                default: Value::Number(0.),
+                writable: true,
+            }],
+        };
+        let mut doc = Document::new(schema, "read-admission").unwrap();
+        let original = doc.save().unwrap();
+        for id in 0..1030_u64 {
+            let mut writer = [0; 16];
+            writer[..8].copy_from_slice(&id.to_le_bytes());
+            let mut session = doc.open_read_session(&writer).unwrap();
+            assert!(session.slot.is_none());
+            assert!(doc.generate(&mut session).unwrap().is_some());
+            let write = encode_state_request(&StateRequest::Write {
+                sequence: 1,
+                values: vec![(1, Value::Number(99.))],
+            })
+            .unwrap();
+            assert!(doc.receive(&mut session, &write).is_err());
+            let hello = encode_state_request(&StateRequest::Hello {
+                writer: writer.to_vec(),
+                resume: 0,
+            })
+            .unwrap();
+            assert!(doc.receive(&mut session, &hello).is_err());
+        }
+        assert_eq!(doc.save().unwrap(), original);
+        assert!(doc.receipts().unwrap().is_empty());
+    }
+
     #[test]
     fn read_only_leases_never_allocate_durable_receipts_and_still_follow_authority_updates() {
         let schema = StateSchema {

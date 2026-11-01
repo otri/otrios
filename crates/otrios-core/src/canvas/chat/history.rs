@@ -45,8 +45,10 @@ pub fn read_message(row: &Snapshot) -> Result<Message> {
     if values.next().is_some() {
         return Err("Conflicting immutable message versions".into());
     }
-    super::check(bytes, MAX_COMMAND_BYTES)?;
-    flexbuffers::from_slice(bytes).map_err(err)
+    super::check(bytes, MAX_MESSAGE_BYTES)?;
+    let message: Message = flexbuffers::from_slice(bytes).map_err(err)?;
+    super::validate_message_assets(&message.assets)?;
+    Ok(message)
 }
 
 pub(super) struct Prepared {
@@ -100,7 +102,7 @@ impl History {
     }
     pub fn prepare(&self, message: &Message) -> Result<Prepared> {
         let bytes = flexbuffers::to_vec(message).map_err(err)?;
-        super::check(&bytes, MAX_COMMAND_BYTES)?;
+        super::check(&bytes, MAX_MESSAGE_BYTES)?;
         let row = Snapshot::empty()
             .edit(
                 [22; 16],
@@ -124,6 +126,13 @@ impl History {
                 Err(error) => return Err(err(error)),
             }
         }
+    }
+    pub fn prepare_removal(&self, sequence: u64, revision: Hash) -> Result<Prepared> {
+        let current = self.snapshot()?;
+        Ok(Prepared {
+            expected: current.revision(),
+            next: current.remove(sequence, revision).map_err(err)?,
+        })
     }
     pub fn commit(&mut self, prepared: Prepared) -> Result<()> {
         match self {
@@ -162,6 +171,7 @@ mod tests {
         let mut pinned = None;
         for sequence in 1..=10 {
             let message = Message {
+                assets: vec![],
                 sequence,
                 at: 1_000_000,
                 sender: Profile {

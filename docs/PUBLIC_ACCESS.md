@@ -1,10 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Public demos and private Monitoring
 
-`https://otrios.otri.ca` opens Home without sign-in. Component Playground, Layout
-Lab, Input Lab, Animation Lab, 3D Lab and The Brass Relay are public apps. Their durable controls
-share the photo frame's per-app Merkle state. Navigation, editing focus and animation
-phase remain local. Monitoring alone requires browser sign-in.
+`https://otrios.otri.ca` serves the public launcher and signed code. Since the
+2026-11-01 [Spaces migration](SPACES.md), Brass Relay allows anonymous reading
+and signed-in visitor comments. Household's shared demo apps and Operations'
+Monitoring require explicit membership. The Frame is a Household Member and can
+visit public Brass Relay; it has no Operations membership. Navigation, editing
+focus and animation phase remain local.
 
 Navigation entries serve app-specific page titles and Open Graph metadata in
 the initial HTML. Home uses `OTriOS`; `/brass-relay` uses the browser title
@@ -41,7 +43,8 @@ signed code and release negotiation available. A whole-process crash affects bot
 | `/release/events` | Stable v1 control-only compatibility alias |
 | `/health` | Status and release only; 503 while state unavailable |
 | `/auth/session` | GET status, POST sign-in, DELETE sign-out |
-| `/monitoring/presentation` | Valid Monitoring session; private read-only view |
+| `/spaces` | Filtered Space discovery and authenticated management |
+| `/monitoring/presentation` | Legacy read path; managed clients use an admitted Monitoring mount |
 | `/apps/stream`, `/demo/ink` | Retired protocols; 410 |
 | `/presentation`, `/admin/activate`, other private paths | Not public; 404 even after sign-in |
 
@@ -49,7 +52,7 @@ signed code and release negotiation available. A whole-process crash affects bot
 
 The public session requires an exact allowed browser Origin and has separate
 peer, byte and rate limits. Its v1 hello must finish before binary state is
-accepted. Anonymous clients can mount only public app UI/state. State operations
+accepted. Anonymous clients can mount only public Space app UI/state. State operations
 are validated server-side; layout, schema and arbitrary fields cannot be written
 by public controls. Monitoring UI/behavior/state are delivered only through an
 authorized mount. Private bytes under `authority/bundles/` (or legacy
@@ -65,8 +68,11 @@ not the future general OTriOS capability runtime.
 
 ## Monitoring sessions
 
-The existing username and seven-word password remain valid. The private mode-600
-`--auth-file` contains `username` and an Argon2id `password_hash`. Never commit it,
+The existing named login and password remain valid. The private mode-600
+`--auth-file` uses the version-1 `users` and `native` identity records described in
+[Spaces identity configuration](SPACES.md#identity-configuration). Human entries
+retain an Argon2id `password_hash`; device/collector entries retain token digests.
+Space roles and service grants are separate from authentication. Never commit it,
 tunnel credentials or signing keys. Successful login rotates a random 256-bit
 opaque session; only its digest is kept server-side. The browser receives a
 host-only `Secure; HttpOnly; SameSite=Strict; Path=/` cookie, expiring after eight
@@ -76,7 +82,8 @@ POST/DELETE require the exact Origin and a custom request header; login uses
 JSON. Verification has one worker slot, 20 attempts/minute globally and 128
 sessions. Passwords/tokens do not enter URLs, document state or logs. The browser
 uses standard password fields and reconnects its single session after login to
-acquire the new cookie. The native frame uses the trusted loopback listener.
+acquire the new cookie. The native Frame uses its private token file on the
+loopback listener; loopback access itself grants no managed admission.
 Only immutable public artifacts enter disposable caches; documents and private
 Monitoring views remain in RAM. See [client storage](CLIENT_STORAGE.md).
 

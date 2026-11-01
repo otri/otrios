@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "authoritySource": "fa29e9aa0b7778cd73d066ffb812b24e09e75350",
+  "sourceInput": "git archive of the named commit",
+  "compilerConfigurationCheckpoint": "72894de3c3401282dd44f2d86803055a3a549677",
+  "target": "armv7-unknown-linux-gnueabihf",
+  "rust": "1.90.0",
+  "features": [
+    "direct",
+    "server",
+    "canvas"
+  ],
+  "compiler": "arm-linux-gnueabihf-gcc 12.2.0 (Debian 12.2.0-14)",
+  "compilerEnvironment": {
+    "CC_armv7_unknown_linux_gnueabihf": "arm-linux-gnueabihf-gcc",
+    "AR_armv7_unknown_linux_gnueabihf": "arm-linux-gnueabihf-ar"
+  },
+  "emulator": "qemu-arm 7.2.22 (Debian 1:7.2+dfsg-7+deb12u18+b3)",
+  "runtime": "container installed armhf libraries; qemu-arm -L /",
+  "suite": {
+    "command": "OTRIOS_SPACES_SERVER=/tmp/arm-authority cargo test -p otrios-core --features canvas --test spaces_process --locked",
+    "tests": 8,
+    "authorityScenarios": 7,
+    "childClientEntryTests": 1,
+    "failed": 0
+  },
+  "artifacts": {
+    "canvas-pack": {
+      "bytes": 6315356,
+      "sha256": "8034637616adf20d3b5dca8d0885a7a2d98348f830951622b6feb41561945ed4",
+      "machine": "ARM EABI"
+    },
+    "dashboard-direct": {
+      "bytes": 8022936,
+      "sha256": "cb06d1157c88af2a50bd422065f4160c356d3f4ffd53a2eafcea8e1906c382d8",
+      "machine": "ARM EABI"
+    },
+    "dashboard-monitoring": {
+      "bytes": 1228240,
+      "sha256": "b4fbc36b8802d8d52fa23a279670eae2dc79f42292195fd4cac987fa3cace318",
+      "machine": "ARM EABI"
+    },
+    "dashboard-server": {
+      "bytes": 8283864,
+      "sha256": "c63c3cfabd51bf39e9cc60857cb35bada03909cd70b8b2713eb87ee6caa5931f",
+      "machine": "ARM EABI"
+    },
+    "session-bootstrap": {
+      "bytes": 2527000,
+      "sha256": "746a6c0e938949bc6daf0bc434a10b7484e9a4023356d1cfc90e79f302909557",
+      "machine": "ARM EABI"
+    }
+  },
+  "signedRelease": false,
+  "activatedOnFrame": false,
+  "physicalFrameAcceptance": false
+}

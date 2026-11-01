@@ -23,6 +23,9 @@ use std::{
 };
 #[path = "bench_telemetry.rs"]
 mod bench_telemetry;
+#[cfg(unix)]
+#[path = "native_worker/local_apps.rs"]
+mod local_apps;
 #[path = "session_client.rs"]
 mod session_client;
 enum NetworkEvent {
@@ -30,6 +33,7 @@ enum NetworkEvent {
     Packet(u64, Instant, Vec<u8>),
     Chat(u64, Vec<u8>),
     Collection(u64, Vec<u8>),
+    Spaces(u64, Vec<u8>),
 }
 struct NetworkSend {
     channel: u8,
@@ -132,6 +136,7 @@ pub(super) enum Input {
 }
 #[derive(Clone, Default)]
 pub(super) struct Options {
+    pub(super) local_apps: Option<String>,
     pub(super) chat_identity: Option<String>,
     pub(super) font: Option<Arc<otrios_core::dashboard::font::Font>>,
     pub(super) url: Option<String>,
@@ -159,6 +164,7 @@ pub(super) struct Options {
 }
 pub(super) fn options() -> Result<Options, String> {
     let mut o = Options {
+        local_apps: std::env::var("OTRIOS_LOCAL_APPS").ok(),
         private_access: std::env::var("OTRIOS_PRIVATE_APP_ACCESS").is_ok_and(|v| v == "true"),
         ..Options::default()
     };
@@ -180,6 +186,7 @@ pub(super) fn options() -> Result<Options, String> {
             }
             "--state" => o.state = Some(value),
             "--apps" => o.apps = Some(value),
+            "--local-apps" => o.local_apps = Some(value),
             "--frames" => o.frames = Some(value.parse::<usize>().map_err(|e| e.to_string())?),
             "--rotation" => {
                 o.rotation = value.parse::<u16>().map_err(|e| e.to_string())?;
@@ -237,14 +244,101 @@ fn app_stream(url: &str) -> String {
     let url = url
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
+    let (url, query) = url
+        .split_once('?')
+        .map_or((url.as_str(), None), |(url, query)| (url, Some(query)));
     if url.ends_with("/session") {
-        return url;
+        return format!("{url}{}", query.map_or(String::new(), |q| format!("?{q}")));
     }
     let root = ["/apps/stream", "/demo/stream", "/stream", "/sync"]
         .iter()
         .find_map(|suffix| url.strip_suffix(suffix))
         .unwrap_or(url.trim_end_matches('/'));
-    format!("{root}/session")
+    format!(
+        "{root}/session{}",
+        query.map_or(String::new(), |q| format!("?{q}"))
+    )
+}
+fn configured_session(url: &str) -> Result<(String, Option<String>), String> {
+    let mut url = app_stream(url);
+    if let Ok(space) = std::env::var("OTRIOS_SPACE") {
+        if !otrios_core::spaces::valid_id(&space) || url.contains('?') {
+            return Err("Specify one valid Frame Space selection".into());
+        }
+        url.push_str(&format!("?space={space}"));
+    }
+    let mut selected = None;
+    for field in url.split_once('?').map_or("", |(_, q)| q).split('&') {
+        if let Some(id) = field.strip_prefix("space=") {
+            if selected.is_some() || !otrios_core::spaces::valid_id(id) {
+                return Err("Specify one valid Frame Space selection".into());
+            }
+            selected = Some(id.to_owned());
+        }
+    }
+    Ok((url, selected))
+}
+fn session_selection(url: &str, selected: Option<&str>) -> Result<String, String> {
+    if selected.is_some_and(|id| !otrios_core::spaces::valid_id(id)) {
+        return Err("Invalid Space selection".into());
+    }
+    let (base, query) = url.split_once('?').unwrap_or((url, ""));
+    let mut fields = query
+        .split('&')
+        .filter(|f| !f.is_empty() && !f.starts_with("space="))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if let Some(space) = selected {
+        fields.push(format!("space={space}"));
+    }
+    Ok(if fields.is_empty() {
+        base.into()
+    } else {
+        format!("{base}?{}", fields.join("&"))
+    })
+}
+
+fn authenticated_request(
+    url: &str,
+    identity: Option<&std::path::Path>,
+) -> Result<tungstenite::http::Request<()>, String> {
+    use tungstenite::client::IntoClientRequest;
+    let mut request = url
+        .into_client_request()
+        .map_err(|_| "Invalid session URL")?;
+    if let Some(path) = identity {
+        use std::io::Read;
+        let metadata = fs::symlink_metadata(path).map_err(|_| "Cannot inspect Frame identity")?;
+        if !metadata.is_file() || !(64..=65).contains(&metadata.len()) {
+            return Err("Invalid Frame identity file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o077 != 0 {
+                return Err("Frame identity must be mode 0600".into());
+            }
+        }
+        let mut token = String::new();
+        fs::File::open(path)
+            .and_then(|f| f.take(66).read_to_string(&mut token))
+            .map_err(|_| "Cannot read Frame identity")?;
+        let token = token.trim();
+        if token.len() != 64
+            || !token
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err("Invalid Frame identity".into());
+        }
+        request.headers_mut().insert(
+            tungstenite::http::header::AUTHORIZATION,
+            format!("Bearer {token}")
+                .parse()
+                .map_err(|_| "Invalid Frame identity")?,
+        );
+    }
+    Ok(request)
 }
 fn save_identity(path: &std::path::Path, token: &str) -> Result<(), String> {
     use std::io::Write;
@@ -318,7 +412,31 @@ pub(super) fn state_worker(
         return Err("Clients keep state in RAM; remove the obsolete --state option".into());
     }
     let (resources, catalog) = app_resources(&o)?;
+    let selected_space = Arc::new(Mutex::new(
+        o.url
+            .as_ref()
+            .map(|url| configured_session(url))
+            .transpose()?
+            .and_then(|(_, selected)| selected),
+    ));
     let mut client = Client::default();
+    #[cfg(unix)]
+    let local_apps = o
+        .local_apps
+        .as_ref()
+        .map(|path| local_apps::Observer::bind(std::path::Path::new(path)))
+        .transpose()?;
+    #[cfg(unix)]
+    if let Some(observer) = &local_apps {
+        let bytes = observer.capture();
+        if let Err(error) = client.update_local_apps(bytes.ok()) {
+            eprintln!("Local apps namespace unavailable: {error}");
+        }
+    }
+    if let Some(url) = &o.url {
+        let (_, selected) = configured_session(url)?;
+        client.configure_spaces(selected.as_deref())?;
+    }
     client.set_chat_native(true);
     let identity_path = o
         .chat_identity
@@ -358,8 +476,8 @@ pub(super) fn state_worker(
     })?;
     client.admit_catalog(&catalog)?;
     let admitted = otrios_core::canvas::decode_catalog(&catalog)?;
-    let entry = if let Some(id) = &o.screen {
-        let id = entry_app(id)?;
+    let requested_path = o.screen.as_deref().map(entry_app).transpose()?;
+    let entry = if let Some(id) = requested_path {
         // An app removed during a verified release handoff returns to Home.
         admitted
             .apps
@@ -371,7 +489,11 @@ pub(super) fn state_worker(
     }
     .ok_or("Entry app is not in the catalog")?;
     if o.url.is_some() {
-        client.open(&entry.app.ui_ref, &entry.app.state_ref);
+        if requested_path.is_some_and(|id| !id.is_empty() && id == entry.path) {
+            client.open(&entry.app.ui_ref, &entry.app.state_ref);
+        } else {
+            client.navigate("")?;
+        }
     } else {
         mount_local(&mut client, &resources, &entry.app.id, &entry.app.state_ref)?;
     }
@@ -402,6 +524,7 @@ pub(super) fn state_worker(
             .or_else(|| std::env::var("OTRIOS_RELEASE_SOCKET").ok());
         let active = ink_active.clone();
         let code_release = active_release.clone();
+        let selected = selected_space.clone();
         thread::spawn(move || {
             network(
                 url,
@@ -415,6 +538,7 @@ pub(super) fn state_worker(
                 ink_publish,
                 active,
                 code_release,
+                selected,
             )
         })
     });
@@ -447,6 +571,19 @@ pub(super) fn state_worker(
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
     loop {
+        client.set_local_apps_online(
+            epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id),
+        );
+        #[cfg(unix)]
+        if let Some(observer) = &local_apps
+            && observer.changed()?
+        {
+            let bytes = observer.capture();
+            match client.update_local_apps(bytes.ok()) {
+                Ok(changed) => dirty |= changed,
+                Err(error) => eprintln!("Local apps namespace unavailable: {error}"),
+            }
+        }
         if network_thread.as_ref().is_some_and(|h| h.is_finished()) {
             return Err("Network worker stopped unexpectedly".into());
         }
@@ -579,6 +716,18 @@ pub(super) fn state_worker(
                         }
                     }
                     NetworkEvent::Collection(..) => {}
+                    NetworkEvent::Spaces(id, bytes)
+                        if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
+                    {
+                        dirty |= client.receive_spaces(&bytes)?;
+                        if client.spaces_snapshot().is_some() {
+                            stream_ready.store(true, Ordering::Release);
+                        }
+                        if client.take_collection_revoked() {
+                            revoke_display(&mut display_access, &mut composer);
+                        }
+                    }
+                    NetworkEvent::Spaces(..) => {}
                 }
             }
         }
@@ -655,6 +804,13 @@ pub(super) fn state_worker(
             }
         }
         dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        if client.take_collection_revoked() {
+            revoke_display(&mut display_access, &mut composer);
+        }
+        if client.rejected_mount_pending() {
+            catalog_candidate = None;
+            eprintln!("App candidate layout rejected; continuing current app");
+        }
         for bytes in ink_rx.try_iter().take(64) {
             dirty |= client.receive_ink(&bytes, now)?;
         }
@@ -670,6 +826,19 @@ pub(super) fn state_worker(
             {
                 ink_pending = Some(bytes);
             }
+        }
+        if let Some(space) = client.take_space_switch() {
+            *selected_space.lock().map_err(|_| "Space selection lock")? = Some(space.clone());
+            client.select_space(&space)?;
+            if let Some(id) = epoch {
+                abort.store(id, Ordering::Release);
+            }
+            epoch = None;
+            outgoing = None;
+            stream_ready.store(false, Ordering::Release);
+            revoke_display(&mut display_access, &mut composer);
+            client.take_collection_revoked();
+            dirty = true;
         }
         let connected = epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id);
         if !connected {
@@ -694,6 +863,13 @@ pub(super) fn state_worker(
                         epoch: epoch.expect("connected epoch"),
                         bytes,
                         channel: otrios_interfaces::collection::CHANNEL,
+                    });
+                }
+                if outgoing.is_none() {
+                    outgoing = client.spaces_outgoing()?.map(|bytes| NetworkSend {
+                        epoch: epoch.expect("connected epoch"),
+                        bytes,
+                        channel: otrios_interfaces::spaces::CHANNEL,
                     });
                 }
             }
@@ -842,17 +1018,34 @@ fn network(
     ink_in: mpsc::SyncSender<Vec<u8>>,
     ink_active: Arc<AtomicBool>,
     active_release: Arc<Mutex<String>>,
+    selected_space: Arc<Mutex<Option<String>>>,
 ) {
     use otrios_interfaces::session::{self as wire, ServerControl};
     use tungstenite::{Error, Message, stream::MaybeTlsStream};
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let url = app_stream(&url);
+    let base_url = app_stream(&url);
+    let identity = std::env::var_os("OTRIOS_IDENTITY_FILE").map(std::path::PathBuf::from);
     let mut epoch = 0_u64;
     loop {
         stream_ready.store(false, Ordering::Release);
         connection.store(0, Ordering::Release);
+        let selected = match selected_space.lock() {
+            Ok(selected) => selected.clone(),
+            Err(_) => return,
+        };
+        let url = match session_selection(&base_url, selected.as_deref()) {
+            Ok(url) => url,
+            Err(_) => return,
+        };
+        let request = match authenticated_request(&url, identity.as_deref()) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("Frame session: {error}");
+                return;
+            }
+        };
         let mut socket = match tungstenite::client::connect_with_config(
-            url.as_str(),
+            request,
             Some(
                 tungstenite::protocol::WebSocketConfig::default()
                     .max_message_size(Some(otrios_interfaces::collection::MAX_EVENT_BYTES + 1))
@@ -995,6 +1188,16 @@ fn network(
                         break;
                     }
                     match bytes.split_first() {
+                        Some((&otrios_interfaces::spaces::CHANNEL, payload))
+                            if payload.len() <= otrios_interfaces::spaces::MAX_EVENT_BYTES =>
+                        {
+                            if reply
+                                .try_send(NetworkEvent::Spaces(epoch, payload.to_vec()))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                         Some((&otrios_interfaces::collection::CHANNEL, payload))
                             if payload.len() <= otrios_interfaces::collection::MAX_EVENT_BYTES =>
                         {
@@ -1073,6 +1276,25 @@ fn network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn space_switch_replaces_only_the_selected_scope() {
+        let first = "a".repeat(32);
+        let next = "b".repeat(32);
+        let url = format!("ws://localhost/session?space={first}&device=frame");
+        assert_eq!(
+            session_selection(&url, Some(&next)).unwrap(),
+            format!("ws://localhost/session?device=frame&space={next}")
+        );
+        assert_eq!(
+            session_selection(&url, None).unwrap(),
+            "ws://localhost/session?device=frame"
+        );
+        assert_eq!(
+            session_selection("ws://localhost/session", None).unwrap(),
+            "ws://localhost/session"
+        );
+        assert!(session_selection(&url, Some("invalid")).is_err());
+    }
     struct Fixture {
         root: std::path::PathBuf,
         ui: Vec<u8>,
@@ -1085,13 +1307,15 @@ mod tests {
     }
     fn fixture() -> Fixture {
         use otrios_interfaces::{canvas::*, layout::*};
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "otrios-canvas-worker-{}-{}",
+            "otrios-canvas-worker-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let schema = StateSchema {
             id: "worker-motion-v1".into(),
@@ -1388,6 +1612,15 @@ mod tests {
     }
     #[test]
     fn app_transport_receives_remote_edits_reconnects_and_revokes_a_held_frame() {
+        check_transport_revocation(false, false);
+        check_transport_revocation(true, false);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn local_uninstall_revokes_a_held_frame_without_waiting_for_display_credit() {
+        check_transport_revocation(false, true);
+    }
+    fn check_transport_revocation(private: bool, uninstall: bool) {
         use otrios_core::canvas::{Document, Session, decode_client, encode_server};
         use otrios_interfaces::canvas::{ClientMessage, ServerMessage};
         use tungstenite::Message;
@@ -1397,6 +1630,17 @@ mod tests {
             Revoke,
         }
         let fixture = fixture();
+        let local_apps_path = fixture.root.join("local-apps.json");
+        #[cfg(unix)]
+        if uninstall {
+            use std::os::unix::fs::PermissionsExt;
+            fs::write(
+                &local_apps_path,
+                br#"{"version":1,"generation":1,"removed":[]}"#,
+            )
+            .unwrap();
+            fs::set_permissions(&local_apps_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
         let catalog_path = fixture.root.join("catalog.flex");
         let mut catalog =
             otrios_core::canvas::decode_catalog(&fs::read(&catalog_path).unwrap()).unwrap();
@@ -1405,7 +1649,7 @@ mod tests {
             .iter_mut()
             .find(|entry| entry.app.id == "three-d-lab")
             .unwrap()
-            .private = true;
+            .private = private;
         fs::write(
             &catalog_path,
             otrios_core::canvas::encode_catalog(&catalog).unwrap(),
@@ -1504,6 +1748,23 @@ mod tests {
                     }
                     match socket.read() {
                         Ok(Message::Binary(bytes)) => {
+                            if bytes.first() == Some(&otrios_interfaces::spaces::CHANNEL) {
+                                socket
+                                    .send(Message::Binary(
+                                        otrios_interfaces::session::frame(
+                                            otrios_interfaces::spaces::CHANNEL,
+                                            otrios_core::spaces::encode_event(
+                                                &otrios_interfaces::spaces::Event::Unavailable {
+                                                    version: 1,
+                                                },
+                                            )
+                                            .unwrap(),
+                                        )
+                                        .into(),
+                                    ))
+                                    .unwrap();
+                                continue;
+                            }
                             match decode_client(bytes.strip_prefix(&[1]).unwrap()).unwrap() {
                                 ClientMessage::Mount {
                                     epoch: id,
@@ -1528,6 +1789,9 @@ mod tests {
                                                     ui_hash: otrios_core::canvas::hash(&ui),
                                                     code: vec![],
                                                     state,
+
+                                                    binding: None,
+                                                    initial_view: None,
                                                 })
                                                 .unwrap(),
                                             )
@@ -1563,6 +1827,7 @@ mod tests {
             }
         });
         let options = Options {
+            local_apps: uninstall.then(|| local_apps_path.to_string_lossy().into()),
             apps: Some(fixture.root.to_string_lossy().into()),
             screen: Some("three-d-lab".into()),
             url: Some(format!("ws://{address}/stream")),
@@ -1601,7 +1866,25 @@ mod tests {
             tx.send(Input::RenderReady(frame.serial)).unwrap();
         };
         assert!(!held.paint.base.mesh.vertices.is_empty());
-        actions.send(ServerAction::Revoke).unwrap();
+        if uninstall {
+            let result = std::process::Command::new("python3")
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../scripts/device-apps.py"
+                ))
+                .arg("--file")
+                .arg(&local_apps_path)
+                .args(["remove", "three-d-lab"])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        } else {
+            actions.send(ServerAction::Revoke).unwrap();
+        }
         let deadline = Instant::now() + Duration::from_secs(3);
         while held.access.load(Ordering::Acquire) {
             assert!(
@@ -1711,6 +1994,55 @@ mod tests {
         ] {
             assert_eq!(app_stream(input), "wss://host/session");
         }
+        for input in [
+            "https://host/session?space=abc",
+            "https://host/sync?space=abc",
+        ] {
+            assert_eq!(app_stream(input), "wss://host/session?space=abc");
+            assert_eq!(
+                app_stream(&app_stream(input)),
+                "wss://host/session?space=abc"
+            );
+        }
+    }
+    #[test]
+    fn native_credential_is_private_and_never_part_of_the_session_url() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!(
+            "otrios-native-identity-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let url = "ws://127.0.0.1:8876/session?space=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        assert!(authenticated_request(url, Some(&path)).is_err());
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options
+            .open(&path)
+            .unwrap()
+            .write_all("a".repeat(64).as_bytes())
+            .unwrap();
+        let request = authenticated_request(url, Some(&path)).unwrap();
+        assert_eq!(request.uri().to_string(), url);
+        assert_eq!(
+            request.headers()["Authorization"],
+            format!("Bearer {}", "a".repeat(64))
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+            assert!(authenticated_request(url, Some(&path)).is_err());
+        }
+        fs::remove_file(path).unwrap();
     }
     #[test]
     fn obsolete_client_state_path_is_rejected_before_any_read_or_write() {

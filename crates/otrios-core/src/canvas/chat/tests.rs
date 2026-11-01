@@ -20,6 +20,290 @@ fn send(text: &str, nonce: u64, now: u64) -> Command {
         text: text.into(),
     }
 }
+fn admitted_profile(events: &[Delivery]) -> Profile {
+    let Event::Welcome {
+        you,
+        credential,
+        temporary,
+        ..
+    } = &events
+        .iter()
+        .find(|delivery| matches!(delivery.event, Event::Welcome { .. }))
+        .unwrap()
+        .event
+    else {
+        unreachable!()
+    };
+    assert!(
+        credential.is_none(),
+        "authority-bound profiles never issue a guest secret"
+    );
+    assert!(!temporary);
+    you.profile.clone()
+}
+
+#[test]
+fn admitted_profiles_are_private_actor_bindings_retained_through_restart_and_guest_expiry() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    let (legacy, token) = room.identity(None, now).unwrap();
+    let events = room
+        .join_admitted(1, "private-alice-authority-identity", true, now)
+        .unwrap();
+    let alice = admitted_profile(&events);
+    assert_ne!(alice.id, legacy.id);
+    for delivery in &events {
+        let encoded = encode_event(&delivery.event).unwrap();
+        for needle in ["private-alice-authority-identity", "authority_identity"] {
+            assert!(
+                !encoded
+                    .windows(needle.len())
+                    .any(|bytes| bytes == needle.as_bytes())
+            );
+        }
+    }
+    assert_eq!(
+        admitted_profile(
+            &room
+                .join_admitted(2, "private-alice-authority-identity", true, now + 1)
+                .unwrap()
+        )
+        .id,
+        alice.id
+    );
+    room.handle(
+        1,
+        Command::Profile {
+            name: "Engineer Alice".into(),
+            avatar: 7,
+        },
+        now + 2,
+    )
+    .unwrap();
+    let bob = admitted_profile(
+        &room
+            .join_admitted(3, "private-bob-authority-identity", false, now + 3)
+            .unwrap(),
+    );
+    assert_ne!(alice.id, bob.id);
+    assert_eq!(
+        room.members().len(),
+        2,
+        "multiple sessions share one admitted profile"
+    );
+    let guest_events = room.join(4, Some(&token), false, now + 4, true).unwrap();
+    assert!(guest_events.iter().any(
+        |delivery| matches!(&delivery.event,Event::Welcome { you, .. } if you.profile.id==legacy.id)
+    ));
+    let before = fs::read(&p).unwrap();
+    assert!(room.join_admitted(5, "", true, now + 5).is_err());
+    assert_eq!(fs::read(&p).unwrap(), before);
+    drop(room);
+    let late = now + 31 * 86_400_000;
+    let mut recovered = Room::open(Some(p.clone()), late).unwrap();
+    let restored = admitted_profile(
+        &recovered
+            .join_admitted(1, "private-alice-authority-identity", true, late)
+            .unwrap(),
+    );
+    assert_eq!(
+        (restored.id, restored.name, restored.avatar),
+        (alice.id.clone(), "Engineer Alice".into(), 7)
+    );
+    assert_eq!(
+        admitted_profile(
+            &recovered
+                .join_admitted(2, "private-bob-authority-identity", false, late)
+                .unwrap()
+        )
+        .id,
+        bob.id
+    );
+    assert!(
+        !recovered.valid_identity(&token),
+        "legacy guest expiry remains separate"
+    );
+    let mut other_collection = Room::open(None, late).unwrap();
+    assert_ne!(
+        admitted_profile(
+            &other_collection
+                .join_admitted(1, "private-alice-authority-identity", true, late)
+                .unwrap()
+        )
+        .id,
+        alice.id
+    );
+    drop(recovered);
+    let _ = fs::remove_file(p);
+}
+
+#[test]
+fn anonymous_reader_reconnects_only_after_a_valid_current_collection_view_without_joining() {
+    use crate::collection as col;
+    let channel = std::sync::Arc::new(std::sync::Mutex::new(col::Channel::new(42)));
+    let room = Room::open_in(None, 1_000_000, channel.clone()).unwrap();
+    let mut client = Client::default();
+    client.access(false);
+    client
+        .receive_initial(&room.initial_snapshot().unwrap())
+        .unwrap();
+    assert!(client.info().online);
+    client.disconnected();
+    assert!(!client.info().online);
+    assert!(client.receive_collection(&[255], true).is_err());
+    assert!(!client.info().online);
+    assert!(client.outgoing(None).unwrap().is_none(), "no presence join");
+    let mut counter = 0;
+    let select =
+        col::decode_command(&client.collection_outgoing(&mut counter).unwrap().unwrap()).unwrap();
+    let view = channel
+        .lock()
+        .unwrap()
+        .handle(
+            &mut col::ChannelSession::default(),
+            col::Access {
+                admitted: true,
+                authenticated: false,
+            },
+            select,
+        )
+        .unwrap();
+    assert!(
+        client
+            .receive_collection(&view.to_bytes().unwrap(), true)
+            .unwrap()
+    );
+    assert!(client.info().online);
+    assert!(client.info().participant.is_empty());
+    assert!(
+        client.outgoing(None).unwrap().is_none(),
+        "still no presence join or write"
+    );
+}
+
+#[test]
+fn initial_transcript_is_a_read_only_bounded_pin_and_rejects_malformed_candidates_atomically() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    room.join_admitted(1, "private-alice", true, now).unwrap();
+    for i in 1..=70 {
+        let at = now + i * 1000;
+        room.handle(1, send(&format!("Dispatch {i}"), i, at), at)
+            .unwrap();
+    }
+    let before = fs::read(&p).unwrap();
+    let bytes = room.initial_snapshot().unwrap();
+    assert_eq!(fs::read(&p).unwrap(), before);
+    assert!(!bytes.windows(13).any(|s| s == b"private-alice"));
+    let initial: Initial = flexbuffers::from_slice(&bytes).unwrap();
+    assert_eq!(initial.messages.len(), 64);
+    assert_eq!(initial.messages[0].message.sequence, 7);
+    assert_eq!(initial.messages[63].message.sequence, 70);
+    assert!(initial.older);
+    let mut malformed = vec![vec![255], vec![0; MAX_INITIAL_BYTES + 1]];
+    for kind in 0..5 {
+        let mut invalid = initial.clone();
+        match kind {
+            0 => invalid.version = 2,
+            1 => invalid.messages[1].message.sequence = 7,
+            2 => invalid.messages[0].message.sender.avatar = AVATARS,
+            3 => invalid.members.push(invalid.members[0].clone()),
+            _ => invalid.messages[0].message.text = "x".repeat(2305),
+        }
+        malformed.push(flexbuffers::to_vec(&invalid).unwrap());
+    }
+    for invalid in malformed {
+        let mut client = Client::default();
+        assert!(client.receive_initial(&invalid).is_err());
+        assert!(client.recent_messages().is_empty());
+        assert!(!client.info().online);
+        assert!(client.info().participant.is_empty());
+    }
+    let mut client = Client::default();
+    client.receive_initial(&bytes).unwrap();
+    assert_eq!(client.info().last_sequence, 70);
+    assert!(!client.info().online);
+    assert!(client.info().participant.is_empty());
+    assert!(client.confirmed());
+    assert!(matches!(
+        decode_command(&client.outgoing(None).unwrap().unwrap()).unwrap(),
+        Command::Join { credential: None }
+    ));
+    let at = now + 71_000;
+    room.handle(1, send("Later dispatch", 71, at), at).unwrap();
+    assert_eq!(client.info().last_sequence, 70, "immutable candidate pin");
+    assert_ne!(room.initial_snapshot().unwrap(), bytes);
+    room.fail_journal_writes();
+    assert!(!room.healthy());
+    assert!(room.initial_snapshot().is_err());
+    drop(room);
+    fs::remove_file(p).unwrap();
+}
+
+#[test]
+fn revoked_execution_abandons_only_ephemeral_presence_without_writing_a_deleted_journal() {
+    let p = path();
+    let now = 1_000_000;
+    let mut room = Room::open(Some(p.clone()), now).unwrap();
+    room.join_admitted(1, "alice", true, now).unwrap();
+    let admission = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    room.bind_admission(1, admission.clone()).unwrap();
+    assert!(admission.load(Ordering::Acquire));
+    let witness = fs::File::open(&p).unwrap();
+    let bytes = witness.metadata().unwrap().len();
+    fs::remove_file(&p).unwrap();
+    let events = room.abandon(1, now + 1000);
+    assert!(!admission.load(Ordering::Acquire));
+    assert!(!room.active(1));
+    assert!(room.members().is_empty());
+    assert!(events.iter().any(
+        |delivery| matches!(&delivery.event,Event::Members { members } if members.is_empty())
+    ));
+    assert_eq!(
+        witness.metadata().unwrap().len(),
+        bytes,
+        "even the unlinked inode receives no write"
+    );
+    assert!(!p.exists());
+}
+
+#[test]
+fn recovery_rejects_duplicate_or_rebound_authority_profiles() {
+    for duplicate_actor in [false, true] {
+        let p = path();
+        let (mut journal, _) = journal::Journal::open(p.clone()).unwrap();
+        for (id, identity) in [
+            ("a".repeat(32), "alice"),
+            (
+                if duplicate_actor {
+                    "b".repeat(32)
+                } else {
+                    "a".repeat(32)
+                },
+                if duplicate_actor { "alice" } else { "bob" },
+            ),
+        ] {
+            journal
+                .append(&journal::Entry::Guest(journal::Guest {
+                    profile: Profile {
+                        id,
+                        name: "Engineer".into(),
+                        avatar: 0,
+                    },
+                    digest: "c".repeat(64),
+                    last_seen_unix_ms: 1_000_000,
+                    cooldown: 0,
+                    authority_identity: Some(identity.into()),
+                }))
+                .unwrap();
+        }
+        drop(journal);
+        assert!(Room::open(Some(p.clone()), 1_000_000).is_err());
+        let _ = fs::remove_file(p);
+    }
+}
 #[test]
 fn sent_profiles_remain_immutable_across_collection_windows_and_journal_recovery() {
     use crate::collection as col;
@@ -593,4 +877,43 @@ fn exhausted_recovered_message_sequence_rejects_before_appending() {
     assert_eq!(fs::read(&p).unwrap(), before);
     drop(room);
     fs::remove_file(p).unwrap();
+}
+
+#[test]
+fn binary_attachment_codec_is_bounded_and_does_not_expand_each_byte_into_a_scalar() {
+    let bytes = (0..=255).cycle().take(MAX_ASSET_BYTES).collect::<Vec<u8>>();
+    let command = Command::SendAsset {
+        epoch: 1,
+        nonce: "a".repeat(32),
+        text: "Binary canary".into(),
+        name: "file.bin".into(),
+        bytes: bytes.clone(),
+    };
+    let encoded = encode_command(&command).unwrap();
+    assert!(encoded.len() < MAX_ASSET_BYTES + 1024);
+    assert_eq!(decode_command(&encoded).unwrap(), command);
+    let event = Event::Asset {
+        nonce: "0".repeat(32),
+        sequence: 1,
+        revision: [1; 32],
+        asset: Asset {
+            name: "file.bin".into(),
+            sha256: super::super::hex(&super::super::hash(&bytes)),
+            bytes: bytes.len() as u32,
+        },
+        bytes,
+    };
+    let encoded = encode_event(&event).unwrap();
+    assert!(encoded.len() < MAX_ASSET_BYTES + 1024);
+    assert_eq!(decode_event(&encoded).unwrap(), event);
+    assert!(
+        encode_command(&Command::SendAsset {
+            epoch: 1,
+            nonce: "a".repeat(32),
+            text: String::new(),
+            name: "large.bin".into(),
+            bytes: vec![0; MAX_ASSET_BYTES + 1]
+        })
+        .is_err()
+    );
 }

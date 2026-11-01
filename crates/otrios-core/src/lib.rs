@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Snapshot validation scaffold. Storage, atomic publication, and IPC are pending.
 
+#[cfg(feature = "canvas")]
+extern crate self as otrios_core;
+#[cfg(feature = "canvas")]
+#[doc(hidden)]
+#[path = "../../../tools/canvas/authoring.rs"]
+pub mod authoring;
+#[cfg(feature = "canvas")]
+#[doc(hidden)]
+#[path = "../../../tools/canvas/components.rs"]
+pub mod components;
+
 use std::collections::BTreeMap;
 
 use otrios_interfaces::{ContentId, Generation, ObjectId, RevisionRef};
@@ -100,6 +111,9 @@ pub mod canvas;
 
 #[cfg(feature = "canvas")]
 pub mod bundle;
+
+#[cfg(feature = "canvas")]
+pub mod spaces;
 
 #[cfg(feature = "merkle")]
 pub mod merkle;

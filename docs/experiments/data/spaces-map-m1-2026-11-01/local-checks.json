@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "source": "e2a782a76f11d339c09281714bfd587b7b04d81b",
+  "command": "TMPDIR=/private/tmp bash scripts/check.sh",
+  "rust": "1.90.0",
+  "core_library_tests": 209,
+  "spaces_metadata_tests": 25,
+  "spaces_ui_tests": 25,
+  "separate_server_client_process_cases": 22,
+  "log_sha256": "faae7ece51231be3ac00b06ef128614f8d65c1dd7415067c4c33a3f2f058ae7f",
+  "ci": {
+    "id": 41299100540,
+    "source": "e2a782a76f11d339c09281714bfd587b7b04d81b",
+    "status": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/otri/otrios/actions/runs/41299100540"
+  },
+  "browser_build": "bash scripts/build-dashboard-web.sh",
+  "exact_signed_wasm_qualified": true,
+  "tooling_followup": {
+    "file": "scripts/check-frame-release.py",
+    "sha256": "f95c99c8dab4909eb451c56b11b77a23e53f5d8a25f44a5d169c1deb327e1894",
+    "validation": [
+      "python3 -m py_compile scripts/check-frame-release.py",
+      "python3 scripts/check-frame-release.py --help",
+      "live Frame readiness with --resume-monitoring"
+    ],
+    "runtime_rebuilt": false
+  }
+}

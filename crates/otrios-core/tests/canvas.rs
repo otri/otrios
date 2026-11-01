@@ -383,6 +383,9 @@ fn activate_snapshot(
             ui: bytes,
             code,
             state: state_bytes,
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -570,7 +573,9 @@ fn corrupt_candidate_retains_previous_view_without_applying_code() {
                 state: vec![],
                 ui: b,
                 ui_hash: vec![0; 32],
-                code: vec![]
+                code: vec![],
+                binding: None,
+                initial_view: None,
             })
             .unwrap()
         )
@@ -963,7 +968,9 @@ fn app_scope_rejects_missing_slots_and_unbound_responder_domains() {
                     state: vec![],
                     ui_hash: hash(&data),
                     ui: data,
-                    code: vec![]
+                    code: vec![],
+                    binding: None,
+                    initial_view: None,
                 })
                 .unwrap()
             )
@@ -1361,6 +1368,9 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
                 ui: bytes,
                 code,
                 state: authority.save().unwrap(),
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -1372,6 +1382,454 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
     );
     pump(&mut client, &mut authority, &mut Session::default());
     assert_eq!(authority.value(1).unwrap(), 800);
+}
+
+#[test]
+fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions() {
+    for (same_collection, editable, same_actor, expected) in [
+        (true, true, true, 700),
+        (false, true, true, 420),
+        (true, false, true, 420),
+        (true, true, false, 420),
+    ] {
+        let code = code();
+        let ui = playground::ui(&code);
+        let mut client = Client::default();
+        activate(&mut client, ui.clone(), "scoped-reconnect", code.clone());
+        let mut authority = Document::new(ui.state_schema.clone(), "scoped-reconnect").unwrap();
+        let binding = |collection: &str, editable| {
+            Some(MountBinding {
+                version: 2,
+                actor: [1; 32],
+                collection: collection.repeat(32),
+                editable,
+                comments: false,
+                moderate: false,
+            })
+        };
+        let remount = |client: &mut Client, binding, expected_hint| {
+            let old_epoch = client.epoch();
+            client.reset_connection();
+            let ClientMessage::Mount {
+                epoch, collection, ..
+            } = decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("mount")
+            };
+            assert_eq!(collection, expected_hint);
+            let returning = expected_hint.is_some();
+            let bytes = encode_ui(&ui).unwrap();
+            client
+                .receive(
+                    &encode_server(&ServerMessage::Mounted {
+                        epoch,
+                        ui_hash: hash(&bytes),
+                        ui: bytes,
+                        code: code.clone(),
+                        state: authority.save().unwrap(),
+                        binding,
+                        initial_view: None,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                client.epoch(),
+                old_epoch,
+                "qualified candidate is not yet visible"
+            );
+            assert!(
+                matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::AcceptMount { epoch: accepted } if accepted == epoch)
+            );
+            if returning {
+                edit(client, "Linear slider", 730, 0);
+                assert_eq!(
+                    client.value(1).unwrap(),
+                    700,
+                    "current reconnecting view remains editable until activation"
+                );
+            }
+            client
+                .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+                .unwrap();
+        };
+        remount(&mut client, binding("a", true), None);
+        edit(&mut client, "Linear slider", 870, 0);
+        assert_eq!(client.value(1).unwrap(), 800);
+        let mut returning_binding = binding(if same_collection { "a" } else { "b" }, editable);
+        if !same_actor {
+            returning_binding.as_mut().unwrap().actor = [2; 32];
+        }
+        remount(&mut client, returning_binding, Some("a".repeat(32)));
+        assert_eq!(client.value(1).unwrap(), expected);
+        pump(&mut client, &mut authority, &mut Session::default());
+        assert_eq!(authority.value(1).unwrap(), expected);
+        if !editable {
+            assert!(!client.scene().unwrap().controls().iter().any(|node| {
+                node.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == "Linear slider")
+            }));
+            let old_control = ui
+                .handlers
+                .iter()
+                .find(|h| h.fields.contains(&1))
+                .unwrap()
+                .control;
+            assert!(!client.event(client.epoch(), old_control, 100, 0).unwrap());
+            assert_eq!(client.value(1).unwrap(), 420);
+            assert!(client.confirmed());
+        }
+    }
+}
+
+#[test]
+fn managed_candidates_remain_invisible_until_activation_and_are_discarded_on_denial_or_disconnect()
+{
+    for finish in ["activate", "deny", "disconnect", "logout"] {
+        let code = code();
+        let ui = playground::ui(&code);
+        let mut client = Client::default();
+        activate(&mut client, ui.clone(), "candidate-race", code.clone());
+        let old_epoch = client.epoch();
+        let old_scene = client.scene().unwrap();
+        client.reset_connection();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        let mut state = Document::new(ui.state_schema.clone(), "candidate-race").unwrap();
+        state.set(&[(1, 999)]).unwrap();
+        let bytes = encode_ui(&ui).unwrap();
+        assert!(
+            !client
+                .receive(
+                    &encode_server(&ServerMessage::Mounted {
+                        epoch,
+                        ui_hash: hash(&bytes),
+                        ui: bytes,
+                        code,
+                        state: state.save().unwrap(),
+                        binding: Some(MountBinding {
+                            version: 2,
+                            actor: [1; 32],
+                            collection: "a".repeat(32),
+                            editable: true,
+                            comments: false,
+                            moderate: false
+                        }),
+                        initial_view: None,
+                    })
+                    .unwrap()
+                )
+                .unwrap()
+        );
+        assert_eq!(client.epoch(), old_epoch);
+        assert_eq!(client.value(1).unwrap(), 420);
+        assert!(std::sync::Arc::ptr_eq(&old_scene, &client.scene().unwrap()));
+        assert!(!client.confirmed());
+        // Even a well-formed acknowledgement cannot precede local acceptance.
+        let activated = encode_server(&ServerMessage::Activated { epoch }).unwrap();
+        assert!(client.receive(&activated).is_err());
+        assert!(
+            matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(), ClientMessage::AcceptMount { epoch: accepted } if accepted == epoch)
+        );
+        match finish {
+            "activate" => {
+                assert!(client.receive(&activated).unwrap());
+                assert_eq!(client.epoch(), epoch);
+                assert_eq!(client.value(1).unwrap(), 999);
+                assert!(!client.receive(&activated).unwrap());
+            }
+            "deny" => {
+                client
+                    .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
+                    .unwrap();
+                assert!(client.auth_required());
+            }
+            "disconnect" => client.reset_connection(),
+            "logout" => client.clear_private(),
+            _ => unreachable!(),
+        }
+        if finish != "activate" {
+            assert!(!client.receive(&activated).unwrap());
+            assert_eq!(client.epoch(), old_epoch);
+            assert_eq!(client.value(1).unwrap(), 420);
+            assert!(std::sync::Arc::ptr_eq(&old_scene, &client.scene().unwrap()));
+        }
+    }
+}
+
+#[test]
+fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resumes_a_guest() {
+    use otrios_core::canvas::chat;
+    let initial = chat::Initial {
+        version: 1,
+        members: vec![],
+        messages: vec![chat::InitialMessage {
+            message: chat::Message {
+                assets: vec![],
+                sequence: 1,
+                at: 1_000_000,
+                sender: chat::Profile {
+                    id: "a".repeat(32),
+                    name: "Captain Test".into(),
+                    avatar: 1,
+                },
+                kind: chat::Kind::Message,
+                text: "Qualified first transcript".into(),
+                nonce: "b".repeat(32),
+            },
+            revision: [7; 32],
+        }],
+        older: false,
+    };
+    let mut full = initial.clone();
+    for sequence in 2..=64 {
+        full.messages.push(chat::InitialMessage {
+            message: chat::Message {
+                assets: vec![],
+                sequence,
+                at: 1_000_000 + sequence * 1000,
+                sender: chat::Profile {
+                    id: format!("{sequence:032x}"),
+                    name: format!("Operator {sequence}"),
+                    avatar: sequence as u8 - 1,
+                },
+                kind: chat::Kind::Message,
+                text: "é".repeat(1100),
+                nonce: format!("{sequence:032x}"),
+            },
+            revision: [sequence as u8; 32],
+        });
+    }
+    for (view, revoke) in [
+        (None, false),
+        (Some(vec![255]), false),
+        (Some(flexbuffers::to_vec(&initial).unwrap()), false),
+        (Some(flexbuffers::to_vec(&full).unwrap()), false),
+        (Some(flexbuffers::to_vec(&initial).unwrap()), true),
+    ] {
+        let ui = brass_relay::ui(&[]);
+        let mut client = Client::default();
+        client.set_font(std::sync::Arc::new(
+            otrios_core::dashboard::font::Font::from_zstd(
+                include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+                otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+            )
+            .unwrap(),
+        ));
+        client.set_chat_credential(&"c".repeat(64)).unwrap();
+        activate(&mut client, ui.clone(), "chat-candidate", vec![]);
+        let old_epoch = client.epoch();
+        client.reset_connection();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        let previous = client.scene().unwrap();
+        let bytes = encode_ui(&ui).unwrap();
+        let usable = view.as_ref().is_some_and(|v| v.len() > 1);
+        let result = client.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 2,
+                    actor: [1; 32],
+                    collection: "d".repeat(32),
+                    editable: true,
+                    comments: false,
+                    moderate: true,
+                }),
+                initial_view: view,
+            })
+            .unwrap(),
+        );
+        assert_eq!(client.epoch(), old_epoch);
+        assert!(std::sync::Arc::ptr_eq(&previous, &client.scene().unwrap()));
+        assert!(
+            client.chat_messages().is_empty(),
+            "candidate transcript remains invisible"
+        );
+        let decision = client.outgoing().unwrap();
+        if usable {
+            assert!(!result.unwrap());
+            assert!(decision.is_none(), "first-view layout precedes acceptance");
+            if revoke {
+                client
+                    .receive(&encode_server(&ServerMessage::AccessRequired { epoch }).unwrap())
+                    .unwrap();
+                assert!(
+                    matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+                    ClientMessage::Leave { epoch: disposed } if disposed == epoch)
+                );
+                assert!(matches!(
+                    decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+                    ClientMessage::CancelMount { .. }
+                ));
+                for turn in 1..=32 {
+                    client.tick(turn * 8, 1000).unwrap();
+                    assert!(client.outgoing().unwrap().is_none());
+                    assert_eq!(client.epoch(), old_epoch);
+                    assert!(
+                        client.chat_messages().is_empty(),
+                        "a revoked warming candidate cannot expose its transcript"
+                    );
+                }
+                continue;
+            }
+            let mut decision = None;
+            for turn in 1..=4096 {
+                client.tick(turn * 8, 1000).unwrap();
+                assert_eq!(client.epoch(), old_epoch);
+                assert!(client.chat_messages().is_empty(), "warming stays offscreen");
+                if let Some(bytes) = client.outgoing().unwrap() {
+                    decision = Some(decode_client(&bytes).unwrap());
+                    break;
+                }
+            }
+            let decision = decision.expect("bounded candidate text qualification");
+            assert!(matches!(decision, ClientMessage::AcceptMount { .. }));
+            client
+                .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+                .unwrap();
+            assert_eq!(client.chat_messages()[0].text, "Qualified first transcript");
+            let first = client
+                .document_frame()
+                .expect("first document before any active tick or Welcome");
+            assert!(
+                first
+                    .draws
+                    .iter()
+                    .any(|draw| !draw.chunk.mesh.glyph_vertices.is_empty()),
+                "the candidate must qualify readable text, not only transcript records"
+            );
+            assert!(!client.chat_info().unwrap().online);
+            assert!(client.space_managed());
+            let bytes = client.chat_outgoing().unwrap().unwrap();
+            let (scope, bytes) = otrios_interfaces::channels::scope(&bytes).unwrap();
+            assert_eq!(scope, epoch);
+            assert_eq!(
+                chat::decode_command(bytes).unwrap(),
+                chat::Command::Join { credential: None }
+            );
+            let scene = format!("{:?}", client.scene().unwrap());
+            assert!(!scene.contains("Monitoring admin sign-in"));
+            for viewport in [[1280., 800.], [800., 1280.], [393., 695.]] {
+                client.set_viewport(viewport).unwrap();
+                let scene = client.scene().unwrap();
+                let controls = scene.controls();
+                let quit = controls
+                    .iter()
+                    .filter(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == "Quit"))
+                    .collect::<Vec<_>>();
+                assert_eq!(quit.len(), 1, "one host-owned Quit control");
+                assert!(matches!(
+                    quit[0].node.responder,
+                    Some(otrios_interfaces::scene::TouchResponder::Activate(
+                        otrios_interfaces::scene::Action::AppEvent(255)
+                    ))
+                ));
+                let bounds = |c: &otrios_core::dashboard::scene::Located<'_>| {
+                    [
+                        c.origin[0],
+                        c.origin[1],
+                        c.node.frame.width * c.scale,
+                        c.node.frame.height * c.scale,
+                    ]
+                };
+                let q = bounds(quit[0]);
+                for c in controls.iter().filter(|c| {
+                    c.node
+                        .semantics
+                        .as_ref()
+                        .is_some_and(|s| matches!(s.label.as_str(), "Members" | "Edit profile"))
+                }) {
+                    let r = bounds(c);
+                    assert!(
+                        q[0] + q[2] <= r[0]
+                            || r[0] + r[2] <= q[0]
+                            || q[1] + q[3] <= r[1]
+                            || r[1] + r[3] <= q[1],
+                        "Quit must not cover another header action"
+                    );
+                }
+            }
+        } else {
+            assert!(result.is_err());
+            let decision = decode_client(&decision.unwrap()).unwrap();
+            assert!(matches!(decision, ClientMessage::CancelMount { .. }));
+        }
+    }
+}
+
+#[test]
+fn managed_aggregate_candidates_require_a_usable_initial_view_before_acceptance() {
+    for view in [
+        None,
+        Some(vec![255]),
+        Some(
+            authoring::AppUi::new("feed", "Feed", authoring::schema("empty", &[]))
+                .build("Qualified aggregate", vec![])
+                .layout,
+        ),
+    ] {
+        let ui = monitoring_app::ui(&[]);
+        let mut client = Client::default();
+        activate_access(&mut client, ui.clone(), "aggregate-candidate", vec![], true);
+        let previous = client.scene().unwrap();
+        let old_epoch = client.epoch();
+        client.reset_connection();
+        let ClientMessage::Mount { epoch, .. } =
+            decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("mount")
+        };
+        let bytes = encode_ui(&ui).unwrap();
+        let usable = view.as_ref().is_some_and(|v| v.len() > 1);
+        let result = client.receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 2,
+                    actor: [1; 32],
+                    collection: "b".repeat(32),
+                    editable: false,
+                    comments: false,
+                    moderate: false,
+                }),
+                initial_view: view,
+            })
+            .unwrap(),
+        );
+        assert_eq!(client.epoch(), old_epoch);
+        assert!(std::sync::Arc::ptr_eq(&previous, &client.scene().unwrap()));
+        let decision = decode_client(&client.outgoing().unwrap().unwrap()).unwrap();
+        if usable {
+            assert!(!result.unwrap());
+            assert!(matches!(decision, ClientMessage::AcceptMount { .. }));
+            assert!(
+                client
+                    .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+                    .unwrap()
+            );
+            assert!(format!("{:?}", client.scene().unwrap()).contains("Qualified aggregate"));
+        } else {
+            assert!(result.is_err());
+            assert!(matches!(decision, ClientMessage::CancelMount { .. }));
+        }
+    }
 }
 
 #[test]
@@ -1408,7 +1866,9 @@ fn staged_reload_freezes_old_editor_and_rejected_candidate_leaves_it_usable() {
                     ui: encode_ui(&ui).unwrap(),
                     ui_hash: vec![0; 32],
                     code: vec![],
-                    state: authority.save().unwrap()
+                    state: authority.save().unwrap(),
+                    binding: None,
+                    initial_view: None,
                 })
                 .unwrap()
             )
@@ -1502,7 +1962,9 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                     ui: bytes.clone(),
                     ui_hash: vec![0; 32],
                     code: code.clone(),
-                    state: authority.save().unwrap()
+                    state: authority.save().unwrap(),
+                    binding: None,
+                    initial_view: None,
                 })
                 .unwrap()
             )
@@ -1538,6 +2000,9 @@ fn mount_decisions_precede_sync_and_rejected_candidate_retains_old_wire_epoch() 
                 ui: bytes,
                 code,
                 state: authority.save().unwrap(),
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -1622,6 +2087,9 @@ fn old_private_lease_revocation_preserves_newer_public_mount() {
                 ui: bytes,
                 code: vec![],
                 state: vec![],
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -2035,6 +2503,9 @@ fn reconnect_keeps_current_ui_editable_and_rebases_edits_made_while_offline() {
             ui: bytes,
             code: vec![],
             state,
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -2386,6 +2857,9 @@ fn home_ui_replacement_retains_state_and_old_scene_and_rejects_stale_input() {
                 ui_hash: hash(&bytes),
                 code: vec![],
                 state,
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -2427,7 +2901,9 @@ fn rejected_home_update_restores_catalog_and_retains_usable_scene() {
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code: vec![],
-                state: vec![]
+                state: vec![],
+                binding: None,
+                initial_view: None,
             })
             .unwrap()
         )
@@ -2519,6 +2995,9 @@ fn every_app_uses_the_same_idempotent_ui_replacement_contract() {
                 ui: bytes,
                 code,
                 state: authority.save().unwrap(),
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -2588,6 +3067,9 @@ fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_n
             ui: bytes,
             code: after.clone(),
             state: authority.save().unwrap(),
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -2635,6 +3117,9 @@ fn behavior_replacement_preserves_document_replaces_guest_ram_and_duplicate_is_n
             ui: bytes,
             code: vec![],
             state: authority.save().unwrap(),
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -2678,7 +3163,9 @@ fn invalid_behavior_replacement_retains_active_guest_and_permissions() {
                 ui_hash: hash(&bytes),
                 ui: bytes,
                 code: bad,
-                state: authority.save().unwrap()
+                state: authority.save().unwrap(),
+                binding: None,
+                initial_view: None,
             })
             .unwrap()
         )
@@ -3004,6 +3491,9 @@ fn entry_and_app_links_resolve_app_owned_catalog_state_references() {
                 ui_hash: hash(&bytes),
                 code: vec![],
                 state: vec![],
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -3179,6 +3669,9 @@ fn cached_ui_mount_still_qualifies_fresh_state_and_rejects_wrong_digest() {
             ui_hash,
             code: vec![],
             state: authority.save().unwrap(),
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap()
     };
@@ -3726,6 +4219,7 @@ fn chat_avatars_track_document_drag_before_the_next_clock_tick() {
     };
     let messages = (1..=40)
         .map(|i| Message {
+            assets: vec![],
             sequence: i,
             at: 1_700_000_000_000,
             sender: member.profile.clone(),
@@ -3947,6 +4441,9 @@ fn phone_breadcrumb_qualifies_the_destination_in_its_layout_viewport() {
                 ui: home_ui,
                 code: vec![],
                 state: vec![],
+
+                binding: None,
+                initial_view: None,
             })
             .unwrap(),
         )
@@ -4367,6 +4864,9 @@ fn brass_relay_consumes_only_bounded_collection_views_and_receipt_confirmed_send
             ui,
             code: vec![],
             state: vec![],
+
+            binding: None,
+            initial_view: None,
         })
         .unwrap(),
     )
@@ -4504,4 +5004,217 @@ fn native_keyboard_short_taps_have_local_feedback_without_rebuilding_the_scene()
             .is_empty(),
         "cancel clears keyboard feedback"
     );
+}
+
+#[test]
+fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() {
+    use otrios_interfaces::chat;
+    let ui = brass_relay::ui(&[]);
+    let mut client = Client::default();
+    client.set_font(std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    ));
+    client.set_chat_credential(&"c".repeat(64)).unwrap();
+    activate(&mut client, ui.clone(), "chat-read-only", vec![]);
+    client.reset_connection();
+    let ClientMessage::Mount { epoch, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount");
+    };
+    let initial = chat::Initial {
+        version: 1,
+        members: vec![],
+        messages: vec![chat::InitialMessage {
+            message: chat::Message {
+                assets: vec![],
+                sequence: 1,
+                at: 1_000_000,
+                sender: chat::Profile {
+                    id: "a".repeat(32),
+                    name: "Author".into(),
+                    avatar: 1,
+                },
+                kind: chat::Kind::Message,
+                text: "Readable without presence".into(),
+                nonce: "b".repeat(32),
+            },
+            revision: [1; 32],
+        }],
+        older: false,
+    };
+    let bytes = encode_ui(&ui).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: vec![],
+                binding: Some(MountBinding {
+                    version: 2,
+                    actor: [1; 32],
+                    collection: "d".repeat(32),
+                    editable: false,
+                    comments: false,
+                    moderate: false,
+                }),
+                initial_view: Some(flexbuffers::to_vec(&initial).unwrap()),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let mut accepted = false;
+    for turn in 1..=128 {
+        client.tick(turn * 8, 1_000_000).unwrap();
+        if let Some(bytes) = client.outgoing().unwrap() {
+            assert!(
+                matches!(decode_client(&bytes).unwrap(), ClientMessage::AcceptMount { epoch: seen } if seen == epoch)
+            );
+            accepted = true;
+            break;
+        }
+    }
+    assert!(accepted);
+    client
+        .receive(&encode_server(&ServerMessage::Activated { epoch }).unwrap())
+        .unwrap();
+    assert_eq!(client.chat_messages().len(), 1);
+    assert!(client.chat_info().unwrap().online);
+    assert!(
+        !client
+            .send_chat_attachment(epoch, "file.bin", &[0, 1, 255, 42])
+            .unwrap()
+    );
+    assert!(
+        !client
+            .send_chat_attachment(epoch + 1, "file.bin", &[0, 1, 255, 42])
+            .unwrap()
+    );
+    assert!(
+        client.chat_outgoing().unwrap().is_none(),
+        "read admission cannot create a guest profile"
+    );
+    assert!(
+        client.collection_outgoing().unwrap().is_some(),
+        "read-only hosts subscribe to live windows without joining"
+    );
+    assert!(
+        !client
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .any(|control| control.node.semantics.as_ref().unwrap().label == "Message composer")
+    );
+    client.show_keyboard().unwrap();
+    assert!(
+        !client
+            .hardware_edit(&otrios_interfaces::keyboard::Edit::Commit(
+                "cannot send".into()
+            ))
+            .unwrap()
+    );
+    assert!(client.chat_outgoing().unwrap().is_none());
+}
+
+#[test]
+fn fixed_chat_controls_work_with_older_descriptions_and_reject_publisher_remapping() {
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let ui = brass_relay::ui(&[]);
+    let mut older = ui.clone();
+    older
+        .handlers
+        .retain(|handler| !matches!(handler.operation, Operation::Chat(command) if command > 200));
+    let mut client = Client::default();
+    client.set_font(font.clone());
+    activate(&mut client, older, "older-chat-description", vec![]);
+    let control = |client: &Client, label: &str| {
+        client
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .find(|owner| {
+                owner
+                    .node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == label)
+            })
+            .unwrap()
+            .node
+            .id
+    };
+    let commands = control(&client, "Commands");
+    client.activate(client.epoch(), commands).unwrap();
+    let browse = control(&client, "Browse dispatches");
+    assert_eq!(client.control_value(browse).unwrap(), None);
+    assert!(client.activate(client.epoch(), browse).unwrap());
+    assert!(client.scene().unwrap().controls().iter().any(|owner| {
+        owner
+            .node
+            .semantics
+            .as_ref()
+            .is_some_and(|s| s.label == "Next dispatches")
+    }));
+    for reserve_quit in [false, true] {
+        let mut forged = ui.clone();
+        if reserve_quit {
+            forged.handlers.push(Handler {
+                control: 255,
+                event: 0,
+                kind: GestureKind::Activate,
+                operation: Operation::Key(0),
+                fields: vec![],
+            });
+        } else {
+            for handler in &mut forged.handlers {
+                if handler.control == 59 {
+                    handler.operation = Operation::Chat(210);
+                } else if handler.control == 250 {
+                    handler.operation = Operation::Chat(19);
+                }
+            }
+        }
+        let mut rejected = Client::default();
+        rejected.set_font(font.clone());
+        let bytes = encode_ui(&forged).unwrap();
+        rejected
+            .admit_catalog(
+                &encode_catalog(&Catalog {
+                    format: "otrios-app-catalog-v1".into(),
+                    apps: vec![CatalogEntry {
+                        path: "brass-relay".into(),
+                        private: false,
+                        ui_hash: hash(&bytes),
+                        app: App {
+                            id: "brass-relay".into(),
+                            title: forged.title.clone(),
+                            ui_ref: forged.ui_ref.clone(),
+                            state_ref: "forged-chat".into(),
+                            status: "canvas-app".into(),
+                            dependencies: vec![],
+                        },
+                    }],
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let error = rejected
+            .mount_local(&bytes, "forged-chat", &[], &[])
+            .unwrap_err();
+        assert!(error.contains("Chat host controls"), "{error}");
+    }
 }

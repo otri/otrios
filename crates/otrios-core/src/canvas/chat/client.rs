@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Mount-local room state. Keystrokes never become CRDT writes.
+#[path = "sharing.rs"]
+mod sharing;
 use super::super::document::{Block, BlockId, Inline, Source};
 use super::*;
 use crate::dashboard::{font::Font, keyboard::TextBuffer};
@@ -11,7 +13,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 pub const VIEWPORT: u16 = 60_000;
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Panel {
     None,
     Members,
@@ -20,6 +22,12 @@ pub(super) enum Panel {
     Kick,
     Help,
     Auth,
+    Dispatches,
+    Dispatch,
+    Destinations,
+    Publish,
+    Redact,
+    Assets,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Focus {
@@ -58,6 +66,7 @@ pub(crate) enum Action {
     BrowserLogin,
 }
 pub struct Client {
+    pub(super) sharing: sharing::Sharing,
     pub(super) you: Option<Member>,
     pub(super) members: Vec<Member>,
     pub(super) drafts: BTreeMap<String, RemoteDraft>,
@@ -86,6 +95,9 @@ pub struct Client {
     pub(super) private: bool,
     pub(super) effects: u8,
     pub(super) native: bool,
+    pub(super) managed: bool,
+    pub(super) read_only: bool,
+    pub(super) quit_control: Option<u8>,
     pub(super) online: bool,
     pub(super) temporary: bool,
     pub(super) kicked: Option<(String, u64)>,
@@ -100,6 +112,7 @@ pub struct Client {
     pub(super) history_wait: bool,
     pub(super) pending: VecDeque<Pending>,
     queue: VecDeque<Command>,
+    pub(super) download: Option<(Asset, Vec<u8>)>,
     pub(super) joining: bool,
     epoch: u64,
     draft_generation: u64,
@@ -137,6 +150,7 @@ pub struct Info {
 impl Default for Client {
     fn default() -> Self {
         Self {
+            sharing: sharing::Sharing::default(),
             you: None,
             members: vec![],
             drafts: BTreeMap::new(),
@@ -165,6 +179,9 @@ impl Default for Client {
             private: false,
             effects: 2,
             native: false,
+            managed: false,
+            read_only: false,
+            quit_control: None,
             online: false,
             temporary: false,
             kicked: None,
@@ -179,6 +196,7 @@ impl Default for Client {
             history_wait: false,
             pending: VecDeque::new(),
             queue: VecDeque::new(),
+            download: None,
             joining: false,
             epoch: 0,
             draft_generation: 0,
@@ -216,7 +234,91 @@ fn day_label(day: u64, today: u64) -> String {
     year += i64::from(m <= 2);
     format!("{year:04}-{m:02}-{d:02}")
 }
+pub(super) fn read_action(command: u16) -> bool {
+    matches!(
+        command,
+        0 | 3 | 6 | 12 | 13 | 18 | 19 | 100..=167 | 190 | 191 | 200..=210 | 213
+    )
+}
 impl Client {
+    pub(crate) fn managed(&mut self, quit_control: Option<u8>) {
+        self.managed = quit_control.is_some();
+        self.quit_control = quit_control;
+    }
+    pub(crate) fn access(&mut self, write: bool) {
+        self.read_only = !write;
+        if self.read_only {
+            self.focus = None;
+            self.compose.replace("");
+            self.pending.clear();
+            self.queue.clear();
+            self.online = false; // admitted after the first readable transcript
+            self.joining = false;
+            self.you = None;
+        }
+    }
+    /// Install a candidate's first readable transcript without joining presence
+    /// or enabling collaborative actions. The enclosing mount owns activation.
+    pub fn receive_initial(&mut self, bytes: &[u8]) -> Result<()> {
+        super::check(bytes, MAX_INITIAL_BYTES)?;
+        let initial: Initial = flexbuffers::from_slice(bytes).map_err(err)?;
+        if initial.version != 1
+            || initial.members.len() > 68
+            || initial.messages.len() > 64
+            || self.online
+            || self.joining
+            || !self.messages.is_empty()
+        {
+            return Err("Invalid initial room view".into());
+        }
+        let profile = |profile: &Profile| -> Result<()> {
+            if !super::valid_hex(&profile.id, 16) || profile.avatar >= AVATARS {
+                return Err("Invalid initial room profile".into());
+            }
+            super::authority::name(&profile.name)?;
+            Ok(())
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for member in &initial.members {
+            profile(&member.profile)?;
+            if member.generation == 0 || !seen.insert(&member.profile.id) {
+                return Err("Invalid initial room roster".into());
+            }
+        }
+        let mut previous = 0;
+        for row in &initial.messages {
+            let message = &row.message;
+            profile(&message.sender)?;
+            super::validate_message_assets(&message.assets)?;
+            super::authority::text(&message.text, 2304, 1200, 18)?;
+            if message.sequence <= previous
+                || (!message.nonce.is_empty() && !super::valid_hex(&message.nonce, 16))
+            {
+                return Err("Invalid initial room transcript".into());
+            }
+            previous = message.sequence;
+        }
+        self.message_revisions = initial
+            .messages
+            .iter()
+            .map(|row| (row.message.sequence, row.revision))
+            .collect();
+        self.messages = initial
+            .messages
+            .into_iter()
+            .map(|row| row.message)
+            .collect();
+        self.members = initial.members;
+        self.online = self.read_only; // read subscription, without a profile/presence
+        if self.read_only {
+            self.select_window(crate::collection::Anchor::Tail)?;
+        }
+        self.older = initial.older;
+        self.reset = true;
+        self.tail = true;
+        self.authors_revision = self.authors_revision.saturating_add(1);
+        Ok(())
+    }
     pub(crate) fn set_header_width(&mut self, width: f32) {
         self.header_width = Some(width);
     }
@@ -250,7 +352,7 @@ impl Client {
             authors_revision: self.authors_revision,
             first_sequence: self.messages.front().map_or(0, |m| m.sequence),
             last_sequence: self.messages.back().map_or(0, |m| m.sequence),
-            pending: self.pending.len(),
+            pending: self.pending.len() + self.sharing.operations.len(),
             drafts: self.drafts.len(),
             history_loading: self.history_wait,
             selected_bytes: self
@@ -411,9 +513,14 @@ impl Client {
                 } else {
                     message.text.clone()
                 };
+                let attachments = message
+                    .assets
+                    .iter()
+                    .map(|a| format!("\n[Attachment: {} ({} bytes)]", a.name, a.bytes))
+                    .collect::<String>();
                 Block::new(
                     id,
-                    format!("{header}\n{}\n\n", body.replace('\r', "")),
+                    format!("{header}\n{}{attachments}\n\n", body.replace('\r', "")),
                     64.,
                     Some(self.avatar_inline(message.sender.avatar)?),
                 )?
@@ -439,6 +546,10 @@ impl Client {
         }
     }
     pub fn disconnected(&mut self) {
+        self.download = None;
+        self.sharing.operations.clear();
+        self.sharing.clear_preview();
+        self.panel = Panel::None;
         self.collection.disconnected();
         self.online = false;
         self.joining = false;
@@ -451,7 +562,7 @@ impl Client {
         self.draft_dirty = true;
     }
     pub fn confirmed(&self) -> bool {
-        self.pending.is_empty()
+        self.pending.is_empty() && self.sharing.operations.is_empty()
     }
     pub fn editing(&self) -> bool {
         self.focus.is_some()
@@ -463,12 +574,26 @@ impl Client {
         }
     }
     pub fn outgoing(&mut self, credential: Option<String>) -> Result<Option<Vec<u8>>> {
+        if self.read_only {
+            if let Some(bytes) = self.operation_outgoing()? {
+                return Ok(Some(bytes));
+            }
+            while let Some(command) = self.queue.pop_front() {
+                if matches!(command, Command::ReadAsset { .. }) {
+                    return encode_command(&command).map(Some);
+                }
+            }
+            return Ok(None);
+        }
         if !self.online && !self.joining && self.kicked.is_none() {
             self.joining = true;
             return encode_command(&Command::Join { credential }).map(Some);
         }
         if !self.online {
             return Ok(None);
+        }
+        if let Some(bytes) = self.operation_outgoing()? {
+            return Ok(Some(bytes));
         }
         if let Some(command) = self.queue.pop_front() {
             return encode_command(&command).map(Some);
@@ -527,6 +652,43 @@ impl Client {
     pub fn receive(&mut self, event: Event, follow: bool) -> Result<Option<String>> {
         let mut credential = None;
         match event {
+            Event::Published { nonce, .. } => {
+                if self.operation_reply(&nonce) {
+                    self.say("Copy published in the destination Space");
+                }
+            }
+            Event::Redacted { nonce, .. } => {
+                if self.operation_reply(&nonce) {
+                    self.say("Dispatch deleted");
+                }
+            }
+            Event::Asset {
+                nonce,
+                sequence,
+                revision,
+                asset,
+                bytes,
+            } => {
+                super::validate_asset(&asset)?;
+                if bytes.len() != asset.bytes as usize
+                    || super::super::hex(&super::super::hash(&bytes)) != asset.sha256
+                {
+                    return Err("Attachment integrity mismatch".into());
+                }
+                if let Some((_, wanted_sequence, wanted_revision, index)) =
+                    self.sharing.download.as_ref().filter(|r| r.0 == nonce)
+                    && *wanted_sequence == sequence
+                    && *wanted_revision == revision
+                    && self.message_revisions.get(&sequence) == Some(&revision)
+                    && self.messages.iter().any(|m| {
+                        m.sequence == sequence && m.assets.get(*index as usize) == Some(&asset)
+                    })
+                {
+                    self.sharing.download = None;
+                    self.download = Some((asset, bytes));
+                    self.say("Attachment ready");
+                }
+            }
             Event::Left => {
                 self.clear_collection();
                 self.disconnected();
@@ -575,7 +737,8 @@ impl Client {
                     .retain(|id, _| self.members.iter().any(|m| m.profile.id == *id));
             }
             Event::Receipt { nonce, .. } => {
-                let mine = self.pending.iter().any(|p| p.nonce == nonce);
+                let operation = self.operation_reply(&nonce);
+                let mine = operation || self.pending.iter().any(|p| p.nonce == nonce);
                 self.pending.retain(|p| p.nonce != nonce);
                 if mine {
                     self.tail = true;
@@ -665,7 +828,13 @@ impl Client {
                 self.password.replace("");
                 self.panel = Panel::None;
                 self.focus = None;
-                self.say(if admin {
+                self.say(if self.managed {
+                    if admin {
+                        "Room moderation is available"
+                    } else {
+                        "Room moderation is unavailable"
+                    }
+                } else if admin {
                     "Monitoring admin signed in"
                 } else {
                     "Admin signed out"
@@ -682,8 +851,36 @@ impl Client {
                 self.panel = Panel::None;
                 self.focus = None;
                 self.pending.clear();
+                self.sharing.operations.clear();
+                self.sharing.clear_preview();
             }
             Event::Error { message, nonce } => {
+                if let Some(nonce) = &nonce {
+                    if self.compose.text().is_empty()
+                        && let Some(text) = self.sharing.operations.iter().find_map(|operation| {
+                            match &operation.command {
+                                Command::SendAsset {
+                                    nonce: pending,
+                                    text,
+                                    ..
+                                } if pending == nonce => Some(text.clone()),
+                                _ => None,
+                            }
+                        })
+                    {
+                        self.compose.replace(&text);
+                        self.compose.place_cursor(text.len());
+                    }
+                    self.operation_reply(nonce);
+                    if self
+                        .sharing
+                        .download
+                        .as_ref()
+                        .is_some_and(|r| &r.0 == nonce)
+                    {
+                        self.sharing.download = None;
+                    }
+                }
                 if let Some(nonce) = nonce.as_ref()
                     && let Some(p) = self.pending.iter().find(|p| p.nonce == *nonce)
                     && self.compose.text().is_empty()
@@ -796,6 +993,9 @@ impl Client {
         changed
     }
     pub fn edit(&mut self, edit: &Edit) -> Result<bool> {
+        if self.read_only {
+            return Ok(false);
+        }
         if edit == &Edit::Enter {
             if self.focus == Some(Focus::Compose) {
                 self.send()?;
@@ -907,6 +1107,12 @@ impl Client {
         self.focus = None;
     }
     pub(crate) fn action(&mut self, command: u16) -> Result<Action> {
+        if self.read_only && !read_action(command) {
+            return Ok(Action::Changed);
+        }
+        if let Some(action) = self.sharing_action(command)? {
+            return Ok(action);
+        }
         match command {
             0 => return Ok(Action::Home),
             1 => {
@@ -929,6 +1135,7 @@ impl Client {
                 self.notice.clear();
             }
             6 => {
+                self.sharing.clear_preview();
                 self.panel = Panel::None;
                 self.focus = None;
                 self.password.replace("");
@@ -963,7 +1170,7 @@ impl Client {
                 self.select_window(crate::collection::Anchor::Tail)?;
             }
             13 => self.older()?,
-            14 => {
+            14 if !self.managed => {
                 if self.you.as_ref().is_some_and(|y| y.admin) {
                     self.queue(Command::SignOut);
                 } else if self.native {
@@ -973,9 +1180,9 @@ impl Client {
                     return Ok(Action::BrowserLogin);
                 }
             }
-            15 => self.focus = Some(Focus::Username),
-            16 => self.focus = Some(Focus::Password),
-            17 => {
+            15 if !self.managed => self.focus = Some(Focus::Username),
+            16 if !self.managed => self.focus = Some(Focus::Password),
+            17 if !self.managed => {
                 self.queue(Command::Authenticate {
                     username: self.username.text().into(),
                     password: self.password.text().into(),
@@ -1044,6 +1251,9 @@ impl Client {
         Ok(())
     }
     pub fn pointer(&mut self, event: PointerEvent, now: u64) -> Option<bool> {
+        if self.read_only {
+            return None;
+        }
         let [x, y] = event.position;
         if self.panel != Panel::None {
             return None;
@@ -1232,6 +1442,7 @@ mod tests {
     use super::*;
     fn message(sequence: u64, day: u64) -> Message {
         Message {
+            assets: vec![],
             sequence,
             at: day * 86_400_000 + 12 * 3_600_000,
             sender: Profile {

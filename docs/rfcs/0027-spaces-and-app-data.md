@@ -1,9 +1,17 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0027: Spaces, membership and app data
 
-Date: 2026-10-31. Status: draft for review; no runtime implementation or
-deployment in this change. Records the agreed product model and proposes bounded
-implementation milestones. Builds on [standalone bundles](0025-standalone-app-bundles.md),
+Date: 2026-10-31. Status: bounded PoC implementation deployed and qualified on
+2026-11-01. Authority, browser and ARM emulation checkpoints are recorded in the
+[software qualification report](../experiments/spaces-admission-2026-11-01.md).
+The [Frame rollout record](../experiments/spaces-frame-2026-11-01.md) records
+confirmed-data migration, physical hardware-path acceptance and signed rollback.
+The [runtime guide](../SPACES.md) records the implemented contracts and operation.
+The proposed [Spaces map and transfer experience](0028-spaces-map-sharing-and-portable-data.md)
+extends the presentation and retained-data model without changing this deployed baseline.
+
+This RFC records the agreed product model and bounded implementation milestones.
+Builds on [standalone bundles](0025-standalone-app-bundles.md),
 [durable app state](0006-durable-canvas-merkle-adapter.md) and the
 [shared session](0009-unified-server-session.md).
 
@@ -19,7 +27,7 @@ Use two membership roles: Member and Admin. Support multiple Admins. Visitors
 may view or comment when the Space explicitly allows it. Different audiences
 require different Spaces or an explicit publication into another Space.
 
-This draft replaces RFC 0025's proposed `/PrivateApplications` convention.
+This RFC replaces RFC 0025's proposed `/PrivateApplications` convention.
 `/Applications` is the proposed installed-bundle namespace. Space membership and
 audience policy govern access to app experiences and data, independently of
 bundle placement. These are OTriOS concepts, not Linux user/group permissions.

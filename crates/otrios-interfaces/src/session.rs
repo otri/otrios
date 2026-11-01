@@ -4,9 +4,8 @@ use crate::release::Release;
 use serde::{Deserialize, Serialize};
 pub const VERSION: u32 = 1;
 pub const MAX_CONTROL_BYTES: usize = 8192;
-pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v8";
-pub const STATE: u8 = 1;
-pub const INK: u8 = 2;
+pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v17";
+pub use crate::channels::{INK, STATE, frame, scope, scoped};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientControl {
@@ -50,8 +49,4 @@ impl ServerControl {
             _ => None,
         }
     }
-}
-pub fn frame(channel: u8, mut bytes: Vec<u8>) -> Vec<u8> {
-    bytes.insert(0, channel);
-    bytes
 }

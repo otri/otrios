@@ -43,6 +43,33 @@ impl CanvasApp {
     pub fn admit_catalog(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.inner.admit_catalog(bytes)
     }
+    pub fn configure_spaces(&mut self, selected: Option<String>) -> Result<(), String> {
+        self.inner.configure_spaces(selected.as_deref())
+    }
+    pub fn spaces_ui(&self) -> bool {
+        self.inner.spaces_ui()
+    }
+    pub fn take_space_switch(&mut self) -> Option<String> {
+        self.inner.take_space_switch()
+    }
+    pub fn select_space(&mut self, space: &str) -> Result<(), String> {
+        self.inner.select_space(space)
+    }
+    pub fn take_sign_in(&mut self) -> bool {
+        self.inner.take_sign_in()
+    }
+    pub fn spaces_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
+        self.inner.spaces_outgoing()
+    }
+    pub fn space_managed(&self) -> bool {
+        self.inner.space_managed()
+    }
+    pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool, String> {
+        self.inner.receive_spaces(bytes)
+    }
+    pub fn spaces_info(&self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.spaces_snapshot()).map_err(|e| e.to_string())
+    }
     pub fn can_update_catalog(&mut self) -> bool {
         self.inner.can_update_catalog()
     }
@@ -165,6 +192,20 @@ impl CanvasApp {
     pub fn ink_outgoing(&mut self, now: f64) -> Vec<u8> {
         self.inner.ink_outgoing(now.max(0.) as u64)
     }
+    pub fn take_chat_upload_request(&mut self) -> Option<u32> {
+        self.inner.take_chat_upload_request()
+    }
+    pub fn send_chat_attachment(
+        &mut self,
+        epoch: u32,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<bool, String> {
+        self.inner.send_chat_attachment(epoch, name, bytes)
+    }
+    pub fn take_chat_download(&mut self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.take_chat_download()).map_err(|e| e.to_string())
+    }
     pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.inner.chat_outgoing()
     }
@@ -218,6 +259,9 @@ impl CanvasApp {
         self.inner.hardware_edit(&edit)
     }
     pub fn presentation_kind(&self) -> String {
+        if self.inner.spaces_map() {
+            return "spaces-map".into();
+        }
         match self.inner.presentation() {
             Some(Presentation::Motion { .. }) => "motion",
             Some(Presentation::TextScroll { .. }) => "text-scroll",

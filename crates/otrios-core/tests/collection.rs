@@ -634,3 +634,26 @@ fn valid_merkle_bytes_with_mixed_membership_and_record_versions_are_rejected_ato
         pinned.snapshot().hash()
     );
 }
+
+#[test]
+fn reviewed_removal_preserves_old_pins_and_committed_identity_across_page_collapse() {
+    let pinned = collection(1100);
+    assert_eq!(
+        pinned.record(1500).unwrap().hash(),
+        record(b"visible").hash()
+    );
+    assert!(pinned.record(1501).is_err());
+    assert_eq!(pinned.remove(1500, [0; 32]).unwrap_err(), Error::Conflict);
+    let expected = record(b"visible").hash();
+    let mut current = pinned.clone();
+    for index in (1..=1100).rev() {
+        current = current.remove(index * 3, expected).unwrap();
+        assert!(current.record(index * 3).is_err());
+        assert!(pinned.record(index * 3).is_ok());
+        assert_eq!(current.len(), index as usize - 1);
+    }
+    assert!(current.is_empty());
+    assert!(current.append(3300, record(b"stale")).is_err());
+    assert!(current.append(3301, record(b"fresh")).is_ok());
+    assert_eq!(pinned.len(), 1100);
+}

@@ -5,6 +5,13 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Spaces map M1](rfcs/0028-spaces-map-sharing-and-portable-data.md) provides the
+common browser/native entrance, editable Space layouts and consolidated settings.
+The [Frame acceptance record](experiments/spaces-map-frame-2026-11-01.md) records
+signed deployment, exact metadata migration, confirmed-data preservation, physical
+GLES2/input checks and an OTSP6-compatible code rollback. Retained-data map UX,
+cross-Space dragging and portable app/data transfers remain later milestones.
+
 [Standalone app bundles](rfcs/0025-standalone-app-bundles.md) install independently
 of the host source registry. The [Frame qualification](experiments/app-bundle-frame-2026-10-29.md)
 records signed Counter installation, generated Home discovery, native/browser Wasm
@@ -41,6 +48,15 @@ strokes can add remaining momentum; bounded capture/replay tools qualify the sam
 paths through sliders, the dial and the touch pad.
 
 ## Apps and collections
+
+[Spaces](rfcs/0027-spaces-and-app-data.md) now own the live app collections.
+The [2026-11-01 Frame rollout](experiments/spaces-frame-2026-11-01.md) preserved
+12 legacy document roots and all 48 Brass Relay messages. Household is closed,
+Brass Relay permits public reading and signed-in visitor comments, and Operations
+contains private Monitoring. Separate Frame/collector identities, native
+uninstall/reinstall, active membership revocation and compatible signed rollback
+were qualified on the physical device. Input acceptance used synthetic calibrated
+evdev taps, without claiming human touch testing.
 
 A [public module host with private Monitoring](PUBLIC_ACCESS.md) serves a verified Wasm/UI replica through the single Rust authority. Public demo controls share the photo frame's state; Monitoring uses a separate authorized subscription. Code becomes active only after the configured replica is ready.
 

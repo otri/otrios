@@ -1,0 +1,77 @@
+{
+  "qualifiedRuntimeSource": "f473efd1d44a0eccc393fe2f25f63364b60ad071",
+  "runtimeSourceArchiveSha256": "ff9391f116ec4f6f5397e600136a9c685bab51c9d6b6d9a22fe05d485555c02f",
+  "testDriverSource": "2114db2945692040d91c9f1c010911f3bb077843",
+  "testDriverFileSha256": "6924f5b6ccca77d33d446ec1e21218939b481ed412c845229313c9aa9fb415c2",
+  "fixtureCorrection": "Mode-0600 manifests and copied journals; no runtime changes after the qualified source.",
+  "unsigned": true,
+  "target": "armv7-unknown-linux-gnueabihf",
+  "artifacts": {
+    "canvas-bundle": {
+      "sha256": "0324dae249bbb8aee6a0150acf989ad39b0b9b19542f96aac767d33bdbf29c37",
+      "bytes": 5068272
+    },
+    "canvas-pack": {
+      "sha256": "a5c6c1acbe514214d4dacacf3257610644a59bc6579be3e24120968fa4a6486e",
+      "bytes": 6561320
+    },
+    "dashboard-direct": {
+      "sha256": "276040309751b6b48f44af903f0aacb03c49cd6a26ccc27bfe95f2be4f3d4e05",
+      "bytes": 8212192
+    },
+    "dashboard-monitoring": {
+      "sha256": "8a0e52a23eddc7357223c956dad79e3ce4391f2e0befa71f453d1e50720aecbe",
+      "bytes": 1240196
+    },
+    "dashboard-server": {
+      "sha256": "31c357fc34be3dc54c8e4b621582686538ae1dbbfeae0a5e393de9484e893d82",
+      "bytes": 9127288
+    },
+    "session-bootstrap": {
+      "sha256": "62bb6528f3eaa5de44f5622ed17d4c329bf965d988e552b71f5fcff098389cf6",
+      "bytes": 2530404
+    }
+  },
+  "stateProtocol": "otrios-canvas-sync-v16",
+  "registryFormat": "OTSP5",
+  "chatJournalFormat": "OTCHAT02",
+  "releaseControl": 1,
+  "builderImage": "sha256:0abf870edc6feacfa4076e5c0697bb46fbd50def81d06a237ca157c5a8ad999f",
+  "rust": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "gcc": "arm-linux-gnueabihf-gcc (Debian 12.2.0-14) 12.2.0",
+  "cc": "arm-linux-gnueabihf-gcc",
+  "ar": "arm-linux-gnueabihf-ar",
+  "buildCommand": "cargo build --release --locked --offline -p otrios-dashboard --features direct,server,canvas --target armv7-unknown-linux-gnueabihf",
+  "qemu": "qemu-arm version 7.2.22 (Debian 1:7.2+dfsg-7+deb12u18+b3)",
+  "authorityCommand": "qemu-arm -L / /src/target/armv7-unknown-linux-gnueabihf/release/dashboard-server",
+  "processQualification": {
+    "passed": true,
+    "cases": 22,
+    "threads": 2,
+    "seconds": 24.49,
+    "logSha256": "4aeab1e4112138ee31ce0a02514d090d5138470d5f54e9a6b43da5161cb966c0"
+  },
+  "oldChatWriterProbe": {
+    "passed": true,
+    "source": "21c13c78337a4ccdd8cbbc327aac8326ff1e661f",
+    "sha256": "412bfa6d94bb2ccfba2e622ba07e157833e5a1d0d547212a46f1876489c6cffb",
+    "logSha256": "d1a80541fabaf11d07c7599861819b7b97d4e4731de1b4361a108741bb229c94",
+    "result": "Actual ARM OTCHAT01 writer rejects a copied OTCHAT02 journal without truncation."
+  },
+  "requiredChecks": {
+    "passed": true,
+    "source": "2114db2945692040d91c9f1c010911f3bb077843",
+    "command": "bash scripts/check.sh",
+    "nativeOldWriterProbes": true,
+    "logSha256": "1393b1239995962950adf7b889f24ce423b4d49b1988057b55f518cc54c1fc5b"
+  },
+  "physicalFrame": {
+    "deployed": false,
+    "accepted": false,
+    "pending": [
+      "Pinned SSH host key and existing Mac builder/signer access",
+      "Explicit identity and confirmed-data migration on Frame",
+      "Signed activation, physical display/touch and qualified rollback acceptance"
+    ]
+  }
+}

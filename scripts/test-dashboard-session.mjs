@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';import assert from 'node:assert/strict';
 import {connectSession,validRelease} from '../web/shared/session.mjs';
-const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v8'});
-function rig({failOpen=false}={}){
+const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v17'});
+function rig({failOpen=false,base='https://otrios.example/releases/'+ 'a'.repeat(64)+'/web/index.html'}={}){
  const peers=[],timers=new Map(),seen=[],state=[],ink=[],status=[],errors=[];let serial=0;
  class Peer {constructor(url){this.url=String(url);this.sent=[];this.bufferedAmount=0;peers.push(this);}send(data){this.sent.push(typeof data==='string'?JSON.parse(data):[...data]);}close(){this.closed=true;this.onclose?.();}event(type='hello',r=release('a'),extra={}){this.onmessage({data:JSON.stringify({type,version:1,release:r,compatible:true,state_available:true,...extra})});}binary(bytes){this.onmessage({data:new Uint8Array(bytes).buffer});}}
- const session=connectSession({open:url=>{if(failOpen)throw Error('offline');return new Peer(url);},base:'https://otrios.example/releases/'+ 'a'.repeat(64)+'/web/index.html',onRelease:r=>seen.push(r),onState:(b,e)=>state.push([[...b],e]),onInk:(b,e)=>ink.push([[...b],e]),onStatus:(v,e)=>status.push([v,e]),onError:e=>errors.push(String(e)),schedule:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},cancel:id=>timers.delete(id)});
+ const session=connectSession({open:url=>{if(failOpen)throw Error('offline');return new Peer(url);},base,onRelease:r=>seen.push(r),onState:(b,e)=>state.push([[...b],e]),onInk:(b,e)=>ink.push([[...b],e]),onStatus:(v,e)=>status.push([v,e]),onError:e=>errors.push(String(e)),schedule:(fn,ms)=>{timers.set(++serial,{fn,ms});return serial;},cancel:id=>timers.delete(id)});
  return {peers,timers,seen,state,ink,status,errors,session};
 }
 test('one socket negotiates before binary traffic and multiplexes subscribed ink',()=>{
  const r=rig(),p=r.peers[0];p.onopen();assert.equal(p.url,'wss://otrios.example/session');
- assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v8',state:true}]);
+ assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v17',state:true}]);
  assert(!r.session.sendState(new Uint8Array([9])));p.event();assert(r.session.ready);
  assert(r.session.sendState(new Uint8Array([8,9])));assert.deepEqual(p.sent[1],[1,8,9]);p.binary([1,7]);assert.deepEqual(r.state,[[[7],1]]);
  r.session.subscribeInk(true);assert.deepEqual(p.sent[2],{type:'ink',enabled:true});r.session.sendInk(new Uint8Array([6]));assert.deepEqual(p.sent[3],[2,6]);p.binary([2,5]);assert.deepEqual(r.ink,[[[5],1]]);
@@ -31,7 +31,7 @@ test('reconnect hello recovers missed release; stale peers and queued writes can
  assert.deepEqual(r.seen,[release('a'),release('b')]);assert.equal(r.state.length,0);assert(!r.session.sendState(new Uint8Array([9]),epoch));assert(r.session.sendState(new Uint8Array([9]),r.session.epoch));r.session.stop();
 });
 test('invalid control/channel frames are rejected before CRDT delivery',()=>{
- for(const trigger of [p=>p.binary([1,0]),p=>p.event('upgrade'),p=>p.event('hello',{...release('a'),web_entry:'https://other.example/code'}),p=>p.event('hello',release('a'),{version:9}),p=>p.onmessage({data:' '.repeat(8193)}),p=>{p.event();p.binary([5,0]);},p=>{p.event('hello',release('a'),{compatible:false});p.binary([1,0]);}]){
+ for(const trigger of [p=>p.binary([1,0]),p=>p.event('upgrade'),p=>p.event('hello',{...release('a'),web_entry:'https://other.example/code'}),p=>p.event('hello',release('a'),{version:9}),p=>p.onmessage({data:' '.repeat(8193)}),p=>{p.event();p.binary([6,0]);},p=>{p.event('hello',release('a'),{compatible:false});p.binary([1,0]);}]){
   const r=rig();trigger(r.peers[0]);assert(r.peers[0].closed);assert.equal(r.state.length,0);r.session.stop();
  }
  assert(!validRelease({id:'a'.repeat(64),web_entry:'/bad'}));
@@ -66,7 +66,7 @@ test('browser and native/server share the same declared codec version',async()=>
 test('chat has its own bounded channel and mailbox credit',async()=>{
  const {bridgeWorker}=await import('../web/shared/session.mjs');
  const r=rig();r.peers[0].event();assert(r.session.sendChat(new Uint8Array([8,9])));assert.deepEqual(r.peers[0].sent[0],[3,8,9]);
- assert.throws(()=>r.session.sendChat(new Uint8Array(8193)),/exceeds limit/);r.session.stop();
+ assert(r.session.sendChat(new Uint8Array(256*1024+1024)));assert.throws(()=>r.session.sendChat(new Uint8Array(384*1024+5)),/exceeds limit/);r.session.stop();
  let resets=0;const messages=[],session={epoch:1,ready:true,reconnect(){resets++;},sendChat(){}};
  const bridge=bridgeWorker(session,m=>messages.push(m));bridge.status(true,1);
  for(let i=0;i<8;i++)bridge.receive('chat',new Uint8Array([i]),1);
@@ -91,4 +91,40 @@ test('collection lane negotiates, bounds payloads and uses two mailbox credits',
  bridge.handle({type:'collection-frame-ack',epoch:1});bridge.receive('collection',new Uint8Array([3]),2);assert.equal(reconnects,1);
  bridge.handle({type:'collection-frame-ack',epoch:2});bridge.receive('collection',new Uint8Array([4]),2);
  assert.equal(messages.filter(m=>m.type==='collection-frame').length,3);
+});
+
+test('selected Space stays on the shared session across reconnects',()=>{
+ const id='a'.repeat(32),r=rig({base:'https://otrios.example/counter?space='+id});
+ assert.equal(r.peers[0].url,'wss://otrios.example/session?space='+id);
+ r.session.reconnect();assert.equal(r.peers[1].url,r.peers[0].url);r.session.stop();
+});
+
+test('Space metadata shares the negotiated socket with independent bounded mailbox credits',async()=>{
+ const {SPACES,bridgeWorker}=await import('../web/shared/session.mjs');assert.equal(SPACES,5);
+ const received=[],peers=[];class Peer {constructor(){this.bufferedAmount=0;this.sent=[];peers.push(this);}send(data){this.sent.push(data);}close(){this.onclose?.();}}
+ const session=connectSession({base:'https://otrios.example/',open:()=>new Peer(),onSpaces:(bytes,epoch)=>received.push([[...bytes],epoch]),schedule:()=>1,cancel:()=>{}});
+ const peer=peers[0];assert(!session.sendSpaces(new Uint8Array([1])));
+ peer.onmessage({data:JSON.stringify({type:'hello',version:1,release:null,compatible:true,state_available:true})});
+ assert(session.sendSpaces(new Uint8Array([7])));assert.deepEqual([...peer.sent[0]],[5,7]);
+ peer.onmessage({data:new Uint8Array([5,8,9]).buffer});assert.deepEqual(received,[[[8,9],1]]);
+ assert.throws(()=>session.sendSpaces(new Uint8Array(8193)),/exceeds limit/);session.stop();
+ let reconnects=0;const messages=[],transport={epoch:2,ready:true,reconnect(){reconnects++;},sendSpaces(){}};
+ const bridge=bridgeWorker(transport,m=>messages.push(m));bridge.status(true,2);
+ bridge.receive('spaces',new Uint8Array([1]),2);bridge.receive('spaces',new Uint8Array([2]),2);
+ bridge.handle({type:'spaces-frame-ack',epoch:1});bridge.receive('spaces',new Uint8Array([3]),2);assert.equal(reconnects,1);
+ bridge.handle({type:'spaces-frame-ack',epoch:2});bridge.receive('spaces',new Uint8Array([4]),2);
+ assert.equal(messages.filter(m=>m.type==='spaces-frame').length,3);
+});
+
+test('Space selection replaces the scoped transport and rejects queued old-scope bytes',()=>{
+ const a='a'.repeat(32),b='b'.repeat(32),r=rig({base:'https://otrios.example/?space='+a}),old=r.peers[0];
+ old.event();const epoch=r.session.epoch;
+ assert(r.session.selectSpace(b));assert(old.closed);assert.equal(r.peers.length,2);
+ assert.equal(r.peers[1].url,'wss://otrios.example/session?space='+b);
+ assert(!r.session.sendState(new Uint8Array([1]),epoch));
+ r.peers[1].onopen();assert.equal(r.peers[1].sent[0].version,1);r.peers[1].event();
+ assert(r.session.sendState(new Uint8Array([2]),r.session.epoch));
+ assert(!r.session.selectSpace(b));assert.equal(r.peers.length,2);
+ assert.throws(()=>r.session.selectSpace('../private'));assert.equal(r.peers.length,2);
+ assert(r.session.selectSpace(null));assert.equal(r.peers[2].url,'wss://otrios.example/session');r.session.stop();
 });

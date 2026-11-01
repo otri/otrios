@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "initial": 0,
+  "value": 2,
+  "shared": 1,
+  "isolated": 0,
+  "anonymousDenied": true,
+  "nonMemberDenied": true,
+  "activeRevoked": true,
+  "remainingMemberContinues": true,
+  "source": "cf43975fdc73e13c2f8aa46d903e1be6220a08d9",
+  "sourceDirty": false,
+  "authoritySha256": "5bb567dd91511582803cd283f1bd1ad38f4fbb68a6e81390197ead538c06337f",
+  "wasmSha256": "142c544d68dee5425c64ade8e70c09b7907a83a9037683249d59e1239af98612",
+  "release": "8306a5ed64edf6a39be910ddf163dfd71c603ca1478a9c47205ef31c83e0d0c4",
+  "browserIdentities": "cookie sessions in isolated browser contexts",
+  "hello": {
+    "version": 1,
+    "state_protocol": "otrios-canvas-sync-v8"
+  },
+  "runtimeErrors": [],
+  "date": "2026-11-01",
+  "timezone": "Asia/Tokyo",
+  "scope": "Local browser and authority qualification; no ARM or Frame deployment acceptance",
+  "repository_checks": {
+    "command": "bash scripts/check.sh",
+    "result": "passed"
+  },
+  "native_redaction": {
+    "command": "cargo test -p otrios-dashboard --features server,canvas,host-sync --test native_owner app_transport_receives_remote_edits_reconnects_and_revokes_a_held_frame --locked --offline",
+    "result": "passed for private and ordinary scoped app cases"
+  },
+  "frame_acceptance": "pending"
+}

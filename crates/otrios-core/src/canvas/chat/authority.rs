@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::journal::{Entry, Guest, Journal, Receipt};
-use super::{Command, Event, Kind, Member, Message, Profile, Result, err, random};
+use super::{
+    COLLECTION, Command, Event, Initial, InitialMessage, Kind, MAX_INITIAL_BYTES, MESSAGE_FIELD,
+    Member, Message, Profile, Result, err, random,
+};
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -11,6 +14,16 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+#[path = "publication.rs"]
+mod publication;
+#[cfg(not(target_arch = "wasm32"))]
+pub use publication::{Publication, publish};
+struct PreparedSend {
+    epoch: u64,
+    nonce: String,
+    body: String,
+    assets: Vec<super::Asset>,
+}
 const DAY: u64 = 86_400_000;
 const EPOCH: u64 = 600_000;
 const MAX_RECEIPTS: usize = 65_536;
@@ -80,7 +93,7 @@ fn generation() -> Result<u64> {
     getrandom::fill(&mut bytes).map_err(err)?;
     Ok(u64::from_le_bytes(bytes).max(1))
 }
-fn text(value: &str, bytes: usize, clusters: usize, lines: usize) -> Result<()> {
+pub(super) fn text(value: &str, bytes: usize, clusters: usize, lines: usize) -> Result<()> {
     if value.len() > bytes
         || value.graphemes(true).count() > clusters
         || value.graphemes(true).any(|g| g.len() > 256)
@@ -93,7 +106,7 @@ fn text(value: &str, bytes: usize, clusters: usize, lines: usize) -> Result<()> 
     }
     Ok(())
 }
-fn name(value: &str) -> Result<String> {
+pub(super) fn name(value: &str) -> Result<String> {
     let value = value.trim();
     text(value, 96, 24, 1)?;
     if value.is_empty() || value.starts_with(['@', '+', '/']) || value.chars().any(|c| c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
@@ -102,6 +115,61 @@ fn name(value: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 impl Room {
+    /// An uncertain durable outcome must remain poisoned, including while idle.
+    pub fn healthy(&self) -> bool {
+        !self.failed && self.journal.as_ref().is_none_or(Journal::healthy)
+    }
+    /// Legacy manifests cover one unscoped journal, not an owned blob namespace.
+    /// Refuse to qualify a partial import that would strand confirmed attachments.
+    pub fn qualify_legacy_import(&self) -> Result<()> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        for (_, row) in self.history.snapshot()?.records() {
+            if !super::read_message(row)?.assets.is_empty() {
+                return Err("Legacy chat import cannot copy owned attachments; use paired collection backup/restore".into());
+            }
+        }
+        Ok(())
+    }
+    /// Capture one bounded immutable transcript without creating presence or a
+    /// profile. The caller must authorize Read on the owning app collection.
+    pub fn initial_snapshot(&self) -> Result<Vec<u8>> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        let snapshot = self.history.snapshot()?;
+        let window = snapshot
+            .select(
+                1,
+                &crate::collection::Grant {
+                    collection: COLLECTION,
+                    fields: vec![MESSAGE_FIELD],
+                },
+                &super::message_selection(crate::collection::Anchor::Tail),
+            )
+            .map_err(err)?;
+        let messages = window
+            .keys
+            .iter()
+            .map(|key| {
+                let row = window.record(*key).map_err(err)?;
+                Ok(InitialMessage {
+                    message: super::read_message(&row)?,
+                    revision: row.hash(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let bytes = flexbuffers::to_vec(&Initial {
+            version: 1,
+            members: self.members(),
+            messages,
+            older: window.more_before,
+        })
+        .map_err(err)?;
+        super::check(&bytes, MAX_INITIAL_BYTES)?;
+        Ok(bytes)
+    }
     #[cfg(test)]
     pub(super) fn fail_journal_writes(&mut self) {
         self.journal.as_mut().unwrap().fail_writes();
@@ -146,14 +214,7 @@ impl Room {
     fn restore(&mut self, entry: Entry, now: u64) -> Result<()> {
         match entry {
             Entry::Guest(guest) => {
-                if !super::valid_hex(&guest.profile.id, 16)
-                    || !super::valid_hex(&guest.digest, 32)
-                    || guest.profile.avatar >= super::AVATARS
-                {
-                    return Err("Invalid saved guest".into());
-                }
-                name(&guest.profile.name)?;
-                self.guests.insert(guest.profile.id.clone(), guest);
+                self.restore_guest(guest)?;
             }
             Entry::Sent { message, receipt } => {
                 self.add_message(message)?;
@@ -169,7 +230,7 @@ impl Room {
                 }
             }
             Entry::Kick { guest, message } => {
-                self.guests.insert(guest.profile.id.clone(), guest);
+                self.restore_guest(guest)?;
                 self.add_message(message)?;
             }
             Entry::Message(message) => self.add_message(message)?,
@@ -185,6 +246,10 @@ impl Room {
                     );
                 }
             }
+            Entry::Redacted { sequence, revision } => {
+                self.history
+                    .commit(self.history.prepare_removal(sequence, revision)?)?;
+            }
             Entry::Sequence(sequence) => self.sequence = self.sequence.max(sequence),
         }
         if self.guests.len() > 4096 || self.receipts.len() > MAX_RECEIPTS {
@@ -192,7 +257,33 @@ impl Room {
         }
         Ok(())
     }
+    fn restore_guest(&mut self, guest: Guest) -> Result<()> {
+        if !super::valid_hex(&guest.profile.id, 16)
+            || !super::valid_hex(&guest.digest, 32)
+            || guest.profile.avatar >= super::AVATARS
+            || guest
+                .authority_identity
+                .as_deref()
+                .is_some_and(|id| !crate::spaces::valid_identity(id))
+            || self
+                .guests
+                .get(&guest.profile.id)
+                .is_some_and(|old| old.authority_identity != guest.authority_identity)
+            || guest.authority_identity.as_ref().is_some_and(|identity| {
+                self.guests.values().any(|old| {
+                    old.profile.id != guest.profile.id
+                        && old.authority_identity.as_ref() == Some(identity)
+                })
+            })
+        {
+            return Err("Invalid saved guest or authority identity".into());
+        }
+        name(&guest.profile.name)?;
+        self.guests.insert(guest.profile.id.clone(), guest);
+        Ok(())
+    }
     fn prepare_message(&self, message: &Message) -> Result<super::history::Prepared> {
+        super::validate_message_assets(&message.assets)?;
         text(&message.text, 2304, 1200, 18)?;
         name(&message.sender.name)?;
         if !super::valid_hex(&message.sender.id, 16)
@@ -212,7 +303,17 @@ impl Room {
         Ok(())
     }
     fn persist_message(&mut self, message: &Message, entry: &Entry, now: u64) -> Result<()> {
+        self.persist_message_with(message, entry, now, || Ok(()))
+    }
+    fn persist_message_with(
+        &mut self,
+        message: &Message,
+        entry: &Entry,
+        now: u64,
+        durable: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         let prepared = self.prepare_message(message)?;
+        durable()?;
         self.persist(entry, now)?;
         // Room is the sole writer for this resource. A publication failure after
         // fsync must stop further writes, since retry deduplication is durable
@@ -235,7 +336,8 @@ impl Room {
     }
     fn prune(&mut self, now: u64) {
         self.guests.retain(|id, g| {
-            g.cooldown > now
+            g.authority_identity.is_some()
+                || g.cooldown > now
                 || now.saturating_sub(g.last_seen_unix_ms) < 30 * DAY
                 || self.memberships.contains_key(id)
         });
@@ -251,7 +353,7 @@ impl Room {
         if self
             .journal
             .as_ref()
-            .is_some_and(|j| j.bytes > 48 * 1024 * 1024)
+            .is_some_and(|j| j.legacy || j.bytes > 48 * 1024 * 1024)
         {
             let snapshot = self.history.snapshot()?;
             let entries = self
@@ -288,7 +390,7 @@ impl Room {
             let old = self
                 .guests
                 .values()
-                .find(|g| g.digest == hash)
+                .find(|g| g.authority_identity.is_none() && g.digest == hash)
                 .ok_or("Guest credential expired")?;
             let mut guest = old.clone();
             guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
@@ -296,6 +398,30 @@ impl Room {
             self.guests.insert(guest.profile.id.clone(), guest.clone());
             return Ok((guest.profile, token.to_owned()));
         }
+        self.new_identity(now, None)
+    }
+    fn identity_admitted(&mut self, identity: &str, now: u64) -> Result<Profile> {
+        if !crate::spaces::valid_identity(identity) {
+            return Err("Invalid authority identity".into());
+        }
+        self.prune(now);
+        if let Some(guest) = self
+            .guests
+            .values()
+            .find(|guest| guest.authority_identity.as_deref() == Some(identity))
+        {
+            let profile = guest.profile.clone();
+            self.record_seen(&profile.id, now)?;
+            return Ok(profile);
+        }
+        self.new_identity(now, Some(identity.into()))
+            .map(|(profile, _)| profile)
+    }
+    fn new_identity(
+        &mut self,
+        now: u64,
+        authority_identity: Option<String>,
+    ) -> Result<(Profile, String)> {
         if self.guests.len() >= 4096 {
             return Err("Guest capacity reached; try later".into());
         }
@@ -365,6 +491,7 @@ impl Room {
             digest: digest(&token),
             last_seen_unix_ms: now,
             cooldown: 0,
+            authority_identity,
         };
         self.persist(&Entry::Guest(guest.clone()), now)?;
         self.guests.insert(id, guest);
@@ -375,7 +502,9 @@ impl Room {
             return false;
         }
         let hash = digest(credential);
-        self.guests.values().any(|g| g.digest == hash)
+        self.guests
+            .values()
+            .any(|g| g.authority_identity.is_none() && g.digest == hash)
     }
     pub fn members(&self) -> Vec<Member> {
         let mut members = self
@@ -435,6 +564,40 @@ impl Room {
             return Err("Room full".into());
         }
         let (profile, token) = self.identity(credential, now)?;
+        self.join_profile(
+            connection,
+            profile,
+            admin,
+            now,
+            !native && credential.is_none(),
+            native.then_some(token),
+        )
+    }
+    /// The host must first authorize collaborative editing on the current
+    /// Space/app binding. Client commands cannot select this principal or obtain
+    /// a resumable guest secret; read admission alone cannot create a profile.
+    pub fn join_admitted(
+        &mut self,
+        connection: u64,
+        identity: &str,
+        moderate: bool,
+        now: u64,
+    ) -> Result<Vec<Delivery>> {
+        if self.connections.len() >= 68 && !self.connections.contains_key(&connection) {
+            return Err("Room full".into());
+        }
+        let profile = self.identity_admitted(identity, now)?;
+        self.join_profile(connection, profile, moderate, now, false, None)
+    }
+    fn join_profile(
+        &mut self,
+        connection: u64,
+        profile: Profile,
+        admin: bool,
+        now: u64,
+        temporary: bool,
+        credential: Option<String>,
+    ) -> Result<Vec<Delivery>> {
         let guest = &self.guests[&profile.id];
         if guest.cooldown > now {
             return Ok(vec![Delivery::one(
@@ -467,8 +630,8 @@ impl Room {
             connection,
             Event::Welcome {
                 you,
-                temporary: !native && credential.is_none(),
-                credential: native.then_some(token),
+                temporary,
+                credential,
                 epoch: now / EPOCH,
                 members: self.members(),
             },
@@ -494,8 +657,13 @@ impl Room {
         if let Some(c) = self.connections.get(&connection) {
             self.record_seen(&c.id.clone(), now)?;
         }
+        Ok(self.abandon(connection, now))
+    }
+    /// Revoke ephemeral execution without touching a journal or recreating a
+    /// deleted path. Use after the binding loses admission; durable data stays.
+    pub fn abandon(&mut self, connection: u64, now: u64) -> Vec<Delivery> {
         let Some(c) = self.connections.remove(&connection) else {
-            return Ok(vec![]);
+            return vec![];
         };
         let mut events = vec![];
         if let Some(d) = self.drafts.get_mut(&c.id)
@@ -516,7 +684,7 @@ impl Room {
             self.drafts.remove(&c.id);
         }
         events.push(self.roster());
-        Ok(events)
+        events
     }
     pub fn set_admin(&mut self, connection: u64, admin: bool) -> Vec<Delivery> {
         let Some(c) = self.connections.get_mut(&connection) else {
@@ -695,6 +863,7 @@ impl Room {
                 guest.cooldown = now + 60_000;
                 guest.last_seen_unix_ms = guest.last_seen_unix_ms.max(now);
                 let message = Message {
+                    assets: vec![],
                     sequence: self
                         .sequence
                         .checked_add(1)
@@ -748,115 +917,172 @@ impl Room {
                 epoch,
                 nonce,
                 text: body,
-            } => {
-                text(&body, 2048, 1024, 16)?;
-                if body.trim().is_empty() {
-                    return Err("Write a message first".into());
-                }
-                if !super::valid_hex(&nonce, 16)
-                    || epoch > now / EPOCH
-                    || epoch.saturating_add(2).saturating_mul(EPOCH) <= now
-                {
-                    return Err("Send expired; send again with a fresh receipt epoch".into());
-                }
-                let hash = super::super::hash(body.as_bytes());
-                let receipt_key = (id.clone(), epoch, nonce.clone());
-                if let Some(r) = self.receipts.get(&receipt_key) {
-                    if r.digest != hash {
-                        return Err("Message nonce conflicts with its original text".into());
-                    }
-                    return Ok(vec![Delivery::one(
-                        connection,
-                        Event::Receipt {
-                            nonce,
-                            sequence: r.sequence,
-                        },
-                    )]);
-                }
-                self.prune(now);
-                if self.receipts.len() >= MAX_RECEIPTS {
-                    return Err("Receipt capacity reached; try later".into());
-                }
-                let rate = self.rates.entry(id.clone()).or_insert(Rate {
-                    at: now,
-                    tokens: 5.,
-                    effect_at: now,
-                    effects: 0,
-                });
-                rate.tokens = (rate.tokens + now.saturating_sub(rate.at) as f64 / 1000.).min(5.);
-                rate.at = now;
-                if rate.tokens < 1. {
-                    return Err("A little slower, please; try again shortly".into());
-                }
-                rate.tokens -= 1.;
-                let (kind, content, effect) = self.parse(&id, &body, admin)?;
-                if effect.is_some() {
-                    let rate = self.rates.get_mut(&id).unwrap();
-                    if now.saturating_sub(rate.effect_at) >= 1000 {
-                        rate.effect_at = now;
-                        rate.effects = 0;
-                    }
-                    if rate.effects >= 2 {
-                        return Err("Let the steam settle before another effect".into());
-                    }
-                    rate.effects += 1;
-                }
-                let message = Message {
-                    sequence: self
-                        .sequence
-                        .checked_add(1)
-                        .ok_or("Room message sequence exhausted")?,
-                    at: now,
-                    sender: self.guests[&id].profile.clone(),
-                    kind,
-                    text: content,
-                    nonce: nonce.clone(),
-                };
-                let receipt = Receipt {
-                    participant: id.clone(),
+            } => self.send_prepared(
+                connection,
+                PreparedSend {
                     epoch,
-                    nonce: nonce.clone(),
-                    digest: hash,
-                    sequence: message.sequence,
-                };
-                self.persist_message(
-                    &message,
-                    &Entry::Sent {
-                        message: message.clone(),
-                        receipt: receipt.clone(),
-                    },
-                    now,
-                )?;
-                self.receipts.insert(receipt_key, receipt);
-                let mut events = vec![Delivery::one(
+                    nonce,
+                    body,
+                    assets: vec![],
+                },
+                now,
+                || Ok(()),
+            ),
+            Command::Redact {
+                sequence,
+                revision,
+                nonce,
+            } => {
+                if !admin {
+                    return Err("Space moderation is required".into());
+                }
+                if !super::valid_hex(&nonce, 16) {
+                    return Err("Invalid moderation nonce".into());
+                }
+                self.redact_message(sequence, revision, now)?;
+                Ok(vec![Delivery::one(
                     connection,
-                    Event::Receipt {
-                        nonce,
-                        sequence: message.sequence,
-                    },
-                )];
-                if let Some(d) = self.drafts.get_mut(&id) {
-                    d.text.clear();
-                    d.revision = d.revision.saturating_add(1);
-                    events.push(Delivery::all(Event::Draft {
-                        participant: id.clone(),
-                        generation: d.generation,
-                        revision: d.revision,
-                        text: String::new(),
-                        expires: now,
-                    }));
-                }
-                if let Some((kind, target)) = effect {
-                    events.push(Delivery::all(Event::Effect {
-                        participant: id,
-                        kind,
-                        target,
-                    }));
-                }
-                Ok(events)
+                    Event::Redacted { sequence, nonce },
+                )])
             }
             _ => Err("Unexpected room command".into()),
         }
+    }
+    fn send_prepared(
+        &mut self,
+        connection: u64,
+        request: PreparedSend,
+        now: u64,
+        durable: impl FnOnce() -> Result<()>,
+    ) -> Result<Vec<Delivery>> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        let PreparedSend {
+            epoch,
+            nonce,
+            body,
+            assets,
+        } = request;
+        let c = self
+            .connections
+            .get(&connection)
+            .ok_or("Join the room first")?;
+        let id = c.id.clone();
+        let admin = c.admin;
+
+        text(&body, 2048, 1024, 16)?;
+        if body.trim().is_empty() && assets.is_empty() {
+            return Err("Write a message first".into());
+        }
+        if !super::valid_hex(&nonce, 16)
+            || epoch > now / EPOCH
+            || epoch.saturating_add(2).saturating_mul(EPOCH) <= now
+        {
+            return Err("Send expired; send again with a fresh receipt epoch".into());
+        }
+        super::validate_message_assets(&assets)?;
+        let hash = if assets.is_empty() {
+            super::super::hash(body.as_bytes())
+        } else {
+            super::super::hash(&flexbuffers::to_vec((body.as_str(), &assets)).map_err(err)?)
+        };
+        let receipt_key = (id.clone(), epoch, nonce.clone());
+        if let Some(r) = self.receipts.get(&receipt_key) {
+            if r.digest != hash {
+                return Err("Message nonce conflicts with its original text".into());
+            }
+            return Ok(vec![Delivery::one(
+                connection,
+                Event::Receipt {
+                    nonce,
+                    sequence: r.sequence,
+                },
+            )]);
+        }
+        self.prune(now);
+        if self.receipts.len() >= MAX_RECEIPTS {
+            return Err("Receipt capacity reached; try later".into());
+        }
+        let rate = self.rates.entry(id.clone()).or_insert(Rate {
+            at: now,
+            tokens: 5.,
+            effect_at: now,
+            effects: 0,
+        });
+        rate.tokens = (rate.tokens + now.saturating_sub(rate.at) as f64 / 1000.).min(5.);
+        rate.at = now;
+        if rate.tokens < 1. {
+            return Err("A little slower, please; try again shortly".into());
+        }
+        rate.tokens -= 1.;
+        let (kind, content, effect) = self.parse(&id, &body, admin)?;
+        if effect.is_some() {
+            let rate = self.rates.get_mut(&id).unwrap();
+            if now.saturating_sub(rate.effect_at) >= 1000 {
+                rate.effect_at = now;
+                rate.effects = 0;
+            }
+            if rate.effects >= 2 {
+                return Err("Let the steam settle before another effect".into());
+            }
+            rate.effects += 1;
+        }
+        let message = Message {
+            assets,
+            sequence: self
+                .sequence
+                .checked_add(1)
+                .ok_or("Room message sequence exhausted")?,
+            at: now,
+            sender: self.guests[&id].profile.clone(),
+            kind,
+            text: content,
+            nonce: nonce.clone(),
+        };
+        let receipt = Receipt {
+            participant: id.clone(),
+            epoch,
+            nonce: nonce.clone(),
+            digest: hash,
+            sequence: message.sequence,
+        };
+        self.persist_message_with(
+            &message,
+            &Entry::Sent {
+                message: message.clone(),
+                receipt: receipt.clone(),
+            },
+            now,
+            durable,
+        )?;
+        self.receipts.insert(receipt_key, receipt);
+        let mut events = vec![Delivery::one(
+            connection,
+            Event::Receipt {
+                nonce,
+                sequence: message.sequence,
+            },
+        )];
+        if let Some(d) = self.drafts.get_mut(&id) {
+            d.text.clear();
+            d.revision = d.revision.saturating_add(1);
+            events.push(Delivery::all(Event::Draft {
+                participant: id.clone(),
+                generation: d.generation,
+                revision: d.revision,
+                text: String::new(),
+                expires: now,
+            }));
+        }
+        if let Some((kind, target)) = effect {
+            events.push(Delivery::all(Event::Effect {
+                participant: id,
+                kind,
+                target,
+            }));
+        }
+        Ok(events)
     }
     fn parse(&self, id: &str, body: &str, admin: bool) -> Result<Parsed> {
         let who = &self.guests[id].profile.name;

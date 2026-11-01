@@ -186,6 +186,39 @@ impl Page {
             }
         }
     }
+    /// Copy only the affected path; existing readers retain their immutable root.
+    fn remove(&self, key: u64) -> Option<Arc<Self>> {
+        let items = match &self.items {
+            Items::Leaf(records) => {
+                let next = records
+                    .iter()
+                    .filter(|r| r.key != key)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if next.is_empty() {
+                    return None;
+                }
+                Items::Leaf(next)
+            }
+            Items::Branch(pages) => {
+                let mut next = Vec::with_capacity(pages.len());
+                for page in pages {
+                    if key >= page.first && key <= page.last {
+                        if let Some(page) = page.remove(key) {
+                            next.push(page);
+                        }
+                    } else {
+                        next.push(page.clone());
+                    }
+                }
+                if next.is_empty() {
+                    return None;
+                }
+                Items::Branch(next)
+            }
+        };
+        Some(Self::new(items))
+    }
     fn prune(&self, key: u64) -> Option<Arc<Self>> {
         if self.last < key {
             return None;
@@ -376,6 +409,37 @@ impl Collection {
         let mut next = self.clone();
         next.root = Some(root);
         next.high_water = key;
+        next.rehash();
+        Ok(next)
+    }
+    /// Bounded page descent for an exact confirmed identity.
+    pub fn record(&self, key: u64) -> Result<Snapshot> {
+        let mut work = IndexWork::default();
+        let rank = self.rank(key, &mut work)?;
+        self.range(rank, rank + 1, &mut work)
+            .into_iter()
+            .next()
+            .filter(|record| record.key == key)
+            .map(|record| record.data)
+            .ok_or(Error::AnchorExpired)
+    }
+    /// The sole owner removes a reviewed record. High-water identity is retained,
+    /// so neither an empty tail nor a stale writer can reuse committed keys.
+    pub fn remove(&self, key: u64, expected: Hash) -> Result<Self> {
+        if self.record(key)?.hash() != expected {
+            return Err(Error::Conflict);
+        }
+        let mut next = self.clone();
+        next.root = self.root.as_ref().and_then(|page| page.remove(key));
+        while let Some(root) = &next.root {
+            if let Items::Branch(pages) = &root.items
+                && pages.len() == 1
+            {
+                next.root = Some(pages[0].clone());
+            } else {
+                break;
+            }
+        }
         next.rehash();
         Ok(next)
     }

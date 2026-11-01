@@ -18,6 +18,9 @@ pub(super) struct Guest {
     #[serde(rename = "seen")]
     pub last_seen_unix_ms: u64,
     pub cooldown: u64,
+    /// Private authority principal; never included in room profiles or events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_identity: Option<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Receipt {
@@ -35,17 +38,25 @@ pub(super) enum Entry {
     Message(Message),
     Receipt(Receipt),
     Sequence(u64),
+    Redacted { sequence: u64, revision: [u8; 32] },
 }
 pub(super) struct Journal {
     // A stable sidecar inode spans atomic data-file replacement during
     // compaction. Never unlink it while the authority is running.
-    _owner: fs::File,
+    _owner: Owner,
     path: PathBuf,
     file: fs::File,
     pub bytes: u64,
+    pub legacy: bool,
     failed: bool,
 }
-fn lock_owner(path: &Path) -> Result<fs::File> {
+struct Owner(fs::File);
+impl Drop for Owner {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+fn lock_owner(path: &Path) -> Result<Owner> {
     let lock = path.with_extension("journal.owner.lock");
     let mut options = fs::OpenOptions::new();
     options.create(true).truncate(false).read(true).write(true);
@@ -54,8 +65,9 @@ fn lock_owner(path: &Path) -> Result<fs::File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let file = options.open(lock).map_err(err)?;
-    file.try_lock()
+    let file = Owner(options.open(lock).map_err(err)?);
+    file.0
+        .try_lock()
         .map_err(|error| format!("Room journal already owned or unavailable: {error}"))?;
     Ok(file)
 }
@@ -78,6 +90,9 @@ fn record(entry: &Entry) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 impl Journal {
+    pub fn healthy(&self) -> bool {
+        !self.failed
+    }
     #[cfg(test)]
     pub(super) fn fail_writes(&mut self) {
         self.failed = true;
@@ -100,7 +115,7 @@ impl Journal {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let mut file = create(&path)?;
-                file.write_all(b"OTCHAT01")
+                file.write_all(b"OTCHAT02")
                     .and_then(|_| file.sync_all())
                     .map_err(err)?;
                 if let Some(parent) = path.parent() {
@@ -119,7 +134,7 @@ impl Journal {
         file.rewind().map_err(err)?;
         let mut magic = [0; 8];
         file.read_exact(&mut magic).map_err(err)?;
-        if &magic != b"OTCHAT01" {
+        if &magic != b"OTCHAT01" && &magic != b"OTCHAT02" {
             return Err("Chat journal format".into());
         }
         let mut at = 8_u64;
@@ -158,6 +173,7 @@ impl Journal {
             path,
             file,
             bytes: at,
+            legacy: &magic == b"OTCHAT01",
             failed: false,
         })
     }
@@ -189,7 +205,7 @@ impl Journal {
             .with_extension(format!("{}.compact", super::random(8)?));
         let result = (|| {
             let mut file = create(&next)?;
-            file.write_all(b"OTCHAT01").map_err(err)?;
+            file.write_all(b"OTCHAT02").map_err(err)?;
             let mut size = 8;
             for entry in entries {
                 let bytes = record(&entry?)?;
@@ -210,6 +226,7 @@ impl Journal {
             }
             self.file = file;
             self.bytes = size;
+            self.legacy = false;
             self.failed = false;
             Ok(())
         })();

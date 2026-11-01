@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Bounded sync-v5 packets. Canonical Merkle, UI and schema bytes are independent.
+//! Bounded Canvas packets. Canonical Merkle, UI and schema bytes are independent.
 use super::*;
 use std::cell::RefCell;
 const DIGEST_BYTES: usize = 32;
@@ -104,6 +104,17 @@ const HEADER: usize = 10;
 const MAX_REF: usize = 128;
 const MAX_CODES: usize = 8;
 
+fn valid_collection(id: &str) -> Result<()> {
+    if id.len() != 32
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("Invalid Canvas collection identity".into());
+    }
+    Ok(())
+}
+
 struct Writer<'a>(&'a mut Vec<u8>);
 impl Writer<'_> {
     fn put(&mut self, bytes: &[u8]) -> Result<()> {
@@ -143,6 +154,14 @@ impl Writer<'_> {
             return Err("Canvas text limit".into());
         }
         self.blob(text.as_bytes())
+    }
+    fn collection(&mut self, value: Option<&str>) -> Result<()> {
+        self.u8(u8::from(value.is_some()))?;
+        if let Some(id) = value {
+            valid_collection(id)?;
+            self.text(id, 32)?;
+        }
+        Ok(())
     }
     fn value(&mut self, v: &Value) -> Result<()> {
         match v {
@@ -223,6 +242,21 @@ impl<'a> Reader<'a> {
     }
     fn text(&mut self, limit: usize) -> Result<String> {
         String::from_utf8(self.blob(limit)?).map_err(err)
+    }
+    fn flag(&mut self) -> Result<bool> {
+        match self.u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err("Invalid Canvas flag".into()),
+        }
+    }
+    fn collection(&mut self) -> Result<Option<String>> {
+        if !self.flag()? {
+            return Ok(None);
+        }
+        let id = self.text(32)?;
+        valid_collection(&id)?;
+        Ok(Some(id))
     }
     fn value(&mut self) -> Result<Value> {
         Ok(match self.u8()? {
@@ -372,6 +406,7 @@ pub fn encode_client_into(value: &ClientMessage, out: &mut Vec<u8>) -> Result<()
             known_code,
             writer,
             resume,
+            collection,
         } => {
             w.u32(*epoch)?;
             w.text(ui_ref, MAX_REF)?;
@@ -389,7 +424,8 @@ pub fn encode_client_into(value: &ClientMessage, out: &mut Vec<u8>) -> Result<()
                 w.fixed(hash, 32)?;
             }
             w.fixed(writer, 16)?;
-            w.u64(*resume)
+            w.u64(*resume)?;
+            w.collection(collection.as_deref())
         }
         ClientMessage::Sync { epoch, bytes } => {
             w.u32(*epoch)?;
@@ -431,6 +467,8 @@ pub fn decode_client(bytes: &[u8]) -> Result<ClientMessage> {
                     known_code,
                     writer: r.take(16)?.to_vec(),
                     resume: r.u64()?,
+
+                    collection: r.collection()?,
                 }
             }
             2 => ClientMessage::AcceptMount { epoch },
@@ -452,6 +490,7 @@ pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()
         ServerMessage::Sync { .. } => 19,
         ServerMessage::AccessRequired { .. } => 20,
         ServerMessage::Error { .. } => 21,
+        ServerMessage::Activated { .. } => 22,
     };
     write(out, tag, |w| match value {
         ServerMessage::View { epoch, bytes } | ServerMessage::Sync { epoch, bytes } => {
@@ -464,14 +503,36 @@ pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()
             ui_hash,
             code,
             state,
+            binding,
+            initial_view,
         } => {
             w.u32(*epoch)?;
             w.blob(ui)?;
             w.fixed(ui_hash, 32)?;
             w.blob(code)?;
-            w.blob(state)
+            w.blob(state)?;
+            w.u8(u8::from(binding.is_some()))?;
+            if let Some(binding) = binding {
+                if binding.version != 2 {
+                    return Err("Unsupported Canvas binding version".into());
+                }
+                valid_collection(&binding.collection)?;
+                w.u32(binding.version)?;
+                w.text(&binding.collection, 32)?;
+                w.fixed(&binding.actor, 32)?;
+                w.u8(u8::from(binding.editable))?;
+                w.u8(u8::from(binding.comments))?;
+                w.u8(u8::from(binding.moderate))?;
+            }
+            w.u8(u8::from(initial_view.is_some()))?;
+            if let Some(bytes) = initial_view {
+                w.blob(bytes)?;
+            }
+            Ok(())
         }
-        ServerMessage::AccessRequired { epoch } => w.u32(*epoch),
+        ServerMessage::AccessRequired { epoch } | ServerMessage::Activated { epoch } => {
+            w.u32(*epoch)
+        }
         ServerMessage::Error { epoch, message } => {
             w.u32(*epoch)?;
             w.text(message, 2048)
@@ -493,6 +554,30 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
                 ui_hash: r.take(32)?.to_vec(),
                 code: r.blob(MAX_BYTES)?,
                 state: r.blob(MAX_BYTES)?,
+
+                binding: if r.flag()? {
+                    let version = r.u32()?;
+                    if version != 2 {
+                        return Err("Unsupported Canvas binding version".into());
+                    }
+                    let collection = r.text(32)?;
+                    valid_collection(&collection)?;
+                    Some(otrios_interfaces::canvas::MountBinding {
+                        version,
+                        collection,
+                        actor: r.take(32)?.try_into().map_err(err)?,
+                        editable: r.flag()?,
+                        comments: r.flag()?,
+                        moderate: r.flag()?,
+                    })
+                } else {
+                    None
+                },
+                initial_view: if r.flag()? {
+                    Some(r.blob(MAX_BYTES)?)
+                } else {
+                    None
+                },
             },
             19 => ServerMessage::Sync {
                 epoch,
@@ -503,6 +588,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
                 epoch,
                 message: r.text(2048)?,
             },
+            22 => ServerMessage::Activated { epoch },
             _ => return Err("Unknown Canvas server tag".into()),
         };
         Ok(message)
@@ -655,6 +741,8 @@ mod tests {
                 known_code: vec![vec![2; 32]],
                 writer: vec![3; 16],
                 resume: 9,
+
+                collection: Some("a".repeat(32)),
             },
             ClientMessage::AcceptMount { epoch: 1 },
             ClientMessage::CancelMount { epoch: 2 },
@@ -667,6 +755,7 @@ mod tests {
             check_roundtrip(&value, encode_client, decode_client);
         }
         for value in [
+            ServerMessage::Activated { epoch: 1 },
             ServerMessage::View {
                 epoch: 1,
                 bytes: vec![1; 256],
@@ -677,6 +766,16 @@ mod tests {
                 ui_hash: vec![3; 32],
                 code: vec![4; 128],
                 state: vec![5; 256],
+
+                binding: Some(otrios_interfaces::canvas::MountBinding {
+                    version: 2,
+                    actor: [1; 32],
+                    collection: "b".repeat(32),
+                    editable: true,
+                    comments: false,
+                    moderate: true,
+                }),
+                initial_view: Some(vec![6; 256]),
             },
             ServerMessage::Sync {
                 epoch: 2,
@@ -741,6 +840,8 @@ mod tests {
             known_code: vec![],
             writer: vec![1; 16],
             resume: 0,
+
+            collection: None,
         };
         let mut bytes = encode_client(&message).unwrap();
         let flag = bytes.len() - 26; // hint flag, code count, writer and resume

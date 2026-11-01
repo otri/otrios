@@ -14,34 +14,39 @@ use tokio::sync::mpsc;
 pub(super) async fn public(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, true, false).await
+    open(app, headers, uri, ws, true, false).await
 }
 pub(super) async fn trusted(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, false, false).await
+    open(app, headers, uri, ws, false, false).await
 }
 pub(super) async fn public_control(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, true, true).await
+    open(app, headers, uri, ws, true, true).await
 }
 pub(super) async fn trusted_control(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
 ) -> Response {
-    open(app, headers, ws, false, true).await
+    open(app, headers, uri, ws, false, true).await
 }
 async fn open(
     app: Arc<App>,
     headers: HeaderMap,
+    uri: axum::extract::OriginalUri,
     ws: WebSocketUpgrade,
     public: bool,
     control_only: bool,
@@ -65,7 +70,11 @@ async fn open(
     let Ok(permit) = slots.try_acquire_owned() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, "Session limit");
     };
-    let key = if public && !control_only {
+    let space = match spaces::selected(&uri.0) {
+        Ok(space) => space,
+        Err(status) => return failure(status, "Invalid Space selection"),
+    };
+    let key = if !control_only {
         match &app.auth {
             Some(a) => a.key(&headers).await,
             None => None,
@@ -81,7 +90,7 @@ async fn open(
         .max_frame_size(otrios_core::canvas::MAX_BYTES + 1)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            peer(app, socket, public, key, control_only, guest).await
+            peer(app, socket, public, key, control_only, guest, space).await
         })
 }
 async fn send(output: &mut SplitSink<WebSocket, Message>, message: Message) -> bool {
@@ -111,15 +120,88 @@ fn refresh(version: u32, protocol: &str, release: &Option<release::Release>) -> 
                 .as_ref()
                 .map_or(STATE_PROTOCOL, |r| r.sync_protocol.as_str())
 }
+#[derive(Default)]
+struct ManagedInk {
+    wanted: bool,
+    active: Option<apps::Activation>,
+    room: Option<Arc<ink::Room>>,
+}
+impl ManagedInk {
+    fn current(
+        &self,
+        live: &watch::Receiver<Option<apps::Activation>>,
+    ) -> Option<&apps::Activation> {
+        if live.has_changed().is_err() {
+            return None;
+        }
+        self.active
+            .as_ref()
+            .filter(|active| live.borrow().as_ref() == Some(*active))
+    }
+    fn clear(&mut self, subscription: &mut Option<ink::Subscription>) {
+        *subscription = None;
+        self.room = None;
+    }
+    async fn refresh(
+        &mut self,
+        app: &App,
+        key: &Option<String>,
+        space: &Option<String>,
+        live: &watch::Receiver<Option<apps::Activation>>,
+        subscription: &mut Option<ink::Subscription>,
+        output: &mut SplitSink<WebSocket, Message>,
+    ) -> bool {
+        let mut guard = app.apps.lock().await;
+        let scope = spaces::Scope {
+            space: space.clone(),
+            identity: spaces::identity(app, key).await,
+        };
+        let active = self.current(live).cloned();
+        let Some(active) = active.filter(|active| self.wanted && active.ink) else {
+            self.clear(subscription);
+            return true;
+        };
+        let Some(hub) = guard
+            .as_mut()
+            .filter(|hub| hub.grant_current(&scope, &active.binding, &active.grant))
+        else {
+            self.clear(subscription);
+            return true;
+        };
+        if self.room.is_some() && subscription.is_some() {
+            return true;
+        }
+        let Ok(room) = hub.ink_room(&active, app.peer_limits.iter().sum()) else {
+            return false;
+        };
+        let Ok((peer, bytes)) = room.subscribe().await else {
+            return false;
+        };
+        if !send(
+            output,
+            Message::Binary(wire::frame(wire::INK, wire::scoped(active.epoch, bytes)).into()),
+        )
+        .await
+        {
+            return false;
+        }
+        self.room = Some(room);
+        *subscription = Some(peer);
+        true
+    }
+}
 enum Event {
     Release,
     Availability,
     Wire(Option<Result<Message, axum::Error>>),
     State(Option<apps::Packet>),
+    Spaces(Option<spaces::Packet>),
     Collection(Option<collections::Packet>),
     Ink(Result<Vec<ink::Event>, tokio::sync::broadcast::error::RecvError>),
     Chat(Result<Arc<chat::Packet>, tokio::sync::broadcast::error::RecvError>),
+    ManagedChat(Option<space_chat::Packet>),
     Heartbeat,
+    Activation,
 }
 async fn peer(
     app: Arc<App>,
@@ -128,6 +210,7 @@ async fn peer(
     key: Option<String>,
     control_only: bool,
     guest: Option<String>,
+    space: Option<String>,
 ) {
     let (mut output, mut input) = socket.split();
     let Ok(Some(Ok(Message::Text(bytes)))) =
@@ -176,19 +259,27 @@ async fn peer(
     // Overflow still disconnects for resync; release control never awaits space.
     let (state_tx, state_input) = mpsc::channel(8);
     let (state_output, mut state_rx) = mpsc::channel(4);
+    let (activation, mut live) = watch::channel(None);
     let worker = state_enabled.then(|| {
         tokio::spawn(apps::worker(
             app.clone(),
             public,
             key.clone(),
+            space.clone(),
             state_input,
             state_output,
+            activation,
         ))
     });
     let mut ink: Option<ink::Subscription> = None;
+    let managed = app.state_config.spaces.is_some();
+    let mut managed_ink = ManagedInk::default();
+    let mut lease_open = state_enabled;
     let mut collection_peer: Option<collections::Peer> = None;
+    let mut spaces_peer: Option<spaces::Peer> = None;
     let mut admission = Arc::new(AtomicBool::new(false));
     let mut chat_peer: Option<chat::Peer> = None;
+    let mut managed_chat: Option<space_chat::Peer> = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     heartbeat.tick().await;
     let mut heard = Instant::now();
@@ -201,14 +292,31 @@ async fn peer(
         let event = tokio::select! {biased;
             result=releases.changed()=>{if result.is_err(){break;}Event::Release},
             result=availability.changed(),if state_enabled=>{if result.is_err(){break;}Event::Availability},
+            result=live.changed(),if lease_open=>{if result.is_err(){lease_open=false;}Event::Activation},
             _=heartbeat.tick()=>Event::Heartbeat,
             value=input.next()=>Event::Wire(value),
             value=state_rx.recv(),if state_enabled=>Event::State(value),
+            value=async{match spaces_peer.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::Spaces(value),
             value=async{match collection_peer.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::Collection(value),
             value=async{match ink.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Ink(value),
             value=async{match chat_peer.as_mut(){Some(sub)=>sub.updates.recv().await,None=>std::future::pending().await}}=>Event::Chat(value),
+            value=async{match managed_chat.as_mut(){Some(peer)=>peer.output.recv().await,None=>std::future::pending().await}}=>Event::ManagedChat(value),
         };
         match event {
+            Event::Activation => {
+                let current = live.borrow_and_update().clone();
+                if managed && (!lease_open || managed_ink.active != current) {
+                    managed_ink.clear(&mut ink);
+                    managed_ink.active = None;
+                }
+                if !lease_open
+                    || managed_chat
+                        .as_ref()
+                        .is_some_and(|peer| current.as_ref() != Some(&peer.active))
+                {
+                    managed_chat = None;
+                }
+            }
             Event::Release => {
                 let r = descriptor(&releases.borrow_and_update());
                 let available = *availability.borrow();
@@ -255,7 +363,114 @@ async fn peer(
                         if !state_enabled || !*availability.borrow() {
                             break;
                         }
+                        // Auxiliary lanes cannot fall back to global rooms.
+                        if managed
+                            && !matches!(
+                                bytes.first(),
+                                Some(&wire::STATE)
+                                    | Some(&otrios_interfaces::spaces::CHANNEL)
+                                    | Some(&wire::INK)
+                                    | Some(&otrios_interfaces::chat::CHANNEL)
+                                    | Some(&otrios_interfaces::collection::CHANNEL)
+                            )
+                        {
+                            break;
+                        }
+                        if managed
+                            && matches!(
+                                bytes.first(),
+                                Some(&otrios_interfaces::chat::CHANNEL)
+                                    | Some(&otrios_interfaces::collection::CHANNEL)
+                            )
+                        {
+                            let (channel, payload) = bytes.split_first().expect("channel");
+                            let Ok((epoch, payload)) = wire::scope(payload) else {
+                                break;
+                            };
+                            let bound = if *channel == otrios_interfaces::chat::CHANNEL {
+                                otrios_interfaces::chat::MAX_COMMAND_BYTES
+                            } else {
+                                otrios_interfaces::collection::MAX_COMMAND_BYTES
+                            };
+                            if payload.is_empty() || payload.len() > bound {
+                                break;
+                            }
+                            let guard = app.apps.lock().await;
+                            let scope = spaces::Scope {
+                                space: space.clone(),
+                                identity: spaces::identity(&app, &key).await,
+                            };
+                            let Some(active) = managed_ink
+                                .current(&live)
+                                .filter(|active| active.epoch == epoch && active.chat)
+                                .cloned()
+                            else {
+                                continue;
+                            };
+                            let Some(hub) = guard.as_ref().filter(|hub| {
+                                hub.grant_current(&scope, &active.binding, &active.grant)
+                            }) else {
+                                continue;
+                            };
+                            if managed_chat
+                                .as_ref()
+                                .is_some_and(|peer| peer.active != active)
+                            {
+                                managed_chat = None;
+                            }
+                            if managed_chat.is_none() {
+                                let Ok(room) = hub.chat_room(&active) else {
+                                    break;
+                                };
+                                managed_chat = Some(space_chat::subscribe(
+                                    app.clone(),
+                                    room,
+                                    active,
+                                    live.clone(),
+                                    key.clone(),
+                                    space.clone(),
+                                ));
+                            }
+                            if managed_chat
+                                .as_ref()
+                                .expect("subscribed room")
+                                .send(*channel, payload.to_vec())
+                                .is_err()
+                            {
+                                break;
+                            }
+                            continue;
+                        }
                         match bytes.split_first() {
+                            Some((&otrios_interfaces::spaces::CHANNEL, payload))
+                                if !payload.is_empty()
+                                    && payload.len()
+                                        <= otrios_interfaces::spaces::MAX_COMMAND_BYTES =>
+                            {
+                                let peer = spaces_peer.get_or_insert_with(|| {
+                                    spaces::subscribe(app.clone(), key.clone())
+                                });
+                                if peer.input.try_send(payload.to_vec()).is_err() {
+                                    spaces_peer = None;
+                                    let bytes = otrios_core::spaces::encode_event(
+                                        &otrios_interfaces::spaces::Event::ResyncRequired {
+                                            version: 1,
+                                        },
+                                    )
+                                    .expect("bounded status");
+                                    if !send(
+                                        &mut output,
+                                        Message::Binary(
+                                            wire::frame(otrios_interfaces::spaces::CHANNEL, bytes)
+                                                .into(),
+                                        ),
+                                    )
+                                    .await
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
                             Some((&otrios_interfaces::collection::CHANNEL, payload))
                                 if !payload.is_empty()
                                     && payload.len()
@@ -346,6 +561,40 @@ async fn peer(
                                 }
                             }
                             Some((&wire::INK, payload)) => {
+                                if managed {
+                                    let Ok((epoch, payload)) = wire::scope(payload) else {
+                                        break;
+                                    };
+                                    let guard = app.apps.lock().await;
+                                    let scope = spaces::Scope {
+                                        space: space.clone(),
+                                        identity: spaces::identity(&app, &key).await,
+                                    };
+                                    let Some(active) = managed_ink
+                                        .current(&live)
+                                        .filter(|active| active.epoch == epoch)
+                                    else {
+                                        continue;
+                                    };
+                                    if guard.as_ref().is_none_or(|hub| {
+                                        !hub.allowed(
+                                            &scope,
+                                            &active.binding,
+                                            otrios_interfaces::spaces::Operation::Edit,
+                                        )
+                                    }) {
+                                        continue;
+                                    }
+                                    let (Some(room), Some(peer)) =
+                                        (&managed_ink.room, ink.as_mut())
+                                    else {
+                                        continue;
+                                    };
+                                    if room.receive(peer, payload).await.is_err() {
+                                        break;
+                                    }
+                                    continue;
+                                }
                                 let Some(sub) = ink.as_mut() else {
                                     break;
                                 };
@@ -369,10 +618,22 @@ async fn peer(
                             break;
                         }
                         match serde_json::from_str(&text) {
+                            Ok(ClientControl::Ink { enabled }) if managed => {
+                                managed_ink.wanted = enabled;
+                                if !managed_ink
+                                    .refresh(&app, &key, &space, &live, &mut ink, &mut output)
+                                    .await
+                                {
+                                    break;
+                                }
+                            }
                             Ok(ClientControl::Ink { enabled: false }) => {
                                 ink = None;
                             }
                             Ok(ClientControl::Ink { enabled: true }) if ink.is_none() => {
+                                if app.state_config.spaces.is_some() {
+                                    break;
+                                }
                                 let Ok((subscription, bytes)) = app.ink.subscribe().await else {
                                     break;
                                 };
@@ -420,7 +681,35 @@ async fn peer(
             }
             Event::Wire(_) => break,
             Event::State(Some(packet)) => {
+                // Hold the same lock as management through the bounded send:
+                // revocation cannot acknowledge ahead of an older queued payload.
+                let guard = if packet.binding.is_some() {
+                    Some(app.apps.lock().await)
+                } else {
+                    None
+                };
+                let scope = spaces::Scope {
+                    space: space.clone(),
+                    identity: spaces::identity(&app, &key).await,
+                };
+                if let Some(binding) = &packet.binding
+                    && guard.as_ref().and_then(|g| g.as_ref()).is_none_or(|hub| {
+                        packet
+                            .grant
+                            .as_ref()
+                            .is_none_or(|grant| !hub.grant_current(&scope, binding, grant))
+                    })
+                {
+                    continue;
+                }
                 if packet.private && !apps::private_allowed(&app, public, &key).await {
+                    continue;
+                }
+                if packet
+                    .activated
+                    .as_deref()
+                    .is_some_and(|active| live.borrow().as_ref() != Some(active))
+                {
                     continue;
                 }
                 if !send(
@@ -431,8 +720,96 @@ async fn peer(
                 {
                     break;
                 }
+                drop(guard);
+                if let Some(active) = packet.activated {
+                    managed_ink.clear(&mut ink);
+                    managed_ink.active = Some(*active);
+                    if !managed_ink
+                        .refresh(&app, &key, &space, &live, &mut ink, &mut output)
+                        .await
+                    {
+                        break;
+                    }
+                }
             }
             Event::State(None) => break,
+            Event::ManagedChat(Some(packet)) => {
+                let guard = app.apps.lock().await;
+                let scope = spaces::Scope {
+                    space: space.clone(),
+                    identity: spaces::identity(&app, &key).await,
+                };
+                let Some(peer) = managed_chat.as_ref() else {
+                    continue;
+                };
+                if managed_ink.current(&live) != Some(&peer.active)
+                    || guard.as_ref().is_none_or(|hub| {
+                        !hub.grant_current(&scope, &peer.active.binding, &peer.active.grant)
+                    })
+                {
+                    continue;
+                }
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(
+                            packet.channel,
+                            wire::scoped(peer.active.epoch, packet.bytes),
+                        )
+                        .into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+            }
+            Event::ManagedChat(None) => {
+                let guard = app.apps.lock().await;
+                let scope = spaces::Scope {
+                    space: space.clone(),
+                    identity: spaces::identity(&app, &key).await,
+                };
+                // Policy publication can stop chat before the state worker has
+                // published its revoked lease or queued AccessRequired. Preserve
+                // the shared socket so that final invalidation can still drain.
+                // Unexpected failure of a currently authorized worker requires
+                // reconnect/resync, as before.
+                if managed_chat.as_ref().is_some_and(|peer| {
+                    managed_ink.current(&live) == Some(&peer.active)
+                        && guard.as_ref().is_some_and(|hub| {
+                            hub.grant_current(&scope, &peer.active.binding, &peer.active.grant)
+                        })
+                }) {
+                    break;
+                }
+                managed_chat = None;
+            }
+            Event::Spaces(Some(packet)) => {
+                let guard = app.apps.lock().await;
+                let principal = spaces::identity(&app, &key).await;
+                if principal != packet.identity
+                    || packet.cursor.as_ref().is_some_and(|cursor| {
+                        guard
+                            .as_ref()
+                            .is_none_or(|hub| hub.discovery_cursor() != cursor)
+                    })
+                {
+                    continue;
+                }
+                if !send(
+                    &mut output,
+                    Message::Binary(
+                        wire::frame(otrios_interfaces::spaces::CHANNEL, packet.bytes).into(),
+                    ),
+                )
+                .await
+                {
+                    break;
+                }
+                drop(guard);
+            }
+            Event::Spaces(None) => break,
             Event::Collection(Some(packet)) => {
                 // Never flush a private view after the admission that produced
                 // it expires, including while renderer/socket work was blocked.
@@ -476,6 +853,33 @@ async fn peer(
             }
             Event::Ink(Ok(events)) => {
                 let bytes = ink::encode(&events);
+                if managed {
+                    let guard = app.apps.lock().await;
+                    let scope = spaces::Scope {
+                        space: space.clone(),
+                        identity: spaces::identity(&app, &key).await,
+                    };
+                    let Some(active) = managed_ink.current(&live) else {
+                        continue;
+                    };
+                    if guard.as_ref().is_none_or(|hub| {
+                        !hub.grant_current(&scope, &active.binding, &active.grant)
+                    }) {
+                        continue;
+                    }
+                    if !bytes.is_empty()
+                        && !send(
+                            &mut output,
+                            Message::Binary(
+                                wire::frame(wire::INK, wire::scoped(active.epoch, bytes)).into(),
+                            ),
+                        )
+                        .await
+                    {
+                        break;
+                    }
+                    continue;
+                }
                 if !bytes.is_empty()
                     && !send(
                         &mut output,
@@ -568,6 +972,9 @@ mod tests {
                 source: PathBuf::new(),
                 state: None,
                 presentation: None,
+                spaces: None,
+                provisioning: false,
+                collector: None,
             },
             recovery: Mutex::new(()),
             state_available,

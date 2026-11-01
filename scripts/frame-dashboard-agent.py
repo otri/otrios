@@ -79,6 +79,10 @@ def cached(cache,release,key,openssl):
 def cache_size(path):
     if path.is_symlink():raise ValueError('Cache symlink rejected')
     if path.is_file():return path.stat().st_size
+    # Device-local installation metadata may keep its notification socket here.
+    # It carries no retained artifact bytes and must survive cache eviction.
+    if path.is_socket():return 0
+    if not path.is_dir():raise ValueError('Unexpected cache entry type')
     return sum(cache_size(p) for p in path.iterdir())
 
 def trim_cache(cache,limit=CACHE_BYTES,reserve=0,pins=()):
@@ -206,6 +210,9 @@ class Host:
         # Presentation only; old native releases safely ignore this during rollback.
         env['OTRIOS_PRIVATE_APP_ACCESS']='true'
         command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
+        # An older verified binary must reject this required option rather than
+        # silently ignoring installation policy supplied only in its environment.
+        if env.get('OTRIOS_LOCAL_APPS'):command+=['--local-apps',env['OTRIOS_LOCAL_APPS']]
         if screen and screen!='locked':command+=['--screen',screen]
         command+=['--catalog-update-socket',str(self.ui_socket)]
         command+=['--rotation',str(a.rotation),'--touch-matrix',a.touch_matrix]

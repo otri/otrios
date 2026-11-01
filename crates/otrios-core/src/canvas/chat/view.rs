@@ -11,8 +11,10 @@ use unicode_segmentation::UnicodeSegmentation;
 struct Paint {
     nodes: Vec<SceneNode>,
     next: u32,
-    buttons: [u8; 201],
+    buttons: [u8; 215],
     line_height: f32,
+    moderator_label: &'static str,
+    read_only: bool,
 }
 impl Paint {
     fn id(&mut self) -> u32 {
@@ -62,7 +64,11 @@ impl Paint {
         let occurrence = &mut self.buttons[usize::from(command)];
         let id = 3_000_000 + u32::from(command) * 2048 + u32::from(*occurrence) * 8;
         *occurrence += 1;
-        let color = if primary {
+        let enabled = !self.read_only || super::client::read_action(command);
+        let primary = primary && enabled;
+        let color = if !enabled {
+            BG
+        } else if primary {
             BRASS
         } else if matches!(command, 1 | 8 | 15 | 16) {
             BG
@@ -100,17 +106,31 @@ impl Paint {
                 ),
                 caption,
                 2,
-                if primary { BG } else { TEXT },
+                if !enabled {
+                    MUTED
+                } else if primary {
+                    BG
+                } else {
+                    TEXT
+                },
             ));
         }
         let mut button = canvas(id, Rect::new(r[0], r[1], r[2], r[3]), children);
-        button.responder = Some(TouchResponder::Activate(Action::AppEvent(
-            (command + 40) as u8,
-        )));
-        button.semantics = Some(SwitchSemantics {
-            label: label.chars().take(90).collect(),
-            checked: false,
-        });
+        button.responder = if self.read_only && !super::client::read_action(command) {
+            None
+        } else {
+            Some(TouchResponder::Activate(Action::AppEvent(
+                (command + 40) as u8,
+            )))
+        };
+        button.semantics = if self.read_only && !super::client::read_action(command) {
+            None
+        } else {
+            Some(SwitchSemantics {
+                label: label.chars().take(90).collect(),
+                checked: false,
+            })
+        };
         self.nodes.push(button);
     }
     fn avatar_button(
@@ -130,7 +150,9 @@ impl Paint {
             if let Primitive::Superellipse { color, .. } = &mut button.children[1].primitive {
                 *color = [54, 47, 37, 255];
             }
-            button.semantics.as_mut().unwrap().checked = true;
+            if let Some(semantics) = &mut button.semantics {
+                semantics.checked = true;
+            }
         }
         let id = self.id();
         let mut icon = avatar(avatar_id, id, r[2].min(r[3]) - 12.);
@@ -144,7 +166,11 @@ impl Paint {
             [x, y, width, 52.],
             &format!(
                 "{}{}",
-                if member.admin { "Admin " } else { "" },
+                if member.admin {
+                    self.moderator_label
+                } else {
+                    ""
+                },
                 member.profile.name
             ),
             "",
@@ -186,8 +212,10 @@ impl Client {
         let mut p = Paint {
             nodes: vec![],
             next: 9_000_000,
-            buttons: [0; 201],
+            buttons: [0; 215],
             line_height: self.line_height(),
+            moderator_label: if self.managed { "Moderator " } else { "Admin " },
+            read_only: self.read_only,
         };
         for particle in &self.particles {
             let t = self.now.saturating_sub(particle.at) as f32 / 1000.;
@@ -210,6 +238,352 @@ impl Client {
         let scene = Scene::new(canvas(8_000_000, Rect::new(0., 0., w, h), p.nodes))?;
         Ok(crate::dashboard::render_scene(&scene).vertices)
     }
+    fn sharing_label(&self, value: &str, width: f32) -> String {
+        let mut label: String = value.chars().take(256).collect();
+        if let Some(font) = &self.font
+            && font.text_width(&label, 2.) > width
+        {
+            while !label.is_empty() && font.text_width(&format!("{label}…"), 2.) > width {
+                label.pop();
+            }
+            label.push('…');
+        }
+        label
+    }
+    fn sharing_preview(&self, p: &mut Paint, x: f32, y: f32, width: f32, height: f32) {
+        let Some(selected) = &self.sharing.selected else {
+            return;
+        };
+        let message = &selected.message;
+        p.text(
+            x,
+            y,
+            width,
+            &self.sharing_label(
+                &format!(
+                    "{} · dispatch {} by {}",
+                    self.sharing.source_name, message.sequence, message.sender.name
+                ),
+                width,
+            ),
+            2,
+            BRASS,
+        );
+        let mut body = super::text::Wrapped::default();
+        if let Some(font) = &self.font {
+            body.update(&message.text, width, font);
+            let lines = ((height - 48.) / body.line_height).floor().max(1.) as usize;
+            for line in 0..body.lines.len().min(lines) {
+                let mut text = body.display(line, None);
+                if line + 1 == lines && body.lines.len() > lines {
+                    text.push_str(" …");
+                }
+                p.text(
+                    x,
+                    y + 40. + line as f32 * body.line_height,
+                    width,
+                    &text,
+                    2,
+                    TEXT,
+                );
+            }
+        }
+    }
+    fn sharing_panel(&self, p: &mut Paint, x: f32, y: f32, width: f32, height: f32) {
+        match self.panel {
+            Panel::Dispatches => {
+                p.text(
+                    x + 24.,
+                    y + 80.,
+                    width - 48.,
+                    "Choose a confirmed dispatch from the current window.",
+                    1,
+                    MUTED,
+                );
+                for (index, message) in self
+                    .messages
+                    .iter()
+                    .rev()
+                    .skip(self.sharing.page * 6)
+                    .take(6)
+                    .enumerate()
+                {
+                    let caption = format!(
+                        "#{}  {}",
+                        message.sequence,
+                        message.text.chars().take(36).collect::<String>()
+                    );
+                    p.button(
+                        200 + index as u16,
+                        [
+                            x + 24.,
+                            y + 108. + index as f32 * ((height - 190.) / 6.).min(62.),
+                            width - 48.,
+                            ((height - 190.) / 6.).min(62.) - 6.,
+                        ],
+                        &format!("Select dispatch {}", message.sequence),
+                        &caption,
+                        false,
+                    );
+                }
+                p.button(
+                    206,
+                    [x + 24., y + height - 70., 144., 50.],
+                    "Previous dispatches",
+                    "Previous",
+                    false,
+                );
+                p.button(
+                    207,
+                    [x + width - 168., y + height - 70., 144., 50.],
+                    "Next dispatches",
+                    "Next",
+                    false,
+                );
+            }
+            Panel::Dispatch => {
+                let preview_height = (height - 376.).clamp(64., 180.);
+                self.sharing_preview(p, x + 24., y + 88., width - 48., preview_height);
+                if let Some(selected) = &self.sharing.selected {
+                    for (index, asset) in selected.message.assets.iter().enumerate() {
+                        p.text(
+                            x + 24.,
+                            y + 96. + preview_height + index as f32 * 24.,
+                            width - 48.,
+                            &format!("Attachment: {} ({} bytes)", asset.name, asset.bytes),
+                            1,
+                            MUTED,
+                        );
+                    }
+                    if self.managed {
+                        p.button(
+                            209,
+                            [x + 24., y + height - 146., width - 48., 54.],
+                            "Publish to another Space",
+                            "Publish to another Space",
+                            false,
+                        );
+                    }
+                    if self.you.as_ref().is_some_and(|you| you.admin) {
+                        p.button(
+                            211,
+                            [x + 24., y + height - 78., (width - 60.) / 2., 54.],
+                            "Delete dispatch",
+                            "Delete dispatch",
+                            false,
+                        );
+                    }
+                    if self.managed && !self.native && !selected.message.assets.is_empty() {
+                        p.button(
+                            213,
+                            [
+                                x + width / 2. + 6.,
+                                y + height - 78.,
+                                (width - 60.) / 2.,
+                                54.,
+                            ],
+                            "Download attachments",
+                            "Attachments",
+                            false,
+                        );
+                    }
+                }
+            }
+            Panel::Destinations => {
+                p.text(
+                    x + 24.,
+                    y + 84.,
+                    width - 48.,
+                    "Choose another Space where you are a Member or Admin.",
+                    1,
+                    MUTED,
+                );
+                p.text(
+                    x + 24.,
+                    y + 116.,
+                    width - 48.,
+                    "The same app must be attached there.",
+                    1,
+                    MUTED,
+                );
+                for (index, target) in self
+                    .sharing
+                    .targets
+                    .iter()
+                    .skip(self.sharing.target_page * 6)
+                    .take(6)
+                    .enumerate()
+                {
+                    let caption = format!("{} · {}", &target.id[..8], target.name);
+                    p.button(
+                        100 + index as u16,
+                        [
+                            x + 24.,
+                            y + 150. + index as f32 * ((height - 228.) / 6.).min(56.),
+                            width - 48.,
+                            ((height - 228.) / 6.).min(56.) - 6.,
+                        ],
+                        &format!("Publish in {}", target.name),
+                        &caption,
+                        false,
+                    );
+                }
+                if self.sharing.targets.is_empty() {
+                    p.text(
+                        x + 24.,
+                        y + 190.,
+                        width - 48.,
+                        "No other editable Spaces are available.",
+                        2,
+                        MUTED,
+                    );
+                }
+                p.button(
+                    190,
+                    [x + 24., y + height - 70., 144., 50.],
+                    "Previous destinations",
+                    "Previous",
+                    false,
+                );
+                p.button(
+                    191,
+                    [x + width - 168., y + height - 70., 144., 50.],
+                    "Next destinations",
+                    "Next",
+                    false,
+                );
+            }
+            Panel::Publish => {
+                if let Some(target) = &self.sharing.target {
+                    p.text(
+                        x + 24.,
+                        y + 88.,
+                        width - 48.,
+                        &self.sharing_label(
+                            &format!("Destination: {} · {}", &target.id[..8], target.name),
+                            width - 48.,
+                        ),
+                        2,
+                        BRASS,
+                    );
+                    p.text(
+                        x + 24.,
+                        y + 132.,
+                        width - 48.,
+                        "Copies the full selected dispatch and its attachments.",
+                        1,
+                        MUTED,
+                    );
+                    self.sharing_preview(
+                        p,
+                        x + 24.,
+                        y + 164.,
+                        width - 48.,
+                        (height - 370.).clamp(64., 150.),
+                    );
+                    p.text(
+                        x + 24.,
+                        y + height - 198.,
+                        width - 48.,
+                        "The destination owns the copy and its comments.",
+                        1,
+                        MUTED,
+                    );
+                    p.text(
+                        x + 24.,
+                        y + height - 164.,
+                        width - 48.,
+                        "Later private changes will not update it.",
+                        1,
+                        MUTED,
+                    );
+                    p.text(
+                        x + 24.,
+                        y + height - 130.,
+                        width - 48.,
+                        "Source and destination deletions are independent.",
+                        1,
+                        MUTED,
+                    );
+                    p.button(
+                        210,
+                        [x + 24., y + height - 84., width - 48., 60.],
+                        "Publish copy",
+                        "Publish copy",
+                        true,
+                    );
+                }
+            }
+            Panel::Redact => {
+                self.sharing_preview(
+                    p,
+                    x + 24.,
+                    y + 88.,
+                    width - 48.,
+                    (height - 304.).clamp(64., 160.),
+                );
+                p.text(
+                    x + 24.,
+                    y + height - 222.,
+                    width - 48.,
+                    "Remove this dispatch from this Space's transcript?",
+                    2,
+                    MUTED,
+                );
+                p.text(
+                    x + 24.,
+                    y + height - 176.,
+                    width - 48.,
+                    "Previously admitted copies and backups may remain.",
+                    1,
+                    MUTED,
+                );
+                p.text(
+                    x + 24.,
+                    y + height - 138.,
+                    width - 48.,
+                    "Copies published in other Spaces are independent.",
+                    1,
+                    MUTED,
+                );
+                p.button(
+                    212,
+                    [x + 24., y + height - 84., width - 48., 60.],
+                    "Confirm delete dispatch",
+                    "Delete dispatch",
+                    true,
+                );
+            }
+            Panel::Assets => {
+                if let Some(selected) = &self.sharing.selected {
+                    for (index, asset) in selected.message.assets.iter().enumerate() {
+                        p.button(
+                            200 + index as u16,
+                            [
+                                x + 24.,
+                                y + 100. + index as f32 * ((height - 176.) / 4.).min(72.),
+                                width - 48.,
+                                ((height - 176.) / 4.).min(72.) - 10.,
+                            ],
+                            &format!("Download {}", asset.name),
+                            &format!("{} · {} bytes", asset.name, asset.bytes),
+                            false,
+                        );
+                    }
+                    p.text(
+                        x + 24.,
+                        y + height - 68.,
+                        width - 48.,
+                        "Downloads create a separate copy on your device.",
+                        1,
+                        MUTED,
+                    );
+                }
+            }
+            _ => (),
+        }
+    }
+
     pub(crate) fn scene(&self, base: &Scene, size: [f32; 2], keyboard: bool) -> Result<Scene> {
         let [w, full_h] = size;
         let h = room_height(size, keyboard);
@@ -223,8 +597,10 @@ impl Client {
         let mut p = Paint {
             nodes: vec![],
             next: 2_000_000,
-            buttons: [0; 201],
+            buttons: [0; 215],
             line_height: self.line_height(),
+            moderator_label: if self.managed { "Moderator " } else { "Admin " },
+            read_only: self.read_only,
         };
         p.rect([0., 0., w, full_h], BG, 0.);
         let header_start = p.nodes.len();
@@ -236,7 +612,8 @@ impl Client {
                     f.text_width(value, heading_scale as f32)
                 })
         };
-        let back_width = measure("< OTriOS");
+        let back_label = if self.managed { "< Quit" } else { "< OTriOS" };
+        let back_width = measure(back_label);
         let line_height = self
             .font
             .as_ref()
@@ -245,11 +622,20 @@ impl Client {
         p.button(
             0,
             [24., 24., back_width + 8., 60.],
-            "Back to OTriOS",
+            if self.managed {
+                "Quit"
+            } else {
+                "Back to OTriOS"
+            },
             "",
             false,
         );
         let back = p.nodes.last_mut().unwrap();
+        if let Some(control) = self.quit_control {
+            // This control comes from the host's reserved action table, never
+            // from a publisher handler. Reuse the breadcrumb's header space.
+            back.responder = Some(TouchResponder::Activate(Action::AppEvent(control)));
+        }
         for child in &mut back.children {
             if let Primitive::Superellipse { color, .. } = &mut child.primitive {
                 *color = BG;
@@ -258,7 +644,7 @@ impl Client {
         back.children.push(text(
             back.id + 3,
             Rect::new(0., heading_y - 24., back_width + 8., line_height),
-            "< OTriOS",
+            back_label,
             heading_scale,
             TEXT,
         ));
@@ -410,7 +796,9 @@ impl Client {
             rows.push(text(
                 id,
                 Rect::new(0., 0., self.input_width(), self.line_height()),
-                if self.focus == Some(Focus::Compose) {
+                if self.read_only {
+                    "Read-only Space view"
+                } else if self.focus == Some(Focus::Compose) {
                     "|"
                 } else {
                     "Message..."
@@ -477,7 +865,7 @@ impl Client {
             p.rect([42., cy - 58., page_w - 36., 48.], BG, 6.);
             p.text(54., cy - 43., page_w - 60., &self.notice, 2, BRASS);
         }
-        if !self.online && self.kicked.is_none() {
+        if !self.online && self.kicked.is_none() && (!self.managed || self.you.is_some()) {
             p.button(
                 11,
                 [48., page_y + 100., 200., 52.],
@@ -546,7 +934,7 @@ impl Client {
             let pw = 720_f32.min(w - 48.);
             let x = (w - pw) / 2.;
             let compact_profile = keyboard || h < 720.;
-            let y = if self.panel == Panel::Profile && h < 800. {
+            let y = if h < 720. || self.panel == Panel::Profile && h < 800. {
                 20.
             } else {
                 100_f32.min((h - 200.).max(20.))
@@ -559,7 +947,13 @@ impl Client {
                         676_f32
                     }
                 }
-                Panel::Members => 650.,
+                Panel::Members
+                | Panel::Dispatches
+                | Panel::Dispatch
+                | Panel::Destinations
+                | Panel::Publish
+                | Panel::Redact
+                | Panel::Assets => 650.,
                 Panel::Auth => 380.,
                 Panel::Help => 520.,
                 _ => 280.,
@@ -597,11 +991,23 @@ impl Client {
                     .map_or("Member", |m| m.profile.name.as_str()),
                 Panel::Kick => "Kick this member?",
                 Panel::Help => "The operator's handbook",
+                Panel::Dispatches => "Confirmed dispatches",
+                Panel::Dispatch => "Selected dispatch",
+                Panel::Destinations => "Choose destination Space",
+                Panel::Publish => "Publish a copy",
+                Panel::Redact => "Delete this dispatch?",
+                Panel::Assets => "Dispatch attachments",
                 Panel::Auth => "Monitoring sign-in",
                 Panel::None => "",
             };
             p.text(x + 24., y + 28., pw - 120., title, 3, TEXT);
             match self.panel {
+                Panel::Dispatches
+                | Panel::Dispatch
+                | Panel::Destinations
+                | Panel::Publish
+                | Panel::Redact
+                | Panel::Assets => self.sharing_panel(&mut p, x, y, pw, ph),
                 Panel::Profile => {
                     p.text(x + 24., y + 70., pw - 48., "Your room name", 2, MUTED);
                     if self.temporary {
@@ -721,7 +1127,11 @@ impl Client {
                         x + 24.,
                         y + 82.,
                         pw - 48.,
-                        &format!("{} on the wire - @ means Admin", self.members.len()),
+                        &format!(
+                            "{} on the wire - @ means {}",
+                            self.members.len(),
+                            if self.managed { "Moderator" } else { "Admin" }
+                        ),
                         2,
                         MUTED,
                     );
@@ -754,21 +1164,23 @@ impl Client {
                         ">",
                         false,
                     );
-                    p.button(
-                        14,
-                        [x + pw - 280., y + ph - 62., 256., 44.],
-                        if self.you.as_ref().is_some_and(|m| m.admin) {
-                            "Sign out admin"
-                        } else {
-                            "Monitoring admin sign-in"
-                        },
-                        if self.you.as_ref().is_some_and(|m| m.admin) {
-                            "Sign out admin"
-                        } else {
-                            "Admin sign-in"
-                        },
-                        false,
-                    );
+                    if !self.managed {
+                        p.button(
+                            14,
+                            [x + pw - 280., y + ph - 62., 256., 44.],
+                            if self.you.as_ref().is_some_and(|m| m.admin) {
+                                "Sign out admin"
+                            } else {
+                                "Monitoring admin sign-in"
+                            },
+                            if self.you.as_ref().is_some_and(|m| m.admin) {
+                                "Sign out admin"
+                            } else {
+                                "Admin sign-in"
+                            },
+                            false,
+                        );
+                    }
                 }
                 Panel::Person => {
                     p.button(
@@ -830,13 +1242,45 @@ impl Client {
                         "/nick name - change your calling card",
                         "/avatar - choose your emblem",
                         "/who - see who is on the wire",
-                        "/kick name - admin: review a removal",
+                        if self.managed {
+                            "/kick name - moderator: review a removal"
+                        } else {
+                            "/kick name - admin: review a removal"
+                        },
                         "//text - send a literal slash",
                     ]
                     .iter()
                     .enumerate()
                     {
-                        p.text(x + 24., y + 94. + i as f32 * 38., pw - 48., line, 2, MUTED);
+                        p.text(
+                            x + 24.,
+                            y + 86. + i as f32 * if ph < 500. { 24. } else { 34. },
+                            pw - 48.,
+                            line,
+                            if ph < 500. { 1 } else { 2 },
+                            MUTED,
+                        );
+                    }
+                    p.button(
+                        208,
+                        [x + 24., y + ph - 78., (pw - 60.) * 0.6, 54.],
+                        "Browse dispatches",
+                        "Dispatches",
+                        false,
+                    );
+                    if self.managed && !self.native && !self.read_only {
+                        p.button(
+                            214,
+                            [
+                                x + 36. + (pw - 60.) * 0.6,
+                                y + ph - 78.,
+                                (pw - 60.) * 0.4,
+                                54.,
+                            ],
+                            "Send file",
+                            "Send file",
+                            false,
+                        );
                     }
                 }
                 Panel::Auth => {

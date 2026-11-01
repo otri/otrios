@@ -5,7 +5,7 @@ use otrios_core::canvas::{self, Behavior, Document, Session};
 use otrios_interfaces::canvas::{App as AppContract, ClientMessage, ServerMessage};
 use otrios_interfaces::session::STATE_PROTOCOL;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::Read,
 };
 
@@ -18,6 +18,12 @@ struct Package {
     private: bool,
     signal_fields: Vec<u16>,
     selection: canvas::StateSelection,
+    schema: otrios_interfaces::canvas::StateSchema,
+    policy: otrios_interfaces::spaces::AppPolicy,
+    chat: bool,
+    aggregate_view: bool,
+    ink: bool,
+    primary_ref: String,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -26,6 +32,7 @@ struct Room {
     doc: Document,
     file: Option<PathBuf>,
     failed: bool,
+    lease: Arc<()>,
 }
 pub(super) struct Hub {
     bundles: BTreeMap<Vec<u8>, Bundle>,
@@ -38,6 +45,21 @@ pub(super) struct Hub {
     active: Vec<u8>,
     active_release: String,
     publisher: Option<[u8; 32]>,
+    spaces: Option<otrios_core::spaces::Store>,
+    collector: Option<otrios_interfaces::spaces::ServiceBinding>,
+    collection_views: BTreeMap<String, (Vec<u8>, Vec<u8>)>,
+    provisioning: bool,
+    discovery: otrios_interfaces::spaces::DiscoveryCursor,
+    discovery_catalog: Vec<u8>,
+    ink_rooms: BTreeMap<String, Arc<ink::Room>>,
+    chat_rooms: BTreeMap<String, Arc<space_chat::Hub>>,
+    cleanup: BTreeMap<String, otrios_interfaces::spaces::CleanupSummary>,
+    next_maintenance: Option<std::time::Instant>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Grant {
+    principal: Option<String>,
+    actions: u8,
 }
 struct Lease {
     epoch: u32,
@@ -45,24 +67,84 @@ struct Lease {
     private: bool,
     sync: Session,
     view_id: Vec<u8>,
+    binding: Option<otrios_interfaces::spaces::Binding>,
+    grant: Grant,
+    _room: Arc<()>,
+    _chat: Option<Arc<space_chat::Hub>>,
+    ink: bool,
+    chat: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Activation {
+    pub epoch: u32,
+    pub binding: otrios_interfaces::spaces::Binding,
+    pub grant: Grant,
+    pub room: String,
+    pub ink: bool,
+    pub chat: bool,
+}
+// Minimal pins survive revocation until the trusted host confirms disposal by
+// sending Leave(epoch), or its connection closes. No old sync snapshot is kept.
+struct Retired {
+    epoch: u32,
+    _room: Arc<()>,
+    _chat: Option<Arc<space_chat::Hub>>,
 }
 #[derive(Default)]
 struct Leases {
     active: Option<Lease>,
     staged: Option<Lease>,
     last_epoch: u32,
+    retired: Vec<Retired>,
 }
 impl Leases {
+    fn activation(&self) -> Option<Activation> {
+        self.active.as_ref().and_then(|lease| {
+            lease.binding.as_ref().map(|binding| Activation {
+                epoch: lease.epoch,
+                binding: binding.clone(),
+                grant: lease.grant.clone(),
+                room: lease.state_ref.clone(),
+                ink: lease.ink,
+                chat: lease.chat,
+            })
+        })
+    }
+    fn publish(&self, sender: &watch::Sender<Option<Activation>>) {
+        let next = self.activation();
+        sender.send_if_modified(|current| {
+            if *current == next {
+                false
+            } else {
+                *current = next;
+                true
+            }
+        });
+    }
+    fn retire(&mut self, lease: Lease) {
+        if lease.binding.is_some() {
+            self.retired.push(Retired {
+                epoch: lease.epoch,
+                _room: lease._room,
+                _chat: lease._chat,
+            });
+        }
+    }
     fn revoke_private(&mut self, allowed: bool) -> Vec<ServerMessage> {
         if allowed {
             return vec![];
         }
         let mut messages = vec![];
+        let mut revoked = vec![];
         for slot in [&mut self.active, &mut self.staged] {
             if slot.as_ref().is_some_and(|l| l.private) {
                 let l = slot.take().expect("present lease");
                 messages.push(ServerMessage::AccessRequired { epoch: l.epoch });
+                revoked.push(l);
             }
+        }
+        for lease in revoked {
+            self.retire(lease);
         }
         messages
     }
@@ -78,6 +160,38 @@ fn bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
         return Err("App artifact exceeds budget".into());
     }
     Ok(bytes)
+}
+fn collection_room(binding: &otrios_interfaces::spaces::Binding, package: &Package) -> String {
+    if package.app.state_ref == package.primary_ref {
+        binding.collection.clone()
+    } else {
+        format!(
+            "{}:{}",
+            binding.collection,
+            canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
+        )
+    }
+}
+fn collection_data_usage(root: &Path, collection: &str) -> Option<u64> {
+    let path = root.join(format!("collection-{collection}.data"));
+    let entries = match fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(0),
+        _ => return None,
+    };
+    let mut total = 0_u64;
+    for (count, entry) in entries.enumerate() {
+        if count == 128 {
+            return None;
+        }
+        let entry = entry.ok()?;
+        let meta = fs::symlink_metadata(entry.path()).ok()?;
+        if !meta.is_file() {
+            return None;
+        }
+        total = total.checked_add(meta.len())?;
+    }
+    Some(total)
 }
 impl Hub {
     pub(super) fn new(source: PathBuf, state: Option<PathBuf>) -> Result<Self> {
@@ -103,10 +217,1118 @@ impl Hub {
             active: vec![],
             active_release: String::new(),
             publisher: None,
+            spaces: None,
+            collector: None,
+            collection_views: BTreeMap::new(),
+            provisioning: false,
+            discovery: otrios_core::spaces::discovery_cursor().map_err(|e| e.to_string())?,
+            discovery_catalog: vec![],
+            ink_rooms: BTreeMap::new(),
+            chat_rooms: BTreeMap::new(),
+            cleanup: BTreeMap::new(),
+            next_maintenance: None,
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
         self.publisher = Some(key);
+    }
+    pub(super) fn enable_spaces(&mut self, path: PathBuf, provisioning: bool) -> Result<()> {
+        if path.with_extension("provisioning").exists() && !provisioning {
+            return Err(
+                "Space provisioning is incomplete; resume the explicit provisioning command".into(),
+            );
+        }
+        self.spaces = Some(otrios_core::spaces::Store::open(path).map_err(|e| e.to_string())?);
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .bind_storage(
+                self.state
+                    .as_deref()
+                    .ok_or("Durable app storage required")?,
+            )
+            .map_err(|e| e.to_string())?;
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .recover_storage()
+            .map_err(|e| e.to_string())?;
+        let registry = self.registry_path()?.to_path_buf();
+        let marker = self
+            .state
+            .as_ref()
+            .ok_or("Durable app storage required")?
+            .join("spaces.registry");
+        if !marker.exists() {
+            persist(
+                &marker,
+                registry
+                    .to_str()
+                    .ok_or("Space registry path must be UTF-8")?
+                    .as_bytes(),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        self.provisioning = provisioning;
+        self.maintain_storage(true)?;
+        Ok(())
+    }
+    pub(super) fn cleanup(
+        &self,
+        space: &str,
+    ) -> Option<&otrios_interfaces::spaces::CleanupSummary> {
+        self.cleanup.get(space)
+    }
+    pub(super) fn maintain_storage(&mut self, force: bool) -> Result<bool> {
+        if self.spaces.is_none() {
+            return Ok(false);
+        }
+        let now = std::time::Instant::now();
+        if !force && self.next_maintenance.is_some_and(|next| now < next) {
+            return Ok(false);
+        }
+        self.next_maintenance = Some(now + Duration::from_secs(60));
+        let deleted = self
+            .registry()
+            .map_err(|e| e.to_string())?
+            .deletions
+            .iter()
+            .map(|d| d.collection.clone())
+            .collect::<BTreeSet<_>>();
+        let mut active = BTreeSet::new();
+        self.rooms.retain(|key, room| {
+            let collection = key.split(':').next().unwrap_or_default();
+            if !deleted.contains(collection) {
+                return true;
+            }
+            if Arc::strong_count(&room.lease) > 1 {
+                active.insert(collection.to_owned());
+                return true;
+            }
+            false
+        });
+        self.chat_rooms.retain(|key, room| {
+            let collection = key.split(':').next().unwrap_or_default();
+            if !deleted.contains(collection) {
+                return true;
+            }
+            if Arc::strong_count(room) > 1 {
+                active.insert(collection.to_owned());
+                return true;
+            }
+            false
+        });
+        self.ink_rooms.retain(|key, room| {
+            let collection = key.split(':').next().unwrap_or_default();
+            if !deleted.contains(collection) {
+                return true;
+            }
+            if Arc::strong_count(room) > 1 {
+                active.insert(collection.to_owned());
+                return true;
+            }
+            false
+        });
+        self.collection_views
+            .retain(|collection, _| !deleted.contains(collection));
+        let unix_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_millis(),
+        )
+        .map_err(|e| e.to_string())?;
+        let summary = self
+            .spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .maintain_deleted(unix_ms, &active)
+            .map_err(|e| e.to_string())?;
+        if summary.values().any(|s| s.local_pending > 0) {
+            self.next_maintenance = Some(now + Duration::from_secs(1));
+        }
+        if summary == self.cleanup {
+            return Ok(false);
+        }
+        let cursor =
+            otrios_core::spaces::advance_discovery(&self.discovery).map_err(|e| e.to_string())?;
+        self.cleanup = summary;
+        self.discovery = cursor;
+        Ok(true)
+    }
+    pub(super) fn registry_path(&self) -> Result<&Path> {
+        self.spaces
+            .as_ref()
+            .map(|store| store.path())
+            .ok_or("Spaces unavailable".into())
+    }
+    pub(super) fn service_binding(
+        &self,
+        admin: &str,
+        space: &str,
+        app: &str,
+        identity: &str,
+    ) -> Result<otrios_interfaces::spaces::ServiceBinding> {
+        if !otrios_core::spaces::valid_identity(identity) {
+            return Err("Invalid service identity".into());
+        }
+        otrios_core::spaces::admit_service_identity(
+            self.registry().map_err(|e| e.to_string())?,
+            identity,
+        )
+        .map_err(|e| e.to_string())?;
+        let p = self
+            .bundles
+            .get(&self.active)
+            .and_then(|b| b.packages.values().find(|p| p.app.id == app))
+            .ok_or("Installed app unavailable")?;
+        let binding = self.binding(
+            &spaces::Scope {
+                space: Some(space.into()),
+                identity: Some(admin.into()),
+            },
+            p,
+        )?;
+        Ok(otrios_interfaces::spaces::ServiceBinding {
+            identity: identity.into(),
+            binding,
+        })
+    }
+    pub(super) fn configure_collector(&mut self, path: &Path) -> Result<()> {
+        let grant: otrios_interfaces::spaces::ServiceBinding =
+            serde_json::from_slice(&spaces::private_bytes(path, 8192)?)
+                .map_err(|_| "Invalid collector binding")?;
+        if grant.binding.app != "monitoring"
+            || !otrios_core::spaces::valid_identity(&grant.identity)
+        {
+            return Err("Collector must be explicitly bound to Monitoring".into());
+        }
+        otrios_core::spaces::admit_service_identity(
+            self.registry().map_err(|e| e.to_string())?,
+            &grant.identity,
+        )
+        .map_err(|e| e.to_string())?;
+        self.collector = Some(grant);
+        Ok(())
+    }
+    pub(super) fn set_collector_view(&mut self, identity: &str, bytes: Vec<u8>) -> Result<()> {
+        if bytes.len() > canvas::MAX_BYTES {
+            return Err("Collection presentation exceeds transport budget".into());
+        }
+        let service = self.collector.as_ref().ok_or("Collector unavailable")?;
+        otrios_core::spaces::authorize_service_installed(
+            self.registry().map_err(|e| e.to_string())?,
+            identity,
+            service,
+            &self.app_policy(&service.binding.app)?,
+        )
+        .map_err(|e| e.to_string())?;
+        let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes)?;
+        checked.resolve_slots(&BTreeMap::new())?;
+        let collection = service.binding.collection.clone();
+        let path = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?
+            .join(format!("collection-{collection}.presentation.flex"));
+        persist(&path, &bytes).map_err(|e| e.to_string())?;
+        if self.collection_views.len() >= 128
+            && !self.collection_views.contains_key(&collection)
+            && let Some(key) = self.collection_views.keys().next().cloned()
+        {
+            self.collection_views.remove(&key);
+        }
+        self.collection_views
+            .insert(collection, (canvas::hash(&bytes), bytes));
+        Ok(())
+    }
+    fn load_collection_view(&mut self, collection: &str) -> Result<()> {
+        if self.collection_views.contains_key(collection) {
+            return Ok(());
+        }
+        let path = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?
+            .join(format!("collection-{collection}.presentation.flex"));
+        let bytes = bounded(&path, canvas::MAX_BYTES)?;
+        let checked = otrios_core::dashboard::layout::Layout::from_bytes(&bytes)?;
+        checked.resolve_slots(&BTreeMap::new())?;
+        if self.collection_views.len() >= 128
+            && let Some(key) = self.collection_views.keys().next().cloned()
+        {
+            self.collection_views.remove(&key);
+        }
+        self.collection_views
+            .insert(collection.into(), (canvas::hash(&bytes), bytes));
+        Ok(())
+    }
+    pub(super) fn import_legacy(
+        &mut self,
+        identity: &str,
+        space: &str,
+        app: &str,
+        source: &str,
+    ) -> Result<Value> {
+        let package = self
+            .bundles
+            .get(&self.active)
+            .and_then(|b| {
+                b.packages
+                    .values()
+                    .find(|p| p.app.id.split('/').next() == Some(app) && p.app.state_ref == source)
+            })
+            .cloned()
+            .ok_or("Installed app unavailable")?;
+        if package.app.state_ref != source {
+            return Err("Legacy source differs from admitted app State".into());
+        }
+        let binding = self.binding(
+            &spaces::Scope {
+                space: Some(space.into()),
+                identity: Some(identity.into()),
+            },
+            &package,
+        )?;
+        let source = self
+            .rooms
+            .get(source)
+            .filter(|r| !r.failed)
+            .ok_or("Legacy root unavailable")?;
+        let bytes = source.doc.save()?;
+        let root = source.doc.root_hash();
+        let original = source
+            .file
+            .clone()
+            .ok_or("Legacy source has no durable checkpoint")?;
+        self.spaces
+            .as_ref()
+            .ok_or("Spaces unavailable")?
+            .check_legacy_import(&binding.collection, &original)
+            .map_err(|e| e.to_string())?;
+        let mut originals = vec![original.clone()];
+        if original.with_extension("merkle.log").exists() {
+            originals.push(original.with_extension("merkle.log"));
+        }
+        let path = self.collection_file(&binding, &package)?;
+        if !path.exists() && path.with_extension("merkle.log").exists() {
+            return Err("Missing migration checkpoint with retained journal".into());
+        }
+        self.collection_parent(&path)?;
+        if path.exists() {
+            let existing = store::load(
+                &path,
+                Document::load(
+                    package.schema,
+                    &package.app.state_ref,
+                    &bounded(&path, canvas::MAX_BYTES)?,
+                )?,
+            )?;
+            if existing.root_hash() != root {
+                return Err("Migration target already contains different confirmed data".into());
+            }
+        } else {
+            persist(&path, &bytes).map_err(|e| e.to_string())?;
+        }
+        if app == "monitoring" && !self.view.is_empty() {
+            let presentation = path.with_file_name(format!(
+                "collection-{}.presentation.flex",
+                binding.collection
+            ));
+            if !presentation.exists() {
+                persist(&presentation, &self.view).map_err(|e| e.to_string())?;
+            }
+        }
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .register_legacy_sources(&binding.collection, &originals)
+            .map_err(|e| e.to_string())?;
+        Ok(
+            json!({"collection":binding.collection,"source":package.app.state_ref,"source_root":canvas::hex(&root)}),
+        )
+    }
+    /// Recover cleanup attribution from a completed private import receipt.
+    /// Never replay payloads or change current admission from historical records.
+    pub(super) fn recover_legacy_original(&mut self, record: &Value) -> Result<()> {
+        let collection = record["collection"]
+            .as_str()
+            .ok_or("Missing import collection")?;
+        let source = record["source"].as_str().ok_or("Missing import source")?;
+        let chat = record["kind"] == "legacy-chat";
+        let original = if chat {
+            if source != "brass-relay.journal" {
+                return Err("Unknown legacy journal source".into());
+            }
+            self.state
+                .as_ref()
+                .ok_or("Durable storage required")?
+                .join(source)
+        } else {
+            if self
+                .spaces
+                .as_ref()
+                .ok_or("Spaces unavailable")?
+                .legacy_document_registered(collection, source)
+                .map_err(|e| e.to_string())?
+            {
+                return Ok(());
+            }
+            self.rooms
+                .get(source)
+                .and_then(|room| room.file.clone())
+                .ok_or("Legacy owning app unavailable")?
+        };
+        if self
+            .spaces
+            .as_ref()
+            .ok_or("Spaces unavailable")?
+            .legacy_source_registered(collection, &original)
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(());
+        }
+        match fs::symlink_metadata(&original) {
+            Ok(_) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.to_string()),
+        }
+        let mut originals = vec![original.clone()];
+        let _owner;
+        if chat {
+            _owner = Some(otrios_core::canvas::chat::Room::open(
+                Some(original.clone()),
+                chat::now(),
+            )?);
+            let bytes = spaces::private_bytes(&original, 64 * 1024 * 1024)?;
+            if record["bytes"].as_u64() != Some(bytes.len() as u64)
+                || record["source_sha256"] != canvas::hex(&canvas::hash(&bytes))
+            {
+                return Err("Legacy journal differs from its completed import receipt".into());
+            }
+        } else {
+            _owner = None;
+            let room = self
+                .rooms
+                .get(source)
+                .filter(|r| !r.failed)
+                .ok_or("Legacy root unavailable")?;
+            if record["source_root"] != canvas::hex(&room.doc.root_hash()) {
+                return Err("Legacy root differs from its completed import receipt".into());
+            }
+            let log = original.with_extension("merkle.log");
+            if log.exists() {
+                originals.push(log);
+            }
+        }
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .register_legacy_sources(collection, &originals)
+            .map_err(|e| e.to_string())
+    }
+    pub(super) fn registry(
+        &self,
+    ) -> std::result::Result<&otrios_interfaces::spaces::Registry, otrios_core::spaces::Error> {
+        self.spaces
+            .as_ref()
+            .ok_or(otrios_core::spaces::Error::Unavailable)?
+            .registry()
+    }
+    pub(super) fn import_legacy_chat(
+        &mut self,
+        identity: &str,
+        space: &str,
+        app: &str,
+        destination: &str,
+    ) -> Result<Value> {
+        use otrios_interfaces::spaces::Role;
+        const LIMIT: usize = 64 * 1024 * 1024;
+        if !self.provisioning
+            || !self
+                .registry()
+                .map_err(|e| e.to_string())?
+                .spaces
+                .iter()
+                .any(|s| {
+                    s.id == space
+                        && otrios_core::spaces::role(s, Some(identity)) == Some(Role::Admin)
+                })
+        {
+            return Err("Chat import requires offline provisioning by a Space Admin".into());
+        }
+        let package = self
+            .bundles
+            .get(&self.active)
+            .and_then(|bundle| {
+                bundle.packages.values().find(|p| {
+                    p.chat
+                        && p.app.id.split('/').next() == Some(app)
+                        && p.app.state_ref == destination
+                })
+            })
+            .cloned()
+            .ok_or("Chat import target is not an installed owning root")?;
+        let binding = self.binding(
+            &spaces::Scope {
+                space: Some(space.into()),
+                identity: Some(identity.into()),
+            },
+            &package,
+        )?;
+        let path = self.chat_file(&binding, &package)?;
+        let receipt = path.with_file_name("legacy-chat-import.json");
+        if receipt.exists() {
+            let record: Value = serde_json::from_slice(&spaces::private_bytes(&receipt, 4096)?)
+                .map_err(|_| "Invalid chat import receipt")?;
+            if record.as_object().is_none_or(|r| r.len() != 9)
+                || record["version"] != 1
+                || record["kind"] != "legacy-chat"
+                || record["app"] != app
+                || record["collection"] != binding.collection
+                || record["root"] != package.app.state_ref
+                || record["schema"] != binding.schema
+                || record["source"] != "brass-relay.journal"
+                || !record["source_sha256"]
+                    .as_str()
+                    .is_some_and(otrios_interfaces::release::valid_hash)
+                || !record["bytes"]
+                    .as_u64()
+                    .is_some_and(|n| (8..=LIMIT as u64).contains(&n))
+            {
+                return Err("Collection has a different or invalid legacy chat import".into());
+            }
+            // A completed import is never replayed over subsequent confirmed
+            // edits. Validate its current journal even if the old source is gone.
+            spaces::private_metadata(&path, LIMIT)?;
+            let _target = otrios_core::canvas::chat::Room::open(Some(path), chat::now())?;
+            self.recover_legacy_original(&record)?;
+            return Ok(record);
+        }
+        let source = self
+            .state
+            .as_ref()
+            .ok_or("Durable chat storage required")?
+            .join("brass-relay.journal");
+        self.spaces
+            .as_ref()
+            .ok_or("Spaces unavailable")?
+            .check_legacy_import(&binding.collection, &source)
+            .map_err(|e| e.to_string())?;
+        spaces::private_metadata(&source, LIMIT)?;
+        // This owns the old journal's stable sidecar lock through the copy.
+        // Recovery validates every complete record and only trims a torn tail.
+        let source_room = otrios_core::canvas::chat::Room::open(Some(source.clone()), chat::now())?;
+        source_room.qualify_legacy_import()?;
+        let bytes = spaces::private_bytes(&source, LIMIT)?;
+        if !path.exists()
+            && (receipt.exists() || path.with_extension("journal.owner.lock").exists())
+        {
+            return Err("Missing imported chat journal with retained ownership metadata".into());
+        }
+        let record = json!({"version":1,"kind":"legacy-chat","app":app,
+            "collection":binding.collection,"root":package.app.state_ref,"schema":binding.schema,
+            "source":"brass-relay.journal","source_sha256":canvas::hex(&canvas::hash(&bytes)),"bytes":bytes.len()});
+        let record_bytes = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
+        self.collection_parent(&path)?;
+        if path.exists() {
+            if spaces::private_bytes(&path, LIMIT)? != bytes {
+                return Err("Chat migration target contains different confirmed data".into());
+            }
+        } else {
+            persist(&path, &bytes).map_err(|e| e.to_string())?;
+        }
+        persist(&receipt, &record_bytes).map_err(|e| e.to_string())?;
+        self.spaces
+            .as_mut()
+            .ok_or("Spaces unavailable")?
+            .register_legacy_sources(&binding.collection, &[source])
+            .map_err(|e| e.to_string())?;
+        Ok(record)
+    }
+    pub(super) fn manage_space(
+        &mut self,
+        actor: &str,
+        request: &otrios_interfaces::spaces::Request,
+        policy: Option<&otrios_interfaces::spaces::AppPolicy>,
+    ) -> std::result::Result<u64, otrios_core::spaces::Error> {
+        if let Some(service) = &self.collector {
+            otrios_core::spaces::admit_human_management(
+                actor,
+                request,
+                &[service.identity.as_str()],
+            )?;
+        }
+        let removed = match &request.change {
+            otrios_interfaces::spaces::Change::Remove { space, app } => self
+                .registry()?
+                .spaces
+                .iter()
+                .find(|s| &s.id == space)
+                .and_then(|s| s.apps.iter().find(|a| &a.policy.app == app))
+                .map(|a| a.collection.clone()),
+            _ => None,
+        };
+        let cursor = otrios_core::spaces::advance_discovery(&self.discovery)?;
+        let policies = self
+            .bundles
+            .get(&self.active)
+            .into_iter()
+            .flat_map(|bundle| bundle.packages.values())
+            .filter(|p| !p.app.id.contains('/'))
+            .map(|p| p.policy.clone())
+            .collect::<Vec<_>>();
+        let store = self
+            .spaces
+            .as_mut()
+            .ok_or(otrios_core::spaces::Error::Unavailable)?;
+        let generation = if matches!(
+            request.change,
+            otrios_interfaces::spaces::Change::Audience { .. }
+        ) {
+            store.commit_catalog(actor, request, &policies)?.generation
+        } else {
+            store.commit(actor, request, policy)?.generation
+        };
+        self.discovery = cursor;
+        if let Some(collection) = removed {
+            self.rooms.retain(|key, room| {
+                room.failed
+                    || Arc::strong_count(&room.lease) > 1
+                    || key.split(':').next() != Some(collection.as_str())
+            });
+            self.collection_views.remove(&collection);
+            self.ink_rooms
+                .retain(|key, _| key.split(':').next() != Some(collection.as_str()));
+        }
+        // A newly created Space must have storage status immediately; discovery
+        // must not wait for the next periodic maintenance pass to offer controls.
+        if let Err(error) = self.maintain_storage(true) {
+            eprintln!("Space cleanup pending: {error}");
+        }
+        Ok(generation)
+    }
+    pub(super) fn discovery_cursor(&self) -> &otrios_interfaces::spaces::DiscoveryCursor {
+        &self.discovery
+    }
+    fn discovery_catalog_changed(&mut self) -> Result<()> {
+        if self.discovery_catalog != self.active {
+            self.discovery = otrios_core::spaces::advance_discovery(&self.discovery)
+                .map_err(|e| e.to_string())?;
+            self.discovery_catalog = self.active.clone();
+        }
+        Ok(())
+    }
+    pub(super) fn discovery(
+        &self,
+        identity: Option<&str>,
+        selected: Option<&str>,
+    ) -> std::result::Result<otrios_interfaces::spaces::Discovery, otrios_core::spaces::Error> {
+        use otrios_interfaces::spaces::InstalledApp;
+        let registry = self.registry()?;
+        let installed = self
+            .bundles
+            .get(&self.active)
+            .into_iter()
+            .flat_map(|b| b.packages.values())
+            .filter(|p| !p.app.id.contains('/'))
+            .map(|p| InstalledApp {
+                policy: p.policy.clone(),
+                title: p.app.title.clone(),
+                ui_ref: p.app.ui_ref.clone(),
+                state_ref: p.app.state_ref.clone(),
+            })
+            .collect::<Vec<_>>();
+        // Only the selected admitted Space needs storage facts. Do not read any
+        // collection payload or start app execution during discovery.
+        let mut facts = BTreeMap::new();
+        for s in registry.spaces.iter().filter(|s| {
+            Some(s.id.as_str()) == selected && otrios_core::spaces::visible(s, identity)
+        }) {
+            for a in &s.apps {
+                let package = self
+                    .bundles
+                    .get(&self.active)
+                    .and_then(|b| b.packages.values().find(|p| p.app.id == a.policy.app));
+                let mut available = package.is_some()
+                    && !self.rooms.iter().any(|(key, r)| {
+                        r.failed && key.split(':').next() == Some(a.collection.as_str())
+                    })
+                    && !self.chat_rooms.iter().any(|(key, room)| {
+                        key.split(':').next() == Some(a.collection.as_str()) && !room.healthy()
+                    });
+                if available {
+                    available = self.bundles.get(&self.active).is_some_and(|bundle| {
+                        bundle
+                            .packages
+                            .values()
+                            .filter(|p| p.policy.app == a.policy.app && p.chat)
+                            .all(|p| {
+                                self.chat_path(&a.collection, p)
+                                    .and_then(|path| self.missing_owned_chat(&path, p))
+                                    .is_ok_and(|missing| !missing)
+                            })
+                    });
+                }
+                let stored_bytes = self.state.as_ref().and_then(|root| {
+                    let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
+                    let presentation =
+                        root.join(format!("collection-{}.presentation.flex", a.collection));
+                    if package.is_some_and(|p| p.aggregate_view) && !presentation.is_file() {
+                        available = false;
+                    }
+                    [
+                        checkpoint.with_extension("merkle.log"),
+                        checkpoint,
+                        presentation,
+                    ]
+                    .iter()
+                    .try_fold(
+                        collection_data_usage(root, &a.collection)?,
+                        |sum, p| match fs::metadata(p) {
+                            Ok(m) if m.is_file() => sum.checked_add(m.len()),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(sum),
+                            _ => None,
+                        },
+                    )
+                });
+                facts.insert(
+                    a.collection.clone(),
+                    otrios_core::spaces::CollectionFacts {
+                        stored_bytes,
+                        available,
+                    },
+                );
+            }
+        }
+        otrios_core::spaces::discovery_with_cleanup(
+            registry,
+            identity,
+            selected,
+            &installed,
+            &facts,
+            &self.cleanup,
+            self.discovery.clone(),
+        )
+    }
+    pub(super) fn app_policy(&self, app: &str) -> Result<otrios_interfaces::spaces::AppPolicy> {
+        let p = self
+            .bundles
+            .get(&self.active)
+            .and_then(|b| b.packages.values().find(|p| p.app.id == app))
+            .ok_or("Installed app unavailable")?;
+        Ok(p.policy.clone())
+    }
+    fn binding(
+        &self,
+        scope: &spaces::Scope,
+        package: &Package,
+    ) -> Result<otrios_interfaces::spaces::Binding> {
+        let owner = package
+            .app
+            .id
+            .split('/')
+            .next()
+            .ok_or("Missing installed app")?;
+        let schema = &package.policy.schema;
+        let registry = self.registry().map_err(|e| e.to_string())?;
+        let binding = otrios_core::spaces::bind(
+            self.registry().map_err(|e| e.to_string())?,
+            scope.identity.as_deref(),
+            scope.space.as_deref().ok_or("Select a Space")?,
+            owner,
+            schema,
+        )
+        .map_err(|e| e.to_string())?;
+        otrios_core::spaces::authorize_installed(
+            registry,
+            scope.identity.as_deref(),
+            &binding,
+            otrios_interfaces::spaces::Operation::Read,
+            &self.app_policy(owner)?,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(binding)
+    }
+    pub(super) fn allowed(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+        operation: otrios_interfaces::spaces::Operation,
+    ) -> bool {
+        scope.space.as_deref() == Some(binding.space.as_str())
+            && (operation == otrios_interfaces::spaces::Operation::Read
+                || otrios_core::spaces::admit_human_action(
+                    scope.identity.as_deref(),
+                    &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
+                )
+                .is_ok())
+            && self.registry().is_ok_and(|registry| {
+                self.app_policy(&binding.app).is_ok_and(|policy| {
+                    otrios_core::spaces::authorize_installed(
+                        registry,
+                        scope.identity.as_deref(),
+                        binding,
+                        operation,
+                        &policy,
+                    )
+                    .is_ok()
+                })
+            })
+    }
+    fn actions(&self, scope: &spaces::Scope, binding: &otrios_interfaces::spaces::Binding) -> u8 {
+        use otrios_interfaces::spaces::Operation;
+        u8::from(self.allowed(scope, binding, Operation::Edit))
+            | (u8::from(self.allowed(scope, binding, Operation::Comment)) << 1)
+            | (u8::from(self.allowed(scope, binding, Operation::Moderate)) << 2)
+    }
+    pub(super) fn grant_current(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+        grant: &Grant,
+    ) -> bool {
+        grant.principal == scope.identity
+            && grant.actions == self.actions(scope, binding)
+            && self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Read)
+    }
+    pub(super) fn chat_allowed(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+        command: &otrios_interfaces::chat::Command,
+    ) -> bool {
+        self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Read)
+            && (matches!(
+                command,
+                otrios_interfaces::chat::Command::Leave
+                    | otrios_interfaces::chat::Command::ReadAsset { .. }
+            ) || otrios_core::spaces::admit_human_action(
+                scope.identity.as_deref(),
+                &[self.collector.as_ref().map_or("", |c| c.identity.as_str())],
+            )
+            .is_ok())
+            && self.registry().is_ok_and(|registry| {
+                self.app_policy(&binding.app).is_ok_and(|policy| {
+                    otrios_core::spaces::authorize_chat(
+                        registry,
+                        scope.identity.as_deref(),
+                        binding,
+                        &policy,
+                        command,
+                    )
+                    .is_ok()
+                })
+            })
+    }
+    fn revoke_scoped(&self, leases: &mut Leases, scope: &spaces::Scope) -> Vec<ServerMessage> {
+        let mut messages = vec![];
+        let mut revoked = vec![];
+        for slot in [&mut leases.active, &mut leases.staged] {
+            if slot.as_ref().is_some_and(|lease| {
+                lease
+                    .binding
+                    .as_ref()
+                    .is_some_and(|binding| !self.grant_current(scope, binding, &lease.grant))
+            }) {
+                let lease = slot.take().expect("present lease");
+                messages.push(ServerMessage::AccessRequired { epoch: lease.epoch });
+                revoked.push(lease);
+            }
+        }
+        for lease in revoked {
+            leases.retire(lease);
+        }
+        messages
+    }
+    fn scoped_room(
+        &mut self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<()> {
+        let key = collection_room(binding, package);
+        if self.rooms.contains_key(&key) {
+            return Ok(());
+        }
+        if self.rooms.len() >= 256 {
+            // Only durable, healthy, idle rooms can be reconstructed. Keep an
+            // uncertain persistence outcome poisoned until operator recovery;
+            // active and staged participants keep their room pinned.
+            let idle = self
+                .rooms
+                .iter()
+                .find_map(|(key, room)| {
+                    (room.file.is_some() && !room.failed && Arc::strong_count(&room.lease) == 1)
+                        .then(|| key.clone())
+                })
+                .ok_or("App root budget exhausted")?;
+            self.rooms.remove(&idle);
+        }
+        let file = Some(self.collection_file(binding, package)?);
+        if let Some(path) = &file {
+            if !path.exists() && path.with_extension("merkle.log").exists() {
+                return Err("Missing collection checkpoint with retained journal".into());
+            }
+            self.collection_parent(path)?;
+        }
+        let mut doc = match file.as_ref().filter(|p| p.exists()) {
+            Some(path) => store::load(
+                path,
+                Document::load(
+                    package.schema.clone(),
+                    &package.app.state_ref,
+                    &bounded(path, canvas::MAX_BYTES)?,
+                )?,
+            )?,
+            None => Document::new(package.schema.clone(), &package.app.state_ref)?,
+        };
+        doc.set_signal_fields(&package.signal_fields)?;
+        if let Some(file) = &file
+            && !file.exists()
+        {
+            persist(file, &doc.save()?).map_err(|e| e.to_string())?;
+        }
+        self.rooms.insert(
+            key,
+            Room {
+                doc,
+                file,
+                failed: false,
+                lease: Arc::new(()),
+            },
+        );
+        Ok(())
+    }
+    pub(super) fn ink_room(
+        &mut self,
+        activation: &Activation,
+        peers: usize,
+    ) -> Result<Arc<ink::Room>> {
+        if !activation.ink {
+            return Err("App does not declare ink".into());
+        }
+        if let Some(room) = self.ink_rooms.get(&activation.room) {
+            return Ok(room.clone());
+        }
+        if self.ink_rooms.len() >= 128 {
+            let idle = self
+                .ink_rooms
+                .iter()
+                .find_map(|(key, room)| {
+                    (Arc::strong_count(room) == 1 && room.subscribers() == 0).then(|| key.clone())
+                })
+                .ok_or("Ink room budget exhausted")?;
+            self.ink_rooms.remove(&idle);
+        }
+        let room = Arc::new(ink::Room::new(peers)?);
+        self.ink_rooms.insert(activation.room.clone(), room.clone());
+        Ok(room)
+    }
+    fn prepare_chat(
+        &mut self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<Arc<space_chat::Hub>> {
+        let key = collection_room(binding, package);
+        if let Some(room) = self.chat_rooms.get(&key) {
+            return Ok(room.clone());
+        }
+        if self.chat_rooms.len() >= 8 {
+            let idle = self
+                .chat_rooms
+                .iter()
+                .find_map(|(key, room)| {
+                    (Arc::strong_count(room) == 1 && room.healthy()).then(|| key.clone())
+                })
+                .ok_or("Chat room budget exhausted")?;
+            self.chat_rooms.remove(&idle);
+        }
+        let path = self.chat_file(binding, package)?;
+        if self.missing_owned_chat(&path, package)? {
+            return Err("Missing owned chat journal; verified storage repair required".into());
+        }
+        self.collection_parent(&path)?;
+        let room = space_chat::Hub::new(path)?;
+        self.chat_rooms.insert(key, room.clone());
+        Ok(room)
+    }
+    fn chat_file(
+        &self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<PathBuf> {
+        self.chat_path(&binding.collection, package)
+    }
+    fn chat_path(&self, collection: &str, package: &Package) -> Result<PathBuf> {
+        let suffix = if package.app.state_ref == package.primary_ref {
+            "primary".into()
+        } else {
+            canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
+        };
+        Ok(self
+            .state
+            .as_ref()
+            .ok_or("Durable chat storage required")?
+            .join(format!("collection-{collection}.data"))
+            .join(format!("chat-{suffix}.journal")))
+    }
+    fn missing_owned_chat(&self, path: &Path, package: &Package) -> Result<bool> {
+        if path.exists() {
+            return Ok(false);
+        }
+        if path.with_extension("journal.owner.lock").exists() {
+            return Ok(true);
+        }
+        let receipt = path.with_file_name("legacy-chat-import.json");
+        if !receipt.exists() {
+            return Ok(false);
+        }
+        let record: Value = serde_json::from_slice(&spaces::private_bytes(&receipt, 4096)?)
+            .map_err(|_| "Invalid chat import receipt")?;
+        if record.as_object().is_none_or(|object| object.len() != 9)
+            || record["version"] != 1
+            || record["kind"] != "legacy-chat"
+            || !record["root"]
+                .as_str()
+                .is_some_and(|root| root.starts_with("app:") && root.len() <= 128)
+        {
+            return Err("Invalid chat import receipt".into());
+        }
+        // One import receipt can name a subsidiary root. It does not establish
+        // prior data for an uninitialized sibling in the same collection.
+        Ok(record["root"] == package.app.state_ref)
+    }
+    pub(super) fn chat_room(&self, active: &Activation) -> Result<Arc<space_chat::Hub>> {
+        if !active.chat {
+            return Err("App does not declare chat".into());
+        }
+        self.chat_rooms
+            .get(&active.room)
+            .cloned()
+            .ok_or("Chat room must be qualified before activation".into())
+    }
+    pub(super) fn owned_assets(
+        &self,
+        binding: &otrios_interfaces::spaces::Binding,
+    ) -> Result<otrios_core::canvas::chat::assets::Assets> {
+        otrios_core::canvas::chat::assets::Assets::new(
+            self.state
+                .as_deref()
+                .ok_or("Durable asset storage required")?,
+            &binding.collection,
+        )
+    }
+    pub(super) fn publish_chat(
+        &mut self,
+        scope: &spaces::Scope,
+        active: &Activation,
+        source: &space_chat::Hub,
+        command: &otrios_interfaces::chat::Command,
+        now: u64,
+    ) -> Result<u64> {
+        use otrios_core::canvas::chat::{Publication, publish};
+        let otrios_interfaces::chat::Command::Publish {
+            epoch,
+            nonce,
+            sequence,
+            revision,
+            destination_space,
+            expected_generation,
+        } = command
+        else {
+            return Err("Expected a publication command".into());
+        };
+        if !self.chat_allowed(scope, &active.binding, command) {
+            return Err("Publication admission required".into());
+        }
+        let actor = scope.identity.as_deref().ok_or("Sign in first")?;
+        let policy = self.app_policy(&active.binding.app)?;
+        let destination = otrios_core::spaces::publication_destination(
+            self.registry().map_err(|e| e.to_string())?,
+            actor,
+            &active.binding,
+            destination_space,
+            *expected_generation,
+            &policy,
+        )
+        .map_err(|_| "Publication access or reviewed destination changed")?;
+        let package = self
+            .bundles
+            .get(&self.active)
+            .and_then(|bundle| {
+                bundle.packages.values().find(|p| {
+                    p.app.id == active.binding.app && p.chat && p.app.state_ref == p.primary_ref
+                })
+            })
+            .cloned()
+            .ok_or("App has no primary chat publication adapter")?;
+        let destination_room = self.prepare_chat(&destination, &package)?;
+        let source_assets = self.owned_assets(&active.binding)?;
+        let destination_assets = self.owned_assets(&destination)?;
+        source.chat.run_inline(|source| {
+            destination_room.chat.run_inline(|target| {
+                publish(
+                    source,
+                    target,
+                    &source_assets,
+                    &destination_assets,
+                    Publication {
+                        source: &active.binding,
+                        destination: &destination,
+                        actor,
+                        sequence: *sequence,
+                        revision: *revision,
+                        epoch: *epoch,
+                        nonce,
+                    },
+                    now,
+                )
+            })
+        })
+    }
+    fn collection_file(
+        &self,
+        binding: &otrios_interfaces::spaces::Binding,
+        package: &Package,
+    ) -> Result<PathBuf> {
+        let root = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?;
+        if package.app.state_ref == package.primary_ref {
+            Ok(root.join(format!("collection-{}.merkle", binding.collection)))
+        } else {
+            Ok(root
+                .join(format!("collection-{}.data", binding.collection))
+                .join(format!(
+                    "doc-{}.merkle",
+                    canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
+                )))
+        }
+    }
+    fn collection_parent(&self, path: &Path) -> Result<()> {
+        let root = self
+            .state
+            .as_ref()
+            .ok_or("Durable collection storage required")?;
+        let parent = path.parent().ok_or("Missing collection directory")?;
+        if parent == root {
+            return Ok(());
+        }
+        match fs::create_dir(parent) {
+            Ok(()) => fs::File::open(root)
+                .and_then(|d| d.sync_all())
+                .map_err(|e| e.to_string()),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::AlreadyExists
+                    && fs::symlink_metadata(parent).is_ok_and(|m| m.is_dir()) =>
+            {
+                fs::File::open(root)
+                    .and_then(|d| d.sync_all())
+                    .map_err(|e| e.to_string())
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
     pub(super) fn refresh(&mut self, releases: &Option<PathBuf>, release: &Value) -> Result<()> {
         let id = release["id"].as_str().unwrap_or("development");
@@ -145,6 +1367,7 @@ impl Hub {
         if bundle_format.is_none() && self.bundles.contains_key(&catalog_hash) {
             self.active = catalog_hash;
             self.active_release = id.into();
+            self.discovery_catalog_changed()?;
             return Ok(());
         }
         let catalog = canvas::decode_catalog(&catalog_bytes)?;
@@ -281,53 +1504,89 @@ impl Hub {
             } else {
                 vec![]
             };
-            if let Some(room) = self
-                .rooms
-                .get(&a.state_ref)
-                .or_else(|| new_rooms.get(&a.state_ref))
+            if self.spaces.is_none()
+                || self.provisioning
+                    && self
+                        .spaces
+                        .as_ref()
+                        .is_some_and(|store| store.legacy_imports_open().unwrap_or(false))
             {
-                room.doc.clone().set_signal_fields(&signal_fields)?;
-                if room.doc.schema() != &description.state_schema {
-                    return Err("App schema requires a new State reference".into());
-                }
-            } else {
-                if self.rooms.len() + new_rooms.len() >= 128 {
-                    return Err("App root budget exhausted".into());
-                }
-                let file = self.state.as_ref().map(|p| {
-                    p.join(format!(
-                        "{}-{}.merkle",
-                        owner,
-                        canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
-                    ))
-                });
-                let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
-                    store::load(
-                        path,
-                        Document::load(
-                            description.state_schema.clone(),
-                            &a.state_ref,
-                            &bounded(path, canvas::MAX_BYTES)?,
-                        )?,
-                    )?
-                } else {
-                    Document::new(description.state_schema, &a.state_ref)?
-                };
-                doc.set_signal_fields(&signal_fields)?;
-                if let Some(path) = &file
-                    && !path.exists()
+                if let Some(room) = self
+                    .rooms
+                    .get(&a.state_ref)
+                    .or_else(|| new_rooms.get(&a.state_ref))
                 {
-                    persist(path, &doc.save()?).map_err(|e| e.to_string())?;
+                    room.doc.clone().set_signal_fields(&signal_fields)?;
+                    if room.doc.schema() != &description.state_schema {
+                        return Err("App schema requires a new State reference".into());
+                    }
+                } else {
+                    if self.rooms.len() + new_rooms.len() >= 128 {
+                        return Err("App root budget exhausted".into());
+                    }
+                    let file = self.state.as_ref().map(|p| {
+                        p.join(format!(
+                            "{}-{}.merkle",
+                            owner,
+                            canvas::hex(&canvas::hash(a.state_ref.as_bytes()))
+                        ))
+                    });
+                    let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
+                        store::load(
+                            path,
+                            Document::load(
+                                description.state_schema.clone(),
+                                &a.state_ref,
+                                &bounded(path, canvas::MAX_BYTES)?,
+                            )?,
+                        )?
+                    } else {
+                        if file
+                            .as_ref()
+                            .is_some_and(|p| p.with_extension("merkle.log").exists())
+                        {
+                            return Err("Missing legacy checkpoint with retained journal".into());
+                        }
+                        Document::new(description.state_schema.clone(), &a.state_ref)?
+                    };
+                    doc.set_signal_fields(&signal_fields)?;
+                    if let Some(path) = &file
+                        && !path.exists()
+                        && self.spaces.is_none()
+                    {
+                        persist(path, &doc.save()?).map_err(|e| e.to_string())?;
+                    }
+                    new_rooms.insert(
+                        a.state_ref.clone(),
+                        Room {
+                            doc,
+                            file,
+                            failed: false,
+                            lease: Arc::new(()),
+                        },
+                    );
                 }
-                new_rooms.insert(
-                    a.state_ref.clone(),
-                    Room {
-                        doc,
-                        file,
-                        failed: false,
-                    },
-                );
             }
+            let policy = otrios_interfaces::spaces::AppPolicy {
+                app: a.id.clone(),
+                schema: canvas::hex(&canvas::hash(&canvas::encode_schema(
+                    &description.state_schema,
+                )?)),
+                closed_only: private,
+                editable: description.state_schema.fields.iter().any(|f| f.writable),
+                comments: matches!(
+                    description.presentation,
+                    Some(otrios_interfaces::canvas::Presentation::Chat)
+                ),
+            };
+            let chat = matches!(
+                description.presentation,
+                Some(otrios_interfaces::canvas::Presentation::Chat)
+            );
+            let aggregate_view = matches!(
+                description.presentation,
+                Some(otrios_interfaces::canvas::Presentation::View { .. })
+            );
             if packages
                 .insert(
                     a.ui_ref.clone(),
@@ -339,12 +1598,50 @@ impl Hub {
                         private,
                         signal_fields,
                         selection,
+                        schema: description.state_schema,
+                        policy,
+                        chat,
+                        aggregate_view,
+                        ink: matches!(
+                            description.presentation,
+                            Some(otrios_interfaces::canvas::Presentation::TouchPad { .. })
+                        ),
+                        primary_ref: String::new(),
                     },
                 )
                 .is_some()
             {
                 return Err("Duplicate UI reference".into());
             }
+        }
+        let mut policies = BTreeMap::new();
+        for p in packages.values().filter(|p| !p.app.id.contains('/')) {
+            let owned = packages
+                .values()
+                .filter(|other| other.app.id.split('/').next() == Some(p.app.id.as_str()))
+                .collect::<Vec<_>>();
+            let roots = owned
+                .iter()
+                .map(|p| otrios_interfaces::spaces::RootSchema {
+                    state_ref: p.app.state_ref.clone(),
+                    schema: p.schema.clone(),
+                })
+                .collect::<Vec<_>>();
+            let policy = otrios_interfaces::spaces::AppPolicy {
+                app: p.app.id.clone(),
+                schema: otrios_core::spaces::collection_schema(&roots)
+                    .map_err(|e| e.to_string())?,
+                closed_only: owned.iter().any(|p| p.private),
+                editable: owned.iter().any(|p| p.policy.editable || p.chat),
+                comments: owned.iter().any(|p| p.chat),
+            };
+            policies.insert(p.app.id.clone(), (policy, p.app.state_ref.clone()));
+        }
+        for p in packages.values_mut() {
+            let owner = p.app.id.split('/').next().ok_or("Missing app owner")?;
+            let (policy, primary_ref) = policies.get(owner).ok_or("Missing admitted app owner")?;
+            p.policy = policy.clone();
+            p.primary_ref = primary_ref.clone();
         }
         self.rooms.extend(new_rooms);
         self.bundles
@@ -364,7 +1661,39 @@ impl Hub {
                 .or_default()
                 .extend(&package.signal_fields);
         }
+        let managed_refs = self
+            .spaces
+            .as_ref()
+            .map(|store| {
+                store.registry().map(|r| {
+                    r.spaces
+                        .iter()
+                        .flat_map(|s| s.apps.iter())
+                        .map(|a| (a.collection.clone(), a.policy.app.clone()))
+                        .collect::<BTreeMap<_, _>>()
+                })
+            })
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
         for (state_ref, room) in &mut self.rooms {
+            if let Some(owner) = managed_refs.get(state_ref.split(':').next().unwrap_or(state_ref))
+            {
+                let fields = self
+                    .bundles
+                    .values()
+                    .flat_map(|b| b.packages.values())
+                    .filter(|p| {
+                        p.app.id.split('/').next() == Some(owner.as_str())
+                            && &p.schema == room.doc.schema()
+                            && p.app.state_ref == room.doc.scope()
+                    })
+                    .flat_map(|p| p.signal_fields.iter().copied())
+                    .collect::<std::collections::BTreeSet<_>>();
+                room.doc
+                    .set_signal_fields(&fields.into_iter().collect::<Vec<_>>())?;
+                continue;
+            }
             let fields = retained
                 .get(state_ref)
                 .map(|ids| ids.iter().copied().collect::<Vec<_>>())
@@ -373,6 +1702,7 @@ impl Hub {
         }
         self.active = catalog_hash;
         self.active_release = id.into();
+        self.discovery_catalog_changed()?;
         Ok(())
     }
     pub(super) fn catalog_bytes(&self) -> Result<Vec<u8>> {
@@ -380,6 +1710,9 @@ impl Hub {
     }
     pub(super) fn counts(&self) -> (usize, usize) {
         (self.bundles.len(), self.rooms.len())
+    }
+    pub(super) fn ink_subscribers(&self) -> usize {
+        self.ink_rooms.values().map(|room| room.subscribers()).sum()
     }
     pub(super) fn view(&self) -> &[u8] {
         &self.view
@@ -408,8 +1741,13 @@ impl Hub {
         leases: &mut Leases,
         message: ClientMessage,
         allow_private: bool,
+        scope: &spaces::Scope,
     ) -> Result<(Vec<ServerMessage>, bool)> {
         let mut messages = leases.revoke_private(allow_private);
+        messages.extend(self.revoke_scoped(leases, scope));
+        if leases.retired.len() > 2 {
+            return Err("Revoked mounts were not discarded".into());
+        }
         let mut changed = false;
         match message {
             ClientMessage::Mount {
@@ -421,6 +1759,7 @@ impl Hub {
                 known_code,
                 writer,
                 resume,
+                collection,
             } => {
                 if epoch == 0
                     || epoch <= leases.last_epoch
@@ -433,6 +1772,17 @@ impl Hub {
                 leases.last_epoch = epoch;
                 leases.staged = None;
                 let p = self.package(&catalog_hash, &ui_ref)?;
+                let binding = if self.spaces.is_some() {
+                    match self.binding(scope, &p) {
+                        Ok(binding) => Some(binding),
+                        Err(_) => {
+                            messages.push(ServerMessage::AccessRequired { epoch });
+                            return Ok((messages, false));
+                        }
+                    }
+                } else {
+                    None
+                };
                 if p.private && !allow_private {
                     messages.push(ServerMessage::AccessRequired { epoch });
                     return Ok((messages, false));
@@ -440,9 +1790,76 @@ impl Hub {
                 if state_ref != p.app.state_ref {
                     return Err("State root is not granted by app catalog".into());
                 }
+                let room_key = if let Some(binding) = &binding {
+                    self.scoped_room(binding, &p)?;
+                    if p.aggregate_view {
+                        self.load_collection_view(&binding.collection)?;
+                    }
+                    collection_room(binding, &p)
+                } else {
+                    state_ref.clone()
+                };
+                let mount_binding = binding
+                    .as_ref()
+                    .map(|b| -> Result<_> {
+                        use otrios_interfaces::spaces::Operation;
+                        Ok(otrios_interfaces::canvas::MountBinding {
+                            version: 2,
+                            actor: otrios_core::spaces::actor_context(
+                                self.registry().map_err(|e| e.to_string())?,
+                                scope.identity.as_deref(),
+                                b,
+                            )
+                            .map_err(|e| e.to_string())?,
+                            collection: b.collection.clone(),
+                            editable: self.allowed(scope, b, Operation::Edit),
+                            comments: self.allowed(scope, b, Operation::Comment),
+                            moderate: self.allowed(scope, b, Operation::Moderate),
+                        })
+                    })
+                    .transpose()?;
+                let grant = Grant {
+                    principal: scope.identity.clone(),
+                    actions: binding
+                        .as_ref()
+                        .map_or(0, |binding| self.actions(scope, binding)),
+                };
+                let prepared_chat = if p.chat {
+                    binding
+                        .as_ref()
+                        .map(|binding| self.prepare_chat(binding, &p))
+                        .transpose()?
+                } else {
+                    None
+                };
+                let initial_view = if p.aggregate_view {
+                    Some(if let Some(b) = &binding {
+                        self.collection_views
+                            .get(&b.collection)
+                            .ok_or("Missing collection presentation")?
+                            .1
+                            .clone()
+                    } else {
+                        self.view.clone()
+                    })
+                } else if let Some(chat) = &prepared_chat {
+                    Some(chat.chat.prepare()?)
+                } else {
+                    None
+                };
+                // Resume receipts belong to the admitted collection. A replacement
+                // collection starts at zero even when the app/state references match.
+                let resume = if binding
+                    .as_ref()
+                    .is_some_and(|b| collection.as_deref() != Some(&b.collection))
+                {
+                    0
+                } else {
+                    resume
+                };
                 let room = self
                     .rooms
-                    .get_mut(&state_ref)
+                    .get_mut(&room_key)
                     .ok_or("Missing app State root")?;
                 if room.failed {
                     return Err("App persistence outcome uncertain; restart required".into());
@@ -454,7 +1871,13 @@ impl Hub {
                         .unwrap_or_default()
                         .as_secs() as i64,
                 );
-                let (mut sync, changed) = candidate.open_session(&writer, resume)?;
+                let (mut sync, changed) = if mount_binding.as_ref().is_some_and(|b| !b.editable)
+                    || !p.schema.fields.iter().any(|field| field.writable)
+                {
+                    (candidate.open_read_session(&writer)?, false)
+                } else {
+                    candidate.open_session(&writer, resume)?
+                };
                 sync.set_selection(p.selection.clone())?;
                 if changed
                     && let Some(file) = &room.file
@@ -482,13 +1905,22 @@ impl Hub {
                         p.code
                     },
                     state,
+
+                    binding: mount_binding,
+                    initial_view,
                 });
                 leases.staged = Some(Lease {
                     epoch,
-                    state_ref,
+                    state_ref: room_key,
                     private: p.private,
                     sync,
                     view_id: vec![],
+                    binding,
+                    grant,
+                    _room: room.lease.clone(),
+                    _chat: prepared_chat,
+                    ink: p.ink,
+                    chat: p.chat,
                 });
                 // The previous activation/session remains authoritative until the client
                 // has qualified every candidate dependency and explicitly accepts it.
@@ -508,6 +1940,9 @@ impl Hub {
                     return Err("No matching staged Canvas mount".into());
                 }
                 leases.active = leases.staged.take();
+                if leases.active.as_ref().is_some_and(|l| l.binding.is_some()) {
+                    messages.push(ServerMessage::Activated { epoch });
+                }
             }
             ClientMessage::CancelMount { epoch } => {
                 if leases.staged.as_ref().is_some_and(|l| l.epoch == epoch) {
@@ -516,6 +1951,29 @@ impl Hub {
                 return Ok((messages, false));
             }
             ClientMessage::Sync { epoch, bytes } => {
+                // Retired epochs cannot decode or mutate the replacement. Keep
+                // the shared socket usable while disposal acknowledgement drains.
+                if leases.retired.iter().any(|old| old.epoch == epoch)
+                    || leases
+                        .active
+                        .as_ref()
+                        .is_some_and(|live| live.epoch != epoch)
+                {
+                    return Ok((messages, false));
+                }
+                if let Some(binding) = leases.active.as_ref().and_then(|l| l.binding.as_ref()) {
+                    // ACK/resync are reads; only actual write requests require Edit.
+                    if matches!(
+                        canvas::decode_state_request(&bytes)?,
+                        otrios_interfaces::canvas::StateRequest::Write { .. }
+                    ) && !self.allowed(
+                        scope,
+                        binding,
+                        otrios_interfaces::spaces::Operation::Edit,
+                    ) {
+                        return Err("Space edit denied".into());
+                    }
+                }
                 let Some(l) = leases.active.as_mut() else {
                     if !messages.is_empty() {
                         return Ok((messages, false));
@@ -552,6 +2010,7 @@ impl Hub {
                 l.sync = session;
             }
             ClientMessage::Leave { epoch } => {
+                leases.retired.retain(|lease| lease.epoch != epoch);
                 if leases.active.as_ref().is_some_and(|l| l.epoch == epoch) {
                     leases.active = None;
                 }
@@ -561,11 +2020,20 @@ impl Hub {
                 return Ok((messages, false));
             }
         }
-        messages.extend(self.updates(leases, allow_private)?);
+        messages.extend(self.updates(leases, allow_private, scope)?);
         Ok((messages, changed))
     }
-    fn updates(&mut self, leases: &mut Leases, allow_private: bool) -> Result<Vec<ServerMessage>> {
+    fn updates(
+        &mut self,
+        leases: &mut Leases,
+        allow_private: bool,
+        scope: &spaces::Scope,
+    ) -> Result<Vec<ServerMessage>> {
         let mut messages = leases.revoke_private(allow_private);
+        messages.extend(self.revoke_scoped(leases, scope));
+        if leases.retired.len() > 2 {
+            return Err("Revoked mounts were not discarded".into());
+        }
         let Some(l) = &mut leases.active else {
             return Ok(messages);
         };
@@ -581,6 +2049,17 @@ impl Hub {
                 epoch: l.epoch,
                 bytes,
             });
+        }
+        if let Some(binding) = &l.binding
+            && binding.app == "monitoring"
+            && let Some((hash, bytes)) = self.collection_views.get(&binding.collection)
+            && &l.view_id != hash
+        {
+            messages.push(ServerMessage::View {
+                epoch: l.epoch,
+                bytes: bytes.clone(),
+            });
+            l.view_id = hash.clone();
         }
         if l.private && l.state_ref == "app:monitoring/state" && l.view_id != self.view_id {
             messages.push(ServerMessage::View {
@@ -611,6 +2090,9 @@ fn verify_asset(manifest: &Value, path: &str, bytes: &[u8]) -> Result<()> {
 pub(super) struct Packet {
     pub bytes: Vec<u8>,
     pub private: bool,
+    pub binding: Option<otrios_interfaces::spaces::Binding>,
+    pub grant: Option<Grant>,
+    pub activated: Option<Box<Activation>>,
 }
 pub(super) async fn private_allowed(app: &App, public: bool, key: &Option<String>) -> bool {
     if !public {
@@ -625,6 +2107,9 @@ async fn emit(
     output: &tokio::sync::mpsc::Sender<Packet>,
     message: ServerMessage,
     private: bool,
+    binding: Option<otrios_interfaces::spaces::Binding>,
+    grant: Option<Grant>,
+    activated: Option<Activation>,
 ) -> bool {
     let Ok(mut bytes) = canvas::encode_server(&message) else {
         return false;
@@ -641,7 +2126,13 @@ async fn emit(
     matches!(
         tokio::time::timeout(
             Duration::from_secs(2),
-            output.send(Packet { bytes, private })
+            output.send(Packet {
+                bytes,
+                private,
+                binding,
+                grant,
+                activated: activated.map(Box::new),
+            })
         )
         .await,
         Ok(Ok(()))
@@ -651,8 +2142,10 @@ pub(super) async fn worker(
     app: Arc<App>,
     public: bool,
     key: Option<String>,
+    space: Option<String>,
     mut input: tokio::sync::mpsc::Receiver<Vec<u8>>,
     output: tokio::sync::mpsc::Sender<Packet>,
+    activation: watch::Sender<Option<Activation>>,
 ) {
     let mut leases = Leases::default();
     let mut notice = app.changed.subscribe();
@@ -666,8 +2159,13 @@ pub(super) async fn worker(
             _=expiry.tick()=>None,
         };
         let allowed = private_allowed(&app, public, &key).await;
+        let mut scope = spaces::Scope {
+            space: space.clone(),
+            identity: spaces::identity(&app, &key).await,
+        };
         for revoked in leases.revoke_private(allowed) {
-            if !emit(&output, revoked, false).await {
+            leases.publish(&activation);
+            if !emit(&output, revoked, false, None, None, None).await {
                 return;
             }
         }
@@ -683,10 +2181,11 @@ pub(super) async fn worker(
             }
             let release = app.release.read().await.clone();
             let mut guard = app.apps.lock().await;
+            scope.identity = spaces::identity(&app, &key).await;
             let Some(hub) = guard.as_mut() else {
                 continue;
             };
-            canvas::decode_client(&bytes).and_then(|message| {
+            let result = canvas::decode_client(&bytes).and_then(|message| {
                 recoverable_epoch = match &message {
                     ClientMessage::Mount { epoch, .. }
                     | ClientMessage::AcceptMount { epoch }
@@ -696,14 +2195,21 @@ pub(super) async fn worker(
                 if matches!(message, ClientMessage::Mount { .. }) {
                     hub.refresh(&app.releases, &release)?;
                 }
-                hub.process(&mut leases, message, allowed)
-            })
+                hub.process(&mut leases, message, allowed, &scope)
+            });
+            leases.publish(&activation);
+            result
         } else {
             let mut guard = app.apps.lock().await;
-            match guard.as_mut() {
-                Some(hub) => hub.updates(&mut leases, allowed).map(|m| (m, false)),
+            scope.identity = spaces::identity(&app, &key).await;
+            let result = match guard.as_mut() {
+                Some(hub) => hub
+                    .updates(&mut leases, allowed, &scope)
+                    .map(|m| (m, false)),
                 None => continue,
-            }
+            };
+            leases.publish(&activation);
+            result
         };
         match result {
             Ok((messages, changed)) => {
@@ -719,6 +2225,7 @@ pub(super) async fn worker(
                 for message in messages {
                     let epoch = match &message {
                         ServerMessage::Mounted { epoch, .. }
+                        | ServerMessage::Activated { epoch }
                         | ServerMessage::Sync { epoch, .. }
                         | ServerMessage::View { epoch, .. }
                         | ServerMessage::AccessRequired { epoch }
@@ -727,13 +2234,29 @@ pub(super) async fn worker(
                     let private = private_epochs.contains(&epoch);
                     if private && !private_allowed(&app, public, &key).await {
                         for revoked in leases.revoke_private(false) {
-                            if !emit(&output, revoked, false).await {
+                            leases.publish(&activation);
+                            if !emit(&output, revoked, false, None, None, None).await {
                                 return;
                             }
                         }
                         continue;
                     }
-                    if !emit(&output, message, private).await {
+                    let binding = [leases.active.as_ref(), leases.staged.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .find(|l| l.epoch == epoch)
+                        .and_then(|l| l.binding.clone());
+                    let grant = [leases.active.as_ref(), leases.staged.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .find(|lease| lease.epoch == epoch && lease.binding.is_some())
+                        .map(|lease| lease.grant.clone());
+                    let activated = if matches!(message, ServerMessage::Activated { .. }) {
+                        leases.activation()
+                    } else {
+                        None
+                    };
+                    if !emit(&output, message, private, binding, grant, activated).await {
                         return;
                     }
                 }
@@ -741,7 +2264,16 @@ pub(super) async fn worker(
             Err(message) => {
                 let epoch = recoverable_epoch
                     .unwrap_or_else(|| leases.active.as_ref().map_or(1, |l| l.epoch));
-                if !emit(&output, ServerMessage::Error { epoch, message }, false).await {
+                if !emit(
+                    &output,
+                    ServerMessage::Error { epoch, message },
+                    false,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
                     return;
                 }
                 if recoverable_epoch.is_none() {

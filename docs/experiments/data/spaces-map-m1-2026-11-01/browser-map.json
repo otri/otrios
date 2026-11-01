@@ -1,0 +1,61 @@
+{
+  "source": "e2a782a76f11d339c09281714bfd587b7b04d81b",
+  "source_dirty": true,
+  "release": "0c29f87972e928e91eb139ac4d5bca06f66cc2ba06ecdf4728856bc705042d7a",
+  "authority_sha256": "695cf59cbab979872c2256e53072a4b66ed3f42783157dfca48328b9e31f495c",
+  "wasm_sha256": "315813d6a4037c4db038d185daa4b14739c9f9017731e2baae7d758362c470c8",
+  "protocols": [
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v17"
+    }
+  ],
+  "collections_preserved": true,
+  "checks": [
+    "common map",
+    "empty edit-only",
+    "Space name/color",
+    "implicit app name",
+    "stable bundle ID",
+    "keyboard resize",
+    "pointer Space/app reorder",
+    "mounted peer preserved",
+    "responsive bounds",
+    "same-session Space switch",
+    "anonymous filtering",
+    "single-app direct launch"
+  ],
+  "exceptions": []
+}

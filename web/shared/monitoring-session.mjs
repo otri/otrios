@@ -30,7 +30,7 @@ export class MonitoringSession {
   async logout(){
     const epoch=++this.epoch;this.authenticated=false;this.status({pending:true});
     // Serialize after a pending login so its late Set-Cookie is revoked too.
-    try{const response=await this.mutate('DELETE');if(!response.ok)throw Error('Could not finish signing out. Please retry.');if(epoch===this.epoch)this.status();}
-    catch(error){if(epoch===this.epoch)this.status({error:error.message});}
+    try{const response=await this.mutate('DELETE');if(!response.ok)throw Error('Could not finish signing out. Please retry.');if(epoch===this.epoch)this.status();return epoch===this.epoch;}
+    catch(error){if(epoch===this.epoch)this.status({error:error.message});return false;}
   }
 }

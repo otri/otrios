@@ -378,6 +378,8 @@ fn real_process_scoping_persistence_reload_and_native_probe() {
                 resume: 0,
 
                 catalog_hash: hash(&std::fs::read(server.root.join("apps/catalog.flex")).unwrap()),
+
+                collection: None,
             })
             .unwrap(),
         )

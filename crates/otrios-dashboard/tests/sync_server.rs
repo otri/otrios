@@ -82,6 +82,8 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -98,6 +100,8 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
     assert!(matches!(read(&mut s), ServerMessage::Error { .. }));
@@ -159,6 +163,7 @@ fn read_epoch(socket: &mut Socket, wanted: u32) -> ServerMessage {
             | ServerMessage::View { epoch, .. }
             | ServerMessage::AccessRequired { epoch }
             | ServerMessage::Error { epoch, .. } => *epoch,
+            ServerMessage::Activated { epoch } => *epoch,
         };
         if epoch == wanted {
             return m;
@@ -220,6 +225,8 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
     assert!(matches!(
@@ -274,6 +281,8 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 2) else {
@@ -308,6 +317,8 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
     assert!(matches!(
@@ -392,6 +403,8 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: client.resume_sequence(),
+
+            collection: None,
         },
     );
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
@@ -421,6 +434,8 @@ fn packed_mounts_confirm_durable_edits_for_independent_writers() {
                 known_code: vec![],
                 writer: vec![writer_id; 16],
                 resume: 0,
+
+                collection: None,
             },
         );
         let ServerMessage::Mounted { state, .. } = read(&mut socket) else {
@@ -465,6 +480,8 @@ fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
                 known_code: vec![],
                 writer: vec![id; 16],
                 resume: 0,
+
+                collection: None,
             },
         );
         let ServerMessage::Mounted { ui, state, .. } = read(&mut socket) else {
@@ -510,6 +527,8 @@ fn ui_cache_hint_omits_only_matching_public_ui_and_never_grants_access() {
                 known_code: vec![],
                 writer: vec![9; 16],
                 resume: 0,
+
+                collection: None,
             },
         );
         match read(&mut socket) {
@@ -548,6 +567,8 @@ fn authorized_private_mounts_ignore_even_matching_ui_cache_hints() {
             known_code: vec![],
             writer: vec![9; 16],
             resume: 0,
+
+            collection: None,
         },
     );
     let ServerMessage::Mounted { ui, ui_hash, .. } = read(&mut socket) else {

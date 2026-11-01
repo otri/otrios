@@ -1,0 +1,1219 @@
+{
+  "qualified_date": "2026-11-01 JST",
+  "source_base": "196b7bb92d90401ffd96bdb2ad92cf7d1679f5f4",
+  "branch": "feat/spaces-and-app-data",
+  "source_followups": "Fixture portability, Chromium driver, collector service binding and updater socket accounting; documented in the accompanying commit.",
+  "signed_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+  "qualified_code_rollback": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+  "release_control_version": 1,
+  "state_protocol": "otrios-canvas-sync-v16",
+  "registry_format": "OTSP5",
+  "ssh_host_pin": {
+    "algorithm": "ssh-ed25519",
+    "fingerprint": "SHA256:MkTehL53moSAWs/omMMpaXhS9emXjZiljHT+lmpeBBs",
+    "existing_mac_pin_used": true,
+    "StrictHostKeyChecking": "yes"
+  },
+  "publisher_public_pem_sha256": "eab886983e0e1df4694b5682ca6da2495520c11e4a294bba78baedbeb0805285",
+  "spaces": [
+    {
+      "name": "Household",
+      "audience": "closed",
+      "apps": 10,
+      "frame_role": "member"
+    },
+    {
+      "name": "Brass Relay",
+      "audience": "public-comment",
+      "apps": 1,
+      "frame_role": "authenticated visitor"
+    },
+    {
+      "name": "Operations",
+      "audience": "closed",
+      "apps": 1,
+      "frame_role": null,
+      "collector": "separate service grant"
+    }
+  ],
+  "migration": {
+    "private_stopped_snapshot_files": 33,
+    "documents": 12,
+    "confirmed_snapshots_and_receipts_equal_at_import": true,
+    "full_chat_messages": 48,
+    "full_chat_canonical_json_sha256": "9f18c6fa23acffcc8c15f194316c9d5813ab776cefd6cbead76b1a0dbc3fcf5b",
+    "rehearsal_restarts": 2,
+    "provisioning_idempotent": true,
+    "unattributed_legacy_files_preserved": 11,
+    "legacy_originals_finalized": false,
+    "counter_before": 2,
+    "counter_after_calibrated_acceptance_edits": 4
+  },
+  "physical_frame": {
+    "final": {
+      "passed": true,
+      "ready": {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "runtime_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      },
+      "native_last_good": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+      "services": {
+        "otrios-authority": "active",
+        "otrios-dashboard-direct": "active",
+        "otrios-tunnel": "active",
+        "otrios-monitoring.timer": "active"
+      },
+      "collector": "Result=success\nExecMainStatus=0",
+      "local_namespace": {
+        "version": 1,
+        "generation": 3,
+        "removed": []
+      },
+      "registry_format": "OTSP5",
+      "native_identities": [
+        "frame-household",
+        "monitoring-collector"
+      ],
+      "temporary_acceptance_credential_absent": true,
+      "artifact_sha256": {
+        "/opt/otrios-authority/dashboard-server": "d0431eb105b7250dddfcc303c56e770b4cdfffd6d56695a31720303285f54a56",
+        "/var/lib/otrios-dashboard/4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add/dashboard-native": "3705e3933b0e151d8989c62fc6f41339768573b2a1711447af3fc6ae53e149de",
+        "/opt/otrios-dashboard/frame-dashboard-agent.py": "97d7ca5495336c221077421ec150ad0472149a6d8a6916a32621b49aa5341d4e"
+      },
+      "touch_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+    },
+    "input": "Synthetic evdev navigation/taps through the existing calibrated live device reader; no human-touch claim.",
+    "initial_native_taps": {
+      "input": "synthetic evdev taps through the existing calibrated physical-device reader",
+      "before": {
+        "ui_ref": "app:bundle-counter/ui",
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "runtime_release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true
+      },
+      "after": {
+        "ui_ref": "app:bundle-counter/ui",
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "runtime_release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true
+      },
+      "touch_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+    },
+    "final_native_taps": {
+      "input": "synthetic evdev taps through the existing calibrated physical-device reader",
+      "before": {
+        "ui_ref": "app:bundle-counter/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "runtime_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true
+      },
+      "after": {
+        "ui_ref": "app:bundle-counter/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "runtime_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true
+      },
+      "touch_sha256": "44f2b33a3a17140e6c662b9feba1f009c9ed7910f2c1fa2178b7f5a24a53859e"
+    },
+    "local_uninstall": {
+      "passed": true,
+      "removed": {
+        "generation": 2,
+        "removed": [
+          "bundle-counter"
+        ],
+        "version": 1
+      },
+      "revoked": {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "runtime_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "pending_commands": 0
+      },
+      "restart_while_removed": {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "runtime_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "pending_commands": 0
+      },
+      "restored": {
+        "generation": 3,
+        "removed": [],
+        "version": 1
+      },
+      "collection_unchanged": true,
+      "other_device_expected_value": 4
+    },
+    "membership_revocation": {
+      "passed": true,
+      "native_revoked": {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_ref": "host:spaces/state",
+        "state_confirmed": true,
+        "pending_commands": 0,
+        "input_busy": false
+      },
+      "closed_household_hidden_when_revoked": true,
+      "frame_restored_as_member": true,
+      "member_management_denied": true,
+      "collections_unchanged": true,
+      "generation_before": 17,
+      "generation_after": 19
+    },
+    "rollback_readiness": {
+      "ready": {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "runtime_release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      },
+      "native_last_good": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+      "services": {
+        "otrios-authority": "active",
+        "otrios-dashboard-direct": "active",
+        "otrios-tunnel": "active"
+      }
+    },
+    "final_reactivation_readiness": {
+      "ready": {
+        "ui_ref": "app:spaces-host/ui",
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "runtime_release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "state_confirmed": true,
+        "stream_ready": true,
+        "input_busy": false,
+        "pending_commands": 0,
+        "renderer": "gles2-direct",
+        "rotation": 90,
+        "output": [
+          800,
+          1280
+        ],
+        "touch_devices": 1,
+        "touch_calibrated": true,
+        "scanout_format": "RGB565",
+        "color_bits": [
+          5,
+          6,
+          5,
+          0
+        ]
+      },
+      "native_last_good": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+      "services": {
+        "otrios-authority": "active",
+        "otrios-dashboard-direct": "active",
+        "otrios-tunnel": "active"
+      }
+    },
+    "final_pixel_capture": {
+      "capture_retained_on_frame": "/var/lib/otrios-authority/rollout/spaces-2026-11-01/physical-final-home.ppm",
+      "bytes": 3072016,
+      "sha256": "8e03b3188b7befa23351aa239cebd7f3b358cc43aff2bd59f374074d2869b290",
+      "pixels_exported": false
+    },
+    "independent_visual_inspection": false
+  },
+  "rollback": {
+    "switch": {
+      "from": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+      "to": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+      "signature_and_closure_verified": true,
+      "current_safety_metadata_unchanged": true,
+      "state_backup_restored": false
+    },
+    "reactivate": {
+      "from": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+      "to": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+      "signature_and_closure_verified": true,
+      "current_safety_metadata_unchanged": true,
+      "state_backup_restored": false
+    },
+    "confirmed_data_audit": {
+      "passed": true,
+      "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+      "all_confirmed_field_and_signal_subtrees_unchanged_across_rollback": true,
+      "all_pre_rollback_receipts_preserved": true,
+      "preserved_receipts": 262,
+      "new_unused_writer_registrations": 2,
+      "documents": 12,
+      "chat": {
+        "messages": 48,
+        "sha256": "9f18c6fa23acffcc8c15f194316c9d5813ab776cefd6cbead76b1a0dbc3fcf5b"
+      },
+      "only_expected_demo_counter_changed_since_migration": true,
+      "changed_documents": [
+        "bundle-counter"
+      ],
+      "counter": 4,
+      "latest_safety_metadata_unchanged": true,
+      "registry_generation": 19,
+      "password_verifier_preserved": true,
+      "temporary_admin_native_credential_removed": true,
+      "frame_membership": "Household Member only",
+      "legacy_originals_finalized": false,
+      "managed_snapshots": {
+        "backups": [
+          "000001a1950f0c0c-2d013d39582cb26c3ec7f536b838475c"
+        ]
+      }
+    },
+    "receipt_audit": {
+      "passed": true,
+      "all_confirmed_field_and_signal_subtrees_unchanged": true,
+      "all_pre_rollback_writer_receipts_preserved": true,
+      "only_new_sequence_zero_receipts": true,
+      "chat": {
+        "messages": 48,
+        "sha256": "9f18c6fa23acffcc8c15f194316c9d5813ab776cefd6cbead76b1a0dbc3fcf5b"
+      },
+      "documents": [
+        {
+          "app": "home",
+          "existing_receipts_preserved": 0,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "brass-relay",
+          "existing_receipts_preserved": 0,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "test-playground",
+          "existing_receipts_preserved": 24,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "component-playground",
+          "existing_receipts_preserved": 93,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "layout-lab",
+          "existing_receipts_preserved": 46,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "input-lab",
+          "existing_receipts_preserved": 20,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "animation-lab",
+          "existing_receipts_preserved": 21,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "three-d-lab",
+          "existing_receipts_preserved": 27,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "layout-document",
+          "existing_receipts_preserved": 0,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "layout-text-scroll",
+          "existing_receipts_preserved": 0,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "monitoring",
+          "existing_receipts_preserved": 4,
+          "new_unused_writer_registrations": 0,
+          "field_and_signal_subtrees_unchanged": true
+        },
+        {
+          "app": "bundle-counter",
+          "existing_receipts_preserved": 27,
+          "new_unused_writer_registrations": 2,
+          "field_and_signal_subtrees_unchanged": true
+        }
+      ]
+    },
+    "state_backup_restored": false,
+    "helpers_retained_current_socket_fix": true
+  },
+  "validation": {
+    "required_command": "bash scripts/check.sh",
+    "host": "macOS; Rust 1.90.0; existing Node 24 on PATH; TMPDIR=/private/tmp",
+    "required_exit": 0,
+    "required_log_sha256": "80e7ae37f908b34af8f79b829b3346bea41601c42ebb381c9f7d2ce4dea58a34",
+    "release_cache_tests": 35,
+    "authority_process_cases": 22,
+    "live_https_command": "python3 scripts/test-dashboard-host.py --url https://otrios.otri.ca --public-only",
+    "live_https_result": "PASS 171 checks: public signed code, release/session negotiation, private/admin isolation and anonymous denial (login not tested)",
+    "browser_qualification": {
+      "passed": true,
+      "trustedPublicationReview": true,
+      "portraitPublicationPointer": true,
+      "sourceLeaseHeldDuringReview": true,
+      "selectedConfirmedContentOnly": true,
+      "ownedAttachmentUploaded": true,
+      "attachmentSurvivesRemovalAndReattachment": true,
+      "publicAttachmentDownloadVerified": true,
+      "privateUpdatesDoNotMirror": true,
+      "sourcePreviewRevocationAcknowledged": true,
+      "publishedAttachmentSurvivesSourceDeletion": true,
+      "anonymousAttachmentReadWithoutProfile": true,
+      "attachmentSha256": "c7a7d73b68d21102bf7d6d9be27b4106497efc8119224bebfbd26b375541bde7",
+      "publicViewReadable": true,
+      "publicDocumentEditsDisabled": true,
+      "publicChatWithoutProfile": true,
+      "anonymousCommentsDisabled": true,
+      "signedVisitorComments": true,
+      "visitorModerationDisabled": true,
+      "commentRestrictionRevokes": true,
+      "closingSpaceRevokesPublicReaders": true,
+      "initial": 0,
+      "value": 3,
+      "shared": 1,
+      "isolated": 0,
+      "anonymousDenied": true,
+      "nonMemberDenied": true,
+      "activeRevoked": true,
+      "remainingMemberContinues": true,
+      "quitPreservesData": true,
+      "quitLeavesOtherParticipantEditing": true,
+      "removeRevokesAnotherClient": true,
+      "retainedDataVisible": true,
+      "reattachPreservesCollectionAndValue": true,
+      "spacePickerSwitchesScope": true,
+      "inkSharedAcrossClients": true,
+      "inkSpaceIsolation": true,
+      "inkParticipantContinuesAfterQuit": true,
+      "inkPointerCaptureLifecycle": true,
+      "chatSharedAcrossClients": true,
+      "chatSpaceIsolation": true,
+      "legacyChatHistoryMigratedAndIsolated": true,
+      "chatQuitLeavesOtherParticipantSending": true,
+      "chatProfileRestoredAfterQuit": true,
+      "chatRemovalRevokesAndRedacts": true,
+      "chatReattachmentRestoresTranscript": true,
+      "memberDeletionDenied": true,
+      "trustedDeletionConfirmation": true,
+      "connectedDisposalAckObserved": true,
+      "deletedNamespaceReclaimed": true,
+      "legacyCleanupPendingIsExplicit": true,
+      "freshCollectionAfterDelete": true,
+      "deletedTranscriptRedacted": true,
+      "otherSpaceContinuesAfterDelete": true,
+      "freshCollection": "bf6bde7a0505854954695d8a865a7687",
+      "deletedCollection": "72ec0009029c83946e60a0136daddf60",
+      "source": "196b7bb92d90401ffd96bdb2ad92cf7d1679f5f4",
+      "sourceDirty": true,
+      "authoritySha256": "af822b03e5589511285c1bb720612a992e16dd9996ab846735bc679c6c6e9999",
+      "wasmSha256": "f28394a957ae5911a593a5c87b39aa1979121e042e4350123ed7e4a18b77c91e",
+      "release": "8a29ab7ae5d59b6b2f178f639fc6640869f2cf827c02a9d0de16f46ab63c0941",
+      "browserIdentities": "cookie sessions in isolated browser contexts",
+      "hello": {
+        "version": 1,
+        "state_protocol": "otrios-canvas-sync-v16"
+      },
+      "runtimeErrors": []
+    },
+    "linux_shared_memory_ipc_qualified": false
+  },
+  "live_browser": {
+    "initial": {
+      "passed": true,
+      "label": "initial",
+      "counter": {
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "value": 3
+      },
+      "public": {
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "messages": 48,
+        "visible_rows": 48,
+        "sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "final-upgrade": {
+      "passed": true,
+      "label": "final-upgrade",
+      "counter": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "value": 3
+      },
+      "public": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "messages": 48,
+        "visible_rows": 48,
+        "sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "final-native-edit": {
+      "passed": true,
+      "label": "final-native-edit",
+      "counter": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "value": 4
+      },
+      "public": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "messages": 48,
+        "visible_rows": 48,
+        "sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "native-uninstall-other-client": {
+      "passed": true,
+      "label": "native-uninstall-other-client",
+      "counter": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "value": 4
+      },
+      "public": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "messages": 48,
+        "visible_rows": 48,
+        "sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "signed-rollback": {
+      "passed": true,
+      "label": "signed-rollback",
+      "counter": {
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "value": 4
+      },
+      "public": {
+        "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+        "messages": 48,
+        "visible_rows": 48,
+        "sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        }
+      ],
+      "runtime_exceptions": []
+    },
+    "final-reactivated": {
+      "passed": true,
+      "label": "final-reactivated",
+      "counter": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "value": 4
+      },
+      "public": {
+        "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+        "messages": 48,
+        "visible_rows": 48,
+        "sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48
+        ],
+        "text_sha256": "ce5bc411338fa52fc2edad51f416fb10aa7e648b4d3348f4911b582c52212d32",
+        "anonymous_read_only": true,
+        "spaces": [
+          {
+            "name": "Brass Relay",
+            "audience": "public-comment",
+            "role": null
+          }
+        ]
+      },
+      "hello": [
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        },
+        {
+          "version": 1,
+          "state_protocol": "otrios-canvas-sync-v16",
+          "release": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add"
+        }
+      ],
+      "runtime_exceptions": []
+    }
+  },
+  "backups": {
+    "mac_private_directory": "~/Library/Application Support/OTriOSDashboard/rollback/spaces-2026-11-01/",
+    "mac_archives": [
+      {
+        "name": "preflight-state.tar",
+        "bytes": 10291200,
+        "sha256": "c88a83cf457ee1093f7b7ec70c8f0558b3345de1777656f207f0e59f6397b2f8"
+      },
+      {
+        "name": "cutover-state.tar",
+        "bytes": 10291200,
+        "sha256": "bf92021fc8ceac175b3cb232cf67f31f5682cc23850896b4822dfcf2199816af"
+      },
+      {
+        "name": "managed-state.tar",
+        "bytes": 1218560,
+        "sha256": "7b1995feacbe0d89307419e4d06ec74bb3d70cf21f807b6b97c8685627ae4a2a"
+      }
+    ],
+    "managed_snapshot": "000001a1950f0c0c-2d013d39582cb26c3ec7f536b838475c",
+    "managed_archive_files_verified": 23,
+    "qualified_code_kit": {
+      "path_suffix": "OTriOSDashboard/rollback/spaces-2026-11-01/qualified-code",
+      "files_verified": 268,
+      "final": "4dac08d73a93aca3345cb49d9a35631a0c60e4f125b6270054c297037c438add",
+      "fallback": "f53e3bfadd4a3bf7ad7bd576ca48c90068f25e49910e5615d9fbc3a2ccb30904",
+      "existing_publisher_used": true,
+      "helpers_include_socket_fix": true
+    },
+    "operational_copies_have_separate_retention": true
+  },
+  "credentials": {
+    "existing_human_password_verifier_preserved": true,
+    "temporary_acceptance_native_credential_removed": true,
+    "publisher_private_key_remained_on_mac": true,
+    "device_and_collector_tokens_not_in_evidence": true
+  }
+}

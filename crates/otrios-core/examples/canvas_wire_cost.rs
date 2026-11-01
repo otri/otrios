@@ -232,6 +232,9 @@ fn mount_cost(release: &std::path::Path) {
             ui,
             code,
             state: vec![],
+
+            binding: None,
+            initial_view: None,
         };
         let raw = encode_server(&message).unwrap();
         let mut packed = vec![];

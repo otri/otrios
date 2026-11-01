@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 
 pub(super) struct Hub {
     pub core: Arc<StdMutex<core::Channel>>,
-    changed: watch::Sender<u64>,
+    pub(super) changed: watch::Sender<u64>,
 }
 pub(super) struct Packet {
     pub bytes: Vec<u8>,
@@ -104,7 +104,7 @@ impl Hub {
             }
         });
     }
-    async fn step(
+    pub(super) async fn step(
         &self,
         session: Arc<StdMutex<core::ChannelSession>>,
         access: core::Access,
@@ -113,44 +113,54 @@ impl Hub {
     ) -> Result<Option<Packet>, String> {
         let channel = self.core.clone();
         tokio::task::spawn_blocking(move || {
-            let mut channel = channel.lock().map_err(|_| "Collection lock")?;
-            let mut session = session.lock().map_err(|_| "Collection session lock")?;
-            let event = if let Some(command) = command {
-                channel.handle(&mut session, access, command)
-            } else if poll_data {
-                channel.poll(&mut session, access)
-            } else {
-                channel.authorize(&mut session, access)
-            };
-            event
-                .map(|event| {
-                    let required = if matches!(event, core::Event::View(_)) {
-                        channel.required_access(&session, access)
-                    } else {
-                        core::Access::default()
-                    };
-                    let revoked = if let core::Event::View(offer) = &event {
-                        core::Event::Revoked {
-                            epoch: offer.epoch,
-                            generation: offer.generation,
-                            collection: session.collection().ok_or("Collection scope")?,
-                        }
-                        .to_bytes()
-                        .map_err(|e| e.to_string())?
-                    } else {
-                        Vec::new()
-                    };
-                    Ok(Packet {
-                        bytes: event.to_bytes().map_err(|e| e.to_string())?,
-                        required,
-                        revoked,
-                    })
-                })
-                .transpose()
+            step_sync(&channel, &session, access, command, poll_data)
         })
         .await
         .map_err(|_| "Collection task failed".to_string())?
     }
+}
+
+pub(super) fn step_sync(
+    channel: &StdMutex<core::Channel>,
+    session: &StdMutex<core::ChannelSession>,
+    access: core::Access,
+    command: Option<core::Command>,
+    poll_data: bool,
+) -> Result<Option<Packet>, String> {
+    let mut channel = channel.lock().map_err(|_| "Collection lock")?;
+    let mut session = session.lock().map_err(|_| "Collection session lock")?;
+    let event = if let Some(command) = command {
+        channel.handle(&mut session, access, command)
+    } else if poll_data {
+        channel.poll(&mut session, access)
+    } else {
+        channel.authorize(&mut session, access)
+    };
+    event
+        .map(|event| {
+            let required = if matches!(event, core::Event::View(_)) {
+                channel.required_access(&session, access)
+            } else {
+                core::Access::default()
+            };
+            let revoked = if let core::Event::View(offer) = &event {
+                core::Event::Revoked {
+                    epoch: offer.epoch,
+                    generation: offer.generation,
+                    collection: session.collection().ok_or("Collection scope")?,
+                }
+                .to_bytes()
+                .map_err(|e| e.to_string())?
+            } else {
+                Vec::new()
+            };
+            Ok(Packet {
+                bytes: event.to_bytes().map_err(|e| e.to_string())?,
+                required,
+                revoked,
+            })
+        })
+        .transpose()
 }
 
 pub(super) async fn worker(

@@ -73,10 +73,19 @@ def refresh(config):
     temporary=output.with_suffix('.pending.flex')
     subprocess.run([config['renderer'],str(temporary)],input=raw,check=True,timeout=30)
     payload=temporary.read_bytes()
+    headers={'Content-Type':'application/octet-stream'}
+    if config.get('authority_identity'):
+        identity=pathlib.Path(config['authority_identity'])
+        if not identity.is_file() or identity.is_symlink() or identity.stat().st_mode & 0o077 or identity.stat().st_size>65:
+            raise ValueError('Authority identity must be a private token file')
+        token=identity.read_text().strip()
+        if len(token)!=64 or any(c not in '0123456789abcdef' for c in token):
+            raise ValueError('Invalid authority identity')
+        headers['Authorization']='Bearer '+token
     # Only the loopback OTriOS service can be a publication destination.
     request=urllib.request.Request('http://127.0.0.1:8876/presentation',data=payload,
-                                  headers={'Content-Type':'application/octet-stream'},method='POST')
-    with urllib.request.urlopen(request,timeout=15) as response:
+                                  headers=headers,method='POST')
+    with urllib.request.build_opener(NoRedirect()).open(request,timeout=15) as response:
         revision=response.read(256).decode()
     temporary.replace(output)
     if config.get('evidence'):

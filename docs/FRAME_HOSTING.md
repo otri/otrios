@@ -95,6 +95,13 @@ unlimited messages. They cannot eliminate TCP head-of-line blocking.
 
 ## Installation layout
 
+The live authority uses [Spaces](SPACES.md). Its unit explicitly selects
+`/var/lib/otrios-authority/spaces.flex` and `collector-binding.json`. Household
+is closed and admits the Frame's separate identity; Brass Relay is public with
+signed-in visitor comments; Operations is closed and contains Monitoring.
+Authentication alone grants no membership. The collector has a service grant
+for the Operations presentation, independently of human viewing permissions.
+
 - `/opt/otrios-authority`: ARM `dashboard-server`, `dashboard-monitoring`, verified
   ARM `cloudflared`, collector and activation helpers.
 - `/etc/otrios-authority`: service-owned mode-0600 Monitoring login hash,
@@ -191,8 +198,8 @@ Qualify that exact candidate before adding the established `--deploy-config` for
 Frame installation. It preserves every public runtime asset and native binary,
 generates Home from installed entries, and uses the expected-baseline activation
 lock. Registry changes use a safe browser/native handoff after confirmed edits and
-idle gestures. Code/state stay on the existing session; control v1 and state v8
-are unchanged. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
+idle gestures. Code/state stay on the existing session. The current managed
+session uses state v17 and retains control v1. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
 outside the host source registry.
 
 `--remove APP_ID` removes registration, retaining authority state. Refused revisions,
@@ -200,6 +207,45 @@ bad signatures, unresolved navigation or state-schema changes leave the pointer
 unchanged. For rollback, restore a complete verified release with matching host
 bytes/helpers and notify activation; never copy an old state backup over confirmed
 data. Keep the private operational rollback snapshot before pruning cached releases.
+
+After the Spaces cutover, code rollback must enforce OTSP6, OTCHAT02 and the
+device-local installed namespace. Retain the current registry, latest-decision
+ledger, stable owner locks and paired app storage. Pre-Spaces binaries and an
+older registry copied over current decisions are not supported rollback paths.
+Use [Spaces migration and payload restore](SPACES.md) and the
+[Spaces map Frame qualification](experiments/spaces-map-frame-2026-11-01.md) for the
+current OTSP6-compatible code fallback and retained private backups. The earlier
+RFC 0027 qualification's OTSP5-only fallback cannot write the upgraded registry.
+
+### Short iteration loop
+
+Batch visual feedback in the local browser preview before freezing a candidate.
+Run the required `TMPDIR=/private/tmp bash scripts/check.sh` once for the final
+runtime changes. Browser qualification and documentation preparation can run in
+parallel when they use isolated fixtures. Build/sign the frozen candidate once;
+qualify its exact Wasm bytes rather than rebuilding another copy for acceptance.
+The frozen build's own checks remain part of signing.
+
+Deploy with the existing `deploy-dashboard-frame.py` workflow and a fresh private
+backup when required by the migration contract. Keep the compatible signed code
+fallback available. Exercise rollback for storage/protocol or deployment-mechanism
+changes; do not cycle releases for each visual refinement. Do not rerun the full
+suite after deployment when runtime source is unchanged.
+
+Finish with one combined readiness/health/collector check:
+
+```sh
+python3 scripts/check-frame-release.py --config /PRIVATE/config.json \
+  --resume-monitoring --output target/frame-acceptance.json
+```
+
+This reuses the configured strict SSH pin and staged signed pointer. It waits for
+matching native/runtime release hashes, confirmed state and idle input, checks
+authority health and services, and optionally resumes monitoring in **one SSH
+round trip**. It never restarts the authority, rolls back code, restores data or
+exports private state/pixels. Run the public smoke check concurrently with native
+navigation. Record human visual feedback when received. Documentation and
+standalone tooling follow-ups do not require rebuilding unchanged deployed code.
 
 ### Release verification
 

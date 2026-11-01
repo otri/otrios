@@ -86,7 +86,9 @@ pub enum GestureKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Operation {
-    /// Local shared-room UI command. The server independently authorizes wire commands.
+    /// Fixed host presentation action. Chat owns controls 40..=254 and reserves
+    /// 255 for Quit; descriptions cannot remap them. Compatible older descriptions
+    /// need not list newer host actions. The server independently authorizes wire commands.
     Chat(u16),
     Set,
     Toggle,
@@ -245,6 +247,8 @@ pub enum ClientMessage {
         /// RAM-only nonce for durable deduplication; never an access grant.
         writer: Vec<u8>,
         resume: u64,
+        /// Previously admitted collection, used only to scope RAM resume state.
+        collection: Option<String>,
     },
     /// Activate an already-qualified candidate; no new app Sync precedes this.
     AcceptMount {
@@ -264,6 +268,10 @@ pub enum ClientMessage {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerMessage {
+    /// Managed candidates stay invisible until current-policy activation succeeds.
+    Activated {
+        epoch: u32,
+    },
     View {
         epoch: u32,
         bytes: Vec<u8>,
@@ -275,6 +283,11 @@ pub enum ServerMessage {
         code: Vec<u8>,
         /// Complete authoritative state used to qualify a candidate before activation.
         state: Vec<u8>,
+        /// Authority-issued scope/actions; never an authorization credential.
+        binding: Option<MountBinding>,
+        /// A declared aggregate or managed chat presentation qualifies before
+        /// accepting the mount. Chat uses the bounded chat::Initial contract.
+        initial_view: Option<Vec<u8>>,
     },
     Sync {
         epoch: u32,
@@ -287,6 +300,18 @@ pub enum ServerMessage {
         epoch: u32,
         message: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MountBinding {
+    pub version: u32,
+    /// Opaque identity/membership/attachment resumption context, never a grant.
+    pub actor: [u8; 32],
+    pub collection: String,
+    pub editable: bool,
+    pub comments: bool,
+    pub moderate: bool,
 }
 
 /// Versioned inner state protocol. Client clocks/trees are never accepted as writes.

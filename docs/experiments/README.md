@@ -7,6 +7,8 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Space admission — 2026-11-01 JST](spaces-admission-2026-11-01.md): isolated collections, identities, migration, revocation and real browser qualification; Frame deployment remains pending.
+
 - [Offline app bundles — 2026-10-29](app-bundles-2026-10-29.md): flat FlexBuffers package export/integrity inspection; installation and AOT remain deferred.
 
 - [Viewport-scoped collections — 2026-10-28](collection-windows-2026-10-28.md): bounded windows, structured messages, recovery and browser/frame deployment.
