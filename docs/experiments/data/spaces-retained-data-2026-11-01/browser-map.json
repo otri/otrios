@@ -1,0 +1,68 @@
+{
+  "source": "869000bd224efb7481941d4e171f7241e7335df6",
+  "source_dirty": true,
+  "release": "ff33644c0093b15df1b287b04825efbee72300054dadc4d0af98fccfd1584ee3",
+  "authority_sha256": "e19af5eda0efea30ebf5be658779f7dd64b234765c23bb17d956575b7b135140",
+  "wasm_sha256": "052a9eb3c42c54d47fa105e4442cb59d40b37994449f6f0f12dda400b3fece3a",
+  "protocols": [
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    },
+    {
+      "version": 1,
+      "state_protocol": "otrios-canvas-sync-v18"
+    }
+  ],
+  "collections_preserved": true,
+  "checks": [
+    "wheel and repeated scroll reversal",
+    "stable map epoch",
+    "restored clipped controls",
+    "common map",
+    "empty edit-only",
+    "Space name/color",
+    "implicit app name",
+    "stable bundle ID",
+    "keyboard resize",
+    "pointer Space/app reorder",
+    "mounted peer preserved",
+    "responsive bounds",
+    "same-session Space switch",
+    "anonymous filtering",
+    "single-app direct launch"
+  ],
+  "exceptions": []
+}

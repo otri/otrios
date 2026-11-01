@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "source": "869000bd224efb7481941d4e171f7241e7335df6",
+  "source_dirty": true,
+  "release": "ff33644c0093b15df1b287b04825efbee72300054dadc4d0af98fccfd1584ee3",
+  "authority_sha256": "e19af5eda0efea30ebf5be658779f7dd64b234765c23bb17d956575b7b135140",
+  "wasm_sha256": "052a9eb3c42c54d47fa105e4442cb59d40b37994449f6f0f12dda400b3fece3a",
+  "default_keep_data": true,
+  "cancel_clears_remove_data": true,
+  "exact_identity_restore": true,
+  "checked_remove_data": true,
+  "deleted_space_recovery": true,
+  "silent_success": true,
+  "runtime_errors": []
+}

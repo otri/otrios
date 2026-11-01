@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "space_metadata_preserved": true,
+  "confirmed_noncollector_files_byte_identical": 55,
+  "auth_identity_calibration_and_collector_binding_preserved": true,
+  "registry_framing": "OTSP7",
+  "private_metadata_exported": false,
+  "data_restored": false
+}

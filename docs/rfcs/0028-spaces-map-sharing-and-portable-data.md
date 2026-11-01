@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028: Spaces map, app sharing and portable data
 
-Date: 2026-11-01. Status: **M1 deployed; M2–M4 proposed**. Records the agreed
+Date: 2026-11-01. Status: **M1–M2 deployed; M3–M4 proposed**. Records the agreed
 interaction design and a proposed minimum transfer contract. The shared map and
 consolidated settings are deployed in browsers and on Frame; see the
 [M1 qualification](../experiments/spaces-map-frame-2026-11-01.md).
