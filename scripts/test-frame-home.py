@@ -22,8 +22,9 @@ def wait(predicate):
  start=time.monotonic()
  while time.monotonic()-start<10:
   q=ready()
-  assert q['release']==q['runtime_release']==expected,'Unexpected release'
-  if predicate(q):latencies.append(round((time.monotonic()-start)*1000,1));return q
+  assert q['runtime_release']==expected,'Unexpected native release'
+  # A handoff can briefly report the loading UI before its signed view arrives.
+  if q['release']==expected and predicate(q):latencies.append(round((time.monotonic()-start)*1000,1));return q
   time.sleep(.02)
  raise RuntimeError('Native input acceptance deadline: '+json.dumps({k:q.get(k)for k in ['ui_ref','input_busy','pending_commands']}|{'map_scroll':q.get('runtime_resources',{}).get('map_scroll')}))
 def idle(q):return not q['input_busy'] and q['state_confirmed'] and q['pending_commands']==0 and q['stream_ready']

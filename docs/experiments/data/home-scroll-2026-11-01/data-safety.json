@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "release": "54922c1c300dadd6b85ef120240bb0ee895a6b6d23b71d233574fc62c6d07391",
+  "paired_safety_roots_preserved": true,
+  "auth_configuration_preserved": true,
+  "touch_calibration_preserved": true,
+  "original_state_files_present": 55,
+  "state_files_byte_identical": 52,
+  "state_files_updated": 3,
+  "private_file_metadata_exported": false,
+  "data_restored": false,
+  "authority_restarted": false
+}

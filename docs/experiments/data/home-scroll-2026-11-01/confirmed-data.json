@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "release": "54922c1c300dadd6b85ef120240bb0ee895a6b6d23b71d233574fc62c6d07391",
+  "documents": 12,
+  "documents_byte_equivalent_except_receipts": 11,
+  "documents_with_live_confirmed_updates_retained": 1,
+  "new_committed_writers_retained": 1,
+  "preexisting_signals_and_root_payloads_preserved": true,
+  "confirmed_chat_preserved": true,
+  "preexisting_writer_receipts_preserved": 270,
+  "new_unused_writer_registrations": 0,
+  "other_state_files_byte_identical": 37,
+  "collector_presentation_updates": 1,
+  "collector_binding_verified_on_frame": true,
+  "live_services_stopped": false,
+  "data_restored": false,
+  "private_file_metadata_exported": false
+}
