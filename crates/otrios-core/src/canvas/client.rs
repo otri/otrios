@@ -49,6 +49,7 @@ struct Mount {
     text_views: BTreeMap<u16, TextViewport>,
     text_bounds_dirty: bool,
     text_scroll: Option<super::text_scroll::Scroll>,
+    map_scroll: Option<super::text_scroll::Scroll>,
     text_document: Option<super::document::Viewport>,
     chat: Option<super::chat::Client>,
     font: Option<Arc<crate::dashboard::font::Font>>,
@@ -161,6 +162,7 @@ pub struct ResourceUsage {
     pub reflow_editing: bool,
     pub wire: WireUsage,
     pub text_scroll: Option<super::text_scroll::Info>,
+    pub map_scroll: Option<super::text_scroll::Info>,
     pub text_document: Option<super::document::Stats>,
 }
 #[derive(Default)]
@@ -639,6 +641,7 @@ impl Client {
         mount.viewport = host_viewport;
         mount.keyboard.set_enabled(!self.external_keyboard);
         mount.invalidate();
+        self.prepare_map_scroll(&mut mount)?;
         cached_scene(&mount)?;
         self.active = Some(mount);
         self.host_active = true;
@@ -667,11 +670,6 @@ impl Client {
                 self.host.editing = !self.host.editing;
                 self.host.drag = None;
                 self.build_host(false)?;
-            }
-            HostAction::Scroll(direction) => {
-                self.host.scroll = (self.host.scroll + f32::from(direction) * 240.)
-                    .clamp(0., self.host.scroll_limit);
-                self.build_host(true)?;
             }
             HostAction::MapSpace(space) => {
                 let app = self
@@ -1596,6 +1594,11 @@ impl Client {
             reflow_editing: self.active.as_ref().is_some_and(|m| m.order_editing),
             wire: wire_usage(),
             text_scroll: self.text_scroll_info(),
+            map_scroll: self
+                .active
+                .as_ref()
+                .and_then(|m| m.map_scroll.as_ref())
+                .map(|s| s.info()),
             text_document: self
                 .active
                 .as_ref()
@@ -2510,7 +2513,7 @@ impl Client {
             event.position = [0., 0.];
         }
         if self.host_active
-            && let Some(changed) = self.host_map_pointer(epoch, event)?
+            && let Some(changed) = self.host_map_pointer(epoch, event, at)?
         {
             return Ok(changed);
         }
@@ -2989,8 +2992,22 @@ impl Client {
         Ok(changed)
     }
     pub fn cancel(&mut self) -> Result<bool> {
-        if self.host.drag.take().is_some() && self.host_active {
-            self.build_host(true)?;
+        if self.host_active {
+            let edit_drag = self
+                .host
+                .drag
+                .take()
+                .is_some_and(|d| !matches!(d.kind, super::host_ui::DragKind::Pan));
+            if edit_drag {
+                self.build_host(true)?;
+            }
+            if let Some(m) = &mut self.active {
+                if let Some(s) = &mut m.map_scroll {
+                    s.cancel();
+                }
+                m.input.cancel_all();
+                m.invalidate_presentation();
+            }
             return Ok(true);
         }
         if let Some(m) = &mut self.active {
@@ -3139,6 +3156,10 @@ impl Client {
         }
         if let Some(s) = &mut m.text_scroll {
             scrolled |= s.tick(now);
+        }
+        if let Some(s) = &mut m.map_scroll {
+            scrolled |= s.tick(now);
+            self.host.scroll = s.info().offset[1];
         }
         if m.text_document.as_ref().is_some_and(|s| s.bounds_dirty) {
             let scene = cached_layout(m)?;
@@ -3751,6 +3772,7 @@ fn qualify(
             None
         },
         text_scroll,
+        map_scroll: None,
         epoch,
         viewport: [1280., 800.],
         ui,
@@ -3901,6 +3923,10 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);
     }
+    if let Some(scroll) = &m.map_scroll {
+        scroll.present(&mut root);
+        host_map::present_map(&mut root, scroll.node(), scroll.info());
+    }
     if let Some(Presentation::TouchPad { control }) = m.ui.presentation {
         fn append(n: &mut SceneNode, control: u8, ink: &crate::dashboard::ink::Ink) {
             if n.responder == Some(TouchResponder::Drag(Action::AppEvent(control))) {
@@ -3992,34 +4018,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     if let Some(control) = m.quit_control
         && m.chat.is_none()
     {
-        use crate::dashboard::components::{background, canvas, text};
-        use otrios_interfaces::scene::{Rect, SwitchSemantics};
-        let mut quit = canvas(
-            4_100_000_000,
-            Rect::new((root.frame.width - 136.).max(0.), 24., 112., 48.),
-            vec![
-                background(
-                    4_100_000_001,
-                    112.,
-                    48.,
-                    otrios_interfaces::theme::CARD,
-                    12.,
-                ),
-                text(
-                    4_100_000_002,
-                    Rect::new(20., 8., 88., 32.),
-                    "Quit",
-                    2,
-                    otrios_interfaces::theme::TEXT,
-                ),
-            ],
-        );
-        quit.responder = Some(TouchResponder::Activate(Action::AppEvent(control)));
-        quit.semantics = Some(SwitchSemantics {
-            label: "Quit".into(),
-            checked: false,
-        });
-        root.children.push(quit);
+        host_map::present_breadcrumb(&mut root, m, control);
     }
     Scene::new(root)
 }

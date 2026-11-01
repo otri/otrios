@@ -144,7 +144,7 @@ onmessage=async({data:m})=>{try{
   const pointerCommand=['pointer','pointer-batch'].includes(m.type);
   if(!pointerCommand)tick(performance.now(),Date.now()/1000);let changed=false;
   const applyPointer=args=>app.pointer(m.epoch??app.epoch(),...args.slice(0,4),Number.isFinite(args[4])?Math.max(0,args[4]-(performance.timeOrigin||0)):performance.now());
-  if(['pointer','pointer-batch','activate','adjust'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
+  if(['pointer','pointer-batch','activate','adjust','map-scroll'].includes(m.type)&&m.viewportRevision!==undefined&&m.viewportRevision!==viewportRevision){postMessage({type:'command-ack'});return;}
   switch(m.type){
     case 'viewport':app.cancel_input();if(m.layoutViewport)app.set_layout_viewport(...m.layoutViewport);changed=app.set_viewport(...m.size);viewportRevision++;changed=!!app.ui_ref()||changed;break;
     case 'reduced-motion':app.set_reduced_motion(!!m.reduced);changed=true;break;
@@ -159,6 +159,7 @@ onmessage=async({data:m})=>{try{
     case 'back':changed=app.back();break;
     case 'text-focus':changed=app.activate(m.epoch,m.id);break;
     case 'text-input':changed=app.replace_text_input(m.epoch,m.id,m.text,m.cursor,m.anchor,!!m.selectionOnly);changed=app.scroll_text_input(m.epoch,m.id,m.scroll||0)||changed;break;
+    case 'map-scroll':changed=app.scroll_map(m.epoch,m.delta);break;
     case 'text-scroll':changed=app.scroll_text_input(m.epoch,m.id,m.scroll);break;
     case 'text-enter':changed=app.text_input_key(m.epoch,m.id,'Enter');break;
     case 'text-blur':changed=app.blur_text_input(m.epoch,m.id);break;

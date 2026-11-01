@@ -68,7 +68,7 @@ try{
   let desiredViewport=layoutViewport(innerWidth,innerHeight);
   let model=null,queue=[],busy=false,releaseCandidate=null,reloading=false,workerFailed=false;
   const textInputs=new TextInputs(controlsLayer,m=>command(m));
-  function command(m,event,downAt){if(timings&&(['activate','navigate','back'].includes(m.type)||(m.type==='pointer'&&m.args[0]===2)))m.timing=timings.input(event,downAt);if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}const previous=queue.at(-1);if(['text-input','text-scroll'].includes(m.type)&&previous?.type===m.type&&previous.epoch===m.epoch&&previous.id===m.id){if(m.type==='text-input')m.selectionOnly=!!m.selectionOnly&&!!previous.selectionOnly;queue[queue.length-1]=m;}else queue.push(m);pump();}
+  function command(m,event,downAt){if(timings&&(['activate','navigate','back'].includes(m.type)||(m.type==='pointer'&&m.args[0]===2)))m.timing=timings.input(event,downAt);if(reloading)return;if(queue.length>=128){fatal('Input queue full. Please wait for state processing.');return;}const previous=queue.at(-1);if(['text-input','text-scroll','map-scroll'].includes(m.type)&&previous?.type===m.type&&previous.epoch===m.epoch&&previous.id===m.id){if(m.type==='map-scroll')m.delta+=previous.delta;if(m.type==='text-input')m.selectionOnly=!!m.selectionOnly&&!!previous.selectionOnly;queue[queue.length-1]=m;}else queue.push(m);pump();}
   function pump(){if(!busy&&model&&queue.length){busy=true;const message=queue.shift();timings?.dispatched(message.timing);worker.postMessage(message);}else if(!busy&&releaseCandidate&&(!model||!queue.length)&&!pointers.size&&!moves.size&&!textInputs.composing&&!reloading){reloading=true;worker.postMessage({type:'release-commit',entry:releaseCandidate});}}
   window.addEventListener('popstate',()=>command({type:'navigate',screen:restoreScreen()}));
   const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false});if(!gl)throw new Error('This dashboard requires WebGL.');
@@ -132,6 +132,7 @@ try{
     if(f.resources)revision.dataset.runtimeResources=JSON.stringify(f.resources);
     revision.dataset.screen=f.screen;revision.dataset.ui=f.ui||'';revision.dataset.state=f.state||'';revision.dataset.reordering=String(!!model.controls?.some(c=>c.draggable)&&!!model.reflow);dirty=true;
     if(f.resources?.chat)revision.dataset.chat=JSON.stringify(f.resources.chat);else delete revision.dataset.chat;
+    if(f.resources?.map_scroll)revision.dataset.mapScroll=JSON.stringify(f.resources.map_scroll);else delete revision.dataset.mapScroll;
     if(f.resources?.text_scroll||f.resources?.text_document)revision.dataset.textScroll=JSON.stringify(f.resources.text_scroll||f.resources.text_document);else{delete revision.dataset.textScroll;scrollLabel='';scrollSamples=[];scrollLast=null;}
     reflectScreen(f.path,!!f.ui||f.authRequired,f.authRequired?f.path:f.ui,model.title);
     pump();pendingFrameAck={type:'frame-ack',serial:f.serial,documentToken:f.document?.token};
@@ -156,12 +157,20 @@ try{
   matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',event=>worker.postMessage({type:'reduced-motion',reduced:event.matches}));
   const pointers=new Set(),moves=new PointerSamples(),pointerStarts=new Map();
   function pointer(e,phase){const p=pointerPosition(e.clientX,e.clientY,canvas.getBoundingClientRect(),model?.extent||[1280,800]);return {type:'pointer',epoch:model?.epoch,viewportRevision:model?.viewportRevision,args:[phase,e.pointerId,...p,sampleTime(e,performance)]};}
+  canvas.addEventListener('wheel',e=>{
+    if(graphicsLost||!model?.resources?.map_scroll)return;
+    e.preventDefault();
+    const rect=canvas.getBoundingClientRect();
+    const unit=e.deltaMode===1?32:e.deltaMode===2?rect.height:1;
+    const delta=e.deltaY*unit*(model.extent[1]/rect.height);
+    if(Number.isFinite(delta))command({type:'map-scroll',epoch:model.epoch,viewportRevision:model.viewportRevision,delta});
+  },{passive:false});
   canvas.addEventListener('pointerdown',e=>{if(graphicsLost)return;e.preventDefault();if(!document.activeElement?.matches('.canvas-editor'))canvas.focus({preventScroll:true});pointers.add(e.pointerId);if(timings)pointerStarts.set(e.pointerId,timingTools.eventTimestamp(e,performance));canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
   canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.add(e,s=>pointer(s,1));});
   function finish(e,phase){if(!pointers.has(e.pointerId))return;if(moves.has(e.pointerId)){command(moves.take(e.pointerId));}command(pointer(e,phase),e,pointerStarts.get(e.pointerId));pointerStarts.delete(e.pointerId);pointers.delete(e.pointerId);}
   canvas.addEventListener('pointerup',e=>finish(e,2));canvas.addEventListener('pointercancel',e=>finish(e,3));canvas.addEventListener('lostpointercapture',e=>finish(e,3));
   window.addEventListener('blur',()=>{moves.clear();for(const id of pointers){command({type:'pointer',args:[3,id,0,0,performance.timeOrigin+performance.now()]});if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}pointers.clear();pointerStarts.clear();command({type:'cancel'});});
-  window.addEventListener('keydown',e=>{if(graphicsLost||e.isComposing||e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(e.key==='Escape'){e.preventDefault();command({type:'back'},e);return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
+  window.addEventListener('keydown',e=>{if(graphicsLost||e.isComposing||e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(model?.resources?.map_scroll&&!e.target.closest?.('#controls button')&&['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)){e.preventDefault();const delta={ArrowUp:-64,ArrowDown:64,PageUp:-model.extent[1]*.8,PageDown:model.extent[1]*.8,Home:-1e6,End:1e6}[e.key];command({type:'map-scroll',epoch:model.epoch,viewportRevision:model.viewportRevision,delta});return;}if(e.key==='Escape'){e.preventDefault();command({type:'back'},e);return;}if(!model?.editing||e.target.closest?.('#controls button'))return;const shortcut=e.ctrlKey||e.metaKey,key=shortcut&&e.key.toLowerCase()==='a'?'SelectAll':e.key;if(['Backspace','ArrowLeft','ArrowRight','Tab','Enter','SelectAll'].includes(key)){e.preventDefault();command({type:'key',key,select:e.shiftKey});}else if(!shortcut&&!e.altKey&&e.key.length===1){e.preventDefault();command({type:'text',text:e.key});}});
   window.addEventListener('paste',e=>{if(graphicsLost)return;if(e.target.closest?.('input,textarea,dialog,[contenteditable="true"]'))return;if(model?.editing){e.preventDefault();command({type:'text',text:e.clipboardData.getData('text/plain')});}});
   let lastMetric=0,scrollSamples=[],scrollLast=null,scrollLabel='',scrollHudAt=0,scrollWasActive=false,scrollHudExtent='';
   function textScrollHud(now,active){

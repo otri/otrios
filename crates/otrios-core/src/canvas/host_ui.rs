@@ -69,7 +69,6 @@ pub(super) enum HostAction {
     SignIn,
     SignOut,
     Edit,
-    Scroll(i8),
     MapSpace(String),
     SpaceBody(String),
     MapApp(String, String),

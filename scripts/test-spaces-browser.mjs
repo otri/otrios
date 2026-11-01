@@ -70,14 +70,14 @@ try {
   await rawClick(session,label);
  };
 
- await click(a,'Quit');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
+ await click(a,'Back to OTriOS');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
  assert.equal(await count(other),isolated);
  await click(a,'Apps & Data');await click(a,'Bundle Counter');
  const beforeRemoval=await(await fetch(fixture.url+'/spaces',{headers})).json();
  const collection=beforeRemoval.spaces.find(s=>s.id===fixture.space_a).apps[0].collection;
  const readmit=await fetch(fixture.url+'/spaces',{method:'POST',headers,body:JSON.stringify({version:1,expected_generation:beforeRemoval.generation,change:{type:'membership',space:fixture.space_a,identity:'bob',role:'member'}})});assert.equal(readmit.status,200);
  const rejoined=b;await call('Page.navigate',{url:fixture.url+'/bundle-counter?space='+fixture.space_a},rejoined);await wait(rejoined,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(rejoined),expected+1);
- await click(a,'Home');await click(a,'Bundle Counter');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");await click(a,'Quit');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
+ await click(a,'Home');await click(a,'Bundle Counter');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");await click(a,'Back to OTriOS');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
  await click(rejoined,'Increase counter');await wait(rejoined,"Number((document.querySelector('#view')?.getAttribute('aria-label')||'').match(/A small shared counter\\D*(\\d+)/)?.[1])==="+(expected+2));
  const retainedValue=expected+2;await click(a,'Apps & Data');await click(a,'Bundle Counter');
  await click(a,'Remove app');
@@ -89,32 +89,32 @@ try {
  await click(a,'Bundle Counter');await click(a,'Add app');await click(a,'Open');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(a),retainedValue);
  const reattached=await(await fetch(fixture.url+'/spaces',{headers})).json();assert.equal(reattached.spaces.find(s=>s.id===fixture.space_a).apps[0].collection,collection);
  const shot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/space-a.png',Buffer.from(shot.data,'base64'));
- await click(a,'Quit');await click(a,'Spaces');await click(a,'Browser B');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");await click(a,'Bundle Counter');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(a),isolated);
+ await click(a,'Back to OTriOS');await click(a,'Spaces');await click(a,'Browser B');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");await click(a,'Bundle Counter');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(a),isolated);
  const inkWait=async(predicate)=>{for(let attempt=0;attempt<200;attempt++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,50));}throw Error('Ink observation timed out');};
- for(const session of [a,other]){await click(session,'Quit');await click(session,'Space ink probe');await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");}
- await call('Page.bringToFront',{},b);await wait(b,"['app:spaces-host/ui','app:bundle-counter/ui'].includes(document.querySelector('#revision')?.dataset.ui)");if(await evaluate(b,"!!document.querySelector('#controls button[aria-label=\"Quit\"]')"))await click(b,'Quit');else await click(b,'Home');await click(b,'Space ink probe');await wait(b,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");
+ for(const session of [a,other]){await click(session,'Back to OTriOS');await click(session,'Space ink probe');await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");}
+ await call('Page.bringToFront',{},b);await wait(b,"['app:spaces-host/ui','app:bundle-counter/ui'].includes(document.querySelector('#revision')?.dataset.ui)");if(await evaluate(b,"!!document.querySelector('#controls button[aria-label=\"Quit\"]')"))await click(b,'Back to OTriOS');else await click(b,'Home');await click(b,'Space ink probe');await wait(b,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");
  await inkWait(()=>[a,b,other].every(session=>(welcomes.get(session)||0)>0));
  // CDP drag moves need the pressed button as well as its bitmask; otherwise
  // Chromium may lose capture on the next stroke's first move.
  const draw=async session=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const bounds=await evaluate(session,"(()=>{const r=document.querySelector('#controls button[aria-label=\"Touch pad\"]').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()");const x=bounds.x+bounds.width*.25,y=bounds.y+bounds.height*.25;await call('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',buttons:1,clickCount:1},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',x:bounds.x+bounds.width*.7,y:bounds.y+bounds.height*.6,buttons:1},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:bounds.x+bounds.width*.7,y:bounds.y+bounds.height*.6,button:'left',buttons:0,clickCount:1},session);};
  await draw(a);await inkWait(()=>ink.get(a)?.some(point=>point.phase===2)&&ink.get(other)?.some(point=>point.phase===2));
  assert(ink.get(a).every(point=>point.epoch>0));assert.deepEqual((({phase,x,y,peer})=>({phase,x,y,peer}))(ink.get(a).at(-1)),(({phase,x,y,peer})=>({phase,x,y,peer}))(ink.get(other).at(-1)));
- const bWelcome=welcomes.get(b);await click(b,'Quit');await click(b,'Space ink probe');await inkWait(()=>welcomes.get(b)>bWelcome);assert.equal((ink.get(b)||[]).length,0,'another Space must receive neither live nor retained trails');
- await click(other,'Quit');await wait(other,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");const pointsBefore=ink.get(a).length;await draw(a);try{await inkWait(()=>ink.get(a).length>pointsBefore&&ink.get(a).at(-1).phase===2);}catch(error){await writeFile(output+'/ink-failure.json',JSON.stringify({pointsBefore,received:ink.get(a),sent:inkSent.get(a),welcomes:welcomes.get(a),page:await evaluate(a,"({trace:window.__spaceProbe,focus:document.hasFocus(),visibility:document.visibilityState,ui:document.querySelector('#revision')?.dataset.ui,epoch:document.querySelector('#revision')?.dataset.epoch,inputs:[...document.querySelectorAll('#controls button')].map(b=>({label:b.getAttribute('aria-label'),bounds:{x:b.getBoundingClientRect().x,y:b.getBoundingClientRect().y,width:b.getBoundingClientRect().width,height:b.getBoundingClientRect().height}}))})")},null,2));throw error;}assert.equal(await evaluate(other,"document.querySelector('#revision')?.dataset.ui"),'app:spaces-host/ui');
+ const bWelcome=welcomes.get(b);await click(b,'Back to OTriOS');await click(b,'Space ink probe');await inkWait(()=>welcomes.get(b)>bWelcome);assert.equal((ink.get(b)||[]).length,0,'another Space must receive neither live nor retained trails');
+ await click(other,'Back to OTriOS');await wait(other,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");const pointsBefore=ink.get(a).length;await draw(a);try{await inkWait(()=>ink.get(a).length>pointsBefore&&ink.get(a).at(-1).phase===2);}catch(error){await writeFile(output+'/ink-failure.json',JSON.stringify({pointsBefore,received:ink.get(a),sent:inkSent.get(a),welcomes:welcomes.get(a),page:await evaluate(a,"({trace:window.__spaceProbe,focus:document.hasFocus(),visibility:document.visibilityState,ui:document.querySelector('#revision')?.dataset.ui,epoch:document.querySelector('#revision')?.dataset.epoch,inputs:[...document.querySelectorAll('#controls button')].map(b=>({label:b.getAttribute('aria-label'),bounds:{x:b.getBoundingClientRect().x,y:b.getBoundingClientRect().y,width:b.getBoundingClientRect().width,height:b.getBoundingClientRect().height}}))})")},null,2));throw error;}assert.equal(await evaluate(other,"document.querySelector('#revision')?.dataset.ui"),'app:spaces-host/ui');
  const captureTrace=await evaluate(a,'window.__spaceProbe');assert.equal(captureTrace.filter(e=>e.type==='gotpointercapture').length,2);assert.equal(captureTrace.filter(e=>e.type==='lostpointercapture'&&e.buttons===0).length,2);assert(!captureTrace.some(e=>e.type==='lostpointercapture'&&e.buttons!==0));
  await writeFile(output+'/ink-trace.json',JSON.stringify({received:ink.get(a),sent:inkSent.get(a),trace:await evaluate(a,'window.__spaceProbe')},null,2));
  const inkShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/space-ink.png',Buffer.from(inkShot.data,'base64'));
- await click(a,'Quit');await click(a,'Spaces');await click(a,'Browser A');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_a)+")&&document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
- await click(b,'Quit');
+ await click(a,'Back to OTriOS');await click(a,'Spaces');await click(a,'Browser A');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_a)+")&&document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
+ await click(b,'Back to OTriOS');
  for(const session of [a,b,other]){await click(session,'The Brass Relay');await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:brass-relay/ui'&&JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");}
  for(const session of [a,b])await wait(session,"document.querySelector('#chat-log').textContent.includes('Legacy Engineer: Legacy household dispatch')");assert(!await evaluate(other,"document.querySelector('#chat-log').textContent.includes('Legacy household dispatch')"));
  const chatProfile=await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.chat).participant");
  const dispatch=async(session,text)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const r=await evaluate(session,"(()=>{const r=document.querySelector('#controls button[aria-label=\"Message composer\"]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...r},session);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...r},session);await wait(session,"document.activeElement?.classList.contains('canvas-editor')");await call('Input.insertText',{text},session);await wait(session,"document.querySelector('.canvas-editor')?.value==="+JSON.stringify(text));await click(session,'Send message');await wait(session,"JSON.parse(document.querySelector('#revision').dataset.chat).pending===0&&document.querySelector('#chat-log').textContent.includes("+JSON.stringify(text)+")");};
  const hasMessage=text=>"document.querySelector('#chat-log')?.textContent.includes("+JSON.stringify(text)+")";
  await dispatch(a,'Household transcript shared in this Space');await wait(b,hasMessage('Household transcript shared in this Space'));assert(!await evaluate(other,hasMessage('Household transcript shared in this Space')));
- await click(a,'Quit');await dispatch(b,'Another participant continues after Quit');await click(a,'The Brass Relay');await wait(a,hasMessage('Another participant continues after Quit'));await wait(a,"JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");assert.equal(await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.chat).participant"),chatProfile);
+ await click(a,'Back to OTriOS');await dispatch(b,'Another participant continues after Quit');await click(a,'The Brass Relay');await wait(a,hasMessage('Another participant continues after Quit'));await wait(a,"JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");assert.equal(await evaluate(a,"JSON.parse(document.querySelector('#revision').dataset.chat).participant"),chatProfile);
  await click(a,'Members');assert(!await evaluate(a,"!!document.querySelector('#controls button[aria-label=\"Monitoring admin sign-in\"]')"));await click(a,'Close dialog');
- await click(a,'Quit');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Remove app');await wait(b,"document.querySelector('#revision')?.dataset.ui!=='app:brass-relay/ui'");assert.equal(await evaluate(b,"document.querySelector('#chat-log').children.length"),0);
+ await click(a,'Back to OTriOS');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Remove app');await wait(b,"document.querySelector('#revision')?.dataset.ui!=='app:brass-relay/ui'");assert.equal(await evaluate(b,"document.querySelector('#chat-log').children.length"),0);
  await click(a,'Add app');await click(a,'Open');await wait(a,hasMessage('Household transcript shared in this Space'));await wait(a,hasMessage('Another participant continues after Quit'));
  const chatShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/space-chat.png',Buffer.from(chatShot.data,'base64'));
 
@@ -127,7 +127,7 @@ try {
  const memberDelete=await evaluate(b,`fetch('/spaces',{method:'POST',headers:{'Content-Type':'application/json','X-OTriOS-Request':'spaces'},body:JSON.stringify(${JSON.stringify(deleteRequest)})}).then(response=>response.status)`);
  assert.equal(memberDelete,403,'a signed-in Member cannot delete the collection');
  const revokedBefore=(revocations.get(b)||[]).length,disposedBefore=(disposals.get(b)||[]).length;
- await click(a,'Quit');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Delete data');
+ await click(a,'Back to OTriOS');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Delete data');
  await wait(a,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('Space: Browser A')");
  const confirmation=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/delete-confirmation.png',Buffer.from(confirmation.data,'base64'));
  await click(a,'Permanently delete');
@@ -162,7 +162,7 @@ try {
  assert(!await evaluate(a,hasMessage('Legacy household dispatch')));
  const freshShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/fresh-chat-collection.png',Buffer.from(freshShot.data,'base64'));
  // Public audience controls apply across isolated anonymous and signed-in contexts.
- await click(other,'Quit');await click(other,'Apps & Data');await click(other,'Sharing');
+ await click(other,'Back to OTriOS');await click(other,'Apps & Data');await click(other,'Sharing');
  await click(other,'Public view');await wait(other,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('Anyone will be able to view')");
  const sharing=await call('Page.captureScreenshot',{format:'png'},other);await writeFile(output+'/public-confirmation.png',Buffer.from(sharing.data,'base64'));
  await click(other,'Make public');
@@ -172,7 +172,7 @@ try {
   await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");
   assert.equal(await count(session),isolated);
   assert(!await evaluate(session,"!!document.querySelector('#controls button[aria-label=\"Increase counter\"]')"),'public viewers cannot invoke document edits');
-  await click(session,'Quit');await click(session,'The Brass Relay');
+  await click(session,'Back to OTriOS');await click(session,'The Brass Relay');
   await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:brass-relay/ui'&&JSON.parse(document.querySelector('#revision').dataset.chat||'null')?.online");
   await wait(session,hasMessage('Independent second Space continues'));
   assert.equal(await evaluate(session,"JSON.parse(document.querySelector('#revision').dataset.chat).participant"),'');
@@ -222,7 +222,7 @@ try {
  const selectedSequence=await evaluate(a,"Number([...document.querySelector('#chat-log').children].find(row=>row.textContent.includes("+JSON.stringify(caption)+")).dataset.sequence)");
  assert(Number.isSafeInteger(selectedSequence));
  // Removal retains the attachment namespace as well as the transcript.
- await click(a,'Quit');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Remove app');
+ await click(a,'Back to OTriOS');await click(a,'Apps & Data');await click(a,'The Brass Relay');await click(a,'Remove app');
  await wait(b,"document.querySelector('#chat-log').children.length===0");
  await click(a,'Add app');await click(a,'Open');await wait(a,hasMessage(caption));
  assert(await evaluate(a,"document.querySelector('#chat-log').textContent.includes('selected-attachment.bin')"));
@@ -239,7 +239,7 @@ try {
  const portraitShot=await call('Page.captureScreenshot',{format:'png'},a);await writeFile(output+'/publication-portrait.png',Buffer.from(portraitShot.data,'base64'));
  await press(a,'Publish copy');await wait(a,"JSON.parse(document.querySelector('#revision').dataset.chat).pending===0");
  await call('Emulation.clearDeviceMetricsOverride',{},a);
- const gallery=await page(null,fixture.space_b);await wait(gallery,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");await click(gallery,'Quit');await click(gallery,'The Brass Relay');await wait(gallery,hasMessage(caption));
+ const gallery=await page(null,fixture.space_b);await wait(gallery,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");await click(gallery,'Back to OTriOS');await click(gallery,'The Brass Relay');await wait(gallery,hasMessage(caption));
  assert(!await evaluate(gallery,hasMessage('Unselected private dispatch stays in its source Space')));
  assert(!await evaluate(gallery,hasMessage('Fresh transcript after permanent deletion')));
  const publicMetadata=await evaluate(gallery,"fetch('/spaces').then(response=>response.json())");

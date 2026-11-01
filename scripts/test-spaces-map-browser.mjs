@@ -43,7 +43,7 @@ try {
  const press=async(session,label)=>{await wait(session,`!!document.querySelector(${JSON.stringify(selector(label))})`);const p=await evaluate(session,`(()=>{const r=document.querySelector(${JSON.stringify(selector(label))}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...p},session);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...p},session);};
  const shot=async(session,name)=>{assert(!await evaluate(session,"(()=>{const e=document.querySelector('#error');return e&&!e.hidden&&e.textContent})()"),'visible host error');await evaluate(session,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');const png=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(output+'/'+name+'.png',Buffer.from(png.data,'base64'));};
  const a=await page('alice@spaces.test',fixture.space_a);
- await wait(a,ui+"==='app:bundle-counter/ui'");await click(a,'Quit');await wait(a,ui+"==='app:spaces-host/ui'");
+ await wait(a,ui+"==='app:bundle-counter/ui'");await click(a,'Back to OTriOS');await wait(a,ui+"==='app:spaces-host/ui'");
  await wait(a,"document.querySelector('#connection')?.textContent==='Live shared space'");
  assert(await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Edit'))})`));
  assert(!await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Spaces'))})`));
@@ -56,11 +56,40 @@ try {
  await wait(a,view+".includes('Browser A')");
  assert(!await evaluate(a,view+".includes('Empty Space')"));
  await shot(a,'map');
+ await call('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false},a);
+ await wait(a,"innerWidth===1280");
+ // Regression: wheel input and repeated bound-to-bound pointer reversals retain
+ // the mount, restore clipped controls, and leave no captured pointer behind.
+ await manage({type:'configure-space',space:fixture.space_a,name:'Browser A',layout:{width:3,height:6,background:'sage'}});
+ const scroll="JSON.parse(document.querySelector('#revision')?.dataset.mapScroll||'null')";
+ await wait(a,scroll+"?.limit[1]>300");
+ const mapEpoch=await evaluate(a,`document.querySelector(${JSON.stringify(selector('Profile'))}).dataset.epoch`);
+ assert(!await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Scroll down'))})`));
+ for(let round=0;round<4;round++){
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:10000},a);
+  await wait(a,scroll+"?.offset[1]==="+scroll+"?.limit[1]");
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:-10000},a);
+  await wait(a,scroll+"?.offset[1]===0");
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:20,y:650},a);
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,x:20,y:-10000},a);
+  await wait(a,scroll+"?.offset[1]==="+scroll+"?.limit[1]");
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,x:20,y:20000},a);
+  await wait(a,scroll+"?.offset[1]===0");
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:20,y:20000},a);
+  assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Profile'))}).dataset.epoch`),mapEpoch);
+ }
+ await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter in Browser A'))})`);
+ await shot(a,'scroll-returned-top');
+ await manage({type:'configure-space',space:fixture.space_a,name:'Browser A',layout:{width:3,height:2,background:'sage'}});
+ await wait(a,scroll+"?.limit[1]<300");
  await click(a,'Edit');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Space settings: Empty Space'))})`);
  await shot(a,'map-edit');
+ await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:10000},a);
  await click(a,'Add app: Empty Space');
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter'))})`);
  await shot(a,'add-app');await click(a,'Close');
+ await wait(a,scroll+"!==null");
+ await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:-10000},a);
  await click(a,'Space settings: Browser A');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Name'))})`);
  await press(a,'Name');await wait(a,"document.activeElement?.classList.contains('canvas-editor')");
  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:4},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:4},a);
@@ -119,9 +148,9 @@ try {
  await call('Emulation.clearDeviceMetricsOverride',{},a);
  // Switching to another Space's app stays within one browser session and opens it.
  await click(a,'Bundle Counter');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&"+ui+"==='app:bundle-counter/ui'");
- await click(a,'Quit');await click(a,'Profile');await click(a,'Sign out');
+ await click(a,'Back to OTriOS');await click(a,'Profile');await click(a,'Sign out');
  await manage({type:'audience',space:fixture.space_b,audience:'public-comment'});
- const anonymous=await page(null,fixture.space_b);await wait(anonymous,ui+"==='app:bundle-counter/ui'");await click(anonymous,'Quit');
+ const anonymous=await page(null,fixture.space_b);await wait(anonymous,ui+"==='app:bundle-counter/ui'");await click(anonymous,'Back to OTriOS');
  assert(!await evaluate(anonymous,`!!document.querySelector(${JSON.stringify(selector('Edit'))})`));
  assert(!await evaluate(anonymous,view+".includes('Workshop')"));
  await shot(anonymous,'public-map');
@@ -130,6 +159,6 @@ try {
  await click(anonymous,'Space: Browser B');await wait(anonymous,ui+"==='app:bundle-counter/ui'");
  const final=await get();assert.deepEqual(final.spaces.flatMap(s=>s.apps.map(a=>a.collection)).sort(),ids.sort());
  assert.equal(errors.length,0,JSON.stringify(errors));
- await writeFile(output+'/map-acceptance.json',JSON.stringify({source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,protocols:hellos,collections_preserved:true,checks:['common map','empty edit-only','Space name/color','implicit app name','stable bundle ID','keyboard resize','pointer Space/app reorder','mounted peer preserved','responsive bounds','same-session Space switch','anonymous filtering','single-app direct launch'],exceptions:errors},null,2));
+ await writeFile(output+'/map-acceptance.json',JSON.stringify({source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,protocols:hellos,collections_preserved:true,checks:['wheel and repeated scroll reversal','stable map epoch','restored clipped controls','common map','empty edit-only','Space name/color','implicit app name','stable bundle ID','keyboard resize','pointer Space/app reorder','mounted peer preserved','responsive bounds','same-session Space switch','anonymous filtering','single-app direct launch'],exceptions:errors},null,2));
  console.log('Spaces map browser acceptance passed');
 } finally {socket?.close();chrome.kill('SIGTERM');await new Promise(r=>chrome.once('exit',r));await rm(profile,{recursive:true,force:true});}
