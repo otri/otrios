@@ -1,0 +1,61 @@
+{
+  "implementation": "333f5e70966e068c79cefc279259ae077c8a81e5",
+  "release": "50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c",
+  "source_fingerprint": "05ffff6d6dfcd522e25f56c148a9e3103b3aec765669846554fa47b1b71def40",
+  "state_protocol": "otrios-canvas-sync-v19",
+  "spaces_envelope": 4,
+  "registry_framing": "OTSP8",
+  "required_check_sh_exit": 0,
+  "focused_ui_tests": 33,
+  "real_authority_process_tests": 27,
+  "public_checks": 171,
+  "public_login_tested": false,
+  "safari_desktop": {
+    "populated_disposable_admin_fixture": true,
+    "deployed_public_entry_and_breadcrumb": true
+  },
+  "backup": {
+    "backed_up": true,
+    "release": "a77bffea8c6f1e09aa8b27d120b549db1c12bab36a84504b8026e00e27032f00",
+    "files_verified": 267,
+    "private_mac_backup": true,
+    "private_inventory_exported": false,
+    "services_restored": true
+  },
+  "physical_frame": {
+    "passed": true,
+    "release": "50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c",
+    "scroll_round_trips": 0,
+    "navigation_exercised": false,
+    "stable_map_epoch": true,
+    "immediate_bound_reversal": null,
+    "corner_return": null,
+    "app_ui": "app:brass-relay/ui",
+    "input": "synthetic evdev through calibrated physical-device reader",
+    "human_touch_observation": false,
+    "app_writes": 0,
+    "pixels_exported": false,
+    "calibration_unchanged": true,
+    "space_title_reorder": false,
+    "requested_order_verified": false,
+    "admin_title_capture": true,
+    "capture_probe_metadata_unchanged": true,
+    "retained_removal_review_cancel": true,
+    "retained_review_metadata_unchanged": true,
+    "cross_space_drop_review_cancel": true,
+    "move_review_metadata_unchanged": true,
+    "space_order_changed": false,
+    "readiness_wait_ms_max": 899.6
+  },
+  "state_audit": {
+    "passed": true,
+    "space_metadata_preserved": true,
+    "confirmed_noncollector_files_byte_identical": 55,
+    "auth_identity_calibration_and_collector_binding_preserved": true,
+    "registry_framing": "OTSP8",
+    "private_metadata_exported": false,
+    "data_restored": false
+  },
+  "live_data_reset": false,
+  "transfers_complete": false
+}
