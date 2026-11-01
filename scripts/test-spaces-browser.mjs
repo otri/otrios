@@ -45,7 +45,24 @@ try {
  const state=await(await fetch(fixture.url+'/spaces',{headers})).json();
  const response=await fetch(fixture.url+'/spaces',{method:'POST',headers,body:JSON.stringify({version:1,expected_generation:state.generation,change:{type:'membership',space:fixture.space_a,identity:'bob',role:null}})});assert.equal(response.status,200);
  await wait(b,"document.querySelector('#revision')?.dataset.ui!=='app:bundle-counter/ui'");assert(!await evaluate(b,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('A small shared counter')"));await call('Page.bringToFront',{},a);await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(a),expected);await evaluate(a,"document.querySelector('#controls button[aria-label=\"Increase counter\"]').click()");for(let i=0;i<100&&await count(a)!==expected+1;i++)await new Promise(r=>setTimeout(r,50));assert.equal(await count(a),expected+1);
- const rawClick=async(session,label)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const selector='#controls button[aria-label='+JSON.stringify(label)+']';await wait(session,`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(session,`document.querySelector(${JSON.stringify(selector)}).click()`);};
+ // Offscreen controls are intentionally absent from the semantic layer. Reveal
+ // them with real wheel input instead of activating an invisible DOM button.
+ const reveal=async(session,candidates)=>{
+  const found=`[...document.querySelectorAll('#controls button')].some(b=>${JSON.stringify(candidates)}.includes(b.getAttribute('aria-label')))`;
+  if(await evaluate(session,found))return;
+  const scroll="JSON.parse(document.querySelector('#revision')?.dataset.mapScroll||'null')";
+  if(!await evaluate(session,scroll+"?.limit[1]>0"))return;
+  await call('Page.bringToFront',{},session);
+  const point=await evaluate(session,"(()=>{const r=document.querySelector('#view').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:-1000000},session);
+  await wait(session,`(${found})||!(${scroll})||${scroll}?.offset[1]===0`);
+  for(let step=0;step<128&&!await evaluate(session,found);step++){
+   const before=await evaluate(session,scroll);if(!before||before.offset[1]===before.limit[1])break;
+   await call('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:48},session);
+   await wait(session,`(${found})||!(${scroll})||${scroll}?.offset[1]>${before.offset[1]}`);
+  }
+ };
+ const rawClick=async(session,label)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const selector='#controls button[aria-label='+JSON.stringify(label)+']';await reveal(session,[label]);await wait(session,`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(session,`document.querySelector(${JSON.stringify(selector)}).click()`);};
  const click=async(session,label)=>{
   const present=async value=>evaluate(session,`[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')===${JSON.stringify(value)})`);
   if(label==='Home'||label==='Spaces'){
@@ -63,6 +80,7 @@ try {
   }
   if(!await present(label)){
    const candidates=[label,'Space: '+label,...(name?[label+' in '+name]:[])];
+   await reveal(session,candidates);
    await wait(session,`[...document.querySelectorAll('#controls button')].some(b=>${JSON.stringify(candidates)}.includes(b.getAttribute('aria-label')))`);
    if(await present('Space: '+label))label='Space: '+label;
    else if(name&&await present(label+' in '+name))label=label+' in '+name;
@@ -92,7 +110,7 @@ try {
  await click(a,'Back to OTriOS');await click(a,'Spaces');await click(a,'Browser B');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");await click(a,'Bundle Counter');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(a),isolated);
  const inkWait=async(predicate)=>{for(let attempt=0;attempt<200;attempt++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,50));}throw Error('Ink observation timed out');};
  for(const session of [a,other]){await click(session,'Back to OTriOS');await click(session,'Space ink probe');await wait(session,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");}
- await call('Page.bringToFront',{},b);await wait(b,"['app:spaces-host/ui','app:bundle-counter/ui'].includes(document.querySelector('#revision')?.dataset.ui)");if(await evaluate(b,"!!document.querySelector('#controls button[aria-label=\"Quit\"]')"))await click(b,'Back to OTriOS');else await click(b,'Home');await click(b,'Space ink probe');await wait(b,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");
+ await call('Page.bringToFront',{},b);await wait(b,"['app:spaces-host/ui','app:bundle-counter/ui'].includes(document.querySelector('#revision')?.dataset.ui)");if(await evaluate(b,"!!document.querySelector('#controls button[aria-label=\"Back to OTriOS\"]')"))await click(b,'Back to OTriOS');else await click(b,'Home');await click(b,'Space ink probe');await wait(b,"document.querySelector('#revision')?.dataset.ui==='app:space-ink-probe/ui'");
  await inkWait(()=>[a,b,other].every(session=>(welcomes.get(session)||0)>0));
  // CDP drag moves need the pressed button as well as its bitmask; otherwise
  // Chromium may lose capture on the next stroke's first move.
