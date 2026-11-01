@@ -58,6 +58,12 @@ fn valid_policy(p: &AppPolicy) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+fn valid_name(name: &str) -> bool {
+    !name.trim().is_empty() && name.len() <= 128 && !name.chars().any(char::is_control)
+}
+fn valid_layout(layout: SpaceLayout) -> bool {
+    (1..=6).contains(&layout.width) && (1..=6).contains(&layout.height)
+}
 fn fresh() -> Result<String> {
     let mut bytes = [0; 16];
     getrandom::fill(&mut bytes).map_err(|_| Error::Unavailable)?;
@@ -103,6 +109,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
             || !spaces.insert(&s.id)
             || s.name.trim().is_empty()
             || s.name.len() > 128
+            || !valid_layout(s.layout)
             || s.admission_epoch == 0
             || s.admission_epoch > registry.generation
             || s.members.len() > MAX_MEMBERS
@@ -128,6 +135,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
                 || !collections.insert(&a.collection)
                 || a.attachment_epoch == 0
                 || a.attachment_epoch > registry.generation
+                || (!a.label.is_empty() && !valid_name(&a.label))
                 || (a.attached && a.policy.closed_only && s.audience != Audience::Closed)
             {
                 return Err(Error::Invalid);
@@ -274,7 +282,7 @@ pub fn apply(
         if next.spaces.len() == MAX_SPACES {
             return Err(Error::Capacity);
         }
-        if name.trim().is_empty() || name.len() > 128 {
+        if !valid_name(name) {
             return Err(Error::Invalid);
         }
         next.spaces.push(Space {
@@ -288,15 +296,41 @@ pub fn apply(
             }],
             apps: vec![],
             admission_epoch: epoch,
+            layout: SpaceLayout::default(),
         });
+    } else if let Change::PlaceSpace { space, before } = &request.change {
+        let index = next
+            .spaces
+            .iter()
+            .position(|s| &s.id == space)
+            .ok_or(Error::Denied)?;
+        admin(&next.spaces[index], actor)?;
+        if before.as_ref().is_some_and(|id| {
+            id == space
+                || !next
+                    .spaces
+                    .iter()
+                    .any(|s| &s.id == id && visible(s, Some(actor)))
+        }) {
+            return Err(Error::Denied);
+        }
+        let moved = next.spaces.remove(index);
+        let target = before
+            .as_ref()
+            .and_then(|id| next.spaces.iter().position(|s| &s.id == id))
+            .unwrap_or(next.spaces.len());
+        next.spaces.insert(target, moved);
     } else {
         let space = match &request.change {
             Change::Membership { space, .. }
             | Change::Audience { space, .. }
             | Change::Attach { space, .. }
             | Change::Remove { space, .. }
-            | Change::DeleteData { space, .. } => space,
-            Change::Create { .. } => unreachable!(),
+            | Change::DeleteData { space, .. }
+            | Change::ConfigureSpace { space, .. }
+            | Change::LabelApp { space, .. }
+            | Change::PlaceApp { space, .. } => space,
+            Change::Create { .. } | Change::PlaceSpace { .. } => unreachable!(),
         };
         // Denied conceals whether an inaccessible Space exists.
         let s = next
@@ -306,6 +340,41 @@ pub fn apply(
             .ok_or(Error::Denied)?;
         admin(s, actor)?;
         match &request.change {
+            Change::ConfigureSpace { name, layout, .. } => {
+                if !valid_name(name) || !valid_layout(*layout) {
+                    return Err(Error::Invalid);
+                }
+                s.name = name.trim().into();
+                s.layout = *layout;
+            }
+            Change::LabelApp { app, name, .. } => {
+                if !valid_name(name) {
+                    return Err(Error::Invalid);
+                }
+                s.apps
+                    .iter_mut()
+                    .find(|a| &a.policy.app == app)
+                    .ok_or(Error::Unavailable)?
+                    .label = name.trim().into();
+            }
+            Change::PlaceApp { app, before, .. } => {
+                let index = s
+                    .apps
+                    .iter()
+                    .position(|a| &a.policy.app == app && a.attached)
+                    .ok_or(Error::Unavailable)?;
+                if before.as_ref().is_some_and(|id| {
+                    id == app || !s.apps.iter().any(|a| &a.policy.app == id && a.attached)
+                }) {
+                    return Err(Error::Invalid);
+                }
+                let moved = s.apps.remove(index);
+                let target = before
+                    .as_ref()
+                    .and_then(|id| s.apps.iter().position(|a| &a.policy.app == id))
+                    .unwrap_or(s.apps.len());
+                s.apps.insert(target, moved);
+            }
             Change::Membership {
                 identity,
                 role: requested,
@@ -367,6 +436,7 @@ pub fn apply(
                         collection: fresh()?,
                         attached: true,
                         attachment_epoch: epoch,
+                        label: String::new(),
                     });
                 }
             }
@@ -409,7 +479,7 @@ pub fn apply(
                 data.attached &= !remove;
                 data.attachment_epoch = epoch;
             }
-            Change::Create { .. } => unreachable!(),
+            Change::Create { .. } | Change::PlaceSpace { .. } => unreachable!(),
         }
     }
     validate(&next)?;

@@ -328,3 +328,49 @@ fn control_metadata_is_private_and_never_follows_symlinks() {
     fs::set_permissions(&fixture.0, fs::Permissions::from_mode(0o770)).unwrap();
     assert!(Store::open(fixture.path()).is_err());
 }
+
+#[test]
+fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data() {
+    let fixture = Fixture::new();
+    let (store, binding) = fixture.seeded();
+    let original = store.current.clone();
+    let latest = store.latest_path().to_path_buf();
+    drop(store);
+    let mut old = serde_json::to_value(&original).unwrap();
+    for space in old["registry"]["spaces"].as_array_mut().unwrap() {
+        space.as_object_mut().unwrap().remove("layout");
+        for app in space["apps"].as_array_mut().unwrap() {
+            app.as_object_mut().unwrap().remove("label");
+        }
+    }
+    let payload = flexbuffers::to_vec(&old).unwrap();
+    let mut bytes = b"OTSP5".to_vec();
+    bytes.extend(crate::canvas::hash(&payload));
+    bytes.extend(payload);
+    for path in [fixture.path(), latest] {
+        write(&path, &bytes).unwrap();
+    }
+    let mut upgraded = Store::open(fixture.path()).unwrap();
+    assert!(upgraded.current == original);
+    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP6"));
+    let request = Request {
+        version: VERSION,
+        expected_generation: upgraded.registry().unwrap().generation,
+        change: Change::ConfigureSpace {
+            space: binding.space.clone(),
+            name: "Workshop".into(),
+            layout: SpaceLayout {
+                width: 1,
+                height: 2,
+                background: Background::Sage,
+            },
+        },
+    };
+    upgraded.commit("alice", &request, None).unwrap();
+    drop(upgraded);
+    let recovered = Store::open(fixture.path()).unwrap();
+    let registry = recovered.registry().unwrap();
+    assert_eq!(registry.spaces[0].layout.width, 1);
+    assert_eq!(registry.spaces[0].apps[0].collection, binding.collection);
+    authorize(registry, Some("alice"), &binding, Operation::Edit).unwrap();
+}

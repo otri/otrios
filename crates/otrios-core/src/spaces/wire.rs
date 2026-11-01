@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Management v1 uses a separate bounded channel on the negotiated shared session.
 use super::*;
-const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v1\0";
-const EVENT: &[u8] = b"OTriOS\0spaces-event\0v1\0";
+const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v2\0";
+const EVENT: &[u8] = b"OTriOS\0spaces-event\0v2\0";
 
 fn command_shape(command: &Command) -> Result<()> {
     match command {
@@ -30,6 +30,26 @@ fn command_shape(command: &Command) -> Result<()> {
             }
             let valid = match &request.change {
                 Change::Create { name } => !name.trim().is_empty() && name.len() <= 128,
+                Change::ConfigureSpace {
+                    space,
+                    name,
+                    layout,
+                } => valid_id(space) && valid_name(name) && valid_layout(*layout),
+                Change::PlaceSpace { space, before } => {
+                    valid_id(space) && before.as_ref().is_none_or(|id| valid_id(id) && id != space)
+                }
+                Change::LabelApp { space, app, name } => {
+                    valid_id(space)
+                        && otrios_interfaces::canvas::valid_destination(app)
+                        && valid_name(name)
+                }
+                Change::PlaceApp { space, app, before } => {
+                    valid_id(space)
+                        && otrios_interfaces::canvas::valid_destination(app)
+                        && before.as_ref().is_none_or(|id| {
+                            id != app && otrios_interfaces::canvas::valid_destination(id)
+                        })
+                }
                 Change::Membership {
                     space, identity, ..
                 } => valid_id(space) && valid_identity(identity),

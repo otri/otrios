@@ -333,12 +333,18 @@ mod tests {
             identity: Some("reader".into()),
             spaces: vec![
                 SpaceSummary {
+                    layout: Default::default(),
+                    apps: vec![],
+                    attached_count: 0,
                     id: SOURCE.into(),
                     name: "Private source".into(),
                     audience: Audience::PublicView,
                     role: None,
                 },
                 SpaceSummary {
+                    layout: Default::default(),
+                    apps: vec![],
+                    attached_count: 0,
                     id: "b".repeat(32),
                     name: "Destination".into(),
                     audience: Audience::PublicView,

@@ -70,6 +70,39 @@ pub struct AppData {
     pub collection: String,
     pub attached: bool,
     pub attachment_epoch: u64,
+    /// Space-local label; empty means the installed bundle's canonical title.
+    #[serde(default)]
+    pub label: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Background {
+    #[default]
+    None,
+    Sand,
+    Sage,
+    Stone,
+    Sky,
+    Lilac,
+    Rose,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpaceLayout {
+    pub width: u8,
+    pub height: u8,
+    pub background: Background,
+}
+impl Default for SpaceLayout {
+    fn default() -> Self {
+        Self {
+            width: 3,
+            height: 1,
+            background: Background::None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +114,8 @@ pub struct Space {
     pub members: Vec<Member>,
     pub apps: Vec<AppData>,
     pub admission_epoch: u64,
+    #[serde(default)]
+    pub layout: SpaceLayout,
 }
 
 /// Minimal permanent stale-reference rejection record. No deleted payload.
@@ -139,6 +174,25 @@ pub enum Operation {
 pub enum Change {
     Create {
         name: String,
+    },
+    ConfigureSpace {
+        space: String,
+        name: String,
+        layout: SpaceLayout,
+    },
+    PlaceSpace {
+        space: String,
+        before: Option<String>,
+    },
+    LabelApp {
+        space: String,
+        app: String,
+        name: String,
+    },
+    PlaceApp {
+        space: String,
+        app: String,
+        before: Option<String>,
     },
     Membership {
         space: String,
@@ -216,6 +270,20 @@ pub struct SpaceSummary {
     pub name: String,
     pub audience: Audience,
     pub role: Option<Role>,
+    pub layout: SpaceLayout,
+    /// Attached app previews only. Collection IDs and retained data are excluded.
+    pub apps: Vec<MapApp>,
+    pub attached_count: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapApp {
+    pub app: String,
+    pub title: String,
+    /// Code compatibility and known failures; collection readiness is qualified
+    /// on selection, before launch. A preview is never a mount grant.
+    pub availability: AppAvailability,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -62,15 +62,42 @@ pub fn discovery_with_cleanup(
     {
         return Err(Error::Invalid);
     }
+    let mut previews_left = MAX_APPS;
     let spaces = registry
         .spaces
         .iter()
         .filter(|s| visible(s, identity))
-        .map(|s| SpaceSummary {
-            id: s.id.clone(),
-            name: s.name.clone(),
-            audience: s.audience,
-            role: role(s, identity),
+        .map(|s| {
+            let preview_count = s
+                .apps
+                .iter()
+                .filter(|a| a.attached)
+                .count()
+                .min(MAX_INSTALLED_APPS)
+                .min(previews_left);
+            previews_left -= preview_count;
+            SpaceSummary {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                audience: s.audience,
+                role: role(s, identity),
+                layout: s.layout,
+                attached_count: s.apps.iter().filter(|a| a.attached).count() as u16,
+                apps: s
+                    .apps
+                    .iter()
+                    .filter(|a| a.attached)
+                    .take(preview_count)
+                    .map(|a| {
+                        let app = installed.iter().find(|p| p.policy.app == a.policy.app);
+                        MapApp {
+                            app: a.policy.app.clone(),
+                            title: title(a, app),
+                            availability: availability(a, app, facts, s.audience, false),
+                        }
+                    })
+                    .collect(),
+            }
         })
         .collect();
     let selected = registry
@@ -85,27 +112,17 @@ pub fn discovery_with_cleanup(
                 .filter(|a| a.attached || admin)
                 .map(|a| {
                     let app = installed.iter().find(|p| p.policy.app == a.policy.app);
-                    let facts = facts.get(&a.collection);
-                    let availability = match app {
-                        None => AppAvailability::Unavailable,
-                        Some(p) if p.policy.schema != a.policy.schema => {
-                            AppAvailability::Incompatible
-                        }
-                        Some(p)
-                            if (p.policy.closed_only && s.audience != Audience::Closed)
-                                || facts.is_none_or(|f| !f.available) =>
-                        {
-                            AppAvailability::Unavailable
-                        }
-                        Some(_) => AppAvailability::Available,
-                    };
+                    let storage = facts.get(&a.collection);
+                    let availability = availability(a, app, facts, s.audience, true);
                     AppSummary {
                         app: a.policy.app.clone(),
-                        title: app.map_or_else(|| a.policy.app.clone(), |p| p.title.clone()),
+                        title: title(a, app),
                         collection: a.collection.clone(),
                         attached: a.attached,
                         availability,
-                        stored_bytes: admin.then(|| facts.and_then(|f| f.stored_bytes)).flatten(),
+                        stored_bytes: admin
+                            .then(|| storage.and_then(|f| f.stored_bytes))
+                            .flatten(),
                         launch: if a.attached && availability == AppAvailability::Available {
                             app.cloned()
                         } else {
@@ -138,6 +155,34 @@ pub fn discovery_with_cleanup(
     Ok(snapshot)
 }
 
+fn title(data: &AppData, installed: Option<&InstalledApp>) -> String {
+    if data.label.is_empty() {
+        installed.map_or_else(|| data.policy.app.clone(), |p| p.title.clone())
+    } else {
+        data.label.clone()
+    }
+}
+fn availability(
+    data: &AppData,
+    app: Option<&InstalledApp>,
+    facts: &BTreeMap<String, CollectionFacts>,
+    audience: Audience,
+    require_state: bool,
+) -> AppAvailability {
+    match app {
+        None => AppAvailability::Unavailable,
+        Some(p) if p.policy.schema != data.policy.schema => AppAvailability::Incompatible,
+        Some(p)
+            if (p.policy.closed_only && audience != Audience::Closed)
+                || facts
+                    .get(&data.collection)
+                    .map_or(require_state, |f| !f.available) =>
+        {
+            AppAvailability::Unavailable
+        }
+        Some(_) => AppAvailability::Available,
+    }
+}
 fn valid_installed(app: &InstalledApp) -> bool {
     valid_policy(&app.policy)
         && !app.title.is_empty()
@@ -151,6 +196,7 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
     if snapshot.version != VERSION
         || !valid_id(&snapshot.cursor.authority)
         || snapshot.spaces.len() > MAX_SPACES
+        || snapshot.spaces.iter().map(|s| s.apps.len()).sum::<usize>() > MAX_APPS
         || snapshot
             .identity
             .as_ref()
@@ -160,7 +206,18 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
     }
     let mut ids = BTreeSet::new();
     for s in &snapshot.spaces {
-        if !valid_id(&s.id) || !ids.insert(&s.id) || s.name.trim().is_empty() || s.name.len() > 128
+        if !valid_id(&s.id)
+            || !ids.insert(&s.id)
+            || s.name.trim().is_empty()
+            || s.name.len() > 128
+            || !valid_layout(s.layout)
+            || s.apps.len() > MAX_INSTALLED_APPS
+            || usize::from(s.attached_count) > MAX_APPS
+            || s.apps.len() > usize::from(s.attached_count)
+            || s.apps.iter().any(|a| {
+                !otrios_interfaces::canvas::valid_destination(&a.app) || !valid_name(&a.title)
+            })
+            || s.apps.iter().map(|a| &a.app).collect::<BTreeSet<_>>().len() != s.apps.len()
         {
             return Err(Error::Invalid);
         }

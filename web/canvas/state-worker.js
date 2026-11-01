@@ -130,7 +130,7 @@ onmessage=async({data:m})=>{try{
   if(m.type==='state-frame'){try{if(!stopped&&transportReady&&m.epoch===transportEpoch)receiveState(m.bytes,m.receivedAt);}finally{postMessage({type:'state-frame-ack',epoch:m.epoch});}return;}
   if(m.type==='ink-frame'){try{if(transportReady&&m.epoch===transportEpoch&&wantsInk()&&app.receive_ink(m.bytes,performance.now()))publish();}finally{postMessage({type:'ink-frame-ack',epoch:m.epoch});}return;}
   if(m.type==='chat-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_chat(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish();}}finally{postMessage({type:'chat-frame-ack',epoch:m.epoch});}outgoing();return;}
-  if(m.type==='spaces-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_spaces(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish(app.spaces_ui());}}finally{postMessage({type:'spaces-frame-ack',epoch:m.epoch});}outgoing();return;}
+  if(m.type==='spaces-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_spaces(m.bytes);stateOnline=true;postMessage({type:'online',online:true});if(app.take_collection_revoked())clearPresentation();if(changed)publish(app.spaces_ui());}}finally{postMessage({type:'spaces-frame-ack',epoch:m.epoch});}outgoing();return;}
   if(m.type==='spaces-send-ack'){if(m.epoch===transportEpoch){spacesSending=false;pumpSpaces();}return;}
   if(m.type==='collection-frame'){try{if(transportReady&&m.epoch===transportEpoch){const changed=app.receive_collection(m.bytes);if(app.take_collection_revoked())clearPresentation();if(changed)publish();}}finally{postMessage({type:'collection-frame-ack',epoch:m.epoch});}outgoing();return;}
   if(m.type==='collection-send-ack'){if(m.epoch===transportEpoch){collectionSending=false;pumpCollection();}return;}
@@ -174,7 +174,7 @@ onmessage=async({data:m})=>{try{
   if(app.take_sign_out()){signOut();changed=true;}
   app.take_sign_in();
   const upload=app.take_chat_upload_request();if(upload!==undefined&&upload!==null)postMessage({type:'choose-chat-file',epoch:upload});
-  const selectedSpace=app.take_space_switch();if(selectedSpace)postMessage({type:'space-switch',space:selectedSpace});
+  const selectedSpace=app.take_space_switch();if(selectedSpace){app.select_space(selectedSpace);clearPresentation();postMessage({type:'space-switch',space:selectedSpace});changed=false;}
   if(timings&&m.timing&&app.pending_mount_epoch())navigationTiming={...m.timing,workerStarted};
   if(changed)publish();outgoing();postMessage({type:'command-ack'});
 }catch(e){error(e);postMessage({type:'command-ack'});}};

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Stable bootstrap/network owner. No dependency on Wasm or the CRDT decoder.
-export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v16',STATE=1,INK=2,CHAT=3,COLLECTION=4,SPACES=5;
+export const CONTROL_VERSION=1,STATE_PROTOCOL='otrios-canvas-sync-v17',STATE=1,INK=2,CHAT=3,COLLECTION=4,SPACES=5;
 export function validRelease(r){return r&&/^[0-9a-f]{64}$/.test(r.id)&&r.web_entry===`/releases/${r.id}/web/index.html`;}
 export function connectSession({
   onRelease=()=>{},onState=()=>{},onInk=()=>{},onChat=()=>{},onCollection=()=>{},onSpaces=()=>{},onStatus=()=>{},onError=()=>{},
@@ -65,6 +65,12 @@ export function connectSession({
     sendCollection:(bytes,epoch)=>send(COLLECTION,bytes,epoch),
     sendSpaces:(bytes,epoch)=>send(SPACES,bytes,epoch),
     subscribeInk(value){wantsInk=!!value;syncInk();},
+    selectSpace(id){
+      if(id!==null&&!/^[a-f0-9]{32}$/.test(id))throw Error('Invalid Space selection');
+      if(url.searchParams.get('space')===id)return false;
+      if(id===null)url.searchParams.delete('space');else url.searchParams.set('space',id);
+      this.reconnect();return true;
+    },
     resume(){if(stopped){stopped=false;delay=250;connect();}},
     reconnect(){if(stopped)return;const old=peer;peer=null;cancel(timer);cancel(deadline);subscribed=false;status(false);old?.close();delay=250;connect();},
     stop(){stopped=true;cancel(timer);cancel(deadline);const old=peer;peer=null;subscribed=false;status(false);old?.close();},

@@ -6,6 +6,8 @@ use crate::authoring as a;
 use otrios_interfaces::layout::Value;
 use otrios_interfaces::spaces::{AppAvailability, Change, Discovery, Role};
 use std::collections::BTreeMap;
+mod map;
+pub(super) use map::{Drag, DragKind};
 
 pub(super) const FIELD: a::StateField = a::StateField::text(1, "entry");
 const PAGE: usize = 4;
@@ -14,6 +16,7 @@ const PAGE: usize = 4;
 pub(super) enum Pane {
     #[default]
     Home,
+    Apps,
     Spaces,
     Data,
     App(String),
@@ -33,14 +36,28 @@ pub(super) enum Pane {
     Person(String),
     Create,
     Invite,
+    SpaceSettings,
+    AppSettings(String),
+    Profile,
 }
 #[derive(Default)]
 pub(super) struct Model {
     pub pane: Pane,
     pub page: usize,
     pub message: String,
+    pub editing: bool,
+    pub scroll: f32,
+    pub scroll_limit: f32,
+    pub drag: Option<Drag>,
+    pub destination: Option<(String, Pane, Option<String>)>,
+    pub background: Option<otrios_interfaces::spaces::Background>,
+    pub field_owner: Option<String>,
+    pub form_generation: u64,
+    pub form_value: String,
+    pub form_pending: Option<(String, String)>,
+    pub form_blocked: bool,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) enum HostAction {
     Pane(Pane),
     Page(i8),
@@ -51,6 +68,16 @@ pub(super) enum HostAction {
     Invite(Role),
     SignIn,
     SignOut,
+    Edit,
+    Scroll(i8),
+    MapSpace(String),
+    SpaceBody(String),
+    MapApp(String, String),
+    Settings(String, Pane),
+    Resize(String),
+    Background(otrios_interfaces::spaces::Background),
+    SaveSpace,
+    Unavailable(&'static str),
 }
 pub(super) struct Rendered {
     pub ui: Ui,
@@ -175,7 +202,15 @@ pub(super) fn render(
     draft: &str,
     sign_in: bool,
     sign_out: bool,
+    viewport: [f32; 2],
+    font: Option<&crate::dashboard::font::Font>,
 ) -> Result<Rendered> {
+    if matches!(
+        model.pane,
+        Pane::Home | Pane::Spaces | Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile
+    ) {
+        return map::render(snapshot, model, draft, sign_in, sign_out, viewport, font);
+    }
     let selected = snapshot.selected.as_ref();
     let summary = selected.and_then(|s| snapshot.spaces.iter().find(|v| v.id == s.space));
     let admin = summary.is_some_and(|s| s.role == Some(Role::Admin));
@@ -220,6 +255,7 @@ pub(super) fn render(
     }
     let title = match model.pane {
         Pane::Home => "Home",
+        Pane::Apps => "Apps",
         Pane::Spaces => "Spaces",
         Pane::Data => "Apps & Data",
         Pane::App(_) => "App data",
@@ -232,6 +268,7 @@ pub(super) fn render(
         Pane::Person(_) => "Membership",
         Pane::Create => "Create Space",
         Pane::Invite => "Add member",
+        Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile => unreachable!(),
     };
     let mut b = Builder {
         nodes: vec![],
@@ -297,7 +334,7 @@ pub(super) fn render(
                 );
             }
         }
-        Pane::Home | Pane::Data => {
+        Pane::Home | Pane::Apps | Pane::Data => {
             if let Some(selected) = selected {
                 let data = matches!(model.pane, Pane::Data);
                 let mut apps = selected
@@ -745,6 +782,7 @@ pub(super) fn render(
                 HostAction::Invite(Role::Admin),
             );
         }
+        Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile => unreachable!(),
     }
     let form = matches!(model.pane, Pane::Create | Pane::Invite);
     if !model.message.is_empty() {

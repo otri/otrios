@@ -45,7 +45,31 @@ try {
  const state=await(await fetch(fixture.url+'/spaces',{headers})).json();
  const response=await fetch(fixture.url+'/spaces',{method:'POST',headers,body:JSON.stringify({version:1,expected_generation:state.generation,change:{type:'membership',space:fixture.space_a,identity:'bob',role:null}})});assert.equal(response.status,200);
  await wait(b,"document.querySelector('#revision')?.dataset.ui!=='app:bundle-counter/ui'");assert(!await evaluate(b,"(document.querySelector('#view')?.getAttribute('aria-label')||'').includes('A small shared counter')"));await call('Page.bringToFront',{},a);await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'");assert.equal(await count(a),expected);await evaluate(a,"document.querySelector('#controls button[aria-label=\"Increase counter\"]').click()");for(let i=0;i<100&&await count(a)!==expected+1;i++)await new Promise(r=>setTimeout(r,50));assert.equal(await count(a),expected+1);
- const click=async(session,label)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const selector='#controls button[aria-label='+JSON.stringify(label)+']';await wait(session,`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(session,`document.querySelector(${JSON.stringify(selector)}).click()`);};
+ const rawClick=async(session,label)=>{await call('Page.bringToFront',{},session);await evaluate(session,'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');const selector='#controls button[aria-label='+JSON.stringify(label)+']';await wait(session,`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(session,`document.querySelector(${JSON.stringify(selector)}).click()`);};
+ const click=async(session,label)=>{
+  const present=async value=>evaluate(session,`[...document.querySelectorAll('#controls button')].some(b=>b.getAttribute('aria-label')===${JSON.stringify(value)})`);
+  if(label==='Home'||label==='Spaces'){
+   if(await present('Home'))await rawClick(session,'Home');else if(await present('Close'))await rawClick(session,'Close');
+   await wait(session,"(()=>{const labels=[...document.querySelectorAll('#controls button')].map(b=>b.getAttribute('aria-label'));return labels.some(l=>['Profile','Sign in'].includes(l))&&!labels.some(l=>['Home','Close'].includes(l));})()");
+   if(await present('Done')){await rawClick(session,'Done');await wait(session,"!!document.querySelector('#controls button[aria-label=\"Edit\"]')");}return;
+  }
+  const state=await evaluate(session,"fetch('/spaces').then(r=>r.json())"),selected=await evaluate(session,"new URL(location.href).searchParams.get('space')"),name=state.spaces.find(s=>s.id===selected)?.name;
+  if(label==='Apps & Data'&&!await present(label)){
+   if(await present('Home'))await rawClick(session,'Home');
+   if(await present('Close'))await rawClick(session,'Close');
+   await wait(session,"[...document.querySelectorAll('#controls button')].some(b=>['Edit','Done'].includes(b.getAttribute('aria-label')))");
+   if(await present('Edit'))await rawClick(session,'Edit');
+   await rawClick(session,'Space settings: '+name);
+  }
+  if(!await present(label)){
+   const candidates=[label,'Space: '+label,...(name?[label+' in '+name]:[])];
+   await wait(session,`[...document.querySelectorAll('#controls button')].some(b=>${JSON.stringify(candidates)}.includes(b.getAttribute('aria-label')))`);
+   if(await present('Space: '+label))label='Space: '+label;
+   else if(name&&await present(label+' in '+name))label=label+' in '+name;
+  }
+  await rawClick(session,label);
+ };
+
  await click(a,'Quit');await wait(a,"document.querySelector('#revision')?.dataset.ui==='app:spaces-host/ui'");
  assert.equal(await count(other),isolated);
  await click(a,'Apps & Data');await click(a,'Bundle Counter');

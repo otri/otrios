@@ -52,6 +52,9 @@ impl CanvasApp {
     pub fn take_space_switch(&mut self) -> Option<String> {
         self.inner.take_space_switch()
     }
+    pub fn select_space(&mut self, space: &str) -> Result<(), String> {
+        self.inner.select_space(space)
+    }
     pub fn take_sign_in(&mut self) -> bool {
         self.inner.take_sign_in()
     }
@@ -256,6 +259,9 @@ impl CanvasApp {
         self.inner.hardware_edit(&edit)
     }
     pub fn presentation_kind(&self) -> String {
+        if self.inner.spaces_map() {
+            return "spaces-map".into();
+        }
         match self.inner.presentation() {
             Some(Presentation::Motion { .. }) => "motion",
             Some(Presentation::TextScroll { .. }) => "text-scroll",

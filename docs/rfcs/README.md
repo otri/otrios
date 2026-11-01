@@ -36,4 +36,4 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0025: Standalone app bundles](0025-standalone-app-bundles.md) | Signed bounded Canvas app installation, discovery, native/browser execution, upgrades and rollback qualified on Frame |
 | [RFC 0026: Target-specific Wasm compilation](0026-target-wasm-compilation.md) | Proposed experiment; no execution backend selected or integrated |
 | [RFC 0027: Spaces, membership and app data](0027-spaces-and-app-data.md) | Bounded implementation deployed and qualified on Frame; Member/Admin roles, public audiences, Space-owned collections and deletion lifecycle |
-| [RFC 0028: Spaces map, app sharing and portable data](0028-spaces-map-sharing-and-portable-data.md) | Proposed; minimal common entrance, resizable/editable Spaces, retained-data ghosts, scoped moves, app sharing and portable data contracts |
+| [RFC 0028: Spaces map, app sharing and portable data](0028-spaces-map-sharing-and-portable-data.md) | M1 map/settings implementation under qualification; retained-data UX, scoped moves and portable transfers remain proposed |

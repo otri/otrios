@@ -20,7 +20,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v16` includes a version-2 presentation binding
+State protocol `otrios-canvas-sync-v17` includes a version-2 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when collection identity, effective actions and
@@ -48,15 +48,16 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 ## Discovery on the shared session
 
-Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
-use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v16; v10 introduced discovery, v11 added the
+Management/discovery uses its v2 binary envelope on channel 5 of the same
+negotiated session. Both hosts use the covered RAM-only observer; it sends Watch after each reconnect. The
+browser/native state protocol is v17; v10 introduced discovery, v11 added the
 managed activation acknowledgement, v12 scoped auxiliary payloads by mount,
 v13 added a qualified first chat transcript window, and v14 added collection-specific
 delete confirmations and Admin cleanup metadata. V15 adds owned attachments,
 reviewed publication and message moderation. V16 adds request-correlated replies
-and the version-2 actor context. Managed hosts send Leave(epoch)
-after discarding revoked replicas; the authority holds cleanup pins until then.
+and the version-2 actor context. V17 adds bounded Space previews and presentation
+management commands; numeric management request version 1 remains unchanged.
+Managed hosts send Leave(epoch) after discarding revoked replicas; the authority holds cleanup pins until then.
 Release discovery remains on its unchanged control v1 envelope.
 
 Watch selects metadata for one Space and includes the previous authority/revision
@@ -74,8 +75,12 @@ second WebSocket is introduced. Snapshot delivery rechecks current identity and
 revision under the management lock, preventing an older queued roster from being
 delivered after revocation acknowledges.
 
-Snapshots contain up to 64 visible Space summaries and metadata for the selected
-Space only: at most 128 app rows, 128 Admin-visible member records and 16 verified
+Snapshots contain up to 64 visible Space summaries, each with up to 16 attached
+app previews (128 total; bundle ID, Space-local title and code compatibility).
+Preview metadata
+contains no collection IDs or usage totals. Larger Spaces open a paged app list.
+Detailed metadata is scoped to the selected Space: at most 128 app rows,
+128 Admin-visible member records and 16 verified
 installed launch records. They never contain document payloads or credentials.
 Retained collection rows, storage totals and installed-app management metadata
 are Admin-only. Storage totals cover managed checkpoints, journals and aggregate
@@ -89,9 +94,45 @@ host observer. A lost reply/reconnect marks its outcome unknown and refreshes th
 snapshot; it never automatically replays Create or a destructive action. Every
 management path uses the same generation/role checks.
 
-The shared native/browser Home includes a Space picker and launch entries. Admins
-can use Apps & Data to inspect attached/retained collections, add/remove apps and
-manage members. Local forms use the shared keyboard; their drafts never enter app
+The shared native/browser entrance is the [RFC 0028](rfcs/0028-spaces-map-sharing-and-portable-data.md)
+Spaces map. It has no Spaces heading or role subtitles. Sign-in/profile stays at
+upper-right; an Admin's Edit/Done action stays at lower-right. Empty Spaces are
+hidden outside Edit. Selecting a single-app Space directly opens that app;
+multiple-app Spaces offer their app list, and map app tiles launch directly.
+Unavailable local code keeps its entry and explains the problem on selection.
+
+Edit exposes Add Space, each Space's Add App, title dragging and corner resizing.
+Arrow keys on a title, app tile or resize corner perform equivalent ordering/size
+changes. The static tile grip is also the reduced-motion cue. App reordering is
+within a Space; cross-Space moves remain unavailable until M3 qualifies. Layout
+uses logical app-cell widths/heights (1–6), grows to fit content and reflows locally
+without changing shared preferred sizes. The map can pan vertically and has
+keyboard-accessible scroll controls; up to four Spaces per page bound the local scene.
+
+The Space settings panel combines name and background (including None), then usage
+and existing people/sharing/data/cleanup controls. No width/height fields or separate
+appearance panel is added. In Edit, an app opens a name field over its immutable
+bundle ID. Enter, blur or closing commits a changed label; there is no Rename,
+Move or Delete App button in that panel. Share App, Export Data and Replace Data
+truthfully report unavailable until the transfer milestone qualifies. Unmeasured
+active-user totals remain unavailable. Existing removal/retention/deletion controls
+remain under Space settings / Apps & Data pending M2; this increment adds neither
+multiple retained backups nor portable data codecs.
+
+Name, background, size and order requests use the reviewed registry generation
+and require current Admin authority on the changed Space. Reordering cannot use
+an inaccessible Space as an anchor. Metadata changes preserve collection IDs,
+schemas, admission and attachment epochs; they do not revoke a valid app writer.
+A stale form cannot overwrite a newer edit. Unknown replies require refresh and
+review rather than automatic management replay. While connected, pending management
+also prevents release handoff.
+
+Switching Spaces retains the browser/native client and intended destination, but
+replaces the one scoped transport using `/session?space=NEW_ID`. The new v1 hello
+carries the current release hash; old-epoch messages cannot cross that handoff.
+A URL/history update alone must never leave mounts on the old Space's socket.
+
+Local forms use the shared keyboard; their drafts never enter app
 state. These are trusted host controls with a private action table: a publisher
 cannot invoke them by reusing labels or event numbers. A changed admission snapshot
 redacts held management frames before renderer credit returns.
@@ -538,14 +579,14 @@ An `OTCHAT01` journal is recovered completely, then atomically compacted into
 `OTCHAT02` before its next durable write. Older writers reject the new framing
 without truncating it. Legacy journal-only manifests reject owned attachment
 references rather than silently losing their namespace; use paired collection
-backup/restore for owned data. Registry framing remains `OTSP5`; release-control v1 remains
-independent. State protocol v16 retains these commands and correlates moderation/download replies
+backup/restore for owned data. Registry framing is `OTSP6`; release-control v1 remains
+independent. State protocol v17 retains these commands and correlates moderation/download replies
 with request nonces.
 
 
 ## Persistence
 
-The native Store writes `OTSP5`, a 32-byte SHA-256 payload digest, and a bounded
+The native Store writes `OTSP6`, a 32-byte SHA-256 payload digest, and a bounded
 FlexBuffers record containing the registry, a stable authority-root identity and
 its paired app-storage path and migration-original retention decisions. The
 registry remains bounded at 2 MiB; attribution metadata adds at most 2 MiB and
@@ -555,13 +596,15 @@ Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
 
-Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3` and `OTSP4` registries while preserving their decisions;
+Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3`, `OTSP4` and `OTSP5` registries while preserving their decisions;
 the initial prototype defaults older members' continuous-membership generation
 to zero. The upgrade writes the latest decision ledger before replacing the
-primary. Older writers reject `OTSP5`, including writers that cannot honor
+primary. Older writers reject `OTSP6`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
-supports this framing and the current admission rules. Management request version
-1 and release-control v1 remain stable. Current state protocol v16 retains the
+supports this framing and the current admission rules. OTSP6 adds Space layout and
+Space-local app labels; omitted legacy fields default without rebinding collections.
+Never downgrade current safety metadata to make an older writer accept it.
+Management request version 1 and release-control v1 remain stable. Current state protocol v17 retains the
 collection-specific deletion confirmation and Admin-only cleanup metadata and adds
 reviewed publication, attachment blobs and message moderation.
 

@@ -199,7 +199,7 @@ Frame installation. It preserves every public runtime asset and native binary,
 generates Home from installed entries, and uses the expected-baseline activation
 lock. Registry changes use a safe browser/native handoff after confirmed edits and
 idle gestures. Code/state stay on the existing session. The current managed
-session uses state v16 and retains control v1. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
+session uses state v17 and retains control v1. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
 outside the host source registry.
 
 `--remove APP_ID` removes registration, retaining authority state. Refused revisions,
@@ -208,7 +208,7 @@ unchanged. For rollback, restore a complete verified release with matching host
 bytes/helpers and notify activation; never copy an old state backup over confirmed
 data. Keep the private operational rollback snapshot before pruning cached releases.
 
-After the Spaces cutover, code rollback must enforce OTSP5, OTCHAT02 and the
+After the Spaces cutover, code rollback must enforce OTSP6, OTCHAT02 and the
 device-local installed namespace. Retain the current registry, latest-decision
 ledger, stable owner locks and paired app storage. Pre-Spaces binaries and an
 older registry copied over current decisions are not supported rollback paths.

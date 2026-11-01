@@ -2,6 +2,7 @@
 //! One admitted app activation. Durable state is authoritative; all client state is RAM only.
 use super::text_viewport::TextViewport;
 use super::*;
+mod host_map;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -421,6 +422,8 @@ impl Client {
         self.host_requested = false;
         self.host.pane = super::host_ui::Pane::Home;
         self.host.message.clear();
+        self.host.drag = None;
+        self.host.field_owner = None;
         self.auth_required = false;
         self.collection_revoked = true;
         Ok(())
@@ -430,6 +433,16 @@ impl Client {
     }
     pub fn spaces_ui(&self) -> bool {
         self.host_active
+    }
+    pub fn spaces_map(&self) -> bool {
+        self.host_active && self.map_pane()
+    }
+    fn map_pane(&self) -> bool {
+        use super::host_ui::Pane;
+        matches!(
+            self.host.pane,
+            Pane::Home | Pane::Spaces | Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile
+        )
     }
     pub fn show_spaces(&mut self) -> Result<bool> {
         if self.spaces.snapshot().is_none() {
@@ -485,6 +498,22 @@ impl Client {
             String::new()
         };
         if let Some(outcome) = self.spaces.take_outcome() {
+            match &outcome {
+                crate::spaces::Outcome::Unknown { .. } => self.host.form_blocked = true,
+                crate::spaces::Outcome::Decided {
+                    status: otrios_interfaces::spaces::ManagementStatus::Applied,
+                    ..
+                } => {
+                    if let Some((owner, value)) = self.host.form_pending.take()
+                        && self.host.field_owner.as_ref() == Some(&owner)
+                    {
+                        self.host.form_value = value;
+                    }
+                }
+                _ => {
+                    self.host.form_pending = None;
+                }
+            }
             self.host.message = match outcome {
                 crate::spaces::Outcome::Unknown { .. } => {
                     "Reply lost. Check the refreshed Space before trying again.".into()
@@ -515,12 +544,70 @@ impl Client {
             .local_apps
             .project(self.spaces.snapshot().ok_or("Spaces are unavailable")?);
         let private = snapshot.identity.is_some();
+        if self.host.field_owner.is_some()
+            && draft == self.host.form_value
+            && !self.spaces.pending()
+            && !self.host.form_blocked
+        {
+            self.host.form_generation = snapshot.generation;
+        }
+        if let Some((space, pane, app)) = self.host.destination.clone()
+            && snapshot.selected.as_ref().is_some_and(|s| s.space == space)
+        {
+            self.host.destination = None;
+            self.host.pane = pane;
+            self.host.field_owner = None;
+            self.host.background = None;
+            let app = app.or_else(|| {
+                if self.host.pane == super::host_ui::Pane::Apps && !self.host.editing {
+                    let apps = snapshot
+                        .selected
+                        .as_ref()?
+                        .apps
+                        .iter()
+                        .filter(|a| a.attached)
+                        .collect::<Vec<_>>();
+                    if apps.len() == 1 {
+                        return Some(apps[0].app.clone());
+                    }
+                }
+                None
+            });
+            if let Some(app) = app {
+                if let Some(launch) = snapshot
+                    .selected
+                    .as_ref()
+                    .and_then(|s| s.apps.iter().find(|a| a.app == app))
+                    .and_then(|a| a.launch.clone())
+                {
+                    self.host_active = false;
+                    self.host_actions.clear();
+                    self.open(&launch.ui_ref, &launch.state_ref);
+                    return Ok(());
+                }
+                self.host.message = "This app is unavailable on this device.".into();
+            }
+        }
+        let mut host_viewport = if self.map_pane() {
+            self.viewport.or(self.layout_viewport)
+        } else {
+            self.layout_viewport.or(self.viewport)
+        }
+        .unwrap_or([1280., 800.]);
+        if matches!(
+            self.host.pane,
+            super::host_ui::Pane::SpaceSettings | super::host_ui::Pane::AppSettings(_)
+        ) {
+            host_viewport[1] = host_viewport[1].max(720.);
+        }
         let rendered = super::host_ui::render(
             &snapshot,
             &mut self.host,
             &draft,
             !self.chat_native,
             !self.chat_native,
+            host_viewport,
+            self.font.as_deref(),
         )?;
         self.generation = self
             .generation
@@ -549,10 +636,7 @@ impl Client {
         mount.font = self.font.clone();
         mount.session_controls = self.session_controls;
         mount.private_access = self.private_access;
-        mount.viewport = self
-            .layout_viewport
-            .or(self.viewport)
-            .unwrap_or([1280., 800.]);
+        mount.viewport = host_viewport;
         mount.keyboard.set_enabled(!self.external_keyboard);
         mount.invalidate();
         cached_scene(&mount)?;
@@ -570,9 +654,89 @@ impl Client {
         self.host.message.clear();
         match action {
             HostAction::Pane(pane) => {
+                if !matches!(pane, Pane::AppSettings(_)) {
+                    self.commit_host_label()?;
+                }
                 self.host.pane = pane;
                 self.host.page = 0;
+                self.host.field_owner = None;
+                self.host.background = None;
                 self.build_host(false)?;
+            }
+            HostAction::Edit => {
+                self.host.editing = !self.host.editing;
+                self.host.drag = None;
+                self.build_host(false)?;
+            }
+            HostAction::Scroll(direction) => {
+                self.host.scroll = (self.host.scroll + f32::from(direction) * 240.)
+                    .clamp(0., self.host.scroll_limit);
+                self.build_host(true)?;
+            }
+            HostAction::MapSpace(space) => {
+                let app = self
+                    .spaces
+                    .snapshot()
+                    .and_then(|s| s.spaces.iter().find(|s| s.id == space))
+                    .filter(|s| s.attached_count == 1)
+                    .and_then(|s| s.apps.first())
+                    .map(|a| a.app.clone());
+                let pane = if self.host.editing {
+                    Pane::SpaceSettings
+                } else {
+                    Pane::Apps
+                };
+                self.host_destination(space, pane, if self.host.editing { None } else { app })?;
+            }
+            HostAction::SpaceBody(space) => {
+                if !self.host.editing {
+                    return self.host_action(HostAction::MapSpace(space));
+                }
+            }
+            HostAction::MapApp(space, app) => {
+                if self.host.editing {
+                    self.host_destination(space, Pane::AppSettings(app), None)?;
+                } else {
+                    self.host_destination(space, Pane::Home, Some(app))?;
+                }
+            }
+            HostAction::Settings(space, pane) => {
+                self.host_destination(space, pane, None)?;
+            }
+            HostAction::Resize(_) => {}
+            HostAction::Background(color) => {
+                self.host.background = Some(color);
+                self.build_host(true)?;
+            }
+            HostAction::SaveSpace => {
+                if let Some(space) = self
+                    .spaces
+                    .snapshot()
+                    .and_then(|s| {
+                        s.selected
+                            .as_ref()
+                            .and_then(|d| s.spaces.iter().find(|s| s.id == d.space))
+                    })
+                    .cloned()
+                {
+                    let name = match self.typed_value(1)? {
+                        Value::Text(v) => v,
+                        _ => String::new(),
+                    };
+                    let mut layout = space.layout;
+                    layout.background = self.host.background.unwrap_or(layout.background);
+                    self.host_request_form(otrios_interfaces::spaces::Change::ConfigureSpace {
+                        space: space.id,
+                        name,
+                        layout,
+                    })?;
+                    self.build_host(true)?;
+                }
+            }
+            HostAction::Unavailable(message) => {
+                self.commit_host_label()?;
+                self.host.message = message.into();
+                self.build_host(true)?;
             }
             HostAction::Page(direction) => {
                 self.host.page = self.host.page.saturating_add_signed(isize::from(direction));
@@ -643,6 +807,63 @@ impl Client {
             }
         }
         Ok(true)
+    }
+    fn host_destination(
+        &mut self,
+        space: String,
+        pane: super::host_ui::Pane,
+        app: Option<String>,
+    ) -> Result<()> {
+        self.host.destination = Some((space.clone(), pane, app));
+        if self.selected_space.as_deref() == Some(&space) {
+            self.build_host(false)?;
+        } else {
+            self.space_switch = Some(space);
+        }
+        Ok(())
+    }
+    fn host_request_form(&mut self, change: otrios_interfaces::spaces::Change) -> Result<()> {
+        if self.host.form_blocked
+            || self
+                .spaces
+                .snapshot()
+                .is_none_or(|s| s.generation != self.host.form_generation)
+        {
+            self.host.message = "The Space changed. Close and review it again.".into();
+        } else {
+            let name = match &change {
+                otrios_interfaces::spaces::Change::LabelApp { name, .. }
+                | otrios_interfaces::spaces::Change::ConfigureSpace { name, .. } => {
+                    Some(name.trim().to_owned())
+                }
+                _ => None,
+            };
+            if self.spaces.request(change).is_ok() {
+                self.host.form_pending =
+                    name.and_then(|name| self.host.field_owner.clone().map(|owner| (owner, name)));
+                self.host.message = "Saving…".into();
+            } else {
+                self.host.message = "Check the name and wait for the current request.".into();
+            }
+        }
+        Ok(())
+    }
+    fn commit_host_label(&mut self) -> Result<()> {
+        if !self.host_active {
+            return Ok(());
+        }
+        if let super::host_ui::Pane::AppSettings(app) = self.host.pane.clone()
+            && let Value::Text(name) = self.typed_value(1)?
+            && name != self.host.form_value
+            && let Some(space) = self.selected_space.clone()
+        {
+            self.host_request_form(otrios_interfaces::spaces::Change::LabelApp {
+                space,
+                app,
+                name,
+            })?;
+        }
+        Ok(())
     }
     /// The host supplies text input; retain editor focus without drawing keys.
     pub fn set_software_keyboard(&mut self, enabled: bool) {
@@ -925,6 +1146,12 @@ impl Client {
         if self.viewport == Some(viewport) {
             return Ok(false);
         }
+        if self.host_active {
+            self.viewport = Some(viewport);
+            self.host.drag = None;
+            self.build_host(true)?;
+            return Ok(true);
+        }
         if let Some(m) = &mut self.active
             && m.layout.blueprint().composition.is_some()
         {
@@ -1188,14 +1415,15 @@ impl Client {
                 .is_some_and(|q| q.mount.private || q.mount.binding.is_some())
     }
     pub fn input_busy(&self) -> bool {
-        self.active.as_ref().is_some_and(|m| {
-            m.input.active()
-                || m.keyboard_pointer.is_some()
-                || m.order_drag.is_some()
-                || m.text_views.values().any(TextViewport::active)
-                || m.text_scroll.as_ref().is_some_and(|s| s.touching())
-                || m.text_document.as_ref().is_some_and(|s| s.touching())
-        })
+        self.host.drag.is_some()
+            || self.active.as_ref().is_some_and(|m| {
+                m.input.active()
+                    || m.keyboard_pointer.is_some()
+                    || m.order_drag.is_some()
+                    || m.text_views.values().any(TextViewport::active)
+                    || m.text_scroll.as_ref().is_some_and(|s| s.touching())
+                    || m.text_document.as_ref().is_some_and(|s| s.touching())
+            })
     }
     pub fn value(&self, id: u16) -> Result<u16> {
         {
@@ -1226,6 +1454,7 @@ impl Client {
     /// unconfirmed user intent and active input prevent code replacement.
     pub fn reload_ready(&self) -> bool {
         !self.input_busy()
+            && !self.spaces.pending()
             && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
             && self
                 .active
@@ -1504,6 +1733,7 @@ impl Client {
         self.host_active = false;
         self.host_actions.clear();
         self.host_requested = false;
+        self.host = super::host_ui::Model::default();
         self.spaces.forget();
         if self
             .active
@@ -2271,6 +2501,11 @@ impl Client {
             event.phase = PointerPhase::Cancel;
             event.position = [0., 0.];
         }
+        if self.host_active
+            && let Some(changed) = self.host_map_pointer(epoch, event)?
+        {
+            return Ok(changed);
+        }
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
@@ -2448,7 +2683,7 @@ impl Client {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
-        if self.order_draggable(id) {
+        if !self.host_active && self.order_draggable(id) {
             return Ok(false);
         }
         self.deliver(InputRouter::activate(self.scene()?.as_ref(), id))
@@ -2613,6 +2848,7 @@ impl Client {
         if epoch != self.epoch() || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused) {
             return Ok(false);
         }
+        self.commit_host_label()?;
         let m = self.active.as_mut().ok_or("No Canvas")?;
         m.focus = None;
         if let Some(chat) = &mut m.chat {
@@ -2671,6 +2907,9 @@ impl Client {
         }
         if self.requested.as_ref().is_some_and(|r| !r.reconnecting) || self.active.is_none() {
             return Ok(false);
+        }
+        if matches!(edit, Edit::Enter) {
+            self.commit_host_label()?;
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
         if let Some(chat) = &mut m.chat {
@@ -2742,6 +2981,10 @@ impl Client {
         Ok(changed)
     }
     pub fn cancel(&mut self) -> Result<bool> {
+        if self.host.drag.take().is_some() && self.host_active {
+            self.build_host(true)?;
+            return Ok(true);
+        }
         if let Some(m) = &mut self.active {
             m.input.cancel_all();
             if let Some(s) = &mut m.text_scroll {
@@ -2766,6 +3009,13 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if self.host_active {
+            if self.host.drag.take().is_some() {
+                self.build_host(true)?;
+                return Ok(true);
+            }
+            return self.host_action(super::host_ui::HostAction::Pane(super::host_ui::Pane::Home));
+        }
         if let Some(m) = &mut self.active
             && let Some(chat) = &mut m.chat
             && chat.close_modal()
@@ -2962,6 +3212,9 @@ impl Client {
         Ok(changed)
     }
     pub fn order_draggable(&self, id: u32) -> bool {
+        if self.host_active {
+            return self.host_map_draggable(id);
+        }
         self.active.as_ref().is_some_and(|m| {
             m.order_editing && order_items(m).iter().any(|i| u32::from(i.node) == id)
         })
@@ -2995,6 +3248,9 @@ impl Client {
     pub fn adjust_control(&mut self, id: u32, dx: i16, dy: i16) -> Result<bool> {
         if self.local_uninstall {
             return Ok(false);
+        }
+        if self.host_active {
+            return self.host_map_adjust(id, dx, dy);
         }
         if self.order_draggable(id) {
             let m = self.active.as_mut().ok_or("No Canvas")?;

@@ -90,7 +90,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP5".to_vec();
+    let mut bytes = b"OTSP6".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -109,13 +109,17 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
     Ok(payload)
 }
 fn decode(bytes: &[u8]) -> Result<Record> {
-    let record: Record = flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4", b"OTSP5"])?)
-        .map_err(|_| Error::Invalid)?;
+    let record: Record =
+        flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6"])?)
+            .map_err(|_| Error::Invalid)?;
     validate_record(&record)?;
     Ok(record)
 }
 fn current_framing(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"OTSP3") || bytes.starts_with(b"OTSP4") || bytes.starts_with(b"OTSP5")
+    bytes.starts_with(b"OTSP3")
+        || bytes.starts_with(b"OTSP4")
+        || bytes.starts_with(b"OTSP5")
+        || bytes.starts_with(b"OTSP6")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)

@@ -134,7 +134,7 @@ def qualify(args):
                     if server.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Disposable authority failed to become ready; see authority.log')
                     time.sleep(.05)
-                subprocess.run(['node', str(REPO / 'scripts/test-spaces-browser.mjs'), str(root / 'fixture.json')], check=True)
+                subprocess.run(['node', str(args.driver), str(root / 'fixture.json')], check=True)
             finally:
                 if server.poll() is None:
                     server.terminate()
@@ -146,4 +146,5 @@ if __name__ == '__main__':
     parser.add_argument('--bin-dir', type=pathlib.Path, default=REPO / 'target/debug')
     parser.add_argument('--wasm-pkg', type=pathlib.Path, default=REPO / 'target/spaces-web/pkg')
     parser.add_argument('--output', type=pathlib.Path, default=REPO / 'target/spaces-browser')
+    parser.add_argument('--driver', type=pathlib.Path, default=REPO / 'scripts/test-spaces-browser.mjs')
     qualify(parser.parse_args())

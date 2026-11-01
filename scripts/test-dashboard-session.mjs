@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';import assert from 'node:assert/strict';
 import {connectSession,validRelease} from '../web/shared/session.mjs';
-const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v16'});
+const release=c=>({id:c.repeat(64),web_entry:`/releases/${c.repeat(64)}/web/index.html`,sync_protocol:'otrios-canvas-sync-v17'});
 function rig({failOpen=false,base='https://otrios.example/releases/'+ 'a'.repeat(64)+'/web/index.html'}={}){
  const peers=[],timers=new Map(),seen=[],state=[],ink=[],status=[],errors=[];let serial=0;
  class Peer {constructor(url){this.url=String(url);this.sent=[];this.bufferedAmount=0;peers.push(this);}send(data){this.sent.push(typeof data==='string'?JSON.parse(data):[...data]);}close(){this.closed=true;this.onclose?.();}event(type='hello',r=release('a'),extra={}){this.onmessage({data:JSON.stringify({type,version:1,release:r,compatible:true,state_available:true,...extra})});}binary(bytes){this.onmessage({data:new Uint8Array(bytes).buffer});}}
@@ -10,7 +10,7 @@ function rig({failOpen=false,base='https://otrios.example/releases/'+ 'a'.repeat
 }
 test('one socket negotiates before binary traffic and multiplexes subscribed ink',()=>{
  const r=rig(),p=r.peers[0];p.onopen();assert.equal(p.url,'wss://otrios.example/session');
- assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v16',state:true}]);
+ assert.deepEqual(p.sent,[{type:'hello',version:1,release:'a'.repeat(64),state_protocol:'otrios-canvas-sync-v17',state:true}]);
  assert(!r.session.sendState(new Uint8Array([9])));p.event();assert(r.session.ready);
  assert(r.session.sendState(new Uint8Array([8,9])));assert.deepEqual(p.sent[1],[1,8,9]);p.binary([1,7]);assert.deepEqual(r.state,[[[7],1]]);
  r.session.subscribeInk(true);assert.deepEqual(p.sent[2],{type:'ink',enabled:true});r.session.sendInk(new Uint8Array([6]));assert.deepEqual(p.sent[3],[2,6]);p.binary([2,5]);assert.deepEqual(r.ink,[[[5],1]]);
@@ -114,4 +114,17 @@ test('Space metadata shares the negotiated socket with independent bounded mailb
  bridge.handle({type:'spaces-frame-ack',epoch:1});bridge.receive('spaces',new Uint8Array([3]),2);assert.equal(reconnects,1);
  bridge.handle({type:'spaces-frame-ack',epoch:2});bridge.receive('spaces',new Uint8Array([4]),2);
  assert.equal(messages.filter(m=>m.type==='spaces-frame').length,3);
+});
+
+test('Space selection replaces the scoped transport and rejects queued old-scope bytes',()=>{
+ const a='a'.repeat(32),b='b'.repeat(32),r=rig({base:'https://otrios.example/?space='+a}),old=r.peers[0];
+ old.event();const epoch=r.session.epoch;
+ assert(r.session.selectSpace(b));assert(old.closed);assert.equal(r.peers.length,2);
+ assert.equal(r.peers[1].url,'wss://otrios.example/session?space='+b);
+ assert(!r.session.sendState(new Uint8Array([1]),epoch));
+ r.peers[1].onopen();assert.equal(r.peers[1].sent[0].version,1);r.peers[1].event();
+ assert(r.session.sendState(new Uint8Array([2]),r.session.epoch));
+ assert(!r.session.selectSpace(b));assert.equal(r.peers.length,2);
+ assert.throws(()=>r.session.selectSpace('../private'));assert.equal(r.peers.length,2);
+ assert(r.session.selectSpace(null));assert.equal(r.peers[2].url,'wss://otrios.example/session');r.session.stop();
 });

@@ -66,7 +66,7 @@ pub async fn list(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     };
     let records = registry.spaces.iter().filter(|s| core::visible(s, identity.as_deref())).map(|s| {
         let role = core::role(s, identity.as_deref());
-        let mut value = json!({"id":s.id,"name":s.name,"audience":s.audience,"role":role,
+        let mut value = json!({"id":s.id,"name":s.name,"layout":s.layout,"audience":s.audience,"role":role,
             "apps":s.apps.iter().filter(|a| a.attached || role == Some(Role::Admin)).collect::<Vec<_>>()});
         if role == Some(Role::Admin) { value["members"] = json!(s.members); value["cleanup"] = json!(hub.cleanup(&s.id)); }
         value

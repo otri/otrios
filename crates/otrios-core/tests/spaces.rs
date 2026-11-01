@@ -321,6 +321,7 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
         policy.app = app.clone();
         let collection = format!("{:032x}", index + 1);
         selected.apps.push(AppData {
+            label: "L".repeat(128),
             policy: policy.clone(),
             collection: collection.clone(),
             attached: true,
@@ -346,7 +347,10 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
     for index in 1..MAX_SPACES {
         let mut space = registry.spaces[0].clone();
         space.id = format!("{:032x}", 10000 + index);
-        space.apps.clear();
+        space.apps.truncate(MAX_INSTALLED_APPS);
+        for (app_index, app) in space.apps.iter_mut().enumerate() {
+            app.collection = format!("{:032x}", 100_000 + index * MAX_APPS + app_index);
+        }
         space.members.truncate(1);
         registry.spaces.push(space);
     }
@@ -361,6 +365,10 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
     )
     .unwrap();
     assert_eq!(snapshot.spaces.len(), MAX_SPACES);
+    assert_eq!(
+        snapshot.spaces.iter().map(|s| s.apps.len()).sum::<usize>(),
+        MAX_APPS
+    );
     let detail = snapshot.selected.as_ref().unwrap();
     assert_eq!(detail.apps.len(), MAX_APPS);
     assert_eq!(detail.members.as_ref().unwrap().len(), MAX_MEMBERS);
@@ -985,7 +993,7 @@ fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
             None,
         )
         .unwrap();
-    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP5");
+    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP6");
     std::fs::remove_dir_all(path).unwrap();
 }
 
@@ -1402,4 +1410,176 @@ fn resumption_context_separates_people_membership_intervals_and_reattachments() 
         spaces::actor_context(&registry, Some("alice"), &new_binding).unwrap(),
         original
     );
+}
+
+#[test]
+fn map_metadata_changes_preserve_live_bindings_and_reject_stale_names() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let binding = attach(&mut registry, &space);
+    let old = registry.spaces[0].clone();
+    let edit = request(
+        &registry,
+        Change::ConfigureSpace {
+            space: space.clone(),
+            name: "Workshop".into(),
+            layout: SpaceLayout {
+                width: 1,
+                height: 2,
+                background: Background::Sage,
+            },
+        },
+    );
+    let next = spaces::apply(&registry, "alice", &edit, None).unwrap();
+    assert_eq!(next.spaces[0].apps, old.apps);
+    assert_eq!(next.spaces[0].admission_epoch, old.admission_epoch);
+    spaces::authorize(&next, Some("alice"), &binding, Operation::Edit).unwrap();
+    assert_eq!(
+        spaces::apply(&next, "alice", &edit, None),
+        Err(Error::Conflict)
+    );
+    registry = next;
+    change(
+        &mut registry,
+        "alice",
+        Change::LabelApp {
+            space: space.clone(),
+            app: "notes".into(),
+            name: "Notebook".into(),
+        },
+    );
+    assert_eq!(registry.spaces[0].apps[0].collection, binding.collection);
+    assert_eq!(registry.spaces[0].apps[0].policy, old.apps[0].policy);
+    assert_eq!(
+        registry.spaces[0].apps[0].attachment_epoch,
+        old.apps[0].attachment_epoch
+    );
+    assert_eq!(registry.spaces[0].apps[0].label, "Notebook");
+    let denied = request(
+        &registry,
+        Change::ConfigureSpace {
+            space,
+            name: "Injected".into(),
+            layout: SpaceLayout::default(),
+        },
+    );
+    assert_eq!(
+        spaces::apply(&registry, "bob", &denied, None),
+        Err(Error::Denied)
+    );
+}
+
+#[test]
+fn ordering_moves_only_the_authorized_record_and_conceals_hidden_anchors() {
+    let mut registry = fixture();
+    let first = registry.spaces[0].id.clone();
+    change(
+        &mut registry,
+        "bob",
+        Change::Create {
+            name: "Hidden".into(),
+        },
+    );
+    let hidden = registry.spaces.last().unwrap().id.clone();
+    let bad = request(
+        &registry,
+        Change::PlaceSpace {
+            space: first.clone(),
+            before: Some(hidden.clone()),
+        },
+    );
+    assert_eq!(
+        spaces::apply(&registry, "alice", &bad, None),
+        Err(Error::Denied)
+    );
+    let nonexistent = request(
+        &registry,
+        Change::PlaceSpace {
+            space: first.clone(),
+            before: Some("e".repeat(32)),
+        },
+    );
+    assert_eq!(
+        spaces::apply(&registry, "alice", &nonexistent, None),
+        Err(Error::Denied)
+    );
+    let owned = registry.spaces[0].clone();
+    let hidden_record = registry.spaces.last().unwrap().clone();
+    change(
+        &mut registry,
+        "alice",
+        Change::PlaceSpace {
+            space: first.clone(),
+            before: None,
+        },
+    );
+    assert_eq!(registry.spaces.last(), Some(&owned));
+    assert!(registry.spaces.contains(&hidden_record));
+    attach(&mut registry, &first);
+    let mut second = policy();
+    second.app = "sketches".into();
+    let attach = request(
+        &registry,
+        Change::Attach {
+            space: first.clone(),
+            app: second.app.clone(),
+        },
+    );
+    registry = spaces::apply(&registry, "alice", &attach, Some(&second)).unwrap();
+    let apps = registry.spaces.last().unwrap().apps.clone();
+    change(
+        &mut registry,
+        "alice",
+        Change::PlaceApp {
+            space: first,
+            app: "sketches".into(),
+            before: Some("notes".into()),
+        },
+    );
+    assert_eq!(
+        registry.spaces.last().unwrap().apps,
+        vec![apps[1].clone(), apps[0].clone()]
+    );
+}
+
+#[test]
+fn legacy_registry_metadata_defaults_and_invalid_sizes_do_not_modify_collections() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    attach(&mut registry, &space);
+    let mut old = serde_json::to_value(&registry).unwrap();
+    for space in old["spaces"].as_array_mut().unwrap() {
+        space.as_object_mut().unwrap().remove("layout");
+        for app in space["apps"].as_array_mut().unwrap() {
+            app.as_object_mut().unwrap().remove("label");
+        }
+    }
+    let bytes = flexbuffers::to_vec(&old).unwrap();
+    let recovered: Registry = flexbuffers::from_slice(&bytes).unwrap();
+    assert_eq!(recovered, registry);
+    for width in [0, 7, 255] {
+        let bad = request(
+            &registry,
+            Change::ConfigureSpace {
+                space: space.clone(),
+                name: "Household".into(),
+                layout: SpaceLayout {
+                    width,
+                    ..SpaceLayout::default()
+                },
+            },
+        );
+        assert_eq!(
+            spaces::apply(&registry, "alice", &bad, None),
+            Err(Error::Invalid)
+        );
+        assert!(
+            spaces::encode_command(&Command::Manage {
+                version: VERSION,
+                id: 1,
+                request: bad
+            })
+            .is_err()
+        );
+    }
 }

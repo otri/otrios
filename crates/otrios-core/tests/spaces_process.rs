@@ -702,7 +702,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v16","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v17","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -815,7 +815,7 @@ fn offline_backup_restore_preserves_latest_revocation_and_older_writers_cannot_a
     if let Ok(older) = std::env::var("OTRIOS_SPACES_OLD_SERVER") {
         let primary = fs::read(rig.root.join("spaces.flex")).unwrap();
         let latest = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
-        assert_eq!(&primary[..5], b"OTSP5");
+        assert_eq!(&primary[..5], b"OTSP6");
         rig.restart(&older, true, false);
         assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
         std::thread::sleep(Duration::from_millis(100));
@@ -900,7 +900,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v16","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v17","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
