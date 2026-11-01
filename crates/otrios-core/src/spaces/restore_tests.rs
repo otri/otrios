@@ -311,7 +311,8 @@ fn initial_ledger_framing_upgrades_without_changing_root_or_membership() {
     let fixture = Fixture::new();
     let (store, _) = fixture.seeded();
     let root = store.root_id().to_owned();
-    let registry = store.registry().unwrap().clone();
+    let mut registry = store.registry().unwrap().clone();
+    registry.spaces[0].layout.width = 1;
     let latest = store.latest_path().to_path_buf();
     drop(store);
     for path in [fixture.path(), latest.clone()] {

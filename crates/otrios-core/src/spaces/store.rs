@@ -109,9 +109,12 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
     Ok(payload)
 }
 fn decode(bytes: &[u8]) -> Result<Record> {
-    let record: Record =
+    let mut record: Record =
         flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6"])?)
             .map_err(|_| Error::Invalid)?;
+    if !bytes.starts_with(b"OTSP6") {
+        initial_layouts(&mut record.registry);
+    }
     validate_record(&record)?;
     Ok(record)
 }
@@ -122,10 +125,19 @@ fn current_framing(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"OTSP6")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
-    let registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
+    let mut registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
         .map_err(|_| Error::Invalid)?;
+    initial_layouts(&mut registry);
     validate(&registry)?;
     Ok(registry)
+}
+// Earlier formats had no presentation preferences. Later OTSP6 edits are kept.
+fn initial_layouts(registry: &mut Registry) {
+    for space in &mut registry.spaces {
+        if space.layout == SpaceLayout::default() {
+            space.layout.width = space.apps.iter().filter(|a| a.attached).count().clamp(1, 3) as u8;
+        }
+    }
 }
 fn private(metadata: &fs::Metadata) -> Result<()> {
     if !metadata.is_file() {

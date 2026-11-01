@@ -86,10 +86,10 @@ try {
  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft'},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowLeft',code:'ArrowLeft'},a);
  for(let i=0;i<100&&(await get()).spaces.find(s=>s.id===fixture.space_a).layout.width===size.width;i++)await new Promise(r=>setTimeout(r,50));
  assert.equal((await get()).spaces.find(s=>s.id===fixture.space_a).layout.width,size.width-1);
- await wait(a,`document.querySelector(${JSON.stringify(selector('Resize: Workshop'))}).getBoundingClientRect().right<${oldCorner}`);
+ await wait(a,`document.querySelector(${JSON.stringify(selector('Resize: Workshop'))})?.getBoundingClientRect().right<${oldCorner}`);
 
  const drag=async(from,to)=>{
-  const point=async label=>evaluate(a,`(()=>{const r=document.querySelector(${JSON.stringify(selector(label))}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+Math.min(32,r.height/2)}})()`);
+  const point=async label=>wait(a,`(()=>{const r=document.querySelector(${JSON.stringify(selector(label))})?.getBoundingClientRect();return r?{x:r.x+r.width/2,y:r.y+Math.min(32,r.height/2)}:null})()`);
   const start=await point(from),end=await point(to);
   await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...start},a);
   await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,...end},a);
@@ -100,7 +100,7 @@ try {
  for(let i=0;i<100&&(await get()).spaces[0].id!==fixture.space_b;i++)await new Promise(r=>setTimeout(r,50));
  await writeFile(output+'/pointer-order-debug.json',JSON.stringify({state:await get(),view:await evaluate(a,view)}));await shot(a,'pointer-space-order');
  assert.equal((await get()).spaces[0].id,fixture.space_b);
- await wait(a,`document.querySelector(${JSON.stringify(selector('Space: Browser B'))}).getBoundingClientRect().left<document.querySelector(${JSON.stringify(selector('Space: Workshop'))}).getBoundingClientRect().left`);
+ await wait(a,`document.querySelector(${JSON.stringify(selector('Space: Browser B'))})?.getBoundingClientRect().left<document.querySelector(${JSON.stringify(selector('Space: Workshop'))})?.getBoundingClientRect().left`);
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Tally'))})`);
  await drag('Tally','Space ink probe in Workshop');
  for(let i=0;i<100&&(await get()).spaces.find(s=>s.id===fixture.space_a).apps[0].policy.app==='bundle-counter';i++)await new Promise(r=>setTimeout(r,50));

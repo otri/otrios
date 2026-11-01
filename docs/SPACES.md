@@ -603,6 +603,8 @@ primary. Older writers reject `OTSP6`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
 supports this framing and the current admission rules. OTSP6 adds Space layout and
 Space-local app labels; omitted legacy fields default without rebinding collections.
+Legacy Spaces start at one to three cells wide according to attached-app count;
+existing OTSP6 layout edits are preserved on every later recovery.
 Never downgrade current safety metadata to make an older writer accept it.
 Management request version 1 and release-control v1 remain stable. Current state protocol v17 retains the
 collection-specific deletion confirmation and Admin-only cleanup metadata and adds

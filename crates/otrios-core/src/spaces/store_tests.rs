@@ -333,7 +333,7 @@ fn control_metadata_is_private_and_never_follows_symlinks() {
 fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data() {
     let fixture = Fixture::new();
     let (store, binding) = fixture.seeded();
-    let original = store.current.clone();
+    let mut original = store.current.clone();
     let latest = store.latest_path().to_path_buf();
     drop(store);
     let mut old = serde_json::to_value(&original).unwrap();
@@ -351,6 +351,7 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
         write(&path, &bytes).unwrap();
     }
     let mut upgraded = Store::open(fixture.path()).unwrap();
+    original.registry.spaces[0].layout.width = 1;
     assert!(upgraded.current == original);
     assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP6"));
     let request = Request {

@@ -98,6 +98,16 @@ fn caption_lines(
     lines
 }
 impl Builder {
+    fn profile(&mut self, avatar: &str, width: f32) {
+        self.nodes
+            .push(a::circle(color(Background::Sand)).frame([width - 76., 22., 52., 52.]));
+        self.flat(
+            "Profile",
+            avatar,
+            [width - 72., 22., 44., 52.],
+            HostAction::Pane(Pane::Profile),
+        );
+    }
     fn flat(&mut self, label: &str, caption: &str, frame: [f32; 4], action: HostAction) {
         self.nodes.push(
             a::canvas(vec![text(
@@ -163,7 +173,6 @@ fn finish(
         exponent: 4.,
         color: Expr::Literal(Value::Color(PAPER)),
     };
-    ui.layout = crate::dashboard::layout::Layout::encode(&blueprint)?;
     let controls = ui
         .handlers
         .iter()
@@ -261,12 +270,7 @@ pub(super) fn render(
         .and_then(|s| s.chars().next())
         .map(|s| s.to_uppercase().to_string());
     if let Some(avatar) = avatar {
-        b.flat(
-            "Profile",
-            &avatar,
-            [w - 76., 22., 52., 52.],
-            HostAction::Pane(Pane::Profile),
-        );
+        b.profile(&avatar, w);
     } else if sign_in {
         b.flat(
             "Sign in",
@@ -492,12 +496,7 @@ pub(super) fn render(
                 .unwrap_or('?')
                 .to_uppercase()
                 .to_string();
-            b.flat(
-                "Profile",
-                &avatar,
-                [w - 76., 22., 52., 52.],
-                HostAction::Pane(Pane::Profile),
-            );
+            b.profile(&avatar, w);
         } else if sign_in {
             b.flat(
                 "Sign in",
@@ -658,24 +657,16 @@ pub(super) fn render(
                             .corner_radius(14.0.into()),
                     );
                     b.nodes.push(
-                        a::canvas(vec![
-                            text(
-                                if c == Background::None {
-                                    "None"
-                                } else if chosen == c {
-                                    "•"
-                                } else {
-                                    ""
-                                },
-                                [4., 10., step - 14., 24.],
-                                1.,
-                            )
-                            .color(if chosen == c {
-                                WHITE
-                            } else {
-                                INK
-                            }),
-                        ])
+                        a::rounded_rect(color(c))
+                            .frame([x + 3., top + 87., step - 12., 38.])
+                            .corner_radius(11.0.into()),
+                    );
+                    b.nodes.push(
+                        a::canvas(vec![text(
+                            if c == Background::None { "None" } else { "" },
+                            [4., 10., step - 14., 24.],
+                            1.,
+                        )])
                         .frame([x, top + 84., step - 6., 44.])
                         .semantic_label(&label)
                         .on_press(a::Event::back()),
