@@ -247,7 +247,14 @@ fn prefix_labels_preserve_the_message_anchor_when_older_coverage_arrives() {
 fn settle(r: &mut Reader) {
     for _ in 0..100_000 {
         r.work(16).unwrap();
-        if r.background == r.summaries.len() && !r.frame().loading && r.job.is_none() {
+        // A complete visible frame can precede the next prefetch job when the
+        // native wall budget ends a turn. Cache-reuse assertions need the whole
+        // requested window warm, rather than whichever turn happened to finish.
+        let warm = r.requests(true).into_iter().all(|key| {
+            r.pages.contains_key(&key)
+                || (r.summaries[key.0].exact && key.1 >= r.summaries[key.0].lines)
+        });
+        if r.background == r.summaries.len() && !r.frame().loading && r.job.is_none() && warm {
             return;
         }
     }
