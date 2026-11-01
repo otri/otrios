@@ -380,6 +380,10 @@ impl Rig {
 }
 
 fn private_json(path: &Path, value: &Json) {
+    private_file(path, value.to_string().as_bytes());
+}
+
+fn private_file(path: &Path, bytes: &[u8]) {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -387,11 +391,7 @@ fn private_json(path: &Path, value: &Json) {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options
-        .open(path)
-        .unwrap()
-        .write_all(value.to_string().as_bytes())
-        .unwrap();
+    options.open(path).unwrap().write_all(bytes).unwrap();
 }
 
 fn presentation(address: &str, token: Option<char>, payload: &[u8]) -> u16 {
@@ -3940,9 +3940,12 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         .unwrap();
         assert_eq!(&bytes[..8], b"OTCHAT02");
         let original = rollback.join("state/brass-relay.journal");
-        fs::write(&original, &bytes).unwrap();
+        private_file(&original, &bytes);
         let manifest = rollback.join("provision.json");
-        fs::write(&manifest, serde_json::to_vec(&json!({"version":2,"spaces":[{"name":"Rollback probe","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}]})).unwrap()).unwrap();
+        private_json(
+            &manifest,
+            &json!({"version":2,"spaces":[{"name":"Rollback probe","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}]}),
+        );
         let output = Command::new(old)
             .arg("--apps")
             .arg(rig.root.join("apps"))
@@ -3971,9 +3974,12 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         "state/collection-{source_collection}.data/chat-primary.journal"
     )))
     .unwrap();
-    fs::write(&original, &original_bytes).unwrap();
+    private_file(&original, &original_bytes);
     let manifest = unsupported.join("provision.json");
-    fs::write(&manifest, serde_json::to_vec(&json!({"version":2,"spaces":[{"name":"Unsupported asset import","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}]})).unwrap()).unwrap();
+    private_json(
+        &manifest,
+        &json!({"version":2,"spaces":[{"name":"Unsupported asset import","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}]}),
+    );
     let rejected = Command::new(&binary)
         .arg("--apps")
         .arg(rig.root.join("apps"))
