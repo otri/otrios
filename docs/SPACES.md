@@ -801,3 +801,14 @@ reader. Its explicit `--app-point` defaults to the existing Frame's public Brass
 Relay Space at `(700,132)`; adjust that point when the layout changes. It writes
 no app data and exports neither pixels nor private state. Synthetic device-input
 acceptance does not establish human touch quality or a measured frame rate.
+
+The populated browser probe uses four synthetic Spaces and 14 app previews:
+`python3 scripts/qualify-spaces-browser.py --wasm-pkg BUILT_PKG --populated
+--driver scripts/test-spaces-map-browser.mjs --output REPORT_DIRECTORY`.
+It signs in once from the public common entry, resizes the viewport while the
+form is open, scrolls repeatedly, and checks fixed header/footer bounds and
+actual fade/footer pixels. It never loads production state. Scrolling binds the
+explicit map node from the host renderer; the outer page is also a clipped
+canvas and must never be selected as the scroll viewport. Sign-in intent survives
+presentation/metadata rebuilds until authenticated or cancelled; background
+session refreshes defer to a pending cookie mutation.

@@ -4,24 +4,21 @@ use super::*;
 use crate::canvas::host_ui::{Drag, DragKind, HostAction, Pane};
 use otrios_interfaces::spaces::{Change, Role};
 impl Client {
-    pub(super) fn prepare_map_scroll(&self, mount: &mut Mount) -> Result<()> {
-        if !matches!(self.host.pane, Pane::Home | Pane::Spaces) {
+    pub(super) fn prepare_map_scroll(
+        &self,
+        mount: &mut Mount,
+        viewport: Option<u16>,
+    ) -> Result<()> {
+        let Some(viewport) = viewport else {
             return Ok(());
-        }
-        fn map(node: &SceneNode) -> Option<&SceneNode> {
-            if matches!(
-                node.primitive,
-                otrios_interfaces::scene::Primitive::Canvas { clip: true }
-            ) {
-                Some(node)
-            } else {
-                node.children.iter().find_map(map)
-            }
-        }
+        };
         let scene = cached_layout(mount)?;
-        let node = map(scene.root()).ok_or("Missing Spaces map")?;
+        let path = scene
+            .path(u32::from(viewport))
+            .ok_or("Missing Spaces map")?;
+        let node = path.last().ok_or("Missing Spaces map frame")?.node;
         let mut scroll = super::super::text_scroll::Scroll::new(
-            u16::try_from(node.id).map_err(|_| "Invalid map node")?,
+            viewport,
             [node.frame.width, node.frame.height + self.host.scroll_limit],
         );
         scroll.sync(&scene)?;

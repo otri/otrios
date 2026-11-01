@@ -214,10 +214,12 @@ fn finish(mut b: Builder, draft: &str, title: &str, form: bool, is_map: bool) ->
     if controls.len() != b.actions.len() {
         return Err("Host action layout mismatch".into());
     }
+    let mut map_viewport = None;
     if is_map {
         // AppUi's three fixed header nodes precede our map viewport. A label
         // on a noninteractive authoring canvas is deliberately not compiled.
         let map = &mut blueprint.templates[0].root.children[3];
+        map_viewport = Some(map.id);
         map.shape = otrios_interfaces::layout::Shape::Canvas { clip: true };
         fn bodies(node: &mut otrios_interfaces::layout::TemplateNode) {
             if node
@@ -239,6 +241,7 @@ fn finish(mut b: Builder, draft: &str, title: &str, form: bool, is_map: bool) ->
     Ok(Rendered {
         ui,
         actions: controls.into_iter().zip(b.actions).collect(),
+        map_viewport,
     })
 }
 pub(super) fn render(

@@ -47,3 +47,10 @@ test('failed server logout remains locally revoked and provides a retry error',a
   const h=harness(async(_,options)=>{if(options.method==='DELETE')throw Error('offline');return reply(true);});
   await h.session.refresh();await h.session.logout();assert.equal(h.session.authenticated,false);assert.match(h.states.at(-1).error,/offline/);
 });
+
+test('discovery refresh cannot reset a pending first sign-in',async()=>{
+  let finish;const h=harness(async(_,options)=>options.method==='POST'?new Promise(resolve=>finish=resolve):reply(true));
+  const login=h.session.login('user','secret');await Promise.resolve();
+  await h.session.refresh();assert.equal(h.calls.length,1);assert.deepEqual(h.states.at(-1),{authenticated:false,pending:true});
+  finish(reply(true));await login;assert.equal(h.session.authenticated,true);assert.deepEqual(h.calls.map(c=>c.method||'GET'),['POST','GET']);
+});

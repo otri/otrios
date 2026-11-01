@@ -25,7 +25,7 @@ def wait(predicate):
   assert q['release']==q['runtime_release']==expected,'Unexpected release'
   if predicate(q):latencies.append(round((time.monotonic()-start)*1000,1));return q
   time.sleep(.02)
- raise RuntimeError('Native input acceptance deadline')
+ raise RuntimeError('Native input acceptance deadline: '+json.dumps({k:q.get(k)for k in ['ui_ref','input_busy','pending_commands']}|{'map_scroll':q.get('runtime_resources',{}).get('map_scroll')}))
 def idle(q):return not q['input_busy'] and q['state_confirmed'] and q['pending_commands']==0 and q['stream_ready']
 def home(q):return q['ui_ref']=='app:spaces-host/ui' and idle(q)
 def scroll(q):return q['runtime_resources']['map_scroll']
@@ -103,7 +103,9 @@ def main():
               'app_point': list(map(float, args.app_point.split(','))), 'app_ui': args.app_ui}
     script = '\n'.join(k + '=' + repr(v) for k, v in values.items()) + '\n' + REMOTE
     result = subprocess.run(config['frame']['ssh'] + ['python3 -c ' + shlex.quote(script)],
-                            capture_output=True, text=True, check=True, timeout=180)
+                            capture_output=True, text=True, timeout=180)
+    if result.returncode:
+        raise SystemExit(result.stderr.strip())
     record = json.loads(result.stdout)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(record, indent=2) + '\n')

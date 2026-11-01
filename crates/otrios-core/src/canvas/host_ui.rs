@@ -81,6 +81,7 @@ pub(super) enum HostAction {
 pub(super) struct Rendered {
     pub ui: Ui,
     pub actions: BTreeMap<u8, HostAction>,
+    pub map_viewport: Option<u16>,
 }
 fn short(value: &str, limit: usize) -> String {
     if value.len() <= limit {
@@ -845,5 +846,6 @@ pub(super) fn render(
     Ok(Rendered {
         ui,
         actions: controls.into_iter().zip(b.actions).collect(),
+        map_viewport: None,
     })
 }

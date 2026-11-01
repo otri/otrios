@@ -1591,3 +1591,110 @@ fn managed_app_breadcrumb_returns_home_from_corner_padding() {
     assert!(client.spaces_ui());
     assert!(!client.input_busy());
 }
+
+#[test]
+fn populated_map_keeps_header_footer_and_viewport_fixed_during_scroll() {
+    let (mut client, _) = fixture(Role::Admin);
+    let mut next = snapshot(Role::Admin, 2);
+    let base = next.spaces[0].clone();
+    next.selected = None;
+    let apps = [
+        "bundle-counter",
+        "notes",
+        "sketches",
+        "component-playground",
+        "layout-lab",
+        "layout-text-scroll",
+        "layout-document",
+        "input-lab",
+        "animation-lab",
+        "three-d-lab",
+    ];
+    next.spaces = [10, 1, 1, 2]
+        .into_iter()
+        .enumerate()
+        .map(|(index, count)| {
+            let mut space = base.clone();
+            space.id = format!("{:032x}", index + 10);
+            space.name = format!("Populated {index}");
+            space.layout.width = [3, 1, 1, 3][index];
+            space.apps = apps[..count]
+                .iter()
+                .map(|id| MapApp {
+                    app: (*id).into(),
+                    title: format!("{id} example"),
+                    availability: AppAvailability::Available,
+                })
+                .collect();
+            space.attached_count = count as u16;
+            space
+        })
+        .collect();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: next,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let fixed = |client: &Client| {
+        let scene = client.scene().unwrap();
+        ["Profile", "Edit"].map(|label| {
+            let controls = scene.controls();
+            let c = controls
+                .iter()
+                .find(|c| c.node.semantics.as_ref().unwrap().label == label)
+                .expect("fixed chrome remains visible");
+            (c.origin, c.node.frame)
+        })
+    };
+    let before = fixed(&client);
+    let epoch = client.epoch();
+    for delta in [96., 96., 100000., -96., -100000.] {
+        client.scroll_map(epoch, delta).unwrap();
+        assert_eq!(fixed(&client), before);
+        // The page background stays at the origin; only the explicit map's
+        // content is translated. The outer page is also a clipped canvas.
+        let scene = client.scene().unwrap();
+        assert_eq!(scene.root().children[0].frame.y, 0.);
+    }
+}
+
+#[test]
+fn common_entry_sign_in_survives_viewport_and_metadata_rebuilds() {
+    let (mut client, _) = fixture(Role::Member);
+    let mut visitor = snapshot(Role::Member, 2);
+    visitor.identity = None;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: visitor.clone(),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Sign in");
+    assert!(client.auth_required());
+    client.set_viewport([800., 615.]).unwrap();
+    assert!(client.auth_required());
+    visitor.generation += 1;
+    visitor.cursor.revision += 1;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: visitor,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(client.auth_required());
+    client.retry_mount();
+    assert!(!client.auth_required());
+}

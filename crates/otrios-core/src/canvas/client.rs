@@ -485,6 +485,7 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
+        let awaiting_sign_in = self.host_active && self.auth_required;
         let draft = if preserve && self.host_active {
             self.typed_value(1)
                 .ok()
@@ -641,14 +642,14 @@ impl Client {
         mount.viewport = host_viewport;
         mount.keyboard.set_enabled(!self.external_keyboard);
         mount.invalidate();
-        self.prepare_map_scroll(&mut mount)?;
+        self.prepare_map_scroll(&mut mount, rendered.map_viewport)?;
         cached_scene(&mount)?;
         self.active = Some(mount);
         self.host_active = true;
         self.local_uninstall = false;
         self.host_actions = rendered.actions;
         self.local = true;
-        self.auth_required = false;
+        self.auth_required = awaiting_sign_in;
         self.requested = None;
         Ok(())
     }
