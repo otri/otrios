@@ -189,6 +189,20 @@ impl CanvasApp {
     pub fn ink_outgoing(&mut self, now: f64) -> Vec<u8> {
         self.inner.ink_outgoing(now.max(0.) as u64)
     }
+    pub fn take_chat_upload_request(&mut self) -> Option<u32> {
+        self.inner.take_chat_upload_request()
+    }
+    pub fn send_chat_attachment(
+        &mut self,
+        epoch: u32,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<bool, String> {
+        self.inner.send_chat_attachment(epoch, name, bytes)
+    }
+    pub fn take_chat_download(&mut self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.take_chat_download()).map_err(|e| e.to_string())
+    }
     pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.inner.chat_outgoing()
     }

@@ -57,7 +57,7 @@ function sendFrame(){
 function clearPresentation(){chatLogKey='';composition=null;documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
 async function signOut(){if(signingOut)return;signingOut=true;transportReady=false;dropPrivate();app.set_session_controls(false);publish();const done=await monitoring.logout();signingOut=false;if(done)postMessage({type:'transport-reconnect'});else postMessage({type:'warning',message:'Could not finish signing out. Reload to retry.'});}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
-function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();}
+function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();const download=JSON.parse(app.take_chat_download());if(download){const [asset,data]=download,bytes=Uint8Array.from(data);postMessage({type:'chat-download',epoch:app.epoch(),name:asset.name,bytes},[bytes.buffer]);}}
 function reloadReady(){return !composition&&!app.input_busy()&&(!stateOnline||app.reload_ready());}
 function release(message){
   const r=message.release;if(!validRelease(r))return;
@@ -82,6 +82,14 @@ function release(message){
   pendingRelease=null;
   activeRelease=r.id;postMessage({type:'release-id',id:r.id});
 }
+function applyAuthenticationStatus(state){
+      if(!state.authenticated&&authenticated&&app.private()){dropPrivate();app.navigate('');outgoing();}
+      const signedIn=state.authenticated&&!authenticated;authenticated=state.authenticated;
+      if(signedIn){if(app.auth_required())app.retry_mount();postMessage({type:'transport-reconnect'});}
+      const accessChanged=app.set_private_access(authenticated);
+      const chromeChanged=app.set_session_controls(authenticated)||accessChanged;
+      postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
+}
 function connect(){stateOnline=false;transportReady=false;postMessage({type:'transport-ready'});}
 function receiveState(bytes,receivedAt){try{
   const workerReceived=timings?timingNow():0;
@@ -105,14 +113,7 @@ onmessage=async({data:m})=>{try{
     if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_layout_viewport(...(m.layoutViewport||m.viewport||[1280,800]));app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);app.configure_spaces(m.space||undefined);activeRelease=m.release;
     app.set_reduced_motion(!!m.reducedMotion);
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
-    monitoring=new MonitoringSession({onStatus:state=>{
-      if(!state.authenticated&&app.private()){dropPrivate();app.navigate('');outgoing();}
-      const signedIn=state.authenticated&&!authenticated;authenticated=state.authenticated;
-      if(signedIn){if(app.auth_required())app.retry_mount();postMessage({type:'transport-reconnect'});}
-      const accessChanged=app.set_private_access(authenticated);
-      const chromeChanged=app.set_session_controls(authenticated)||accessChanged;
-      postMessage({type:'monitoring-auth',...state});publish(chromeChanged);
-    }});
+    monitoring=new MonitoringSession({onStatus:applyAuthenticationStatus});
     navigate(m.screen);connect();monitoring.refresh().catch(()=>postMessage({type:'monitoring-auth',authenticated:false,error:'Monitoring sign-in is temporarily unavailable.'}));
     if(discoveredRelease)release({release:discoveredRelease});
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
@@ -151,6 +152,7 @@ onmessage=async({data:m})=>{try{
     case 'logout':signOut();changed=true;break;
     case 'pointer':if(!app.ui_ref())break;changed=applyPointer(m.args);break;
     case 'pointer-batch':if(!app.ui_ref())break;if(!Array.isArray(m.samples)||m.samples.length>64)throw Error('Pointer batch limit');for(const args of m.samples)changed=applyPointer(args)||changed;break;
+    case 'chat-attachment':changed=app.send_chat_attachment(m.epoch,m.name,m.bytes);break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;
     case 'navigate':if(updateBusy&&app.catalog_update_pending())break;navigate(m.screen);changed=true;break;
@@ -171,6 +173,7 @@ onmessage=async({data:m})=>{try{
   if(pointerCommand)changed=tick(performance.now(),Date.now()/1000)||changed;
   if(app.take_sign_out()){signOut();changed=true;}
   app.take_sign_in();
+  const upload=app.take_chat_upload_request();if(upload!==undefined&&upload!==null)postMessage({type:'choose-chat-file',epoch:upload});
   const selectedSpace=app.take_space_switch();if(selectedSpace)postMessage({type:'space-switch',space:selectedSpace});
   if(timings&&m.timing&&app.pending_mount_epoch())navigationTiming={...m.timing,workerStarted};
   if(changed)publish();outgoing();postMessage({type:'command-ack'});

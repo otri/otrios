@@ -13,7 +13,7 @@ pub fn description() -> Ui {
     )
     .with_presentation(Presentation::Chat)
     .build("The Brass Relay", vec![crate::components::keyboard()]);
-    for command in 0..=200 {
+    for command in 0..=214 {
         ui.handlers.push(Handler {
             control: (command + 40) as u8,
             event: 0,

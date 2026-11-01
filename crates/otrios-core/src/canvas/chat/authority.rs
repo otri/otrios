@@ -119,6 +119,19 @@ impl Room {
     pub fn healthy(&self) -> bool {
         !self.failed && self.journal.as_ref().is_none_or(Journal::healthy)
     }
+    /// Legacy manifests cover one unscoped journal, not an owned blob namespace.
+    /// Refuse to qualify a partial import that would strand confirmed attachments.
+    pub fn qualify_legacy_import(&self) -> Result<()> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        for (_, row) in self.history.snapshot()?.records() {
+            if !super::read_message(row)?.assets.is_empty() {
+                return Err("Legacy chat import cannot copy owned attachments; use paired collection backup/restore".into());
+            }
+        }
+        Ok(())
+    }
     /// Capture one bounded immutable transcript without creating presence or a
     /// profile. The caller must authorize Read on the owning app collection.
     pub fn initial_snapshot(&self) -> Result<Vec<u8>> {
@@ -915,14 +928,21 @@ impl Room {
                 now,
                 || Ok(()),
             ),
-            Command::Redact { sequence, revision } => {
+            Command::Redact {
+                sequence,
+                revision,
+                nonce,
+            } => {
                 if !admin {
                     return Err("Space moderation is required".into());
+                }
+                if !super::valid_hex(&nonce, 16) {
+                    return Err("Invalid moderation nonce".into());
                 }
                 self.redact_message(sequence, revision, now)?;
                 Ok(vec![Delivery::one(
                     connection,
-                    Event::Redacted { sequence },
+                    Event::Redacted { sequence, nonce },
                 )])
             }
             _ => Err("Unexpected room command".into()),

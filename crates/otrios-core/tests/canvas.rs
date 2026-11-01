@@ -1386,9 +1386,12 @@ fn reconnect_preserves_unsent_coalesced_intent_and_mount_waits_for_confirmation(
 
 #[test]
 fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions() {
-    for (same_collection, editable, expected) in
-        [(true, true, 700), (false, true, 420), (true, false, 420)]
-    {
+    for (same_collection, editable, same_actor, expected) in [
+        (true, true, true, 700),
+        (false, true, true, 420),
+        (true, false, true, 420),
+        (true, true, false, 420),
+    ] {
         let code = code();
         let ui = playground::ui(&code);
         let mut client = Client::default();
@@ -1396,7 +1399,8 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
         let mut authority = Document::new(ui.state_schema.clone(), "scoped-reconnect").unwrap();
         let binding = |collection: &str, editable| {
             Some(MountBinding {
-                version: 1,
+                version: 2,
+                actor: [1; 32],
                 collection: collection.repeat(32),
                 editable,
                 comments: false,
@@ -1452,11 +1456,11 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
         remount(&mut client, binding("a", true), None);
         edit(&mut client, "Linear slider", 870, 0);
         assert_eq!(client.value(1).unwrap(), 800);
-        remount(
-            &mut client,
-            binding(if same_collection { "a" } else { "b" }, editable),
-            Some("a".repeat(32)),
-        );
+        let mut returning_binding = binding(if same_collection { "a" } else { "b" }, editable);
+        if !same_actor {
+            returning_binding.as_mut().unwrap().actor = [2; 32];
+        }
+        remount(&mut client, returning_binding, Some("a".repeat(32)));
         assert_eq!(client.value(1).unwrap(), expected);
         pump(&mut client, &mut authority, &mut Session::default());
         assert_eq!(authority.value(1).unwrap(), expected);
@@ -1509,7 +1513,8 @@ fn managed_candidates_remain_invisible_until_activation_and_are_discarded_on_den
                         code,
                         state: state.save().unwrap(),
                         binding: Some(MountBinding {
-                            version: 1,
+                            version: 2,
+                            actor: [1; 32],
                             collection: "a".repeat(32),
                             editable: true,
                             comments: false,
@@ -1636,7 +1641,8 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
                 code: vec![],
                 state: vec![],
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "d".repeat(32),
                     editable: true,
                     comments: false,
@@ -1796,7 +1802,8 @@ fn managed_aggregate_candidates_require_a_usable_initial_view_before_acceptance(
                 code: vec![],
                 state: vec![],
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "b".repeat(32),
                     editable: false,
                     comments: false,
@@ -5050,7 +5057,8 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
                 code: vec![],
                 state: vec![],
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "d".repeat(32),
                     editable: false,
                     comments: false,
@@ -5079,6 +5087,16 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
     assert_eq!(client.chat_messages().len(), 1);
     assert!(client.chat_info().unwrap().online);
     assert!(
+        !client
+            .send_chat_attachment(epoch, "file.bin", &[0, 1, 255, 42])
+            .unwrap()
+    );
+    assert!(
+        !client
+            .send_chat_attachment(epoch + 1, "file.bin", &[0, 1, 255, 42])
+            .unwrap()
+    );
+    assert!(
         client.chat_outgoing().unwrap().is_none(),
         "read admission cannot create a guest profile"
     );
@@ -5103,4 +5121,100 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
             .unwrap()
     );
     assert!(client.chat_outgoing().unwrap().is_none());
+}
+
+#[test]
+fn fixed_chat_controls_work_with_older_descriptions_and_reject_publisher_remapping() {
+    let font = std::sync::Arc::new(
+        otrios_core::dashboard::font::Font::from_zstd(
+            include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+            otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+        )
+        .unwrap(),
+    );
+    let ui = brass_relay::ui(&[]);
+    let mut older = ui.clone();
+    older
+        .handlers
+        .retain(|handler| !matches!(handler.operation, Operation::Chat(command) if command > 200));
+    let mut client = Client::default();
+    client.set_font(font.clone());
+    activate(&mut client, older, "older-chat-description", vec![]);
+    let control = |client: &Client, label: &str| {
+        client
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .find(|owner| {
+                owner
+                    .node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == label)
+            })
+            .unwrap()
+            .node
+            .id
+    };
+    let commands = control(&client, "Commands");
+    client.activate(client.epoch(), commands).unwrap();
+    let browse = control(&client, "Browse dispatches");
+    assert_eq!(client.control_value(browse).unwrap(), None);
+    assert!(client.activate(client.epoch(), browse).unwrap());
+    assert!(client.scene().unwrap().controls().iter().any(|owner| {
+        owner
+            .node
+            .semantics
+            .as_ref()
+            .is_some_and(|s| s.label == "Next dispatches")
+    }));
+    for reserve_quit in [false, true] {
+        let mut forged = ui.clone();
+        if reserve_quit {
+            forged.handlers.push(Handler {
+                control: 255,
+                event: 0,
+                kind: GestureKind::Activate,
+                operation: Operation::Key(0),
+                fields: vec![],
+            });
+        } else {
+            for handler in &mut forged.handlers {
+                if handler.control == 59 {
+                    handler.operation = Operation::Chat(210);
+                } else if handler.control == 250 {
+                    handler.operation = Operation::Chat(19);
+                }
+            }
+        }
+        let mut rejected = Client::default();
+        rejected.set_font(font.clone());
+        let bytes = encode_ui(&forged).unwrap();
+        rejected
+            .admit_catalog(
+                &encode_catalog(&Catalog {
+                    format: "otrios-app-catalog-v1".into(),
+                    apps: vec![CatalogEntry {
+                        path: "brass-relay".into(),
+                        private: false,
+                        ui_hash: hash(&bytes),
+                        app: App {
+                            id: "brass-relay".into(),
+                            title: forged.title.clone(),
+                            ui_ref: forged.ui_ref.clone(),
+                            state_ref: "forged-chat".into(),
+                            status: "canvas-app".into(),
+                            dependencies: vec![],
+                        },
+                    }],
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let error = rejected
+            .mount_local(&bytes, "forged-chat", &[], &[])
+            .unwrap_err();
+        assert!(error.contains("Chat host controls"), "{error}");
+    }
 }

@@ -320,6 +320,21 @@ mod tests {
         }
     }
     #[test]
+    fn legacy_manifest_cannot_silently_import_an_owned_attachment_namespace() {
+        let mut fixture = Fixture::new();
+        fixture.destination.qualify_legacy_import().unwrap();
+        assert!(
+            fixture
+                .source
+                .qualify_legacy_import()
+                .unwrap_err()
+                .contains("owned attachments")
+        );
+        fixture.copy(1, &"d".repeat(32)).unwrap();
+        assert!(fixture.destination.qualify_legacy_import().is_err());
+        fixture.finish();
+    }
+    #[test]
     fn selected_publication_copies_owned_bytes_without_private_links_and_survives_source_deletion()
     {
         let mut fixture = Fixture::new();
@@ -438,6 +453,7 @@ mod tests {
             .handle(
                 1,
                 Command::Redact {
+                    nonce: "0".repeat(32),
                     sequence: 1,
                     revision,
                 },
@@ -477,6 +493,7 @@ mod tests {
             .join_admitted(2, "visitor", false, NOW)
             .unwrap();
         let command = Command::Redact {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision,
         };

@@ -19,11 +19,14 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v15` includes a version-1 presentation binding
+State protocol `otrios-canvas-sync-v16` includes a version-2 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
-resumes pending RAM intents only when both collection identity and effective
-actions match its previous mount. A replacement collection starts at receipt
+resumes pending RAM intents only when collection identity, effective actions and
+the opaque actor context match its previous mount. The context distinguishes the
+authenticated person, continuous membership interval and attachment epoch; it
+does not confer permission. A different identity or removal/readmission cannot
+inherit the former participant's pending input. A replacement collection starts at receipt
 sequence zero; identical app and state references cannot restore old edits into
 it. Read admission does not allocate durable writer receipts even for editable
 schemas. The authority still checks every write independently.
@@ -46,11 +49,12 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 Management/discovery v1 uses channel 5 of the same negotiated session. Both hosts
 use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v15; v10 introduced discovery, v11 added the
+browser/native state protocol is v16; v10 introduced discovery, v11 added the
 managed activation acknowledgement, v12 scoped auxiliary payloads by mount,
 v13 added a qualified first chat transcript window, and v14 added collection-specific
 delete confirmations and Admin cleanup metadata. V15 adds owned attachments,
-reviewed publication and message moderation. Managed hosts send Leave(epoch)
+reviewed publication and message moderation. V16 adds request-correlated replies
+and the version-2 actor context. Managed hosts send Leave(epoch)
 after discarding revoked replicas; the authority holds cleanup pins until then.
 Release discovery remains on its unchanged control v1 envelope.
 
@@ -467,8 +471,26 @@ another Space. The authority requires current source Read, destination Edit and
 the reviewed management generation under one lock. Public commenting alone cannot
 publish. The source row revision prevents copying a removed or changed selection.
 Other presentations have no publication adapter; this is not a general cross-app
-transaction API. Trusted publication/file controls and browser/Frame acceptance
-are the next integration step for this backend.
+transaction API.
+
+In Chat, open Commands / Dispatches, choose a dispatch, then Publish to
+another Space. The trusted chooser lists other Spaces where the current person
+is a Member or Admin and requires an explicit destination confirmation. The same
+app must be attached and compatible there. The source mount remains active during
+review; role loss, deletion or removal clears the private preview before its
+disposal acknowledgement. Changed destination metadata cancels the confirmation.
+The fixed host controls cannot be remapped by publisher descriptions; compatible
+older Chat descriptions can use newer host actions without being rewritten.
+
+Browser Commands / Send file opens a bounded file picker and sends the selected
+file with the current composer text. Both hosts list attachment names and can
+publish their owned bytes; browser attachment controls download an explicit
+separate copy. Native Frame file picking/downloading is not offered. File callbacks
+carry the originating mount epoch and cannot target a replacement collection.
+Unsolicited, stale or mismatched download replies cannot initiate a download.
+Connected navigation and upgrades wait for send, publication and moderation
+receipts. Unconfirmed file/publication/moderation operations and previews are
+discarded on disconnect; confirmed authority data remains authoritative.
 
 The destination gets its own sequence, timestamp, nonce and app-local sender ID.
 Only the selected display name, icon, message content and owned attachment bytes
@@ -513,8 +535,11 @@ serialized message shape; old confirmed records are read without replacing app
 collections or their schema fingerprints. New chat journals use `OTCHAT02`.
 An `OTCHAT01` journal is recovered completely, then atomically compacted into
 `OTCHAT02` before its next durable write. Older writers reject the new framing
-without truncating it. Registry framing remains `OTSP5`; release-control v1 remains
-independent. State protocol v15 declares the changed live command/event format.
+without truncating it. Legacy journal-only manifests reject owned attachment
+references rather than silently losing their namespace; use paired collection
+backup/restore for owned data. Registry framing remains `OTSP5`; release-control v1 remains
+independent. State protocol v16 retains these commands and correlates moderation/download replies
+with request nonces.
 
 
 ## Persistence
@@ -535,7 +560,7 @@ to zero. The upgrade writes the latest decision ledger before replacing the
 primary. Older writers reject `OTSP5`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
 supports this framing and the current admission rules. Management request version
-1 and release-control v1 remain stable. Current state protocol v15 retains the
+1 and release-control v1 remain stable. Current state protocol v16 retains the
 collection-specific deletion confirmation and Admin-only cleanup metadata and adds
 reviewed publication, attachment blobs and message moderation.
 
@@ -688,6 +713,14 @@ shared login, device administration or trusted listener cannot grant membership.
 Provision the Frame as a separate authenticated identity with explicit Space
 memberships. Bind Monitoring's collector to its intended Operations collection
 as a service identity; human Monitoring views remain read-only.
+
+The installed authority unit must explicitly pass
+`--spaces-registry /var/lib/otrios-authority/spaces.flex`, matching the checked-in
+unit. Provision that registry and migrate the declared legacy roots while the
+authority is stopped, before activating the unit. The explicit argument also
+prevents pre-Spaces binaries from silently reopening legacy admission during a
+rollback; use only a rollback binary qualified for the current registry and chat
+journal formats. Never replace the registry with an empty bootstrap.
 
 Before live cutover, record each legacy root's destination Space and collection,
 preserve its checkpoint/journal and confirmed receipts, and validate recovery in a

@@ -107,11 +107,13 @@ pub enum Command {
         expected_generation: u64,
     },
     ReadAsset {
+        nonce: String,
         sequence: u64,
         revision: [u8; 32],
         index: u8,
     },
     Redact {
+        nonce: String,
         sequence: u64,
         revision: [u8; 32],
     },
@@ -144,9 +146,11 @@ pub enum Event {
         sequence: u64,
     },
     Redacted {
+        nonce: String,
         sequence: u64,
     },
     Asset {
+        nonce: String,
         sequence: u64,
         revision: [u8; 32],
         asset: Asset,

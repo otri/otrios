@@ -30,6 +30,7 @@ impl Client {
         self.collection_revoked = true;
         self.messages.clear();
         self.download = None;
+        self.sharing.clear_preview();
         self.message_revisions.clear();
         self.source_blocks.clear();
         self.reset = true;
@@ -75,6 +76,7 @@ impl Client {
                         .map(|key| Ok((*key, window.record(*key).map_err(err)?.hash())))
                         .collect::<Result<_>>()?;
                     self.messages = messages;
+                    self.selection_current();
                     self.reset = true;
                     self.authors_revision = self.authors_revision.saturating_add(1);
                     self.tail |= follow

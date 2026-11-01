@@ -107,7 +107,10 @@ def qualify(args):
         while internal == public:
             internal = port()
         url = f'http://127.0.0.1:{public}'
+        attachment = root / 'selected-attachment.bin'
+        attachment.write_bytes((bytes(range(256)) * 782)[:200000])
         fixture = {'root': str(root), 'url': url, 'space_a': spaces[0]['space'], 'space_b': spaces[1]['space'],
+                   'attachment': str(attachment), 'attachment_sha256': digest(attachment.read_bytes()),
                    'release': release, 'source': source, 'source_dirty': dirty, 'output': str(output),
                    'authority_sha256': digest((args.bin_dir / 'dashboard-server').read_bytes()),
                    'wasm_sha256': digest((args.wasm_pkg / 'otrios_dashboard_bg.wasm').read_bytes())}

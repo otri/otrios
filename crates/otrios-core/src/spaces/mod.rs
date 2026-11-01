@@ -606,3 +606,47 @@ pub fn publication_destination(
     )?;
     Ok(destination)
 }
+
+/// Opaque pending-input context; hosts still authorize every operation. A new
+/// identity, continuous membership interval or attachment must not inherit RAM
+/// intentions from its predecessor merely because its effective actions match.
+pub fn actor_context(
+    registry: &Registry,
+    identity: Option<&str>,
+    binding: &Binding,
+) -> Result<[u8; 32]> {
+    if identity.is_some_and(|id| !valid_identity(id)) {
+        return Err(Error::Invalid);
+    }
+    let space = registry
+        .spaces
+        .iter()
+        .find(|space| space.id == binding.space)
+        .ok_or(Error::Denied)?;
+    if !space.apps.iter().any(|app| {
+        app.attached
+            && app.policy.app == binding.app
+            && app.collection == binding.collection
+            && app.policy.schema == binding.schema
+            && app.attachment_epoch == binding.attachment_epoch
+    }) {
+        return Err(Error::Denied);
+    }
+    let member = space
+        .members
+        .iter()
+        .find(|member| Some(member.identity.as_str()) == identity);
+    let interval = member.map_or(space.admission_epoch, |member| member.joined_generation);
+    let canonical = flexbuffers::to_vec((
+        "otrios-mount-actor-v1",
+        &binding.collection,
+        identity,
+        member.is_some(),
+        interval,
+        binding.attachment_epoch,
+    ))
+    .map_err(|_| Error::Invalid)?;
+    crate::canvas::hash(&canonical)
+        .try_into()
+        .map_err(|_| Error::Unavailable)
+}

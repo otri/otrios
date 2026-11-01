@@ -26,7 +26,7 @@ impl StateSelection {
                     ui.presentation,
                     Some(otrios_interfaces::canvas::Presentation::Chat)
                 ) {
-                    240
+                    255
                 } else {
                     128
                 }

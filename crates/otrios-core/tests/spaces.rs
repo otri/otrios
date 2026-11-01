@@ -1338,3 +1338,68 @@ fn publication_requires_current_source_read_destination_edit_and_reviewed_genera
         Err(Error::Denied)
     );
 }
+
+#[test]
+fn resumption_context_separates_people_membership_intervals_and_reattachments() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    attach(&mut registry, &space);
+    let bind = |registry: &Registry, identity| {
+        spaces::bind(registry, identity, &space, "notes", &policy().schema).unwrap()
+    };
+    let alice = bind(&registry, Some("alice"));
+    let original = spaces::actor_context(&registry, Some("alice"), &alice).unwrap();
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let bob = bind(&registry, Some("bob"));
+    let bob_context = spaces::actor_context(&registry, Some("bob"), &bob).unwrap();
+    assert_ne!(original, bob_context);
+    assert_eq!(
+        spaces::actor_context(&registry, Some("alice"), &alice).unwrap(),
+        original
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    assert_ne!(
+        spaces::actor_context(&registry, Some("bob"), &bind(&registry, Some("bob"))).unwrap(),
+        bob_context
+    );
+    change(
+        &mut registry,
+        "alice",
+        Change::Remove {
+            space: space.clone(),
+            app: "notes".into(),
+        },
+    );
+    assert!(spaces::actor_context(&registry, Some("alice"), &alice).is_err());
+    let new_binding = attach(&mut registry, &space);
+    assert_eq!(new_binding.collection, alice.collection);
+    assert_ne!(
+        spaces::actor_context(&registry, Some("alice"), &new_binding).unwrap(),
+        original
+    );
+}

@@ -86,7 +86,9 @@ pub enum GestureKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Operation {
-    /// Local shared-room UI command. The server independently authorizes wire commands.
+    /// Fixed host presentation action. Chat owns controls 40..=254 and reserves
+    /// 255 for Quit; descriptions cannot remap them. Compatible older descriptions
+    /// need not list newer host actions. The server independently authorizes wire commands.
     Chat(u16),
     Set,
     Toggle,
@@ -304,6 +306,8 @@ pub enum ServerMessage {
 #[serde(deny_unknown_fields)]
 pub struct MountBinding {
     pub version: u32,
+    /// Opaque identity/membership/attachment resumption context, never a grant.
+    pub actor: [u8; 32],
     pub collection: String,
     pub editable: bool,
     pub comments: bool,

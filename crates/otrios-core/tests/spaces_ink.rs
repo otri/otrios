@@ -61,7 +61,8 @@ fn fixture(editable: bool) -> Client {
                 state: document.generate(&mut replica).unwrap().unwrap(),
                 code: vec![],
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "a".repeat(32),
                     editable,
                     comments: false,

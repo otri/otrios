@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Mount-local room state. Keystrokes never become CRDT writes.
+#[path = "sharing.rs"]
+mod sharing;
 use super::super::document::{Block, BlockId, Inline, Source};
 use super::*;
 use crate::dashboard::{font::Font, keyboard::TextBuffer};
@@ -11,7 +13,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 pub const VIEWPORT: u16 = 60_000;
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Panel {
     None,
     Members,
@@ -20,6 +22,12 @@ pub(super) enum Panel {
     Kick,
     Help,
     Auth,
+    Dispatches,
+    Dispatch,
+    Destinations,
+    Publish,
+    Redact,
+    Assets,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Focus {
@@ -58,6 +66,7 @@ pub(crate) enum Action {
     BrowserLogin,
 }
 pub struct Client {
+    pub(super) sharing: sharing::Sharing,
     pub(super) you: Option<Member>,
     pub(super) members: Vec<Member>,
     pub(super) drafts: BTreeMap<String, RemoteDraft>,
@@ -141,6 +150,7 @@ pub struct Info {
 impl Default for Client {
     fn default() -> Self {
         Self {
+            sharing: sharing::Sharing::default(),
             you: None,
             members: vec![],
             drafts: BTreeMap::new(),
@@ -227,7 +237,7 @@ fn day_label(day: u64, today: u64) -> String {
 pub(super) fn read_action(command: u16) -> bool {
     matches!(
         command,
-        0 | 3 | 6 | 12 | 13 | 18 | 19 | 100..=167 | 190 | 191
+        0 | 3 | 6 | 12 | 13 | 18 | 19 | 100..=167 | 190 | 191 | 200..=210 | 213
     )
 }
 impl Client {
@@ -342,7 +352,7 @@ impl Client {
             authors_revision: self.authors_revision,
             first_sequence: self.messages.front().map_or(0, |m| m.sequence),
             last_sequence: self.messages.back().map_or(0, |m| m.sequence),
-            pending: self.pending.len(),
+            pending: self.pending.len() + self.sharing.operations.len(),
             drafts: self.drafts.len(),
             history_loading: self.history_wait,
             selected_bytes: self
@@ -537,6 +547,9 @@ impl Client {
     }
     pub fn disconnected(&mut self) {
         self.download = None;
+        self.sharing.operations.clear();
+        self.sharing.clear_preview();
+        self.panel = Panel::None;
         self.collection.disconnected();
         self.online = false;
         self.joining = false;
@@ -549,7 +562,7 @@ impl Client {
         self.draft_dirty = true;
     }
     pub fn confirmed(&self) -> bool {
-        self.pending.is_empty()
+        self.pending.is_empty() && self.sharing.operations.is_empty()
     }
     pub fn editing(&self) -> bool {
         self.focus.is_some()
@@ -562,6 +575,14 @@ impl Client {
     }
     pub fn outgoing(&mut self, credential: Option<String>) -> Result<Option<Vec<u8>>> {
         if self.read_only {
+            if let Some(bytes) = self.operation_outgoing()? {
+                return Ok(Some(bytes));
+            }
+            while let Some(command) = self.queue.pop_front() {
+                if matches!(command, Command::ReadAsset { .. }) {
+                    return encode_command(&command).map(Some);
+                }
+            }
             return Ok(None);
         }
         if !self.online && !self.joining && self.kicked.is_none() {
@@ -570,6 +591,9 @@ impl Client {
         }
         if !self.online {
             return Ok(None);
+        }
+        if let Some(bytes) = self.operation_outgoing()? {
+            return Ok(Some(bytes));
         }
         if let Some(command) = self.queue.pop_front() {
             return encode_command(&command).map(Some);
@@ -628,9 +652,18 @@ impl Client {
     pub fn receive(&mut self, event: Event, follow: bool) -> Result<Option<String>> {
         let mut credential = None;
         match event {
-            Event::Published { .. } => self.say("Copy published in the destination Space"),
-            Event::Redacted { .. } => self.say("Dispatch deleted"),
+            Event::Published { nonce, .. } => {
+                if self.operation_reply(&nonce) {
+                    self.say("Copy published in the destination Space");
+                }
+            }
+            Event::Redacted { nonce, .. } => {
+                if self.operation_reply(&nonce) {
+                    self.say("Dispatch deleted");
+                }
+            }
             Event::Asset {
+                nonce,
                 sequence,
                 revision,
                 asset,
@@ -642,13 +675,18 @@ impl Client {
                 {
                     return Err("Attachment integrity mismatch".into());
                 }
-                if self.message_revisions.get(&sequence) == Some(&revision)
-                    && self
-                        .messages
-                        .iter()
-                        .any(|m| m.sequence == sequence && m.assets.contains(&asset))
+                if let Some((_, wanted_sequence, wanted_revision, index)) =
+                    self.sharing.download.as_ref().filter(|r| r.0 == nonce)
+                    && *wanted_sequence == sequence
+                    && *wanted_revision == revision
+                    && self.message_revisions.get(&sequence) == Some(&revision)
+                    && self.messages.iter().any(|m| {
+                        m.sequence == sequence && m.assets.get(*index as usize) == Some(&asset)
+                    })
                 {
+                    self.sharing.download = None;
                     self.download = Some((asset, bytes));
+                    self.say("Attachment ready");
                 }
             }
             Event::Left => {
@@ -699,7 +737,8 @@ impl Client {
                     .retain(|id, _| self.members.iter().any(|m| m.profile.id == *id));
             }
             Event::Receipt { nonce, .. } => {
-                let mine = self.pending.iter().any(|p| p.nonce == nonce);
+                let operation = self.operation_reply(&nonce);
+                let mine = operation || self.pending.iter().any(|p| p.nonce == nonce);
                 self.pending.retain(|p| p.nonce != nonce);
                 if mine {
                     self.tail = true;
@@ -812,8 +851,36 @@ impl Client {
                 self.panel = Panel::None;
                 self.focus = None;
                 self.pending.clear();
+                self.sharing.operations.clear();
+                self.sharing.clear_preview();
             }
             Event::Error { message, nonce } => {
+                if let Some(nonce) = &nonce {
+                    if self.compose.text().is_empty()
+                        && let Some(text) = self.sharing.operations.iter().find_map(|operation| {
+                            match &operation.command {
+                                Command::SendAsset {
+                                    nonce: pending,
+                                    text,
+                                    ..
+                                } if pending == nonce => Some(text.clone()),
+                                _ => None,
+                            }
+                        })
+                    {
+                        self.compose.replace(&text);
+                        self.compose.place_cursor(text.len());
+                    }
+                    self.operation_reply(nonce);
+                    if self
+                        .sharing
+                        .download
+                        .as_ref()
+                        .is_some_and(|r| &r.0 == nonce)
+                    {
+                        self.sharing.download = None;
+                    }
+                }
                 if let Some(nonce) = nonce.as_ref()
                     && let Some(p) = self.pending.iter().find(|p| p.nonce == *nonce)
                     && self.compose.text().is_empty()
@@ -1043,6 +1110,9 @@ impl Client {
         if self.read_only && !read_action(command) {
             return Ok(Action::Changed);
         }
+        if let Some(action) = self.sharing_action(command)? {
+            return Ok(action);
+        }
         match command {
             0 => return Ok(Action::Home),
             1 => {
@@ -1065,6 +1135,7 @@ impl Client {
                 self.notice.clear();
             }
             6 => {
+                self.sharing.clear_preview();
                 self.panel = Panel::None;
                 self.focus = None;
                 self.password.replace("");

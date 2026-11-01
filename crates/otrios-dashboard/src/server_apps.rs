@@ -718,7 +718,8 @@ impl Hub {
         spaces::private_metadata(&source, LIMIT)?;
         // This owns the old journal's stable sidecar lock through the copy.
         // Recovery validates every complete record and only trims a torn tail.
-        let _source = otrios_core::canvas::chat::Room::open(Some(source.clone()), chat::now())?;
+        let source_room = otrios_core::canvas::chat::Room::open(Some(source.clone()), chat::now())?;
+        source_room.qualify_legacy_import()?;
         let bytes = spaces::private_bytes(&source, LIMIT)?;
         if !path.exists()
             && (receipt.exists() || path.with_extension("journal.owner.lock").exists())
@@ -1798,16 +1799,25 @@ impl Hub {
                 } else {
                     state_ref.clone()
                 };
-                let mount_binding = binding.as_ref().map(|b| {
-                    use otrios_interfaces::spaces::Operation;
-                    otrios_interfaces::canvas::MountBinding {
-                        version: 1,
-                        collection: b.collection.clone(),
-                        editable: self.allowed(scope, b, Operation::Edit),
-                        comments: self.allowed(scope, b, Operation::Comment),
-                        moderate: self.allowed(scope, b, Operation::Moderate),
-                    }
-                });
+                let mount_binding = binding
+                    .as_ref()
+                    .map(|b| -> Result<_> {
+                        use otrios_interfaces::spaces::Operation;
+                        Ok(otrios_interfaces::canvas::MountBinding {
+                            version: 2,
+                            actor: otrios_core::spaces::actor_context(
+                                self.registry().map_err(|e| e.to_string())?,
+                                scope.identity.as_deref(),
+                                b,
+                            )
+                            .map_err(|e| e.to_string())?,
+                            collection: b.collection.clone(),
+                            editable: self.allowed(scope, b, Operation::Edit),
+                            comments: self.allowed(scope, b, Operation::Comment),
+                            moderate: self.allowed(scope, b, Operation::Moderate),
+                        })
+                    })
+                    .transpose()?;
                 let grant = Grant {
                     principal: scope.identity.clone(),
                     actions: binding

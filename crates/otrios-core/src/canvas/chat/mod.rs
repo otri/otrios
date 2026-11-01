@@ -82,3 +82,7 @@ pub fn validate_message_assets(assets: &[Asset]) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn valid_request_nonce(value: &str) -> bool {
+    valid_hex(value, 16)
+}

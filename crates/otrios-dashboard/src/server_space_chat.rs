@@ -167,7 +167,9 @@ async fn worker(
                     };
                     let nonce = if let wire::Command::Send { nonce, .. }
                     | wire::Command::SendAsset { nonce, .. }
-                    | wire::Command::Publish { nonce, .. } = &command
+                    | wire::Command::Publish { nonce, .. }
+                    | wire::Command::Redact { nonce, .. }
+                    | wire::Command::ReadAsset { nonce, .. } = &command
                     {
                         Some(nonce.clone())
                     } else {
@@ -176,6 +178,7 @@ async fn worker(
                     let permitted = authority.chat_allowed(&scope, &active.binding, &command);
                     if permitted
                         && let wire::Command::ReadAsset {
+                            nonce: request_nonce,
                             sequence,
                             revision,
                             index,
@@ -183,13 +186,19 @@ async fn worker(
                     {
                         // Large private payloads go directly to this bounded peer
                         // queue, never the room-wide ephemeral broadcast history.
-                        let result = authority.owned_assets(&active.binding).and_then(|assets| {
-                            hub.chat.run_inline(|room| {
-                                room.read_attachment(sequence, revision, index, &assets)
-                            })
-                        });
+                        let result =
+                            if !otrios_core::canvas::chat::valid_request_nonce(&request_nonce) {
+                                Err("Invalid attachment request nonce".into())
+                            } else {
+                                authority.owned_assets(&active.binding).and_then(|assets| {
+                                    hub.chat.run_inline(|room| {
+                                        room.read_attachment(sequence, revision, index, &assets)
+                                    })
+                                })
+                            };
                         let event = match result {
                             Ok((asset, bytes)) => wire::Event::Asset {
+                                nonce: request_nonce.clone(),
                                 sequence,
                                 revision,
                                 asset,
@@ -197,7 +206,7 @@ async fn worker(
                             },
                             Err(_) => wire::Event::Error {
                                 message: "Dispatch attachment is unavailable".into(),
-                                nonce: None,
+                                nonce: Some(request_nonce),
                             },
                         };
                         let Ok(bytes) = room::encode_event(&event) else {

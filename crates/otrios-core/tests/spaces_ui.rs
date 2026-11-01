@@ -310,7 +310,8 @@ fn launch_access(
                 code: vec![],
                 state: authority.generate(&mut session).unwrap().unwrap(),
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "d".repeat(32),
                     editable,
                     comments: false,
@@ -520,7 +521,8 @@ fn local_uninstall_cancels_staged_mount_and_rejects_missing_or_rolled_back_names
                 code: vec![],
                 state: vec![],
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "d".repeat(32),
                     editable: true,
                     comments: false,
@@ -1053,7 +1055,8 @@ fn a_returning_offline_client_discards_pending_edits_when_the_collection_is_repl
                 code: vec![],
                 state: replacement.generate(&mut session).unwrap().unwrap(),
                 binding: Some(MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "e".repeat(32),
                     editable: true,
                     comments: false,

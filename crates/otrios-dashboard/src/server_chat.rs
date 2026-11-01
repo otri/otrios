@@ -170,11 +170,12 @@ impl Hub {
                     Ok(command) => command,
                     Err(_) => break,
                 };
-                let nonce = if let Command::Send { nonce, .. } = &command {
-                    Some(nonce.clone())
-                } else {
-                    None
-                };
+                let nonce =
+                    if let Command::Send { nonce, .. } | Command::Redact { nonce, .. } = &command {
+                        Some(nonce.clone())
+                    } else {
+                        None
+                    };
                 let result=match command {
                     Command::Join{credential}=>{
                         if public&&credential.is_some(){Err("Browser identity must use its guest cookie".into())}

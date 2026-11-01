@@ -513,12 +513,13 @@ pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()
             w.blob(state)?;
             w.u8(u8::from(binding.is_some()))?;
             if let Some(binding) = binding {
-                if binding.version != 1 {
+                if binding.version != 2 {
                     return Err("Unsupported Canvas binding version".into());
                 }
                 valid_collection(&binding.collection)?;
                 w.u32(binding.version)?;
                 w.text(&binding.collection, 32)?;
+                w.fixed(&binding.actor, 32)?;
                 w.u8(u8::from(binding.editable))?;
                 w.u8(u8::from(binding.comments))?;
                 w.u8(u8::from(binding.moderate))?;
@@ -556,7 +557,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
 
                 binding: if r.flag()? {
                     let version = r.u32()?;
-                    if version != 1 {
+                    if version != 2 {
                         return Err("Unsupported Canvas binding version".into());
                     }
                     let collection = r.text(32)?;
@@ -564,6 +565,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
                     Some(otrios_interfaces::canvas::MountBinding {
                         version,
                         collection,
+                        actor: r.take(32)?.try_into().map_err(err)?,
                         editable: r.flag()?,
                         comments: r.flag()?,
                         moderate: r.flag()?,
@@ -766,7 +768,8 @@ mod tests {
                 state: vec![5; 256],
 
                 binding: Some(otrios_interfaces::canvas::MountBinding {
-                    version: 1,
+                    version: 2,
+                    actor: [1; 32],
                     collection: "b".repeat(32),
                     editable: true,
                     comments: false,

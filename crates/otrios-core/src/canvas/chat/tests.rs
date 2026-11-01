@@ -849,6 +849,7 @@ fn binary_attachment_codec_is_bounded_and_does_not_expand_each_byte_into_a_scala
     assert!(encoded.len() < MAX_ASSET_BYTES + 1024);
     assert_eq!(decode_command(&encoded).unwrap(), command);
     let event = Event::Asset {
+        nonce: "0".repeat(32),
         sequence: 1,
         revision: [1; 32],
         asset: Asset {

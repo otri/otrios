@@ -700,7 +700,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v15","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v16","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -898,7 +898,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v15","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v16","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -3963,6 +3963,35 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         assert_eq!(fs::read(original).unwrap(), bytes);
     }
     assert_eq!(selection.message.assets.len(), 1);
+    // A journal-only legacy manifest cannot silently strand owned blob files.
+    let unsupported = rig.root.join("unsupported-asset-import");
+    fs::create_dir_all(unsupported.join("state")).unwrap();
+    let original = unsupported.join("state/brass-relay.journal");
+    let original_bytes = fs::read(rig.root.join(format!(
+        "state/collection-{source_collection}.data/chat-primary.journal"
+    )))
+    .unwrap();
+    fs::write(&original, &original_bytes).unwrap();
+    let manifest = unsupported.join("provision.json");
+    fs::write(&manifest, serde_json::to_vec(&json!({"version":2,"spaces":[{"name":"Unsupported asset import","admins":["alice"],"members":[],"apps":[{"id":"relay","legacy_chat_root":"app:relay/state"}]}]})).unwrap()).unwrap();
+    let rejected = Command::new(&binary)
+        .arg("--apps")
+        .arg(rig.root.join("apps"))
+        .arg("--app-state")
+        .arg(unsupported.join("state"))
+        .arg("--spaces-registry")
+        .arg(unsupported.join("spaces.flex"))
+        .arg("--provision-spaces")
+        .arg(manifest)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("owned attachments"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    assert_eq!(fs::read(original).unwrap(), original_bytes);
     let mut public = socket(&rig.public, &destination, None);
     let (first_destination_collection, empty) = chat_mount(&rig, &mut public, "relay", 1);
     assert!(empty.messages.is_empty());
@@ -3970,6 +3999,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut public,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: selection.revision,
             index: 0,
@@ -4017,6 +4047,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut public,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: copy.revision,
             index: 0,
@@ -4032,6 +4063,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut public,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: selection.revision,
             index: 0,
@@ -4061,6 +4093,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut visitor,
         1,
         Chat::Redact {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: copy.revision,
         },
@@ -4079,6 +4112,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
             &mut moderator,
             1,
             Chat::Redact {
+                nonce: "0".repeat(32),
                 sequence: row.message.sequence,
                 revision: row.revision,
             },
@@ -4092,6 +4126,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut public,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: copy.revision,
             index: 0,
@@ -4117,6 +4152,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut author,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: selection.revision,
             index: 0,
@@ -4179,6 +4215,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut public,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: copy.revision,
             index: 0,
@@ -4235,6 +4272,7 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         &mut public,
         1,
         Chat::ReadAsset {
+            nonce: "0".repeat(32),
             sequence: 1,
             revision: copy.revision,
             index: 0,
@@ -4246,4 +4284,93 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         unreachable!()
     };
     assert_eq!(bytes, payload);
+    drop(public);
+    rig.stop();
+    let backup = rig.storage_action(&binary, "backup");
+    assert!(
+        backup.status.success(),
+        "{}",
+        String::from_utf8_lossy(&backup.stderr)
+    );
+    let backup = serde_json::from_slice::<Json>(&backup.stdout).unwrap()["backup"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let blob = rig.root.join(format!(
+        "state/collection-{destination_collection}.data/asset-{}.blob",
+        copy.message.assets[0].sha256
+    ));
+    assert_eq!(fs::read(&blob).unwrap(), payload);
+    fs::remove_file(&blob).unwrap();
+    let restored = rig.storage_action(&binary, &format!("restore:{backup}"));
+    assert!(
+        restored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    rig.restart(&binary, true, true);
+    let mut public = socket(&rig.public, &destination, None);
+    let (_, restored_copy) = chat_mount(&rig, &mut public, "relay", 1);
+    assert_eq!(restored_copy.messages[0], copy);
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            nonce: "0".repeat(32),
+            sequence: 1,
+            revision: copy.revision,
+            index: 0,
+        },
+    );
+    let ChatEvent::Asset { bytes, .. } =
+        chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Asset { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
+    rig.change(
+        'a',
+        Change::DeleteData {
+            space: destination.clone(),
+            app: "relay".into(),
+            collection: destination_collection.clone(),
+            remove: false,
+        },
+    );
+    drop(public);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while blob.parent().unwrap().exists() {
+        assert!(
+            Instant::now() < deadline,
+            "deleted destination remained pinned"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    rig.stop();
+    let restored = rig.storage_action(&binary, &format!("restore:{backup}"));
+    assert!(
+        restored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    assert!(
+        !blob.parent().unwrap().exists(),
+        "a payload backup cannot recreate a deleted asset namespace"
+    );
+    rig.restart(&binary, true, true);
+    let mut public = socket(&rig.public, &destination, None);
+    let (replacement, empty) = chat_mount(&rig, &mut public, "relay", 1);
+    assert_ne!(replacement, destination_collection);
+    assert!(empty.messages.is_empty());
+    chat_command(
+        &mut public,
+        1,
+        Chat::ReadAsset {
+            nonce: "0".repeat(32),
+            sequence: 1,
+            revision: copy.revision,
+            index: 0,
+        },
+    );
+    chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Error { .. }));
 }

@@ -344,6 +344,17 @@ impl Client {
         let changed = self.spaces.receive(bytes).map_err(err)?;
         self.managed_transport |= self.spaces.snapshot().is_some();
         let mut rendered = false;
+        if changed
+            && let Some(mount) = &mut self.active
+            && let Some(chat) = &mut mount.chat
+        {
+            if let Some(snapshot) = self.spaces.snapshot() {
+                chat.publication_targets(snapshot);
+            } else {
+                chat.publication_unavailable();
+            }
+            mount.invalidate_local_scene();
+        }
         if self.host_active && self.spaces.snapshot().is_none() {
             self.active = None;
             self.host_active = false;
@@ -691,6 +702,35 @@ impl Client {
             .as_ref()
             .filter(|m| m.binding.is_some() && m.epoch == epoch)
             .map(|_| payload))
+    }
+    pub fn take_chat_upload_request(&mut self) -> Option<u32> {
+        let mount = self.active.as_mut()?;
+        mount
+            .chat
+            .as_mut()?
+            .take_upload_request()
+            .then_some(mount.epoch)
+    }
+    pub fn send_chat_attachment(&mut self, epoch: u32, name: &str, bytes: &[u8]) -> Result<bool> {
+        let Some(mount) = self
+            .active
+            .as_mut()
+            .filter(|mount| mount.epoch == epoch && mount.binding.is_some())
+        else {
+            return Ok(false);
+        };
+        let Some(chat) = &mut mount.chat else {
+            return Ok(false);
+        };
+        let changed = chat.upload(name, bytes)?;
+        if changed {
+            mount.keyboard.hide();
+            mount.invalidate();
+        }
+        Ok(changed)
+    }
+    pub fn take_chat_download(&mut self) -> Option<(super::chat::Asset, Vec<u8>)> {
+        self.active.as_mut()?.chat.as_mut()?.take_download()
     }
     pub fn chat_outgoing(&mut self) -> Result<Option<Vec<u8>>> {
         if let Some(m) = &mut self.active
@@ -1727,6 +1767,9 @@ impl Client {
                         .set_read_only(candidate.binding.as_ref().is_some_and(|b| !b.editable));
                     if let Some(chat) = &mut candidate.chat {
                         chat.managed(candidate.quit_control);
+                        if let Some(snapshot) = self.spaces.snapshot() {
+                            chat.publication_targets(snapshot);
+                        }
                         chat.access(
                             candidate
                                 .binding
@@ -2074,8 +2117,7 @@ impl Client {
         let h = self
             .active
             .as_ref()
-            .and_then(|m| m.ui.handlers.iter().find(|h| h.control == control))
-            .cloned()
+            .and_then(|m| m.handler(control))
             .ok_or("Unknown app event")?;
         if self.requested.as_ref().is_some_and(|r| !r.reconnecting)
             && !matches!(h.operation, Operation::Back)
@@ -2419,7 +2461,7 @@ impl Client {
             let kind = self
                 .active
                 .as_ref()
-                .and_then(|m| m.ui.handlers.iter().find(|h| h.control == control))
+                .and_then(|m| m.handler(control))
                 .map(|h| h.kind)
                 .ok_or("Unknown gesture")?;
             let norm = |v: f32| (v.clamp(0., 1.) * 1000.).round() as u16;
@@ -2516,7 +2558,7 @@ impl Client {
             else {
                 continue;
             };
-            let Some(handler) = m.ui.handlers.iter().find(|h| h.control == control) else {
+            let Some(handler) = m.handler(control) else {
                 continue;
             };
             let mut input = match (&handler.operation, &m.chat) {
@@ -2975,11 +3017,7 @@ impl Client {
         if m.quit_control == Some(control) {
             return Ok(false);
         }
-        let h =
-            m.ui.handlers
-                .iter()
-                .find(|h| h.control == control)
-                .ok_or("Unknown control")?;
+        let h = m.handler(control).ok_or("Unknown control")?;
         if h.kind == GestureKind::Activate {
             return Ok(false);
         }
@@ -3004,11 +3042,7 @@ impl Client {
         if m.quit_control == Some(control) {
             return Ok(None);
         }
-        let h =
-            m.ui.handlers
-                .iter()
-                .find(|h| h.control == control)
-                .ok_or("Unknown control")?;
+        let h = m.handler(control).ok_or("Unknown control")?;
         if h.kind == GestureKind::Activate {
             return Ok(None);
         }
@@ -3016,6 +3050,25 @@ impl Client {
     }
 }
 impl Mount {
+    // Fixed Chat presentation actions are host-owned, including when an older
+    // compatible app description does not list newer publication controls.
+    fn handler(&self, control: u8) -> Option<Handler> {
+        if self.chat.is_some() && (40..=254).contains(&control) {
+            Some(Handler {
+                control,
+                event: 0,
+                kind: GestureKind::Activate,
+                operation: Operation::Chat(u16::from(control - 40)),
+                fields: vec![],
+            })
+        } else {
+            self.ui
+                .handlers
+                .iter()
+                .find(|h| h.control == control)
+                .cloned()
+        }
+    }
     /// Local paint changed within the same layout and document clipping bounds.
     fn invalidate_local_scene(&mut self) {
         self.layout_scene.take();
@@ -3088,7 +3141,7 @@ fn qualify(
         || ui.selectors.len() > 128
         || ui.handlers.len()
             > if matches!(ui.presentation, Some(Presentation::Chat)) {
-                240
+                255
             } else {
                 128
             }
@@ -3117,6 +3170,13 @@ fn qualify(
     }
     let mut controls = std::collections::BTreeSet::new();
     for h in &ui.handlers {
+        if matches!(ui.presentation, Some(Presentation::Chat))
+            && (h.control == 255
+                || (40..=254).contains(&h.control)
+                    && h.operation != Operation::Chat(u16::from(h.control - 40)))
+        {
+            return Err("Chat host controls cannot be remapped".into());
+        }
         if !controls.insert(h.control)
             || h.fields.len() > 5
             || !h
@@ -3143,7 +3203,8 @@ fn qualify(
         let valid = match &h.operation {
             Operation::Chat(command) => {
                 h.fields.is_empty()
-                    && *command <= 200
+                    && *command <= 214
+                    && h.control == (*command + 40) as u8
                     && matches!(ui.presentation, Some(Presentation::Chat))
             }
             Operation::Back | Operation::Stress | Operation::SignOut => h.fields.is_empty(),

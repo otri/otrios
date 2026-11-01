@@ -86,7 +86,7 @@ def publish(web,native,out,key,openssl,activate=True,catalog=None,bundles=None,b
             if not count:raise ValueError('Empty installed bundle registry')
         path='native/armv7/dashboard-native';dest=stage/path;dest.parent.mkdir(parents=True);dest.write_bytes(elf)
         assets[path]={'bytes':len(elf),'sha256':digest(elf)}
-        manifest={'behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v15','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
+        manifest={'behavior_abi':'otrios-app-behavior-v1','ui_abi':'otrios-app-ui-v1','host_session':1,'format':'otrios-release-v1','state_schema':'otrios-canvas-merkle-state-v1','sync_protocol':'otrios-canvas-sync-v16','native_target':'armv7-unknown-linux-gnueabihf','assets':assets,'authority':authority}
         if bundles:manifest['bundle_abi']='otrios-app-bundle-v1'
         raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();release=digest(raw)
         (stage/'manifest.json').write_bytes(raw)
