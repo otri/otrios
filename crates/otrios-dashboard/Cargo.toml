@@ -134,3 +134,7 @@ required-features = ["canvas", "host-sync"]
 [[example]]
 name = "app_management_probe"
 required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "transfer_ui_probe"
+required-features = ["canvas", "host-sync"]

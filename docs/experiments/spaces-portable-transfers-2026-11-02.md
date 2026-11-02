@@ -87,6 +87,17 @@ These are development artifacts from a dirty implementation checkout. They do
 not substitute for qualification of the final frozen signed Wasm/native pair,
 Safari acceptance or physical-device input through the Frame's calibrated reader.
 
+The thin `transfer_ui_probe` helper derives private on-device control coordinates
+from negotiated discovery, the matching catalog and a local review recipe. It
+performs no network I/O and rejects a recipe that queues management or changes
+scope; a final confirmation is a coordinate query only. Export, replacement and
+app-review recipes were checked against a disposable authority's real discovery,
+and attempted import confirmation was rejected by the guard. Strict example
+Clippy/build checks pass. These checks qualify coordinate generation only. Physical
+input, actual host I/O and independently observed authority decisions must still
+establish the on-device transfer results. The canonical ARM build includes this
+helper and the existing authenticated management probe for that work.
+
 ## Remaining release gates
 
 - Freeze committed implementation inputs and build/sign through the existing Mac
