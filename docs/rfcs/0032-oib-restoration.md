@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0032: Restore authored OIB instances and UI defaults
 
-Date: 2026-11-03. Status: **implemented; live qualification pending**.
+Date: 2026-11-03. Status: **implemented, deployed and live qualified**.
+See [Frame/Wasm acceptance](../experiments/live-slider-layout-2026-11-03.md).
 
 The bounded OIB editor can remove its original controls, but Add only instantiates
 the component's first signed factory. It cannot recreate a deleted Brightness

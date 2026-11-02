@@ -5,6 +5,13 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[OIB component geometry](rfcs/0031-live-oib-component-geometry.md) adds live
+placement, dimensions, visibility and row pitch through bounded property batches.
+[Restoration](rfcs/0032-oib-restoration.md) recovers authored bindings without
+allocating new identities and can separately reset UI defaults. The
+[Frame/Wasm record](experiments/live-slider-layout-2026-11-03.md) records the
+accepted compact design, live spacing edit, protocol v24 and both recovery controls.
+
 [OIB O2](rfcs/0030-live-oib-instances.md) adds bounded live creation, duplication
 and removal of named reusable instances through shared UI/code operations. Its
 [qualification](experiments/live-oib-instances-2026-11-03.md) records the exact

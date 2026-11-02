@@ -33,6 +33,13 @@ allocations, including the seed instances. Removed identities remain retained;
 the status shows the remaining allocation budget. **Remove pending** resolves an
 unactivated new instance, such as a concurrent duplicate-name conflict.
 
+**Restore sliders** brings back the authored Volume/Brightness pair and bindings,
+while keeping the live component design and prior instance overrides. Extras are
+deactivated and their history retained. **Reset UI defaults** also restores signed
+component defaults and clears instance overrides; it preserves current slider
+values. Both operations reuse original objects without consuming allocation slots.
+See [restoration](rfcs/0032-oib-restoration.md) for causality and compatibility.
+
 - **Change** cycles through suggestions authored by the app for label, accent,
   width or spacing. Component edits affect both instances unless overridden.
 - Changing an instance property sets its override. **Reset** clears the override
@@ -200,10 +207,3 @@ Runtime implementation and tests remain under LGPL-3.0-only in
 `crates/otrios-core`. Contracts, SDK declarations, app authoring and tools retain
 their Apache-2.0 boundaries. No dependencies, identities, trust roots or services
 are added by O1.
-
-**Restore sliders** brings back the authored Volume/Brightness pair and bindings,
-while keeping the live component design and prior instance overrides. Extras are
-deactivated and their history retained. **Reset UI defaults** also restores signed
-component defaults and clears instance overrides; it preserves current slider
-values. Both operations reuse original objects without consuming allocation slots.
-See [restoration](rfcs/0032-oib-restoration.md) for causality and compatibility.

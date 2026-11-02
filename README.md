@@ -21,7 +21,10 @@ records completed Safari/Frame acceptance, migration, rollback and data preserva
 overrides and live instance creation, duplication and removal through shared
 CRDT operations. The [O2 qualification](docs/experiments/live-oib-instances-2026-11-03.md)
 records the deployed Live UI companion app. Arbitrary graph placement and
-executable class/outlet APIs remain later work.
+executable class/outlet APIs remain later work. Declared
+[component geometry](docs/experiments/live-slider-layout-2026-11-03.md) now changes
+through live CRDT batches; restore/default controls recover the original bindings
+without resetting app values.
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
