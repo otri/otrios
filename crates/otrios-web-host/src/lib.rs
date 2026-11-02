@@ -314,6 +314,7 @@ impl CanvasApp {
             return "spaces-map".into();
         }
         match self.inner.presentation() {
+            Some(Presentation::Oib(_)) => "oib",
             Some(Presentation::Motion { .. }) => "motion",
             Some(Presentation::TextScroll { .. }) => "text-scroll",
             Some(Presentation::TextDocument { .. }) => "text-document",

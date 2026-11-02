@@ -521,6 +521,7 @@ pub fn encode_server_into(value: &ServerMessage, out: &mut Vec<u8>) -> Result<()
                 w.text(&binding.collection, 32)?;
                 w.fixed(&binding.actor, 32)?;
                 w.u8(u8::from(binding.editable))?;
+                w.u8(u8::from(binding.ui_editable))?;
                 w.u8(u8::from(binding.comments))?;
                 w.u8(u8::from(binding.moderate))?;
             }
@@ -567,6 +568,7 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
                         collection,
                         actor: r.take(32)?.try_into().map_err(err)?,
                         editable: r.flag()?,
+                        ui_editable: r.flag()?,
                         comments: r.flag()?,
                         moderate: r.flag()?,
                     })
@@ -596,12 +598,24 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
 }
 pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Result<()> {
     let tag = match value {
+        StateRequest::OibWrite { .. } => 37,
         StateRequest::Hello { .. } => 33,
         StateRequest::Write { .. } => 34,
         StateRequest::Ack { .. } => 35,
         StateRequest::Resync => 36,
     };
     write(out, tag, |w| match value {
+        StateRequest::OibWrite { sequence, changes } => {
+            if changes.is_empty() || changes.len() > otrios_interfaces::oib::MAX_CHANGES {
+                return Err("OIB batch limit".into());
+            }
+            w.u64(*sequence)?;
+            let bytes = flexbuffers::to_vec(changes).map_err(err)?;
+            if bytes.len() > otrios_interfaces::oib::MAX_BYTES {
+                return Err("OIB operation budget".into());
+            }
+            w.blob(&bytes)
+        }
         StateRequest::Hello { writer, resume } => {
             w.fixed(writer, 16)?;
             w.u64(*resume)
@@ -638,6 +652,32 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
     }
     read(bytes, |r| {
         let message = match r.u8()? {
+            37 => {
+                let sequence = r.u64()?;
+                let bytes = r.blob(otrios_interfaces::oib::MAX_BYTES)?;
+                if bytes.len() > otrios_interfaces::oib::MAX_BYTES {
+                    return Err("OIB operation budget".into());
+                }
+                crate::flex_guard::validate(&bytes, 24, 131072, 65536)?;
+                if flexbuffers::Reader::get_root(bytes.as_slice())
+                    .map_err(err)?
+                    .get_vector()
+                    .map_err(err)?
+                    .len()
+                    > otrios_interfaces::oib::MAX_CHANGES
+                {
+                    return Err("OIB batch limit".into());
+                }
+                let changes: Vec<otrios_interfaces::oib::Change> =
+                    flexbuffers::from_slice(&bytes).map_err(err)?;
+                if changes.is_empty()
+                    || changes.len() > otrios_interfaces::oib::MAX_CHANGES
+                    || flexbuffers::to_vec(&changes).map_err(err)? != bytes
+                {
+                    return Err("OIB noncanonical batch".into());
+                }
+                StateRequest::OibWrite { sequence, changes }
+            }
             33 => StateRequest::Hello {
                 writer: r.take(16)?.to_vec(),
                 resume: r.u64()?,
@@ -772,6 +812,7 @@ mod tests {
                     actor: [1; 32],
                     collection: "b".repeat(32),
                     editable: true,
+                    ui_editable: false,
                     comments: false,
                     moderate: true,
                 }),

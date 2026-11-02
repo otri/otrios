@@ -25,6 +25,12 @@ pub fn description() -> Ui {
         .build(
             "Test Playground",
             vec![
+                button("Live UI")
+                    .frame([1112., 716., 144., 60.])
+                    .pin_right(24.)
+                    .pin_bottom(24.)
+                    .key("live-ui-link")
+                    .navigate_to(Destination::app("live-ui").route("live-ui")),
                 launch_card(
                     "component-playground",
                     "components",

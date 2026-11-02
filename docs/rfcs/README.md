@@ -37,3 +37,4 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0026: Target-specific Wasm compilation](0026-target-wasm-compilation.md) | Proposed experiment; no execution backend selected or integrated |
 | [RFC 0027: Spaces, membership and app data](0027-spaces-and-app-data.md) | Bounded implementation deployed and qualified on Frame; Member/Admin roles, public audiences, Space-owned collections and deletion lifecycle |
 | [RFC 0028: Spaces map, app sharing and portable data](0028-spaces-map-sharing-and-portable-data.md) | Complete and deployed: combined map, retained data, scoped moves and portable transfers; Safari/Frame, migration and rollback qualified |
+| [RFC 0029: OIB components and live UI data](0029-live-oib-ui.md) | O1 property editing implemented and qualified on browser/Frame; graph editing and executable class APIs remain proposed |

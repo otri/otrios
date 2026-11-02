@@ -709,7 +709,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v20","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v21","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -907,7 +907,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v20","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v21","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -5860,7 +5860,7 @@ fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, Strin
             assets.insert(path.clone(), entry);
         }
     }
-    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v20","assets":assets,"authority":authority}).to_string().into_bytes();
+    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v21","assets":assets,"authority":authority}).to_string().into_bytes();
     let release = canvas::hex(&canvas::hash(&manifest));
     let root = rig.root.join("releases").join(&release);
     fs::create_dir_all(&root).unwrap();
@@ -5887,7 +5887,7 @@ fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, Strin
         root.join("manifest.sig"),
     )
     .unwrap();
-    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v20"}).to_string()).unwrap();
+    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v21"}).to_string()).unwrap();
     (tree, digest, release)
 }
 fn public_get(address: &str, path: &str) -> (u16, String, Vec<u8>) {
@@ -6300,4 +6300,168 @@ fn app_file_intake_is_actor_bound_and_url_intake_cannot_reach_private_destinatio
         200,
         "volatile stages never activate across recovery"
     );
+}
+
+#[test]
+fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    use otrios_interfaces::oib::{Cell, FORMAT, Object, Seed};
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("OIB process test");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), Some(431)).0,
+        431
+    );
+    rig.stop();
+    let package = rig.root.join("apps/counter/package/ui.flex");
+    let mut ui = canvas::decode_ui(&fs::read(&package).unwrap()).unwrap();
+    ui.format = "otrios-canvas-v8".into();
+    ui.presentation = Some(Presentation::Oib(Seed {
+        format: FORMAT.into(),
+        main_oib: 1,
+        main_class: "otrios.declarative-v1".into(),
+        components: vec![Object {
+            id: 10,
+            name: "Label".into(),
+            component: None,
+        }],
+        instances: vec![Object {
+            id: 20,
+            name: "label".into(),
+            component: Some(10),
+        }],
+        cells: vec![Cell {
+            id: 100,
+            owner: 10,
+            name: "label".into(),
+            default: Value::Text("Original".into()),
+            choices: vec![],
+            inherit: None,
+            targets: vec![],
+        }],
+        inspector_viewport: 0,
+        inspector_content: [500., 500.],
+    }));
+    let bytes = canvas::encode_ui(&ui).unwrap();
+    fs::write(&package, &bytes).unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    catalog.apps[0].ui_hash = canvas::hash(&bytes);
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    fs::write(rig.root.join("apps/catalog.flex"), &rig.catalog).unwrap();
+    rig.restart(&binary, true, true);
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    fn open(rig: &Rig, space: &str, ui: &Ui, actor: char) -> (Socket, canvas::StateAdapter, bool) {
+        let mut socket = socket(&rig.public, space, Some(actor));
+        send(
+            &mut socket,
+            ClientMessage::Mount {
+                epoch: 1,
+                ui_ref: ui.ui_ref.clone(),
+                state_ref: "app:counter/state".into(),
+                catalog_hash: canvas::hash(&rig.catalog),
+                known_ui: None,
+                known_code: vec![],
+                writer: vec![actor as u8; 16],
+                resume: 0,
+                collection: None,
+            },
+        );
+        let ServerMessage::Mounted {
+            state,
+            binding: Some(binding),
+            ..
+        } = read(&mut socket)
+        else {
+            panic!("OIB mount");
+        };
+        let replica =
+            canvas::StateAdapter::for_ui(ui, "app:counter/state", &state, [actor as u8; 16])
+                .unwrap();
+        send(&mut socket, ClientMessage::AcceptMount { epoch: 1 });
+        assert!(matches!(
+            read(&mut socket),
+            ServerMessage::Activated { epoch: 1 }
+        ));
+        (socket, replica, binding.ui_editable)
+    }
+    fn flush(socket: &mut Socket, replica: &mut canvas::StateAdapter) {
+        while let Some(bytes) = replica.generate().unwrap() {
+            send(socket, ClientMessage::Sync { epoch: 1, bytes });
+        }
+    }
+    let (mut admin, mut a, allowed) = open(&rig, &space, &ui, 'a');
+    assert!(allowed);
+    assert_eq!(
+        a.value(1).unwrap(),
+        431,
+        "seeding OIB retains existing app content"
+    );
+    let (mut member, mut b, allowed) = open(&rig, &space, &ui, 'b');
+    assert!(!allowed);
+    flush(&mut admin, &mut a);
+    flush(&mut member, &mut b);
+    a.edit_oib(&[(100, Some(Value::Text("Confirmed live UI".into())))])
+        .unwrap();
+    let request = a.generate().unwrap().unwrap();
+    send(
+        &mut member,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: request.clone(),
+        },
+    );
+    assert!(matches!(read(&mut member), ServerMessage::Error { .. }));
+    // Rejected mutations close that state session; reconnect for read-only observation.
+    drop(member);
+    let (next, replica, allowed) = open(&rig, &space, &ui, 'b');
+    assert!(!allowed);
+    member = next;
+    b = replica;
+    flush(&mut member, &mut b);
+    send(
+        &mut admin,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: request,
+        },
+    );
+    while !a.confirmed() {
+        if let ServerMessage::Sync { bytes, .. } = read(&mut admin) {
+            a.receive(&bytes).unwrap();
+            flush(&mut admin, &mut a);
+        }
+    }
+    while b.oib_generation() != a.oib_generation() {
+        if let ServerMessage::Sync { bytes, .. } = read(&mut member) {
+            b.receive(&bytes).unwrap();
+            flush(&mut member, &mut b);
+        }
+    }
+    assert_eq!(
+        a.oib_active().unwrap()[&100],
+        Some(Value::Text("Confirmed live UI".into()))
+    );
+    assert_eq!(a.oib_active().unwrap(), b.oib_active().unwrap());
+    drop(admin);
+    drop(member);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    let (_, restored, _) = open(&rig, &space, &ui, 'a');
+    assert_eq!(restored.oib_active().unwrap(), a.oib_active().unwrap());
 }

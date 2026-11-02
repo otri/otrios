@@ -9,6 +9,8 @@ pub mod document;
 pub mod input;
 #[path = "../layout-lab/app.rs"]
 pub mod layouts;
+#[path = "../live-ui/app.rs"]
+pub mod live_ui;
 #[path = "../layout-text-scroll/app.rs"]
 pub mod panning;
 #[path = "state/schema.rs"]
@@ -39,6 +41,10 @@ pub fn screens() -> Vec<crate::authoring::AppScreen> {
         screens.extend(factory());
     }
     screens.extend([
+        (
+            live_ui::manifest(),
+            live_ui::ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui,
+        ),
         (
             document::manifest(),
             document::ui as fn(&[u8]) -> otrios_interfaces::canvas::Ui,

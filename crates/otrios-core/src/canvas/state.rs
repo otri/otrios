@@ -4,6 +4,7 @@ use super::*;
 use crate::merkle::{self, Actor, Authority, Cursor, Edit, Snapshot, Subscription};
 use otrios_interfaces::layout::Value;
 use std::collections::BTreeMap;
+mod oib;
 mod portable;
 const ROOT_SCHEMA: &[u8] = b"otrios-canvas-merkle-v1";
 const RECEIPTS: usize = 1024;
@@ -27,6 +28,7 @@ struct Receipt {
 }
 #[derive(Clone)]
 pub struct Document {
+    oib_ui: Option<std::sync::Arc<Ui>>,
     schema: std::sync::Arc<StateSchema>,
     required_fields: u64,
     scope: String,
@@ -40,6 +42,7 @@ pub struct Document {
 }
 #[derive(Clone, Default)]
 pub struct Session {
+    oib_edit: bool,
     writer: Option<[u8; 16]>,
     slot: Option<usize>,
     authority: Option<Authority>,
@@ -49,6 +52,9 @@ pub struct Session {
     selection: Option<StateSelection>,
 }
 impl Session {
+    pub fn set_oib_editable(&mut self, allowed: bool) {
+        self.oib_edit = allowed;
+    }
     /// Call from trusted admission before generating the first mount. A lease's
     /// coverage is fixed; replacing UI dependencies requires a new lease.
     pub fn set_selection(&mut self, selection: StateSelection) -> Result<()> {
@@ -124,6 +130,7 @@ impl Document {
         }
         let tree = Snapshot::empty().edit([0; 16], &edits).map_err(err)?.0;
         Ok(Self {
+            oib_ui: None,
             required_fields: StateSelection::all(&schema).fields,
             schema: schema.into(),
             scope: scope.into(),
@@ -182,6 +189,7 @@ impl Document {
         }
         let actor = root.actor.as_slice().try_into().map_err(err)?;
         let result = Self {
+            oib_ui: None,
             field_hashes: std::sync::Arc::new(Self::field_hashes(&schema, scope)?),
             required_fields,
             schema: schema.into(),
@@ -227,8 +235,20 @@ impl Document {
         }
         retained(old, tree)?;
         for kind in tree.child_keys() {
-            if !(1..=3).contains(&kind) {
+            if !(1..=4).contains(&kind) {
                 return Err("Unknown Canvas subtree".into());
+            }
+            if kind == 4 {
+                if old.is_some_and(|o| {
+                    o.subtree(&[4])
+                        .ok()
+                        .zip(tree.subtree(&[4]).ok())
+                        .is_some_and(|(a, b)| a.hash() == b.hash())
+                }) {
+                    continue;
+                }
+                self.validate_oib(old, tree)?;
+                continue;
             }
             let branch = tree.subtree(&[kind]).map_err(err)?;
             let previous = old.and_then(|s| s.subtree(&[kind]).ok());
@@ -583,6 +603,7 @@ impl Document {
         let authority = Authority::new(u64::from_le_bytes(random()?), self.tree.clone());
         Ok((
             Session {
+                oib_edit: false,
                 writer: Some(writer),
                 slot,
                 authority: Some(authority),
@@ -608,6 +629,46 @@ impl Document {
             .writer
             .ok_or("State write without admitted writer")?;
         match request {
+            StateRequest::OibWrite { sequence, changes } => {
+                if !session.oib_edit {
+                    return Err("OIB editing requires Space Admin admission".into());
+                }
+                let slot = session.slot.ok_or("Missing OIB writer receipt")?;
+                let mut receipt: Receipt = decode(&payload(&self.tree, &path(2, slot))?)?;
+                if receipt.writer != hash(&writer) {
+                    return Err("OIB writer receipt retired".into());
+                }
+                let digest = hash(&bytes(&("oib-v1", &changes))?);
+                if sequence <= receipt.sequence {
+                    if sequence != receipt.sequence || receipt.digest != digest {
+                        return Err("Changed OIB replay".into());
+                    }
+                    return Ok(false);
+                }
+                if sequence
+                    != receipt
+                        .sequence
+                        .checked_add(1)
+                        .ok_or("Writer sequence exhausted")?
+                {
+                    return Err("OIB intent sequence gap".into());
+                }
+                let mut candidate = self.clone();
+                candidate.oib_write(writer, &changes)?;
+                receipt.sequence = sequence;
+                receipt.digest = digest;
+                receipt.time = self.wall;
+                candidate.change(
+                    &[],
+                    vec![Edit {
+                        path: path(2, slot),
+                        schema: self.extra_schema(2, slot),
+                        value: Some(bytes(&receipt)?),
+                    }],
+                )?;
+                self.tree = candidate.tree;
+                Ok(true)
+            }
             StateRequest::Write { sequence, values } => {
                 self.validate_commands(&values, false)?;
                 if values.is_empty() {
@@ -692,7 +753,7 @@ impl Document {
                 .selection
                 .clone()
                 .unwrap_or_else(|| StateSelection::all(&self.schema));
-            let coverage = selection.coverage(session.slot)?;
+            let coverage = selection.coverage_oib(session.slot, session.oib_edit)?;
             session.subscription = Some(
                 authority
                     .subscribe_coverage(&[vec![]], coverage)
@@ -728,6 +789,7 @@ impl Document {
 
 #[derive(Clone)]
 struct Flight {
+    oib: Vec<otrios_interfaces::oib::Change>,
     sequence: u64,
     values: Vec<(u16, Value)>,
     sent: bool,
@@ -818,13 +880,21 @@ impl StateAdapter {
         Self::with_selection(schema, scope, data, writer, selection)
     }
     pub fn for_ui(ui: &Ui, scope: &str, data: &[u8], writer: [u8; 16]) -> Result<Self> {
-        Self::with_selection(
+        let mut result = Self::with_selection(
             ui.state_schema.clone(),
             scope,
             data,
             writer,
             StateSelection::from_ui(ui)?,
-        )
+        )?;
+        if super::oib::seed(ui).is_some()
+            && !data.is_empty()
+            && result.doc.tree.subtree(&[4, 0]).is_err()
+        {
+            return Err("Missing admitted OIB state".into());
+        }
+        result.doc.configure_oib(ui)?;
+        Ok(result)
     }
     fn with_selection(
         schema: StateSchema,
@@ -969,7 +1039,11 @@ impl StateAdapter {
         self.clock = self.clock.max(now);
     }
     pub fn pending_count(&self) -> usize {
-        self.pending.len() + self.flight.as_ref().map_or(0, |f| f.values.len())
+        self.pending.len()
+            + self
+                .flight
+                .as_ref()
+                .map_or(0, |f| f.values.len() + f.oib.len())
     }
     pub fn state_usage(&self) -> StateUsage {
         StateUsage {
@@ -985,7 +1059,10 @@ impl StateAdapter {
     pub fn dispatch_usage(&self) -> DispatchUsage {
         DispatchUsage {
             pending_fields: self.pending.len(),
-            issued_fields: self.flight.as_ref().map_or(0, |f| f.values.len()),
+            issued_fields: self
+                .flight
+                .as_ref()
+                .map_or(0, |f| f.values.len() + f.oib.len()),
             pending_payload_bytes: self.pending.values().map(value_payload_bytes).sum(),
             issued_payload_bytes: self.flight.as_ref().map_or(0, |f| {
                 f.values.iter().map(|(_, v)| value_payload_bytes(v)).sum()
@@ -1098,6 +1175,7 @@ impl StateAdapter {
                     .checked_add(1)
                     .ok_or("Intent sequence exhausted")?,
                 values,
+                oib: vec![],
                 sent: false,
                 issued_at: self.clock,
             });
@@ -1106,6 +1184,13 @@ impl StateAdapter {
             && !f.sent
         {
             f.sent = true;
+            if !f.oib.is_empty() {
+                return encode_state_request(&StateRequest::OibWrite {
+                    sequence: f.sequence,
+                    changes: f.oib.clone(),
+                })
+                .map(Some);
+            }
             return encode_state_request(&StateRequest::Write {
                 sequence: f.sequence,
                 values: f.values.clone(),
@@ -1159,6 +1244,20 @@ impl StateAdapter {
         };
         if mounting {
             self.slot = next.receipt(&self.writer)?.map(|(slot, _)| slot);
+        }
+        if let Some(ui) = &self.doc.oib_ui {
+            if self
+                .doc
+                .tree
+                .subtree(&[4])
+                .ok()
+                .zip(next.tree.subtree(&[4]).ok())
+                .is_some_and(|(a, b)| a.hash() == b.hash())
+            {
+                next.oib_ui = Some(ui.clone());
+            } else {
+                next.configure_oib(ui)?;
+            }
         }
         next.wall = self.doc.wall;
         let cursor = replica.cursor().ok_or("Missing state cursor")?;

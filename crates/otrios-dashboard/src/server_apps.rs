@@ -1141,11 +1141,26 @@ impl Hub {
                 })
             })
     }
+    fn ui_allowed(
+        &self,
+        scope: &spaces::Scope,
+        binding: &otrios_interfaces::spaces::Binding,
+    ) -> bool {
+        self.allowed(scope, binding, otrios_interfaces::spaces::Operation::Edit)
+            && self.registry().is_ok_and(|r| {
+                r.spaces.iter().any(|space| {
+                    space.id == binding.space
+                        && otrios_core::spaces::role(space, scope.identity.as_deref())
+                            == Some(otrios_interfaces::spaces::Role::Admin)
+                })
+            })
+    }
     fn actions(&self, scope: &spaces::Scope, binding: &otrios_interfaces::spaces::Binding) -> u8 {
         use otrios_interfaces::spaces::Operation;
         u8::from(self.allowed(scope, binding, Operation::Edit))
             | (u8::from(self.allowed(scope, binding, Operation::Comment)) << 1)
             | (u8::from(self.allowed(scope, binding, Operation::Moderate)) << 2)
+            | (u8::from(self.ui_allowed(scope, binding)) << 3)
     }
     pub(super) fn grant_current(
         &self,
@@ -1247,6 +1262,11 @@ impl Hub {
             )?,
             None => Document::new(package.schema.clone(), &package.app.state_ref)?,
         };
+        let persisted = doc.clone();
+        let seeded = doc.configure_oib(&canvas::decode_ui(&package.ui)?)?;
+        if seeded && let Some(file) = file.as_ref().filter(|p| p.exists()) {
+            store::append(file, &persisted, &doc)?;
+        }
         doc.set_signal_fields(&package.signal_fields)?;
         if let Some(file) = &file
             && !file.exists()
@@ -1726,6 +1746,7 @@ impl Hub {
                         }
                         Document::new(description.state_schema.clone(), &a.state_ref)?
                     };
+                    doc.configure_oib(&description)?;
                     doc.set_signal_fields(&signal_fields)?;
                     if let Some(path) = &file
                         && !path.exists()
@@ -1996,6 +2017,8 @@ impl Hub {
                             .map_err(|e| e.to_string())?,
                             collection: b.collection.clone(),
                             editable: self.allowed(scope, b, Operation::Edit),
+                            ui_editable: canvas::oib::seed(&canvas::decode_ui(&p.ui)?).is_some()
+                                && self.ui_allowed(scope, b),
                             comments: self.allowed(scope, b, Operation::Comment),
                             moderate: self.allowed(scope, b, Operation::Moderate),
                         })
@@ -2048,6 +2071,7 @@ impl Hub {
                     return Err("App persistence outcome uncertain; restart required".into());
                 }
                 let mut candidate = room.doc.clone();
+                let oib_seed_changed = candidate.configure_oib(&canvas::decode_ui(&p.ui)?)?;
                 candidate.set_wall_time(
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -2061,6 +2085,8 @@ impl Hub {
                 } else {
                     candidate.open_session(&writer, resume)?
                 };
+                sync.set_oib_editable(mount_binding.as_ref().is_some_and(|b| b.ui_editable));
+                let changed = changed || oib_seed_changed;
                 sync.set_selection(p.selection.clone())?;
                 if changed
                     && let Some(file) = &room.file
@@ -2169,6 +2195,13 @@ impl Hub {
                     return Ok((messages, false));
                 }
                 if let Some(binding) = leases.active.as_ref().and_then(|l| l.binding.as_ref()) {
+                    if matches!(
+                        canvas::decode_state_request(&bytes)?,
+                        otrios_interfaces::canvas::StateRequest::OibWrite { .. }
+                    ) && !self.ui_allowed(scope, binding)
+                    {
+                        return Err("OIB editing requires Space Admin".into());
+                    }
                     // ACK/resync are reads; only actual write requests require Edit.
                     if matches!(
                         canvas::decode_state_request(&bytes)?,

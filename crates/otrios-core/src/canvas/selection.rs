@@ -6,6 +6,7 @@ use super::*;
 pub struct StateSelection {
     pub(crate) fields: u64,
     pub(crate) signals: u64,
+    oib: bool,
 }
 impl StateSelection {
     pub(crate) fn all(schema: &StateSchema) -> Self {
@@ -16,6 +17,7 @@ impl StateSelection {
         Self {
             fields,
             signals: fields,
+            oib: false,
         }
     }
     pub fn from_ui(ui: &Ui) -> Result<Self> {
@@ -52,7 +54,9 @@ impl StateSelection {
             if selector.field == 0
                 && !matches!(
                     selector.projection,
-                    Projection::KeyboardLabel { .. }
+                    Projection::OibStatus
+                        | Projection::OibCell { .. }
+                        | Projection::KeyboardLabel { .. }
                         | Projection::KeyboardVisible
                         | Projection::SessionControls
                         | Projection::SessionAccess { .. }
@@ -107,9 +111,17 @@ impl StateSelection {
             }
             _ => {}
         }
-        Ok(Self { fields, signals })
+        Ok(Self {
+            fields,
+            signals,
+            oib: super::oib::seed(ui).is_some(),
+        })
     }
-    pub(crate) fn coverage(&self, slot: Option<usize>) -> Result<crate::merkle::Coverage> {
+    pub(crate) fn coverage_oib(
+        &self,
+        slot: Option<usize>,
+        edit: bool,
+    ) -> Result<crate::merkle::Coverage> {
         let mut registers = vec![vec![]];
         if let Some(slot) = slot {
             registers.push(state::path(2, slot));
@@ -122,7 +134,16 @@ impl StateSelection {
                 registers.push(state::path(3, id));
             }
         }
-        crate::merkle::Coverage::new(&registers, &[]).map_err(err)
+        let subtrees = if self.oib {
+            if edit {
+                vec![vec![4]]
+            } else {
+                vec![vec![4, 0], vec![4, 2], vec![4, 3]]
+            }
+        } else {
+            vec![]
+        };
+        crate::merkle::Coverage::new(&registers, &subtrees).map_err(err)
     }
 }
 

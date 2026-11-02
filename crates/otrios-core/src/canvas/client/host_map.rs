@@ -137,7 +137,11 @@ impl Client {
     }
     /// Local wheel input never changes the map mount or authoritative metadata.
     pub fn scroll_map(&mut self, epoch: u32, delta: f32) -> Result<bool> {
-        if !self.host_active
+        if (!self.host_active
+            && self
+                .active
+                .as_ref()
+                .is_none_or(|m| super::super::oib::seed(&m.ui).is_none()))
             || epoch != self.epoch()
             || !delta.is_finite()
             || self.host.drag.is_some()

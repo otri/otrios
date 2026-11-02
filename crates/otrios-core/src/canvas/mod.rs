@@ -6,6 +6,7 @@ mod client;
 mod device_apps;
 pub mod document;
 mod host_ui;
+pub mod oib;
 pub mod presentation;
 pub mod reflow;
 mod selection;
@@ -41,6 +42,7 @@ pub fn validate_ui_format(ui: &Ui) -> Result<()> {
             | "otrios-canvas-v5"
             | "otrios-canvas-v6"
             | "otrios-canvas-v7"
+            | "otrios-canvas-v8"
     ) || (matches!(ui.presentation, Some(Presentation::TextScroll { .. }))
         && !matches!(ui.format.as_str(), "otrios-canvas-v3" | "otrios-canvas-v4"))
         || (matches!(ui.presentation, Some(Presentation::TextDocument { .. }))
@@ -53,6 +55,9 @@ pub fn validate_ui_format(ui: &Ui) -> Result<()> {
             && ui.format != "otrios-canvas-v7")
     {
         return Err("Unsupported Canvas UI format".into());
+    }
+    if matches!(ui.presentation, Some(Presentation::Oib(_))) && ui.format != "otrios-canvas-v8" {
+        return Err("OIB requires Canvas UI v8".into());
     }
     Ok(())
 }

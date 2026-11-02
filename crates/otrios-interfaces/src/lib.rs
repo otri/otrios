@@ -50,6 +50,8 @@ pub mod chat;
 #[cfg(feature = "layout")]
 pub mod device_apps;
 #[cfg(feature = "layout")]
+pub mod oib;
+#[cfg(feature = "layout")]
 pub mod spaces;
 #[cfg(feature = "layout")]
 pub mod transfers;

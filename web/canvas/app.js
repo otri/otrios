@@ -128,7 +128,7 @@ try{
       const inputIds=new Set((f.inputs||[]).map(d=>d.id));for(const [id,b]of controls){b.tabIndex=inputIds.has(id)?-1:0;if(inputIds.has(id))b.setAttribute('aria-hidden','true');else b.removeAttribute('aria-hidden');}
       textInputs.accept(f);
       if(focusKey&&!document.activeElement?.matches('.canvas-editor')){const b=controls.get(Number(focusKey.id));if(b?.getAttribute('aria-label')===focusKey.label)b.focus({preventScroll:true});}
-      const panelOpen=!!f.resources?.panel_scroll;
+      const panelOpen=!!f.resources?.panel_scroll&&!f.resources?.oib;
       if(panelOpen){
         controlsLayer.setAttribute('role','dialog');controlsLayer.setAttribute('aria-modal','true');controlsLayer.setAttribute('aria-label','Settings');
         if(!panelWasOpen){panelReturnFocus=focusKey?.label||null;if(!document.activeElement?.matches('.canvas-editor'))(panelFocusables().find(b=>b.getAttribute('aria-label')?.startsWith('Move to '))||panelFocusables()[0])?.focus({preventScroll:true});}

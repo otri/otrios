@@ -175,6 +175,9 @@ pub fn pack(
     if code.is_some() {
         required_features.push(BEHAVIOR_FEATURE.into());
     }
+    if canvas::oib::seed(&ui).is_some() {
+        required_features.push(otrios_interfaces::oib::FEATURE.into());
+    }
     required_features.sort();
     let info = BundleInfo {
         app: entry.app.clone(),
@@ -361,6 +364,8 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-canvas-v5"
                     | "otrios-canvas-v6"
                     | "otrios-canvas-v7"
+                    | "otrios-canvas-v8"
+                    | "otrios-oib-v1"
             )
         })
     {
@@ -368,6 +373,9 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     }
     let ui = canvas::decode_ui(get(UI_PATH)?)?;
     canvas::validate_ui_format(&ui)?;
+    if canvas::oib::seed(&ui).is_some() && !features.contains(otrios_interfaces::oib::FEATURE) {
+        return Err("Missing required OIB feature".into());
+    }
     canvas::validate_schema(&ui.state_schema)?;
     if ui.ui_ref != info.app.ui_ref
         || canvas::decode_schema(get(SCHEMA_PATH)?)? != ui.state_schema

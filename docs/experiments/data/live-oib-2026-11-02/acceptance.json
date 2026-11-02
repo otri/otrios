@@ -1,0 +1,105 @@
+{
+  "format": "otrios-oib-acceptance-v1",
+  "date": "2026-11-02",
+  "release": {
+    "release": "718ee4957c62c4a225bd0a6e05d3db9ddf28a2e239b87932c55c4bf1341b44ef",
+    "state_protocol": "otrios-canvas-sync-v21",
+    "code_only": true,
+    "authority_sha256": "b35ac39c81e2c0694e356cb5ac844b7581e7f27bb02a6dd5656687ab9da9e39c",
+    "native_sha256": "8fc9fcba3076d1109c6f42461462c1a9d16ce0820b92acf76de470bd39b3f822",
+    "wasm_sha256": "fb0389415c409d43a967d240764d52b733cd7ce496fd28956cf23833df5e33a7"
+  },
+  "validation": {
+    "command": "bash scripts/check.sh",
+    "exit_code": 0,
+    "core_library_tests": 244,
+    "canvas_tests": 69,
+    "oib_tests": 7,
+    "real_authority_process_tests": 33,
+    "sdk_oib_feature_check": true,
+    "frozen_runtime_inputs_match_checkout": true
+  },
+  "browser": {
+    "passed": true,
+    "release": "718ee4957c62c4a225bd0a6e05d3db9ddf28a2e239b87932c55c4bf1341b44ef",
+    "two_contexts": true,
+    "live_component_and_override_edits": true,
+    "local_scroll": true,
+    "nonmodal_inspector": true,
+    "focus_retained": true,
+    "workers_retained": true,
+    "connections_before_refresh": [
+      2,
+      2
+    ],
+    "native_edit_received_by_both": true,
+    "app_values_retained": true,
+    "reconnect_retains_ui": true,
+    "edit_to_both_present_ms": 724,
+    "final_generation": 16,
+    "errors": []
+  },
+  "native": {
+    "passed": true,
+    "release": "718ee4957c62c4a225bd0a6e05d3db9ddf28a2e239b87932c55c4bf1341b44ef",
+    "pid_retained": true,
+    "mount_epoch_retained": true,
+    "browser_edits_presented": true,
+    "frame_edit_confirmed": true,
+    "initial_generation": 1,
+    "browser_generation": 11,
+    "frame_generation": 12,
+    "properties": {
+      "100": "label: Level (default)",
+      "101": "accent: #FF8855 (default)",
+      "102": "width: 400 (default)",
+      "103": "spacing: 24 (default)",
+      "200": "label: Level (inherited)",
+      "201": "accent: #FF8855 (inherited)",
+      "202": "width: 400 (inherited)",
+      "203": "spacing: 24 (inherited)",
+      "300": "label: Level (inherited)",
+      "301": "accent: #FF8855 (inherited)",
+      "302": "width: 400 (inherited)",
+      "303": "spacing: 24 (inherited)"
+    },
+    "sync_to_present_ms": 746.803327,
+    "renderer": "gles2-direct",
+    "input": "synthetic evdev tap through existing calibrated physical reader"
+  },
+  "native_final": {
+    "passed": true,
+    "release": "718ee4957c62c4a225bd0a6e05d3db9ddf28a2e239b87932c55c4bf1341b44ef",
+    "pid_retained": true,
+    "epoch_retained": true,
+    "final_generation": 16,
+    "ui_defaults_restored": true,
+    "state_confirmed": true,
+    "services_active": true
+  },
+  "attachment": {
+    "attached": true,
+    "release": "718ee4957c62c4a225bd0a6e05d3db9ddf28a2e239b87932c55c4bf1341b44ef",
+    "used_existing_admin": true,
+    "new_identities": false,
+    "membership_changed": false
+  },
+  "recovery": {
+    "verified": true,
+    "code_only": true,
+    "release": "718ee4957c62c4a225bd0a6e05d3db9ddf28a2e239b87932c55c4bf1341b44ef",
+    "data_rollback": false,
+    "cross_release_rollback_exercised": false
+  },
+  "limits": {
+    "browser_engine": "headless Chromium with SwiftShader",
+    "browser_auth": "existing Frame Admin identity in temporary HttpOnly browser-context cookies",
+    "native_input": "synthetic evdev input through the physical calibrated reader",
+    "safari_tested": false,
+    "human_finger_tested": false,
+    "linux_shared_memory_ipc_qualified": false,
+    "portable_oib_data_codec": false,
+    "general_graph_editing": false,
+    "executable_class_api": false
+  }
+}

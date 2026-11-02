@@ -1,0 +1,116 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Live OIB UI
+
+OIB O1 implements the property-editing slice of
+[RFC 0029](rfcs/0029-live-oib-ui.md). It is deployed and qualified on
+[browser and Frame](experiments/live-oib-2026-11-02.md). Structural
+graph editing and executable main-class APIs remain later increments.
+
+Add the installed **Live UI** app to a Space using its Admin controls, then open
+**Test Playground → Live UI** in that same Space (or launch its Space tile).
+The screen contains
+two instances, `volume` and `brightness`, of `LabeledSlider`. Its scrolling
+inspector has sections for the component and each instance.
+
+- **Change** cycles through suggestions authored by the app for label, accent,
+  width or spacing. Component edits affect both instances unless overridden.
+- Changing an instance property sets its override. **Reset** clears the override
+  causally and restores inheritance. The inspector identifies inherited values
+  and explicit overrides.
+- **Default** explicitly writes the signed seed default, observing all retained
+  alternatives. It can resolve a same-property conflict. The typed client API can
+  also resolve to another chosen value.
+
+Space Admins edit UI; Members and admitted visitors receive the active result.
+The authority enforces this independently of visible controls. Edits affect only
+the selected Space's Live UI collection. The demo uses its own volume/brightness
+content fields; existing app schemas and values are unchanged. App content values
+remain independent of UI properties. Scroll position, gestures, inspector interaction and
+focus remain local.
+
+Every accepted change is durably journaled before publication. Disjoint changes
+merge; different concurrent assignments to one property stay in the draft. A
+conflicted or invalid draft retains the authority's previous active graph for all
+viewers. Editors receive status and affected property identities. Layout activation
+waits for held gestures and unconfirmed app edits; it retains the current mount,
+state, responder identities and renderer resources.
+
+## Contracts and storage
+
+`Presentation::Oib(Seed)` in Canvas UI v8 contains `main_oib`, `main_class`, named
+component/instance identities, the fixed property table and admitted mappings to
+layout nodes. O1 uses `otrios.declarative-v1`, the existing declarative event
+interpreter, without adding guest imports or an execution backend. The immutable
+bundle requires both `otrios-canvas-v8` and `otrios-oib-v1`. Old hosts reject these
+requirements; they cannot silently interpret the OIB as legacy UI.
+
+The public contracts live in `otrios_interfaces::oib`, also reexported as
+`otrios_sdk::oib` with the SDK's `oib` feature. Application authoring uses
+`AppUi::with_oib`, `NamedOibTarget` and the same shared layout builder as other
+apps. App-defined inspector choices are data; the runtime contains no slider-
+specific labels, colors or property names.
+
+`Client::edit_oib(&[(cell_id, Some(value))])` and
+`StateAdapter::edit_oib` use the same typed operation as the inspector. `None`
+causally clears an instance override. Only one issued OIB batch is retained per
+writer; wait for confirmation before submitting another. A batch has at most
+16 distinct cells. Observed leaf snapshots are captured before issuing it.
+
+The new request is tag 37 in state protocol **v21**: u64 writer sequence followed
+by a bounded blob containing the canonical FlexBuffers vector of `Change` values.
+Each change contains a stable u64 cell ID, optional typed value and the observed
+canonical Merkle leaf. The authority checks observed context against its retained
+context, then assigns against that observation and joins concurrent values. It
+does not turn a stale observation into a write against the newest authority head.
+
+The collection's existing Canvas root adds branch 4:
+
+| Path | Contents |
+| --- | --- |
+| `[4, 0]` | Immutable owning UI reference, signed seed descriptor and SHA-256 of its canonical admitted UI |
+| `[4, 1, <13 base-32 digits of CellId>]` | Draft causal property register |
+| `[4, 2, <13 base-32 digits of CellId>]` | Active resolved property register |
+| `[4, 3]` | Active generation/root, source draft hash, conflict IDs and bounded error |
+
+Cell paths have depth 15 and fanout at most 32. The current implementation stores
+the fixed descriptor table once in metadata instead of at every cell. Clients
+receive changed Merkle cells; compiled layout bytes remain derived from their
+verified package. The Canvas checkpoint, append journal and writer receipts cover
+UI changes and ordinary app edits in one publication root.
+
+Admin coverage includes the draft. Other participants receive metadata, active
+cells and bounded status, excluding conflicting draft values. A role change
+invalidates the admitted grant and drops its private mount. The stable opening
+release-control v1 envelope, shared WebSocket and release discovery path remain
+independent of the new state codec.
+
+O1 admits at most 16 definitions, 64 authored objects, 64 editable cells, 8
+inspector suggestions per cell and 24 KiB of encoded seed descriptors. The draft
+branch is bounded at 64 KiB, including causal metadata. Text properties are at
+most 96 UTF-8 bytes; numeric property values must be finite in 0..1000. Compiled
+geometry, layout bytes, expanded scene/control counts and both supported logical
+orientations must also qualify before activation. Existing Merkle actor/context,
+message, receipt and journal limits continue to apply.
+
+## Current boundaries
+
+The graph and bindings are fixed by the signed seed. Creating/deleting instances,
+reparenting, new code connections, arbitrary guest UI mutation imports and seed
+rebasing are not implemented. An incompatible seed reports unavailable retained
+UI rather than silently discarding its overrides. Resetting one property is an
+ordinary causal edit; code rollback never restores old app data.
+
+The inspector currently offers app-authored choices. The typed client API accepts
+other values within the admitted property type and limits. A general free-text
+property editor remains separate UI work.
+
+**Portable data export/replacement for Live UI is unavailable in O1.** Its
+current codec does not yet include the OIB
+namespace, so the authority refuses the entire transfer instead of omitting UI
+state. Other apps retain their existing portable transfers. Signed app sharing
+continues to contain immutable code/seeds only.
+
+Runtime implementation and tests remain under LGPL-3.0-only in
+`crates/otrios-core`. Contracts, SDK declarations, app authoring and tools retain
+their Apache-2.0 boundaries. No dependencies, identities, trust roots or services
+are added by O1.

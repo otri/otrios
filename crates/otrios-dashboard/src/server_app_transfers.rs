@@ -306,6 +306,9 @@ impl Hub {
             .ok_or("Installed catalog unavailable")?;
         let mut packages = BTreeMap::<String, &Package>::new();
         for package in bundle.packages.values().filter(|p| p.policy.app == app) {
+            if canvas::decode_ui(&package.ui).is_ok_and(|ui| canvas::oib::seed(&ui).is_some()) {
+                return Err("Live UI data transfers are not available yet".into());
+            }
             if package.aggregate_view
                 || self
                     .collector

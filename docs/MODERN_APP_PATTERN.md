@@ -5,6 +5,10 @@ This describes the implemented app cutover build. Deployment and physical frame
 acceptance are recorded separately; source changes alone do not prove that a
 running device has crossed the boundary.
 
+[OIB O1](OIB.md) implements fixed named components, per-instance overrides and
+Space-scoped live CRDT property edits. [RFC 0029](rfcs/0029-live-oib-ui.md) also
+describes later graph editing and main-class APIs, which remain design targets.
+
 ## One app runtime
 
 ```text
@@ -86,7 +90,8 @@ mirror.
 
 The UI format has independently versioned schemas: v2 typed fields, v3 text
 panning, v4 documents, v5 Brass Relay and v6 motion stages. The current state
-wire protocol is v8; the release-control opening envelope remains v1. Typed
+wire protocol is v21; the release-control opening envelope remains v1. Canvas UI
+v8 adds the bounded OIB seed and inspector operations. Typed
 state supports bounded numeric, text, boolean, color and series values with
 fixed field types and per-field write policy. The authority validates losing
 operations as well as selected values.

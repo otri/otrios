@@ -65,6 +65,7 @@ fn fixture(editable: bool) -> Client {
                     actor: [1; 32],
                     collection: "a".repeat(32),
                     editable,
+                    ui_editable: false,
                     comments: false,
                     moderate: false,
                 }),
