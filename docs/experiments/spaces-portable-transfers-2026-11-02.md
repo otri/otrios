@@ -6,11 +6,11 @@ qualification campaign for the combined [RFC 0028](../rfcs/0028-spaces-map-shari
 scope. The [aggregate record](data/spaces-transfers-2026-11-02/acceptance.json)
 contains the requirement audit and technical results, without private inventories.
 
-The final implementation is pushed at `5a5a86bbdccff490734c15d26f1838ad9867ba26` on
+The combined campaign implementation is pushed at `5a5a86bbdccff490734c15d26f1838ad9867ba26` on
 `feat/spaces-portable-transfers`. It preserves the retained-data/admin-moves
 histories and includes current `main`. Before cutover, authority and native ran
 `50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c`
-with state v19. The final active signed release is
+with state v19. The combined campaign completed on signed release
 `ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2`,
 using state v20, Spaces envelope v5, registry OTSP9 and opening control v1.
 
@@ -270,3 +270,42 @@ and the verified compatible fallback remain private in the rollback kits.
 All RFC requirements have corresponding evidence in the aggregate completion
 audit. Final documentation-only edits preserve the implementation fingerprint.
 These UI/process checks do not establish Linux shared-memory IPC.
+
+## Remove Data checkbox follow-up
+
+A reported Delete App control appeared unable to toggle. Its local action already
+changed the deletion choice, but both Unicode circle indicators fell back to the
+same missing glyph. Its semantic state also remained unchecked and the browser
+presented it as an ordinary button. Delete App and Delete Space now share a drawn
+24-pixel checkbox, with a clear empty/checked appearance, the real checked state
+and the browser checkbox role. It remains off by default; toggling stages a local
+choice, Cancel resets it, and only Delete sends the reviewed management command.
+
+The [follow-up evidence](data/spaces-transfers-2026-11-02/remove-data-checkbox.json)
+records signed release `698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4`, qualified source
+`dff9602401da49669239ed5bd245af627f14295f`, full repository checks, the exact-Wasm
+browser run, physical Frame acceptance and preservation audit. The focused
+regression covers box/label pointer hits and accessible activation in both deletion
+panels. The full check passed all 39 shared UI and 32 real-authority process cases.
+A subsequent test-only commit waits for the dialog before its initial assertion;
+the canonical builds before and after that change produced identical signed bytes.
+
+Real Chromium mouse input checked the option, Space unchecked it, and inspected
+rendered images show both states. The integrated driver also passed default keep,
+cancel/reset, exact restore and checked removal using disposable data. On the
+physical Frame, two calibrated evdev taps each caused a fresh UI epoch; Cancel
+and Done returned to the map without changing metadata. This is synthetic device
+input, not observed human finger input; no Frame pixels were exported.
+
+![Checked Remove Data](data/spaces-transfers-2026-11-02/remove-data-checked.png)
+
+![Unchecked Remove Data](data/spaces-transfers-2026-11-02/remove-data-unchecked.png)
+
+The paired private backup verified 273 files. All 57 current non-collector payload
+files, Space metadata, credentials, identity, calibration and collector binding
+remain unchanged. All signed app and catalog bytes are identical to the preceding
+release. The public host probe passed 173 checks; native/authority release and
+readiness match, and monitoring succeeded. State v20, Spaces v5, OTSP9 and opening
+control v1 are unchanged. Existing compatible rollback/migration evidence applies;
+no data snapshot was restored. Safari acceptance above describes the combined
+campaign, while this follow-up's real browser acceptance used Chromium.

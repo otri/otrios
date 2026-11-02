@@ -14,6 +14,9 @@ GLES2/input checks and an OTSP6-compatible code rollback. The combined
 retained data, scoped app/data moves, signed app sharing/import and portable
 export/replacement. It records state v20/OTSP9 deployment, Safari and physical
 Frame acceptance, compatible code rollback and preservation of existing content.
+The same record includes the subsequent Remove Data checkbox correction, with
+real mouse/keyboard state changes, calibrated Frame cancellation and unchanged
+confirmed data.
 
 [Standalone app bundles](rfcs/0025-standalone-app-bundles.md) install independently
 of the host source registry. The [Frame qualification](experiments/app-bundle-frame-2026-10-29.md)

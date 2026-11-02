@@ -1,0 +1,133 @@
+{
+  "status": "validated-and-deployed",
+  "date": "2026-11-02",
+  "candidate": {
+    "passed": true,
+    "release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+    "previous_release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "source": "dff9602401da49669239ed5bd245af627f14295f",
+    "source_fingerprint": "e94c01d8716a5a3a890491434228e2a9a79a2d3839776b1edf04047e4e63c4ad",
+    "wasm_sha256": "6888b482d3859d8cb42d197cb8b2e515c815548c1a2d1c7cc1c4068b9124fd6e",
+    "native_sha256": "8b400d5a2e40c8b5c337e3c6161e85f4b87d46c72d35baab415bc6cec33b0083",
+    "signed_closure_verified": true,
+    "catalog_and_all_signed_app_bytes_unchanged": true,
+    "state_protocol": "otrios-canvas-sync-v20"
+  },
+  "full_check": {
+    "command": "bash scripts/check.sh",
+    "exit_code": 0,
+    "source": "9efe48b62733972968f0a3d8b2f7af6a07b4fc3b",
+    "shared_ui_cases": 39,
+    "real_authority_process_cases": 32,
+    "ordinary_process_scaffolds_are_acceptance": false,
+    "initial_sandbox_socket_failure": "rerun outside network sandbox; complete check passed"
+  },
+  "test_only_followup": {
+    "source": "dff9602401da49669239ed5bd245af627f14295f",
+    "change": "Wait for the dialog before inspecting its initial checkbox state",
+    "signed_release_and_product_artifacts_identical_to_full_check_candidate": true
+  },
+  "canonical_signed_build_exit_code": 0,
+  "browser": {
+    "passed": true,
+    "source": "dff9602401da49669239ed5bd245af627f14295f",
+    "source_dirty": false,
+    "release": "789cc6a950751db039dc3f6d788fc9f8190532594492c02f3a86fce4ec5f008b",
+    "authority_sha256": "711804d6f00a0d69f120dc015ccccad3df81a3df27676601936774f3c6785abb",
+    "wasm_sha256": "6888b482d3859d8cb42d197cb8b2e515c815548c1a2d1c7cc1c4068b9124fd6e",
+    "default_keep_data": true,
+    "cancel_clears_remove_data": true,
+    "visible_checkbox_and_accessible_checked_state": true,
+    "exact_identity_restore": true,
+    "checked_remove_data": true,
+    "deleted_space_recovery": true,
+    "silent_success": true,
+    "runtime_errors": []
+  },
+  "browser_driver_exit_code": 0,
+  "checked_and_unchecked_rendered_images_inspected": true,
+  "native": {
+    "passed": true,
+    "release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+    "actual_native_runtime_and_ui_match": true,
+    "checkbox_toggle_count": 2,
+    "each_toggle_advanced_ui_epoch": true,
+    "cancel_and_done_returned_to_map": true,
+    "metadata_unchanged": true,
+    "calibration_unchanged": true,
+    "pixels_exported": false,
+    "human_touch_observation": false,
+    "input": "synthetic evdev through calibrated physical-device reader",
+    "legacy_named_helper_failed_before_input": true
+  },
+  "readiness": {
+    "passed": true,
+    "release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+    "state_protocol": "otrios-canvas-sync-v20",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+      "runtime_release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 20.039
+  },
+  "preservation": {
+    "passed": true,
+    "current_metadata_preserved": true,
+    "confirmed_noncollector_payload_files_byte_identical": 57,
+    "credentials_identity_calibration_collector_binding_preserved": true,
+    "registry_framing": "OTSP9",
+    "data_restored": false,
+    "private_metadata_exported": false
+  },
+  "promotion": {
+    "passed": true,
+    "release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+    "source_pin": "dff9602401da49669239ed5bd245af627f14295f",
+    "mac_and_frame_pointers_match": true,
+    "previous_control_files_preserved_privately": true
+  },
+  "backup": {
+    "backed_up": true,
+    "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "files_verified": 273,
+    "private_mac_backup": true,
+    "private_inventory_exported": false,
+    "services_restored": true
+  },
+  "public_host_checks": 173,
+  "production_password_login_tested": false,
+  "storage_and_protocol_changes": false,
+  "data_restored": false
+}

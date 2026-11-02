@@ -359,5 +359,10 @@
     "authority_restarted": false,
     "data_restored": false,
     "elapsed_seconds": 20.239
+  },
+  "latest_followup": {
+    "record": "remove-data-checkbox.json",
+    "release": "698d1693021dfdadf87ac4bed941e9b2ddcbd763c7b1bf195f8a4db3130c2ba4",
+    "source": "dff9602401da49669239ed5bd245af627f14295f"
   }
 }
