@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Retained text strips: immutable local glyphs, moving viewport, conservative culling.
+//! Retained UI primitives: immutable local geometry/glyphs and moving, clipped views.
 use super::{
     font::Font,
     render::{Clip, Mesh, RetainedPaint},
@@ -20,6 +20,7 @@ pub struct TextPresentation {
 struct Run {
     draw: usize,
     id: u32,
+    geometry: bool,
     right: Vec<f32>,
     left: Vec<f32>,
     top: f32,
@@ -101,7 +102,8 @@ impl TextPresentation {
             let mut runs = Vec::new();
             // Oversized documents retain the existing visible-only bounded path.
             // Input fields are limited to 256 bytes; normal strips fit comfortably.
-            if glyphs <= 16384 {
+            let mut retain = glyphs <= 16384;
+            if retain {
                 mesh.glyph_vertices.reserve(glyphs * 64);
                 let mut paint = RetainedPaint { runs: &mut runs };
                 mesh.paint(
@@ -117,17 +119,45 @@ impl TextPresentation {
                     Some(font),
                     Some(&mut paint),
                 );
-            } else {
+                // Native retained-view ranges admit at most 65,536 vertices.
+                // Large admitted scenes keep the existing clipped, fixed-
+                // placement path instead of producing out-of-contract views.
+                retain = mesh.vertices.len() / 6 <= 65536;
+            }
+            if !retain {
                 mesh = super::render_scene_with_font(scene, font);
-                self.key = None;
+                runs.clear();
             }
             let mut styles = vec![0.; mesh.draws.len() / 3];
             self.runs = runs
                 .into_iter()
                 .map(|(draw, id)| {
-                    styles[draw] = positions.get(&id).map_or(0., |p| p[6]);
                     let first = mesh.draws[draw * 3 + 1] as usize;
                     let count = mesh.draws[draw * 3 + 2] as usize;
+                    if mesh.draws[draw * 3] == 0 {
+                        let mut bounds = [
+                            f32::INFINITY,
+                            f32::INFINITY,
+                            f32::NEG_INFINITY,
+                            f32::NEG_INFINITY,
+                        ];
+                        for v in mesh.vertices[first * 6..(first + count) * 6].chunks_exact(6) {
+                            bounds[0] = bounds[0].min(v[0]);
+                            bounds[1] = bounds[1].min(v[1]);
+                            bounds[2] = bounds[2].max(v[0]);
+                            bounds[3] = bounds[3].max(v[1]);
+                        }
+                        return Run {
+                            draw,
+                            id,
+                            geometry: true,
+                            left: vec![bounds[0]],
+                            right: vec![bounds[2]],
+                            top: bounds[1],
+                            bottom: bounds[3],
+                        };
+                    }
+                    styles[draw] = positions.get(&id).map_or(0., |p| p[6]);
                     let mut right = Vec::new();
                     let mut left = Vec::new();
                     let mut top = f32::INFINITY;
@@ -149,6 +179,7 @@ impl TextPresentation {
                     Run {
                         draw,
                         id,
+                        geometry: false,
                         right,
                         left,
                         top,
@@ -165,7 +196,7 @@ impl TextPresentation {
                     * 4;
             }
             self.font = font.hash().into();
-            self.key = (glyphs <= 16384).then_some(key);
+            self.key = retain.then_some(key);
             self.generation = self.generation.wrapping_add(1);
         }
         if let Some(p) = profile.as_deref_mut() {
@@ -178,6 +209,22 @@ impl TextPresentation {
                 continue;
             };
             let visible = r > l && b > t && run.bottom + y > t && run.top + y < b;
+            if run.geometry {
+                // A zero geometry range is the legacy fixed-placement sentinel.
+                // Retain its admitted range and use an empty clip to hide it.
+                let visible = visible && run.right[0] + x > l && run.left[0] + x < r;
+                views[run.draw * 8..run.draw * 8 + 8].copy_from_slice(&[
+                    self.mesh.draws[run.draw * 3 + 1] as f32,
+                    self.mesh.draws[run.draw * 3 + 2] as f32,
+                    x,
+                    y,
+                    l,
+                    t,
+                    if visible { r } else { l },
+                    b,
+                ]);
+                continue;
+            }
             let start = run.right.partition_point(|right| *right <= l - x);
             let end = run.left.partition_point(|left| *left < r - x);
             let count = if visible {
@@ -243,6 +290,10 @@ fn normalize(
     let y = parent[1] + f.y * factor;
     let mut clip = clip;
     let mut factor = factor;
+    // Input clipping/semantics are rebuilt with the scene, independently from
+    // painted content. Offscreen controls must not invalidate retained geometry.
+    node.responder = None;
+    node.semantics = None;
     match &node.primitive {
         Primitive::Text { value, scale, .. } => {
             *glyphs += value.chars().count();
@@ -272,6 +323,24 @@ fn normalize(
             }
         }
         _ => {}
+    }
+    if !matches!(
+        node.primitive,
+        Primitive::Canvas { .. } | Primitive::Viewport { .. } | Primitive::Text { .. }
+    ) {
+        out.insert(node.id, [x, y, clip[0], clip[1], clip[2], clip[3], 0.]);
+    }
+    // Placement and container clipping are carried by views. In particular,
+    // clipping a partially visible button changes its semantic Canvas bounds,
+    // without changing any painted content. Viewport scales remain in the key.
+    node.frame.x = 0.;
+    node.frame.y = 0.;
+    if matches!(
+        node.primitive,
+        Primitive::Canvas { .. } | Primitive::Viewport { .. }
+    ) {
+        node.frame.width = 0.;
+        node.frame.height = 0.;
     }
     for child in &mut node.children {
         normalize(child, [x, y], factor, clip, out, glyphs, scales);
@@ -362,5 +431,76 @@ mod tests {
             scaled.mesh.glyph_vertices, original,
             "Held snapshots never change"
         );
+    }
+
+    #[test]
+    fn moving_shapes_keep_local_vertices_and_clip_offscreen_runs() {
+        use otrios_interfaces::scene::{Action, TouchResponder};
+        let font = super::super::font::test_font();
+        let make = |x: f32, size: f32, color: [u8; 4]| {
+            let mut shape = super::super::components::node(
+                2,
+                Rect::new(x, 4., size, size),
+                Primitive::Circle { color },
+            );
+            shape.responder = Some(TouchResponder::Activate(Action::AppEvent(1)));
+            Scene::new(canvas(
+                0,
+                Rect::new(0., 0., 100., 60.),
+                vec![canvas(1, Rect::new(10., 10., 40., 30.), vec![shape])],
+            ))
+            .unwrap()
+        };
+        let mut renderer = TextPresentation::default();
+        let before = renderer.compose(&make(0., 20., WHITE), &font);
+        let original = before.mesh.vertices.clone();
+        let partial = renderer.compose(&make(30., 20., WHITE), &font);
+        assert!(Arc::ptr_eq(&before.mesh, &partial.mesh));
+        assert_eq!(&partial.views[2..], &[40., 14., 10., 10., 50., 40.]);
+        assert_eq!(partial.views[1] as u32, partial.mesh.draws[2]);
+        let hidden = renderer.compose(&make(50., 20., WHITE), &font);
+        assert!(Arc::ptr_eq(&before.mesh, &hidden.mesh));
+        assert!(
+            hidden.views[1] > 0.,
+            "Do not use the legacy fixed-placement sentinel"
+        );
+        assert_eq!(
+            hidden.views[4], hidden.views[6],
+            "Offscreen shapes have an empty clip"
+        );
+        let resized = renderer.compose(&make(30., 22., WHITE), &font);
+        assert!(!Arc::ptr_eq(&before.mesh, &resized.mesh));
+        let recolored = renderer.compose(&make(30., 22., [1, 2, 3, 255]), &font);
+        assert!(!Arc::ptr_eq(&resized.mesh, &recolored.mesh));
+        assert_eq!(before.mesh.vertices, original);
+    }
+
+    #[test]
+    fn oversized_geometry_keeps_the_bounded_legacy_view_contract() {
+        let font = super::super::font::test_font();
+        let make = |x| {
+            let shapes = (1..=430)
+                .map(|id| {
+                    super::super::components::node(
+                        id,
+                        Rect::new(x, 10., 20., 20.),
+                        Primitive::Superellipse {
+                            radius: 5.,
+                            exponent: 4.,
+                            color: WHITE,
+                        },
+                    )
+                })
+                .collect();
+            Scene::new(canvas(0, Rect::new(0., 0., 200., 100.), shapes)).unwrap()
+        };
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&make(0.), &font);
+        assert!(first.mesh.vertices.len() / 6 > 65536);
+        assert!(first.views.is_empty());
+        let moved = renderer.compose(&make(12.), &font);
+        assert!(!Arc::ptr_eq(&first.mesh, &moved.mesh));
+        assert!(moved.views.is_empty());
+        assert_eq!(moved.mesh.vertices[0] - first.mesh.vertices[0], 12.);
     }
 }

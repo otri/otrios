@@ -35,6 +35,29 @@ viewers. Editors receive status and affected property identities. Layout activat
 waits for held gestures and unconfirmed app edits; it retains the current mount,
 state, responder identities and renderer resources.
 
+## Local rendering and input
+
+The inspector scrolls through a local viewport offset and clipping. Its geometry
+and glyph buffers stay resident while scrolling; frames update placement and clip
+ranges. Visible semantic hit rectangles are clipped independently. Scrolling never
+writes shared OIB data. The runtime still traverses scene placements and updates
+hit regions on the CPU; it does not retessellate the panel or upload its mesh for
+each scroll sample.
+
+The preview and inspector use independent, ordered retained layers. Changing a
+slider percentage does not rebuild the inspector. OIB display strings and
+resource diagnostics are cached by the admitted OIB root and pending UI intent;
+ordinary app writes do not produce a misleading “Saving UI change” indicator.
+The native owner yields between bounded input turns so continuous dragging cannot
+starve presentation or state sync. Property intents retain client type/identity
+checks; authority validation, durable publication and received-state validation
+remain authoritative. A property delta does not repeat package admission.
+
+Very large scenes that exceed the existing 65,536-vertex retained-view range use
+the clipped fixed-placement renderer; this bound does not affect the Live UI
+panel. The [Frame input performance record](experiments/frame-oib-input-2026-11-02.md)
+contains measurements and remaining limits.
+
 ## Contracts and storage
 
 `Presentation::Oib(Seed)` in Canvas UI v8 contains `main_oib`, `main_class`, named

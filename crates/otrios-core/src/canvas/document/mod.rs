@@ -73,8 +73,8 @@ pub struct Draw {
 }
 impl Draw {
     /// Every run in a block chunk uses the same placement/clip. Geometry is
-    /// explicitly placed with its full triangle range; ordinary UI geometry
-    /// keeps the pre-existing zero-view contract.
+    /// explicitly placed with its full triangle range; retained UI geometry
+    /// uses the same contract, with zero views reserved for legacy placement.
     pub fn views(&self) -> Vec<f32> {
         self.chunk
             .mesh

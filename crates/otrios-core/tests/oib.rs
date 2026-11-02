@@ -199,6 +199,18 @@ fn invalid_and_unauthorized_edits_keep_the_active_ui_and_receipts_atomic() {
     assert!(admin.edit_oib(&[(100, Some(Value::Number(1.)))]).is_err());
     assert!(
         admin
+            .edit_oib(&[
+                (100, Some(Value::Text("one".into()))),
+                (100, Some(Value::Text("two".into()))),
+            ])
+            .is_err()
+    );
+    assert!(
+        admin.confirmed(),
+        "Rejected local intents cannot issue a flight"
+    );
+    assert!(
+        admin
             .edit_oib(&[(9999, Some(Value::Text("unknown".into())))])
             .is_err()
     );
@@ -490,4 +502,94 @@ fn inspector_scroll_is_local_and_visible_buttons_remain_clickable() {
             .iter()
             .all(|p| p.origin[1] >= 0.)
     );
+}
+
+#[test]
+fn inspector_panning_retains_uploaded_content_including_initially_hidden_buttons() {
+    use std::sync::Arc;
+    let (ui, mut doc) = setup();
+    let (mut client, _) = mounted_client(&ui, &mut doc);
+    let font = otrios_core::dashboard::font::Font::from_zstd(
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+    )
+    .unwrap();
+    let mut composer = presentation::Composer::default();
+    let before = composer.compose(&mut client, &font).unwrap().clone();
+    let vertices = before.base.mesh.vertices.clone();
+    let glyphs = before.base.mesh.glyph_vertices.clone();
+    let info = client.resource_usage().oib.unwrap();
+    for _ in 0..30 {
+        client.scroll_map(client.epoch(), 20.).unwrap();
+        let frame = composer.compose(&mut client, &font).unwrap();
+        assert!(
+            Arc::ptr_eq(&before.base.mesh, &frame.base.mesh),
+            "Panning must only update placements and clips"
+        );
+        assert_eq!(before.revisions.content, frame.revisions.content);
+        assert!(Arc::ptr_eq(
+            &before.overlay.as_ref().unwrap().mesh,
+            &frame.overlay.as_ref().unwrap().mesh
+        ));
+        assert_eq!(
+            client.resource_usage().oib.unwrap().properties,
+            info.properties
+        );
+    }
+    let after = composer.frame().unwrap();
+    assert_ne!(
+        before.overlay.as_ref().unwrap().views,
+        after.overlay.as_ref().unwrap().views
+    );
+    assert_eq!(
+        before.base.mesh.vertices, vertices,
+        "Pinned frames stay immutable"
+    );
+    assert_eq!(before.base.mesh.glyph_vertices, glyphs);
+    // At the lower bound the previously hidden brightness controls are drawn,
+    // clipped and interactive, without another content generation.
+    let scene = client.scene().unwrap();
+    assert!(scene.controls().iter().any(|c| {
+        c.node
+            .semantics
+            .as_ref()
+            .is_some_and(|s| s.label == "Instance: brightness Spacing change")
+    }));
+    assert!(
+        after
+            .base
+            .views
+            .chunks_exact(8)
+            .any(|v| v[1] > 0. && v[6] > v[4] && v[7] > v[5])
+    );
+}
+
+#[test]
+fn slider_feedback_keeps_inspector_content_and_saving_status_unchanged() {
+    use std::sync::Arc;
+    let (ui, mut doc) = setup();
+    let (mut client, _) = mounted_client(&ui, &mut doc);
+    let font = otrios_core::dashboard::font::Font::from_zstd(
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+    )
+    .unwrap();
+    let mut composer = presentation::Composer::default();
+    let before = composer.compose(&mut client, &font).unwrap().clone();
+    let status = client.resource_usage().oib.unwrap().status;
+    let control = ui
+        .handlers
+        .iter()
+        .find(|h| h.fields == [1])
+        .unwrap()
+        .control;
+    client.event(client.epoch(), control, 650, 0).unwrap();
+    let after = composer.compose(&mut client, &font).unwrap();
+    assert!(!Arc::ptr_eq(&before.base.mesh, &after.base.mesh));
+    assert!(Arc::ptr_eq(
+        &before.overlay.as_ref().unwrap().mesh,
+        &after.overlay.as_ref().unwrap().mesh
+    ));
+    assert_eq!(client.resource_usage().oib.unwrap().status, status);
+    assert_eq!(client.typed_value(1).unwrap(), Value::Number(650.));
 }

@@ -1246,17 +1246,13 @@ impl StateAdapter {
             self.slot = next.receipt(&self.writer)?.map(|(slot, _)| slot);
         }
         if let Some(ui) = &self.doc.oib_ui {
-            if self
-                .doc
-                .tree
-                .subtree(&[4])
-                .ok()
-                .zip(next.tree.subtree(&[4]).ok())
-                .is_some_and(|(a, b)| a.hash() == b.hash())
-            {
-                next.oib_ui = Some(ui.clone());
-            } else {
+            if mounting {
                 next.configure_oib(ui)?;
+            } else {
+                // validate_changed already checked immutable seed identity and
+                // the active closure against this admitted UI. A property delta
+                // is not another package admission or seed migration.
+                next.oib_ui = Some(ui.clone());
             }
         }
         next.wall = self.doc.wall;

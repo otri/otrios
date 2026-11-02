@@ -129,3 +129,7 @@ required-features = ["canvas"]
 [[example]]
 name = "portable_data_fixtures"
 required-features = ["canvas"]
+
+[[example]]
+name = "oib_input_cost"
+required-features = ["canvas"]

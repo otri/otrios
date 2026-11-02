@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "release": "802dba22acd4be013d2d21109bcab12f86368b1b59644610391bc429f8583831",
+  "native_hash_verified": true,
+  "button_confirm_present_ms": [
+    749.9313619919121,
+    752.3498591035604,
+    748.6938221845776
+  ],
+  "active_generation": 28,
+  "presented_generation": 28,
+  "accent_restored": true,
+  "mount_retained": true,
+  "input_released": true
+}

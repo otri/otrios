@@ -151,6 +151,7 @@ impl Client {
         let Some(mount) = &mut self.active else {
             return Ok(false);
         };
+        mount.sync_panel_scroll()?;
         if let Some(scroll) = &mut mount.panel_scroll {
             let before = scroll.info().offset;
             scroll.set_offset([0., before[1] + delta]);

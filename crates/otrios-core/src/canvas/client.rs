@@ -31,13 +31,18 @@ struct OrderDrag {
     position: [f32; 2],
     moving: bool,
 }
+struct OibView {
+    root: crate::merkle::Hash,
+    saving: bool,
+    info: super::oib::Info,
+}
 struct Mount {
     epoch: u32,
     viewport: [f32; 2],
     ui: Ui,
     layout: Layout,
     oib_generation: Option<u64>,
-    oib_status: String,
+    oib_view: Option<OibView>,
     doc: StateAdapter,
     behavior: Option<Behavior>,
     input: InputRouter,
@@ -1899,21 +1904,10 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
-            oib: self.active.as_ref().and_then(|m| {
-                let seed = super::oib::seed(&m.ui)?;
-                let status = m.doc.oib_generation()?;
-                Some(super::oib::Info {
-                    active_generation: status,
-                    presented_generation: m.oib_generation.unwrap_or(0),
-                    conflicts: m.doc.oib_conflicts(),
-                    status: m.doc.oib_status_text(),
-                    properties: seed
-                        .cells
-                        .iter()
-                        .map(|c| (c.id, m.doc.oib_property_text(c.id)))
-                        .collect(),
-                })
-            }),
+            oib: self
+                .active
+                .as_ref()
+                .and_then(|m| m.oib_view.as_ref().map(|view| view.info.clone())),
             chat: self.chat_info(),
             sampled_monotonic_ms: self.wire_clock,
             dispatch: self.dispatch_usage(),
@@ -2695,6 +2689,7 @@ impl Client {
         }
         let changed = mount.doc.edit_oib(changes)?;
         if changed {
+            mount.refresh()?;
             mount.invalidate();
         }
         Ok(changed)
@@ -2750,6 +2745,7 @@ impl Client {
                 }
                 let changed = m.doc.oib_inspector_action(cell, action)?;
                 if changed {
+                    m.refresh()?;
                     m.invalidate();
                 }
                 return Ok(changed);
@@ -3162,6 +3158,13 @@ impl Client {
             Some(Presentation::Chat) => {
                 super::document::scene::split(scene, u32::from(super::chat::VIEWPORT)).map(Some)
             }
+            Some(Presentation::Oib(seed)) => {
+                // Numeric preview feedback and inspector content have different
+                // lifetimes. Use the existing ordered base/overlay resources so
+                // one changed percentage cannot upload the whole inspector.
+                super::document::scene::split_before(scene, u32::from(seed.inspector_viewport))
+                    .map(Some)
+            }
             _ => Ok(None),
         }
     }
@@ -3556,6 +3559,7 @@ impl Client {
             scrolled |= s.tick(now);
             self.host.scroll = s.info().offset[1];
         }
+        m.sync_panel_scroll()?;
         if let Some(s) = &mut m.panel_scroll {
             scrolled |= s.tick(now);
             self.host.panel_scroll = s.info().offset[1];
@@ -3776,6 +3780,9 @@ impl Mount {
             chat.prepare(self.viewport, self.keyboard.visible, self.font.clone());
         }
         self.layout_scene.take();
+        if let Some(scroll) = &mut self.panel_scroll {
+            scroll.bounds_dirty = true;
+        }
         if let Some(s) = &mut self.text_document {
             s.bounds_dirty = true;
         }
@@ -3785,9 +3792,22 @@ impl Mount {
     fn invalidate_presentation(&mut self) {
         self.scene.take();
     }
+    fn sync_panel_scroll(&mut self) -> Result<()> {
+        if self.panel_scroll.as_ref().is_some_and(|s| s.bounds_dirty) {
+            let scene = cached_layout(self)?;
+            self.panel_scroll
+                .as_mut()
+                .ok_or("Missing panel scroll")?
+                .sync(&scene)?;
+        }
+        Ok(())
+    }
     fn refresh(&mut self) -> Result<bool> {
-        let mut oib_changed = false;
-        if let Some(generation) = self.doc.oib_generation()
+        let mut oib_changed = self.refresh_oib_view()?;
+        if let Some(generation) = self
+            .oib_view
+            .as_ref()
+            .map(|view| view.info.active_generation)
             && self.oib_generation != Some(generation)
             && !self.input.active()
             && !self.panel_scroll.as_ref().is_some_and(|s| s.touching())
@@ -3800,18 +3820,12 @@ impl Mount {
                 return Err(error);
             }
             self.oib_generation = Some(generation);
+            if let Some(view) = &mut self.oib_view {
+                view.info.presented_generation = generation;
+            }
             self.invalidate();
             oib_changed = true;
         }
-        if super::oib::seed(&self.ui).is_some() {
-            let status = self.doc.oib_status_text();
-            if self.oib_status != status {
-                self.oib_status = status;
-                self.invalidate();
-                oib_changed = true;
-            }
-        }
-
         for (id, editor) in &mut self.editors {
             if let Value::Text(text) = self.doc.typed_value(*id)?
                 && editor.text() != text
@@ -3826,6 +3840,31 @@ impl Mount {
         self.visible = values;
         self.invalidate();
         Ok(true)
+    }
+    fn refresh_oib_view(&mut self) -> Result<bool> {
+        if super::oib::seed(&self.ui).is_none() {
+            return Ok(false);
+        }
+        let root = self.doc.oib_root().ok_or("Missing OIB state")?;
+        let saving = self.doc.oib_saving();
+        if self
+            .oib_view
+            .as_ref()
+            .is_some_and(|v| v.root == root && v.saving == saving)
+        {
+            return Ok(false);
+        }
+        let mut info = self.doc.oib_info()?;
+        info.presented_generation = self.oib_generation.unwrap_or(0);
+        let changed = self
+            .oib_view
+            .as_ref()
+            .is_none_or(|v| v.info.status != info.status || v.info.properties != info.properties);
+        self.oib_view = Some(OibView { root, saving, info });
+        if changed {
+            self.invalidate();
+        }
+        Ok(changed)
     }
 }
 struct Qualification {
@@ -4219,7 +4258,7 @@ fn qualify(
         ui,
         layout,
         oib_generation: None,
-        oib_status: String::new(),
+        oib_view: None,
         doc,
         behavior,
         input: InputRouter::default(),
@@ -4257,8 +4296,10 @@ fn qualify(
     if super::oib::seed(&m.ui).is_some() {
         m.layout = super::oib::compile(&m.ui, &m.doc.oib_active()?)?;
         m.oib_generation = m.doc.oib_generation();
+        m.refresh_oib_view()?;
     }
     m.visible = selected_values(&m)?;
+    m.sync_panel_scroll()?;
     resolve_scene(&m)?;
     Ok(m)
 }
@@ -4278,9 +4319,22 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
     let mut bindings = BTreeMap::new();
     for s in &m.ui.selectors {
         let value = if matches!(s.projection, Projection::OibStatus) {
-            Value::Text(m.doc.oib_status_text())
+            Value::Text(
+                m.oib_view
+                    .as_ref()
+                    .ok_or("Missing OIB view")?
+                    .info
+                    .status
+                    .clone(),
+            )
         } else if let Projection::OibCell { cell } = s.projection {
-            Value::Text(m.doc.oib_property_text(cell))
+            Value::Text(
+                m.oib_view
+                    .as_ref()
+                    .and_then(|v| v.info.properties.get(&cell))
+                    .ok_or("Missing OIB property view")?
+                    .clone(),
+            )
         } else if let Projection::KeyboardLabel { key } = s.projection {
             Value::Text(m.keyboard.label(key))
         } else if matches!(s.projection, Projection::ReorderLabel) {

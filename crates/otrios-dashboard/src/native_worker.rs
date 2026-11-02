@@ -621,7 +621,11 @@ pub(super) fn state_worker(
             thread::sleep(Duration::from_millis(stall_ms));
             next_stall = Instant::now() + Duration::from_secs(1);
         }
-        for event in input.try_iter() {
+        // A continuous touch stream must yield to state sync and renderer
+        // credit even when scene work is slower than the input sample rate.
+        // Keep every edge/sample in order; only bound this owner's work turn.
+        let input_started = Instant::now();
+        for event in input.try_iter().take(32) {
             match event {
                 Input::Stop => {
                     stopping.get_or_insert_with(Instant::now);
@@ -661,6 +665,9 @@ pub(super) fn state_worker(
                             .map_err(|e| e.to_string())?;
                     }
                 }
+            }
+            if input_started.elapsed() >= Duration::from_millis(4) {
+                break;
             }
         }
         let blocked = false;

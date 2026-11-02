@@ -96,10 +96,9 @@ impl Document {
             }],
         )
     }
-    fn oib_ui(&self) -> Result<Ui> {
+    fn oib_ui(&self) -> Result<&Ui> {
         self.oib_ui
-            .as_ref()
-            .map(|ui| ui.as_ref().clone())
+            .as_deref()
             .ok_or_else(|| "OIB package must be admitted before resolving".into())
     }
     fn oib_binding(&self) -> Result<Binding> {
@@ -119,8 +118,15 @@ impl Document {
         decode(&payload(&self.tree, &[4, 3])?)
     }
     pub fn oib_values(&self, branch: u64) -> Result<BTreeMap<u64, Option<Value>>> {
-        let binding = self.oib_binding()?;
-        let seed = &binding.seed;
+        // Admission already binds this immutable seed to the signed UI. Keep
+        // decoding the persisted binding for validation/recovery, not every read.
+        let binding;
+        let seed = if let Some(ui) = &self.oib_ui {
+            super::super::oib::seed(ui).ok_or("Missing OIB seed")?
+        } else {
+            binding = self.oib_binding()?;
+            &binding.seed
+        };
         let mut values = BTreeMap::new();
         for cell in &seed.cells {
             let leaf = self
@@ -256,7 +262,7 @@ impl Document {
             return Err("OIB change batch limit".into());
         }
         let ui = self.oib_ui()?;
-        let seed = super::super::oib::seed(&ui).ok_or("Missing OIB seed")?;
+        let seed = super::super::oib::seed(ui).ok_or("Missing OIB seed")?;
         let mut next = self.tree.clone();
         let mut seen = BTreeSet::new();
         for change in changes {
@@ -301,7 +307,7 @@ impl Document {
         let mut edits = Vec::new();
         if status.conflicts.is_empty() {
             let values = draft.oib_values(1)?;
-            match super::super::oib::compile(&ui, &values) {
+            match super::super::oib::compile(ui, &values) {
                 Ok(_) => {
                     status.generation = status
                         .generation
@@ -345,6 +351,29 @@ impl Document {
 }
 
 impl StateAdapter {
+    pub(in crate::canvas) fn oib_saving(&self) -> bool {
+        self.flight.as_ref().is_some_and(|f| !f.oib.is_empty())
+    }
+    pub(in crate::canvas) fn oib_root(&self) -> Option<merkle::Hash> {
+        self.doc.tree.subtree(&[4]).ok().map(|n| n.hash())
+    }
+    pub(in crate::canvas) fn oib_info(&self) -> Result<super::super::oib::Info> {
+        let ui = self.doc.oib_ui()?;
+        let seed = super::super::oib::seed(ui).ok_or("Missing OIB seed")?;
+        let status = self.doc.oib_status()?;
+        let values = self.doc.oib_values(2)?;
+        let mut properties = BTreeMap::new();
+        for cell in &seed.cells {
+            properties.insert(cell.id, property_text(seed, cell, &status, &values)?);
+        }
+        Ok(super::super::oib::Info {
+            active_generation: status.generation,
+            presented_generation: 0,
+            conflicts: status.conflicts.clone(),
+            status: self.oib_status_text(),
+            properties,
+        })
+    }
     pub fn oib_conflicts(&self) -> Vec<u64> {
         self.doc
             .oib_status()
@@ -353,32 +382,15 @@ impl StateAdapter {
     pub fn oib_property_text(&self, id: u64) -> String {
         let result = (|| -> Result<String> {
             let ui = self.doc.oib_ui()?;
-            let seed = super::super::oib::seed(&ui).ok_or("Missing OIB seed")?;
+            let seed = super::super::oib::seed(ui).ok_or("Missing OIB seed")?;
             let cell = seed
                 .cells
                 .iter()
                 .find(|c| c.id == id)
                 .ok_or("Unknown OIB property")?;
             let status = self.doc.oib_status()?;
-            if status.conflicts.contains(&id) {
-                return Ok(format!("{}: conflict", cell.name));
-            }
             let values = self.doc.oib_values(2)?;
-            let value = super::super::oib::effective(seed, &values, id)?;
-            let value = match value {
-                Value::Text(v) => v,
-                Value::Number(v) => format!("{v:.0}"),
-                Value::Color(c) => format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2]),
-                _ => String::new(),
-            };
-            let kind = if cell.inherit.is_none() {
-                "default"
-            } else if values[&id].is_some() {
-                "override"
-            } else {
-                "inherited"
-            };
-            Ok(format!("{}: {} ({})", cell.name, value, kind))
+            property_text(seed, cell, &status, &values)
         })();
         result.unwrap_or_else(|_| "UI unavailable".into())
     }
@@ -400,7 +412,7 @@ impl StateAdapter {
             )
         } else if status.error.is_some() {
             "Draft needs correction; active UI retained".into()
-        } else if !self.confirmed() {
+        } else if self.oib_saving() {
             "Saving UI change…".into()
         } else {
             format!("Live · revision {}", status.generation)
@@ -414,9 +426,13 @@ impl StateAdapter {
             return Err("OIB change batch limit".into());
         }
         let ui = self.doc.oib_ui()?;
-        let seed = super::super::oib::seed(&ui).ok_or("Missing OIB seed")?;
+        let seed = super::super::oib::seed(ui).ok_or("Missing OIB seed")?;
         let mut edits = Vec::new();
+        let mut seen = BTreeSet::new();
         for (id, value) in changes {
+            if !seen.insert(*id) {
+                return Err("Duplicate OIB cell edit".into());
+            }
             let cell = seed
                 .cells
                 .iter()
@@ -439,8 +455,10 @@ impl StateAdapter {
                     .map_err(err)?,
             });
         }
-        let mut candidate = self.doc.clone();
-        candidate.oib_write(self.writer, &edits)?;
+        // This is an intent, not an optimistic UI activation. Its observed
+        // registers come directly from the admitted replica; the authority
+        // compiles/validates the draft and journals the active result atomically.
+        // Repeating that work here only blocks delivery of the button release.
         self.flight = Some(Flight {
             sequence: self
                 .acknowledged
@@ -455,7 +473,7 @@ impl StateAdapter {
     }
     pub fn oib_inspector_action(&mut self, id: u64, action: InspectorAction) -> Result<bool> {
         let ui = self.doc.oib_ui()?;
-        let seed = super::super::oib::seed(&ui).ok_or("Missing OIB seed")?;
+        let seed = super::super::oib::seed(ui).ok_or("Missing OIB seed")?;
         let cell = seed
             .cells
             .iter()
@@ -480,4 +498,29 @@ impl StateAdapter {
         };
         self.edit_oib(&[(id, value)])
     }
+}
+
+fn property_text(
+    seed: &otrios_interfaces::oib::Seed,
+    cell: &otrios_interfaces::oib::Cell,
+    status: &Status,
+    values: &BTreeMap<u64, Option<Value>>,
+) -> Result<String> {
+    if status.conflicts.contains(&cell.id) {
+        return Ok(format!("{}: conflict", cell.name));
+    }
+    let value = match super::super::oib::effective(seed, values, cell.id)? {
+        Value::Text(v) => v,
+        Value::Number(v) => format!("{v:.0}"),
+        Value::Color(c) => format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2]),
+        _ => String::new(),
+    };
+    let kind = if cell.inherit.is_none() {
+        "default"
+    } else if values[&cell.id].is_some() {
+        "override"
+    } else {
+        "inherited"
+    };
+    Ok(format!("{}: {} ({})", cell.name, value, kind))
 }
