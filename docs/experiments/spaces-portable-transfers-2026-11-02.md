@@ -309,3 +309,33 @@ readiness match, and monitoring succeeded. State v20, Spaces v5, OTSP9 and openi
 control v1 are unchanged. Existing compatible rollback/migration evidence applies;
 no data snapshot was restored. Safari acceptance above describes the combined
 campaign, while this follow-up's real browser acceptance used Chromium.
+
+## Live UI iteration: scrolling, input pass-through and floating Edit
+
+The [live iteration record](data/spaces-transfers-2026-11-02/live-ui-iteration.json)
+identifies the accepted release `c5881166b5197d1772ef05ec0bec9472d580a025fe47f2b347580858c981fe42` from source `3206fb1da689d93e203a665c62b7a089812da431`.
+Add App, app/Space lists, move destinations and the complete native file picker
+scroll instead of using small pages. Large member/dataset batches retain only
+the paging required by current layout/control limits. Ordinary maps can show six
+Spaces within the existing sixteen-tile budget. `TouchResponder::PassThrough`
+leaves decorative fade/drag overlays out of hit testing and semantic activation;
+visible fragments of clipped controls remain interactive.
+
+Edit/Done floats over the fade. The scrolling viewport reaches the bottom edge,
+with an eighty-unit end spacer so final content clears the controls. There is no
+permanently reserved white footer. The live browser loaded the final release and
+its canvas bottom matched the 300-pixel window bottom exactly. Two calibrated
+physical Frame taps exercised floating Edit/Done without leaving the map. Aaron
+confirmed that scrolling and Monitoring clicks worked, then accepted the revised
+bottom-edge presentation. This is live acceptance, not an isolated-fixture claim.
+
+The initial runtime change passed the full repository check (244 core, 44 shared
+UI and 32 real-authority process cases). The subsequent footer had one focused
+regression check. An isolated populated-browser campaign had viewport/action
+timing timeouts and is not counted as acceptance. At Aaron's request it was
+replaced by the faster compile/sign/deploy/live-feedback loop. Broad builder
+preflight is now explicitly opt-in with `--checks`; AGENTS.md and the hosting
+guide record this default. No new data backup, inventory or preservation audit
+was run. Signed verification and compatible code rollback remain available.
+State v20 and persisted formats are unchanged. The watcher source pin names the accepted implementation; resume it after that
+exact SHA is reachable from the completed source push.

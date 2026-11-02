@@ -1,0 +1,69 @@
+{
+  "date": "2026-11-02",
+  "status": "deployed-and-accepted-live",
+  "release": "c5881166b5197d1772ef05ec0bec9472d580a025fe47f2b347580858c981fe42",
+  "source": "3206fb1da689d93e203a665c62b7a089812da431",
+  "preceding_live_iteration": "a274a7883fb230331ec3e0993e77a4e7360a109fac7cd79fe608c9220f7a9a08",
+  "wasm_sha256": "40308742dfb26c111434b51b97414141aef98f21048efecb9ba549815aee1beb",
+  "native_sha256": "bcf68924972eff727dfcc5809bcb0d0e135b52208bacd166a5ae7010177d1059",
+  "workflow": {
+    "live_first_default": true,
+    "broad_preflight_opt_in": "--checks",
+    "new_data_backup": false,
+    "data_inventory_or_preservation_audit": false
+  },
+  "earlier_repository_check": {
+    "exit_code": 0,
+    "scope": "Scrolling/pass-through runtime before the footer refinement and live-first tooling change",
+    "core_cases": 244,
+    "shared_ui_cases": 44,
+    "real_authority_process_cases": 32,
+    "workspace_process_scaffolds_are_acceptance": false
+  },
+  "focused_footer_check": {
+    "command": "cargo test -p otrios-core --features canvas --test spaces_ui a_partly_visible_app_launches",
+    "exit_code": 0,
+    "cases": 1
+  },
+  "compile_and_signed_deployment": {
+    "exit_code": 0,
+    "broad_preflight_suites_run": false,
+    "signature_and_closure_verification_retained": true
+  },
+  "isolated_populated_browser_campaign": {
+    "counted_as_acceptance": false,
+    "result": "Viewport/action timing timeouts; campaign discontinued after the user requested live-first acceptance"
+  },
+  "live_browser": {
+    "origin": "https://otrios.otri.ca",
+    "final_release_loaded": true,
+    "window_height_css": 300,
+    "canvas_bottom_css": 300,
+    "actor": "anonymous",
+    "agent_tab_closed": true
+  },
+  "live_native": {
+    "passed": true,
+    "release": "c5881166b5197d1772ef05ec0bec9472d580a025fe47f2b347580858c981fe42",
+    "floating_edit_done_taps": 2,
+    "each_tap_advanced_ui_epoch": true,
+    "remained_on_map": true,
+    "input": "synthetic evdev through calibrated physical-device reader",
+    "human_touch_observation": false,
+    "pixels_exported": false,
+    "data_audit_run": false
+  },
+  "human_live_feedback": {
+    "scrolling_and_monitoring_clicks_confirmed": true,
+    "floating_edit_and_bottom_edge_footer_accepted": true
+  },
+  "promotion": {
+    "passed": true,
+    "release": "c5881166b5197d1772ef05ec0bec9472d580a025fe47f2b347580858c981fe42",
+    "source_pin": "3206fb1da689d93e203a665c62b7a089812da431",
+    "mac_and_frame_pointers_match": true,
+    "previous_control_files_preserved_privately": true
+  },
+  "state_protocol": "otrios-canvas-sync-v20",
+  "state_protocol_or_storage_changed": false
+}

@@ -17,6 +17,9 @@ Frame acceptance, compatible code rollback and preservation of existing content.
 The same record includes the subsequent Remove Data checkbox correction, with
 real mouse/keyboard state changes, calibrated Frame cancellation and unchanged
 confirmed data.
+The later live UI iteration adds scrolling panels, input-transparent decoration,
+visible clipped hit targets and Edit floating over a fade at the window bottom.
+AGENTS.md now makes compile/deploy/live-feedback the default development loop.
 
 [Standalone app bundles](rfcs/0025-standalone-app-bundles.md) install independently
 of the host source registry. The [Frame qualification](experiments/app-bundle-frame-2026-10-29.md)
