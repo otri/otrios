@@ -160,6 +160,9 @@ impl Scene {
             p: [f32; 2],
             path: &mut Vec<Located<'a>>,
         ) -> bool {
+            if n.responder == Some(TouchResponder::PassThrough) {
+                return false;
+            }
             let origin = [origin[0] + n.frame.x * scale, origin[1] + n.frame.y * scale];
             let local = [(p[0] - origin[0]) / scale, (p[1] - origin[1]) / scale];
             if matches!(
@@ -207,6 +210,9 @@ impl Scene {
     }
     pub fn controls(&self) -> Vec<Located<'_>> {
         fn walk<'a>(n: &'a SceneNode, origin: [f32; 2], scale: f32, v: &mut Vec<Located<'a>>) {
+            if n.responder == Some(TouchResponder::PassThrough) {
+                return;
+            }
             let origin = [origin[0] + n.frame.x * scale, origin[1] + n.frame.y * scale];
             if n.semantics.is_some() {
                 v.push(Located {
@@ -222,6 +228,41 @@ impl Scene {
         let mut v = Vec::new();
         walk(self.root(), [0., 0.], 1., &mut v);
         v
+    }
+}
+
+/// Restrict semantic hit rectangles to the visible part of a scrolling surface.
+/// Move canvas children back by the same delta so painting stays in place.
+pub(crate) fn clip_controls(node: &mut SceneNode, parent: [f32; 2], bounds: [f32; 2]) {
+    let mut at = [parent[0] + node.frame.x, parent[1] + node.frame.y];
+    if node.semantics.is_some() {
+        let start = [at[0].max(0.), at[1].max(0.)];
+        let end = [
+            (at[0] + node.frame.width).min(bounds[0]),
+            (at[1] + node.frame.height).min(bounds[1]),
+        ];
+        if start[0] >= end[0] || start[1] >= end[1] {
+            node.semantics = None;
+            node.responder = None;
+        } else if matches!(node.primitive, Primitive::Canvas { .. }) {
+            let delta = [start[0] - at[0], start[1] - at[1]];
+            node.frame.x += delta[0];
+            node.frame.y += delta[1];
+            node.frame.width = end[0] - start[0];
+            node.frame.height = end[1] - start[1];
+            for child in &mut node.children {
+                child.frame.x -= delta[0];
+                child.frame.y -= delta[1];
+            }
+            at = start;
+        } else if start != at || end != [at[0] + node.frame.width, at[1] + node.frame.height] {
+            // Non-container primitives retain their paint geometry and pointer
+            // responder; do not advertise an offscreen assistive rectangle.
+            node.semantics = None;
+        }
+    }
+    for child in &mut node.children {
+        clip_controls(child, at, bounds);
     }
 }
 fn child_scale(n: &SceneNode, scale: f32) -> f32 {

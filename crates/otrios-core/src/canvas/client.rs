@@ -1000,7 +1000,12 @@ impl Client {
             }
             HostAction::Page(direction) => {
                 self.host.page = self.host.page.saturating_add_signed(isize::from(direction));
-                self.build_host(false)?;
+                if matches!(self.host.pane, Pane::Home | Pane::Spaces) {
+                    self.host.scroll = 0.;
+                } else {
+                    self.host.panel_scroll = 0.;
+                }
+                self.build_host(true)?;
             }
             HostAction::Launch(ui, state) => {
                 self.host_active = false;

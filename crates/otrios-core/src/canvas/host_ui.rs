@@ -11,7 +11,12 @@ pub(super) mod transfers;
 pub(super) use map::{Drag, DragKind};
 
 pub(super) const FIELD: a::StateField = a::StateField::text(1, "entry");
-const PAGE: usize = 4;
+const PAGE: usize = 6;
+// Recovery/member panels retain bounded batches only where rendering the whole
+// admitted list would exceed the scene/control budgets (128 rows per list).
+const PANEL_PAGE: usize = 16;
+// The native software keyboard shares the member form's serialized layout.
+const MEMBER_PAGE: usize = 8;
 
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub(super) enum Pane {

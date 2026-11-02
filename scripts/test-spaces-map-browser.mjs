@@ -2,6 +2,7 @@
 // Real isolated Chromium contexts against the disposable Space authority fixture.
 import assert from 'node:assert/strict';
 import {pngPixels} from './browser-pixels.mjs';
+import {chatViewport} from '../web/shared/viewport.mjs';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {readFile,mkdtemp,mkdir,writeFile,rm,stat} from 'node:fs/promises';
@@ -42,6 +43,7 @@ try {
  const selector=label=>'#controls button[aria-label='+JSON.stringify(label)+']';
  let clickSequence=0;
  const click=async(session,label)=>{const key=++clickSequence;await wait(session,`(()=>{const button=document.querySelector(${JSON.stringify(selector(label))}),previous=window.__spaceClick;if(!button||previous?.key!==${key}||previous.epoch!==button.dataset.epoch){window.__spaceClick={key:${key},epoch:button?.dataset.epoch,at:performance.now()};return false;}if(performance.now()-previous.at<120)return false;button.click();delete window.__spaceClick;return true;})()`);};
+ const settledBounds=async(session,label)=>{const key=++clickSequence;return wait(session,`(()=>{const button=document.querySelector(${JSON.stringify(selector(label))}),old=window.__spaceBounds;if(!button||old?.key!==${key}||old.epoch!==button.dataset.epoch){window.__spaceBounds={key:${key},epoch:button?.dataset.epoch,at:performance.now()};return false;}return performance.now()-old.at>120&&button.getBoundingClientRect().toJSON();})()`);};
  const press=async(session,label)=>{await wait(session,`!!document.querySelector(${JSON.stringify(selector(label))})`);const p=await evaluate(session,`(()=>{const r=document.querySelector(${JSON.stringify(selector(label))}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...p},session);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...p},session);};
  const shot=async(session,name)=>{assert(!await evaluate(session,"(()=>{const e=document.querySelector('#error');return e&&!e.hidden&&e.textContent})()"),'visible host error');await evaluate(session,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');const png=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(output+'/'+name+'.png',Buffer.from(png.data,'base64'));};
  if(fixture.populated){
@@ -91,6 +93,8 @@ try {
    await call('Emulation.setDeviceMetricsOverride',{width,height:700,deviceScaleFactor:1,mobile:false},a);
    await call('Emulation.setTouchEmulationEnabled',{enabled:touch,maxTouchPoints:1},a);
    await wait(a,'innerWidth==='+width);
+   await wait(a,`document.querySelector('#view').dataset.logicalSize===${JSON.stringify(chatViewport(width,700).join('x'))}`);
+   await settledBounds(a,'Done');
    await wait(a,scroll+'?.limit[1]>500');
    await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:100000},a);
    await wait(a,scroll+'?.offset[1]==='+scroll+'?.limit[1]');
@@ -116,8 +120,65 @@ try {
    assert.equal((await get()).spaces[0].id,fixture.space_b);
    reorderChecks.push({width,input:touch?'touch':'mouse',offscreen_destination:true,stationary_edge_scroll:true,stable_epoch:true});
   }
+  await click(a,'Done');
+  // A partly clipped Monitoring tile must launch through the painted edge fade.
+  for(const space of (await get()).spaces)await manage({type:'configure-space',space:space.id,name:space.name,layout:{width:6,height:1,background:space.layout.background}});
+  // Stack complete Spaces so Monitoring approaches the viewport through its bottom edge.
+  await manage({type:'place-space',space:fixture.space_a,before:fixture.space_b});
+  await call('Emulation.setDeviceMetricsOverride',{width:390,height:570,deviceScaleFactor:1,mobile:false},a);
+  await wait(a,'innerWidth===390&&innerHeight===570');
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:-100000},a);
+  await wait(a,scroll+'?.offset[1]===0&&'+scroll+'?.limit[1]>0');
+  const expectedMapSize=chatViewport(390,570).join('x');
+  for(const touch of [false,true]){
+   await wait(a,`document.querySelector('#view').dataset.logicalSize===${JSON.stringify(expectedMapSize)}`);
+   await call('Emulation.setTouchEmulationEnabled',{enabled:touch,maxTouchPoints:1},a);
+   const stage=await evaluate(a,"(()=>{const c=document.querySelector('#view'),r=c.getBoundingClientRect(),e=c.dataset.logicalSize.split('x').map(Number);return {bottom:r.top+(e[1]-80)*r.height/e[1],scale:r.height/e[1]};})()");
+   let rect;
+   for(let n=0;n<120;n++){
+    rect=await bounds('Monitoring');
+    if(rect&&rect.height>=16*stage.scale&&rect.bottom>=stage.bottom-1&&rect.height<144*stage.scale-1)break;
+    const before=(await evaluate(a,scroll)).offset[1];
+    await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:24*stage.scale},a);
+    await wait(a,scroll+'?.offset[1]>'+before);
+   }
+   await settledBounds(a,'Monitoring');rect=await bounds('Monitoring');
+   assert(rect&&rect.height>=16*stage.scale&&rect.height<144*stage.scale&&Math.abs(rect.bottom-stage.bottom)<1,'Monitoring intersects the fade and is partly clipped: '+JSON.stringify({rect,stage}));
+   const point={x:rect.x+rect.width/2,y:rect.bottom-8*stage.scale};
+   assert(point.y>=stage.bottom-32*stage.scale&&point.y<stage.bottom,'input lands inside the painted fade');
+   await shot(a,'monitoring-in-fade-'+(touch?'touch':'mouse'));
+   if(touch){await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:0,radiusX:1,radiusY:1,force:1}]},a);await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);}
+   else{await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},a);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},a);}
+   await wait(a,ui+"==='app:monitoring/ui'");
+   await click(a,'Back to OTriOS');await wait(a,ui+"==='app:spaces-host/ui'");
+  }
+  await call('Emulation.setTouchEmulationEnabled',{enabled:false},a);
+  await click(a,'Edit');await settledBounds(a,'Done');
+  for(let n=0;n<120&&!await bounds('Add app: Browser B');n++){
+   const before=(await evaluate(a,scroll)).offset[1];
+   await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:48},a);
+   await wait(a,scroll+'?.offset[1]>'+before);
+  }
+  await click(a,'Add app: Browser B');
+  await settledBounds(a,'Upload');
+  for(const label of ['Previous','Next'])assert(!await evaluate(a,`!!document.querySelector(${JSON.stringify(selector(label))})`));
+  const panel="JSON.parse(document.querySelector('#revision').dataset.runtimeResources).panel_scroll";
+  await wait(a,panel+'?.limit[1]>0');
+  const panelEpoch=await evaluate(a,`document.querySelector(${JSON.stringify(selector('Upload'))}).dataset.epoch`);
+  const initialChoices=await evaluate(a,"[...document.querySelectorAll('#controls button')].map(b=>b.getAttribute('aria-label'))");
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:195,y:400,deltaX:0,deltaY:100000},a);
+  await wait(a,panel+'?.offset[1]==='+panel+'?.limit[1]');
+  await settledBounds(a,'Close');
+  const bottomChoices=await evaluate(a,"[...document.querySelectorAll('#controls button')].map(b=>b.getAttribute('aria-label'))");
+  assert(bottomChoices.some(label=>label!=='Close'&&!initialChoices.includes(label)),'scroll reveals app choices beyond the initial rows');
+  await shot(a,'add-app-scroll-bottom');
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:195,y:400,deltaX:0,deltaY:-100000},a);
+  await wait(a,panel+'?.offset[1]===0');await settledBounds(a,'Upload');
+  assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Upload'))}).dataset.epoch`),panelEpoch,'panel scrolling preserves its mount');
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:195,y:400,deltaX:0,deltaY:100000},a);await wait(a,panel+'?.offset[1]==='+panel+'?.limit[1]');
+  await click(a,'Close');await click(a,'Done');
   assert.equal(errors.length,0,JSON.stringify(errors));
-  await writeFile(output+'/populated-acceptance.json',JSON.stringify({passed:true,spaces:4,apps:14,first_attempt_sign_in:true,sign_in_ms:signInMs,viewport_resize_preserves_sign_in:true,fixed_header_footer:true,fade_and_footer_pixels:true,scroll_samples:samples,reorder_checks:reorderChecks,source:fixture.source,source_dirty:fixture.source_dirty,wasm_sha256:fixture.wasm_sha256,runtime_errors:errors},null,2));
+  await writeFile(output+'/populated-acceptance.json',JSON.stringify({passed:true,spaces:4,apps:14,first_attempt_sign_in:true,sign_in_ms:signInMs,viewport_resize_preserves_sign_in:true,fixed_header_footer:true,fade_and_footer_pixels:true,monitoring_launches_through_fade_with_mouse_and_touch:true,add_app_uses_scrolling_without_paging:true,stable_panel_scroll_epoch:true,scroll_samples:samples,reorder_checks:reorderChecks,source:fixture.source,source_dirty:fixture.source_dirty,wasm_sha256:fixture.wasm_sha256,runtime_errors:errors},null,2));
   console.log('Populated map pixels, scrolling and first-attempt sign-in passed');
  }else{
  const a=await page('alice@spaces.test',fixture.space_a);

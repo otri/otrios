@@ -134,3 +134,28 @@ the catalog; an open child retains its mount and the browser replaces its curren
 history entry with the new path. Previously copied old paths return 404; this
 milestone does not retain aliases. Legacy hash paths and release-entry redirects
 are not supported. Private admission precedes screen payloads.
+
+## Spaces panels and decorative input
+
+The common Spaces entrance and its local panels use the same runtime hit testing
+on Web and Frame. Add App, app lists, Deleted Spaces, move destinations and the
+native Transfers file list scroll through their complete admitted lists. Member
+and retained-data lists use scrolling within bounded batches only when their full
+admitted sizes would exceed the current layout/control limits: eight member rows
+with the native software keyboard, or sixteen retained datasets. The map groups
+up to six Spaces and sixteen preview tiles within its existing scene/coordinate
+budget. Changing one of these exceptional batches starts at its top and preserves
+an unsubmitted access draft. No state or admission limit is increased.
+
+`TouchResponder::PassThrough` paints a scene subtree normally but excludes it
+from pointer hit testing, semantic controls and assistive activation. It exposes
+siblings beneath it. `Bubble` instead follows the current target's ancestors;
+`Consume` blocks delivery behind the cover. Ordinary covers keep their existing
+behavior. A captured gesture is cancelled if its owner gains a pass-through
+ancestor.
+
+The home fade and local drag preview are pass-through decoration. Scrolling
+surfaces retain the visible part of a clipped control's hit rectangle, adjusting
+its children to preserve paint positions. A tile entering the fade can therefore
+be clicked or tapped before it is fully visible. Completely offscreen controls
+remain absent from semantic navigation; settings backdrops remain inert.

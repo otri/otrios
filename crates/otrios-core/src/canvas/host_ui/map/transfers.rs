@@ -192,8 +192,7 @@ pub(super) fn render(
                         width,
                     );
                 }
-                model.page = model.page.min(files.len().saturating_sub(1) / 4);
-                for file in files.iter().skip(model.page * 4).take(4) {
+                for file in files {
                     b.flat(
                         &format!("Choose {}", file.name),
                         &short(&file.name, 44),
@@ -201,12 +200,6 @@ pub(super) fn render(
                         HostAction::TransferFile(file.id.clone()),
                     );
                     y += 64.;
-                }
-                if model.page > 0 {
-                    b.flat("Previous", "‹", [left, y, 80., 56.], HostAction::Page(-1));
-                }
-                if (model.page + 1) * 4 < files.len() {
-                    b.flat("Next", "›", [left + 96., y, 80., 56.], HostAction::Page(1));
                 }
                 y += 64.;
             }

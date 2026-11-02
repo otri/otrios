@@ -573,7 +573,7 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
         preview.position[1] - 76.
     };
     let caption: String = preview.caption.chars().take(24).collect();
-    root.children.push(canvas(
+    let mut preview = canvas(
         4_210_000_000,
         Rect::new(x, y, 180., 56.),
         vec![
@@ -586,7 +586,9 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
                 [44, 50, 43, 255],
             ),
         ],
-    ));
+    );
+    preview.responder = Some(TouchResponder::PassThrough);
+    root.children.push(preview);
 }
 
 /// Clip semantic controls on the presented clone, never the canonical layout.
@@ -594,26 +596,11 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
 pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::text_scroll::Info) {
     use crate::dashboard::components::background;
     use otrios_interfaces::scene::Rect;
-    fn visible(node: &mut SceneNode, parent: [f32; 2], bounds: [f32; 2]) {
-        let position = [parent[0] + node.frame.x, parent[1] + node.frame.y];
-        if node.semantics.is_some()
-            && (position[0] < 0.
-                || position[1] < 0.
-                || position[0] + node.frame.width > bounds[0]
-                || position[1] + node.frame.height > bounds[1])
-        {
-            node.responder = None;
-            node.semantics = None;
-        }
-        for child in &mut node.children {
-            visible(child, position, bounds);
-        }
-    }
     if root.id == node {
         root.semantics = None;
         let bounds = [root.frame.width, root.frame.height];
         for child in &mut root.children {
-            visible(child, [0., 0.], bounds);
+            crate::dashboard::scene::clip_controls(child, [0., 0.], bounds);
         }
         if info.offset[1] + 0.5 < info.limit[1] {
             for step in 0..16 {
@@ -625,6 +612,7 @@ pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::t
                     0.,
                 );
                 fade.frame = Rect::new(0., bounds[1] - 32. + step as f32 * 2., bounds[0], 2.);
+                fade.responder = Some(TouchResponder::PassThrough);
                 root.children.push(fade);
             }
         }

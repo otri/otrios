@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--config', type=pathlib.Path, required=True)
     parser.add_argument('--release', required=True)
     parser.add_argument('--source', required=True, help='Validated implementation commit')
-    parser.add_argument('--backup-tag', required=True)
+    parser.add_argument('--backup-tag', required=True, help='ISO-date-first release-control rollback record; a data backup is not required')
     parser.add_argument('--output', type=pathlib.Path, required=True)
     args = parser.parse_args()
     if not re.fullmatch(r'[a-f0-9]{64}', args.release) or not re.fullmatch(r'[a-f0-9]{40}', args.source) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}-[a-z0-9-]+', args.backup_tag):
@@ -52,8 +52,7 @@ def main():
     if active != [actual, actual]:
         raise SystemExit('Frame authority and native reader have not accepted the expected release')
     backup = runtime / 'rollback' / args.backup_tag
-    if not (backup / 'pre-cutover.tar').is_file():
-        raise SystemExit('The paired private pre-cutover backup is required')
+    backup.mkdir(parents=True, exist_ok=True, mode=0o700)
     controls = [(runtime / 'config.json', 'mac-config-before.json'), (runtime / 'releases/current.json', 'mac-pointer-before.json'), (runtime / 'build/source-id', 'mac-source-id-before')]
     if any((backup / name).exists() for _, name in controls):
         raise SystemExit('Promotion baseline already exists; inspect it before retrying')

@@ -124,25 +124,10 @@ impl Client {
 }
 
 pub(super) fn present_panel(root: &mut SceneNode, id: u32) {
-    fn clip(node: &mut SceneNode, origin: [f32; 2], size: [f32; 2]) {
-        let at = [origin[0] + node.frame.x, origin[1] + node.frame.y];
-        if node.semantics.is_some()
-            && (at[0] < 0.
-                || at[1] < 0.
-                || at[0] + node.frame.width > size[0]
-                || at[1] + node.frame.height > size[1])
-        {
-            node.semantics = None;
-            node.responder = None;
-        }
-        for child in &mut node.children {
-            clip(child, at, size);
-        }
-    }
     if root.id == id {
         let size = [root.frame.width, root.frame.height];
         for child in &mut root.children {
-            clip(child, [0., 0.], size);
+            crate::dashboard::scene::clip_controls(child, [0., 0.], size);
         }
     } else {
         for child in &mut root.children {

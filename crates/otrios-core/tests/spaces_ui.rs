@@ -1799,6 +1799,361 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
 }
 
 #[test]
+fn a_partly_visible_app_launches_through_the_home_fade() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 340.]).unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    state.spaces[0].layout.height = 6;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let scene = client.scene().unwrap();
+    let control = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Counter")
+        .unwrap();
+    let bottom = 340. - 80.;
+    assert_eq!(control.origin[1] + control.node.frame.height, bottom);
+    assert!(
+        control.node.frame.height < 144.,
+        "the tile is partly clipped"
+    );
+    assert!(
+        format!("{scene:?}").contains("4200000000"),
+        "the fade must still be painted"
+    );
+    let position = [
+        control.origin[0] + control.node.frame.width / 2.,
+        bottom - 8.,
+    ];
+    assert!(
+        scene
+            .hit_path(position)
+            .iter()
+            .any(|n| n.node.id == control.node.id)
+    );
+    let epoch = client.epoch();
+    for (phase, at) in [(Down, 100), (Up, 150)] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 7,
+                    phase,
+                    position,
+                },
+                at,
+            )
+            .unwrap();
+    }
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::Mount { ui_ref, .. } if ui_ref == "app:counter/ui")
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
+fn add_app_scrolls_the_complete_installed_list_and_targets_the_last_item() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 440.]).unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    let installed = &mut state.selected.as_mut().unwrap().installed;
+    let base = installed[0].clone();
+    for index in 1..MAX_INSTALLED_APPS {
+        let mut app = base.clone();
+        app.policy.app = format!("app-{}", char::from(b'a' + index as u8));
+        app.ui_ref = format!("app:app-{}/ui", char::from(b'a' + index as u8));
+        app.state_ref = format!("app:app-{}/state", char::from(b'a' + index as u8));
+        app.title = format!("App {index}");
+        installed.push(app);
+    }
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    click(&mut client, "Add app: Household");
+    for unwanted in ["Previous", "Next"] {
+        assert!(!labels(&client).contains(&unwanted.into()));
+    }
+    let epoch = client.epoch();
+    assert!(client.resource_usage().panel_scroll.unwrap().limit[1] > 500.);
+    client.scroll_map(epoch, 1e6).unwrap();
+    assert!(labels(&client).contains(&"App 15".into()));
+    assert!(labels(&client).contains(&"Close".into()));
+    // A pan that starts on a selectable item must not attach it on release.
+    let scene = client.scene().unwrap();
+    let last = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "App 15")
+        .unwrap();
+    let start = [last.origin[0] + 24., last.origin[1] + 24.];
+    for (phase, y, at) in [
+        (Down, start[1], 100),
+        (Move, start[1] - 40., 150),
+        (Up, start[1] - 40., 250),
+    ] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 7,
+                    phase,
+                    position: [start[0], y],
+                },
+                at,
+            )
+            .unwrap();
+    }
+    assert_eq!(client.epoch(), epoch);
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client.scroll_map(epoch, -1e6).unwrap();
+    assert!(labels(&client).contains(&"Upload".into()));
+    client.scroll_map(epoch, 1e6).unwrap();
+    click(&mut client, "App 15");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("attach")
+    };
+    assert_eq!(
+        request.change,
+        Change::Attach {
+            space: SPACE.into(),
+            app: "app-p".into()
+        }
+    );
+}
+#[test]
+fn oversized_management_lists_use_scrollable_bounded_batches_without_losing_targets() {
+    let (mut client, _) = fixture(Role::Admin);
+    let mut state = snapshot(Role::Admin, 2);
+    let data: Vec<_> = (0..MAX_APPS)
+        .map(|i| DatasetSummary {
+            app: "counter".into(),
+            collection: format!("{:032x}", i + 1),
+            title: format!("Backup {i}"),
+            availability: AppAvailability::Available,
+            stored_bytes: None,
+            origin: None,
+        })
+        .collect();
+    state.spaces[0].retained = vec![data[0].clone()];
+    state.selected.as_mut().unwrap().retained = data;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    click(&mut client, "All retained data");
+    assert!(client.resource_usage().panel_scroll.unwrap().limit[1] > 500.);
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    click(&mut client, "Next");
+    assert_eq!(client.resource_usage().panel_scroll.unwrap().offset[1], 0.);
+    assert!(labels(&client).contains(&"Data: Backup 16".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+
+    let (mut client, _) = fixture(Role::Admin);
+    let mut state = snapshot(Role::Admin, 2);
+    state.selected.as_mut().unwrap().members = Some(
+        (0..MAX_MEMBERS)
+            .map(|i| Member {
+                identity: format!("person-{i}"),
+                role: Role::Admin,
+                joined_generation: 1,
+            })
+            .collect(),
+    );
+    for i in 1..MAX_INSTALLED_APPS {
+        state.spaces[0].apps.push(MapApp {
+            app: format!("app-{}", char::from(b'a' + i as u8)),
+            title: format!("App {i}"),
+            availability: AppAvailability::Available,
+        });
+    }
+    state.spaces[0].attached_count = MAX_INSTALLED_APPS as u16;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    open_access(&mut client);
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    click(&mut client, "Next");
+    assert_eq!(client.resource_usage().panel_scroll.unwrap().offset[1], 0.);
+    assert!(labels(&client).contains(&"Role: person-8".into()));
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    click(&mut client, "Person to add");
+    assert!(
+        client.keyboard_visible(),
+        "maximum member batches still admit the keyboard beside a populated map"
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
+fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([240., 440.]).unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    let base = state.spaces[0].clone();
+    state.spaces = (0..6)
+        .map(|i| {
+            let mut s = base.clone();
+            if i > 0 {
+                s.id = format!("{:032x}", i);
+            }
+            s.name = format!("Space {i}");
+            s.layout.width = 1;
+            s.layout.height = 6;
+            if i == 0 {
+                for index in 0..10 {
+                    s.apps.push(MapApp {
+                        app: format!("app-{}", char::from(b'a' + index)),
+                        title: "A long app title that wraps onto another line".into(),
+                        availability: AppAvailability::Available,
+                    });
+                }
+                s.attached_count = s.apps.len() as u16;
+            }
+            s
+        })
+        .collect();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    assert!(!labels(&client).contains(&"Next".into()));
+    assert!(client.resource_usage().map_scroll.unwrap().limit[1] > 4000.);
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    assert!(labels(&client).contains(&"Resize: Space 5".into()));
+
+    for deleted in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        let mut state = snapshot(Role::Admin, 2);
+        let base = state.spaces[0].clone();
+        state.spaces = (0..MAX_SPACES)
+            .map(|i| {
+                let mut s = base.clone();
+                if i > 0 {
+                    s.id = format!("{:032x}", i);
+                    s.name = format!("Space {i}");
+                    if deleted {
+                        s.archived = true;
+                        s.apps.clear();
+                        s.attached_count = 0;
+                    }
+                }
+                s
+            })
+            .collect();
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(state),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        if deleted {
+            click(&mut client, "Profile");
+            click(&mut client, "Deleted Spaces");
+        } else {
+            click(&mut client, "Edit");
+            let scene = client.scene().unwrap();
+            let id = scene
+                .controls()
+                .into_iter()
+                .find(|c| c.node.semantics.as_ref().unwrap().label == "Counter in Household")
+                .unwrap()
+                .node
+                .id;
+            client.adjust_control(id, 0, 0).unwrap();
+        }
+        assert!(!labels(&client).contains(&"Next".into()));
+        assert!(!labels(&client).contains(&"Previous".into()));
+        client.scroll_map(client.epoch(), 1e6).unwrap();
+        assert!(labels(&client).contains(&if deleted {
+            "Restore Space: Space 63".into()
+        } else {
+            "Move to Space 63".into()
+        }));
+        assert!(client.spaces_outgoing().unwrap().is_none());
+    }
+}
+#[test]
+fn transfer_file_picker_scrolls_all_sixty_four_files_without_paging() {
+    let mut client = transfer_fixture();
+    click(&mut client, "Edit");
+    click(&mut client, "Add app: Household");
+    click(&mut client, "Upload");
+    click(&mut client, "Choose File");
+    let task = client.take_transfer_task().unwrap();
+    client
+        .receive_transfer(
+            task.id,
+            TransferReply::Files {
+                files: (1..=64)
+                    .map(|i| TransferFile {
+                        id: format!("{i:032x}"),
+                        name: format!("file-{i}.otapp.zip"),
+                        bytes: 100,
+                    })
+                    .collect(),
+            },
+        )
+        .unwrap();
+    for unwanted in ["Previous", "Next"] {
+        assert!(!labels(&client).contains(&unwanted.into()));
+    }
+    let epoch = client.epoch();
+    client.scroll_map(epoch, 1e6).unwrap();
+    click(&mut client, "Choose file-64.otapp.zip");
+    assert_eq!(
+        client.take_transfer_task().unwrap().io,
+        TransferIo::File {
+            file: format!("{:032x}", 64)
+        }
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
 fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);

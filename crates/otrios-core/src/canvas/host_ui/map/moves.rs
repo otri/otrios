@@ -45,15 +45,9 @@ pub(super) fn render(
             .iter()
             .filter(|s| s.id != moving.source && !s.archived && s.role == Some(Role::Admin))
             .collect::<Vec<_>>();
-        model.page = model.page.min(destinations.len().saturating_sub(1) / PAGE);
         b.nodes
             .push(text("Move to", [left, top + 64., width, 32.], 1.5));
-        for (i, space) in destinations
-            .iter()
-            .skip(model.page * PAGE)
-            .take(PAGE)
-            .enumerate()
-        {
+        for (i, space) in destinations.iter().enumerate() {
             b.flat(
                 &format!("Move to {}", space.name),
                 &space.name,
@@ -68,22 +62,7 @@ pub(super) fn render(
                 1.5,
             ));
         }
-        if model.page > 0 {
-            b.flat(
-                "Previous",
-                "‹",
-                [left, top + 380., 48., 48.],
-                HostAction::Page(-1),
-            );
-        }
-        if (model.page + 1) * PAGE < destinations.len() {
-            b.flat(
-                "Next",
-                "›",
-                [left + 56., top + 380., 48., 48.],
-                HostAction::Page(1),
-            );
-        }
+
         return;
     }
     let Some(destination) = snapshot.spaces.iter().find(|s| {

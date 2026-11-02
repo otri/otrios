@@ -131,12 +131,14 @@ pub(super) fn render(
                 HostAction::Pane(Pane::AccessAudience),
             );
             b.divider([left, top + 176., width, 1.]);
-            model.page = model.page.min(draft.members.len().saturating_sub(1) / PAGE);
+            model.page = model
+                .page
+                .min(draft.members.len().saturating_sub(1) / MEMBER_PAGE);
             let rows = draft
                 .members
                 .iter()
-                .skip(model.page * PAGE)
-                .take(PAGE)
+                .skip(model.page * MEMBER_PAGE)
+                .take(MEMBER_PAGE)
                 .collect::<Vec<_>>();
             for (index, member) in rows.iter().enumerate() {
                 let y = top + 200. + index as f32 * 68.;
@@ -170,12 +172,12 @@ pub(super) fn render(
             }
             let mut y = top + 200. + rows.len() as f32 * 68.;
             if model.page > 0 {
-                b.flat("Previous", "‹", [left, y, 48., 48.], HostAction::Page(-1));
+                b.flat("Previous", "<", [left, y, 48., 48.], HostAction::Page(-1));
             }
-            if (model.page + 1) * PAGE < draft.members.len() {
-                b.flat("Next", "›", [left + 56., y, 48., 48.], HostAction::Page(1));
+            if (model.page + 1) * MEMBER_PAGE < draft.members.len() {
+                b.flat("Next", ">", [left + 56., y, 48., 48.], HostAction::Page(1));
             }
-            if draft.members.len() > PAGE {
+            if draft.members.len() > MEMBER_PAGE {
                 y += 56.;
             }
             b.entry("Person to add", [left, y + 8., width - 56., 64.]);

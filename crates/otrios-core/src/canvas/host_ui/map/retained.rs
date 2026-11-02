@@ -74,12 +74,12 @@ pub(super) fn render(
             .push(text("Retained data", [left, top, width, 40.], 2.));
         model.page = model
             .page
-            .min(detail.retained.len().saturating_sub(1) / PAGE);
+            .min(detail.retained.len().saturating_sub(1) / PANEL_PAGE);
         for (index, data) in detail
             .retained
             .iter()
-            .skip(model.page * PAGE)
-            .take(PAGE)
+            .skip(model.page * PANEL_PAGE)
+            .take(PANEL_PAGE)
             .enumerate()
         {
             let tile = width / 2.;
@@ -109,16 +109,26 @@ pub(super) fn render(
         if model.page > 0 {
             b.flat(
                 "Previous",
-                "‹",
-                [left, top + 380., 48., 48.],
+                "<",
+                [
+                    left,
+                    top + 64. + PANEL_PAGE.div_ceil(2) as f32 * 152.,
+                    48.,
+                    48.,
+                ],
                 HostAction::Page(-1),
             );
         }
-        if (model.page + 1) * PAGE < detail.retained.len() {
+        if (model.page + 1) * PANEL_PAGE < detail.retained.len() {
             b.flat(
                 "Next",
-                "›",
-                [left + 56., top + 380., 48., 48.],
+                ">",
+                [
+                    left + 56.,
+                    top + 64. + PANEL_PAGE.div_ceil(2) as f32 * 152.,
+                    48.,
+                    48.,
+                ],
                 HostAction::Page(1),
             );
         }

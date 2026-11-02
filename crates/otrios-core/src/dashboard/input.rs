@@ -50,7 +50,10 @@ fn bubble(path: &[Located<'_>], event: PointerEvent) -> (Delivery, Option<TouchR
             phase: event.phase,
         });
         if let Some(responder) = entry.node.responder
-            && responder != TouchResponder::Bubble
+            && !matches!(
+                responder,
+                TouchResponder::Bubble | TouchResponder::PassThrough
+            )
         {
             result.responder = Some(entry.node.id);
             if let TouchResponder::Drag(action) = responder {
@@ -111,6 +114,10 @@ impl InputRouter {
         // A removed/rebound responder cannot receive an action from an old gesture.
         let valid = scene
             .path(capture.owner)
+            .filter(|p| {
+                p.iter()
+                    .all(|v| v.node.responder != Some(TouchResponder::PassThrough))
+            })
             .and_then(|p| p.last().and_then(|v| v.node.responder))
             == Some(capture.responder);
         if !valid || capture.history.last().is_some_and(|s| at < s.time_ms) {
@@ -147,6 +154,12 @@ impl InputRouter {
     /// Keyboard/assistive activation follows the same responder ancestry, without a pointer.
     pub fn activate(scene: &Scene, id: NodeId) -> Delivery {
         let path = scene.path(id).unwrap_or_default();
+        if path
+            .iter()
+            .any(|n| n.node.responder == Some(TouchResponder::PassThrough))
+        {
+            return Delivery::default();
+        }
         let (mut result, responder) = bubble(
             &path,
             PointerEvent {
@@ -320,6 +333,58 @@ mod tests {
                 .action,
             None
         );
+    }
+    #[test]
+    fn pass_through_decoration_exposes_siblings_but_consume_and_bubble_still_block_them() {
+        for responder in [
+            TouchResponder::PassThrough,
+            TouchResponder::Bubble,
+            TouchResponder::Consume,
+        ] {
+            let mut root = scene().root().clone();
+            let mut cover = panel(90, Rect::new(100., 200., 300., 240.), WHITE, vec![]);
+            cover.responder = Some(responder);
+            root.children.push(cover);
+            let s = Arc::new(Scene::new(root).unwrap());
+            let mut input = InputRouter::default();
+            let point = [170., 280.];
+            let down = input.dispatch(s.clone(), event(1, PointerPhase::Down, point));
+            let up = input.dispatch(s.clone(), event(1, PointerPhase::Up, point));
+            if responder == TouchResponder::PassThrough {
+                assert_eq!(down.target, Some(21));
+                assert_eq!(up.action, Some(Action::AppEvent(1)));
+            } else {
+                assert_eq!(down.target, Some(91));
+                assert_eq!(up.action, None);
+            }
+            assert_eq!(
+                s.root().children.len(),
+                2,
+                "decoration stays in the painted scene"
+            );
+        }
+    }
+    #[test]
+    fn transparent_ancestor_hides_semantic_children_and_cancels_existing_capture() {
+        let old = scene();
+        let mut root = old.root().clone();
+        root.children[0].children[1].semantics = Some(SwitchSemantics {
+            label: "Covered control".into(),
+            checked: false,
+        });
+        root.children[0].children[1].responder =
+            Some(TouchResponder::Activate(Action::AppEvent(2)));
+        let old = Arc::new(Scene::new(root.clone()).unwrap());
+        let mut input = InputRouter::default();
+        input.dispatch(old, event(1, PointerPhase::Down, [170., 280.]));
+        root.children[0].responder = Some(TouchResponder::PassThrough);
+        let next = Arc::new(Scene::new(root).unwrap());
+        assert!(next.controls().is_empty());
+        assert!(InputRouter::activate(&next, 20).action.is_none());
+        let up = input.dispatch(next, event(1, PointerPhase::Up, [170., 280.]));
+        assert_eq!(up.action, None);
+        assert!(up.visits.iter().all(|v| v.phase == PointerPhase::Cancel));
+        assert!(!input.active());
     }
     #[test]
     fn independent_pointers_capture_separately_and_keyboard_uses_parent_chain() {

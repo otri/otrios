@@ -527,8 +527,7 @@ pub(super) fn render(
                     .iter()
                     .filter(|a| a.attached)
                     .collect::<Vec<_>>();
-                model.page = model.page.min(apps.len().saturating_sub(1) / PAGE);
-                for (i, app) in apps.iter().skip(model.page * PAGE).take(PAGE).enumerate() {
+                for (i, app) in apps.iter().enumerate() {
                     let tile = width / 2.;
                     b.nodes.push(
                         a::canvas(app_tile(
@@ -553,22 +552,6 @@ pub(super) fn render(
                         HostAction::Unavailable("This app is unavailable on this device.")
                     });
                 }
-                if model.page > 0 {
-                    b.flat(
-                        "Previous",
-                        "‹",
-                        [left, top + 380., 48., 48.],
-                        HostAction::Page(-1),
-                    );
-                }
-                if (model.page + 1) * PAGE < apps.len() {
-                    b.flat(
-                        "Next",
-                        "›",
-                        [left + 56., top + 380., 48., 48.],
-                        HostAction::Page(1),
-                    );
-                }
             }
         }
         Pane::DeletedSpaces => {
@@ -579,13 +562,7 @@ pub(super) fn render(
                 .iter()
                 .filter(|s| s.archived && s.role == Some(Role::Admin))
                 .collect::<Vec<_>>();
-            model.page = model.page.min(deleted.len().saturating_sub(1) / PAGE);
-            for (i, space) in deleted
-                .iter()
-                .skip(model.page * PAGE)
-                .take(PAGE)
-                .enumerate()
-            {
+            for (i, space) in deleted.iter().enumerate() {
                 b.nodes.push(text(
                     &space.name,
                     [left, top + 72. + i as f32 * 64., width - 112., 48.],
@@ -603,22 +580,6 @@ pub(super) fn render(
             if deleted.is_empty() {
                 b.nodes
                     .push(text("Nothing here.", [left, top + 72., width, 40.], 1.5).color(SOFT));
-            }
-            if model.page > 0 {
-                b.flat(
-                    "Previous",
-                    "‹",
-                    [left, top + 348., 48., 48.],
-                    HostAction::Page(-1),
-                );
-            }
-            if (model.page + 1) * PAGE < deleted.len() {
-                b.flat(
-                    "Next",
-                    "›",
-                    [left + 56., top + 348., 48., 48.],
-                    HostAction::Page(1),
-                );
             }
         }
         Pane::Cleanup => {
@@ -681,9 +642,8 @@ pub(super) fn render(
                     })
                     .collect::<Vec<_>>();
                 let count = apps.len() + 1;
-                model.page = model.page.min(count.saturating_sub(1) / PAGE);
-                for position in 0..PAGE {
-                    let index = model.page * PAGE + position;
+                for position in 0..count {
+                    let index = position;
                     let tile = width / 2.;
                     let frame = [
                         left + (position % 2) as f32 * tile,
@@ -727,22 +687,6 @@ pub(super) fn render(
                     } else {
                         b.nodes.push(node);
                     }
-                }
-                if model.page > 0 {
-                    b.flat(
-                        "Previous",
-                        "‹",
-                        [left, top + 380., 48., 48.],
-                        HostAction::Page(-1),
-                    );
-                }
-                if (model.page + 1) * PAGE < count {
-                    b.flat(
-                        "Next",
-                        "›",
-                        [left + 56., top + 380., 48., 48.],
-                        HostAction::Page(1),
-                    );
                 }
             }
         }
@@ -1165,9 +1109,10 @@ fn map_body<'a>(
     let gap = 20.;
     let available = (w - margin * 2.).max(1.);
     let cols = ((available + gap) / 160.).floor().clamp(1., 6.) as usize;
-    // Keep even four maximally tall previews within the layout coordinate
-    // budget; a one-column viewport uses three Spaces per page.
-    let page_size = if cols == 1 { 3 } else { PAGE };
+    // Six Spaces plus the existing 16-tile budget keep worst-case tall
+    // layouts inside scene/control/coordinate limits, including one column.
+    // Ordinary maps scroll together instead of paging at four Spaces.
+    let page_size = PAGE;
     let mut pages = vec![vec![]];
     let mut tiles = 0;
     for space in &shown {
@@ -1444,7 +1389,7 @@ fn map_body<'a>(
     if model.page > 0 {
         b.flat(
             "Previous",
-            "‹",
+            "<",
             [margin, h - 124., 48., 48.],
             HostAction::Page(-1),
         );
@@ -1452,7 +1397,7 @@ fn map_body<'a>(
     if model.page + 1 < pages.len() {
         b.flat(
             "Next",
-            "›",
+            ">",
             [margin + 56., h - 124., 48., 48.],
             HostAction::Page(1),
         );
