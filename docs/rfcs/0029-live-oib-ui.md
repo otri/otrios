@@ -4,8 +4,9 @@
 Date: 2026-11-02. Status: **O1 property editing implemented, validated and deployed**.
 The [qualification record](../experiments/live-oib-2026-11-02.md) records browser,
 Frame and process evidence. The [OIB guide](../OIB.md) records concrete contracts
-and limits. Later graph
-editing and executable class APIs are design targets, not additions to O1.
+and limits. [O2](0030-live-oib-instances.md) subsequently implements bounded
+instance creation, duplication and removal. Arbitrary graph placement and
+executable class APIs remain design targets beyond these increments.
 
 Builds on [independent UI documents](0013-app-ui-updates.md),
 [behavior replacement](0014-app-behavior-updates.md),

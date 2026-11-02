@@ -118,6 +118,12 @@ property identities, inheritance, types, defaults and choices. Admitted node
 mappings and presentation may change. Existing property values and conflicts
 survive; unrelated seed changes remain rejected. This is not general seed rebasing.
 
+An admitted signed presentation update can also retain the exact canonical OIB
+seed. Only its UI binding/hash and status generation advance; all retained
+allocations, presence and property registers survive. Initialize the instance
+ledger only on first admission or the explicit O1-to-O2 migration. This permits
+layout-only app updates, not live CRDT editing of arbitrary layout constraints.
+
 Before publication, validate the exact deployed O1 UI fixture, journal replay,
 concurrent changes and old-control identities. Deploy through the signed-release
 workflow, retain a v22/O2-compatible recovery kit, and qualify the same attachment

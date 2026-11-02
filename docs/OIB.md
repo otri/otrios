@@ -160,6 +160,13 @@ limits. Earlier layouts retain their event-ID bound. An incompatible seed report
 UI rather than silently discarding its overrides. Resetting one property is an
 ordinary causal edit; code rollback never restores old app data.
 
+Signed app presentation updates may retain the exact canonical OIB seed. Those
+updates change the admitted UI hash while preserving the allocation ledger,
+presence, removed identities, property registers and app values. They do not
+reinitialize instances. Changed seed definitions still require an explicit
+compatible migration. A signed presentation update is distinct from a live CRDT
+edit: panel layout constraints are not yet editable OIB properties.
+
 The inspector currently offers app-authored choices. The typed client API accepts
 other values within the admitted property type and limits. A general free-text
 property editor remains separate UI work.

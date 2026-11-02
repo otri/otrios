@@ -60,7 +60,7 @@ pointer samples and verifies a changed local preview offset with unchanged
 inspector selection, inspector offset and shared root. It failed before the fix
 and passes afterward.
 
-The final signed release is
+The signed touch-pan follow-up is
 `6fc39d970dcec7e1dc9471ae92907c52b96c43f804433af3069034404f6757f5`.
 Focused calibrated evdev acceptance panned the preview from **0 to 184**, selected
 the third instance, tapped **Duplicate**, panned to **400**, selected the copy and
@@ -113,3 +113,52 @@ including the seeds. Removed identities remain retained. New sliders use the
 signed Volume binding; duplicates retain their source binding. Independent new
 app fields, arbitrary placement/reparenting, mutable bindings, history collection,
 general seed rebasing and portable OIB transfers remain outside O2.
+
+## Panel height follow-up
+
+The user requested that the left and right panels extend to the bottom of Frame's
+viewport. Their wide arrangement now gives the row and both component slots a
+flexible height. The tall arrangement shares the remaining height between its
+stacked panels. Existing internal top/bottom pins resize the clipped content
+viewports. At 1280×800, both cards end at **y=776**, retaining the **24 px** outer
+bottom margin; their heights grow from 500 to 656. The preview viewport grows
+from 464 to **620**, and the inspector viewport from 364 to **520**. At 800×1280,
+the stacked arrangement ends at y=1256 with the same outer margin.
+
+Panel layout constraints are still authored in the signed app presentation.
+This adjustment is a signed app update, not a CRDT edit to panel geometry. The
+live-editable surface remains declared component properties and instance
+operations. Making all layout constraints editable requires a later OIB surface.
+
+Signed presentation updates may now retain the **exact canonical OIB seed**
+without reinitializing the instance ledger. The UI binding/hash and status
+generation advance while draft/active properties, presence, immutable allocations,
+removed identities and app-content values survive. Modified seed definitions
+still require an explicit compatible migration; the existing exact O1 migration
+also remains supported. The wire format and protocol remain v22.
+
+The focused OIB target passed **21 tests**, including the previous deployed O2
+fixture, an active instance override and removed allocation surviving the new
+presentation, journal replay, unchanged active root, and actual wide/tall panel
+bounds. Strict core-library Clippy also passed. The prior signed O2 UI fixture is
+Apache-2.0 data; its migration tests and runtime remain LGPL-3.0-only. No new
+dependencies were added.
+
+Signed release
+`ececaf3d4dd97ccc13d92e7eaad2e60db3163ba203b2f7c13df872dc8e8575bf`
+is active on Frame/Web. Native generation **79** retains all three active
+instances, three removed allocations, their overrides and four remaining lifetime
+slots. Calibrated synthetic touch pans independently reached preview offset 28
+and inspector offset 232, then returned both to 0. All pans retained native PID
+**26315**, mount epoch **1** and generation 79. These limits confirm viewport
+heights 620 and 520 with the new panel bounds. The actual deployed public Wasm
+client mounted generation 79 with the same limits and retained `Frame` override.
+The signed artifacts, native state stream and existing three services were
+verified healthy. [Panel evidence](data/live-oib-instances-2026-11-03/panels.json)
+records the results without pixels or authentication material.
+
+A compatible signed code-only kit for this presentation-binding behavior was
+verified and retained before activation. Use that kit rather than an older
+authority that rejects the changed UI binding. The development watcher was
+restored to the accepted source/release. No cross-release rollback or broad
+preflight suite was repeated for this follow-up.
