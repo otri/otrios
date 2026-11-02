@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
+use tungstenite::{Message, WebSocket, client::IntoClientRequest, stream::MaybeTlsStream};
 
 fn settle(
     client: &mut Client,
@@ -75,7 +75,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if steps.len() > 16 {
         return Err("OIB probe step limit".into());
     }
-    let (mut socket, _) = tungstenite::connect(endpoint.as_str())?;
+    let mut upgrade = endpoint.as_str().into_client_request()?;
+    if let Ok(token) = std::env::var("OTRIOS_PROBE_TOKEN") {
+        upgrade
+            .headers_mut()
+            .insert("Authorization", format!("Bearer {token}").parse()?);
+    }
+    let (mut socket, _) = tungstenite::connect(upgrade)?;
     if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
         stream.set_read_timeout(Some(Duration::from_millis(100)))?;
     }
