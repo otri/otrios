@@ -2549,7 +2549,8 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
 fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
-    client.set_viewport([390., 600.]).unwrap();
+    let viewport = [390., 600.];
+    client.set_viewport(viewport).unwrap();
     let mut next = snapshot(Role::Admin, 2);
     next.spaces[0].layout.height = 6;
     client
@@ -2571,7 +2572,9 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
         .find(|c| c.node.semantics.as_ref().unwrap().label == "Space: Household")
         .unwrap();
     let start = [title.origin[0] + 10., title.origin[1] + 10.];
-    for (phase, position, at) in [(Down, start, 100), (Move, [100., 510.], 120)] {
+    // The map now scrolls to the screen bottom beneath the floating Edit button.
+    let bottom_edge = [100., viewport[1] - 10.];
+    for (phase, position, at) in [(Down, start, 100), (Move, bottom_edge, 120)] {
         client
             .pointer_at(
                 epoch,
