@@ -5,9 +5,11 @@ This describes the implemented app cutover build. Deployment and physical frame
 acceptance are recorded separately; source changes alone do not prove that a
 running device has crossed the boundary.
 
-[OIB O1](OIB.md) implements fixed named components, per-instance overrides and
-Space-scoped live CRDT property edits. [RFC 0029](rfcs/0029-live-oib-ui.md) also
-describes later graph editing and main-class APIs, which remain design targets.
+[OIB](OIB.md) implements named components, per-instance overrides and Space-scoped
+live CRDT edits. [O2](rfcs/0030-live-oib-instances.md) adds bounded creation,
+duplication and removal through the UI or typed code operations. Arbitrary graph
+placement and the executable main-class/outlet APIs in
+[RFC 0029](rfcs/0029-live-oib-ui.md) remain design targets.
 
 ## One app runtime
 

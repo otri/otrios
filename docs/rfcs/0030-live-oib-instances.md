@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0030: Bounded live OIB instances
 
-Date: 2026-11-03. Status: **O2 implementation; live qualification pending**.
+Date: 2026-11-03. Status: **O2 implemented and deployed**.
+See the [live qualification](../experiments/live-oib-instances-2026-11-03.md).
 Extends [OIB O1](0029-live-oib-ui.md) with creation, duplication and removal in
 the existing isolated Live UI app. Executable class/outlet APIs, arbitrary graph
 placement, mutable bindings, seed rebasing and portable OIB transfers remain

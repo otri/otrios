@@ -1,0 +1,1008 @@
+{
+  "first_release": "86cc5fb9d17a7d39673c6e0bd37ce05884449d2c8394ee42d45b5cb69d57b3c8",
+  "state_protocol": "otrios-canvas-sync-v22",
+  "release_control_version": 1,
+  "frame_ui_add": {
+    "synthetic_evdev": true,
+    "elapsed_seconds": 1.208,
+    "pid": 24553,
+    "epoch": 1,
+    "generation": 68,
+    "instances": [
+      {
+        "active": true,
+        "component": 10,
+        "id": 20,
+        "name": "volume",
+        "prototype": 20
+      },
+      {
+        "active": true,
+        "component": 10,
+        "id": 30,
+        "name": "brightness",
+        "prototype": 30
+      },
+      {
+        "active": true,
+        "component": 10,
+        "id": 65538,
+        "name": "instance-3",
+        "prototype": 20
+      }
+    ]
+  },
+  "public_wasm_shared_edits": [
+    {
+      "generation": 67,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        }
+      ]
+    },
+    {
+      "generation": 68,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Level (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        }
+      ]
+    },
+    {
+      "generation": 69,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Level (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Level (inherited)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        }
+      ]
+    },
+    {
+      "generation": 70,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Level (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        }
+      ]
+    },
+    {
+      "generation": 71,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Shared (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Shared (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Shared (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Shared (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        }
+      ]
+    },
+    {
+      "generation": 72,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Shared (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Shared (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Shared (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Shared (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Code (override)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65540,
+          "name": "code-copy",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        }
+      ]
+    },
+    {
+      "generation": 73,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Shared (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Shared (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Shared (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Shared (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Code (override)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65540,
+          "name": "code-copy",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        }
+      ]
+    },
+    {
+      "generation": 74,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Shared (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Shared (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Shared (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Shared (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Code (override)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65540,
+          "name": "code-copy",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        }
+      ]
+    },
+    {
+      "generation": 75,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Level (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Code (override)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65540,
+          "name": "code-copy",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        }
+      ]
+    },
+    {
+      "generation": 76,
+      "epoch": 1,
+      "selected_instance": 30,
+      "panel_offset": [
+        0,
+        388
+      ],
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Frame (override)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Code (override)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65540,
+          "name": "code-copy",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        }
+      ]
+    }
+  ],
+  "native_after_code_edits": {
+    "pid": 24553,
+    "epoch": 1,
+    "release": "86cc5fb9d17a7d39673c6e0bd37ce05884449d2c8394ee42d45b5cb69d57b3c8",
+    "oib": {
+      "active_generation": 76,
+      "allocations_remaining": 5,
+      "conflicts": [],
+      "instances": [
+        {
+          "active": true,
+          "component": 10,
+          "id": 20,
+          "name": "volume",
+          "prototype": 20
+        },
+        {
+          "active": true,
+          "component": 10,
+          "id": 30,
+          "name": "brightness",
+          "prototype": 30
+        },
+        {
+          "active": true,
+          "component": 10,
+          "id": 65538,
+          "name": "instance-3",
+          "prototype": 20
+        },
+        {
+          "active": false,
+          "component": 10,
+          "id": 65539,
+          "name": "code-slider",
+          "prototype": 20
+        },
+        {
+          "active": false,
+          "component": 10,
+          "id": 65540,
+          "name": "code-copy",
+          "prototype": 20
+        }
+      ],
+      "presented_generation": 76,
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "16777344": "label: Frame (override)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Code (override)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Code (override)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)",
+        "200": "label: Level (inherited)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: Level (inherited)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)"
+      },
+      "selected_instance": 65538,
+      "status": "Live \u00b7 revision 76 \u00b7 3 instances \u00b7 5 IDs left"
+    },
+    "panel_scroll": {
+      "active": false,
+      "limit": [
+        0.0,
+        388.0
+      ],
+      "offset": [
+        0.0,
+        344.0
+      ],
+      "velocity": [
+        0.0,
+        0.0
+      ]
+    },
+    "preview": {
+      "active": false,
+      "limit": [
+        0.0,
+        184.0
+      ],
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0
+      ]
+    },
+    "touch_hashes": {
+      "/lib/firmware/moonka/moonka-gsl1680f.config": "723e0773d6b197d505ed58bc4310cf0af3dd6478a335bc0b9599a6aa0308825a",
+      "/etc/udev/rules.d/99-spd-touch.rules": "a8f9fc76ad8c66fe9a2c4d785846b04d3660d9871ed5a49fb3aa41fa1d6be3fa"
+    }
+  },
+  "touch_fix": {
+    "result": {
+      "passed": true,
+      "release": "6fc39d970dcec7e1dc9471ae92907c52b96c43f804433af3069034404f6757f5",
+      "pid": 24997,
+      "epoch": 1,
+      "generation": 78,
+      "duplicated_removed_id": 65541,
+      "selected_instance": 65538,
+      "preview_offset": [
+        0.0,
+        0.0
+      ],
+      "panel_offset": [
+        0.0,
+        344.0
+      ],
+      "allocations_remaining": 4
+    },
+    "physical_touch_scroll_confirmed_by_user": true,
+    "synthetic_steps": [
+      {
+        "before_preview": [
+          0.0,
+          0.0
+        ],
+        "after_preview": [
+          0.0,
+          184.0
+        ],
+        "generation": 76,
+        "selected_instance": 20,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          184.0
+        ],
+        "after_preview": [
+          0.0,
+          184.0
+        ],
+        "generation": 76,
+        "selected_instance": 65538,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          184.0
+        ],
+        "after_preview": [
+          0.0,
+          184.0
+        ],
+        "generation": 77,
+        "selected_instance": 65538,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          184.0
+        ],
+        "after_preview": [
+          0.0,
+          400.0
+        ],
+        "generation": 77,
+        "selected_instance": 65538,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          400.0
+        ],
+        "after_preview": [
+          0.0,
+          400.0
+        ],
+        "generation": 77,
+        "selected_instance": 65541,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          400.0
+        ],
+        "after_preview": [
+          0.0,
+          184.0
+        ],
+        "generation": 78,
+        "selected_instance": 20,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          184.0
+        ],
+        "after_preview": [
+          0.0,
+          184.0
+        ],
+        "generation": 78,
+        "selected_instance": 65538,
+        "pid": 24997,
+        "epoch": 1
+      },
+      {
+        "before_preview": [
+          0.0,
+          184.0
+        ],
+        "after_preview": [
+          0.0,
+          0.0
+        ],
+        "generation": 78,
+        "selected_instance": 65538,
+        "pid": 24997,
+        "epoch": 1
+      }
+    ]
+  },
+  "final_readiness": {
+    "passed": true,
+    "release": "6fc39d970dcec7e1dc9471ae92907c52b96c43f804433af3069034404f6757f5",
+    "state_protocol": "otrios-canvas-sync-v22",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:live-ui/ui",
+      "release": "6fc39d970dcec7e1dc9471ae92907c52b96c43f804433af3069034404f6757f5",
+      "runtime_release": "6fc39d970dcec7e1dc9471ae92907c52b96c43f804433af3069034404f6757f5",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active"
+    },
+    "collector_resumed": false,
+    "collector_result": null,
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 7.317
+  },
+  "final_public_wasm_mount": {
+    "release": "6fc39d970dcec7e1dc9471ae92907c52b96c43f804433af3069034404f6757f5",
+    "epoch": 1,
+    "generation": 78,
+    "selected_instance": 30,
+    "instances": [
+      {
+        "id": 20,
+        "name": "volume",
+        "component": 10,
+        "prototype": 20,
+        "active": true
+      },
+      {
+        "id": 30,
+        "name": "brightness",
+        "component": 10,
+        "prototype": 30,
+        "active": true
+      },
+      {
+        "id": 65538,
+        "name": "instance-3",
+        "component": 10,
+        "prototype": 20,
+        "active": true
+      },
+      {
+        "id": 65539,
+        "name": "code-slider",
+        "component": 10,
+        "prototype": 20,
+        "active": false
+      },
+      {
+        "id": 65540,
+        "name": "code-copy",
+        "component": 10,
+        "prototype": 20,
+        "active": false
+      },
+      {
+        "id": 65541,
+        "name": "instance-6",
+        "component": 10,
+        "prototype": 20,
+        "active": false
+      }
+    ]
+  },
+  "compatible_signed_code_kit_verified": true,
+  "cross_release_rollback_exercised": false,
+  "full_check_script_run": false
+}

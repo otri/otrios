@@ -5,6 +5,13 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[OIB O2](rfcs/0030-live-oib-instances.md) adds bounded live creation, duplication
+and removal of named reusable instances through shared UI/code operations. Its
+[qualification](experiments/live-oib-instances-2026-11-03.md) records the exact
+O1 seed upgrade, state v22 deployment, calibrated Frame input and the deployed
+Wasm client retaining local inspection/scroll while receiving graph changes.
+Executable class/outlet APIs and arbitrary graph placement remain deferred.
+
 [Spaces map M1](rfcs/0028-spaces-map-sharing-and-portable-data.md) provides the
 common browser/native entrance, editable Space layouts and consolidated settings.
 The [Frame acceptance record](experiments/spaces-map-frame-2026-11-01.md) records

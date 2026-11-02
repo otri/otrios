@@ -5,7 +5,9 @@ OIB O1 implements the property-editing slice of
 [RFC 0029](rfcs/0029-live-oib-ui.md). Its original qualification is recorded on
 [browser and Frame](experiments/live-oib-2026-11-02.md).
 [O2](rfcs/0030-live-oib-instances.md) adds bounded live creation, duplication and
-removal through shared typed operations. O2 live qualification is pending.
+removal through shared typed operations. Its
+[live qualification](experiments/live-oib-instances-2026-11-03.md) records Frame
+input, live API edits and the deployed browser Wasm client observing the same data.
 Executable main-class and outlet APIs remain later increments.
 
 Add the installed **Live UI** app to a Space using its Admin controls, then open

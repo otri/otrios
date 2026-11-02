@@ -17,10 +17,11 @@ complete confirmed data export/replacement to the shared Spaces controls. The
 [combined qualification record](docs/experiments/spaces-portable-transfers-2026-11-02.md)
 records completed Safari/Frame acceptance, migration, rollback and data preservation.
 
-[Live OIB UI](docs/OIB.md) adds Space-owned component properties and instance
-overrides that update running browser/native views through CRDT changes. The
-[O1 qualification](docs/experiments/live-oib-2026-11-02.md) records the deployed
-Live UI companion app; graph editing and executable class APIs remain later work.
+[Live OIB UI](docs/OIB.md) adds Space-owned reusable components, per-instance
+overrides and live instance creation, duplication and removal through shared
+CRDT operations. The [O2 qualification](docs/experiments/live-oib-instances-2026-11-03.md)
+records the deployed Live UI companion app. Arbitrary graph placement and
+executable class/outlet APIs remain later work.
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
