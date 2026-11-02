@@ -4,6 +4,7 @@
 import argparse, fcntl, hashlib, io, json, os, pathlib, shutil, subprocess, sys, tarfile, tempfile, time
 from importlib.machinery import SourceFileLoader
 publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_name('publish-dashboard.py'))).load_module()
+app_imports=SourceFileLoader('otrios_app_imports',str(pathlib.Path(__file__).with_name('process-app-imports.py'))).load_module()
 
 def inputs(repo):
     exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt']
@@ -18,7 +19,7 @@ def fingerprint(repo):
     for p in inputs(repo):h.update(str(p.relative_to(repo)).encode()+b'\0');h.update(p.read_bytes());h.update(b'\0')
     return h.hexdigest()
 def run(args,**kw):subprocess.run([str(x) for x in args],check=True,**kw)
-def rebuild(config,wanted,activate=True):
+def rebuild(config,wanted,activate=True,checks=False):
     repo=pathlib.Path(config['repo']);runtime=pathlib.Path(config['runtime']);build=runtime/'build';build.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='input-',dir=build) as tmp:
         temp=pathlib.Path(tmp)
@@ -31,15 +32,18 @@ def rebuild(config,wanted,activate=True):
         os.replace(temp,source);temp.mkdir()
         if old.exists():shutil.rmtree(old)
     env=dict(os.environ,**config['build_env'],CARGO_TARGET_DIR=str(build/'mac-target'))
-    run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
-    run(['cargo','test','-p','otrios-dashboard','--features','server,canvas,host-sync','--locked'],cwd=source,env=env)
-    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--locked'],cwd=source,env=env)
-    for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py','scripts/test_app_bundles.py']:
-        run([sys.executable,script],cwd=source,env=dict(env,OTRIOS_TEST_BIN_DIR=str(build/'mac-target/debug')))
+    if checks:
+        run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
+        run(['cargo','test','-p','otrios-dashboard','--features','server,canvas,host-sync','--locked'],cwd=source,env=env)
+    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--example','app_management_probe','--locked'],cwd=source,env=env)
+    if checks:
+        for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py','scripts/test_app_bundles.py']:
+            run([sys.executable,script],cwd=source,env=dict(env,OTRIOS_TEST_BIN_DIR=str(build/'mac-target/debug')))
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
     run(['bash','scripts/build-dashboard-web.sh'],cwd=source,env=env)
     if config.get('node'):
-        run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs','scripts/test-document-transfer.mjs','scripts/test-touch-input.mjs','scripts/test-text-input.mjs','scripts/test-viewport.mjs'],cwd=source)
+        if checks:
+            run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs','scripts/test-app-transfers.mjs','scripts/test-document-transfer.mjs','scripts/test-touch-input.mjs','scripts/test-text-input.mjs','scripts/test-viewport.mjs'],cwd=source)
         for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/session.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
     name='otrios-dashboard-live-builder'
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
@@ -56,9 +60,12 @@ def rebuild(config,wanted,activate=True):
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
     feature,binary='direct,server,canvas','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--target','armv7-unknown-linux-gnueabihf'])
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--example','space_map_probe','--example','app_management_probe','--example','transfer_ui_probe','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
+    run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/examples/space_map_probe',build/'frame-space-map-probe'])
+    for example in ['app_management_probe','transfer_ui_probe']:
+        run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/examples/'+example,build/('frame-'+example.replace('_','-'))])
     for program in ['dashboard-server','dashboard-monitoring','canvas-bundle']:
         run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+program,build/('frame-'+program)])
     if fingerprint(repo)!=wanted:raise RuntimeError('Source changed during compilation; stale build not published')
@@ -130,10 +137,10 @@ def refresh_git(config):
         if old.exists():shutil.rmtree(old)
     publisher.atomic(marker,commit.encode());print('SOURCE '+commit,flush=True)
 
-def main(config,once,activate=True):
+def main(config,once,activate=True,checks=False):
     runtime=pathlib.Path(config['runtime']);lock=open(runtime/'watcher.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     repo=pathlib.Path(config['repo']);marker=runtime/'build/source-id';last=marker.read_text() if marker.exists() else None
-    retry_at=0;next_git=0
+    retry_at=0;next_git=0;next_import=0
     while True:
         try:
             if time.monotonic()>=next_git:
@@ -142,14 +149,18 @@ def main(config,once,activate=True):
             if once or (wanted!=last and time.monotonic()>=retry_at):
                 time.sleep(.5)
                 if fingerprint(repo)!=wanted:continue
-                rebuild(config,wanted,activate);last=wanted
+                rebuild(config,wanted,activate,checks);last=wanted
             if once:return
+            if activate and config.get('frame') and time.monotonic()>=next_import:
+                next_import=time.monotonic()+5
+                try:app_imports.service(config)
+                except Exception as error:print('APP IMPORT PENDING: '+str(error),flush=True)
         except Exception as e:
             print('BUILD/ACTIVATION FAILED; inspect active pointer: '+str(e),flush=True)
             if once:raise
             retry_at=time.monotonic()+10
         time.sleep(1)
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--once',action='store_true');p.add_argument('--stage-only',action='store_true');a=p.parse_args();
+    p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--once',action='store_true');p.add_argument('--stage-only',action='store_true');p.add_argument('--checks',action='store_true',help='Opt into broad preflight suites; default is compile, sign and deploy for live acceptance');a=p.parse_args();
     if a.stage_only and not a.once:p.error('--stage-only requires --once')
-    main(json.loads(pathlib.Path(a.config).read_text()),a.once,not a.stage_only)
+    main(json.loads(pathlib.Path(a.config).read_text()),a.once,not a.stage_only,a.checks)

@@ -1,0 +1,368 @@
+{
+  "date": "2026-11-02",
+  "status": "complete-validated-and-deployed",
+  "rfc_complete": true,
+  "implementation_source": "5a5a86bbdccff490734c15d26f1838ad9867ba26",
+  "source_fingerprint": "75b7fb32da92fcf9222a9540e78c710dd22054fc20852a1b22c0318562f6cfe3",
+  "checks": {
+    "scripts/check.sh": "exit 0",
+    "real_authority_process_cases": 32,
+    "ordinary_workspace_process_scaffolds_are_acceptance": false,
+    "public_host_conformance_checks": 173,
+    "production_password_login_tested": false,
+    "implementation_source": "5a5a86bbdccff490734c15d26f1838ad9867ba26",
+    "earlier_app_install_release_public_checks": 180,
+    "canonical_signed_build": "exit 0",
+    "padding_regression": "passed inside existing UI case"
+  },
+  "shadow_arm": {
+    "arm_migration": "OTSP8-to-OTSP9",
+    "original_metadata_preserved": true,
+    "payload_files_byte_identical": 56,
+    "obsolete_writer_refused": true,
+    "v20_reopen_passed": true,
+    "server_unprivileged": true,
+    "private_mount_namespace": true,
+    "passed": true,
+    "live_release_unchanged": true,
+    "private_data_copy_removed": true,
+    "private_metadata_exported": false
+  },
+  "live_migration": {
+    "passed": true,
+    "space_metadata_preserved": true,
+    "confirmed_noncollector_files_byte_identical": 54,
+    "auth_identity_calibration_and_collector_binding_preserved": true,
+    "registry_framing": "OTSP9",
+    "private_metadata_exported": false,
+    "data_restored": false
+  },
+  "browser_upgrade": {
+    "passed": true,
+    "before": "50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c",
+    "after": "6fd416fb81ec6013eb493bf6575ea8729675ae867727ddecee0663c0a5cb141b",
+    "same_open_tab": true,
+    "public_only_controls": true,
+    "live": true,
+    "runtime_error": "",
+    "manual_browser": "T3 Chromium"
+  },
+  "deployed_acceptance": {
+    "app": {
+      "passed": true,
+      "physical_signed_app_import_applied": true,
+      "physical_explicit_publication": true,
+      "anonymous_https_page_and_download": true,
+      "download_signature_and_exact_bundle_verified": true,
+      "server_received_shared_https_url": true,
+      "url_review_cancelled_without_mutation": true,
+      "app_digest": "e54e2c9ab7bdbca46e9f32bafbb655391ca6c7ca9ea9e87393250a5108323365",
+      "release": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3",
+      "pixels_exported": false
+    },
+    "rollback": {
+      "passed": true,
+      "release": "6fd416fb81ec6013eb493bf6575ea8729675ae867727ddecee0663c0a5cb141b",
+      "latest_confirmed_metadata_preserved": true,
+      "confirmed_payload_files_byte_identical": 60,
+      "latest_replacement_binding_preserved": true,
+      "complete_reexport_byte_identical": true,
+      "data_restored": false,
+      "registry_framing": "OTSP9"
+    },
+    "reactivation": {
+      "passed": true,
+      "release": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3",
+      "latest_confirmed_metadata_preserved": true,
+      "confirmed_payload_files_byte_identical": 60,
+      "latest_replacement_binding_preserved": true,
+      "complete_reexport_byte_identical": true,
+      "data_restored": false,
+      "registry_framing": "OTSP9"
+    },
+    "preservation": {
+      "passed": true,
+      "original_space_metadata_and_relative_order_preserved": true,
+      "original_noncollector_payload_files_byte_identical": 54,
+      "extra_data_payloads_restricted_to_disposable_collections": true,
+      "independent_verified_public_code_objects": 1,
+      "only_added_scope_archived_and_unattached": true,
+      "credentials_memberships_identity_calibration_collector_binding_preserved": true,
+      "explicit_approved_host_operators": 2,
+      "registry_framing": "OTSP9",
+      "data_restored": false,
+      "private_metadata_exported": false
+    },
+    "data": {
+      "physical_export_and_file_picker": true,
+      "review_did_not_mutate": true,
+      "explicit_confirmation_fresh_binding_and_retained_outgoing": true,
+      "complete_reexport_byte_identical": true,
+      "archive_bytes": 1235,
+      "input": "synthetic evdev through calibrated physical-device reader",
+      "human_touch_observation": false,
+      "pixels_exported": false
+    }
+  },
+  "final_controls": {
+    "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "source": "5a5a86bbdccff490734c15d26f1838ad9867ba26",
+    "source_fingerprint": "75b7fb32da92fcf9222a9540e78c710dd22054fc20852a1b22c0318562f6cfe3",
+    "wasm_sha256": "632a7965c51a22c1320bb78071b85883bcbe9b0adf0672cc75ca7b1113f27947",
+    "native_sha256": "bd425e9d28fbcfba81a8f9dbfc5b9107c2d615390fc732226ddc021993b4a526",
+    "signed_closure_verified": true,
+    "catalog_and_all_signed_app_bytes_unchanged": true,
+    "state_protocol_unchanged": "otrios-canvas-sync-v20",
+    "passed": true,
+    "source_pin": "5a5a86bbdccff490734c15d26f1838ad9867ba26",
+    "mac_and_frame_pointers_match": true,
+    "previous_control_files_preserved_privately": true,
+    "existing_watcher_running": true,
+    "matches_frozen_build": true,
+    "final_release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "compatible_fallback": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3"
+  },
+  "final_readiness": {
+    "passed": true,
+    "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "state_protocol": "otrios-canvas-sync-v20",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+      "runtime_release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active"
+    },
+    "collector_resumed": false,
+    "collector_result": null,
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 3.199
+  },
+  "remaining": [],
+  "after_fixture_removal": {
+    "published_code_available_after_fixture_app_and_space_removal": true,
+    "transfer_folder_contains_only_owner_lock": true
+  },
+  "initial_implementation_source": "9a61137e8585531ab6930d61723d71f2fa7bbafb",
+  "initial_source_fingerprint": "7fdbac615e03cfcbad46c71ba1970e691825ee8b237eee28ca0d13201ea24d4d",
+  "initial_controls": {
+    "passed": true,
+    "final_release": "057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c",
+    "source_pin": "9a61137e8585531ab6930d61723d71f2fa7bbafb",
+    "wasm_sha256": "17004c8f0db653131b11f4bba522e750d5d6ac757291b318b5154096f5090f81",
+    "native_sha256": "4095e8ed392a2d09a6ff1384986cb38fae0342e8ceb027e85a25ee8285378ea5",
+    "host_artifacts_identical_across_A_B_C": true,
+    "signed_closure_verified": true,
+    "mac_pointer_and_staging_match": true,
+    "existing_watcher_running": true,
+    "compatible_fallback": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3"
+  },
+  "final_browser": {
+    "passed": true,
+    "source": "5a5a86bbdccff490734c15d26f1838ad9867ba26",
+    "source_dirty": false,
+    "release": "05d0d4672ba7d82035134343cfc586eb5676b77ea69823c5e4afd4848b77eeec",
+    "authority_sha256": "2aa12632bba85b16df12a7beb32cfe5c37d7d76cfd039d13df8040d99c491356",
+    "wasm_sha256": "632a7965c51a22c1320bb78071b85883bcbe9b0adf0672cc75ca7b1113f27947",
+    "archive_sha256": "509442f0a7e89ce613cb33827b9161bcf6e1ba7806e7baf0b6dced8957408809",
+    "actual_browser_download": true,
+    "actual_file_picker": true,
+    "review_has_no_mutation": true,
+    "fresh_binding": true,
+    "retained_outgoing_data": true,
+    "confirmed_value": 0,
+    "runtime_errors": []
+  },
+  "safari": {
+    "passed": true,
+    "browser": "Safari 27.0.1",
+    "source": "5a5a86bbdccff490734c15d26f1838ad9867ba26",
+    "wasm_sha256": "632a7965c51a22c1320bb78071b85883bcbe9b0adf0672cc75ca7b1113f27947",
+    "fixture_spaces": 4,
+    "fixture_attached_apps": 14,
+    "first_attempt_login": true,
+    "actual_download": true,
+    "actual_native_file_picker": true,
+    "review_and_cancellation_no_metadata_mutation": true,
+    "explicit_ui_confirmation": true,
+    "generation_advanced_once": true,
+    "fresh_binding": true,
+    "exact_outgoing_retained_before_replacement": true,
+    "other_bindings_unchanged": true,
+    "complete_reexport_byte_identical": true,
+    "archive_bytes": 1963,
+    "archive_sha256": "79c7b8e9e4d22cd518ffe5dd8480c7c48bb0805610bbf01f4f09147907fcf62d",
+    "reopened_counter_value": 1,
+    "download_archive_bytes_verified": true,
+    "ordinary_public_share_page_verified": true,
+    "public_page_shows_code_only_notice_download_instructions_and_project_links": true,
+    "initial_round_trip_wasm_sha256": "17004c8f0db653131b11f4bba522e750d5d6ac757291b318b5154096f5090f81",
+    "final_signed_wasm_round_trip": true,
+    "aligned_close_content_inset": true,
+    "nondefault_value_survived_signed_activation": true,
+    "all_existing_retained_backups_preserved": true,
+    "final_generation_advanced_once": true,
+    "deployed_public_map_and_app_verified": true,
+    "deployed_breadcrumb_return_verified": true,
+    "deployed_anonymous_edit_unavailable": true,
+    "deployed_release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "agent_tabs_closed": true
+  },
+  "final_padding_native": {
+    "passed": true,
+    "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "actual_native_runtime_and_ui_match": true,
+    "new_close_left_edge_hit": true,
+    "second_export_proves_close_returned_to_settings": true,
+    "complete_private_exports": 2,
+    "metadata_unchanged": true,
+    "calibration_unchanged": true,
+    "pixels_exported": false,
+    "human_touch_observation": false,
+    "source_scope_public": true,
+    "temporary_exports_removed": true
+  },
+  "final_padding_preservation": {
+    "passed": true,
+    "space_metadata_preserved": true,
+    "confirmed_noncollector_files_byte_identical": 55,
+    "auth_identity_calibration_and_collector_binding_preserved": true,
+    "registry_framing": "OTSP9",
+    "private_metadata_exported": false,
+    "data_restored": false
+  },
+  "final_original_preservation": {
+    "passed": true,
+    "original_space_metadata_and_relative_order_preserved": true,
+    "original_noncollector_payload_files_byte_identical": 54,
+    "extra_data_payloads_restricted_to_disposable_collections": true,
+    "independent_verified_public_code_objects": 1,
+    "only_added_scope_archived_and_unattached": true,
+    "credentials_memberships_identity_calibration_collector_binding_preserved": true,
+    "explicit_approved_host_operators": 2,
+    "registry_framing": "OTSP9",
+    "data_restored": false,
+    "private_metadata_exported": false
+  },
+  "padding_private_backup": {
+    "tag": "2026-11-02-spaces-transfer-padding",
+    "release": "057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c",
+    "files_verified": 269,
+    "services_restored": true,
+    "private_inventory_exported": false
+  },
+  "completion_audit": [
+    {
+      "requirement": "Retained data, restore/replacement backups, removal and deletion/revocation",
+      "passed": true,
+      "evidence": "Core Spaces/restore tests, 38 shared UI cases, real process suite, signed browser retained-data acceptance"
+    },
+    {
+      "requirement": "Scoped app/data moves, occupied targets, public review, stale writers and crash recovery",
+      "passed": true,
+      "evidence": "Core move/recovery cases; scoped_moves and scoped_chat_move real-process cases; signed browser move acceptance"
+    },
+    {
+      "requirement": "Signed code publication, file/HTTPS intake, explicit installation and independent trust",
+      "passed": true,
+      "evidence": "14 transfer cases, TLS/SSRF checks, signed installer/bridge recovery suite, physical Frame import/publication, anonymous HTTPS signature verification and URL intake"
+    },
+    {
+      "requirement": "Complete confirmed portable data, all roots/history/assets and fixed byte contracts",
+      "passed": true,
+      "evidence": "Four fixed-fixture cases plus independent framing/SHA oracle; real process history beyond the UI window, all roots and three owned attachments; Frame/Safari/browser archive round trips"
+    },
+    {
+      "requirement": "Browser and physical Frame UX, including the requested Close padding",
+      "passed": true,
+      "evidence": "Exact final Wasm browser driver and Safari 14-app fixture; Safari real file chooser/value 1; calibrated Frame export/replacement/import; final native shifted-edge hit test"
+    },
+    {
+      "requirement": "Release-control compatibility, live migration, compatible rollback and data preservation",
+      "passed": true,
+      "evidence": "ARM private-namespace OTSP8-to-9 recovery/refusal, live migration audit, v19 browser upgrade, v20 code-only rollback/reactivation, original 54-file audit and final 55-file audit"
+    },
+    {
+      "requirement": "Frozen source, full checks, signed deployment and operational control",
+      "passed": true,
+      "evidence": "scripts/check.sh exit 0 on 5a5a86b, 32 real-authority cases, canonical browser/ARM build, verified final closure, matching authority/native/Mac pointers, active exact-pinned signer watcher"
+    },
+    {
+      "requirement": "Documentation and qualification evidence",
+      "passed": true,
+      "evidence": "RFC 0028, Spaces/Transfers guides and this aggregate record; no private inventories or Frame pixels exported"
+    }
+  ],
+  "collector_qualification": {
+    "passed": true,
+    "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+    "state_protocol": "otrios-canvas-sync-v20",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+      "runtime_release": "ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 20.239
+  },
+  "latest_followup": {
+    "record": "live-ui-iteration.json",
+    "release": "c5881166b5197d1772ef05ec0bec9472d580a025fe47f2b347580858c981fe42",
+    "source": "3206fb1da689d93e203a665c62b7a089812da431"
+  }
+}

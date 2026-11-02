@@ -324,6 +324,8 @@ mod tests {
     const SOURCE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     fn snapshot() -> Discovery {
         Discovery {
+            profile: None,
+            catalog: vec![],
             version: 1,
             generation: 1,
             cursor: DiscoveryCursor {
@@ -333,6 +335,8 @@ mod tests {
             identity: Some("reader".into()),
             spaces: vec![
                 SpaceSummary {
+                    archived: false,
+                    retained: vec![],
                     layout: Default::default(),
                     apps: vec![],
                     attached_count: 0,
@@ -342,6 +346,8 @@ mod tests {
                     role: None,
                 },
                 SpaceSummary {
+                    archived: false,
+                    retained: vec![],
                     layout: Default::default(),
                     apps: vec![],
                     attached_count: 0,
@@ -352,6 +358,8 @@ mod tests {
                 },
             ],
             selected: Some(SpaceDetail {
+                active_users: None,
+                retained: vec![],
                 space: SOURCE.into(),
                 apps: vec![],
                 installed: vec![],

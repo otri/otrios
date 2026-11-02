@@ -110,6 +110,9 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
         },
     );
     let installed = vec![InstalledApp {
+        bundle_sha256: None,
+        code_bytes: None,
+        revision: None,
         policy: policy(),
         title: "Notes".into(),
         ui_ref: "app:notes/ui".into(),
@@ -153,7 +156,7 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
         assert!(hidden.selected.is_none());
         let bytes = spaces::encode_event(&Event::Snapshot {
             observation: 1,
-            snapshot: hidden,
+            snapshot: Box::new(hidden),
             resync: true,
         })
         .unwrap();
@@ -168,7 +171,7 @@ fn discovery_filters_rosters_retained_data_and_storage_before_encoding() {
     for snapshot in [admin, member] {
         let event = Event::Snapshot {
             observation: 1,
-            snapshot,
+            snapshot: Box::new(snapshot),
             resync: true,
         };
         assert_eq!(
@@ -185,6 +188,9 @@ fn discovery_preserves_unavailable_or_incompatible_collections_without_a_launch_
     let space = registry.spaces[0].id.clone();
     let binding = attach(&mut registry, &space);
     let mut installed = InstalledApp {
+        bundle_sha256: None,
+        code_bytes: None,
+        revision: None,
         policy: policy(),
         title: "Notes".into(),
         ui_ref: "app:notes/ui".into(),
@@ -336,6 +342,9 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
         );
         if index < MAX_INSTALLED_APPS {
             installed.push(InstalledApp {
+                bundle_sha256: Some("b".repeat(64)),
+                code_bytes: Some(u64::MAX),
+                revision: Some(u64::MAX),
                 policy,
                 title: "T".repeat(96),
                 ui_ref: format!("app:{app}/ui"),
@@ -374,7 +383,7 @@ fn maximum_selected_space_metadata_fits_one_bounded_snapshot_without_document_pa
     assert_eq!(detail.members.as_ref().unwrap().len(), MAX_MEMBERS);
     let event = Event::Snapshot {
         observation: 1,
-        snapshot,
+        snapshot: Box::new(snapshot),
         resync: true,
     };
     let bytes = spaces::encode_event(&event).unwrap();
@@ -398,7 +407,7 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
     .unwrap();
     let event = spaces::encode_event(&Event::Snapshot {
         observation: 1,
-        snapshot: snapshot.clone(),
+        snapshot: Box::new(snapshot.clone()),
         resync: true,
     })
     .unwrap();
@@ -449,7 +458,7 @@ fn observer_refreshes_on_reconnect_and_never_replays_uncertain_management() {
         .receive(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 2,
-                snapshot: snapshot.clone(),
+                snapshot: Box::new(snapshot.clone()),
                 resync: true,
             })
             .unwrap(),
@@ -993,7 +1002,7 @@ fn initial_registry_framing_recovers_older_members_and_upgrades_on_commit() {
             None,
         )
         .unwrap();
-    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP6");
+    assert_eq!(&std::fs::read(&file).unwrap()[..5], b"OTSP9");
     std::fs::remove_dir_all(path).unwrap();
 }
 
@@ -1078,7 +1087,7 @@ fn cleanup_facts_are_admin_only_and_cannot_be_smuggled_into_member_snapshots() {
     assert!(
         spaces::encode_event(&Event::Snapshot {
             observation: 1,
-            snapshot: member,
+            snapshot: Box::new(member),
             resync: false
         })
         .is_err()
@@ -1581,5 +1590,636 @@ fn legacy_registry_metadata_defaults_and_invalid_sizes_do_not_modify_collections
             })
             .is_err()
         );
+    }
+}
+
+#[test]
+fn uncertain_moves_query_the_durable_outcome_without_replaying_and_forget_on_identity_change() {
+    use std::collections::BTreeMap;
+    for changed_identity in [false, true] {
+        let registry = fixture();
+        let source = registry.spaces[0].id.clone();
+        let operation = "e".repeat(32);
+        let mut snapshot = spaces::discovery(
+            &registry,
+            Some("alice"),
+            Some(&source),
+            &[],
+            &BTreeMap::new(),
+            spaces::discovery_cursor().unwrap(),
+        )
+        .unwrap();
+        let mut observer = spaces::Observer::default();
+        observer.configure(Some(&source)).unwrap();
+        observer.outgoing().unwrap().unwrap();
+        observer
+            .receive(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(snapshot.clone()),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        observer
+            .request(Change::Move {
+                operation: operation.clone(),
+                source: source.clone(),
+                destination: "f".repeat(32),
+                app: "counter".into(),
+                collection: "d".repeat(32),
+                destination_collection: None,
+                mode: MoveMode::AppAndData,
+            })
+            .unwrap();
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::Manage { .. }
+        ));
+        observer.reset();
+        assert!(
+            !observer.pending(),
+            "offline outcome uncertainty must not block release discovery"
+        );
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::Watch { .. }
+        ));
+        assert!(observer.outgoing().unwrap().is_none());
+        if changed_identity {
+            snapshot.identity = Some("bob".into());
+        }
+        observer
+            .receive(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 2,
+                    snapshot: Box::new(snapshot),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        if changed_identity {
+            assert!(!observer.pending());
+            assert!(observer.outgoing().unwrap().is_none());
+        } else {
+            let Command::MoveStatus {
+                id,
+                operation: actual,
+                ..
+            } = spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("read-only status query")
+            };
+            assert_eq!(actual, operation);
+            observer
+                .receive(
+                    &spaces::encode_event(&Event::MoveStatus {
+                        version: 1,
+                        id,
+                        operation: operation.clone(),
+                        status: ManagementStatus::Applied,
+                        generation: Some(42),
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(!observer.pending());
+            assert!(matches!(
+                observer.take_outcome(),
+                Some(spaces::Outcome::MoveStatus {
+                    status: ManagementStatus::Applied,
+                    generation: Some(42),
+                    ..
+                })
+            ));
+            assert!(observer.outgoing().unwrap().is_none());
+        }
+    }
+}
+
+#[test]
+fn one_space_access_publication_checks_final_admins_epochs_services_and_current_code_policy() {
+    let mut registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let binding = attach(&mut registry, &space);
+    let joined = registry.spaces[0].members[0].joined_generation;
+    let request = Request {
+        version: 1,
+        expected_generation: registry.generation,
+        change: Change::Access {
+            space: space.clone(),
+            audience: Audience::PublicComment,
+            changes: vec![
+                MembershipEdit {
+                    identity: "alice".into(),
+                    role: Some(Role::Member),
+                },
+                MembershipEdit {
+                    identity: "bob".into(),
+                    role: Some(Role::Admin),
+                },
+            ],
+        },
+    };
+    let next = spaces::apply_catalog(&registry, "alice", &request, &[policy()]).unwrap();
+    assert_eq!(next.spaces[0].audience, Audience::PublicComment);
+    assert_eq!(next.spaces[0].apps[0].collection, binding.collection);
+    assert_eq!(
+        next.spaces[0]
+            .members
+            .iter()
+            .find(|m| m.identity == "alice")
+            .unwrap()
+            .joined_generation,
+        joined
+    );
+    assert_eq!(
+        next.spaces[0]
+            .members
+            .iter()
+            .find(|m| m.identity == "bob")
+            .unwrap()
+            .joined_generation,
+        next.generation
+    );
+    assert_eq!(
+        spaces::apply_catalog(&next, "alice", &request, &[policy()]),
+        Err(Error::Conflict)
+    );
+    let mut no_admin = request.clone();
+    let Change::Access { changes, .. } = &mut no_admin.change else {
+        unreachable!()
+    };
+    changes.pop();
+    assert_eq!(
+        spaces::apply_catalog(&registry, "alice", &no_admin, &[policy()]),
+        Err(Error::LastAdmin)
+    );
+    let mut closed_only = policy();
+    closed_only.closed_only = true;
+    assert_eq!(
+        spaces::apply_catalog(&registry, "alice", &request, &[closed_only]),
+        Err(Error::Incompatible)
+    );
+    assert_eq!(
+        spaces::admit_human_management("alice", &request, &["bob"]),
+        Err(Error::Denied)
+    );
+    assert_eq!(registry.spaces[0].members.len(), 1);
+    assert_eq!(registry.spaces[0].audience, Audience::Closed);
+}
+
+#[test]
+fn self_profiles_persist_with_revision_conflicts_without_renaming_principals_or_registry_bindings()
+{
+    let path = std::env::temp_dir().join(format!("otrios-profiles-test-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    let file = path.join("registry.flex");
+    let mut store = Store::open(file.clone()).unwrap();
+    let generation = store.registry().unwrap().generation;
+    let registry = std::fs::read(&file).unwrap();
+    let request = Request {
+        version: 1,
+        expected_generation: generation,
+        change: Change::Profile {
+            name: "Aaron Hilton".into(),
+            expected_revision: 0,
+        },
+    };
+    assert_eq!(store.profile("aaron@spaces.test").unwrap(), None);
+    store.commit("aaron@spaces.test", &request, None).unwrap();
+    assert_eq!(
+        store.profile("aaron@spaces.test").unwrap(),
+        Some(UserProfile {
+            name: "Aaron Hilton".into(),
+            revision: 1
+        })
+    );
+    assert_eq!(store.profile("bob").unwrap(), None);
+    assert_eq!(std::fs::read(&file).unwrap(), registry);
+    assert_eq!(
+        store.commit("aaron@spaces.test", &request, None),
+        Err(Error::Conflict)
+    );
+    drop(store);
+    let mut recovered = Store::open(file.clone()).unwrap();
+    assert_eq!(
+        recovered
+            .profile("aaron@spaces.test")
+            .unwrap()
+            .unwrap()
+            .name,
+        "Aaron Hilton"
+    );
+    let mut changed = request;
+    changed.change = Change::Profile {
+        name: "Aaron".into(),
+        expected_revision: 1,
+    };
+    recovered
+        .commit("aaron@spaces.test", &changed, None)
+        .unwrap();
+    assert_eq!(
+        recovered
+            .profile("aaron@spaces.test")
+            .unwrap()
+            .unwrap()
+            .revision,
+        2
+    );
+    assert_eq!(recovered.registry().unwrap().generation, generation);
+    let data = std::fs::read_dir(path.join("registry.flex.profiles"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let corrupt = b"OTSU1corrupted";
+    std::fs::write(&data, corrupt).unwrap();
+    assert!(recovered.profile("aaron@spaces.test").is_err());
+    assert!(
+        recovered
+            .commit("aaron@spaces.test", &changed, None)
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&data).unwrap(), corrupt);
+    assert_eq!(std::fs::read(&file).unwrap(), registry);
+    drop(recovered);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn replacement_observer_queries_after_reconnect_and_never_replays_a_consumed_stage() {
+    use otrios_interfaces::transfers::{DataReview, Replacement, ReplacementOutcome};
+    use std::collections::BTreeMap;
+    for changed_identity in [false, true] {
+        let mut registry = fixture();
+        let space = registry.spaces[0].id.clone();
+        let binding = attach(&mut registry, &space);
+        let mut snapshot = spaces::discovery(
+            &registry,
+            Some("alice"),
+            Some(&space),
+            &[],
+            &BTreeMap::new(),
+            spaces::discovery_cursor().unwrap(),
+        )
+        .unwrap();
+        let mut observer = spaces::Observer::default();
+        observer.configure(Some(&space)).unwrap();
+        observer.outgoing().unwrap().unwrap();
+        observer
+            .receive(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(snapshot.clone()),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let review = DataReview {
+            stage: "a".repeat(32),
+            replacement: Replacement {
+                space: space.clone(),
+                app: "notes".into(),
+                collection: binding.collection,
+                replacement: "b".repeat(32),
+                expected_generation: registry.generation,
+            },
+            audience: Audience::Closed,
+            schema_sha256: policy().schema,
+            archive_sha256: "c".repeat(64),
+            bytes: 100,
+            expires_unix_ms: 1000,
+        };
+        observer.replace_data(&review).unwrap();
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::ReplaceData { .. }
+        ));
+        observer.reset();
+        assert!(!observer.pending());
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::Watch { .. }
+        ));
+        assert!(observer.outgoing().unwrap().is_none());
+        if changed_identity {
+            snapshot.identity = Some("bob".into());
+        }
+        observer
+            .receive(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 2,
+                    snapshot: Box::new(snapshot),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        if changed_identity {
+            assert!(!observer.pending());
+            assert!(observer.outgoing().unwrap().is_none());
+        } else {
+            let Command::ReplacementStatus {
+                id, replacement, ..
+            } = spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("Only a read-only outcome check may resume")
+            };
+            assert_eq!(replacement, review.replacement.replacement);
+            assert!(
+                !observer
+                    .receive(
+                        &spaces::encode_event(&Event::ReplacementStatus {
+                            version: VERSION,
+                            id,
+                            replacement: "f".repeat(32),
+                            status: ManagementStatus::Applied,
+                            outcome: Some(ReplacementOutcome::Committed)
+                        })
+                        .unwrap()
+                    )
+                    .unwrap()
+            );
+            observer
+                .receive(
+                    &spaces::encode_event(&Event::ReplacementStatus {
+                        version: VERSION,
+                        id,
+                        replacement,
+                        status: ManagementStatus::Applied,
+                        outcome: Some(ReplacementOutcome::Committed),
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(!observer.pending());
+            assert!(matches!(
+                observer.take_outcome(),
+                Some(spaces::Outcome::Replacement {
+                    outcome: Some(ReplacementOutcome::Committed),
+                    ..
+                })
+            ));
+            assert!(observer.outgoing().unwrap().is_none());
+        }
+    }
+}
+
+#[test]
+fn code_share_results_are_correlated_and_reconnects_do_not_replay_publication() {
+    use otrios_interfaces::transfers::AppShare;
+    use std::collections::BTreeMap;
+    let registry = fixture();
+    let space = registry.spaces[0].id.clone();
+    let mut snapshot = spaces::discovery(
+        &registry,
+        Some("alice"),
+        Some(&space),
+        &[],
+        &BTreeMap::new(),
+        spaces::discovery_cursor().unwrap(),
+    )
+    .unwrap();
+    snapshot.catalog = vec![4; 32];
+    let mut observer = spaces::Observer::default();
+    observer.configure(Some(&space)).unwrap();
+    observer.outgoing().unwrap().unwrap();
+    observer
+        .receive(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(snapshot.clone()),
+                resync: true,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let id = observer
+        .share_app(&space, "notes", &"d".repeat(64))
+        .unwrap();
+    assert!(matches!(
+        spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+        Command::ShareApp { .. }
+    ));
+    assert!(
+        !observer
+            .receive(
+                &spaces::encode_event(&Event::Result {
+                    version: VERSION,
+                    id,
+                    status: ManagementStatus::Applied,
+                    created: None
+                })
+                .unwrap()
+            )
+            .unwrap()
+    );
+    assert!(
+        observer.pending(),
+        "an unrelated management reply cannot confirm a share"
+    );
+    observer
+        .receive(
+            &spaces::encode_event(&Event::AppShared {
+                version: VERSION,
+                id,
+                status: ManagementStatus::Applied,
+                share: Some(AppShare {
+                    app: "notes".into(),
+                    digest: "d".repeat(64),
+                    title: "Notes".into(),
+                }),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!observer.pending());
+    assert!(matches!(
+        observer.take_outcome(),
+        Some(spaces::Outcome::AppShared {
+            status: ManagementStatus::Applied,
+            ..
+        })
+    ));
+    observer
+        .share_app(&space, "notes", &"d".repeat(64))
+        .unwrap();
+    observer.outgoing().unwrap().unwrap();
+    observer.reset();
+    assert!(matches!(
+        observer.take_outcome(),
+        Some(spaces::Outcome::Unknown { .. })
+    ));
+    assert!(matches!(
+        spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+        Command::Watch { .. }
+    ));
+    observer
+        .receive(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 2,
+                snapshot: Box::new(snapshot),
+                resync: true,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        observer.outgoing().unwrap().is_none(),
+        "publication is never retried implicitly"
+    );
+}
+
+#[test]
+fn install_observer_reconnects_with_reads_and_waits_for_exact_terminal_outcome() {
+    use otrios_interfaces::transfers::{AppImportPhase as Phase, AppImportState, AppReview};
+    use std::collections::BTreeMap;
+    for changed_actor in [false, true] {
+        let registry = fixture();
+        let space = registry.spaces[0].id.clone();
+        let mut snapshot = spaces::discovery(
+            &registry,
+            Some("alice"),
+            Some(&space),
+            &[],
+            &BTreeMap::new(),
+            spaces::discovery_cursor().unwrap(),
+        )
+        .unwrap();
+        snapshot.catalog = vec![5; 32];
+        let mut observer = spaces::Observer::default();
+        observer.configure(Some(&space)).unwrap();
+        observer.outgoing().unwrap();
+        let deliver = |observer: &mut spaces::Observer, observation, snapshot: Discovery| {
+            observer
+                .receive(
+                    &spaces::encode_event(&Event::Snapshot {
+                        observation,
+                        snapshot: Box::new(snapshot),
+                        resync: true,
+                    })
+                    .unwrap(),
+                )
+                .unwrap()
+        };
+        deliver(&mut observer, 1, snapshot.clone());
+        let review = AppReview {
+            stage: "c".repeat(32),
+            space: space.clone(),
+            app: "sample".into(),
+            digest: "d".repeat(64),
+            title: "Sample".into(),
+            revision: 1,
+            bytes: 1024,
+            installed: None,
+            affected_spaces: 0,
+            expected_generation: snapshot.generation,
+            catalog: snapshot.catalog.clone(),
+            release: "a".repeat(64),
+            audience: Audience::Closed,
+            expires_unix_ms: 10000,
+        };
+        let id = observer.import_app(&review).unwrap();
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::ImportApp { .. }
+        ));
+        assert!(
+            !observer
+                .receive(
+                    &spaces::encode_event(&Event::Result {
+                        version: VERSION,
+                        id,
+                        status: ManagementStatus::Applied,
+                        created: None
+                    })
+                    .unwrap()
+                )
+                .unwrap()
+        );
+        observer.reset();
+        observer.take_outcome();
+        assert!(matches!(
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap(),
+            Command::Watch { .. }
+        ));
+        deliver(&mut observer, 2, snapshot.clone());
+        let Command::ImportStatus { id, operation, .. } =
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("read-only recovery query");
+        };
+        let reply = |id, operation: String, phase| Event::AppImport {
+            version: VERSION,
+            id,
+            operation: operation.clone(),
+            status: ManagementStatus::Applied,
+            state: Some(AppImportState {
+                operation,
+                phase,
+                release: matches!(phase, Phase::Armed | Phase::Applied).then(|| "b".repeat(64)),
+            }),
+        };
+        assert!(
+            !observer
+                .receive(&spaces::encode_event(&reply(id, "e".repeat(32), Phase::Queued)).unwrap())
+                .unwrap()
+        );
+        observer
+            .receive(&spaces::encode_event(&reply(id, operation.clone(), Phase::Queued)).unwrap())
+            .unwrap();
+        assert!(observer.pending());
+        assert!(
+            observer.outgoing().unwrap().is_none(),
+            "queued status must not busy-poll or replay installation"
+        );
+        snapshot.cursor.revision += 1;
+        deliver(&mut observer, 2, snapshot.clone());
+        let Command::ImportStatus { id, .. } =
+            spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("query after authority notice");
+        };
+        observer
+            .receive(&spaces::encode_event(&reply(id, operation.clone(), Phase::Armed)).unwrap())
+            .unwrap();
+        assert!(observer.pending());
+        assert!(observer.outgoing().unwrap().is_none());
+        observer.reset();
+        observer.outgoing().unwrap();
+        if changed_actor {
+            snapshot.identity = Some("bob".into());
+        }
+        deliver(&mut observer, 3, snapshot);
+        if changed_actor {
+            assert!(!observer.pending());
+            assert!(observer.outgoing().unwrap().is_none());
+        } else {
+            let Command::ImportStatus { id, .. } =
+                spaces::decode_command(&observer.outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("armed outcome query");
+            };
+            observer
+                .receive(&spaces::encode_event(&reply(id, operation, Phase::Applied)).unwrap())
+                .unwrap();
+            assert!(!observer.pending());
+            assert!(observer.outgoing().unwrap().is_none());
+            assert!(matches!(
+                observer.take_outcome(),
+                Some(spaces::Outcome::AppImported {
+                    state: Some(AppImportState {
+                        phase: Phase::Applied,
+                        ..
+                    }),
+                    ..
+                })
+            ));
+        }
     }
 }

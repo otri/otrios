@@ -59,7 +59,7 @@ fn expiry(id: &str) -> Result<u64> {
         .checked_add(RETENTION_MS)
         .ok_or(Error::Invalid)
 }
-fn new_directory(path: &Path) -> Result<()> {
+pub(super) fn new_directory(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
@@ -68,7 +68,7 @@ fn new_directory(path: &Path) -> Result<()> {
     }
     builder.create(path).map_err(io_error)
 }
-fn sync_directory(path: &Path) -> Result<()> {
+pub(super) fn sync_directory(path: &Path) -> Result<()> {
     fs::File::open(path)
         .and_then(|d| d.sync_all())
         .map_err(io_error)
@@ -346,6 +346,12 @@ impl Store {
             .iter()
             .flat_map(|s| &s.apps)
             .map(|a| (a.collection.clone(), a.policy.schema.clone()))
+            .chain(
+                self.registry()?
+                    .retained
+                    .iter()
+                    .map(|d| (d.collection.clone(), d.policy.schema.clone())),
+            )
             .collect::<BTreeMap<_, _>>();
         let files = snapshot_files(storage, &collections)?;
         let id = format!("{now_unix_ms:016x}-{}", fresh()?);

@@ -11,7 +11,7 @@ license = "LGPL-3.0-only"
 otrios-interfaces = { path = "../otrios-interfaces" }
 
 [features]
-canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex"]
+canvas = ["dashboard", "merkle", "dep:wasmi", "dep:getrandom", "dep:serde", "dep:lz4_flex", "dep:flate2"]
 signed-bundles = ["canvas", "dep:ring", "dep:base64"]
 merkle = ["dep:sha2"]
 default = []
@@ -27,6 +27,13 @@ optional = true
 
 [dependencies.ruzstd]
 version = "=0.8.2"
+optional = true
+
+# RFC 0028 portable ZIP payloads: bounded raw Deflate and CRC32, pure Rust backend.
+[dependencies.flate2]
+version = "=1.1.10"
+default-features = false
+features = ["miniz_oxide"]
 optional = true
 
 [lints]
@@ -117,4 +124,8 @@ required-features = ["canvas"]
 
 [[example]]
 name = "message_frames"
+required-features = ["canvas"]
+
+[[example]]
+name = "portable_data_fixtures"
 required-features = ["canvas"]

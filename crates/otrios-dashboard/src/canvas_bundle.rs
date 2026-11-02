@@ -73,6 +73,7 @@ fn compose(
             return Err("Installed app count limit".into());
         }
         let verified = bundle::verify(read_tree(&directory.path())?, &key)?;
+        bundle::qualify_install(&verified)?;
         let info = &verified.summary().info;
         if directory.file_name().to_str() != Some(&format!("{}.otapp", info.app.id)) {
             return Err("Installed folder differs from app identity".into());
@@ -367,6 +368,16 @@ fn report(tree: &BundleTree) -> Result<()> {
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("unpack") if args.len() == 7 && args[3] == "--key" && args[5] == "--openssl" => {
+            let key = bundle_files::public_key(Path::new(&args[4]), false, &args[6])?;
+            let archive = bundle_files::read_bounded(Path::new(&args[1]), otrios_interfaces::transfers::MAX_APP_ARCHIVE_BYTES)?;
+            let tree = otrios_core::transfers::archive::decode(otrios_core::transfers::archive::Kind::App, &archive)?;
+            let verified = bundle::verify(tree.clone(), &key)?;
+            bundle::qualify_install(&verified)?;
+            write_tree(Path::new(&args[2]), &tree)?;
+            println!("VERIFIED {} {}", verified.summary().info.app.id, verified.summary().digest);
+            Ok(())
+        }
         Some("materialize") if args.len()==8 && args[4]=="--key" && args[6]=="--openssl" => {
             use otrios_interfaces::bundle::*;
             let key=bundle_files::public_key(Path::new(&args[5]),false,&args[7])?;
@@ -456,6 +467,6 @@ fn main() -> Result<()> {
             write_tree(Path::new(&args[3]), &tree)?;
             report(&tree)
         }
-        _ => Err("Use canvas-bundle inspect BUNDLE; export APPS APP_ID OUTPUT.otapp --revision N; sign INPUT OUTPUT.otapp --key PRIVATE --openssl PATH; verify BUNDLE --key PUBLIC --openssl PATH".into()),
+        _ => Err("Use canvas-bundle inspect BUNDLE; export APPS APP_ID OUTPUT.otapp --revision N; sign INPUT OUTPUT.otapp --key PRIVATE --openssl PATH; verify BUNDLE --key PUBLIC --openssl PATH; unpack INPUT.otapp.zip OUTPUT.otapp --key PUBLIC --openssl PATH".into()),
     }
 }

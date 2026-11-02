@@ -3,8 +3,13 @@
 //! before calling this module and hold one authority lock through writes/reads.
 use otrios_interfaces::spaces::*;
 use std::collections::BTreeSet;
+mod access;
+mod usage;
+pub use usage::{AcceptedUser, active_users};
 mod discovery;
+mod moves;
 mod observer;
+mod retained;
 mod schema;
 pub use schema::collection_schema;
 mod wire;
@@ -71,6 +76,7 @@ fn fresh() -> Result<String> {
 }
 pub fn empty() -> Registry {
     Registry {
+        retained: vec![],
         version: VERSION,
         generation: 0,
         spaces: vec![],
@@ -83,6 +89,7 @@ pub fn validate(registry: &Registry) -> Result<()> {
     if registry.version != VERSION
         || registry.spaces.len() > MAX_SPACES
         || registry.deletions.len() > MAX_DELETIONS
+        || registry.retained.len() > MAX_RETAINED_DATASETS
     {
         return Err(Error::Invalid);
     }
@@ -114,6 +121,8 @@ pub fn validate(registry: &Registry) -> Result<()> {
             || s.admission_epoch > registry.generation
             || s.members.len() > MAX_MEMBERS
             || s.apps.len() > MAX_APPS
+            || s.apps.len() + registry.retained.iter().filter(|d| d.space == s.id).count()
+                > MAX_APPS
             || !s.members.iter().any(|m| m.role == Role::Admin)
         {
             return Err(Error::Invalid);
@@ -142,6 +151,18 @@ pub fn validate(registry: &Registry) -> Result<()> {
             }
         }
     }
+    for dataset in &registry.retained {
+        if !declared_spaces.contains(dataset.space.as_str())
+            || !valid_policy(&dataset.policy)
+            || !valid_id(&dataset.collection)
+            || !collections.insert(&dataset.collection)
+            || !dataset.label.is_empty() && !valid_name(&dataset.label)
+            || dataset.generation == 0
+            || dataset.generation > registry.generation
+        {
+            return Err(Error::Invalid);
+        }
+    }
     Ok(())
 }
 pub fn role(space: &Space, identity: Option<&str>) -> Option<Role> {
@@ -152,7 +173,11 @@ pub fn role(space: &Space, identity: Option<&str>) -> Option<Role> {
         .map(|m| m.role)
 }
 pub fn visible(space: &Space, identity: Option<&str>) -> bool {
-    space.audience != Audience::Closed || role(space, identity).is_some()
+    if space.archived {
+        role(space, identity) == Some(Role::Admin)
+    } else {
+        space.audience != Audience::Closed || role(space, identity).is_some()
+    }
 }
 /// Configured service principals cannot also acquire human membership roles.
 pub fn admit_service_identity(registry: &Registry, identity: &str) -> Result<()> {
@@ -171,6 +196,7 @@ pub fn admit_service_identity(registry: &Registry, identity: &str) -> Result<()>
 pub fn admit_human_management(actor: &str, request: &Request, services: &[&str]) -> Result<()> {
     if services.contains(&actor)
         || matches!(&request.change, Change::Membership { identity, .. } if services.contains(&identity.as_str()))
+        || matches!(&request.change, Change::Access { changes, .. } if changes.iter().any(|c| services.contains(&c.identity.as_str())))
     {
         return Err(Error::Denied);
     }
@@ -236,7 +262,11 @@ pub fn apply_catalog(
         return Err(Error::Conflict);
     }
     let mut current = registry.clone();
-    if let Change::Audience { space, audience } = &request.change {
+    if let Change::Audience { space, audience }
+    | Change::Access {
+        space, audience, ..
+    } = &request.change
+    {
         let selected = current
             .spaces
             .iter_mut()
@@ -255,7 +285,9 @@ pub fn apply_catalog(
         }
     }
     let attaching = match &request.change {
-        Change::Attach { app, .. } => installed.iter().find(|p| &p.app == app),
+        Change::Attach { app, .. }
+        | Change::RestoreDataset { app, .. }
+        | Change::Move { app, .. } => installed.iter().find(|p| &p.app == app),
         _ => None,
     };
     apply(&current, actor, request, attaching)
@@ -275,9 +307,19 @@ pub fn apply(
     if request.expected_generation != registry.generation {
         return Err(Error::Conflict);
     }
+    if matches!(request.change, Change::Profile { .. }) {
+        return Err(Error::Unavailable);
+    }
     let mut next = registry.clone();
     next.generation = next.generation.checked_add(1).ok_or(Error::Capacity)?;
     let epoch = next.generation;
+    if access::mutate(&mut next, actor, &request.change)?
+        || moves::mutate(&mut next, actor, &request.change, installed)?
+        || retained::mutate(&mut next, actor, &request.change, installed)?
+    {
+        validate(&next)?;
+        return Ok(next);
+    }
     if let Change::Create { name } = &request.change {
         if next.spaces.len() == MAX_SPACES {
             return Err(Error::Capacity);
@@ -286,6 +328,7 @@ pub fn apply(
             return Err(Error::Invalid);
         }
         next.spaces.push(Space {
+            archived: false,
             id: fresh()?,
             name: name.clone(),
             audience: Audience::Closed,
@@ -330,7 +373,16 @@ pub fn apply(
             | Change::ConfigureSpace { space, .. }
             | Change::LabelApp { space, .. }
             | Change::PlaceApp { space, .. } => space,
-            Change::Create { .. } | Change::PlaceSpace { .. } => unreachable!(),
+            Change::Profile { .. }
+            | Change::Access { .. }
+            | Change::Create { .. }
+            | Change::PlaceSpace { .. }
+            | Change::Move { .. }
+            | Change::DeleteSpace { .. }
+            | Change::RestoreSpace { .. }
+            | Change::RestoreDataset { .. }
+            | Change::DeleteDataset { .. }
+            | Change::LabelDataset { .. } => unreachable!(),
         };
         // Denied conceals whether an inaccessible Space exists.
         let s = next
@@ -339,6 +391,14 @@ pub fn apply(
             .find(|s| &s.id == space)
             .ok_or(Error::Denied)?;
         admin(s, actor)?;
+        if s.archived
+            && !matches!(
+                request.change,
+                Change::Membership { .. } | Change::ConfigureSpace { .. }
+            )
+        {
+            return Err(Error::Unavailable);
+        }
         match &request.change {
             Change::ConfigureSpace { name, layout, .. } => {
                 if !valid_name(name) || !valid_layout(*layout) {
@@ -478,8 +538,20 @@ pub fn apply(
                 data.collection = fresh()?;
                 data.attached &= !remove;
                 data.attachment_epoch = epoch;
+                if *remove {
+                    s.apps.retain(|a| a.policy.app != *app);
+                }
             }
-            Change::Create { .. } | Change::PlaceSpace { .. } => unreachable!(),
+            Change::Profile { .. }
+            | Change::Access { .. }
+            | Change::Create { .. }
+            | Change::PlaceSpace { .. }
+            | Change::Move { .. }
+            | Change::DeleteSpace { .. }
+            | Change::RestoreSpace { .. }
+            | Change::RestoreDataset { .. }
+            | Change::DeleteDataset { .. }
+            | Change::LabelDataset { .. } => unreachable!(),
         }
     }
     validate(&next)?;
@@ -496,7 +568,7 @@ pub fn bind(
     let s = registry
         .spaces
         .iter()
-        .find(|s| s.id == space && visible(s, identity))
+        .find(|s| s.id == space && !s.archived && visible(s, identity))
         .ok_or(Error::Denied)?;
     let a = s
         .apps
@@ -545,7 +617,8 @@ pub fn authorize(
         .members
         .iter()
         .find(|m| Some(m.identity.as_str()) == identity);
-    if binding.admission_epoch == 0
+    if s.archived
+        || binding.admission_epoch == 0
         || binding.admission_epoch > s.admission_epoch
         || a.attachment_epoch != binding.attachment_epoch
         || (s.admission_epoch != binding.admission_epoch
@@ -582,13 +655,15 @@ pub fn authorize_service(
         .iter()
         .find(|s| s.id == b.space)
         .ok_or(Error::Denied)?;
-    if s.apps.iter().any(|a| {
-        a.attached
-            && a.collection == b.collection
-            && a.policy.app == b.app
-            && a.policy.schema == b.schema
-            && a.attachment_epoch == b.attachment_epoch
-    }) {
+    if !s.archived
+        && s.apps.iter().any(|a| {
+            a.attached
+                && a.collection == b.collection
+                && a.policy.app == b.app
+                && a.policy.schema == b.schema
+                && a.attachment_epoch == b.attachment_epoch
+        })
+    {
         Ok(())
     } else {
         Err(Error::Denied)

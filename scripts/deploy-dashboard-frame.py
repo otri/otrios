@@ -30,20 +30,23 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
  if (stage/'ui-base.json').exists():
   base=json.loads((stage/'ui-base.json').read_bytes())['id'];store=root/'releases'
   if json.loads((store/'current.json').read_bytes())['id']==json.loads(pointer)['id']:
-   print('UNCHANGED '+activation.verify(store,key,'openssl',pointer));sys.exit(0)
-  release=activation.complete_ui(stage/'releases',store,key,'openssl',pointer,base)
+   release=activation.verify(store,key,'openssl',pointer)
+  else:release=activation.complete_ui(stage/'releases',store,key,'openssl',pointer,base)
  else:release=activation.verify(stage/'releases',key,'openssl',pointer,bundle_checker=stage/'canvas-bundle' if 'canvas-bundle' in checks else None)
  store=root/'releases';store.mkdir(exist_ok=True)
  import fcntl
  with (store/'.activation.lock').open('a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX)
-  if (stage/'ui-base.json').exists() and json.loads((store/'current.json').read_bytes())['id']!=base:raise ValueError('UI deployment baseline changed during transfer')
+  if (stage/'ui-base.json').exists() and json.loads((store/'current.json').read_bytes())['id'] not in (base,release):raise ValueError('UI deployment baseline changed during transfer')
   destination=store/release
   if destination.exists():
    activation.verify(store,key,'openssl',pointer)
   else:os.replace(stage/'releases'/release,destination)
   shutil.chown(destination,user='otrios',group='otrios')
   for path in destination.rglob('*'):shutil.chown(path,user='otrios',group='otrios')
+  activation.durable_release(store,release)
+  operation=json.loads((stage/'app-import.json').read_text())['operation'] if (stage/'app-import.json').exists() else None
+  activation.guard_imports('http://127.0.0.1:8876/admin/activate',release,operation)
   restart=False;restart_native=False
   for name in checks:
    dest=(pathlib.Path('/opt/otrios-dashboard') if name in ('frame-dashboard-agent.py','session-bootstrap') else binary)/name
@@ -51,7 +54,6 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
    if changed:activation.agent.atomic(dest,data,0o755)
    if name=='dashboard-server':restart=changed
    if name=='frame-dashboard-agent.py':restart_native=changed
-  activation.durable_release(store,release)
   activation.agent.atomic(store/'current.json',pointer)
   shutil.chown(store/'current.json',user='otrios',group='otrios')
  if restart:subprocess.run(['systemctl','restart','otrios-authority.service'],check=True)
@@ -76,7 +78,10 @@ with tempfile.TemporaryDirectory(prefix='.incoming-',dir=root) as tmp:
  else:print('Native release still activating; its running cache was retained')
 '''
 
-def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None,bundle_checker=None):
+def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None,bundle_checker=None,app_import=None):
+    if app_import is not None:
+        import re
+        if not re.fullmatch(r'[a-f0-9]{32}',app_import) or not ui_base:raise ValueError('App imports require an exact operation and unchanged host baseline')
     repo=pathlib.Path(__file__).resolve().parent.parent
     runtime=pathlib.Path(config['runtime']);pointer=pathlib.Path(pointer)
     spec=importlib.util.spec_from_file_location('activation',repo/'scripts/activate-dashboard-release.py')
@@ -102,6 +107,8 @@ def deploy(config,pointer,server,monitoring,bootstrap,ui_base=None,bundle_checke
         else:
             for name in changed:archive.add(runtime/'releases'/release/name,arcname='releases/'+release+'/'+name)
             raw=json.dumps({'id':ui_base}).encode();item=tarfile.TarInfo('ui-base.json');item.size=len(raw);archive.addfile(item,io.BytesIO(raw))
+        if app_import:
+            raw=json.dumps({'operation':app_import}).encode();item=tarfile.TarInfo('app-import.json');item.size=len(raw);archive.addfile(item,io.BytesIO(raw))
         archive.add(pointer,arcname='current.json')
         for name,path in files.items():
             if not ui_base or name.endswith('.py'):archive.add(path,arcname=name)

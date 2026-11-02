@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "old_otsp6_writer_rejected": true,
+  "private_probe_control_files_unchanged": true,
+  "live_registry_touched": false,
+  "code_rolled_back": false
+}

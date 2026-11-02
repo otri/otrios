@@ -4,7 +4,7 @@
 import argparse,fcntl,gzip,hashlib,importlib.util,io,json,os,pathlib,re,subprocess,time,urllib.request,urllib.parse
 spec=importlib.util.spec_from_file_location('frame_agent',pathlib.Path(__file__).with_name('frame-dashboard-agent.py'));agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
 WEB={'web/index.html','web/style.css','web/app.js','web/state-worker.js','web/pkg/otrios_dashboard.js','web/pkg/otrios_dashboard_bg.wasm','apps/catalog.flex'}
-OPTIONAL={'web/text-input.mjs','web/fonts/Roboto.ttf','web/fonts/OFL.txt','web/document-transfer.mjs','web/touch-input.mjs','web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/viewport.mjs','web/ui-update.mjs','web/navigation-timings.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
+OPTIONAL={'web/text-input.mjs','web/fonts/Roboto.ttf','web/fonts/OFL.txt','web/document-transfer.mjs','web/app-transfers.mjs','web/touch-input.mjs','web/app-catalog.mjs','web/Slug-LICENSE.txt','web/gpu-scene.mjs','web/viewport.mjs','web/ui-update.mjs','web/navigation-timings.mjs','web/slug-shaders.mjs','web/font-resource.mjs','web/font-reference.mjs','web/fonts/Roboto-Regular.otq.zst','web/release-gate.mjs','web/session.mjs','web/monitoring-session.mjs','web/artifact-cache.mjs','web/artifact-cache-worker.js'}
 NATIVE={'native/armv7/dashboard-native'}
 def read(path,limit):
     with path.open('rb')as f:data=f.read(limit+1)
@@ -100,15 +100,55 @@ def durable_release(releases,release):
         try:os.fsync(descriptor)
         finally:os.close(descriptor)
 
+def guard_imports(notify_url,release,operation=None):
+    """Called while holding .activation.lock, after complete release verification.
+
+    The local authority owns authorization and durable decisions. This adapter
+    only carries an exact planned release through that authority's bridge.
+    """
+    parsed=urllib.parse.urlsplit(notify_url)
+    if parsed.scheme!='http' or parsed.hostname not in ('127.0.0.1','::1') or parsed.path!='/admin/activate' or parsed.query or parsed.username or parsed.password:
+        raise ValueError('Use the trusted loopback activation hook')
+    if operation is not None and not re.fullmatch(r'[a-f0-9]{32}',operation):raise ValueError('Invalid import operation')
+    base=urllib.parse.urlunsplit((parsed.scheme,parsed.netloc,'','',''))
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def request(path,data=None):
+        headers={'X-OTriOS-Request':'signer'}
+        if data is not None:headers['Content-Type']='application/json'
+        with opener.open(urllib.request.Request(base+path,data=None if data is None else json.dumps(data).encode(),headers=headers),timeout=10)as response:
+            raw=response.read(16385)
+        if len(raw)>16384:raise ValueError('Oversized install bridge response')
+        return json.loads(raw)
+    try:job=request('/admin/app-import')
+    except urllib.error.HTTPError as error:
+        # The pre-RFC0028 host has no install decision or bridge. Required only
+        # for its one-time upgrade; an import never uses this compatibility path.
+        if error.code==404 and operation is None:error.close();return
+        raise
+    if operation is None:
+        if job and job['state']['phase']=='armed' and job['state']['release']!=release:
+            raise ValueError('An armed app import requires its exact planned release')
+        return
+    if not job:
+        state=request('/admin/app-import/'+operation)
+        if state and state['operation']==operation and state['phase']=='applied' and state['release']==release:return
+        raise ValueError('Import decision is no longer pending')
+    if job['review']['stage']!=operation:raise ValueError('A different app import is pending')
+    state=job['state']
+    if state['phase']=='queued':state=request('/admin/app-import/'+operation+'/arm',{'release':release})
+    if state['operation']!=operation or state['phase']!='armed' or state['release']!=release:
+        raise ValueError('Import activation decision changed')
+
 def activate(a):
     pointer=a.pointer.read_bytes()
     with (a.releases/'.activation.lock').open('a')as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         release=verify(a.releases,a.key,a.openssl,pointer)
         durable_release(a.releases,release)
+        if getattr(a,'imports_guard',False) or getattr(a,'app_import',None):guard_imports(a.notify_url,release,getattr(a,'app_import',None))
         agent.atomic(a.releases/'current.json',pointer)
         notify(a.notify_url)
     print('ACTIVE '+release,flush=True);return release
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--releases',type=pathlib.Path,required=True);p.add_argument('--pointer',type=pathlib.Path,required=True);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='openssl');p.add_argument('--notify-url',default='http://127.0.0.1:8876/admin/activate');a=p.parse_args();activate(a)
+    p=argparse.ArgumentParser();p.add_argument('--releases',type=pathlib.Path,required=True);p.add_argument('--pointer',type=pathlib.Path,required=True);p.add_argument('--key',type=pathlib.Path,required=True);p.add_argument('--openssl',default='openssl');p.add_argument('--notify-url',default='http://127.0.0.1:8876/admin/activate');p.add_argument('--app-import');a=p.parse_args();a.imports_guard=True;activate(a)

@@ -156,6 +156,7 @@ impl Store {
             .iter()
             .flat_map(|s| &s.apps)
             .map(|a| a.collection.as_str())
+            .chain(registry.retained.iter().map(|d| d.collection.as_str()))
             .chain(registry.deletions.iter().map(|d| d.collection.as_str()))
             .collect::<BTreeSet<_>>();
         let mut names = BTreeSet::new();

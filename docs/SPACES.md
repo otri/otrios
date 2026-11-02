@@ -1,6 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Spaces management contract
 
+The deployed RFC 0028 implementation uses state protocol v20, Spaces envelope
+v5 and registry framing OTSP9, including staged portable replacement. Earlier
+v19/OTSP8 qualification remains historical evidence. See
+[Transfers](TRANSFERS.md) for payload details and the
+[combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
+for completed Safari/physical Frame acceptance, deployed migration/rollback and
+preservation results.
+
 The covered `otrios_core::spaces` library implements registry transitions and
 admission. The authority additionally supports an explicit managed mode via
 `--spaces-registry /ABS/PRIVATE/spaces.flex`. The live Frame was migrated on
@@ -20,7 +28,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v17` includes a version-2 presentation binding
+State protocol `otrios-canvas-sync-v20` includes a version-2 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when collection identity, effective actions and
@@ -48,15 +56,19 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 ## Discovery on the shared session
 
-Management/discovery uses its v2 binary envelope on channel 5 of the same
+Management/discovery uses its v5 binary envelope on channel 5 of the same
 negotiated session. Both hosts use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v17; v10 introduced discovery, v11 added the
+browser/native state protocol is v20; v10 introduced discovery, v11 added the
 managed activation acknowledgement, v12 scoped auxiliary payloads by mount,
 v13 added a qualified first chat transcript window, and v14 added collection-specific
 delete confirmations and Admin cleanup metadata. V15 adds owned attachments,
 reviewed publication and message moderation. V16 adds request-correlated replies
 and the version-2 actor context. V17 adds bounded Space previews and presentation
-management commands; numeric management request version 1 remains unchanged.
+management commands. V18 adds archived Spaces, exact retained datasets and reviewed recovery/deletion commands. V19 adds scoped moves and durable outcome queries. V20 adds staged portable
+replacement, cancellation, read-only replacement outcome queries and explicit
+host-authorized code publication. Launch references avoid duplicating installed
+code facts in each app row; numeric
+management request version 1 remains unchanged.
 Managed hosts send Leave(epoch) after discarding revoked replicas; the authority holds cleanup pins until then.
 Release discovery remains on its unchanged control v1 envelope.
 
@@ -77,8 +89,11 @@ delivered after revocation acknowledges.
 
 Snapshots contain up to 64 visible Space summaries, each with up to 16 attached
 app previews (128 total; bundle ID, Space-local title and code compatibility).
-Preview metadata
-contains no collection IDs or usage totals. Larger Spaces open a paged app list.
+Attached previews contain no collection IDs or usage totals. Admins additionally
+receive bounded retained-dataset previews with exact collection IDs; these are
+never granted to Members or visitors. Attached and retained previews share the
+128-row budget. The map draws at most 16 tiles per Space; larger retained sets
+open the paged Data list. Larger attached Spaces open a paged app list.
 Detailed metadata is scoped to the selected Space: at most 128 app rows,
 128 Admin-visible member records and 16 verified
 installed launch records. They never contain document payloads or credentials.
@@ -103,8 +118,9 @@ Unavailable local code keeps its entry and explains the problem on selection.
 
 Edit exposes Add Space, each Space's Add App, title dragging and corner resizing.
 Arrow keys on a title, app tile or resize corner perform equivalent ordering/size
-changes. The static tile grip is also the reduced-motion cue. App reordering is
-within a Space; cross-Space moves remain unavailable until M3 qualifies. Layout
+changes. App minus controls are separate from the tile's drag target. App reordering is
+within a Space; a cross-Space drop opens the move review. Space on an app or ghost
+picks it up for a keyboard destination chooser; it uses the same review. Layout
 uses logical app-cell widths/heights (1–6), grows to fit content and reflows locally
 without changing shared preferred sizes. The map pans vertically with shared
 sample-time momentum physics on Web and Frame, retaining the mount throughout a
@@ -119,14 +135,139 @@ Managed apps return through `< OTriOS • App name`; the breadcrumb uses the hos
 reserved return action and includes the top-left padding in its touch target.
 
 The Space settings panel combines name and background (including None), then usage
-and existing people/sharing/data/cleanup controls. No width/height fields or separate
+and its compact access/app/dataset information rows. People & access and Delete Space
+are its primary actions. No width/height fields or separate
 appearance panel is added. In Edit, an app opens a name field over its immutable
 bundle ID. Enter, blur or closing commits a changed label; there is no Rename,
 Move or Delete App button in that panel. Share App, Export Data and Replace Data
-truthfully report unavailable until the transfer milestone qualifies. Unmeasured
-active-user totals remain unavailable. Existing removal/retention/deletion controls
-remain under Space settings / Apps & Data pending M2; this increment adds neither
-multiple retained backups nor portable data codecs.
+use the shared reviewed transfer workflow and qualified host adapters. Unmeasured
+active-user totals remain unavailable only where no admitted-mount inventory is
+available. The authority supplies Admin-only counts from accepted, currently
+admitted mounts, deduplicating authenticated people and counting anonymous
+connections separately. Successful changes do not display a Saved
+message. An unavailable codec or host capability remains explicit.
+
+In Edit, the red minus opens Delete App with Remove Data unchecked. Cancel
+changes nothing and resets that choice. Delete without Remove Data detaches the
+app while preserving its preferred collection. Checked deletion tombstones that
+exact collection and removes the attachment. Detached datasets and sealed backups
+appear after loaded apps as ghosted `<name> (data)` tiles; outside Edit they are
+hidden. A ghost's info and minus select its exact collection, never an arbitrary
+backup. Destructive and replacement reviews pin the registry generation; changes
+or loss of Admin access require a new review.
+
+Ordinary restoration reattaches the preferred collection with a fresh attachment
+epoch. Restoring a sealed backup keeps that source sealed, retains the outgoing
+current dataset as another sealed backup, copies all managed checkpoint/journal/
+asset files to a fresh collection, then publishes its active binding. The
+OTSR2 scoped plan uses the existing durable `.restore` admission barrier; verified
+files become durable before the registry decision, and startup completes that
+same decision before any app admission. Interrupted pre-plan staging is removed.
+No second active instance of a bundle is created. Registry limits bound sealed
+backups to 512 per authority and 128 total datasets per Space; reaching the limit
+rejects restoration without discarding any dataset. Usage includes preferred and
+sealed collections once each. Unavailable storage or schema/code compatibility
+keeps Restore unavailable. Export/replacement also require the installed compatible
+portable codec; see [Transfers](TRANSFERS.md).
+
+Cross-Space moves require current Admin authority in both Spaces. A review pins
+both exact collection bindings, the registry generation and discovery cursor;
+metadata/catalog changes require picking up the item again. Attached apps offer
+App and data, App only and Data only. Ghosts offer Data only. The destination
+name and audience are visible; data-bearing public moves use an explicit
+**Move and publish data** confirmation. App-only moves keep destination content
+unchanged. A data-bearing occupied destination retains its outgoing dataset as
+a sealed BeforeReplacement backup. A destination without an attachment receives
+a ghost for Data only. Source attachment/data retirement and fresh destination
+binding publish as one decision; delayed old producers cannot recreate either
+collection. Closed-only/schema-incompatible data, unhealthy storage and service
+or collector-backed apps without a separately authorized rebinding plan reject
+without changing either Space. Service credentials never move.
+
+The existing `.restore` admission barrier journals a scoped OTSR3 move plan.
+Complete confirmed files and owned assets are staged and synced first, then
+promoted under fresh collection identities, followed by the current registry and a
+durable outcome receipt. Startup finishes this exact decision before admission.
+The source's tombstone/pins retain existing cleanup protections; copied assets
+have independent ownership rather than mutable links to source storage.
+The deployed writer uses OTSP9, retaining OTSP8 custom RGB backgrounds and OTSR3
+move recovery. Older writers that cannot preserve current decisions reject this
+framing; the historical retained-data baseline also cannot recover OTSR3 plans.
+Use a current compatible reader/writer for code rollback; preserve the paired
+pre-deployment backup for an explicitly authorized state reset. Never remove the plan or restore older safety metadata.
+
+Receipts live privately in `REGISTRY.moves/OPERATION.flex`: OTSM1, SHA-256 and a
+bounded FlexBuffers record bound to the authority root, actor, both Spaces,
+request digest and committed generation. They grant no access. The request hash
+uses domain `OTriOS\0space-move-request\0v1\0`, length-prefixed UTF-8
+actor/operation/source/destination/app/collection, then request version,
+expected generation, optional destination collection and mode, in the canonical
+little-endian encoding in `spaces/move_receipts.rs`. At most 1024 receipts of
+2048 payload bytes are retained; capacity rejects new moves without evicting old
+outcomes. Operational rollback kits include these receipts and pending plans;
+app payload backups exclude authority safety metadata.
+
+After a lost reply, the same client reconnects and issues read-only MoveStatus
+by operation ID. Current Admin access to both scopes is checked again. A known
+identical request can return its prior decision without executing again; changed
+content under that ID conflicts. A new explicit review generates a new ID.
+Identity changes discard the RAM watch. Disconnected outcome uncertainty cannot
+block release discovery; connected outcome checks still precede handoff.
+
+Space, app, dataset, access and recovery controls share one rounded modal
+surface over the dimmed Spaces map. The underlying map has no input responders or
+semantic controls while a panel is open. The panel owns its own bounded local
+pan/wheel scroll; it preserves the mount and distinguishes a tap from a pan that
+starts on a field or button. Web traps keyboard focus and Escape within the
+panel and restores the initiating semantic control on close. Short viewports
+scroll the panel rather than scaling it into an unreadable whole-screen form.
+Primary confirmations use the shared green action treatment; destructive
+confirmations stay red and routine successes are silent.
+
+Profile editing saves a self-only display name; it never renames the authenticated
+principal, changes membership or transfers writer context. A profile has its own
+revision CAS and a private authority-root-bound OTSU1 record under
+`REGISTRY.profiles/ACTOR_SHA256.flex`, limited to 256 profiles and 1024 payload
+bytes per record. These files are separate from app payloads and included in
+operational rollback kits. Discovery returns only the signed-in actor's profile.
+An absent profile falls back to the authenticated identity; corruption cannot be
+accepted as an empty/default profile and overwritten silently. Profile updates
+leave registry generations and data bindings unchanged.
+
+Space name edits commit implicitly on Enter, blur or closing, as app labels do.
+Palette selections commit the currently edited name and chosen background as
+one generation-checked ConfigureSpace. Swatches wrap to retain touch target size
+on narrow screens. Dataset headings edit exact preferred/sealed dataset labels
+through LabelDataset; labels never change bundle/collection identity. Archived
+Spaces are recovered through Profile → Deleted Spaces, with current Admin checks.
+
+People & access holds an unsent local draft of audience and membership changes.
+Save sends one single-Space Access command with the desired audience and at most
+16 explicit identity/role edits. Final membership must retain an Admin, with a
+128-member bound. Existing members keep their continuous membership interval;
+new members receive the committed generation. Audience and membership changes
+share one admission-epoch publication. Public audiences still adopt/check the
+current verified app policies; service principals cannot acquire human roles.
+An access change opens its explicit review before this command is sent. Cancel
+leaves all authority metadata unchanged. This bounded Space ACL publication is
+not a general transaction API.
+
+Discovery includes the installed catalog identity independently of its delivery
+revision. Access/move reviews pin catalog identity, authority incarnation and
+registry generation. Presence updates can advance delivery revisions without
+invalidating an unchanged review or rebuilding a Home map during a gesture.
+Admin detail includes accepted participant totals; staged mounts and retired
+cleanup pins are excluded. Verified InstalledApp metadata also supplies logical
+bundle bytes and revision. Unsigned development fixtures leave these code facts
+unknown rather than inventing a version or byte total.
+
+Deleting a Space without Remove Data archives it with its data and ACL intact.
+It immediately denies app and service bindings, disappears for Members/visitors,
+and remains recoverable for current Admins through Deleted Spaces. Restore Space preserves its
+collections while issuing fresh admission/attachment epochs. Checked deletion
+tombstones every current and sealed dataset before archiving the empty Space;
+restoring it cannot restore those deleted bytes. Cleanup retains RFC 0027's
+producer pins and managed-backup retention reporting.
 
 Name, background, size and order requests use the reviewed registry generation
 and require current Admin authority on the changed Space. Reordering cannot use
@@ -268,21 +409,16 @@ browser qualification. `scripts/check.sh` supplies its freshly built authority t
 `otrios-core/tests/spaces_process.rs`. Its test-only `tungstenite` dependency reuses
 the pinned workspace WebSocket client; it adds no runtime dependency.
 
-For real-browser qualification, build the authority, `bundle_counter` and
-`space_ink_probe` examples and
-Wasm package from the tested revision, then run
-`python3 scripts/qualify-spaces-browser.py --wasm-pkg /ABS/BUILT/pkg`. The probe uses
-disposable data and signing keys, normal sign-in and separate Chromium cookie
-contexts. It checks shared edits, Space isolation, anonymous/non-Member denial,
-active revocation and continued use by an unaffected Member. It also exercises
-the host controls for Quit, retained-data inspection, removal, reattachment and
-Space switching, verifying that another participant can edit after Quit and that
-reattachment preserves the collection and value. Drawing qualification
-uses real pointer input in separate cookie contexts to check shared trails,
-Space isolation (including a new subscription's recent history), and continued
-drawing after another participant quits. Reports include the
-source revision, dirty-tree status and artifact digests. The fixture has no native
-artifact; it does not establish ARM execution or Frame deployment acceptance.
+For real-browser qualification, build the authority, `bundle_counter`,
+`space_ink_probe`, `space_chat_probe` examples and Wasm package from the tested
+revision. Use `python3 scripts/qualify-spaces-browser.py --wasm-pkg /ABS/BUILT/pkg
+--serve --output REPORT_DIRECTORY` to serve a disposable fixture in Safari.
+The fixture uses synthetic data, test identities and a temporary signing key;
+`REPORT_DIRECTORY/fixture.json` records its URL and runtime hashes. Stop the
+fixture process when acceptance is complete. The focused map driver remains an
+optional automated Chromium probe. The superseded management-page browser
+script has been removed; real authority/process tests retain data isolation,
+revocation, concurrent-write and ownership coverage.
 
 ## Identity configuration
 
@@ -588,14 +724,14 @@ An `OTCHAT01` journal is recovered completely, then atomically compacted into
 `OTCHAT02` before its next durable write. Older writers reject the new framing
 without truncating it. Legacy journal-only manifests reject owned attachment
 references rather than silently losing their namespace; use paired collection
-backup/restore for owned data. Registry framing is `OTSP6`; release-control v1 remains
-independent. State protocol v17 retains these commands and correlates moderation/download replies
+backup/restore for owned data. Registry framing is `OTSP9`; release-control v1 remains
+independent. State protocol v20 retains these commands and correlates moderation/download replies
 with request nonces.
 
 
 ## Persistence
 
-The native Store writes `OTSP6`, a 32-byte SHA-256 payload digest, and a bounded
+The native Store writes `OTSP9`, a 32-byte SHA-256 payload digest, and a bounded
 FlexBuffers record containing the registry, a stable authority-root identity and
 its paired app-storage path and migration-original retention decisions. The
 registry remains bounded at 2 MiB; attribution metadata adds at most 2 MiB and
@@ -605,17 +741,17 @@ Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
 
-Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3`, `OTSP4` and `OTSP5` registries while preserving their decisions;
+Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3`, `OTSP4`, `OTSP5`, `OTSP6`, `OTSP7` and `OTSP8` registries while preserving their decisions;
 the initial prototype defaults older members' continuous-membership generation
 to zero. The upgrade writes the latest decision ledger before replacing the
-primary. Older writers reject `OTSP6`, including writers that cannot honor
+primary. Older writers reject `OTSP9`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
-supports this framing and the current admission rules. OTSP6 adds Space layout and
+supports this framing and the current admission rules. OTSP9 adds imported inactive dataset provenance and fences older portable-replacement writers. OTSP8 added custom RGB background colors; OTSP7 added archived Space and sealed-dataset decisions; OTSP6 added Space layout and
 Space-local app labels; omitted legacy fields default without rebinding collections.
 Legacy Spaces start at one to three cells wide according to attached-app count;
 existing OTSP6 layout edits are preserved on every later recovery.
 Never downgrade current safety metadata to make an older writer accept it.
-Management request version 1 and release-control v1 remain stable. Current state protocol v17 retains the
+Management request version 1 and release-control v1 remain stable. Current state protocol v20 retains the
 collection-specific deletion confirmation and Admin-only cleanup metadata and adds
 reviewed publication, attachment blobs and message moderation.
 
@@ -827,3 +963,10 @@ explicit map node from the host renderer; the outer page is also a clipped
 canvas and must never be selected as the scroll viewport. Sign-in intent survives
 presentation/metadata rebuilds until authenticated or cancelled; background
 session refreshes defer to a pending cookie mutation.
+
+The shared settings panel composes a separate, inert map scene beneath its
+scrim. This keeps a populated map and the native software keyboard inside their
+individual 128 KiB layout budgets. Pages also bound visible app previews rather
+than counting only Spaces. Custom background colors use an explicit six-digit
+hex field on both hosts; dark colors receive light labels. No native file or OS
+color-picker capability is implied.

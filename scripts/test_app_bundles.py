@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Signed bundle installation across real tool, authority and guest processes."""
-import hashlib,importlib.util,json,os,pathlib,shutil,socket,subprocess,sys,time,unittest,urllib.request
+import ast,hashlib,importlib.util,io,json,os,pathlib,shutil,socket,subprocess,sys,tarfile,time,unittest,urllib.request,zipfile
 from types import SimpleNamespace
 from unittest import mock
 HERE=pathlib.Path(__file__).parent;REPO=HERE.parent
@@ -9,6 +9,7 @@ def module(name,file):
 legacy=module('release_fixtures','test_dashboard_release.py')
 installer=module('bundle_installer','install-app.py')
 activation=installer.activation
+app_imports=module('app_import_bridge','process-app-imports.py')
 BIN=pathlib.Path(os.environ.get('OTRIOS_TEST_BIN_DIR',str(REPO/'target/debug'))).resolve()
 CHECKER=BIN/'canvas-bundle';OPENSSL=legacy.OPENSSL
 
@@ -46,7 +47,9 @@ class SignedBundleInstallation(unittest.TestCase):
 
     def start(self):
         self.log=(self.root/'server.log').open('ab');self.addCleanup(self.log.close)
-        self.server=subprocess.Popen([str(BIN/'dashboard-server'),'--bind',f'127.0.0.1:{self.trusted}','--public-bind',f'127.0.0.1:{self.public}','--releases',str(self.fixture.out),'--bundle-key',str(self.key),'--app-state',str(self.root/'state'),'--origin','http://bundle.test'],stdout=self.log,stderr=self.log)
+        args=[str(BIN/'dashboard-server'),'--bind',f'127.0.0.1:{self.trusted}','--public-bind',f'127.0.0.1:{self.public}','--releases',str(self.fixture.out),'--bundle-key',str(self.key),'--app-state',str(self.root/'state'),'--origin','http://bundle.test']
+        if getattr(self,'managed',False):args+=['--spaces-registry',str(self.root/'spaces.flex'),'--auth-file',str(self.root/'auth.json')]
+        self.server=subprocess.Popen(args,stdout=self.log,stderr=self.log)
         for _ in range(150):
             if self.server.poll()is not None:self.fail((self.root/'server.log').read_text())
             try:
@@ -64,11 +67,61 @@ class SignedBundleInstallation(unittest.TestCase):
         run(CHECKER,'sign',unsigned,signed,'--key',self.private,'--openssl',OPENSSL)
         return signed
 
-    def stage(self,bundle=None,remove=None):
+    def stage(self,bundle=None,remove=None,payload=None,expected_release=None,expected_bundle=None,expected_candidate=None,expected_app=None):
         args=[sys.executable,HERE/'install-app.py','--runtime',self.runtime,'--checker',CHECKER,'--openssl',OPENSSL]
-        args+=['--bundle',bundle]if bundle else['--remove',remove]
+        args+=['--payload',payload]if payload else(['--bundle',bundle]if bundle else['--remove',remove])
+        if expected_release:args+=['--expected-release',expected_release]
+        if expected_bundle:args+=['--expected-bundle',expected_bundle]
+        if payload and expected_candidate is None:
+            with zipfile.ZipFile(payload)as archive:expected_candidate=hashlib.sha256(b'otrios-app-bundle-v1\0'+archive.read('Integrity/files.flex')).hexdigest()
+        if expected_candidate:args+=['--expected-candidate',expected_candidate]
+        if expected_app:args+=['--expected-app',expected_app]
         run(*args)
         return json.loads((self.runtime/'build/app-install.json').read_bytes())
+
+    def test_portable_signed_import_preserves_bytes_trust_baselines_and_confirmed_data(self):
+        self.start()
+        first_bundle=self.counter('portable-first',1,1)
+        def payload(bundle,name):
+            archive=self.root/(name+'.otapp.zip')
+            with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED)as out:
+                for file in sorted(bundle.rglob('*')):
+                    if file.is_file():out.write(file,file.relative_to(bundle).as_posix())
+            return archive
+        archive=payload(first_bundle,'portable-first')
+        pointer=(self.fixture.out/'current.json').read_bytes()
+        with self.assertRaises(subprocess.CalledProcessError):self.stage(payload=archive)
+        with self.assertRaises(subprocess.CalledProcessError):self.stage(payload=archive,expected_release='0'*64,expected_bundle='absent')
+        first=self.stage(payload=archive,expected_release=self.base['id'],expected_bundle='absent')
+        self.assertEqual((self.fixture.out/'current.json').read_bytes(),pointer)
+        installed=self.fixture.out/first['id']/'authority/bundles/bundle-counter.otapp'
+        original={p.relative_to(first_bundle).as_posix():p.read_bytes()for p in first_bundle.rglob('*')if p.is_file()}
+        self.assertEqual({p.relative_to(installed).as_posix():p.read_bytes()for p in installed.rglob('*')if p.is_file()},original)
+        self.activate(first)
+        self.assertIn('value=1',self.probe(first,'increase'))
+        pointer=(self.fixture.out/'current.json').read_bytes()
+        key_bytes=self.key.read_bytes()
+        other=self.root/'foreign-private.pem'
+        run(OPENSSL,'genpkey','-algorithm','ED25519','-out',other)
+        foreign=self.root/'foreign.otapp'
+        run(CHECKER,'sign',first_bundle,foreign,'--key',other,'--openssl',OPENSSL)
+        foreign_archive=payload(foreign,'foreign')
+        current_digest=run(CHECKER,'verify',installed,'--key',self.key,'--openssl',OPENSSL).split()[2]
+        for candidate,app in [('0'*64,None),(current_digest,'other-app')]:
+            with self.assertRaises(subprocess.CalledProcessError):self.stage(payload=archive,expected_release=first['id'],expected_bundle=current_digest,expected_candidate=candidate,expected_app=app)
+            self.assertEqual((self.fixture.out/'current.json').read_bytes(),pointer)
+        for bad,release,digest in [(foreign_archive,first['id'],current_digest),(archive,self.base['id'],'absent'),(archive,first['id'],'0'*64)]:
+            with self.assertRaises(subprocess.CalledProcessError):self.stage(payload=bad,expected_release=release,expected_bundle=digest)
+            self.assertEqual((self.fixture.out/'current.json').read_bytes(),pointer)
+            self.assertEqual(self.key.read_bytes(),key_bytes)
+            self.assertIn('value=1',self.probe(first))
+        second_bundle=self.counter('portable-second',2,2)
+        second=self.stage(payload=payload(second_bundle,'portable-second'),expected_release=first['id'],expected_bundle=current_digest)
+        before=json.loads((self.fixture.out/first['id']/'manifest.json').read_bytes());after=json.loads((self.fixture.out/second['id']/'manifest.json').read_bytes())
+        self.assertTrue(activation.agent.app_install_change(before,after))
+        self.activate(second)
+        self.assertIn('value=1',self.probe(second))
+        self.assertIn('value=3',self.probe(second,'increase'))
 
     def activate(self,pointer):
         file=self.root/'pending.json';file.write_text(json.dumps(pointer))
@@ -76,10 +129,116 @@ class SignedBundleInstallation(unittest.TestCase):
         with mock.patch.dict(os.environ,{'OTRIOS_BUNDLE_CHECKER':str(CHECKER)}):
             activation.activate(SimpleNamespace(pointer=file,releases=self.fixture.out,key=self.key,openssl=OPENSSL,notify_url=f'http://127.0.0.1:{self.trusted}/admin/activate'))
 
-    def probe(self,release,action='read',app='bundle-counter',public=False):
-        args=[BIN/'examples/bundle_app_probe',f'ws://127.0.0.1:{self.public if public else self.trusted}/session',self.fixture.out/release['id']/'apps/catalog.flex',app,action]
+    def probe(self,release,action='read',app='bundle-counter',public=False,space=None):
+        endpoint=f'ws://127.0.0.1:{self.public if public else self.trusted}/session'+('?space='+space if space else '')
+        args=[BIN/'examples/bundle_app_probe',endpoint,self.fixture.out/release['id']/'apps/catalog.flex',app,action]
         if public:args.append('http://bundle.test')
+        if space:args+=['-',space]
+        if space:
+            with mock.patch.dict(os.environ,{'OTRIOS_PROBE_TOKEN':'a'*64}):return run(*args)
         return run(*args)
+
+    def test_shared_import_bridge_recovers_armed_activation_and_preserves_connected_writes(self):
+        self.managed=True
+        auth=self.root/'auth.json';auth.write_text(json.dumps({'version':1,'users':[],'native':[{'identity':'alice','token_sha256':hashlib.sha256(('a'*64).encode()).hexdigest()}],'operators':['alice']}));auth.chmod(0o600)
+        checker=self.runtime/'build/mac-target/debug/canvas-bundle';checker.parent.mkdir(parents=True);checker.symlink_to(CHECKER)
+        self.start()
+        def request(path,data=None,content_type='application/json',bridge=False):
+            headers={'X-OTriOS-Request':'signer'if bridge else('transfers'if path.startswith('/transfers/')else'spaces')}
+            if not bridge:headers.update({'Origin':'http://bundle.test','Authorization':'Bearer '+'a'*64})
+            if data is not None:headers['Content-Type']=content_type
+            with urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{self.trusted}'+path,data=data,headers=headers),timeout=15)as response:return response.read()
+        def metadata():return json.loads(request('/spaces'))
+        def change(value):return json.loads(request('/spaces',json.dumps({'version':1,'expected_generation':metadata()['generation'],'change':value}).encode()))
+        change({'type':'create','name':'Import destination'})
+        space=metadata()['spaces'][0]['id']
+        def stage(bundle):
+            payload=self.root/'import.otapp.zip'
+            with zipfile.ZipFile(payload,'w',compression=zipfile.ZIP_DEFLATED)as archive:
+                for file in sorted(bundle.rglob('*')):
+                    if file.is_file():archive.write(file,file.relative_to(bundle).as_posix())
+            return json.loads(request('/transfers/apps/'+space,payload.read_bytes(),'application/vnd.otrios.app+zip'))
+        def approve(review):
+            with mock.patch.dict(os.environ,{'OTRIOS_PROBE_TOKEN':'a'*64}):
+                output=subprocess.check_output([str(BIN/'examples/app_management_probe'),f'ws://127.0.0.1:{self.trusted}/session'],input=json.dumps({'type':'import-app','version':1,'id':1,'stage':review['stage']}).encode())
+            event=json.loads(output);self.assertEqual(event['status'],'applied');self.assertEqual(event['state']['phase'],'queued')
+        class LocalBridge:
+            def request(_,path,data=None,raw=False):
+                value=request(path,None if data is None else json.dumps(data).encode(),bridge=True)
+                return value if raw else json.loads(value)
+        bridge=LocalBridge();config={'runtime':str(self.runtime),'openssl':OPENSSL,'frame':{'ssh':['ssh','unused-fixture']}}
+        def deploy(config,pointer,*args,ui_base=None,app_import=None):
+            # Exercise the actual pinned-SSH package builder without contacting
+            # a device; activation below uses the real local authority instead.
+            original_run=subprocess.run;transfers=[]
+            def ssh_fixture(argv,*args,**kwargs):
+                if argv and argv[0]=='ssh':transfers.append(kwargs['input']);return subprocess.CompletedProcess(argv,0)
+                return original_run(argv,*args,**kwargs)
+            with mock.patch.object(installer.deployer.subprocess,'run',side_effect=ssh_fixture):
+                installer.deployer.deploy(config,pointer,self.root/'frame-dashboard-server',self.root/'frame-dashboard-monitoring',self.root/'session-bootstrap',ui_base=ui_base,app_import=app_import)
+            self.assertEqual(len(transfers),1)
+            with tarfile.open(fileobj=io.BytesIO(transfers[0]))as archive:
+                names=archive.getnames()
+                self.assertEqual(json.load(archive.extractfile('app-import.json')),{'operation':app_import})
+                self.assertEqual(json.load(archive.extractfile('ui-base.json')),{'id':ui_base})
+                self.assertEqual(json.load(archive.extractfile('transfer.json')),{})
+                self.assertFalse(any('private.pem'in name or '/native/'in name or name in ['dashboard-server','dashboard-monitoring','session-bootstrap','canvas-bundle'] for name in names))
+            ast.parse(installer.deployer.REMOTE);ast.parse(app_imports.REMOTE)
+            with mock.patch.dict(os.environ,{'OTRIOS_BUNDLE_CHECKER':str(CHECKER)}):
+                activation.activate(SimpleNamespace(pointer=pointer,releases=self.fixture.out,key=self.key,openssl=OPENSSL,notify_url=f'http://127.0.0.1:{self.trusted}/admin/activate',imports_guard=True,app_import=app_import))
+        def applied(review):
+            for _ in range(100):
+                state=bridge.request('/admin/app-import/'+review['stage'])
+                if state['phase']=='applied':
+                    app_imports.service(config,bridge,deploy)
+                    return json.loads((self.fixture.out/'current.json').read_bytes())
+                time.sleep(.02)
+            self.fail((self.root/'server.log').read_text())
+        first_review=stage(self.counter('bridge-first',1,1));approve(first_review)
+        for path in ['/admin/app-import','/admin/app-import/'+first_review['stage'],'/admin/app-import/'+first_review['stage']+'/payload']:
+            with self.assertRaises(urllib.error.HTTPError)as error:urllib.request.urlopen(f'http://127.0.0.1:{self.public}'+path)
+            self.assertEqual(error.exception.code,404);error.exception.close()
+        original_request=bridge.request
+        def temporarily_busy(path,*args,**kwargs):
+            if path.endswith('/payload'):raise OSError('temporary transfer busy')
+            return original_request(path,*args,**kwargs)
+        with mock.patch.object(bridge,'request',side_effect=temporarily_busy):
+            with self.assertRaisesRegex(OSError,'transfer busy'):app_imports.service(config,bridge,deploy)
+        self.assertEqual(bridge.request('/admin/app-import')['state']['phase'],'queued')
+        with mock.patch.object(activation,'notify',side_effect=OSError('injected exit after pointer, before notification')):
+            with self.assertRaisesRegex(OSError,'after pointer'):app_imports.service(config,bridge,deploy)
+        self.assertEqual(bridge.request('/admin/app-import')['state']['phase'],'armed')
+        self.stop();self.start()
+        first=applied(first_review)
+        self.assertIn('value=1',self.probe(first,'increase',space=space))
+        before=metadata();cid=before['spaces'][0]['apps'][0]['collection']
+        second_review=stage(self.counter('bridge-second',2,2));approve(second_review)
+        old_pointer=(self.fixture.out/'current.json').read_bytes()
+        original_atomic=activation.agent.atomic
+        def fail_pointer(path,*args,**kwargs):
+            if path==self.fixture.out/'current.json':raise OSError('injected exit after arming, before pointer')
+            return original_atomic(path,*args,**kwargs)
+        with mock.patch.object(activation.agent,'atomic',side_effect=fail_pointer):
+            with self.assertRaisesRegex(OSError,'after arming'):app_imports.service(config,bridge,deploy)
+        self.assertEqual((self.fixture.out/'current.json').read_bytes(),old_pointer)
+        self.assertEqual(bridge.request('/admin/app-import')['state']['phase'],'armed')
+        with self.assertRaisesRegex(ValueError,'exact planned release'):activation.guard_imports(f'http://127.0.0.1:{self.trusted}/admin/activate','0'*64)
+        with self.assertRaises(urllib.error.HTTPError)as error:change({'type':'label-app','space':space,'app':'bundle-counter','name':'Conflicting label'})
+        self.assertEqual(error.exception.code,503);error.exception.close()
+        self.assertIn('value=2',self.probe(first,'increase',space=space),'data writes continue while management is fenced')
+        self.stop();self.start()
+        self.assertEqual(bridge.request('/admin/app-import')['state']['phase'],'armed')
+        app_imports.service(config,bridge,deploy);second=applied(second_review)
+        after=metadata();self.assertEqual(after['generation'],before['generation']+1)
+        self.assertEqual(after['spaces'][0]['apps'][0]['collection'],cid)
+        self.assertIn('value=2',self.probe(second,space=space));self.assertIn('value=4',self.probe(second,'increase',space=space))
+        third_review=stage(self.counter('bridge-third',3,3));approve(third_review)
+        change({'type':'label-app','space':space,'app':'bundle-counter','name':'Newer label'})
+        pointer=(self.fixture.out/'current.json').read_bytes()
+        with self.assertRaises(urllib.error.HTTPError):app_imports.service(config,bridge,deploy)
+        self.assertEqual(bridge.request('/admin/app-import/'+third_review['stage'])['phase'],'rejected')
+        self.assertEqual((self.fixture.out/'current.json').read_bytes(),pointer)
+        self.assertIn('value=4',self.probe(second,space=space))
 
     def test_install_upgrade_failure_restart_uninstall_and_explicit_rollback(self):
         self.start();pid=self.server.pid

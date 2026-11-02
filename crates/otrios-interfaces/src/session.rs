@@ -4,7 +4,7 @@ use crate::release::Release;
 use serde::{Deserialize, Serialize};
 pub const VERSION: u32 = 1;
 pub const MAX_CONTROL_BYTES: usize = 8192;
-pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v17";
+pub const STATE_PROTOCOL: &str = "otrios-canvas-sync-v20";
 pub use crate::channels::{INK, STATE, frame, scope, scoped};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]

@@ -10,9 +10,9 @@ license = "Apache-2.0"
 [features]
 canvas = ["otrios-core/signed-bundles", "dep:wat"]
 default = []
-host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls"]
+host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls", "dep:webpki-roots", "dep:getrandom"]
 direct = ["host-sync", "otrios-core/signed-bundles", "dep:otrios-linux-display"]
-server = ["otrios-core/signed-bundles", "dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util", "dep:argon2", "dep:getrandom", "dep:sha2"]
+server = ["otrios-core/signed-bundles", "dep:axum", "dep:tokio", "dep:serde_json", "dep:futures-util", "dep:argon2", "dep:getrandom", "dep:sha2", "dep:rustls", "dep:webpki-roots"]
 
 [dependencies]
 otrios-core = { path = "../otrios-core", features = ["dashboard"] }
@@ -23,6 +23,8 @@ libc = "=0.2.191"
 otrios-linux-display = { path = "../otrios-linux-display", features = ["platform"], optional = true }
 wat = { version = "=1.239.0", optional = true }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+# Already locked for native WebSockets; HTTPS app intake uses the same CA roots.
+webpki-roots = { version = "=1.0.9", optional = true }
 tungstenite = { version = "=0.30.0", features = ["rustls-tls-webpki-roots"], optional = true }
 axum = { version = "=0.8.9", features = ["ws"], optional = true }
 tokio = { version = "=1.53.3", features = ["rt-multi-thread", "net", "sync", "time", "macros", "fs"], optional = true }
@@ -127,4 +129,12 @@ required-features = ["direct"]
 
 [[example]]
 name = "chat_loopback_probe"
+required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "app_management_probe"
+required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "transfer_ui_probe"
 required-features = ["canvas", "host-sync"]

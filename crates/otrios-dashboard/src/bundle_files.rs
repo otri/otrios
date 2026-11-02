@@ -6,11 +6,13 @@ use otrios_core::{
 };
 use std::{fs, io::Read, path::Path, process::Command};
 pub(crate) fn read_file(path: &Path, remaining: usize) -> Result<Vec<u8>> {
+    read_bounded(path, remaining.min(MAX_FILE_BYTES))
+}
+pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if !metadata.is_file() {
         return Err("Bundle input must be a regular file (no links)".into());
     }
-    let limit = remaining.min(MAX_FILE_BYTES);
     if metadata.len() > limit as u64 {
         return Err("Bundle input byte budget exceeded".into());
     }

@@ -193,6 +193,13 @@ impl Rig {
             .arg(self.root.join("state"))
             .arg("--auth-file")
             .arg(self.root.join("auth.json"));
+        if self.root.join("releases/current.json").is_file() {
+            command
+                .arg("--releases")
+                .arg(self.root.join("releases"))
+                .arg("--bundle-key")
+                .arg(self.root.join("public.pem"));
+        }
         if managed {
             command
                 .arg("--spaces-registry")
@@ -702,7 +709,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v17","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v20","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -815,7 +822,7 @@ fn offline_backup_restore_preserves_latest_revocation_and_older_writers_cannot_a
     if let Ok(older) = std::env::var("OTRIOS_SPACES_OLD_SERVER") {
         let primary = fs::read(rig.root.join("spaces.flex")).unwrap();
         let latest = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
-        assert_eq!(&primary[..5], b"OTSP6");
+        assert_eq!(&primary[..5], b"OTSP9");
         rig.restart(&older, true, false);
         assert_eq!(http(&rig.public, "GET", Some('a'), None).0, 503);
         std::thread::sleep(Duration::from_millis(100));
@@ -900,7 +907,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v17","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v20","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -3388,7 +3395,7 @@ fn deleting_chat_stops_all_owned_producers_and_retains_another_spaces_transcript
             .iter()
             .find(|s| s["id"] == household)
             .unwrap();
-        assert_eq!(space["apps"][0]["attached"], false);
+        assert!(space["apps"].as_array().unwrap().is_empty());
         if space["cleanup"]["local_pending"] == 0 {
             break;
         }
@@ -4381,4 +4388,1916 @@ fn publication_copies_confirmed_content_and_owned_assets_without_cross_space_acc
         },
     );
     chat_event(&mut public, 1, |e| matches!(e, ChatEvent::Error { .. }));
+}
+
+#[test]
+fn retained_data_and_deleted_spaces_recover_real_confirmed_state_across_authority_restart() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("Recovery Home");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let (value, cid) = document_session(&rig, &space, "counter", schema(), Some(41));
+    assert_eq!(value, 41);
+    let cid = cid.unwrap();
+    rig.change(
+        'a',
+        Change::Remove {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let member = http(&rig.public, "GET", Some('b'), None).1;
+    assert!(member["spaces"][0]["apps"].as_array().unwrap().is_empty());
+    assert!(member["spaces"][0].get("retained").is_none());
+    rig.stop();
+    rig.restart(&binary, true, true);
+    rig.change(
+        'a',
+        Change::RestoreDataset {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: cid.clone(),
+        },
+    );
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (41, Some(cid.clone()))
+    );
+    rig.change(
+        'a',
+        Change::DeleteSpace {
+            space: space.clone(),
+            remove_data: false,
+        },
+    );
+    assert!(
+        http(&rig.public, "GET", Some('b'), None).1["spaces"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        http(&rig.public, "GET", None, None).1["spaces"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        http(&rig.public, "GET", Some('a'), None).1["spaces"][0]["archived"],
+        true
+    );
+    rig.stop();
+    rig.restart(&binary, true, true);
+    rig.child(&rig.public, &space, Some('b'), "deny");
+    rig.change(
+        'a',
+        Change::RestoreSpace {
+            space: space.clone(),
+        },
+    );
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (41, Some(cid.clone()))
+    );
+    rig.change(
+        'a',
+        Change::Remove {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::DeleteDataset {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: cid.clone(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let (value, fresh) = document_session(&rig, &space, "counter", schema(), None);
+    assert_eq!(value, 0);
+    assert_ne!(fresh.as_deref(), Some(cid.as_str()));
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (0, fresh)
+    );
+}
+#[test]
+fn sealed_restore_uses_complete_durable_state_and_keeps_outgoing_data_after_restart() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let space = rig.space("Backup Home");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let (_, old) = document_session(&rig, &space, "counter", schema(), Some(41));
+    let old = old.unwrap();
+    rig.stop();
+    // Seed the immutable backup that the later replacement milestone will create.
+    // No public management operation can inject a caller-selected collection ID.
+    let source = "f".repeat(32);
+    for entry in fs::read_dir(rig.root.join("state")).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        if let Some(tail) = name.strip_prefix(&format!("collection-{old}.")) {
+            assert!(entry.metadata().unwrap().is_file());
+            if !tail.ends_with("owner.lock") {
+                fs::copy(
+                    entry.path(),
+                    rig.root.join(format!("state/collection-{source}.{tail}")),
+                )
+                .unwrap();
+            }
+        }
+    }
+    let raw = fs::read(rig.root.join("spaces.flex.latest")).unwrap();
+    let mut record: Json = flexbuffers::from_slice(&raw[37..]).unwrap();
+    let app = record["registry"]["spaces"][0]["apps"][0].clone();
+    let generation = record["registry"]["generation"].clone();
+    record["registry"]["retained"].as_array_mut().unwrap().push(json!({"space":space,"policy":app["policy"],"collection":source,"label":"Earlier Counter","origin":"before-replacement","generation":generation}));
+    let payload = flexbuffers::to_vec(&record).unwrap();
+    let mut raw = b"OTSP7".to_vec();
+    raw.extend(canvas::hash(&payload));
+    raw.extend(payload);
+    for file in ["spaces.flex", "spaces.flex.latest"] {
+        fs::write(rig.root.join(file), &raw).unwrap();
+    }
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), Some(73)).0,
+        73
+    );
+    let before = fs::read(rig.root.join(format!("state/collection-{old}.merkle"))).unwrap();
+    rig.change(
+        'a',
+        Change::RestoreDataset {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: source.clone(),
+        },
+    );
+    let (value, new) = document_session(&rig, &space, "counter", schema(), None);
+    assert_eq!(value, 41);
+    assert_ne!(new.as_deref(), Some(old.as_str()));
+    assert_ne!(new.as_deref(), Some(source.as_str()));
+    let state = http(&rig.public, "GET", Some('a'), None).1;
+    let backups = state["spaces"][0]["retained"].as_array().unwrap();
+    assert_eq!(backups.len(), 2);
+    assert!(backups.iter().any(|d| d["collection"] == old));
+    assert!(backups.iter().any(|d| d["collection"] == source));
+    assert_eq!(
+        fs::read(rig.root.join(format!("state/collection-{old}.merkle"))).unwrap(),
+        before
+    );
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None),
+        (41, new)
+    );
+}
+
+#[test]
+fn scoped_moves_preserve_confirmed_state_back_up_occupied_targets_and_resolve_after_restart() {
+    use otrios_interfaces::spaces::{Command as SpaceCommand, Event, ManagementStatus, MoveMode};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    for (index, mode) in [MoveMode::AppAndData, MoveMode::AppOnly, MoveMode::DataOnly]
+        .into_iter()
+        .enumerate()
+    {
+        let source = rig.space(&format!("Move source {index}"));
+        let destination = rig.space(&format!("Move destination {index}"));
+        for space in [&source, &destination] {
+            rig.change(
+                'a',
+                Change::Attach {
+                    space: space.clone(),
+                    app: "counter".into(),
+                },
+            );
+        }
+        let (_, original) = document_session(&rig, &source, "counter", schema(), Some(41));
+        let original = original.unwrap();
+        let (_, outgoing) = document_session(&rig, &destination, "counter", schema(), Some(73));
+        let outgoing = outgoing.unwrap();
+        let current = http(&rig.public, "GET", Some('a'), None).1;
+        let operation = format!("{index:032x}");
+        let request = Request {
+            version: 1,
+            expected_generation: current["generation"].as_u64().unwrap(),
+            change: Change::Move {
+                operation: operation.clone(),
+                source: source.clone(),
+                destination: destination.clone(),
+                app: "counter".into(),
+                collection: original.clone(),
+                destination_collection: Some(outgoing.clone()),
+                mode,
+            },
+        };
+        assert_eq!(http(&rig.public, "POST", Some('b'), Some(&request)).0, 403);
+        let mut acknowledged_race = false;
+        if mode == MoveMode::DataOnly {
+            let mut writer = socket(&rig.public, &source, Some('a'));
+            mount(&mut writer, &rig.catalog);
+            assert!(matches!(read(&mut writer), ServerMessage::Mounted { .. }));
+            send(&mut writer, ClientMessage::AcceptMount { epoch: 1 });
+            assert!(matches!(read(&mut writer), ServerMessage::Activated { .. }));
+            let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let writer_gate = gate.clone();
+            let writing = std::thread::spawn(move || {
+                writer_gate.wait();
+                send(
+                    &mut writer,
+                    ClientMessage::Sync {
+                        epoch: 1,
+                        bytes: canvas::encode_state_request(&StateRequest::Write {
+                            sequence: 1,
+                            values: vec![(1, Value::Number(99.))],
+                        })
+                        .unwrap(),
+                    },
+                );
+                writer
+            });
+            gate.wait();
+            assert_eq!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 200);
+            let mut writer = writing.join().unwrap();
+            loop {
+                match read(&mut writer) {
+                    ServerMessage::Sync { .. } => acknowledged_race = true,
+                    ServerMessage::AccessRequired { .. } => break,
+                    other => panic!("move revocation: {other:?}"),
+                }
+            }
+            send(
+                &mut writer,
+                ClientMessage::Sync {
+                    epoch: 1,
+                    bytes: canvas::encode_state_request(&StateRequest::Write {
+                        sequence: 2,
+                        values: vec![(1, Value::Number(88.))],
+                    })
+                    .unwrap(),
+                },
+            );
+            send(&mut writer, ClientMessage::Leave { epoch: 1 });
+        } else {
+            assert_eq!(http(&rig.public, "POST", Some('a'), Some(&request)).0, 200);
+        }
+        let after = http(&rig.public, "GET", Some('a'), None).1;
+        let generation = after["generation"].as_u64().unwrap();
+        let target = after["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == destination)
+            .unwrap();
+        assert_eq!(target["apps"].as_array().unwrap().len(), 1);
+        let (value, target_cid) = document_session(&rig, &destination, "counter", schema(), None);
+        if mode == MoveMode::AppOnly {
+            assert_eq!((value, target_cid), (73, Some(outgoing)));
+            let source_state = after["spaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == source)
+                .unwrap();
+            assert_eq!(source_state["apps"][0]["attached"], false);
+            assert_eq!(source_state["apps"][0]["collection"], original);
+        } else {
+            assert!(value == 41 || mode == MoveMode::DataOnly && value == 99);
+            if acknowledged_race {
+                assert_eq!(
+                    value, 99,
+                    "every acknowledged write must reach the destination"
+                );
+            }
+            assert_ne!(target_cid.as_ref(), Some(&original));
+            assert_ne!(target_cid.as_ref(), Some(&outgoing));
+            assert!(
+                target["retained"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["collection"] == outgoing && d["origin"] == "before-replacement")
+            );
+            if mode == MoveMode::DataOnly {
+                let (value, replacement) =
+                    document_session(&rig, &source, "counter", schema(), None);
+                assert_eq!(value, 0);
+                assert_ne!(replacement, Some(original));
+            }
+        }
+        rig.stop();
+        rig.restart(&binary, true, true);
+        assert_eq!(
+            http(&rig.public, "POST", Some('a'), Some(&request)).0,
+            200,
+            "known operation must not execute again"
+        );
+        assert_eq!(
+            http(&rig.public, "GET", Some('a'), None).1["generation"],
+            generation
+        );
+        let mut control = socket(&rig.public, &destination, Some('a'));
+        send_spaces(
+            &mut control,
+            SpaceCommand::Watch {
+                version: 1,
+                observation: 1,
+                selected: Some(destination.clone()),
+                cursor: None,
+            },
+        );
+        assert!(matches!(read_spaces(&mut control), Event::Snapshot { .. }));
+        send_spaces(
+            &mut control,
+            SpaceCommand::MoveStatus {
+                version: 1,
+                id: 1,
+                operation,
+                source,
+                destination: destination.clone(),
+            },
+        );
+        assert!(
+            matches!(read_spaces(&mut control), Event::MoveStatus { status: ManagementStatus::Applied, generation: Some(g), .. } if g == generation)
+        );
+        assert_eq!(
+            document_session(&rig, &destination, "counter", schema(), None).0,
+            value
+        );
+    }
+}
+
+#[test]
+fn scoped_chat_move_copies_owned_assets_and_revokes_old_producers_without_mutable_links() {
+    use otrios_interfaces::{
+        chat::{Command as Chat, Event as ChatEvent},
+        spaces::MoveMode,
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let source = rig.space("Move private transcript");
+    let destination = rig.space("Move transcript destination");
+    for space in [&source, &destination] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "relay".into(),
+            },
+        );
+    }
+    let mut producer = socket(&rig.public, &source, Some('a'));
+    let (old, _) = chat_mount(&rig, &mut producer, "relay", 1);
+    let (_, epoch) = chat_join(&mut producer, 1);
+    let payload = vec![37; 8192];
+    chat_command(
+        &mut producer,
+        1,
+        Chat::SendAsset {
+            epoch,
+            nonce: "1".repeat(32),
+            text: "Confirmed owned attachment".into(),
+            name: "asset.bin".into(),
+            bytes: payload.clone(),
+        },
+    );
+    chat_event(&mut producer, 1, |e| {
+        matches!(e, ChatEvent::Receipt { sequence: 1, .. })
+    });
+    let mut outgoing = socket(&rig.public, &destination, Some('a'));
+    let (prior, _) = chat_mount(&rig, &mut outgoing, "relay", 1);
+    let (_, prior_epoch) = chat_join(&mut outgoing, 1);
+    chat_send(&mut outgoing, 1, prior_epoch, 2, "Destination backup");
+    rig.change(
+        'a',
+        Change::Move {
+            operation: "2".repeat(32),
+            source: source.clone(),
+            destination: destination.clone(),
+            app: "relay".into(),
+            collection: old.clone(),
+            destination_collection: Some(prior),
+            mode: MoveMode::AppAndData,
+        },
+    );
+    loop {
+        if matches!(
+            chat_state(&mut producer),
+            ServerMessage::AccessRequired { epoch: 1 }
+        ) {
+            break;
+        }
+    }
+    // A delayed old producer cannot enter the moved dataset or resurrect its source.
+    chat_command(
+        &mut producer,
+        1,
+        Chat::Send {
+            epoch,
+            nonce: "3".repeat(32),
+            text: "Delayed old write".into(),
+        },
+    );
+    send(&mut producer, ClientMessage::Leave { epoch: 1 });
+    send(&mut outgoing, ClientMessage::Leave { epoch: 1 });
+    drop(producer);
+    drop(outgoing);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    let mut reader = socket(&rig.public, &destination, Some('a'));
+    let (fresh, initial) = chat_mount(&rig, &mut reader, "relay", 1);
+    assert_ne!(fresh, old);
+    assert_eq!(initial.messages.len(), 1);
+    let message = &initial.messages[0];
+    assert_eq!(message.message.text, "Confirmed owned attachment");
+    chat_command(
+        &mut reader,
+        1,
+        Chat::ReadAsset {
+            nonce: "4".repeat(32),
+            sequence: 1,
+            revision: message.revision,
+            index: 0,
+        },
+    );
+    let event = chat_event(&mut reader, 1, |e| matches!(e, ChatEvent::Asset { .. }));
+    let ChatEvent::Asset { bytes, .. } = event else {
+        unreachable!()
+    };
+    assert_eq!(bytes, payload);
+    let old_assets = rig.root.join(format!("state/collection-{old}.data"));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while old_assets.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "old source cleanup must not retain writable files"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        rig.root
+            .join(format!("state/collection-{fresh}.data"))
+            .is_dir()
+    );
+}
+
+#[test]
+fn admin_usage_counts_only_accepted_current_mounts_deduplicates_people_and_counts_anonymous_connections()
+ {
+    use otrios_interfaces::spaces::{Audience, Command as SpaceCommand, Event};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let rig = Rig::start(&binary);
+    let space = rig.space("Accepted participants");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::PublicView,
+        },
+    );
+    let mut control = socket(&rig.public, &space, Some('a'));
+    let mut observation = 0;
+    let mut snapshot = |control: &mut Socket| {
+        observation += 1;
+        send_spaces(
+            control,
+            SpaceCommand::Watch {
+                version: 1,
+                observation,
+                selected: Some(space.clone()),
+                cursor: None,
+            },
+        );
+        loop {
+            if let Event::Snapshot {
+                observation: actual,
+                snapshot,
+                ..
+            } = read_spaces(control)
+                && actual == observation
+            {
+                break snapshot;
+            }
+        }
+    };
+    let mut peers = vec![];
+    for token in [Some('a'), Some('a'), Some('b'), None, None] {
+        let mut peer = socket(&rig.public, &space, token);
+        mount(&mut peer, &rig.catalog);
+        assert!(matches!(read(&mut peer), ServerMessage::Mounted { .. }));
+        let staged = snapshot(&mut control);
+        assert_eq!(
+            staged.selected.as_ref().unwrap().active_users,
+            Some(match peers.len() {
+                0 => 0,
+                1 | 2 => 1,
+                3 => 2,
+                _ => 3,
+            })
+        );
+        send(&mut peer, ClientMessage::AcceptMount { epoch: 1 });
+        assert!(matches!(read(&mut peer), ServerMessage::Activated { .. }));
+        peers.push(peer);
+    }
+    let active = snapshot(&mut control);
+    let generation = active.generation;
+    let detail = active.selected.as_ref().unwrap();
+    assert_eq!(detail.active_users, Some(4));
+    assert_eq!(detail.apps[0].active_users, Some(4));
+    let mut visitor = socket(&rig.public, &space, Some('b'));
+    send_spaces(
+        &mut visitor,
+        SpaceCommand::Watch {
+            version: 1,
+            observation: 1,
+            selected: Some(space.clone()),
+            cursor: None,
+        },
+    );
+    let Event::Snapshot {
+        snapshot: member, ..
+    } = read_spaces(&mut visitor)
+    else {
+        panic!("visitor snapshot")
+    };
+    assert_eq!(member.selected.as_ref().unwrap().active_users, None);
+    assert_eq!(member.selected.as_ref().unwrap().apps[0].active_users, None);
+    drop(peers.pop());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let current = snapshot(&mut control);
+        assert_eq!(
+            current.generation, generation,
+            "presence never changes registry decisions"
+        );
+        if current.selected.as_ref().unwrap().active_users == Some(3) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    rig.change(
+        'a',
+        Change::Audience {
+            space: space.clone(),
+            audience: Audience::Closed,
+        },
+    );
+    assert_eq!(
+        snapshot(&mut control)
+            .selected
+            .as_ref()
+            .unwrap()
+            .active_users,
+        Some(1),
+        "current admission excludes revoked visitors immediately"
+    );
+}
+
+fn portable_download(
+    address: &str,
+    space: &str,
+    app: &str,
+    collection: &str,
+    actor: Option<char>,
+) -> (u16, String, Vec<u8>) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(socket, "GET /transfers/data/{space}/{app}/{collection} HTTP/1.0\r\nHost: {address}\r\nOrigin: {ORIGIN}\r\n").unwrap();
+    if let Some(actor) = actor {
+        write!(
+            socket,
+            "Authorization: Bearer {}\r\n",
+            actor.to_string().repeat(64)
+        )
+        .unwrap();
+    }
+    socket.write_all(b"\r\n").unwrap();
+    let mut bytes = vec![];
+    socket.read_to_end(&mut bytes).unwrap();
+    let boundary = bytes.windows(4).position(|v| v == b"\r\n\r\n").unwrap();
+    let headers = std::str::from_utf8(&bytes[..boundary]).unwrap().to_owned();
+    let status = headers
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse::<u16>()
+        .unwrap();
+    (status, headers, bytes[boundary + 4..].to_vec())
+}
+
+#[test]
+fn portable_export_reads_confirmed_owned_data_and_denies_deleted_or_unadmitted_bindings() {
+    use otrios_core::transfers::{self as transfer, RootPolicy, archive};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    // Frame learns only the configured public share origin on the trusted
+    // listener. Loopback, an Origin header, and a browser-shaped request confer
+    // no native admission; no Space/account metadata belongs in this response.
+    let context = |address: &str, actor: Option<char>, origin: bool, requested: bool| {
+        let mut socket = TcpStream::connect(address).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            socket,
+            "GET /transfers/context HTTP/1.0\r\nHost: {address}\r\n"
+        )
+        .unwrap();
+        if let Some(actor) = actor {
+            write!(
+                socket,
+                "Authorization: Bearer {}\r\n",
+                actor.to_string().repeat(64)
+            )
+            .unwrap();
+        }
+        if origin {
+            write!(socket, "Origin: {ORIGIN}\r\n").unwrap();
+        }
+        if requested {
+            socket
+                .write_all(b"X-OTriOS-Request: transfers\r\n")
+                .unwrap();
+        }
+        socket.write_all(b"\r\n").unwrap();
+        let mut bytes = vec![];
+        socket.read_to_end(&mut bytes).unwrap();
+        let at = bytes.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+        let status: u16 = std::str::from_utf8(&bytes[..at])
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice::<Json>(&bytes[at + 4..]).unwrap_or(Json::Null),
+        )
+    };
+    assert_eq!(
+        context(&rig.native, Some('a'), false, true),
+        (200, json!({"origin":ORIGIN}))
+    );
+    assert_eq!(context(&rig.native, None, false, true).0, 403);
+    assert_eq!(context(&rig.native, Some('a'), true, true).0, 403);
+    assert_eq!(context(&rig.native, Some('a'), false, false).0, 403);
+    assert_eq!(context(&rig.public, Some('a'), false, true).0, 404);
+    let space = rig.space("Export source");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let (_, collection) = document_session(&rig, &space, "counter", schema(), Some(42));
+    let collection = collection.unwrap();
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Member),
+        },
+    );
+    for (address, actor) in [
+        (&rig.public, None),
+        (&rig.native, None),
+        (&rig.public, Some('b')),
+        (&rig.native, Some('c')),
+    ] {
+        assert_eq!(
+            portable_download(address, &space, "counter", &collection, actor).0,
+            403
+        );
+    }
+    let missing = "f".repeat(32);
+    assert_eq!(
+        portable_download(&rig.public, &space, "counter", &missing, Some('a')).0,
+        403
+    );
+    let assert_payload = |payload: Vec<u8>| {
+        let data = transfer::inspect_data(archive::decode(archive::Kind::Data, &payload).unwrap())
+            .unwrap();
+        assert_eq!(data.info().bundle_id, "counter");
+        assert_eq!(data.info().codec, transfer::COLLECTION_CODEC);
+        let schema_hash = data.info().schema_sha256.clone();
+        let imported = transfer::QualifiedCollection::qualify(
+            data,
+            "counter",
+            &schema_hash,
+            &[RootPolicy {
+                state_ref: "app:counter/state".into(),
+                schema: schema(),
+                chat: false,
+            }],
+        )
+        .unwrap();
+        let stage = rig.root.join("inspect-export");
+        fs::create_dir(&stage).unwrap();
+        imported
+            .write_stage(&stage, "app:counter/state", &"e".repeat(32))
+            .unwrap();
+        let document = canvas::Document::load(
+            schema(),
+            "app:counter/state",
+            &fs::read(stage.join(format!("collection-{}.merkle", "e".repeat(32)))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document.value(1).unwrap(), 42);
+        fs::remove_dir_all(stage).unwrap();
+    };
+    let (status, headers, payload) =
+        portable_download(&rig.public, &space, "counter", &collection, Some('a'));
+    assert_eq!(status, 200, "{headers}");
+    assert!(headers.contains("application/vnd.otrios.app-data+zip"));
+    assert!(headers.contains("no-store"));
+    assert!(headers.contains("counter.otdata"));
+    assert_payload(payload);
+    rig.change(
+        'a',
+        Change::Remove {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    let (status, _, payload) =
+        portable_download(&rig.public, &space, "counter", &collection, Some('a'));
+    assert_eq!(status, 200, "detaching retains exportable confirmed data");
+    assert_payload(payload);
+    let exported_before_restart =
+        portable_download(&rig.public, &space, "counter", &collection, Some('a')).2;
+    rig.stop();
+    rig.restart(&binary, true, true);
+    let (status, _, payload) =
+        portable_download(&rig.native, &space, "counter", &collection, Some('a'));
+    assert_eq!(status, 200);
+    assert_eq!(payload, exported_before_restart);
+    rig.change(
+        'a',
+        Change::DeleteData {
+            space: space.clone(),
+            app: "counter".into(),
+            collection: collection.clone(),
+            remove: true,
+        },
+    );
+    assert_eq!(
+        portable_download(&rig.public, &space, "counter", &collection, Some('a')).0,
+        403
+    );
+}
+
+#[test]
+fn portable_export_keeps_history_beyond_the_view_window_all_roots_and_owned_assets() {
+    use otrios_core::transfers::{self as transfer, RootPolicy, archive};
+    use otrios_interfaces::chat::{Command as Chat, Event as ChatEvent};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    chat_fixture(&mut rig);
+    rig.restart(&binary, true, true);
+    let space = rig.space("Complete chat export");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "relay".into(),
+        },
+    );
+    let mut writer = socket(&rig.public, &space, Some('a'));
+    let (collection, _) = chat_mount(&rig, &mut writer, "relay", 1);
+    let (_, epoch) = chat_join(&mut writer, 1);
+    let owned = [vec![91; 200_000], vec![92; 200_000], vec![93; 200_000]];
+    for (index, asset) in owned.iter().enumerate() {
+        let sequence = index as u64 + 1;
+        chat_command(
+            &mut writer,
+            1,
+            Chat::SendAsset {
+                epoch,
+                nonce: format!("{sequence:032x}"),
+                text: "Retained asset beyond the UI window".into(),
+                name: "owned.bin".into(),
+                bytes: asset.clone(),
+            },
+        );
+        chat_event(
+            &mut writer,
+            1,
+            |e| matches!(e, ChatEvent::Receipt { sequence: found, .. } if *found == sequence),
+        );
+    }
+    // Seed additional confirmed journal entries while the authority is stopped;
+    // synthetic time exercises full history without weakening live rate limits.
+    drop(writer);
+    rig.stop();
+    let journal = rig.root.join(format!(
+        "state/collection-{collection}.data/chat-primary.journal"
+    ));
+    let now = 1_000_000;
+    let mut history = canvas::chat::Room::open(Some(journal), now).unwrap();
+    let (_, credential) = history.identity(None, now).unwrap();
+    history
+        .join(1, Some(&credential), false, now, true)
+        .unwrap();
+    for sequence in 4..=66 {
+        let at = now + sequence * 1000;
+        history
+            .handle(
+                1,
+                Chat::Send {
+                    epoch: at / 600_000,
+                    nonce: format!("{sequence:032x}"),
+                    text: format!("Confirmed row {sequence}"),
+                },
+                at,
+            )
+            .unwrap();
+    }
+    drop(history);
+    rig.restart(&binary, true, true);
+    let mut writer = socket(&rig.public, &space, Some('a'));
+    chat_mount(&rig, &mut writer, "relay/other", 1);
+    let (_, other_epoch) = chat_join(&mut writer, 1);
+    chat_send(
+        &mut writer,
+        1,
+        other_epoch,
+        100,
+        "Independent child-root content",
+    );
+    let (status, _, bytes) =
+        portable_download(&rig.public, &space, "relay", &collection, Some('a'));
+    assert_eq!(status, 200);
+    let data =
+        transfer::inspect_data(archive::decode(archive::Kind::Data, &bytes).unwrap()).unwrap();
+    assert_eq!(data.assets().len(), 3);
+    for asset in &owned {
+        assert_eq!(
+            data.assets().get(&canvas::hex(&canvas::hash(asset))),
+            Some(asset)
+        );
+    }
+    let schema_hash = data.info().schema_sha256.clone();
+    let policies = ["app:relay/state", "app:relay/other/state"].map(|state_ref| RootPolicy {
+        state_ref: state_ref.into(),
+        schema: otrios_core::authoring::schema("chat-empty-v1", &[]),
+        chat: true,
+    });
+    let qualified =
+        transfer::QualifiedCollection::qualify(data, "relay", &schema_hash, &policies).unwrap();
+    let stage = rig.root.join("qualified-chat-export");
+    fs::create_dir(&stage).unwrap();
+    let fresh = "e".repeat(32);
+    qualified
+        .write_stage(&stage, "app:relay/state", &fresh)
+        .unwrap();
+    let directory = stage.join(format!("collection-{fresh}.data"));
+    for (suffix, count) in [
+        ("primary".into(), 66),
+        (canvas::hex(&canvas::hash(b"app:relay/other/state")), 1),
+    ] {
+        let room = canvas::chat::Room::open(
+            Some(directory.join(format!("chat-{suffix}.journal"))),
+            1_000_000,
+        )
+        .unwrap();
+        let pin = room.pin_portable_history().unwrap();
+        let history = canvas::chat::QualifiedHistory::decode(&pin.encode().unwrap()).unwrap();
+        assert_eq!(history.len(), count);
+        if count == 66 {
+            assert_eq!(
+                history.assets().len(),
+                3,
+                "offscreen early attachment remains owned"
+            );
+        }
+    }
+}
+
+fn portable_upload(
+    address: &str,
+    space: &str,
+    app: &str,
+    collection: &str,
+    actor: Option<char>,
+    payload: &[u8],
+) -> (u16, Json) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(socket, "POST /transfers/data/{space}/{app}/{collection} HTTP/1.0\r\nHost: {address}\r\nOrigin: {ORIGIN}\r\nX-OTriOS-Request: transfers\r\nContent-Type: application/vnd.otrios.app-data+zip\r\nContent-Length: {}\r\n", payload.len()).unwrap();
+    if let Some(actor) = actor {
+        write!(
+            socket,
+            "Authorization: Bearer {}\r\n",
+            actor.to_string().repeat(64)
+        )
+        .unwrap();
+    }
+    socket.write_all(b"\r\n").unwrap();
+    socket.write_all(payload).unwrap();
+    let mut bytes = vec![];
+    socket.read_to_end(&mut bytes).unwrap();
+    let boundary = bytes.windows(4).position(|v| v == b"\r\n\r\n").unwrap();
+    let status = std::str::from_utf8(&bytes[..boundary])
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse()
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes[boundary + 4..]).unwrap_or(Json::Null),
+    )
+}
+
+#[test]
+fn portable_replacement_stages_then_commits_once_and_recovers_a_lost_reply_without_replay() {
+    use otrios_interfaces::{
+        spaces::{Command as Control, Event, ManagementStatus as Status},
+        transfers::{DataReview, ReplacementOutcome},
+    };
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    let source = rig.space("Import source");
+    let destination = rig.space("Import destination");
+    for space in [&source, &destination] {
+        rig.change(
+            'a',
+            Change::Attach {
+                space: space.clone(),
+                app: "counter".into(),
+            },
+        );
+    }
+    let (_, source_cid) = document_session(&rig, &source, "counter", schema(), Some(42));
+    let (_, destination_cid) = document_session(&rig, &destination, "counter", schema(), Some(7));
+    let source_cid = source_cid.unwrap();
+    let destination_cid = destination_cid.unwrap();
+    let (status, _, payload) =
+        portable_download(&rig.public, &source, "counter", &source_cid, Some('a'));
+    assert_eq!(status, 200);
+    rig.change(
+        'a',
+        Change::Membership {
+            space: destination.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Admin),
+        },
+    );
+    assert_eq!(
+        portable_upload(
+            &rig.public,
+            &destination,
+            "counter",
+            &destination_cid,
+            None,
+            &payload
+        )
+        .0,
+        403
+    );
+    assert_eq!(
+        portable_upload(
+            &rig.public,
+            &destination,
+            "counter",
+            &destination_cid,
+            Some('c'),
+            &payload
+        )
+        .0,
+        403
+    );
+    let before = http(&rig.public, "GET", Some('a'), None).1;
+    assert_eq!(
+        portable_upload(
+            &rig.public,
+            &destination,
+            "counter",
+            &destination_cid,
+            Some('a'),
+            b"invalid container"
+        )
+        .0,
+        422
+    );
+    assert_eq!(http(&rig.public, "GET", Some('a'), None).1, before);
+    let (status, review) = portable_upload(
+        &rig.public,
+        &destination,
+        "counter",
+        &destination_cid,
+        Some('a'),
+        &payload,
+    );
+    assert_eq!(status, 200, "{review}");
+    let review: DataReview = serde_json::from_value(review).unwrap();
+    assert_eq!(
+        http(&rig.public, "GET", Some('a'), None).1,
+        before,
+        "a staged upload exposes no replacement"
+    );
+    assert_eq!(
+        portable_download(&rig.public, &source, "counter", &source_cid, Some('a')).0,
+        429,
+        "staged data retains the bounded transfer credit"
+    );
+    assert_eq!(
+        document_session(&rig, &destination, "counter", schema(), None).0,
+        7
+    );
+    let mut bob = socket(&rig.public, &destination, Some('b'));
+    send_spaces(
+        &mut bob,
+        Control::ReplaceData {
+            version: 1,
+            id: 1,
+            stage: review.stage.clone(),
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut bob),
+        Event::Result {
+            id: 1,
+            status: Status::Denied,
+            ..
+        }
+    ));
+    let mut control = socket(&rig.public, &destination, Some('a'));
+    send_spaces(
+        &mut control,
+        Control::CancelData {
+            version: 1,
+            id: 2,
+            stage: review.stage,
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut control),
+        Event::Result {
+            id: 2,
+            status: Status::Applied,
+            ..
+        }
+    ));
+    assert_eq!(
+        portable_download(&rig.public, &source, "counter", &source_cid, Some('a')).0,
+        200
+    );
+    let (_, stale_review) = portable_upload(
+        &rig.public,
+        &destination,
+        "counter",
+        &destination_cid,
+        Some('a'),
+        &payload,
+    );
+    let stale_review: DataReview = serde_json::from_value(stale_review).unwrap();
+    rig.change(
+        'b',
+        Change::Membership {
+            space: destination.clone(),
+            identity: "alice".into(),
+            role: Some(Role::Member),
+        },
+    );
+    send_spaces(
+        &mut control,
+        Control::ReplaceData {
+            version: 1,
+            id: 3,
+            stage: stale_review.stage.clone(),
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut control),
+        Event::Result {
+            id: 3,
+            status: Status::Denied,
+            ..
+        }
+    ));
+    send_spaces(
+        &mut control,
+        Control::CancelData {
+            version: 1,
+            id: 4,
+            stage: stale_review.stage,
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut control),
+        Event::Result {
+            id: 4,
+            status: Status::Applied,
+            ..
+        }
+    ));
+    rig.change(
+        'b',
+        Change::Membership {
+            space: destination.clone(),
+            identity: "alice".into(),
+            role: Some(Role::Admin),
+        },
+    );
+    let (_, stale_review) = portable_upload(
+        &rig.public,
+        &destination,
+        "counter",
+        &destination_cid,
+        Some('a'),
+        &payload,
+    );
+    let stale_review: DataReview = serde_json::from_value(stale_review).unwrap();
+    rig.change(
+        'a',
+        Change::LabelApp {
+            space: destination.clone(),
+            app: "counter".into(),
+            name: "Reviewed destination".into(),
+        },
+    );
+    send_spaces(
+        &mut control,
+        Control::ReplaceData {
+            version: 1,
+            id: 5,
+            stage: stale_review.stage.clone(),
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut control),
+        Event::Result {
+            id: 5,
+            status: Status::Conflict,
+            ..
+        }
+    ));
+    send_spaces(
+        &mut control,
+        Control::CancelData {
+            version: 1,
+            id: 6,
+            stage: stale_review.stage,
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut control),
+        Event::Result {
+            id: 6,
+            status: Status::Applied,
+            ..
+        }
+    ));
+    let mut stale_writer = socket(&rig.public, &destination, Some('a'));
+    mount(&mut stale_writer, &rig.catalog);
+    assert!(matches!(
+        read(&mut stale_writer),
+        ServerMessage::Mounted { .. }
+    ));
+    send(&mut stale_writer, ClientMessage::AcceptMount { epoch: 1 });
+    assert!(matches!(
+        read(&mut stale_writer),
+        ServerMessage::Activated { epoch: 1 }
+    ));
+    let (status, review) = portable_upload(
+        &rig.public,
+        &destination,
+        "counter",
+        &destination_cid,
+        Some('a'),
+        &payload,
+    );
+    assert_eq!(status, 200, "{review}");
+    let review: DataReview = serde_json::from_value(review).unwrap();
+    send_spaces(
+        &mut control,
+        Control::ReplaceData {
+            version: 1,
+            id: 7,
+            stage: review.stage.clone(),
+        },
+    );
+    // Observe the committed binding independently, then discard the still unread
+    // command reply. Reconnection must resolve its exact fresh identity by read.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = http(&rig.public, "GET", Some('a'), None).1;
+        let current = state["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == destination)
+            .unwrap()["apps"][0]["collection"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        if current == review.replacement.replacement {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "replacement did not commit: {state}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(control);
+    assert!(matches!(
+        read(&mut stale_writer),
+        ServerMessage::AccessRequired { epoch: 1 }
+    ));
+    send(
+        &mut stale_writer,
+        ClientMessage::Sync {
+            epoch: 1,
+            bytes: canvas::encode_state_request(&StateRequest::Write {
+                sequence: 99,
+                values: vec![(1, Value::Number(99.))],
+            })
+            .unwrap(),
+        },
+    );
+    send(&mut stale_writer, ClientMessage::Leave { epoch: 1 });
+    let mut recovered = socket(&rig.public, &destination, Some('a'));
+    send_spaces(
+        &mut recovered,
+        Control::ReplacementStatus {
+            version: 1,
+            id: 8,
+            space: destination.clone(),
+            replacement: review.replacement.replacement.clone(),
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut recovered),
+        Event::ReplacementStatus {
+            id: 8,
+            status: Status::Applied,
+            outcome: Some(ReplacementOutcome::Committed),
+            ..
+        }
+    ));
+    send_spaces(
+        &mut recovered,
+        Control::ReplaceData {
+            version: 1,
+            id: 9,
+            stage: review.stage,
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut recovered),
+        Event::Result {
+            id: 9,
+            status: Status::Denied,
+            ..
+        }
+    ));
+    assert_eq!(
+        document_session(&rig, &destination, "counter", schema(), None).0,
+        42
+    );
+    assert_eq!(
+        document_session(&rig, &source, "counter", schema(), None).0,
+        42
+    );
+    let (_, _, backup) = portable_download(
+        &rig.public,
+        &destination,
+        "counter",
+        &destination_cid,
+        Some('a'),
+    );
+    assert_ne!(
+        backup, payload,
+        "outgoing data remains a separately exportable sealed backup"
+    );
+    assert!(!backup.is_empty());
+    drop(recovered);
+    drop(stale_writer);
+    drop(bob);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &destination, "counter", schema(), None).0,
+        42
+    );
+    let mut check = socket(&rig.native, &destination, Some('a'));
+    send_spaces(
+        &mut check,
+        Control::ReplacementStatus {
+            version: 1,
+            id: 10,
+            space: destination,
+            replacement: review.replacement.replacement,
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut check),
+        Event::ReplacementStatus {
+            id: 10,
+            status: Status::Applied,
+            outcome: Some(ReplacementOutcome::Committed),
+            ..
+        }
+    ));
+}
+
+fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, String, String) {
+    use otrios_core::bundle;
+    let openssl = std::env::var("OTRIOS_TEST_OPENSSL").unwrap_or_else(|_| {
+        if Path::new("/opt/homebrew/opt/openssl@3/bin/openssl").exists() {
+            "/opt/homebrew/opt/openssl@3/bin/openssl".into()
+        } else {
+            "openssl".into()
+        }
+    });
+    let run = |args: &[&str]| {
+        let output = Command::new(&openssl)
+            .args(args)
+            .current_dir(&rig.root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    run(&["genpkey", "-algorithm", "Ed25519", "-out", "private.pem"]);
+    run(&[
+        "pkey",
+        "-in",
+        "private.pem",
+        "-pubout",
+        "-out",
+        "public.pem",
+    ]);
+    let key = bundle::public_key_der(&run(&[
+        "pkey",
+        "-in",
+        "private.pem",
+        "-pubout",
+        "-outform",
+        "DER",
+    ]))
+    .unwrap();
+    let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
+    catalog.apps[0].private = true;
+    catalog.apps[0].app.title = "Code <Counter> & friends".into();
+    let ui = fs::read(rig.root.join("apps/counter/package/ui.flex")).unwrap();
+    let mut tree = bundle::pack(&catalog.apps[0], 1, &ui, None).unwrap();
+    let digest = bundle::inspect(&tree).unwrap().digest;
+    fs::write(
+        rig.root.join("signature-input.bin"),
+        bundle::signing_payload(&digest, &key).unwrap(),
+    )
+    .unwrap();
+    run(&[
+        "pkeyutl",
+        "-sign",
+        "-rawin",
+        "-inkey",
+        "private.pem",
+        "-in",
+        "signature-input.bin",
+        "-out",
+        "publisher.sig",
+    ]);
+    bundle::attach_signature(
+        &mut tree,
+        &key,
+        &fs::read(rig.root.join("publisher.sig")).unwrap(),
+    )
+    .unwrap();
+    rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+    let mut files = std::collections::BTreeMap::from([
+        ("web/index.html".to_owned(), b"signed code fixture".to_vec()),
+        ("apps/catalog.flex".to_owned(), rig.catalog.clone()),
+    ]);
+    for (path, bytes) in &tree {
+        files.insert(
+            format!("authority/bundles/counter.otapp/{path}"),
+            bytes.clone(),
+        );
+    }
+    let mut assets = serde_json::Map::new();
+    let mut authority = serde_json::Map::new();
+    for (path, bytes) in &files {
+        let entry = json!({"bytes":bytes.len(),"sha256":canvas::hex(&canvas::hash(bytes))});
+        if path.starts_with("authority/") {
+            authority.insert(path.clone(), entry);
+        } else {
+            assets.insert(path.clone(), entry);
+        }
+    }
+    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v20","assets":assets,"authority":authority}).to_string().into_bytes();
+    let release = canvas::hex(&canvas::hash(&manifest));
+    let root = rig.root.join("releases").join(&release);
+    fs::create_dir_all(&root).unwrap();
+    for (path, bytes) in files {
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    fs::write(root.join("manifest.json"), &manifest).unwrap();
+    fs::write(rig.root.join("release-manifest.json"), manifest).unwrap();
+    run(&[
+        "pkeyutl",
+        "-sign",
+        "-rawin",
+        "-inkey",
+        "private.pem",
+        "-in",
+        "release-manifest.json",
+        "-out",
+        "release-manifest.sig",
+    ]);
+    fs::copy(
+        rig.root.join("release-manifest.sig"),
+        root.join("manifest.sig"),
+    )
+    .unwrap();
+    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v20"}).to_string()).unwrap();
+    (tree, digest, release)
+}
+fn public_get(address: &str, path: &str) -> (u16, String, Vec<u8>) {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(socket, "GET {path} HTTP/1.0\r\nHost: {address}\r\n\r\n").unwrap();
+    let mut bytes = vec![];
+    socket.read_to_end(&mut bytes).unwrap();
+    let boundary = bytes.windows(4).position(|v| v == b"\r\n\r\n").unwrap();
+    let headers = std::str::from_utf8(&bytes[..boundary]).unwrap().to_owned();
+    (
+        headers.split_whitespace().nth(1).unwrap().parse().unwrap(),
+        headers,
+        bytes[boundary + 4..].to_vec(),
+    )
+}
+#[test]
+fn signed_code_is_public_only_after_explicit_host_and_space_authorized_publication() {
+    use otrios_interfaces::spaces::{Command as Control, Event, ManagementStatus as Status};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    let (tree, digest, release) = signed_code_fixture(&mut rig);
+    let mut config: Json =
+        serde_json::from_slice(&fs::read(rig.root.join("auth.json")).unwrap()).unwrap();
+    config["operators"] = json!(["alice"]);
+    fs::write(rig.root.join("auth.json"), config.to_string()).unwrap();
+    rig.restart(&binary, true, true);
+    let space = rig.space("Secret household label");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::LabelApp {
+            space: space.clone(),
+            app: "counter".into(),
+            name: "Secret Space app label".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Admin),
+        },
+    );
+    let (_, collection) = document_session(&rig, &space, "counter", schema(), Some(42));
+    let collection = collection.unwrap();
+    let checkpoint = rig
+        .root
+        .join(format!("state/collection-{collection}.merkle"));
+    let before = fs::read(&checkpoint).unwrap();
+    let page_path = format!("/apps/counter/{digest}");
+    assert_eq!(public_get(&rig.public, &page_path).0, 404);
+    assert_eq!(
+        public_get(&rig.public, &format!("{page_path}/download")).0,
+        404
+    );
+    assert_eq!(
+        public_get(
+            &rig.public,
+            &format!("/releases/{release}/authority/bundles/counter.otapp/Info.flex")
+        )
+        .0,
+        404
+    );
+    let share = |id, digest: String| Control::ShareApp {
+        version: 1,
+        id,
+        space: space.clone(),
+        app: "counter".into(),
+        digest,
+        expected_generation: http(&rig.public, "GET", Some('a'), None).1["generation"]
+            .as_u64()
+            .unwrap(),
+        catalog: canvas::hash(&rig.catalog),
+    };
+    let mut bob = socket(&rig.public, &space, Some('b'));
+    send_spaces(&mut bob, share(1, digest.clone()));
+    assert!(matches!(
+        read_spaces(&mut bob),
+        Event::AppShared {
+            id: 1,
+            status: Status::Denied,
+            share: None,
+            ..
+        }
+    ));
+    rig.change(
+        'b',
+        Change::Membership {
+            space: space.clone(),
+            identity: "alice".into(),
+            role: Some(Role::Member),
+        },
+    );
+    let mut alice = socket(&rig.public, &space, Some('a'));
+    send_spaces(&mut alice, share(2, digest.clone()));
+    assert!(matches!(
+        read_spaces(&mut alice),
+        Event::AppShared {
+            id: 2,
+            status: Status::Denied,
+            share: None,
+            ..
+        }
+    ));
+    rig.change(
+        'b',
+        Change::Membership {
+            space: space.clone(),
+            identity: "alice".into(),
+            role: Some(Role::Admin),
+        },
+    );
+    send_spaces(&mut alice, share(3, "f".repeat(64)));
+    assert!(matches!(
+        read_spaces(&mut alice),
+        Event::AppShared {
+            id: 3,
+            status: Status::Conflict,
+            share: None,
+            ..
+        }
+    ));
+    send_spaces(&mut alice, share(4, digest.clone()));
+    let Event::AppShared {
+        id: 4,
+        status: Status::Applied,
+        share: Some(shared),
+        ..
+    } = read_spaces(&mut alice)
+    else {
+        panic!("Explicit code-only share")
+    };
+    assert_eq!(shared.title, "Code <Counter> & friends");
+    assert_eq!(shared.digest, digest);
+    let (status, headers, html) = public_get(&rig.public, &page_path);
+    assert_eq!(status, 200);
+    assert!(headers.contains("text/html"));
+    let html = String::from_utf8(html).unwrap();
+    assert!(html.contains("Code &lt;Counter&gt; &amp; friends"));
+    for label in [
+        "Download App",
+        "Get OTriOS",
+        "Project source",
+        "Hosting guide",
+        "code only",
+    ] {
+        assert!(html.contains(label), "{label}");
+    }
+    assert!(!html.contains("Secret"));
+    assert!(!html.contains("<Counter>"));
+    let (status, headers, archive) = public_get(&rig.public, &format!("{page_path}/download"));
+    assert_eq!(status, 200);
+    assert!(headers.contains("application/vnd.otrios.app+zip"));
+    assert!(headers.contains("counter.otapp.zip"));
+    let decoded = otrios_core::transfers::archive::decode(
+        otrios_core::transfers::archive::Kind::App,
+        &archive,
+    )
+    .unwrap();
+    assert_eq!(
+        decoded, tree,
+        "Every original signed file is retained, without mutable data or rewritten metadata"
+    );
+    assert!(otrios_core::bundle::inspect(&decoded).unwrap().info.private);
+    assert_eq!(
+        fs::read(&checkpoint).unwrap(),
+        before,
+        "Code sharing cannot rewrite confirmed state"
+    );
+    rig.change(
+        'a',
+        Change::Remove {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    assert_eq!(
+        public_get(&rig.public, &format!("{page_path}/download")).2,
+        archive
+    );
+    drop(alice);
+    drop(bob);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        public_get(&rig.native, &format!("{page_path}/download")).2,
+        archive
+    );
+    assert_eq!(
+        public_get(
+            &rig.public,
+            &format!("/apps/counter/{}/download", "0".repeat(64))
+        )
+        .0,
+        404
+    );
+}
+
+fn app_intake(
+    address: &str,
+    space: &str,
+    actor: Option<char>,
+    content_type: &str,
+    payload: &[u8],
+) -> (u16, Json) {
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(stream, "POST /transfers/apps/{space} HTTP/1.0\r\nHost: {address}\r\nOrigin: {ORIGIN}\r\nX-OTriOS-Request: transfers\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n", payload.len()).unwrap();
+    if let Some(actor) = actor {
+        write!(
+            stream,
+            "Authorization: Bearer {}\r\n",
+            actor.to_string().repeat(64)
+        )
+        .unwrap();
+    }
+    stream.write_all(b"\r\n").unwrap();
+    stream.write_all(payload).unwrap();
+    let mut bytes = vec![];
+    stream.read_to_end(&mut bytes).unwrap();
+    let end = bytes.windows(4).position(|v| v == b"\r\n\r\n").unwrap();
+    (
+        std::str::from_utf8(&bytes[..end])
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap(),
+        serde_json::from_slice(&bytes[end + 4..]).unwrap_or(Json::Null),
+    )
+}
+
+#[test]
+fn app_file_intake_is_actor_bound_and_url_intake_cannot_reach_private_destinations() {
+    use otrios_core::transfers::{APP_MEDIA_TYPE, AppReview, archive};
+    use otrios_interfaces::spaces::{Command as Control, Event, ManagementStatus as Status};
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut rig = Rig::start(&binary);
+    rig.stop();
+    let (tree, digest, release) = signed_code_fixture(&mut rig);
+    let mut config: Json =
+        serde_json::from_slice(&fs::read(rig.root.join("auth.json")).unwrap()).unwrap();
+    config["operators"] = json!(["alice"]);
+    fs::write(rig.root.join("auth.json"), config.to_string()).unwrap();
+    rig.restart(&binary, true, true);
+    let space = rig.space("Intake destination");
+    rig.change(
+        'a',
+        Change::Attach {
+            space: space.clone(),
+            app: "counter".into(),
+        },
+    );
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: Some(Role::Admin),
+        },
+    );
+    let (_, cid) = document_session(&rig, &space, "counter", schema(), Some(71));
+    let checkpoint = rig
+        .root
+        .join(format!("state/collection-{}.merkle", cid.unwrap()));
+    let before = fs::read(&checkpoint).unwrap();
+    let archive = archive::encode(archive::Kind::App, &tree).unwrap();
+    assert_eq!(
+        app_intake(&rig.public, &space, None, APP_MEDIA_TYPE, &archive).0,
+        403
+    );
+    for url in [
+        format!("https://127.0.0.1/apps/counter/{digest}"),
+        format!("https://169.254.169.254/apps/counter/{digest}"),
+        format!("https://[::ffff:127.0.0.1]/apps/counter/{digest}"),
+    ] {
+        assert_eq!(
+            app_intake(
+                &rig.public,
+                &space,
+                Some('a'),
+                "text/plain; charset=utf-8",
+                url.as_bytes()
+            )
+            .0,
+            422
+        );
+    }
+    let bad_url = format!("http://localhost/apps/counter/{digest}");
+    assert_eq!(
+        app_intake(
+            &rig.public,
+            &space,
+            Some('a'),
+            "text/plain; charset=utf-8",
+            bad_url.as_bytes()
+        )
+        .0,
+        400
+    );
+    let mut unsigned = tree.clone();
+    unsigned.remove(otrios_interfaces::bundle::SIGNATURE_PATH);
+    let unsigned = archive::encode(archive::Kind::App, &unsigned).unwrap();
+    assert_eq!(
+        app_intake(&rig.public, &space, Some('a'), APP_MEDIA_TYPE, &unsigned).0,
+        422
+    );
+    // Reusing verified installed code needs Space Admin, not host-operator rights.
+    let (status, review) = app_intake(&rig.public, &space, Some('b'), APP_MEDIA_TYPE, &archive);
+    assert_eq!(status, 200, "{review}");
+    let review: AppReview = serde_json::from_value(review).unwrap();
+    assert_eq!(review.app, "counter");
+    assert_eq!(review.digest, digest);
+    assert_eq!(review.release, release);
+    assert_eq!(review.installed.as_deref(), Some(digest.as_str()));
+    assert_eq!(review.affected_spaces, 0);
+    assert_eq!(
+        app_intake(&rig.public, &space, Some('a'), APP_MEDIA_TYPE, &archive).0,
+        429
+    );
+    let mut alice = socket(&rig.public, &space, Some('a'));
+    let mut bob = socket(&rig.public, &space, Some('b'));
+    send_spaces(
+        &mut alice,
+        Control::CancelApp {
+            version: 1,
+            id: 1,
+            stage: review.stage.clone(),
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut alice),
+        Event::Result {
+            id: 1,
+            status: Status::Denied,
+            ..
+        }
+    ));
+    rig.change(
+        'a',
+        Change::Membership {
+            space: space.clone(),
+            identity: "bob".into(),
+            role: None,
+        },
+    );
+    // An owner may dispose of an uncommitted stage even after losing Admin.
+    send_spaces(
+        &mut bob,
+        Control::CancelApp {
+            version: 1,
+            id: 2,
+            stage: review.stage,
+        },
+    );
+    assert!(matches!(
+        read_spaces(&mut bob),
+        Event::Result {
+            id: 2,
+            status: Status::Applied,
+            ..
+        }
+    ));
+    assert_eq!(
+        app_intake(&rig.public, &space, Some('b'), APP_MEDIA_TYPE, &archive).0,
+        403
+    );
+    assert_eq!(
+        app_intake(&rig.public, &space, Some('a'), APP_MEDIA_TYPE, &archive).0,
+        200
+    );
+    assert_eq!(
+        fs::read(&checkpoint).unwrap(),
+        before,
+        "review never changes confirmed content"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Json>(&fs::read(rig.root.join("releases/current.json")).unwrap())
+            .unwrap()["id"],
+        release
+    );
+    drop(alice);
+    drop(bob);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    assert_eq!(
+        document_session(&rig, &space, "counter", schema(), None).0,
+        71
+    );
+    assert_eq!(
+        app_intake(&rig.public, &space, Some('a'), APP_MEDIA_TYPE, &archive).0,
+        200,
+        "volatile stages never activate across recovery"
+    );
 }

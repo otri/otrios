@@ -24,6 +24,8 @@ use std::{
 };
 use tokio::sync::{Mutex, RwLock, Semaphore, watch};
 
+#[path = "server_app_install.rs"]
+mod app_install;
 #[path = "server_apps.rs"]
 mod apps;
 #[path = "server_auth.rs"]
@@ -43,6 +45,8 @@ mod space_chat;
 mod spaces;
 #[path = "server_store.rs"]
 mod store;
+#[path = "server_transfers.rs"]
+mod transfers;
 
 #[derive(Clone)]
 struct StateConfig {
@@ -72,6 +76,9 @@ struct App {
     origins: Vec<String>,
     peers: Arc<Semaphore>,
     public_peers: Arc<Semaphore>,
+    transfer_jobs: Arc<Semaphore>,
+    public_transfer_jobs: Arc<Semaphore>,
+    publications: Arc<std::sync::Mutex<Option<otrios_core::transfers::PublicationStore>>>,
     peer_limits: [usize; 2],
 }
 fn persist(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -521,6 +528,8 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "web/artifact-cache.mjs"
         | "state-worker.js"
         | "web/state-worker.js"
+        | "app-transfers.mjs"
+        | "web/app-transfers.mjs"
         | "document-transfer.mjs"
         | "touch-input.mjs"
         | "web/touch-input.mjs"
@@ -876,6 +885,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         origins,
         peers: Arc::new(Semaphore::new(trusted_peers)),
         public_peers: Arc::new(Semaphore::new(public_peers)),
+        transfer_jobs: Arc::new(Semaphore::new(1)),
+        public_transfer_jobs: Arc::new(Semaphore::new(1)),
+        publications: Arc::new(std::sync::Mutex::new(None)),
         peer_limits: [trusted_peers, public_peers],
     });
     if let Some(path) = provision_spaces {
@@ -930,6 +942,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let routes = Router::new()
             .route("/session", get(session::public))
             .route(
+                "/transfers/apps/{space}",
+                axum::routing::post(transfers::upload_app),
+            )
+            .route("/apps/{app}/{digest}", get(transfers::app_page))
+            .route(
+                "/apps/{app}/{digest}/download",
+                get(transfers::app_download),
+            )
+            .route(
+                "/transfers/data/{space}/{app}/{collection}",
+                get(transfers::download_data).post(transfers::upload_data),
+            )
+            .route(
                 "/spaces",
                 get(spaces::list)
                     .post(spaces::manage)
@@ -963,6 +988,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let routes = Router::new()
         .route("/session", get(session::trusted))
+        .route("/transfers/context", get(transfers::context))
+        .route(
+            "/transfers/apps/{space}",
+            axum::routing::post(transfers::upload_app),
+        )
+        .route("/apps/{app}/{digest}", get(transfers::app_page))
+        .route(
+            "/apps/{app}/{digest}/download",
+            get(transfers::app_download),
+        )
+        .route(
+            "/transfers/data/{space}/{app}/{collection}",
+            get(transfers::download_data).post(transfers::upload_data),
+        )
         .route(
             "/spaces",
             get(spaces::list)
@@ -971,6 +1010,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .route("/release/events", get(session::trusted_control))
         .route("/admin/activate", axum::routing::post(activate))
+        .route("/admin/app-import", get(app_install::pending))
+        .route("/admin/app-import/{operation}", get(app_install::status))
+        .route(
+            "/admin/app-import/{operation}/reject",
+            axum::routing::post(app_install::reject),
+        )
+        .route(
+            "/admin/app-import/{operation}/payload",
+            get(app_install::payload),
+        )
+        .route(
+            "/admin/app-import/{operation}/arm",
+            axum::routing::post(app_install::arm).layer(DefaultBodyLimit::max(256)),
+        )
         .route("/demo/ink", get(retired))
         .route("/", get(root))
         .route("/health", get(health))

@@ -73,6 +73,9 @@ pub enum Action {
 pub enum TouchResponder {
     Bubble,
     Consume,
+    /// Paint normally, but exclude this entire subtree from pointer hit testing
+    /// and semantic activation. Unlike Bubble, this exposes siblings underneath.
+    PassThrough,
     /// Capture on press; emit only on release inside this responder's subtree.
     Activate(Action),
     /// Capture and deliver local positions throughout the gesture, including cancel.

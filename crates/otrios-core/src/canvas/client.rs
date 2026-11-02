@@ -2,7 +2,11 @@
 //! One admitted app activation. Durable state is authoritative; all client state is RAM only.
 use super::text_viewport::TextViewport;
 use super::*;
+mod host_access;
 mod host_map;
+mod host_moves;
+mod host_panel;
+mod host_transfers;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -50,6 +54,8 @@ struct Mount {
     text_bounds_dirty: bool,
     text_scroll: Option<super::text_scroll::Scroll>,
     map_scroll: Option<super::text_scroll::Scroll>,
+    panel_scroll: Option<super::text_scroll::Scroll>,
+    host_backdrop: Option<SceneNode>,
     map_drag: Option<host_map::Preview>,
     text_document: Option<super::document::Viewport>,
     chat: Option<super::chat::Client>,
@@ -164,10 +170,15 @@ pub struct ResourceUsage {
     pub wire: WireUsage,
     pub text_scroll: Option<super::text_scroll::Info>,
     pub map_scroll: Option<super::text_scroll::Info>,
+    pub panel_scroll: Option<super::text_scroll::Info>,
     pub text_document: Option<super::document::Stats>,
 }
 #[derive(Default)]
 pub struct Client {
+    transfer_caps: super::host_ui::transfers::Capabilities,
+    transfer_task: Option<otrios_interfaces::transfers::TransferTask>,
+    next_transfer: u32,
+    transfer_copy: Option<u32>,
     local_apps: super::device_apps::LocalApps,
     local_uninstall: bool,
     local_apps_offline: bool,
@@ -345,7 +356,51 @@ impl Client {
         })
     }
     pub fn receive_spaces(&mut self, bytes: &[u8]) -> Result<bool> {
+        let previous_map = if self.host_active
+            && matches!(
+                self.host.pane,
+                super::host_ui::Pane::Home | super::host_ui::Pane::Spaces
+            ) {
+            self.spaces.snapshot().map(|s| {
+                (
+                    s.generation,
+                    s.identity.clone(),
+                    s.catalog.clone(),
+                    s.profile.clone(),
+                    s.spaces.clone(),
+                )
+            })
+        } else {
+            None
+        };
         let changed = self.spaces.receive(bytes).map_err(err)?;
+        if self.host.transfer.as_ref().is_some_and(|d| {
+            self.spaces.snapshot().is_none_or(|s| {
+                s.identity.as_deref() != Some(d.actor.as_str())
+                    || !s.spaces.iter().any(|space| {
+                        space.id == d.space
+                            && space.role == Some(otrios_interfaces::spaces::Role::Admin)
+                    })
+            })
+        }) {
+            self.host.transfer = None;
+            self.transfer_task = None;
+            self.transfer_copy = None;
+            if self.host.pane == super::host_ui::Pane::Transfer {
+                self.host.pane = super::host_ui::Pane::Home;
+            }
+            self.host.field_owner = None;
+        }
+        let map_unchanged = !self.spaces.has_outcome()
+            && previous_map.is_some_and(|(generation, identity, catalog, profile, spaces)| {
+                self.spaces.snapshot().is_some_and(|s| {
+                    s.generation == generation
+                        && s.identity == identity
+                        && s.catalog == catalog
+                        && s.profile == profile
+                        && s.spaces == spaces
+                })
+            });
         self.managed_transport |= self.spaces.snapshot().is_some();
         let mut rendered = false;
         if changed
@@ -391,7 +446,7 @@ impl Client {
                     && self.spaces.snapshot().is_some_and(|s| s.identity.is_some()))
         {
             if self.host_active {
-                if changed {
+                if changed && !map_unchanged {
                     self.collection_revoked = true;
                     self.build_host(true)?;
                     rendered = true;
@@ -438,14 +493,29 @@ impl Client {
         self.host_active
     }
     pub fn spaces_map(&self) -> bool {
-        self.host_active && self.map_pane()
+        self.host_active
     }
-    fn map_pane(&self) -> bool {
-        use super::host_ui::Pane;
-        matches!(
-            self.host.pane,
-            Pane::Home | Pane::Spaces | Pane::SpaceSettings | Pane::AppSettings(_) | Pane::Profile
-        )
+    /// Describe the active surface without announcing an inert modal backdrop.
+    pub fn accessibility_text(&self) -> Result<String> {
+        fn visit(node: &SceneNode, backdrop: Option<u32>, text: &mut Vec<String>) {
+            if Some(node.id) == backdrop {
+                return;
+            }
+            if let otrios_interfaces::scene::Primitive::Text { value, .. } = &node.primitive {
+                text.push(value.clone());
+            }
+            for child in &node.children {
+                visit(child, backdrop, text);
+            }
+        }
+        let backdrop = self
+            .active
+            .as_ref()
+            .and_then(|m| m.host_backdrop.as_ref())
+            .map(|n| n.id);
+        let mut text = vec![];
+        visit(self.scene()?.root(), backdrop, &mut text);
+        Ok(text.join(". "))
     }
     pub fn show_spaces(&mut self) -> Result<bool> {
         if self.spaces.snapshot().is_none() {
@@ -486,11 +556,12 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
+        self.host.transfer_caps = self.transfer_caps.clone();
         // Only metadata/navigation rebuild the host. Local drag feedback must
         // retain the mount; an external rebuild invalidates the captured drag.
         self.host.drag = None;
         let awaiting_sign_in = self.host_active && self.auth_required;
-        let draft = if preserve && self.host_active {
+        let mut draft = if preserve && self.host_active {
             self.typed_value(1)
                 .ok()
                 .and_then(|v| {
@@ -505,6 +576,10 @@ impl Client {
             String::new()
         };
         if let Some(outcome) = self.spaces.take_outcome() {
+            if let crate::spaces::Outcome::AppShared { status, share, .. } = &outcome {
+                self.transfer_share_outcome(*status, share.as_ref());
+            }
+            self.host.background = None;
             match &outcome {
                 crate::spaces::Outcome::Unknown { .. } => self.host.form_blocked = true,
                 crate::spaces::Outcome::Decided {
@@ -522,11 +597,46 @@ impl Client {
                 }
             }
             self.host.message = match outcome {
+                crate::spaces::Outcome::AppImported { status, state, .. } => {
+                    use otrios_interfaces::{spaces::ManagementStatus as Status, transfers::AppImportPhase as Phase};
+                    match (status, state.map(|s| s.phase)) {
+                        (Status::Applied, Some(Phase::Applied)) => "",
+                        (Status::Applied, Some(Phase::Queued | Phase::Armed)) => "Installing app…",
+                        (Status::Applied, Some(Phase::Rejected)) => "The install was cancelled or its review changed. Review the current Space before trying again.",
+                        (Status::Denied, _) => "Current Space Admin and host installation authorization are required.",
+                        _ => "Installation outcome is unknown. Reconnect to check before trying again.",
+                    }.into()
+                }
+                crate::spaces::Outcome::AppShared { status, share, .. } => {
+                    match (status, share) {
+                        (otrios_interfaces::spaces::ManagementStatus::Applied, Some(share)) => if self.host.transfer.is_some() { String::new() } else { format!("App shared without data: {}/apps/{}/{}", self.transfer_caps.origin, share.app, share.digest) },
+                        (otrios_interfaces::spaces::ManagementStatus::Denied, _) => "Host publication authorization and Space Admin access are required.".into(),
+                        _ => "The app changed or sharing is unavailable. Refresh before reviewing it again.".into(),
+                    }
+                }
+                crate::spaces::Outcome::Replacement { status, outcome, .. } => {
+                    match (status, outcome) {
+                        (otrios_interfaces::spaces::ManagementStatus::Applied, Some(otrios_interfaces::transfers::ReplacementOutcome::Committed)) => "",
+                        (otrios_interfaces::spaces::ManagementStatus::Denied, _) => "Admin access is required to check this replacement.",
+                        _ => "Replacement outcome is unknown. Refresh the dataset before reviewing another change.",
+                    }.into()
+                }
+                crate::spaces::Outcome::MoveStatus { status, .. } => match status {
+                    otrios_interfaces::spaces::ManagementStatus::Applied => "",
+                    otrios_interfaces::spaces::ManagementStatus::Conflict => {
+                        "The move was not recorded. Review both Spaces before trying again."
+                    }
+                    otrios_interfaces::spaces::ManagementStatus::Denied => {
+                        "Admin access to both Spaces is required."
+                    }
+                    _ => "Couldn't confirm the move. Reconnect to check its outcome.",
+                }
+                .into(),
                 crate::spaces::Outcome::Unknown { .. } => {
                     "Reply lost. Check the refreshed Space before trying again.".into()
                 }
                 crate::spaces::Outcome::Decided { status, .. } => match status {
-                    otrios_interfaces::spaces::ManagementStatus::Applied => "Saved.",
+                    otrios_interfaces::spaces::ManagementStatus::Applied => "",
                     otrios_interfaces::spaces::ManagementStatus::Denied => {
                         "Admin access is required."
                     }
@@ -556,7 +666,44 @@ impl Client {
             && !self.spaces.pending()
             && !self.host.form_blocked
         {
-            self.host.form_generation = snapshot.generation;
+            use super::host_ui::Pane;
+            let profile_changed = matches!(self.host.pane, Pane::ProfileEdit)
+                && snapshot.profile.as_ref().map_or(0, |p| p.revision)
+                    != self.host.profile_revision;
+            if snapshot.generation > self.host.form_generation || profile_changed {
+                let current = match &self.host.pane {
+                    Pane::SpaceSettings => snapshot
+                        .selected
+                        .as_ref()
+                        .and_then(|d| snapshot.spaces.iter().find(|s| s.id == d.space))
+                        .map(|s| s.name.clone()),
+                    Pane::AppSettings(id) => snapshot
+                        .selected
+                        .as_ref()
+                        .and_then(|s| s.apps.iter().find(|a| a.app == *id))
+                        .map(|a| a.title.clone()),
+                    Pane::Dataset(cid) => snapshot
+                        .selected
+                        .as_ref()
+                        .and_then(|s| s.retained.iter().find(|a| a.collection == *cid))
+                        .map(|a| a.title.clone()),
+                    Pane::ProfileEdit => snapshot
+                        .profile
+                        .as_ref()
+                        .map(|p| p.name.clone())
+                        .or_else(|| snapshot.identity.clone()),
+                    _ => None,
+                };
+                if let Some(current) = current {
+                    draft = current.clone();
+                    self.host.form_value = current;
+                }
+                self.host.form_generation = snapshot.generation;
+                if matches!(self.host.pane, Pane::ProfileEdit) {
+                    self.host.profile_revision =
+                        snapshot.profile.as_ref().map_or(0, |p| p.revision);
+                }
+            }
         }
         if let Some((space, pane, app)) = self.host.destination.clone()
             && snapshot.selected.as_ref().is_some_and(|s| s.space == space)
@@ -595,18 +742,11 @@ impl Client {
                 self.host.message = "This app is unavailable on this device.".into();
             }
         }
-        let mut host_viewport = if self.map_pane() {
-            self.viewport.or(self.layout_viewport)
-        } else {
-            self.layout_viewport.or(self.viewport)
-        }
-        .unwrap_or([1280., 800.]);
-        if matches!(
-            self.host.pane,
-            super::host_ui::Pane::SpaceSettings | super::host_ui::Pane::AppSettings(_)
-        ) {
-            host_viewport[1] = host_viewport[1].max(720.);
-        }
+        self.prepare_host_move(&snapshot)?;
+        let host_viewport = self
+            .viewport
+            .or(self.layout_viewport)
+            .unwrap_or([1280., 800.]);
         let rendered = super::host_ui::render(
             &snapshot,
             &mut self.host,
@@ -640,6 +780,7 @@ impl Client {
                 writer,
             },
         )?;
+        mount.host_backdrop = rendered.backdrop;
         mount.font = self.font.clone();
         mount.session_controls = self.session_controls;
         mount.private_access = self.private_access;
@@ -647,6 +788,7 @@ impl Client {
         mount.keyboard.set_enabled(!self.external_keyboard);
         mount.invalidate();
         self.prepare_map_scroll(&mut mount, rendered.map_viewport)?;
+        self.prepare_panel_scroll(&mut mount, rendered.panel_viewport)?;
         cached_scene(&mount)?;
         self.active = Some(mount);
         self.host_active = true;
@@ -661,12 +803,36 @@ impl Client {
         use super::host_ui::{HostAction, Pane};
         self.host.message.clear();
         match action {
+            action @ (HostAction::TransferUpload
+            | HostAction::TransferShare(_)
+            | HostAction::TransferExport(..)
+            | HostAction::TransferReplace(..)
+            | HostAction::TransferPick
+            | HostAction::TransferUrl
+            | HostAction::TransferFile(_)
+            | HostAction::TransferCommit
+            | HostAction::TransferCancel
+            | HostAction::TransferCopy) => return self.host_transfer_action(action),
             HostAction::Pane(pane) => {
+                if !matches!(
+                    pane,
+                    Pane::Members | Pane::AccessAudience | Pane::AudienceConfirm { .. }
+                ) {
+                    self.host.access = None;
+                }
+                self.host.panel_scroll = 0.;
                 if !matches!(pane, Pane::AppSettings(_)) {
                     self.commit_host_label()?;
                 }
+                self.host.review = None;
+                self.host.moving = None;
+                self.host.remove_data = false;
+                self.host.page = if matches!(pane, Pane::Home | Pane::Spaces) {
+                    self.host.map_page
+                } else {
+                    0
+                };
                 self.host.pane = pane;
-                self.host.page = 0;
                 self.host.field_owner = None;
                 self.host.background = None;
                 self.build_host(false)?;
@@ -703,38 +869,129 @@ impl Client {
                     self.host_destination(space, Pane::Home, Some(app))?;
                 }
             }
+            HostAction::MapDataset(space, _, collection) => {
+                self.host_destination(space, Pane::Dataset(collection), None)?;
+            }
+            HostAction::MoveDestination(space) => {
+                if let Some(moving) = &mut self.host.moving {
+                    moving.destination = Some(space.clone());
+                    self.host_destination(space, Pane::MoveReview, None)?;
+                }
+            }
+            HostAction::MoveMode(mode) => {
+                if let Some(moving) = &mut self.host.moving
+                    && moving.attached
+                {
+                    moving.mode = mode;
+                }
+                self.build_host(true)?;
+            }
+            HostAction::MoveConfirm => return self.confirm_host_move(),
+            HostAction::ProfileSave => {
+                let snapshot = self.spaces.snapshot().ok_or("Spaces unavailable")?;
+                let revision = snapshot.profile.as_ref().map_or(0, |p| p.revision);
+                let name = match self.typed_value(1)? {
+                    Value::Text(name) => name,
+                    _ => String::new(),
+                };
+                if snapshot.identity.is_none() || revision != self.host.profile_revision {
+                    self.host.message = "The profile changed. Close and review it again.".into();
+                } else if name.trim() == self.host.form_value
+                    || self
+                        .spaces
+                        .request(otrios_interfaces::spaces::Change::Profile {
+                            name,
+                            expected_revision: revision,
+                        })
+                        .is_ok()
+                {
+                    self.host.pane = Pane::Profile;
+                    self.host.field_owner = None;
+                } else {
+                    self.host.message = "Check the name and wait for the current request.".into();
+                }
+                self.build_host(true)?;
+            }
+            HostAction::BackgroundApply => {
+                let text = match self.typed_value(1)? {
+                    Value::Text(text) => text,
+                    _ => String::new(),
+                };
+                let hex = text.trim().trim_start_matches('#');
+                let color = (hex.len() == 6 && hex.is_ascii())
+                    .then(|| {
+                        Some([
+                            u8::from_str_radix(&hex[..2], 16).ok()?,
+                            u8::from_str_radix(&hex[2..4], 16).ok()?,
+                            u8::from_str_radix(&hex[4..6], 16).ok()?,
+                        ])
+                    })
+                    .flatten();
+                let snapshot = self.spaces.snapshot().ok_or("Spaces unavailable")?;
+                if let Some(rgb) = color {
+                    let space = snapshot
+                        .selected
+                        .as_ref()
+                        .and_then(|d| snapshot.spaces.iter().find(|s| s.id == d.space))
+                        .ok_or("Space unavailable")?;
+                    let mut layout = space.layout;
+                    layout.background = otrios_interfaces::spaces::Background::Rgb(rgb);
+                    if snapshot.generation != self.host.form_generation || self.host.form_blocked {
+                        self.host.message = "The Space changed. Close and review it again.".into();
+                    } else if self
+                        .spaces
+                        .request(otrios_interfaces::spaces::Change::ConfigureSpace {
+                            space: space.id.clone(),
+                            name: space.name.clone(),
+                            layout,
+                        })
+                        .is_ok()
+                    {
+                        self.host.pane = Pane::SpaceSettings;
+                        self.host.field_owner = None;
+                        self.host.background = Some(layout.background);
+                        self.host.message.clear();
+                    } else {
+                        self.host.message = "Wait for the current request.".into();
+                    }
+                } else {
+                    self.host.message = "Use a six-digit hex color, such as #E7EBE1.".into();
+                }
+                self.build_host(true)?;
+            }
+
+            action @ (HostAction::AccessAudience(_)
+            | HostAction::AccessRole(_)
+            | HostAction::AccessRemove(_)
+            | HostAction::AccessAdd
+            | HostAction::AccessSave
+            | HostAction::AccessApply) => return self.host_access_action(action),
             HostAction::Settings(space, pane) => {
+                self.host.review = None;
+                self.host.remove_data = false;
                 self.host_destination(space, pane, None)?;
+            }
+            HostAction::ToggleRemoveData => {
+                self.host.remove_data = !self.host.remove_data;
+                self.build_host(true)?;
+            }
+            HostAction::Reviewed(change, generation) => {
+                if self
+                    .spaces
+                    .snapshot()
+                    .is_none_or(|s| s.generation != generation)
+                {
+                    self.host.message = "The Space changed. Close and review it again.".into();
+                    self.build_host(true)?;
+                } else {
+                    return self.host_action(HostAction::Manage(change));
+                }
             }
             HostAction::Resize(_) => {}
             HostAction::Background(color) => {
                 self.host.background = Some(color);
+                self.save_host_space()?;
                 self.build_host(true)?;
-            }
-            HostAction::SaveSpace => {
-                if let Some(space) = self
-                    .spaces
-                    .snapshot()
-                    .and_then(|s| {
-                        s.selected
-                            .as_ref()
-                            .and_then(|d| s.spaces.iter().find(|s| s.id == d.space))
-                    })
-                    .cloned()
-                {
-                    let name = match self.typed_value(1)? {
-                        Value::Text(v) => v,
-                        _ => String::new(),
-                    };
-                    let mut layout = space.layout;
-                    layout.background = self.host.background.unwrap_or(layout.background);
-                    self.host_request_form(otrios_interfaces::spaces::Change::ConfigureSpace {
-                        space: space.id,
-                        name,
-                        layout,
-                    })?;
-                    self.build_host(true)?;
-                }
             }
             HostAction::Unavailable(message) => {
                 self.commit_host_label()?;
@@ -743,10 +1000,12 @@ impl Client {
             }
             HostAction::Page(direction) => {
                 self.host.page = self.host.page.saturating_add_signed(isize::from(direction));
-                self.build_host(false)?;
-            }
-            HostAction::Space(space) => {
-                self.space_switch = Some(space);
+                if matches!(self.host.pane, Pane::Home | Pane::Spaces) {
+                    self.host.scroll = 0.;
+                } else {
+                    self.host.panel_scroll = 0.;
+                }
+                self.build_host(true)?;
             }
             HostAction::Launch(ui, state) => {
                 self.host_active = false;
@@ -761,7 +1020,7 @@ impl Client {
                 self.sign_out_requested = true;
             }
             action => {
-                let text = if matches!(action, HostAction::Create | HostAction::Invite(_)) {
+                let text = if matches!(action, HostAction::Create) {
                     match self.typed_value(1)? {
                         Value::Text(text) => text,
                         _ => String::new(),
@@ -772,33 +1031,31 @@ impl Client {
                 let change = match action {
                     HostAction::Manage(change) => change,
                     HostAction::Create => otrios_interfaces::spaces::Change::Create { name: text },
-                    HostAction::Invite(role) => otrios_interfaces::spaces::Change::Membership {
-                        space: self
-                            .spaces
-                            .snapshot()
-                            .and_then(|s| s.selected.as_ref())
-                            .ok_or("Select a Space")?
-                            .space
-                            .clone(),
-                        identity: text,
-                        role: Some(role),
-                    },
                     _ => unreachable!(),
                 };
                 let deleting =
                     matches!(change, otrios_interfaces::spaces::Change::DeleteData { .. });
                 let sharing = matches!(change, otrios_interfaces::spaces::Change::Audience { .. });
+                let retained = matches!(
+                    self.host.pane,
+                    Pane::RemoveApp(_)
+                        | Pane::DeleteDataset(_)
+                        | Pane::RestoreDataset(_)
+                        | Pane::DeleteSpace
+                        | Pane::Dataset(_)
+                );
                 match self.spaces.request(change) {
                     Ok(_) => {
-                        self.host.message = "Saving…".into();
-                        if self.host.pane == Pane::Create {
+                        self.host.message.clear();
+                        if retained {
+                            self.host.pane = Pane::Home;
+                            self.host.review = None;
+                        } else if self.host.pane == Pane::Create {
                             self.host.pane = Pane::Spaces;
-                        } else if self.host.pane == Pane::Invite {
-                            self.host.pane = Pane::Members;
                         } else if deleting {
                             self.host.pane = Pane::Cleanup;
                         } else if sharing {
-                            self.host.pane = Pane::Sharing;
+                            self.host.pane = Pane::Members;
                         }
                     }
                     Err(_) => {
@@ -836,6 +1093,7 @@ impl Client {
         } else {
             let name = match &change {
                 otrios_interfaces::spaces::Change::LabelApp { name, .. }
+                | otrios_interfaces::spaces::Change::LabelDataset { name, .. }
                 | otrios_interfaces::spaces::Change::ConfigureSpace { name, .. } => {
                     Some(name.trim().to_owned())
                 }
@@ -844,10 +1102,38 @@ impl Client {
             if self.spaces.request(change).is_ok() {
                 self.host.form_pending =
                     name.and_then(|name| self.host.field_owner.clone().map(|owner| (owner, name)));
-                self.host.message = "Saving…".into();
+                self.host.message.clear();
             } else {
                 self.host.message = "Check the name and wait for the current request.".into();
             }
+        }
+        Ok(())
+    }
+    fn save_host_space(&mut self) -> Result<()> {
+        let Some(space) = self
+            .spaces
+            .snapshot()
+            .and_then(|s| {
+                s.selected
+                    .as_ref()
+                    .and_then(|d| s.spaces.iter().find(|s| s.id == d.space))
+            })
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let name = match self.typed_value(1)? {
+            Value::Text(name) => name,
+            _ => return Ok(()),
+        };
+        let mut layout = space.layout;
+        layout.background = self.host.background.unwrap_or(layout.background);
+        if name != self.host.form_value || layout.background != space.layout.background {
+            self.host_request_form(otrios_interfaces::spaces::Change::ConfigureSpace {
+                space: space.id,
+                name,
+                layout,
+            })?;
         }
         Ok(())
     }
@@ -855,16 +1141,50 @@ impl Client {
         if !self.host_active {
             return Ok(());
         }
-        if let super::host_ui::Pane::AppSettings(app) = self.host.pane.clone()
-            && let Value::Text(name) = self.typed_value(1)?
-            && name != self.host.form_value
-            && let Some(space) = self.selected_space.clone()
+        if self.spaces.pending()
+            && let Some((owner, pending)) = &self.host.form_pending
+            && self.host.field_owner.as_ref() == Some(owner)
+            && matches!(self.typed_value(1)?, Value::Text(name) if name.trim() == pending)
         {
-            self.host_request_form(otrios_interfaces::spaces::Change::LabelApp {
-                space,
-                app,
-                name,
-            })?;
+            return Ok(());
+        }
+        match self.host.pane.clone() {
+            super::host_ui::Pane::SpaceSettings => self.save_host_space()?,
+            super::host_ui::Pane::AppSettings(app) => {
+                if let Value::Text(name) = self.typed_value(1)?
+                    && name != self.host.form_value
+                    && let Some(space) = self.selected_space.clone()
+                {
+                    self.host_request_form(otrios_interfaces::spaces::Change::LabelApp {
+                        space,
+                        app,
+                        name,
+                    })?;
+                }
+            }
+            super::host_ui::Pane::Dataset(collection) => {
+                if let Value::Text(name) = self.typed_value(1)?
+                    && name != self.host.form_value
+                    && let Some((space, app)) = self
+                        .spaces
+                        .snapshot()
+                        .and_then(|s| s.selected.as_ref())
+                        .and_then(|s| {
+                            s.retained
+                                .iter()
+                                .find(|d| d.collection == collection)
+                                .map(|d| (s.space.clone(), d.app.clone()))
+                        })
+                {
+                    self.host_request_form(otrios_interfaces::spaces::Change::LabelDataset {
+                        space,
+                        app,
+                        collection,
+                        name,
+                    })?;
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1465,6 +1785,11 @@ impl Client {
     /// unconfirmed user intent and active input prevent code replacement.
     pub fn reload_ready(&self) -> bool {
         !self.input_busy()
+            && !self
+                .host
+                .transfer
+                .as_ref()
+                .is_some_and(|d| matches!(d.step, super::host_ui::transfers::Step::Waiting { .. }))
             && !self.spaces.pending()
             && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
             && self
@@ -1603,6 +1928,11 @@ impl Client {
                 .active
                 .as_ref()
                 .and_then(|m| m.map_scroll.as_ref())
+                .map(|s| s.info()),
+            panel_scroll: self
+                .active
+                .as_ref()
+                .and_then(|m| m.panel_scroll.as_ref())
                 .map(|s| s.info()),
             text_document: self
                 .active
@@ -1745,6 +2075,8 @@ impl Client {
         self.navigate("").is_ok()
     }
     pub fn clear_private(&mut self) {
+        self.transfer_task = None;
+        self.transfer_copy = None;
         let host = self.host_active;
         self.host_active = false;
         self.host_actions.clear();
@@ -3004,6 +3336,9 @@ impl Client {
                 if let Some(s) = &mut m.map_scroll {
                     s.cancel();
                 }
+                if let Some(s) = &mut m.panel_scroll {
+                    s.cancel();
+                }
                 m.input.cancel_all();
                 m.invalidate_presentation();
             }
@@ -3034,9 +3369,11 @@ impl Client {
     }
     pub fn back(&mut self) -> Result<bool> {
         if self.host_active {
-            if self.host.drag.take().is_some() {
-                self.preview_map_drag();
-                return Ok(true);
+            if self.host.pane == super::host_ui::Pane::Transfer {
+                return self.host_transfer_action(super::host_ui::HostAction::TransferCancel);
+            }
+            if self.host.drag.is_some() {
+                return self.cancel();
             }
             return self.host_action(super::host_ui::HostAction::Pane(super::host_ui::Pane::Home));
         }
@@ -3160,6 +3497,10 @@ impl Client {
         if let Some(s) = &mut m.map_scroll {
             scrolled |= s.tick(now);
             self.host.scroll = s.info().offset[1];
+        }
+        if let Some(s) = &mut m.panel_scroll {
+            scrolled |= s.tick(now);
+            self.host.panel_scroll = s.info().offset[1];
         }
         if m.text_document.as_ref().is_some_and(|s| s.bounds_dirty) {
             let scene = cached_layout(m)?;
@@ -3773,6 +4114,8 @@ fn qualify(
         },
         text_scroll,
         map_scroll: None,
+        panel_scroll: None,
+        host_backdrop: None,
         map_drag: None,
         epoch,
         viewport: [1280., 800.],
@@ -3920,6 +4263,10 @@ fn resolve_scene(m: &Mount) -> Result<Scene> {
 }
 fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     let mut root = scene.root().clone();
+    if let Some(backdrop) = &m.host_backdrop {
+        root.children
+            .insert(root.children.len().min(1), backdrop.clone());
+    }
     present_text_views(m, scene, &mut root);
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);
@@ -3927,6 +4274,10 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     if let Some(scroll) = &m.map_scroll {
         scroll.present(&mut root);
         host_map::present_map(&mut root, scroll.node(), scroll.info());
+    }
+    if let Some(scroll) = &m.panel_scroll {
+        scroll.present(&mut root);
+        host_panel::present_panel(&mut root, scroll.node());
     }
     if let Some(preview) = &m.map_drag {
         host_map::present_drag(&mut root, preview, m.viewport);

@@ -1,11 +1,75 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Management v1 uses a separate bounded channel on the negotiated shared session.
 use super::*;
-const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v2\0";
-const EVENT: &[u8] = b"OTriOS\0spaces-event\0v2\0";
+const COMMAND: &[u8] = b"OTriOS\0spaces-command\0v5\0";
+const EVENT: &[u8] = b"OTriOS\0spaces-event\0v5\0";
 
 fn command_shape(command: &Command) -> Result<()> {
     match command {
+        Command::ShareApp {
+            version,
+            id,
+            space,
+            app,
+            digest,
+            catalog,
+            ..
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(space)
+                || !otrios_interfaces::canvas::valid_destination(app)
+                || app.contains('/')
+                || catalog.len() != 32
+                || !valid_digest(digest)
+            {
+                return Err(Error::Invalid);
+            }
+        }
+        Command::ReplaceData { version, id, stage }
+        | Command::ImportApp { version, id, stage }
+        | Command::CancelApp { version, id, stage }
+        | Command::CancelData { version, id, stage } => {
+            if *version != VERSION || *id == 0 || !valid_id(stage) {
+                return Err(Error::Invalid);
+            }
+        }
+        Command::ReplacementStatus {
+            version,
+            id,
+            space,
+            replacement,
+        } => {
+            if *version != VERSION || *id == 0 || !valid_id(space) || !valid_id(replacement) {
+                return Err(Error::Invalid);
+            }
+        }
+        Command::ImportStatus {
+            version,
+            id,
+            operation,
+        } => {
+            if *version != VERSION || *id == 0 || !valid_id(operation) {
+                return Err(Error::Invalid);
+            }
+        }
+        Command::MoveStatus {
+            version,
+            id,
+            operation,
+            source,
+            destination,
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(operation)
+                || !valid_id(source)
+                || !valid_id(destination)
+                || source == destination
+            {
+                return Err(Error::Invalid);
+            }
+        }
         Command::Watch {
             version,
             observation,
@@ -29,6 +93,12 @@ fn command_shape(command: &Command) -> Result<()> {
                 return Err(Error::Invalid);
             }
             let valid = match &request.change {
+                Change::Profile { name, .. } => valid_name(name),
+                Change::Access { space, changes, .. } => {
+                    valid_id(space)
+                        && changes.len() <= 16
+                        && changes.iter().all(|c| valid_identity(&c.identity))
+                }
                 Change::Create { name } => !name.trim().is_empty() && name.len() <= 128,
                 Change::ConfigureSpace {
                     space,
@@ -37,6 +107,53 @@ fn command_shape(command: &Command) -> Result<()> {
                 } => valid_id(space) && valid_name(name) && valid_layout(*layout),
                 Change::PlaceSpace { space, before } => {
                     valid_id(space) && before.as_ref().is_none_or(|id| valid_id(id) && id != space)
+                }
+                Change::Move {
+                    operation,
+                    source,
+                    destination,
+                    app,
+                    collection,
+                    destination_collection,
+                    ..
+                } => {
+                    valid_id(operation)
+                        && valid_id(source)
+                        && valid_id(destination)
+                        && source != destination
+                        && valid_id(collection)
+                        && destination_collection
+                            .as_ref()
+                            .is_none_or(|id| valid_id(id))
+                        && otrios_interfaces::canvas::valid_destination(app)
+                }
+                Change::DeleteSpace { space, .. } | Change::RestoreSpace { space } => {
+                    valid_id(space)
+                }
+                Change::RestoreDataset {
+                    space,
+                    app,
+                    collection,
+                }
+                | Change::DeleteDataset {
+                    space,
+                    app,
+                    collection,
+                } => {
+                    valid_id(space)
+                        && valid_id(collection)
+                        && otrios_interfaces::canvas::valid_destination(app)
+                }
+                Change::LabelDataset {
+                    space,
+                    app,
+                    collection,
+                    name,
+                } => {
+                    valid_id(space)
+                        && valid_id(collection)
+                        && otrios_interfaces::canvas::valid_destination(app)
+                        && valid_name(name)
                 }
                 Change::LabelApp { space, app, name } => {
                     valid_id(space)
@@ -77,6 +194,86 @@ fn command_shape(command: &Command) -> Result<()> {
 }
 fn event_shape(event: &Event) -> Result<()> {
     match event {
+        Event::AppImport {
+            version,
+            id,
+            operation,
+            status,
+            state,
+        } => {
+            use crate::transfers::AppImportPhase as Phase;
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(operation)
+                || state.as_ref().is_some_and(|s| {
+                    *status != ManagementStatus::Applied
+                        || s.operation != *operation
+                        || s.release.as_deref().is_some_and(|r| !valid_digest(r))
+                        || matches!(s.phase, Phase::Armed | Phase::Applied) && s.release.is_none()
+                        || s.phase == Phase::Queued && s.release.is_some()
+                })
+            {
+                Err(Error::Invalid)
+            } else {
+                Ok(())
+            }
+        }
+        Event::AppShared {
+            version,
+            id,
+            status,
+            share,
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || (*status == ManagementStatus::Applied) != share.is_some()
+                || share.as_ref().is_some_and(|s| {
+                    !otrios_interfaces::canvas::valid_destination(&s.app)
+                        || s.app.contains('/')
+                        || !valid_digest(&s.digest)
+                        || !valid_name(&s.title)
+                })
+            {
+                Err(Error::Invalid)
+            } else {
+                Ok(())
+            }
+        }
+        Event::ReplacementStatus {
+            version,
+            id,
+            replacement,
+            status,
+            outcome,
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(replacement)
+                || (*status == ManagementStatus::Applied) != outcome.is_some()
+            {
+                Err(Error::Invalid)
+            } else {
+                Ok(())
+            }
+        }
+        Event::MoveStatus {
+            version,
+            id,
+            operation,
+            status,
+            generation,
+        } => {
+            if *version != VERSION
+                || *id == 0
+                || !valid_id(operation)
+                || (*status == ManagementStatus::Applied) != generation.is_some()
+                || generation == &Some(0)
+            {
+                Err(Error::Invalid)
+            } else {
+                Ok(())
+            }
+        }
         Event::Snapshot {
             observation,
             snapshot,
@@ -107,6 +304,12 @@ fn event_shape(event: &Event) -> Result<()> {
             }
         }
     }
+}
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 fn encode<T: serde::Serialize>(prefix: &[u8], value: &T, limit: usize) -> Result<Vec<u8>> {
     let payload = flexbuffers::to_vec(value).map_err(|_| Error::Invalid)?;

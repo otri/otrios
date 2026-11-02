@@ -44,6 +44,53 @@ fn fixture(code: Option<&[u8]>) -> BundleTree {
     .unwrap()
 }
 
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn explicit_publication_preserves_signed_bytes_and_rejects_untrusted_code() {
+    use crate::transfers::{PublicationStore, archive};
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    let key = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let mut tree = fixture(None);
+    let digest = inspect(&tree).unwrap().digest;
+    let signature = key.sign(&signing_payload(&digest, &public).unwrap());
+    attach_signature(&mut tree, &public, signature.as_ref()).unwrap();
+    let mut nonce = [0; 16];
+    getrandom::fill(&mut nonce).unwrap();
+    let root = std::env::temp_dir().join(format!("otrios-public-app-{}", hex(&nonce)));
+    let store = PublicationStore::open(root.clone(), public).unwrap();
+    assert!(PublicationStore::open(root.clone(), public).is_err());
+    assert!(
+        store.read("sample", &digest).unwrap().is_none(),
+        "installed does not mean shared"
+    );
+    assert!(store.read("../sample", &digest).is_err());
+    store.publish(tree.clone()).unwrap();
+    store.publish(tree.clone()).unwrap();
+    let published = store.read("sample", &digest).unwrap().unwrap();
+    assert!(
+        published.summary.info.private,
+        "sharing does not rewrite signed classification"
+    );
+    assert_eq!(
+        archive::decode(archive::Kind::App, &published.archive).unwrap(),
+        tree
+    );
+    let mut unknown = tree.clone();
+    unknown.remove(SIGNATURE_PATH);
+    assert!(store.publish(unknown).is_err());
+    store.withdraw("sample", &digest).unwrap();
+    assert!(store.read("sample", &digest).unwrap().is_none());
+    drop(store);
+    let store = PublicationStore::open(root.clone(), public).unwrap();
+    store.publish(tree).unwrap();
+    drop(store);
+    let other = PublicationStore::open(root.clone(), [0; 32]).unwrap();
+    assert!(other.read("sample", &digest).is_err());
+    drop(other);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn reseal(tree: &mut BundleTree) {
     tree.insert(FILES_PATH.into(), encode(&file_manifest(tree)).unwrap());
 }
@@ -368,4 +415,237 @@ fn signed_snapshot_requires_external_trust_and_survives_source_mutation() {
     assert!(verified.file(UI_PATH).is_ok());
     assert!(public_key_der(&public).is_err());
     assert!(attach_signature(&mut tree, &public, &[0; 63]).is_err());
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn app_intake_requires_independent_trust_and_separates_reuse_from_host_installation() {
+    use crate::{spaces, transfers::*};
+    use otrios_interfaces::spaces::{Audience, Change, Request, VERSION};
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    let key = Ed25519KeyPair::from_seed_unchecked(&[11; 32]).unwrap();
+    let public = key.public_key().as_ref().try_into().unwrap();
+    let original = fixture(None);
+    let mut ui = canvas::decode_ui(&original[UI_PATH]).unwrap();
+    ui.ui_ref = "app:sample/ui".into();
+    let mut app = inspect(&original).unwrap().info.app;
+    app.ui_ref = ui.ui_ref.clone();
+    let ui = canvas::encode_ui(&ui).unwrap();
+    let entry = CatalogEntry {
+        app,
+        path: "sample".into(),
+        private: true,
+        ui_hash: hash(&ui),
+    };
+    let sign = |revision| {
+        let mut tree = pack(&entry, revision, &ui, None).unwrap();
+        let signature =
+            key.sign(&signing_payload(&inspect(&tree).unwrap().digest, &public).unwrap());
+        attach_signature(&mut tree, &public, signature.as_ref()).unwrap();
+        tree
+    };
+    let first = sign(1);
+    let previous = verify(first.clone(), &public).unwrap();
+    let bytes = archive::encode(archive::Kind::App, &first).unwrap();
+    let source = AppSource::parse(&format!(
+        "https://apps.example/apps/sample/{}",
+        previous.summary().digest
+    ))
+    .unwrap();
+    assert!(AppCandidate::qualify(&bytes, &[0; 32], Some(&source)).is_err());
+    let wrong_source = AppSource::parse(&format!(
+        "https://apps.example/apps/sample/{}",
+        "0".repeat(64)
+    ))
+    .unwrap();
+    assert!(AppCandidate::qualify(&bytes, &public, Some(&wrong_source)).is_err());
+    let registry = spaces::apply(
+        &spaces::empty(),
+        "alice",
+        &Request {
+            version: VERSION,
+            expected_generation: 0,
+            change: Change::Create {
+                name: "Import destination".into(),
+            },
+        },
+        None,
+    )
+    .unwrap();
+    let before = registry.clone();
+    let target = AppImportTarget {
+        space: registry.spaces[0].id.clone(),
+        generation: registry.generation,
+        catalog: vec![5; 32],
+        release: "a".repeat(64),
+        audience: Audience::Closed,
+    };
+    let candidate = || AppCandidate::qualify(&bytes, &public, Some(&source)).unwrap();
+    assert!(
+        candidate()
+            .admit(
+                target.clone(),
+                &registry,
+                "alice",
+                &HostPolicy::default(),
+                None,
+                100
+            )
+            .is_err()
+    );
+    let stage = candidate()
+        .admit(
+            target.clone(),
+            &registry,
+            "alice",
+            &HostPolicy::default(),
+            Some(&previous),
+            100,
+        )
+        .unwrap();
+    assert_eq!(
+        stage.review().installed.as_deref(),
+        Some(previous.summary().digest.as_str())
+    );
+    assert_eq!(stage.review().affected_spaces, 0);
+    assert_eq!(
+        registry, before,
+        "intake cannot mutate destination metadata"
+    );
+    assert!(stage.owned_by("alice", &stage.review().stage));
+    assert!(!stage.owned_by("bob", &stage.review().stage));
+    let auth = |actor: &str, host: &HostPolicy, generation, release: &str, now| {
+        let mut current = registry.clone();
+        current.generation = generation;
+        stage.authorize(&current, actor, host, &target.catalog, release, now)
+    };
+    auth(
+        "alice",
+        &HostPolicy::default(),
+        registry.generation,
+        &target.release,
+        101,
+    )
+    .unwrap();
+    assert!(
+        auth(
+            "bob",
+            &HostPolicy::default(),
+            registry.generation,
+            &target.release,
+            101
+        )
+        .is_err()
+    );
+    assert!(
+        auth(
+            "alice",
+            &HostPolicy::default(),
+            registry.generation + 1,
+            &target.release,
+            101
+        )
+        .is_err()
+    );
+    assert!(
+        auth(
+            "alice",
+            &HostPolicy::default(),
+            registry.generation,
+            &"b".repeat(64),
+            101
+        )
+        .is_err()
+    );
+    assert!(
+        auth(
+            "alice",
+            &HostPolicy::default(),
+            registry.generation,
+            &target.release,
+            99
+        )
+        .is_err()
+    );
+    assert!(
+        auth(
+            "alice",
+            &HostPolicy::default(),
+            registry.generation,
+            &target.release,
+            stage.review().expires_unix_ms
+        )
+        .is_err()
+    );
+    let host = HostPolicy::new(vec!["alice".into()]).unwrap();
+    let next_bytes = archive::encode(archive::Kind::App, &sign(2)).unwrap();
+    let next = || AppCandidate::qualify(&next_bytes, &public, None).unwrap();
+    assert!(
+        next()
+            .admit(
+                target.clone(),
+                &registry,
+                "alice",
+                &HostPolicy::default(),
+                Some(&previous),
+                100
+            )
+            .is_err()
+    );
+    assert!(
+        next()
+            .admit(
+                target.clone(),
+                &registry,
+                "bob",
+                &HostPolicy::new(vec!["bob".into()]).unwrap(),
+                Some(&previous),
+                100
+            )
+            .is_err()
+    );
+    let stage = next()
+        .admit(
+            target.clone(),
+            &registry,
+            "alice",
+            &host,
+            Some(&previous),
+            100,
+        )
+        .unwrap();
+    assert_eq!(stage.review().revision, 2);
+    assert!(
+        stage
+            .authorize(
+                &registry,
+                "alice",
+                &HostPolicy::default(),
+                &target.catalog,
+                &target.release,
+                101
+            )
+            .is_err()
+    );
+    let mut public_space = registry.clone();
+    public_space.spaces[0].audience = Audience::PublicView;
+    let public_target = AppImportTarget {
+        audience: Audience::PublicView,
+        ..target.clone()
+    };
+    assert!(
+        candidate()
+            .admit(
+                public_target,
+                &public_space,
+                "alice",
+                &host,
+                Some(&previous),
+                100
+            )
+            .is_err()
+    );
+    let (review, verified) = stage.into_parts();
+    assert_eq!(review.digest, verified.summary().digest);
+    assert_eq!(verified.file(UI_PATH).unwrap(), ui);
 }

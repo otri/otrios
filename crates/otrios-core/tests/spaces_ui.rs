@@ -1,11 +1,314 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 #![cfg(feature = "canvas")]
 use otrios_core::{authoring as a, canvas::*, spaces};
+use otrios_interfaces::transfers::*;
 use otrios_interfaces::{canvas::*, keyboard::Edit, spaces::*};
 
 const SPACE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn data_review() -> DataReview {
+    DataReview {
+        stage: "e".repeat(32),
+        replacement: Replacement {
+            space: SPACE.into(),
+            app: "counter".into(),
+            collection: "d".repeat(32),
+            replacement: "f".repeat(32),
+            expected_generation: 1,
+        },
+        audience: Audience::Closed,
+        schema_sha256: "b".repeat(64),
+        archive_sha256: "1".repeat(64),
+        bytes: 100,
+        expires_unix_ms: u64::MAX,
+    }
+}
+fn transfer_fixture() -> Client {
+    let (mut client, _) = fixture(Role::Admin);
+    client
+        .set_transfer_host("https://otrios.example", true, true, true)
+        .unwrap();
+    client
+}
+#[test]
+fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session_commit() {
+    let mut client = transfer_fixture();
+    click(&mut client, "Edit");
+    click(&mut client, "Counter");
+    let right = |client: &Client, label: &str| {
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == label))
+            .unwrap();
+        control.origin[0] + control.node.frame.width * control.scale
+    };
+    let content_right = right(&client, "Export Data");
+    click(&mut client, "Export Data");
+    let export = client.take_transfer_task().unwrap();
+    assert_eq!(export.io, TransferIo::Export);
+    assert_eq!(
+        export.target,
+        TransferTarget::Data {
+            dataset: DatasetRef {
+                space: SPACE.into(),
+                app: "counter".into(),
+                collection: "d".repeat(32),
+                schema: "b".repeat(64)
+            }
+        }
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    assert!(
+        !client.reload_ready(),
+        "connected export waits for its host result"
+    );
+    client
+        .receive_transfer(
+            export.id,
+            TransferReply::Exported {
+                name: "counter.otdata".into(),
+            },
+        )
+        .unwrap();
+    assert!(!labels(&client).contains(&"Saved".into()));
+    assert!(
+        (right(&client, "Close") - content_right).abs() < 0.01,
+        "the wider transfer Close button shares the content's right inset"
+    );
+    click(&mut client, "Close");
+    click(&mut client, "Replace Data");
+    click(&mut client, "Choose File");
+    let picker = client.take_transfer_task().unwrap();
+    assert_eq!(picker.io, TransferIo::Pick);
+    let file = TransferFile {
+        id: "9".repeat(32),
+        name: "archive.otdata".into(),
+        bytes: 100,
+    };
+    client
+        .receive_transfer(
+            picker.id,
+            TransferReply::Files {
+                files: vec![file.clone()],
+            },
+        )
+        .unwrap();
+    click(&mut client, "Choose archive.otdata");
+    let upload = client.take_transfer_task().unwrap();
+    assert_eq!(upload.target, export.target);
+    assert_eq!(upload.io, TransferIo::File { file: file.id });
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client
+        .receive_transfer(
+            upload.id,
+            TransferReply::Data {
+                review: data_review(),
+            },
+        )
+        .unwrap();
+    assert!(labels(&client).contains(&"Confirm Replacement".into()));
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "review cannot publish"
+    );
+    assert_eq!(
+        client
+            .spaces_snapshot()
+            .unwrap()
+            .selected
+            .as_ref()
+            .unwrap()
+            .apps[0]
+            .collection,
+        "d".repeat(32)
+    );
+    click(&mut client, "Confirm Replacement");
+    assert!(
+        matches!(spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap(), Command::ReplaceData { stage, .. } if stage == data_review().stage)
+    );
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "no replacement replay"
+    );
+}
+#[test]
+fn closing_a_data_review_or_its_inflight_picker_disposes_the_stage_without_replacement() {
+    for close_early in [false, true] {
+        let mut client = transfer_fixture();
+        click(&mut client, "Edit");
+        click(&mut client, "Counter");
+        click(&mut client, "Replace Data");
+        click(&mut client, "Choose File");
+        let upload = client.take_transfer_task().unwrap();
+        if close_early {
+            click(&mut client, "Close");
+        }
+        client
+            .receive_transfer(
+                upload.id,
+                TransferReply::Data {
+                    review: data_review(),
+                },
+            )
+            .unwrap();
+        if !close_early {
+            click(&mut client, "Close");
+        }
+        assert!(
+            matches!(spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap(), Command::CancelData { stage, .. } if stage == data_review().stage)
+        );
+        assert!(!labels(&client).contains(&"Confirm Replacement".into()));
+    }
+}
+#[test]
+fn role_loss_and_mismatched_review_cannot_offer_or_send_a_transfer_commit() {
+    for revoke in [false, true] {
+        let mut client = transfer_fixture();
+        click(&mut client, "Edit");
+        click(&mut client, "Counter");
+        click(&mut client, "Replace Data");
+        click(&mut client, "Choose File");
+        let task = client.take_transfer_task().unwrap();
+        let mut review = data_review();
+        if revoke {
+            client
+                .receive_spaces(
+                    &spaces::encode_event(&Event::Snapshot {
+                        observation: 1,
+                        snapshot: Box::new(snapshot(Role::Member, 2)),
+                        resync: false,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+        } else {
+            review.replacement.collection = "8".repeat(32);
+        }
+        client
+            .receive_transfer(task.id, TransferReply::Data { review })
+            .unwrap();
+        assert!(!labels(&client).contains(&"Confirm Replacement".into()));
+        assert!(client.take_transfer_task().is_none());
+        assert!(client.spaces_outgoing().unwrap().is_none());
+    }
+}
+#[test]
+fn app_upload_tile_and_explicit_host_wide_review_precede_import_commit() {
+    let mut client = transfer_fixture();
+    click(&mut client, "Edit");
+    click(&mut client, "Add app: Household");
+    assert!(labels(&client).contains(&"Upload".into()));
+    click(&mut client, "Upload");
+    click(&mut client, "Shared app URL");
+    client
+        .hardware_edit(&Edit::Commit(format!(
+            "https://publisher.example/apps/counter/{}",
+            "7".repeat(64)
+        )))
+        .unwrap();
+    click(&mut client, "Review URL");
+    let task = client.take_transfer_task().unwrap();
+    assert!(matches!(task.io, TransferIo::Url { url } if url.ends_with("/download")));
+    let review = AppReview {
+        stage: "6".repeat(32),
+        space: SPACE.into(),
+        app: "counter".into(),
+        digest: "7".repeat(64),
+        title: "Canonical Counter".into(),
+        revision: u64::MAX,
+        bytes: 100,
+        installed: Some("8".repeat(64)),
+        affected_spaces: 3,
+        expected_generation: 1,
+        catalog: vec![],
+        release: "9".repeat(64),
+        audience: Audience::Closed,
+        expires_unix_ms: u64::MAX,
+    };
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client
+        .receive_transfer(task.id, TransferReply::App { review })
+        .unwrap();
+    let panel = format!("{:?}", client.scene().unwrap());
+    assert!(panel.contains("Canonical Counter"));
+    assert!(panel.contains("Affected Spaces: 3"));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Confirm Import");
+    assert!(
+        matches!(spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap(), Command::ImportApp { stage, .. } if stage == "6".repeat(32))
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
+fn share_link_is_immutable_and_appears_only_after_confirmed_publication() {
+    let mut client = transfer_fixture();
+    let mut state = snapshot(Role::Admin, 2);
+    state.catalog = client.catalog_hash().to_vec();
+    let code = &mut state.selected.as_mut().unwrap().installed[0];
+    code.bundle_sha256 = Some("7".repeat(64));
+    code.title = "Canonical Counter".into();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    click(&mut client, "Counter");
+    click(&mut client, "Share App");
+    assert!(!labels(&client).contains(&"Copy link".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Publish App");
+    let Command::ShareApp {
+        id,
+        app,
+        digest,
+        expected_generation,
+        ..
+    } = spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("share")
+    };
+    assert_eq!(app, "counter");
+    assert_eq!(digest, "7".repeat(64));
+    assert_eq!(expected_generation, 2);
+    assert!(!labels(&client).contains(&"Copy link".into()));
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::AppShared {
+                version: VERSION,
+                id,
+                status: ManagementStatus::Applied,
+                share: Some(AppShare {
+                    app,
+                    digest,
+                    title: "Canonical Counter".into(),
+                }),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Copy link");
+    let task = client.take_transfer_task().unwrap();
+    assert_eq!(
+        task.io,
+        TransferIo::Copy {
+            text: format!("https://otrios.example/apps/counter/{}", "7".repeat(64))
+        }
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
 fn snapshot(role: Role, revision: u64) -> Discovery {
     let installed = InstalledApp {
+        bundle_sha256: None,
+        code_bytes: None,
+        revision: None,
         policy: AppPolicy {
             app: "counter".into(),
             schema: "b".repeat(64),
@@ -18,6 +321,8 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
         state_ref: "app:counter/state".into(),
     };
     Discovery {
+        profile: None,
+        catalog: vec![],
         version: 1,
         cursor: DiscoveryCursor {
             authority: "c".repeat(32),
@@ -26,6 +331,8 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
         generation: revision,
         identity: Some("alice".into()),
         spaces: vec![SpaceSummary {
+            archived: false,
+            retained: vec![],
             layout: Default::default(),
             apps: vec![MapApp {
                 app: "counter".into(),
@@ -39,18 +346,21 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
             role: Some(role),
         }],
         selected: Some(SpaceDetail {
+            active_users: None,
+            retained: vec![],
             cleanup: (role == Role::Admin)
                 .then(CleanupSummary::default)
                 .map(Box::new),
             space: SPACE.into(),
             apps: vec![AppSummary {
+                active_users: None,
                 app: "counter".into(),
                 title: "Counter".into(),
                 collection: "d".repeat(32),
                 attached: true,
                 availability: AppAvailability::Available,
                 stored_bytes: (role == Role::Admin).then_some(1234),
-                launch: Some(installed.clone()),
+                launch: Some(installed.clone().into()),
             }],
             installed: if role == Role::Admin {
                 vec![installed]
@@ -124,7 +434,7 @@ fn fixture(role: Role) -> (Client, Ui) {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: snapshot(role, 1),
+                snapshot: Box::new(snapshot(role, 1)),
                 resync: true,
             })
             .unwrap(),
@@ -165,13 +475,11 @@ fn home(client: &mut Client) {
         click(client, "Done");
     }
 }
-fn open_data(client: &mut Client) {
-    if !labels(client).contains(&"Apps & Data".into()) {
-        home(client);
-        click(client, "Edit");
-        click(client, "Space settings: Household");
-    }
-    click(client, "Apps & Data");
+fn open_access(client: &mut Client) {
+    home(client);
+    click(client, "Edit");
+    click(client, "Space settings: Household");
+    click(client, "People & access");
 }
 
 #[test]
@@ -205,53 +513,138 @@ fn trusted_controls_reflow_and_only_admins_receive_data_and_membership_actions()
             }
         }
     }
-}
-
-#[test]
-fn app_removal_is_an_explicit_generation_checked_host_request_and_member_rosters_revoke() {
+    // A short modal owns its own pan without exposing or remounting the map.
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
-    open_data(&mut client);
+    client.set_viewport([390., 440.]).unwrap();
+    click(&mut client, "Edit");
     click(&mut client, "Counter");
-    click(&mut client, "Remove app");
-    let Command::Manage { request, .. } =
-        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
-    else {
-        panic!("management")
-    };
-    assert_eq!(request.expected_generation, 1);
-    assert_eq!(
-        request.change,
-        Change::Remove {
-            space: SPACE.into(),
-            app: "counter".into()
-        }
+    assert!(client.resource_usage().map_scroll.is_none());
+    assert!(client.resource_usage().panel_scroll.as_ref().unwrap().limit[1] > 0.);
+    for hidden in ["Profile", "Done", "Space: Household"] {
+        assert!(!labels(&client).contains(&hidden.into()));
+    }
+    let epoch = client.epoch();
+    let scene = client.scene().unwrap();
+    let field = scene
+        .controls()
+        .into_iter()
+        .find(|n| n.node.semantics.as_ref().unwrap().label == "Name")
+        .unwrap()
+        .origin;
+    for (phase, y, at) in [
+        (Down, field[1] + 32., 100),
+        (Move, -100., 200),
+        (Up, -100., 300),
+    ] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 12,
+                    phase,
+                    position: [field[0] + 32., y],
+                },
+                at,
+            )
+            .unwrap();
+    }
+    assert_eq!(client.epoch(), epoch);
+    assert!(
+        !client.keyboard_visible(),
+        "a pan starting on the name must not activate the field"
     );
-    home(&mut client);
-    open_data(&mut client);
-    click(&mut client, "Members");
-    let old_epoch = client.epoch();
-    assert!(format!("{:?}", client.scene().unwrap()).contains("closed-admin-secret"));
+    assert!(
+        client
+            .resource_usage()
+            .panel_scroll
+            .as_ref()
+            .unwrap()
+            .offset[1]
+            > 0.
+    );
+    client.scroll_map(epoch, 1e6).unwrap();
+    assert!(labels(&client).contains(&"Close".into()));
+    client.scroll_map(epoch, -1e6).unwrap();
+    assert!(labels(&client).contains(&"Name".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    // Settings must remain admitted beside a populated map and native keyboard.
+    let (mut client, _) = fixture(Role::Admin);
+    let mut populated = snapshot(Role::Admin, 2);
+    for index in 0..13 {
+        let mut tile = populated.spaces[0].apps[0].clone();
+        tile.app = format!("sample-{}", char::from(b'a' + index));
+        tile.title = format!("Sample {index}");
+        populated.spaces[0].apps.push(tile);
+    }
+    populated.spaces[0].attached_count = 14;
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: snapshot(Role::Member, 2),
-                resync: false,
+                snapshot: Box::new(populated),
+                resync: true,
             })
             .unwrap(),
         )
         .unwrap();
-    assert!(
-        client.take_collection_revoked(),
-        "held native/browser roster frames must be redacted without renderer credit"
+    click(&mut client, "Edit");
+    let scene = client.scene().unwrap();
+    let settings = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Space settings: Household")
+        .unwrap();
+    let position = [settings.origin[0] + 20., settings.origin[1] + 20.];
+    let epoch = client.epoch();
+    for phase in [Down, Up] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    phase,
+                    id: 91,
+                    position,
+                },
+                500,
+            )
+            .unwrap();
+    }
+    assert!(labels(&client).contains(&"People & access".into()));
+    assert!(!labels(&client).contains(&"Profile".into()));
+    assert!(!client.accessibility_text().unwrap().contains("Sample"));
+    click(&mut client, "Name");
+    assert!(client.keyboard_visible());
+    client.hardware_edit(&Edit::SelectAll).unwrap();
+    let scene = client.scene().unwrap();
+    let key = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "w")
+        .unwrap();
+    let position = [
+        key.origin[0] + key.node.frame.width * key.scale / 2.,
+        key.origin[1] + key.node.frame.height * key.scale / 2.,
+    ];
+    let epoch = client.epoch();
+    for phase in [Down, Up] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    phase,
+                    id: 92,
+                    position,
+                },
+                600,
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        client.typed_value(1).unwrap(),
+        otrios_interfaces::layout::Value::Text("w".into())
     );
-    assert!(!format!("{:?}", client.scene().unwrap()).contains("closed-admin-secret"));
-    assert!(
-        !labels(&client)
-            .iter()
-            .any(|s| ["Apps & Data", "Members", "Remove app"].contains(&s.as_str()))
-    );
-    assert!(!client.activate(old_epoch, 1).unwrap());
+    assert!(client.spaces_outgoing().unwrap().is_none());
 }
 
 #[test]
@@ -291,8 +684,7 @@ fn local_forms_use_the_shared_keyboard_without_synchronizing_drafts_as_app_data(
 #[test]
 fn unavailable_metadata_discards_the_private_host_view_and_switching_forgets_the_old_scope() {
     let (mut client, _) = fixture(Role::Admin);
-    open_data(&mut client);
-    click(&mut client, "Members");
+    open_access(&mut client);
     client
         .receive_spaces(&spaces::encode_event(&Event::Unavailable { version: 1 }).unwrap())
         .unwrap();
@@ -509,7 +901,7 @@ fn local_uninstall_flushes_confirmed_edits_leaves_other_clients_and_reattaches_s
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: snapshot(Role::Admin, 2),
+                snapshot: Box::new(snapshot(Role::Admin, 2)),
                 resync: false,
             })
             .unwrap(),
@@ -772,7 +1164,7 @@ fn signed_in_discovery_does_not_cancel_an_admissible_deep_link() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 3,
-                snapshot: snapshot(Role::Member, 2),
+                snapshot: Box::new(snapshot(Role::Member, 2)),
                 resync: true,
             })
             .unwrap(),
@@ -799,7 +1191,7 @@ fn unchanged_resync_keeps_live_controls_and_reopening_the_same_scope_reports_a_n
     let (mut client, _) = fixture(Role::Admin);
     let bytes = spaces::encode_event(&Event::Snapshot {
         observation: 1,
-        snapshot: snapshot(Role::Admin, 1),
+        snapshot: Box::new(snapshot(Role::Admin, 1)),
         resync: true,
     })
     .unwrap();
@@ -810,7 +1202,7 @@ fn unchanged_resync_keeps_live_controls_and_reopening_the_same_scope_reports_a_n
         epoch,
         "unchanged metadata cannot invalidate the displayed controls"
     );
-    open_data(&mut client);
+    open_access(&mut client);
     client.select_space(SPACE).unwrap();
     assert!(client.spaces_outgoing().unwrap().is_some());
     assert!(
@@ -819,7 +1211,7 @@ fn unchanged_resync_keeps_live_controls_and_reopening_the_same_scope_reports_a_n
     );
     let fresh = spaces::encode_event(&Event::Snapshot {
         observation: 2,
-        snapshot: snapshot(Role::Admin, 1),
+        snapshot: Box::new(snapshot(Role::Admin, 1)),
         resync: true,
     })
     .unwrap();
@@ -828,7 +1220,7 @@ fn unchanged_resync_keeps_live_controls_and_reopening_the_same_scope_reports_a_n
         "a new local activation needs a presentation even when metadata is unchanged"
     );
     assert!(client.spaces_ui());
-    open_data(&mut client);
+    open_access(&mut client);
 }
 
 #[test]
@@ -845,7 +1237,7 @@ fn home_waits_for_discovery_instead_of_launching_the_first_installed_app() {
         let event = if managed {
             Event::Snapshot {
                 observation: 2,
-                snapshot: snapshot(Role::Admin, 2),
+                snapshot: Box::new(snapshot(Role::Admin, 2)),
                 resync: true,
             }
         } else {
@@ -881,7 +1273,7 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
         removed.spaces[0].attached_count = 0;
         let removed_event = spaces::encode_event(&Event::Snapshot {
             observation: 1,
-            snapshot: removed.clone(),
+            snapshot: Box::new(removed.clone()),
             resync: false,
         })
         .unwrap();
@@ -906,7 +1298,7 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
                 .receive_spaces(
                     &spaces::encode_event(&Event::Snapshot {
                         observation: 1,
-                        snapshot: snapshot(Role::Admin, 1),
+                        snapshot: Box::new(snapshot(Role::Admin, 1)),
                         resync: true,
                     })
                     .unwrap()
@@ -921,11 +1313,11 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
             .receive_spaces(
                 &spaces::encode_event(&Event::Snapshot {
                     observation,
-                    snapshot: if reattached {
+                    snapshot: Box::new(if reattached {
                         snapshot(Role::Member, 3)
                     } else {
                         removed
-                    },
+                    }),
                     resync: true,
                 })
                 .unwrap(),
@@ -940,125 +1332,6 @@ fn metadata_before_revocation_cannot_strand_or_repaint_a_removed_app() {
             assert!(client.spaces_ui());
             assert!(!labels(&client).contains(&"Counter".into()));
         }
-    }
-}
-
-#[test]
-fn deletion_requires_trusted_confirmation_and_carries_the_reviewed_collection() {
-    for remove in [false, true] {
-        let (mut client, _) = fixture(Role::Admin);
-        open_data(&mut client);
-        click(&mut client, "Counter");
-        click(
-            &mut client,
-            if remove {
-                "Remove & delete"
-            } else {
-                "Delete data"
-            },
-        );
-        assert!(client.spaces_outgoing().unwrap().is_none());
-        assert!(labels(&client).contains(&"Permanently delete".into()));
-        let view = format!("{:?}", client.scene().unwrap());
-        assert!(view.contains("Household") && view.contains("Counter"));
-        click(&mut client, "Cancel");
-        assert!(client.spaces_outgoing().unwrap().is_none());
-        click(
-            &mut client,
-            if remove {
-                "Remove & delete"
-            } else {
-                "Delete data"
-            },
-        );
-        click(&mut client, "Permanently delete");
-        let Command::Manage { request, .. } =
-            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
-        else {
-            panic!("delete request");
-        };
-        assert_eq!(request.expected_generation, 1);
-        assert_eq!(
-            request.change,
-            Change::DeleteData {
-                space: SPACE.into(),
-                app: "counter".into(),
-                collection: "d".repeat(32),
-                remove
-            }
-        );
-    }
-}
-
-#[test]
-fn changed_collection_or_lost_admin_role_invalidates_a_deletion_dialog() {
-    for member in [false, true] {
-        let (mut client, _) = fixture(Role::Admin);
-        open_data(&mut client);
-        click(&mut client, "Counter");
-        click(&mut client, "Delete data");
-        let mut changed = snapshot(if member { Role::Member } else { Role::Admin }, 2);
-        changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
-        client
-            .receive_spaces(
-                &spaces::encode_event(&Event::Snapshot {
-                    observation: 1,
-                    snapshot: changed,
-                    resync: false,
-                })
-                .unwrap(),
-            )
-            .unwrap();
-        assert!(!labels(&client).contains(&"Permanently delete".into()));
-        assert!(client.spaces_outgoing().unwrap().is_none());
-        if !member {
-            click(&mut client, "Counter");
-            click(&mut client, "Delete data");
-            click(&mut client, "Permanently delete");
-            let Command::Manage { request, .. } =
-                spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
-            else {
-                panic!("new confirmation");
-            };
-            assert_eq!(request.expected_generation, 2);
-            assert!(
-                matches!(request.change, Change::DeleteData { collection, .. } if collection == "e".repeat(32))
-            );
-        }
-    }
-}
-
-#[test]
-fn cleanup_ui_reports_retention_deadlines_without_claiming_an_offline_wipe() {
-    let (mut client, _) = fixture(Role::Admin);
-    let mut progress = snapshot(Role::Admin, 2);
-    progress.selected.as_mut().unwrap().cleanup = Some(Box::new(CleanupSummary {
-        deleted_collections: 1,
-        local_pending: 1,
-        backup_until_unix_ms: Some(1_735_689_600_000),
-        legacy_qualification_required: true,
-        ..CleanupSummary::default()
-    }));
-    client
-        .receive_spaces(
-            &spaces::encode_event(&Event::Snapshot {
-                observation: 1,
-                snapshot: progress,
-                resync: false,
-            })
-            .unwrap(),
-        )
-        .unwrap();
-    open_data(&mut client);
-    click(&mut client, "Cleanup");
-    let view = format!("{:?}", client.scene().unwrap());
-    for text in [
-        "pending: 1",
-        "2025-01-01 00:00 UTC",
-        "await migration qualification",
-        "cannot be verified",
-    ] {
-        assert!(view.contains(text), "missing cleanup fact: {text}");
     }
 }
 
@@ -1129,44 +1402,68 @@ fn a_returning_offline_client_discards_pending_edits_when_the_collection_is_repl
 }
 
 #[test]
-fn only_admins_can_confirm_public_audiences_and_role_loss_cancels_the_dialog() {
+fn unified_access_form_reviews_publication_preserves_local_drafts_and_revokes_on_role_loss() {
     let (mut client, _) = fixture(Role::Admin);
-    open_data(&mut client);
-    click(&mut client, "Sharing");
-    click(&mut client, "Public view & comment");
-    assert!(client.spaces_outgoing().unwrap().is_none());
-    assert!(labels(&client).contains(&"Make public".into()));
+    open_access(&mut client);
+    click(&mut client, "Role: alice");
+    click(&mut client, "Save");
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "keep at least one Admin"
+    );
+    click(&mut client, "Role: closed-admin-secret");
+    click(&mut client, "Access");
+    click(&mut client, "Public · Signed-in comments");
+    click(&mut client, "Save");
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "review before public access"
+    );
     click(&mut client, "Cancel");
-    click(&mut client, "Public view");
-    click(&mut client, "Make public");
+    click(&mut client, "Save");
+    click(&mut client, "Apply");
     let Command::Manage { request, .. } =
         spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
     else {
-        panic!("audience request");
+        panic!("access request")
     };
     assert_eq!(
         request.change,
-        Change::Audience {
+        Change::Access {
             space: SPACE.into(),
-            audience: Audience::PublicView
+            audience: Audience::PublicComment,
+            changes: vec![
+                MembershipEdit {
+                    identity: "alice".into(),
+                    role: Some(Role::Member)
+                },
+                MembershipEdit {
+                    identity: "closed-admin-secret".into(),
+                    role: Some(Role::Admin)
+                }
+            ]
         }
     );
     let (mut client, _) = fixture(Role::Admin);
-    open_data(&mut client);
-    click(&mut client, "Sharing");
-    click(&mut client, "Public view");
+    open_access(&mut client);
+    click(&mut client, "Access");
+    click(&mut client, "Public · Read only");
+    click(&mut client, "Save");
+    let old_epoch = client.epoch();
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: snapshot(Role::Member, 2),
+                snapshot: Box::new(snapshot(Role::Member, 2)),
                 resync: false,
             })
             .unwrap(),
         )
         .unwrap();
-    assert!(!labels(&client).contains(&"Make public".into()));
-    assert!(!labels(&client).contains(&"Sharing".into()));
+    assert!(client.take_collection_revoked());
+    assert!(!labels(&client).contains(&"Apply".into()));
+    assert!(!format!("{:?}", client.scene().unwrap()).contains("closed-admin-secret"));
+    assert!(!client.activate(old_epoch, 1).unwrap());
 }
 
 #[test]
@@ -1214,6 +1511,35 @@ fn map_has_common_entry_profile_and_edit_without_role_or_spaces_headings() {
         click(&mut client, "Close");
         assert!(labels(&client).contains(&"Counter".into()));
     }
+    let (mut client, _) = fixture(Role::Member);
+    click(&mut client, "Profile");
+    click(&mut client, "Edit profile");
+    click(&mut client, "Display name");
+    client.hardware_edit(&Edit::SelectAll).unwrap();
+    client.hardware_edit(&Edit::Commit("Maya".into())).unwrap();
+    click(&mut client, "Cancel");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Edit profile");
+    click(&mut client, "Display name");
+    client.hardware_edit(&Edit::SelectAll).unwrap();
+    client.hardware_edit(&Edit::Commit("Maya".into())).unwrap();
+    click(&mut client, "Save");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("self-profile")
+    };
+    assert_eq!(
+        request.change,
+        Change::Profile {
+            name: "Maya".into(),
+            expected_revision: 0
+        }
+    );
+    assert_eq!(
+        client.spaces_snapshot().unwrap().identity.as_deref(),
+        Some("alice")
+    );
 }
 
 #[test]
@@ -1229,6 +1555,24 @@ fn app_name_commits_on_enter_without_changing_bundle_or_launch_destination() {
         assert!(panel.contains(&action.into()));
     }
     assert!(format!("{:?}", client.scene().unwrap()).contains("counter"));
+    let mut renamed = snapshot(Role::Admin, 2);
+    renamed.selected.as_mut().unwrap().apps[0].title = "Existing label".into();
+    renamed.spaces[0].apps[0].title = "Existing label".into();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(renamed),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        client.typed_value(1).unwrap(),
+        otrios_interfaces::layout::Value::Text("Existing label".into()),
+        "untouched names adopt newer authority metadata"
+    );
     click(&mut client, "Name");
     client.hardware_edit(&Edit::SelectAll).unwrap();
     client.hardware_edit(&Edit::Commit("Tally".into())).unwrap();
@@ -1246,7 +1590,7 @@ fn app_name_commits_on_enter_without_changing_bundle_or_launch_destination() {
             name: "Tally".into()
         }
     );
-    assert_eq!(request.expected_generation, 1);
+    assert_eq!(request.expected_generation, 2);
     assert!(
         !client.reload_ready(),
         "confirmed management precedes release handoff"
@@ -1285,6 +1629,39 @@ fn title_and_corner_keyboard_actions_are_shared_generation_checked_metadata() {
             }
         }
     );
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Edit");
+    click(&mut client, "Space settings: Household");
+    click(&mut client, "Custom background color");
+    assert!(!labels(&client).contains(&"Close".into()));
+    click(&mut client, "Hex color");
+    client.hardware_edit(&Edit::SelectAll).unwrap();
+    client
+        .hardware_edit(&Edit::Commit("bad hex".into()))
+        .unwrap();
+    click(&mut client, "Apply color");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Hex color");
+    client.hardware_edit(&Edit::SelectAll).unwrap();
+    client
+        .hardware_edit(&Edit::Commit("#14283C".into()))
+        .unwrap();
+    click(&mut client, "Apply color");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("custom color")
+    };
+    assert!(matches!(
+        request.change,
+        Change::ConfigureSpace {
+            layout: SpaceLayout {
+                background: Background::Rgb([20, 40, 60]),
+                ..
+            },
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -1298,7 +1675,7 @@ fn empty_spaces_are_edit_only_and_cancelled_drags_cannot_write() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: empty,
+                snapshot: Box::new(empty),
                 resync: false,
             })
             .unwrap(),
@@ -1350,7 +1727,7 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: next,
+                snapshot: Box::new(next),
                 resync: false,
             })
             .unwrap(),
@@ -1422,6 +1799,361 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
 }
 
 #[test]
+fn a_partly_visible_app_launches_through_the_home_fade() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 270.]).unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    state.spaces[0].layout.height = 6;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let scene = client.scene().unwrap();
+    let control = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Counter")
+        .unwrap();
+    let bottom = 270.;
+    assert_eq!(control.origin[1] + control.node.frame.height, bottom);
+    assert!(
+        control.node.frame.height < 144.,
+        "the tile is partly clipped"
+    );
+    assert!(
+        format!("{scene:?}").contains("4200000000"),
+        "the fade must still be painted"
+    );
+    let position = [
+        control.origin[0] + control.node.frame.width / 2.,
+        bottom - 8.,
+    ];
+    assert!(
+        scene
+            .hit_path(position)
+            .iter()
+            .any(|n| n.node.id == control.node.id)
+    );
+    let epoch = client.epoch();
+    for (phase, at) in [(Down, 100), (Up, 150)] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 7,
+                    phase,
+                    position,
+                },
+                at,
+            )
+            .unwrap();
+    }
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::Mount { ui_ref, .. } if ui_ref == "app:counter/ui")
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
+fn add_app_scrolls_the_complete_installed_list_and_targets_the_last_item() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 440.]).unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    let installed = &mut state.selected.as_mut().unwrap().installed;
+    let base = installed[0].clone();
+    for index in 1..MAX_INSTALLED_APPS {
+        let mut app = base.clone();
+        app.policy.app = format!("app-{}", char::from(b'a' + index as u8));
+        app.ui_ref = format!("app:app-{}/ui", char::from(b'a' + index as u8));
+        app.state_ref = format!("app:app-{}/state", char::from(b'a' + index as u8));
+        app.title = format!("App {index}");
+        installed.push(app);
+    }
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    click(&mut client, "Add app: Household");
+    for unwanted in ["Previous", "Next"] {
+        assert!(!labels(&client).contains(&unwanted.into()));
+    }
+    let epoch = client.epoch();
+    assert!(client.resource_usage().panel_scroll.unwrap().limit[1] > 500.);
+    client.scroll_map(epoch, 1e6).unwrap();
+    assert!(labels(&client).contains(&"App 15".into()));
+    assert!(labels(&client).contains(&"Close".into()));
+    // A pan that starts on a selectable item must not attach it on release.
+    let scene = client.scene().unwrap();
+    let last = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "App 15")
+        .unwrap();
+    let start = [last.origin[0] + 24., last.origin[1] + 24.];
+    for (phase, y, at) in [
+        (Down, start[1], 100),
+        (Move, start[1] - 40., 150),
+        (Up, start[1] - 40., 250),
+    ] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 7,
+                    phase,
+                    position: [start[0], y],
+                },
+                at,
+            )
+            .unwrap();
+    }
+    assert_eq!(client.epoch(), epoch);
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client.scroll_map(epoch, -1e6).unwrap();
+    assert!(labels(&client).contains(&"Upload".into()));
+    client.scroll_map(epoch, 1e6).unwrap();
+    click(&mut client, "App 15");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("attach")
+    };
+    assert_eq!(
+        request.change,
+        Change::Attach {
+            space: SPACE.into(),
+            app: "app-p".into()
+        }
+    );
+}
+#[test]
+fn oversized_management_lists_use_scrollable_bounded_batches_without_losing_targets() {
+    let (mut client, _) = fixture(Role::Admin);
+    let mut state = snapshot(Role::Admin, 2);
+    let data: Vec<_> = (0..MAX_APPS)
+        .map(|i| DatasetSummary {
+            app: "counter".into(),
+            collection: format!("{:032x}", i + 1),
+            title: format!("Backup {i}"),
+            availability: AppAvailability::Available,
+            stored_bytes: None,
+            origin: None,
+        })
+        .collect();
+    state.spaces[0].retained = vec![data[0].clone()];
+    state.selected.as_mut().unwrap().retained = data;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    click(&mut client, "All retained data");
+    assert!(client.resource_usage().panel_scroll.unwrap().limit[1] > 500.);
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    click(&mut client, "Next");
+    assert_eq!(client.resource_usage().panel_scroll.unwrap().offset[1], 0.);
+    assert!(labels(&client).contains(&"Data: Backup 16".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+
+    let (mut client, _) = fixture(Role::Admin);
+    let mut state = snapshot(Role::Admin, 2);
+    state.selected.as_mut().unwrap().members = Some(
+        (0..MAX_MEMBERS)
+            .map(|i| Member {
+                identity: format!("person-{i}"),
+                role: Role::Admin,
+                joined_generation: 1,
+            })
+            .collect(),
+    );
+    for i in 1..MAX_INSTALLED_APPS {
+        state.spaces[0].apps.push(MapApp {
+            app: format!("app-{}", char::from(b'a' + i as u8)),
+            title: format!("App {i}"),
+            availability: AppAvailability::Available,
+        });
+    }
+    state.spaces[0].attached_count = MAX_INSTALLED_APPS as u16;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    open_access(&mut client);
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    click(&mut client, "Next");
+    assert_eq!(client.resource_usage().panel_scroll.unwrap().offset[1], 0.);
+    assert!(labels(&client).contains(&"Role: person-8".into()));
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    click(&mut client, "Person to add");
+    assert!(
+        client.keyboard_visible(),
+        "maximum member batches still admit the keyboard beside a populated map"
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
+fn scrolling_maps_and_space_lists_fit_their_admitted_bounds() {
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([240., 440.]).unwrap();
+    let mut state = snapshot(Role::Admin, 2);
+    let base = state.spaces[0].clone();
+    state.spaces = (0..6)
+        .map(|i| {
+            let mut s = base.clone();
+            if i > 0 {
+                s.id = format!("{:032x}", i);
+            }
+            s.name = format!("Space {i}");
+            s.layout.width = 1;
+            s.layout.height = 6;
+            if i == 0 {
+                for index in 0..10 {
+                    s.apps.push(MapApp {
+                        app: format!("app-{}", char::from(b'a' + index)),
+                        title: "A long app title that wraps onto another line".into(),
+                        availability: AppAvailability::Available,
+                    });
+                }
+                s.attached_count = s.apps.len() as u16;
+            }
+            s
+        })
+        .collect();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    assert!(!labels(&client).contains(&"Next".into()));
+    assert!(client.resource_usage().map_scroll.unwrap().limit[1] > 4000.);
+    client.scroll_map(client.epoch(), 1e6).unwrap();
+    assert!(labels(&client).contains(&"Resize: Space 5".into()));
+
+    for deleted in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        let mut state = snapshot(Role::Admin, 2);
+        let base = state.spaces[0].clone();
+        state.spaces = (0..MAX_SPACES)
+            .map(|i| {
+                let mut s = base.clone();
+                if i > 0 {
+                    s.id = format!("{:032x}", i);
+                    s.name = format!("Space {i}");
+                    if deleted {
+                        s.archived = true;
+                        s.apps.clear();
+                        s.attached_count = 0;
+                    }
+                }
+                s
+            })
+            .collect();
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(state),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        if deleted {
+            click(&mut client, "Profile");
+            click(&mut client, "Deleted Spaces");
+        } else {
+            click(&mut client, "Edit");
+            let scene = client.scene().unwrap();
+            let id = scene
+                .controls()
+                .into_iter()
+                .find(|c| c.node.semantics.as_ref().unwrap().label == "Counter in Household")
+                .unwrap()
+                .node
+                .id;
+            client.adjust_control(id, 0, 0).unwrap();
+        }
+        assert!(!labels(&client).contains(&"Next".into()));
+        assert!(!labels(&client).contains(&"Previous".into()));
+        client.scroll_map(client.epoch(), 1e6).unwrap();
+        assert!(labels(&client).contains(&if deleted {
+            "Restore Space: Space 63".into()
+        } else {
+            "Move to Space 63".into()
+        }));
+        assert!(client.spaces_outgoing().unwrap().is_none());
+    }
+}
+#[test]
+fn transfer_file_picker_scrolls_all_sixty_four_files_without_paging() {
+    let mut client = transfer_fixture();
+    click(&mut client, "Edit");
+    click(&mut client, "Add app: Household");
+    click(&mut client, "Upload");
+    click(&mut client, "Choose File");
+    let task = client.take_transfer_task().unwrap();
+    client
+        .receive_transfer(
+            task.id,
+            TransferReply::Files {
+                files: (1..=64)
+                    .map(|i| TransferFile {
+                        id: format!("{i:032x}"),
+                        name: format!("file-{i}.otapp.zip"),
+                        bytes: 100,
+                    })
+                    .collect(),
+            },
+        )
+        .unwrap();
+    for unwanted in ["Previous", "Next"] {
+        assert!(!labels(&client).contains(&unwanted.into()));
+    }
+    let epoch = client.epoch();
+    client.scroll_map(epoch, 1e6).unwrap();
+    click(&mut client, "Choose file-64.otapp.zip");
+    assert_eq!(
+        client.take_transfer_task().unwrap().io,
+        TransferIo::File {
+            file: format!("{:032x}", 64)
+        }
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
 fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
@@ -1432,7 +2164,7 @@ fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: next,
+                snapshot: Box::new(next),
                 resync: false,
             })
             .unwrap(),
@@ -1517,7 +2249,7 @@ fn map_momentum_and_cancel_use_sample_time_and_release_capture() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: next,
+                snapshot: Box::new(next),
                 resync: false,
             })
             .unwrap(),
@@ -1634,7 +2366,7 @@ fn populated_map_keeps_header_footer_and_viewport_fixed_during_scroll() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: next,
+                snapshot: Box::new(next),
                 resync: false,
             })
             .unwrap(),
@@ -1672,7 +2404,7 @@ fn common_entry_sign_in_survives_viewport_and_metadata_rebuilds() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: visitor.clone(),
+                snapshot: Box::new(visitor.clone()),
                 resync: false,
             })
             .unwrap(),
@@ -1688,7 +2420,7 @@ fn common_entry_sign_in_survives_viewport_and_metadata_rebuilds() {
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: visitor,
+                snapshot: Box::new(visitor),
                 resync: false,
             })
             .unwrap(),
@@ -1717,7 +2449,7 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
             .receive_spaces(
                 &spaces::encode_event(&Event::Snapshot {
                     observation: 1,
-                    snapshot: next,
+                    snapshot: Box::new(next),
                     resync: false,
                 })
                 .unwrap(),
@@ -1755,6 +2487,24 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
             );
         }
         assert!(client.input_busy());
+        let mut presence = client.spaces_snapshot().unwrap().clone();
+        presence.cursor.revision += 1;
+        presence.selected.as_mut().unwrap().active_users = Some(2);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(presence),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            client.epoch(),
+            epoch,
+            "participant counts must not cancel a map gesture"
+        );
         for at in (128..10000).step_by(16) {
             client.tick(at, 0).unwrap();
             client.scene().unwrap();
@@ -1799,14 +2549,15 @@ fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
 fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
-    client.set_viewport([390., 600.]).unwrap();
+    let viewport = [390., 600.];
+    client.set_viewport(viewport).unwrap();
     let mut next = snapshot(Role::Admin, 2);
     next.spaces[0].layout.height = 6;
     client
         .receive_spaces(
             &spaces::encode_event(&Event::Snapshot {
                 observation: 1,
-                snapshot: next,
+                snapshot: Box::new(next),
                 resync: false,
             })
             .unwrap(),
@@ -1821,7 +2572,9 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
         .find(|c| c.node.semantics.as_ref().unwrap().label == "Space: Household")
         .unwrap();
     let start = [title.origin[0] + 10., title.origin[1] + 10.];
-    for (phase, position, at) in [(Down, start, 100), (Move, [100., 510.], 120)] {
+    // The map now scrolls to the screen bottom beneath the floating Edit button.
+    let bottom_edge = [100., viewport[1] - 10.];
+    for (phase, position, at) in [(Down, start, 100), (Move, bottom_edge, 120)] {
         client
             .pointer_at(
                 epoch,
@@ -1864,4 +2617,447 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
         client.resource_usage().map_scroll.unwrap().offset[1],
         offset
     );
+}
+
+#[test]
+fn remove_data_checkbox_toggles_by_box_label_and_accessible_activation_without_a_write() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive, SceneNode};
+    let checkbox = |client: &Client| -> (SceneNode, [f32; 2]) {
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.semantics.as_ref().unwrap().label == "Remove Data")
+            .unwrap();
+        assert!(client.control_is_checkbox(control.node.id).unwrap());
+        (control.node.clone(), control.origin)
+    };
+    for delete_space in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Edit");
+        if delete_space {
+            click(&mut client, "Space settings: Household");
+            click(&mut client, "Delete Space");
+        } else {
+            click(&mut client, "Delete App: Counter in Household");
+        }
+        let (unchecked, _) = checkbox(&client);
+        assert!(!unchecked.semantics.as_ref().unwrap().checked);
+        for (i, x) in [22., 80.].into_iter().enumerate() {
+            let (control, origin) = checkbox(&client);
+            let position = [origin[0] + x, origin[1] + control.frame.height / 2.];
+            let epoch = client.epoch();
+            for (phase, delta) in [(PointerPhase::Down, 0), (PointerPhase::Up, 50)] {
+                client
+                    .pointer_at(
+                        epoch,
+                        PointerEvent {
+                            id: 1,
+                            phase,
+                            position,
+                        },
+                        100 + i as u64 * 100 + delta,
+                    )
+                    .unwrap();
+            }
+            let (current, _) = checkbox(&client);
+            assert_eq!(current.semantics.as_ref().unwrap().checked, i == 0);
+            if i == 0 {
+                assert_ne!(
+                    current.children, unchecked.children,
+                    "the checked state must visibly change"
+                );
+                assert!(
+                    current
+                        .children
+                        .iter()
+                        .any(|n| matches!(n.primitive, Primitive::Path { .. })),
+                    "the check mark is drawn without a font glyph"
+                );
+            }
+            assert!(client.spaces_outgoing().unwrap().is_none());
+        }
+        click(&mut client, "Remove Data");
+        assert!(checkbox(&client).0.semantics.unwrap().checked);
+        click(&mut client, "Cancel");
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        if delete_space {
+            click(&mut client, "Delete Space");
+        } else {
+            click(&mut client, "Delete App: Counter in Household");
+        }
+        assert!(!checkbox(&client).0.semantics.unwrap().checked);
+    }
+}
+#[test]
+fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_collection() {
+    for remove_data in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Edit");
+        click(&mut client, "Delete App: Counter in Household");
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        assert!(labels(&client).contains(&"Remove Data".into()));
+        if remove_data {
+            click(&mut client, "Remove Data");
+            assert!(client.spaces_outgoing().unwrap().is_none());
+        }
+        click(&mut client, "Delete");
+        let Command::Manage { request, id, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("delete request")
+        };
+        assert_eq!(request.expected_generation, 1);
+        assert_eq!(
+            request.change,
+            if remove_data {
+                Change::DeleteData {
+                    space: SPACE.into(),
+                    app: "counter".into(),
+                    collection: "d".repeat(32),
+                    remove: true,
+                }
+            } else {
+                Change::Remove {
+                    space: SPACE.into(),
+                    app: "counter".into(),
+                }
+            }
+        );
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Result {
+                    version: VERSION,
+                    id,
+                    status: ManagementStatus::Applied,
+                    created: None,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!format!("{:?}", client.scene().unwrap()).contains("Saved."));
+    }
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Edit");
+    click(&mut client, "Delete App: Counter in Household");
+    click(&mut client, "Remove Data");
+    click(&mut client, "Cancel");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Delete App: Counter in Household");
+    click(&mut client, "Delete");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("remove")
+    };
+    assert!(matches!(request.change, Change::Remove { .. }));
+}
+#[test]
+fn map_delete_review_cannot_follow_generation_changes_or_lost_admin_access() {
+    for role in [Role::Admin, Role::Member] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Edit");
+        click(&mut client, "Delete App: Counter in Household");
+        let mut changed = snapshot(role, 2);
+        changed.selected.as_mut().unwrap().apps[0].collection = "e".repeat(32);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(changed),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(!labels(&client).contains(&"Delete".into()));
+        assert!(client.spaces_outgoing().unwrap().is_none());
+    }
+}
+fn with_retained(mut snapshot: Discovery, backup: bool) -> Discovery {
+    let data = DatasetSummary {
+        app: "counter".into(),
+        collection: if backup {
+            "e".repeat(32)
+        } else {
+            "d".repeat(32)
+        },
+        title: if backup {
+            "Earlier Counter".into()
+        } else {
+            "Counter".into()
+        },
+        availability: AppAvailability::Available,
+        stored_bytes: Some(1234),
+        origin: backup.then_some(DatasetOrigin::BeforeReplacement),
+    };
+    if !backup {
+        snapshot.spaces[0].apps.clear();
+        snapshot.spaces[0].attached_count = 0;
+        let app = &mut snapshot.selected.as_mut().unwrap().apps[0];
+        app.attached = false;
+        app.launch = None;
+    }
+    snapshot.spaces[0].retained.push(data.clone());
+    snapshot.selected.as_mut().unwrap().retained.push(data);
+    snapshot
+}
+#[test]
+fn retained_tiles_are_edit_only_and_restore_and_delete_name_the_exact_dataset() {
+    for backup in [false, true] {
+        for delete in [false, true] {
+            let (mut client, _) = fixture(Role::Admin);
+            client
+                .receive_spaces(
+                    &spaces::encode_event(&Event::Snapshot {
+                        observation: 1,
+                        snapshot: Box::new(with_retained(snapshot(Role::Admin, 2), backup)),
+                        resync: false,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+            let title = if backup { "Earlier Counter" } else { "Counter" };
+            let label = format!("{title} (data) in Household");
+            assert!(!labels(&client).contains(&label));
+            click(&mut client, "Edit");
+            assert!(labels(&client).contains(&label));
+            if delete {
+                click(&mut client, &format!("Delete data: {title} in Household"));
+            } else {
+                click(&mut client, &label);
+                click(&mut client, "Restore App");
+            }
+            assert!(client.spaces_outgoing().unwrap().is_none());
+            click(&mut client, if delete { "Delete" } else { "Restore" });
+            let Command::Manage { request, .. } =
+                spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+            else {
+                panic!("dataset action")
+            };
+            let cid = if backup {
+                "e".repeat(32)
+            } else {
+                "d".repeat(32)
+            };
+            assert_eq!(request.expected_generation, 2);
+            assert_eq!(
+                request.change,
+                if delete {
+                    Change::DeleteDataset {
+                        space: SPACE.into(),
+                        app: "counter".into(),
+                        collection: cid,
+                    }
+                } else {
+                    Change::RestoreDataset {
+                        space: SPACE.into(),
+                        app: "counter".into(),
+                        collection: cid,
+                    }
+                }
+            );
+        }
+    }
+}
+#[test]
+fn deleted_space_recovers_from_profile_with_current_admin_access() {
+    let (mut client, _) = fixture(Role::Admin);
+    click(&mut client, "Edit");
+    click(&mut client, "Space settings: Household");
+    click(&mut client, "Delete Space");
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Delete");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("space deletion")
+    };
+    assert_eq!(
+        request.change,
+        Change::DeleteSpace {
+            space: SPACE.into(),
+            remove_data: false
+        }
+    );
+    let (mut client, _) = fixture(Role::Admin);
+    let mut deleted = with_retained(snapshot(Role::Admin, 2), false);
+    deleted.spaces[0].archived = true;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(deleted),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(!labels(&client).contains(&"Space: Household".into()));
+    click(&mut client, "Edit");
+    assert!(!labels(&client).contains(&"Space: Household".into()));
+    click(&mut client, "Profile");
+    click(&mut client, "Deleted Spaces");
+    click(&mut client, "Restore Space: Household");
+    let Command::Manage { request, .. } =
+        spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("space restoration")
+    };
+    assert_eq!(
+        request.change,
+        Change::RestoreSpace {
+            space: SPACE.into()
+        }
+    );
+}
+
+#[test]
+fn cross_space_pickup_reviews_modes_publication_and_exact_current_bindings() {
+    for (mode, ghost) in [
+        (MoveMode::AppAndData, false),
+        (MoveMode::AppOnly, false),
+        (MoveMode::DataOnly, false),
+        (MoveMode::DataOnly, true),
+    ] {
+        let (mut client, _) = fixture(Role::Admin);
+        let mut state = snapshot(Role::Admin, 2);
+        let destination = "f".repeat(32);
+        let mut target = state.spaces[0].clone();
+        target.id = destination.clone();
+        target.name = "The Brass Relay".into();
+        target.audience = Audience::PublicView;
+        state.spaces.push(target);
+        if ghost {
+            state = with_retained(state, false);
+        }
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: Box::new(state.clone()),
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        click(&mut client, "Edit");
+        let id = client
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .find(|n| {
+                n.node.semantics.as_ref().unwrap().label
+                    == if ghost {
+                        "Counter (data) in Household"
+                    } else {
+                        "Counter in Household"
+                    }
+            })
+            .unwrap()
+            .node
+            .id;
+        if mode == MoveMode::DataOnly {
+            use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+            let scene = client.scene().unwrap();
+            let from = scene.path(id).unwrap().last().unwrap().origin;
+            let target = scene
+                .controls()
+                .into_iter()
+                .find(|n| n.node.semantics.as_ref().unwrap().label == "Space: The Brass Relay")
+                .unwrap()
+                .origin;
+            let epoch = client.epoch();
+            for (phase, position, at) in [
+                (Down, [from[0] + 30., from[1] + 40.], 100),
+                (Move, [target[0] + 100., target[1] + 20.], 200),
+                (Up, [target[0] + 100., target[1] + 20.], 300),
+            ] {
+                client
+                    .pointer_at(
+                        epoch,
+                        PointerEvent {
+                            id: 7,
+                            phase,
+                            position,
+                        },
+                        at,
+                    )
+                    .unwrap();
+            }
+        } else {
+            assert!(
+                client.adjust_control(id, 0, 0).unwrap(),
+                "keyboard pickup uses the drop review"
+            );
+            assert!(
+                client.spaces_outgoing().unwrap().is_none(),
+                "pickup does not mutate"
+            );
+            click(&mut client, "Move to The Brass Relay");
+        }
+        assert_eq!(client.take_space_switch(), Some(destination.clone()));
+        client.select_space(&destination).unwrap();
+        let Command::Watch { observation, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("watch destination")
+        };
+        let detail = state.selected.as_mut().unwrap();
+        detail.space = destination.clone();
+        detail.apps[0].collection = "e".repeat(32);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation,
+                    snapshot: Box::new(state),
+                    resync: true,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let caption = match mode {
+            MoveMode::AppAndData => "App and data",
+            MoveMode::AppOnly => "App only",
+            MoveMode::DataOnly => "Data only",
+        };
+        click(&mut client, caption);
+        assert!(
+            client.spaces_outgoing().unwrap().is_none(),
+            "mode choice does not mutate"
+        );
+        click(
+            &mut client,
+            if mode == MoveMode::AppOnly {
+                "Move"
+            } else {
+                "Move and publish data"
+            },
+        );
+        let Command::Manage { request, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("scoped move")
+        };
+        assert_eq!(request.expected_generation, 2);
+        let Change::Move {
+            operation,
+            source,
+            destination: actual,
+            collection,
+            destination_collection,
+            mode: actual_mode,
+            ..
+        } = request.change
+        else {
+            panic!("move")
+        };
+        assert_eq!(operation.len(), 32);
+        assert_eq!(source, SPACE);
+        assert_eq!(actual, destination);
+        assert_eq!(collection, "d".repeat(32));
+        assert_eq!(destination_collection, Some("e".repeat(32)));
+        assert_eq!(actual_mode, mode);
+    }
 }

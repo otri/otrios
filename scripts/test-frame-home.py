@@ -136,6 +136,47 @@ try:
   assert ready()['epoch']==edit_epoch and not ready()['input_busy'],'Same-title drop should release without a write'
   assert metadata()['generation']==initial['generation'],'Cancelled title drag changed metadata'
   tap(1220,756);wait(home)
+ if retained_review:
+  token=pathlib.Path('/etc/otrios-dashboard.identity').read_text().strip()
+  def metadata():
+   req=urllib.request.Request('http://127.0.0.1:8877/spaces',headers={'Authorization':'Bearer '+token,'Origin':'https://otrios.otri.ca'})
+   return json.load(urllib.request.urlopen(req,timeout=5))
+  initial=metadata()
+  result=subprocess.run([runtime_probe,str(pathlib.Path('/var/lib/otrios-authority/releases')/expected/'apps/catalog.flex'),'--retained-review'],input=json.dumps(initial).encode(),capture_output=True)
+  assert result.returncode==0,'Private retained-data coordinate probe failed'
+  points=json.loads(result.stdout);assert points['offline_cancel_no_commands']
+  if ready()['ui_ref']!='app:spaces-host/ui':tap(5,5)
+  wait(lambda q:home(q)and scroll(q)is not None);bound(False)
+  before_edit=ready()['epoch'];tap(1220,756)
+  wait(lambda q:home(q)and q['epoch']>before_edit)
+  tap(*points['delete_app']);wait(lambda q:home(q)and scroll(q)is None)
+  before_toggle=ready()['epoch'];tap(*points['remove_data'])
+  wait(lambda q:home(q)and scroll(q)is None and q['epoch']>before_toggle)
+  tap(*points['cancel']);wait(lambda q:home(q)and scroll(q)is not None)
+  assert metadata()['generation']==initial['generation'],'Cancelled removal changed metadata'
+  tap(1220,756);wait(home)
+ if move_review:
+  token=pathlib.Path('/etc/otrios-dashboard.identity').read_text().strip()
+  def metadata():
+   req=urllib.request.Request('http://127.0.0.1:8877/spaces',headers={'Authorization':'Bearer '+token,'Origin':'https://otrios.otri.ca'})
+   return json.load(urllib.request.urlopen(req,timeout=5))
+  initial=metadata()
+  result=subprocess.run([runtime_probe,str(pathlib.Path('/var/lib/otrios-authority/releases')/expected/'apps/catalog.flex'),'--move-review'],input=json.dumps(initial).encode(),capture_output=True)
+  assert result.returncode==0,'Private cross-Space coordinate probe failed'
+  points=json.loads(result.stdout);assert points['offline_cancel_no_commands']
+  if ready()['ui_ref']!='app:spaces-host/ui':tap(5,5)
+  wait(lambda q:home(q)and scroll(q)is not None);bound(False)
+  before_edit=ready()['epoch'];tap(1220,756)
+  q=wait(lambda q:home(q)and q['epoch']>before_edit);epoch=q['epoch']
+  start=points['source'];end=points['destination']
+  touch(*start,True);wait(lambda q:q['input_busy']and q['epoch']==epoch)
+  for step in range(1,13):
+   touch(*(start[i]+(end[i]-start[i])*step/12 for i in range(2)),True);time.sleep(.06)
+   assert ready()['epoch']==epoch,'App drag remounted the native map'
+  touch(*end,False);wait(lambda q:home(q)and scroll(q)is None)
+  tap(*points['cancel']);wait(lambda q:home(q)and scroll(q)is not None)
+  assert metadata()['generation']==initial['generation'],'Cancelled move changed metadata'
+  tap(1220,756);wait(home)
  assert rule.read_bytes()==calibration,'Calibration changed'
  print(json.dumps({'passed':True,'release':expected,'scroll_round_trips':0 if skip_navigation else 3,'navigation_exercised':not skip_navigation,
   'stable_map_epoch':True,'immediate_bound_reversal':None if skip_navigation else True,
@@ -143,8 +184,8 @@ try:
   'app_ui':app_ui,'input':'synthetic evdev through calibrated physical-device reader',
   'human_touch_observation':False,'app_writes':0,'pixels_exported':False,
   'calibration_unchanged':True,'space_title_reorder':reorder_changed,'requested_order_verified':reorder_passed,'admin_title_capture':edit_capture,
-  'capture_probe_metadata_unchanged':edit_capture,
-  'space_order_changed':reorder_changed,'readiness_wait_ms_max':max(latencies)}))
+  'capture_probe_metadata_unchanged':edit_capture,'retained_removal_review_cancel':retained_review,'retained_review_metadata_unchanged':retained_review,
+  'cross_space_drop_review_cancel':move_review,'move_review_metadata_unchanged':move_review,'space_order_changed':reorder_changed,'readiness_wait_ms_max':max(latencies)}))
 finally:
  touch(20,600,False);os.close(fd)
 '''
@@ -162,17 +203,19 @@ def main():
                         help='Also drag Brass Relay before Household, retaining that requested order')
     parser.add_argument('--edit-capture', action='store_true',
                         help='Exercise a visible administrable title and drop it back without a metadata write')
+    parser.add_argument('--retained-review', action='store_true', help='Open Remove App, toggle Remove Data and cancel without a management write')
+    parser.add_argument('--move-review', action='store_true', help='Drag an app across Spaces, open the review and cancel without a write')
     parser.add_argument('--runtime-probe', help='Private on-Frame space_map_probe executable')
     parser.add_argument('--skip-navigation', action='store_true', help='Exercise only the open map edit flow')
     args = parser.parse_args()
-    if (args.reorder_spaces or args.edit_capture) and not args.runtime_probe:
+    if (args.reorder_spaces or args.edit_capture or args.retained_review or args.move_review) and not args.runtime_probe:
         parser.error('Edit probes require --runtime-probe')
     config = json.loads(args.config.read_text())
     pointer = args.pointer or pathlib.Path(config['runtime']) / 'build/staged-release.json'
     values = {'expected': json.loads(pointer.read_text())['id'], 'device': args.device,
               'app_point': list(map(float, args.app_point.split(','))), 'app_ui': args.app_ui,
               'reorder': args.reorder_spaces, 'edit_capture': args.edit_capture,
-              'runtime_probe': args.runtime_probe, 'skip_navigation': args.skip_navigation, 'source_name': 'Brass Relay', 'destination_name': 'Household'}
+              'runtime_probe': args.runtime_probe, 'move_review': args.move_review, 'retained_review': args.retained_review, 'skip_navigation': args.skip_navigation, 'source_name': 'Brass Relay', 'destination_name': 'Household'}
     script = '\n'.join(k + '=' + repr(v) for k, v in values.items()) + '\n' + REMOTE
     result = subprocess.run(config['frame']['ssh'] + ['python3 -c ' + shlex.quote(script)],
                             capture_output=True, text=True, timeout=180)

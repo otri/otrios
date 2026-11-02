@@ -4,6 +4,7 @@ use super::*;
 use crate::merkle::{self, Actor, Authority, Cursor, Edit, Snapshot, Subscription};
 use otrios_interfaces::layout::Value;
 use std::collections::BTreeMap;
+mod portable;
 const ROOT_SCHEMA: &[u8] = b"otrios-canvas-merkle-v1";
 const RECEIPTS: usize = 1024;
 const RESUME_SECONDS: i64 = 86400;

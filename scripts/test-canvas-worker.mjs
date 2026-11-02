@@ -8,12 +8,14 @@ function workerContext(fields){
   if(fields.fake){
     const app=fields.fake;
     let dirty=false,inFlight=null,serial=0n;
+    app.control_is_checkbox??=()=>false;
     app.document_chunk_geometry??=()=>new Float32Array();
     app.request_frame??=()=>{dirty=true;};
     app.begin_frame??=()=>{if(!dirty||inFlight!==null)return;dirty=false;return inFlight=++serial;};
     app.frame_presented??=s=>{if(s!==inFlight)return false;inFlight=null;return true;};
     app.prepare_frame??=()=>JSON.stringify({revisions:{content:app.text_generation?.()||1,placement:1,semantics:app.text_generation?.()||1,effects:1},order:['base']});
     app.scroll_text_input??=()=>false;app.text_inputs??=()=> '[]';app.effect_vertices??=()=>new Float32Array();app.chat_info??=()=> 'null';app.chat_messages??=()=> '[]';app.chat_outgoing??=()=>null;app.chat_disconnected??=()=>{};app.collection_outgoing??=()=>null;app.take_collection_revoked??=()=>false;app.screen??=()=> 'home';app.document_frame??=()=> 'null';
+    app.transfer_actor??=()=>undefined;app.take_transfer_task??=()=> 'null';app.transfer_drop_kind??=()=>undefined;
     app.rejected_mount_pending??=()=>false;app.space_managed??=()=>false;app.spaces_outgoing??=()=>null;app.spaces_ui??=()=>false;app.take_sign_in??=()=>false;app.take_space_switch??=()=>null;app.take_chat_upload_request??=()=>null;app.take_chat_download??=()=> 'null';app.send_chat_attachment??=()=>false;
     for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])app[key]??=()=>new Float32Array();app.overlay_draws??=()=>new Uint32Array();
   }

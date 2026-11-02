@@ -8,9 +8,12 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     io::Read,
 };
+#[path = "server_app_transfers.rs"]
+mod transfers;
 
 #[derive(Clone)]
 struct Package {
+    bundle_sha256: Option<String>,
     app: AppContract,
     ui: Vec<u8>,
     ui_hash: Vec<u8>,
@@ -24,6 +27,8 @@ struct Package {
     aggregate_view: bool,
     ink: bool,
     primary_ref: String,
+    code_bytes: Option<u64>,
+    revision: Option<u64>,
 }
 struct Bundle {
     packages: BTreeMap<String, Package>,
@@ -55,11 +60,21 @@ pub(super) struct Hub {
     chat_rooms: BTreeMap<String, Arc<space_chat::Hub>>,
     cleanup: BTreeMap<String, otrios_interfaces::spaces::CleanupSummary>,
     next_maintenance: Option<std::time::Instant>,
+    presence: Vec<std::sync::Weak<Presence>>,
+    next_presence: u64,
+    staged_data: Option<transfers::PendingData>,
+    staged_app: Option<transfers::PendingApp>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Grant {
     principal: Option<String>,
     actions: u8,
+}
+struct Presence {
+    scope: spaces::Scope,
+    binding: otrios_interfaces::spaces::Binding,
+    grant: Grant,
+    anonymous: u64,
 }
 struct Lease {
     epoch: u32,
@@ -71,6 +86,7 @@ struct Lease {
     grant: Grant,
     _room: Arc<()>,
     _chat: Option<Arc<space_chat::Hub>>,
+    _presence: Option<Arc<Presence>>,
     ink: bool,
     chat: bool,
 }
@@ -227,6 +243,10 @@ impl Hub {
             chat_rooms: BTreeMap::new(),
             cleanup: BTreeMap::new(),
             next_maintenance: None,
+            presence: vec![],
+            next_presence: 0,
+            staged_data: None,
+            staged_app: None,
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
@@ -280,6 +300,8 @@ impl Hub {
         self.cleanup.get(space)
     }
     pub(super) fn maintain_storage(&mut self, force: bool) -> Result<bool> {
+        self.expire_data_stage(chat::now());
+        self.expire_app_stage(chat::now());
         if self.spaces.is_none() {
             return Ok(false);
         }
@@ -759,6 +781,75 @@ impl Hub {
                 &[service.identity.as_str()],
             )?;
         }
+        if let otrios_interfaces::spaces::Change::Move {
+            operation,
+            source,
+            destination,
+            app,
+            collection,
+            destination_collection,
+            ..
+        } = &request.change
+            && self
+                .move_committed(actor, source, destination, operation)?
+                .is_none()
+        {
+            let service = self.bundles.get(&self.active).is_some_and(|b| {
+                b.packages
+                    .values()
+                    .any(|p| p.policy.app == *app && p.aggregate_view)
+            }) || self
+                .collector
+                .as_ref()
+                .is_some_and(|g| g.binding.app == *app);
+            if service {
+                return Err(otrios_core::spaces::Error::Unavailable);
+            }
+            for cid in std::iter::once(collection).chain(destination_collection.iter()) {
+                if self
+                    .rooms
+                    .iter()
+                    .any(|(key, r)| key.split(':').next() == Some(cid.as_str()) && r.failed)
+                    || self
+                        .chat_rooms
+                        .iter()
+                        .any(|(key, r)| key.split(':').next() == Some(cid.as_str()) && !r.healthy())
+                {
+                    return Err(otrios_core::spaces::Error::Unavailable);
+                }
+            }
+            // Verified discovery checks code/schema and known owned-chat failures
+            // without reading private app documents into the management channel.
+            for (id, cid) in [
+                (source, Some(collection)),
+                (destination, destination_collection.as_ref()),
+            ] {
+                let snapshot = self.discovery(Some(actor), Some(id))?;
+                let detail = snapshot
+                    .selected
+                    .ok_or(otrios_core::spaces::Error::Denied)?;
+                if let Some(cid) = cid {
+                    let fact = detail
+                        .apps
+                        .iter()
+                        .find(|a| a.collection == *cid)
+                        .map(|a| (a.availability, a.stored_bytes))
+                        .or_else(|| {
+                            detail
+                                .retained
+                                .iter()
+                                .find(|d| d.collection == *cid)
+                                .map(|d| (d.availability, d.stored_bytes))
+                        });
+                    if !fact.is_some_and(|(availability, bytes)| {
+                        availability == otrios_interfaces::spaces::AppAvailability::Available
+                            && bytes.is_some()
+                    }) {
+                        return Err(otrios_core::spaces::Error::Unavailable);
+                    }
+                }
+            }
+        }
         let removed = match &request.change {
             otrios_interfaces::spaces::Change::Remove { space, app } => self
                 .registry()?
@@ -785,6 +876,7 @@ impl Hub {
         let generation = if matches!(
             request.change,
             otrios_interfaces::spaces::Change::Audience { .. }
+                | otrios_interfaces::spaces::Change::Access { .. }
         ) {
             store.commit_catalog(actor, request, &policies)?.generation
         } else {
@@ -807,6 +899,28 @@ impl Hub {
             eprintln!("Space cleanup pending: {error}");
         }
         Ok(generation)
+    }
+    pub(super) fn move_committed(
+        &self,
+        actor: &str,
+        source: &str,
+        destination: &str,
+        operation: &str,
+    ) -> std::result::Result<Option<u64>, otrios_core::spaces::Error> {
+        self.spaces
+            .as_ref()
+            .ok_or(otrios_core::spaces::Error::Unavailable)?
+            .move_committed(actor, source, destination, operation)
+    }
+    pub(super) fn refresh_presence(&mut self) -> Result<bool> {
+        let before = self.presence.len();
+        self.presence.retain(|p| p.strong_count() > 0);
+        let changed = before != self.presence.len();
+        if changed {
+            self.discovery = otrios_core::spaces::advance_discovery(&self.discovery)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(changed)
     }
     pub(super) fn discovery_cursor(&self) -> &otrios_interfaces::spaces::DiscoveryCursor {
         &self.discovery
@@ -833,6 +947,9 @@ impl Hub {
             .flat_map(|b| b.packages.values())
             .filter(|p| !p.app.id.contains('/'))
             .map(|p| InstalledApp {
+                bundle_sha256: p.bundle_sha256.clone(),
+                code_bytes: p.code_bytes,
+                revision: p.revision,
                 policy: p.policy.clone(),
                 title: p.app.title.clone(),
                 ui_ref: p.app.ui_ref.clone(),
@@ -845,35 +962,41 @@ impl Hub {
         for s in registry.spaces.iter().filter(|s| {
             Some(s.id.as_str()) == selected && otrios_core::spaces::visible(s, identity)
         }) {
-            for a in &s.apps {
+            for (policy, collection) in s.apps.iter().map(|a| (&a.policy, &a.collection)).chain(
+                registry
+                    .retained
+                    .iter()
+                    .filter(|d| d.space == s.id)
+                    .map(|d| (&d.policy, &d.collection)),
+            ) {
                 let package = self
                     .bundles
                     .get(&self.active)
-                    .and_then(|b| b.packages.values().find(|p| p.app.id == a.policy.app));
+                    .and_then(|b| b.packages.values().find(|p| p.app.id == policy.app));
                 let mut available = package.is_some()
                     && !self.rooms.iter().any(|(key, r)| {
-                        r.failed && key.split(':').next() == Some(a.collection.as_str())
+                        r.failed && key.split(':').next() == Some(collection.as_str())
                     })
                     && !self.chat_rooms.iter().any(|(key, room)| {
-                        key.split(':').next() == Some(a.collection.as_str()) && !room.healthy()
+                        key.split(':').next() == Some(collection.as_str()) && !room.healthy()
                     });
                 if available {
                     available = self.bundles.get(&self.active).is_some_and(|bundle| {
                         bundle
                             .packages
                             .values()
-                            .filter(|p| p.policy.app == a.policy.app && p.chat)
+                            .filter(|p| p.policy.app == policy.app && p.chat)
                             .all(|p| {
-                                self.chat_path(&a.collection, p)
+                                self.chat_path(collection, p)
                                     .and_then(|path| self.missing_owned_chat(&path, p))
                                     .is_ok_and(|missing| !missing)
                             })
                     });
                 }
                 let stored_bytes = self.state.as_ref().and_then(|root| {
-                    let checkpoint = root.join(format!("collection-{}.merkle", a.collection));
+                    let checkpoint = root.join(format!("collection-{}.merkle", collection));
                     let presentation =
-                        root.join(format!("collection-{}.presentation.flex", a.collection));
+                        root.join(format!("collection-{}.presentation.flex", collection));
                     if package.is_some_and(|p| p.aggregate_view) && !presentation.is_file() {
                         available = false;
                     }
@@ -884,7 +1007,7 @@ impl Hub {
                     ]
                     .iter()
                     .try_fold(
-                        collection_data_usage(root, &a.collection)?,
+                        collection_data_usage(root, collection)?,
                         |sum, p| match fs::metadata(p) {
                             Ok(m) if m.is_file() => sum.checked_add(m.len()),
                             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(sum),
@@ -893,7 +1016,7 @@ impl Hub {
                     )
                 });
                 facts.insert(
-                    a.collection.clone(),
+                    collection.clone(),
                     otrios_core::spaces::CollectionFacts {
                         stored_bytes,
                         available,
@@ -901,7 +1024,7 @@ impl Hub {
                 );
             }
         }
-        otrios_core::spaces::discovery_with_cleanup(
+        let mut discovery = otrios_core::spaces::discovery_with_cleanup(
             registry,
             identity,
             selected,
@@ -909,7 +1032,49 @@ impl Hub {
             &facts,
             &self.cleanup,
             self.discovery.clone(),
-        )
+        )?;
+        discovery.profile = identity
+            .map(|actor| {
+                self.spaces
+                    .as_ref()
+                    .ok_or(otrios_core::spaces::Error::Unavailable)?
+                    .profile(actor)
+            })
+            .transpose()?
+            .flatten();
+        discovery.catalog = self.active.clone();
+        if let Some(detail) = discovery.selected.as_mut()
+            && discovery.spaces.iter().any(|s| {
+                s.id == detail.space && s.role == Some(otrios_interfaces::spaces::Role::Admin)
+            })
+        {
+            let participants = self
+                .presence
+                .iter()
+                .filter_map(std::sync::Weak::upgrade)
+                .filter(|p| {
+                    p.binding.space == detail.space
+                        && self.grant_current(&p.scope, &p.binding, &p.grant)
+                })
+                .collect::<Vec<_>>();
+            let users = || {
+                participants
+                    .iter()
+                    .map(|p| otrios_core::spaces::AcceptedUser {
+                        collection: &p.binding.collection,
+                        principal: p.grant.principal.as_deref(),
+                        anonymous: p.anonymous,
+                    })
+            };
+            detail.active_users = Some(otrios_core::spaces::active_users(users(), None));
+            for app in &mut detail.apps {
+                app.active_users = Some(otrios_core::spaces::active_users(
+                    users(),
+                    Some(&app.collection),
+                ));
+            }
+        }
+        Ok(discovery)
     }
     pub(super) fn app_policy(&self, app: &str) -> Result<otrios_interfaces::spaces::AppPolicy> {
         let p = self
@@ -1291,15 +1456,18 @@ impl Hub {
         binding: &otrios_interfaces::spaces::Binding,
         package: &Package,
     ) -> Result<PathBuf> {
+        self.collection_path(&binding.collection, package)
+    }
+    fn collection_path(&self, collection: &str, package: &Package) -> Result<PathBuf> {
         let root = self
             .state
             .as_ref()
             .ok_or("Durable collection storage required")?;
         if package.app.state_ref == package.primary_ref {
-            Ok(root.join(format!("collection-{}.merkle", binding.collection)))
+            Ok(root.join(format!("collection-{collection}.merkle")))
         } else {
             Ok(root
-                .join(format!("collection-{}.data", binding.collection))
+                .join(format!("collection-{collection}.data"))
                 .join(format!(
                     "doc-{}.merkle",
                     canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
@@ -1332,6 +1500,14 @@ impl Hub {
     }
     pub(super) fn refresh(&mut self, releases: &Option<PathBuf>, release: &Value) -> Result<()> {
         let id = release["id"].as_str().unwrap_or("development");
+        if let Some(store) = &self.spaces
+            && let Some(job) = store.pending_app_install().map_err(|e| e.to_string())?
+            && job.state.phase == otrios_core::transfers::AppImportPhase::Armed
+            && id != job.review.release
+            && job.state.release.as_deref() != Some(id)
+        {
+            return Err("An armed app install requires its exact planned release".into());
+        }
         if valid_id(id) && self.active_release == id {
             return Ok(());
         }
@@ -1442,6 +1618,7 @@ impl Hub {
                         .as_ref()
                         .ok_or("Missing trusted bundle publisher key")?,
                 )?;
+                otrios_core::bundle::qualify_install(&verified)?;
                 if verified.summary().info.app != a
                     || verified.summary().info.private != entry.private
                 {
@@ -1591,6 +1768,9 @@ impl Hub {
                 .insert(
                     a.ui_ref.clone(),
                     Package {
+                        bundle_sha256: verified.as_ref().map(|v| v.summary().digest.clone()),
+                        code_bytes: verified.as_ref().map(|v| v.summary().bytes as u64),
+                        revision: verified.as_ref().map(|v| v.summary().info.revision),
                         app: a,
                         ui,
                         ui_hash: entry.ui_hash,
@@ -1702,6 +1882,9 @@ impl Hub {
         }
         self.active = catalog_hash;
         self.active_release = id.into();
+        if self.spaces.is_some() {
+            self.finish_install()?;
+        }
         self.discovery_catalog_changed()?;
         Ok(())
     }
@@ -1919,6 +2102,7 @@ impl Hub {
                     grant,
                     _room: room.lease.clone(),
                     _chat: prepared_chat,
+                    _presence: None,
                     ink: p.ink,
                     chat: p.chat,
                 });
@@ -1939,7 +2123,30 @@ impl Hub {
                     }
                     return Err("No matching staged Canvas mount".into());
                 }
+                self.refresh_presence()?;
+                if self.presence.len() >= 512 {
+                    return Err("Presence capacity reached".into());
+                }
                 leases.active = leases.staged.take();
+                if let Some(lease) = &mut leases.active
+                    && let Some(binding) = &lease.binding
+                {
+                    self.next_presence = self
+                        .next_presence
+                        .checked_add(1)
+                        .ok_or("Presence counter exhausted")?;
+                    let presence = Arc::new(Presence {
+                        scope: scope.clone(),
+                        binding: binding.clone(),
+                        grant: lease.grant.clone(),
+                        anonymous: self.next_presence,
+                    });
+                    self.presence.push(Arc::downgrade(&presence));
+                    lease._presence = Some(presence);
+                    self.discovery = otrios_core::spaces::advance_discovery(&self.discovery)
+                        .map_err(|e| e.to_string())?;
+                    changed = true;
+                }
                 if leases.active.as_ref().is_some_and(|l| l.binding.is_some()) {
                     messages.push(ServerMessage::Activated { epoch });
                 }
@@ -1948,7 +2155,7 @@ impl Hub {
                 if leases.staged.as_ref().is_some_and(|l| l.epoch == epoch) {
                     leases.staged = None;
                 }
-                return Ok((messages, false));
+                return Ok((messages, self.refresh_presence()?));
             }
             ClientMessage::Sync { epoch, bytes } => {
                 // Retired epochs cannot decode or mutate the replacement. Keep

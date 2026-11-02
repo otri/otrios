@@ -13,6 +13,7 @@ pub const MAX_COMMAND_BYTES: usize = 8192;
 pub const MAX_EVENT_BYTES: usize = 128 * 1024;
 pub const MAX_INSTALLED_APPS: usize = 16;
 pub const MAX_ROOTS: usize = 16;
+pub const MAX_RETAINED_DATASETS: usize = 512;
 pub const MAX_COLLECTION_SCHEMA_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +41,19 @@ pub struct Member {
     /// live authority-issued bindings are RAM-only and renewed after restart.
     #[serde(default)]
     pub joined_generation: u64,
+}
+/// One explicitly edited row in the bounded, single-Space access form.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MembershipEdit {
+    pub identity: String,
+    pub role: Option<Role>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserProfile {
+    pub name: String,
+    pub revision: u64,
 }
 
 /// Admitted installed-app policy, supplied by the host after bundle verification.
@@ -86,6 +100,7 @@ pub enum Background {
     Sky,
     Lilac,
     Rose,
+    Rgb([u8; 3]),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +131,29 @@ pub struct Space {
     pub admission_epoch: u64,
     #[serde(default)]
     pub layout: SpaceLayout,
+    /// A recoverable Space keeps its current authorization and data references.
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DatasetOrigin {
+    BeforeReplacement,
+    BeforeRestore,
+    Imported,
+}
+
+/// An inactive sealed dataset is distinct from the bundle's single app slot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedDataset {
+    pub space: String,
+    pub policy: AppPolicy,
+    pub collection: String,
+    pub label: String,
+    pub origin: DatasetOrigin,
+    pub generation: u64,
 }
 
 /// Minimal permanent stale-reference rejection record. No deleted payload.
@@ -136,6 +174,8 @@ pub struct Registry {
     pub generation: u64,
     pub spaces: Vec<Space>,
     pub deletions: Vec<Deletion>,
+    #[serde(default)]
+    pub retained: Vec<RetainedDataset>,
 }
 
 /// A host-issued scope. Every operation must revalidate it against current policy.
@@ -167,11 +207,29 @@ pub enum Operation {
     Moderate,
 }
 
+/// A cross-Space move never creates a second active instance of one bundle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MoveMode {
+    AppAndData,
+    AppOnly,
+    DataOnly,
+}
+
 /// Mutations are serialized by one authority and require an expected generation.
 /// Identity is supplied by authentication, never by this request body.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Change {
+    Profile {
+        name: String,
+        expected_revision: u64,
+    },
+    Access {
+        space: String,
+        audience: Audience,
+        changes: Vec<MembershipEdit>,
+    },
     Create {
         name: String,
     },
@@ -184,9 +242,41 @@ pub enum Change {
         space: String,
         before: Option<String>,
     },
+    Move {
+        operation: String,
+        source: String,
+        destination: String,
+        app: String,
+        collection: String,
+        destination_collection: Option<String>,
+        mode: MoveMode,
+    },
+    DeleteSpace {
+        space: String,
+        remove_data: bool,
+    },
+    RestoreSpace {
+        space: String,
+    },
+    RestoreDataset {
+        space: String,
+        app: String,
+        collection: String,
+    },
+    DeleteDataset {
+        space: String,
+        app: String,
+        collection: String,
+    },
     LabelApp {
         space: String,
         app: String,
+        name: String,
+    },
+    LabelDataset {
+        space: String,
+        app: String,
+        collection: String,
         name: String,
     },
     PlaceApp {
@@ -240,6 +330,53 @@ pub struct DiscoveryCursor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
+    ImportApp {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    ImportStatus {
+        version: u32,
+        id: u32,
+        operation: String,
+    },
+    CancelApp {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    ShareApp {
+        version: u32,
+        id: u32,
+        space: String,
+        app: String,
+        digest: String,
+        expected_generation: u64,
+        catalog: Vec<u8>,
+    },
+    ReplaceData {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    CancelData {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    ReplacementStatus {
+        version: u32,
+        id: u32,
+        space: String,
+        replacement: String,
+    },
+    MoveStatus {
+        version: u32,
+        id: u32,
+        operation: String,
+        source: String,
+        destination: String,
+    },
     Watch {
         version: u32,
         observation: u32,
@@ -257,10 +394,30 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstalledApp {
+    pub bundle_sha256: Option<String>,
+    pub code_bytes: Option<u64>,
+    pub revision: Option<u64>,
     pub policy: AppPolicy,
     pub title: String,
     pub ui_ref: String,
     pub state_ref: String,
+}
+
+/// Enough metadata to request a mount. Catalog facts are carried once for Admin
+/// settings; these references never grant execution or data access.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchApp {
+    pub ui_ref: String,
+    pub state_ref: String,
+}
+impl From<InstalledApp> for LaunchApp {
+    fn from(app: InstalledApp) -> Self {
+        Self {
+            ui_ref: app.ui_ref,
+            state_ref: app.state_ref,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,6 +431,21 @@ pub struct SpaceSummary {
     /// Attached app previews only. Collection IDs and retained data are excluded.
     pub apps: Vec<MapApp>,
     pub attached_count: u16,
+    pub archived: bool,
+    /// Only an authenticated current Admin receives retained identities.
+    pub retained: Vec<DatasetSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatasetSummary {
+    pub app: String,
+    pub collection: String,
+    pub title: String,
+    pub availability: AppAvailability,
+    pub stored_bytes: Option<u64>,
+    /// None identifies the preferred dataset retained by ordinary app removal.
+    pub origin: Option<DatasetOrigin>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,6 +469,7 @@ pub enum AppAvailability {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSummary {
+    pub active_users: Option<u16>,
     pub app: String,
     pub title: String,
     pub collection: String,
@@ -305,7 +478,7 @@ pub struct AppSummary {
     /// Managed checkpoint/journal/presentation bytes, excluding shared runtime
     /// code and backups. None means unavailable, never an invented zero.
     pub stored_bytes: Option<u64>,
-    pub launch: Option<InstalledApp>,
+    pub launch: Option<LaunchApp>,
 }
 
 /// Admin-only deletion progress. Unmanaged/offline copies cannot be verified.
@@ -323,6 +496,8 @@ pub struct CleanupSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpaceDetail {
+    pub active_users: Option<u16>,
+    pub retained: Vec<DatasetSummary>,
     pub space: String,
     pub cleanup: Option<Box<CleanupSummary>>,
     pub apps: Vec<AppSummary>,
@@ -333,6 +508,9 @@ pub struct SpaceDetail {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Discovery {
+    pub profile: Option<UserProfile>,
+    /// Verified installed catalog identity, independent of presence revisions.
+    pub catalog: Vec<u8>,
     pub version: u32,
     pub cursor: DiscoveryCursor,
     pub generation: u64,
@@ -357,12 +535,39 @@ pub enum ManagementStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Event {
+    AppImport {
+        version: u32,
+        id: u32,
+        operation: String,
+        status: ManagementStatus,
+        state: Option<crate::transfers::AppImportState>,
+    },
+    AppShared {
+        version: u32,
+        id: u32,
+        status: ManagementStatus,
+        share: Option<crate::transfers::AppShare>,
+    },
+    ReplacementStatus {
+        version: u32,
+        id: u32,
+        replacement: String,
+        status: ManagementStatus,
+        outcome: Option<crate::transfers::ReplacementOutcome>,
+    },
+    MoveStatus {
+        version: u32,
+        id: u32,
+        operation: String,
+        status: ManagementStatus,
+        generation: Option<u64>,
+    },
     ResyncRequired {
         version: u32,
     },
     Snapshot {
         observation: u32,
-        snapshot: Discovery,
+        snapshot: Box<Discovery>,
         resync: bool,
     },
     Result {

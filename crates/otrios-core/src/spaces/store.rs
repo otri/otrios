@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 2 * 1024 * 1024 + 8192;
+const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 2 * 1024 * 1024 + 128 * 1024;
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -18,6 +18,8 @@ struct Record {
     registry: Registry,
     #[serde(default)]
     legacy_sources: Option<backups::legacy_sources::Originals>,
+    #[serde(default)]
+    imports: Vec<app_imports::Install>,
 }
 pub struct Store {
     current: Record,
@@ -61,6 +63,7 @@ fn suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 fn validate_record(record: &Record) -> Result<()> {
     validate(&record.registry)?;
+    app_imports::validate_installs(record)?;
     if flexbuffers::to_vec(&record.registry)
         .map_err(io_error)?
         .len()
@@ -90,7 +93,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP6".to_vec();
+    let mut bytes = b"OTSP9".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -109,10 +112,17 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
     Ok(payload)
 }
 fn decode(bytes: &[u8]) -> Result<Record> {
-    let mut record: Record =
-        flexbuffers::from_slice(payload(bytes, &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6"])?)
-            .map_err(|_| Error::Invalid)?;
-    if !bytes.starts_with(b"OTSP6") {
+    let mut record: Record = flexbuffers::from_slice(payload(
+        bytes,
+        &[
+            b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6", b"OTSP7", b"OTSP8", b"OTSP9",
+        ],
+    )?)
+    .map_err(|_| Error::Invalid)?;
+    if ![b"OTSP6", b"OTSP7", b"OTSP8", b"OTSP9"]
+        .iter()
+        .any(|h| bytes.starts_with(*h))
+    {
         initial_layouts(&mut record.registry);
     }
     validate_record(&record)?;
@@ -123,6 +133,9 @@ fn current_framing(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"OTSP4")
         || bytes.starts_with(b"OTSP5")
         || bytes.starts_with(b"OTSP6")
+        || bytes.starts_with(b"OTSP7")
+        || bytes.starts_with(b"OTSP8")
+        || bytes.starts_with(b"OTSP9")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let mut registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
@@ -288,6 +301,7 @@ impl Store {
                 root: fresh()?,
                 storage: None,
                 legacy_sources: None,
+                imports: vec![],
                 registry: primary
                     .as_ref()
                     .map(|b| legacy(b))
@@ -409,13 +423,16 @@ impl Store {
         request: &Request,
         installed: Option<&AppPolicy>,
     ) -> Result<&Registry> {
+        self.check_install_fence()?;
+        if matches!(request.change, Change::Profile { .. }) {
+            self.commit_profile(actor, request)?;
+            return self.registry();
+        }
+        if self.replayed_move(actor, request)? {
+            return self.registry();
+        }
         let registry = apply(self.registry()?, actor, request, installed)?;
-        let next = Record {
-            registry,
-            ..self.current.clone()
-        };
-        self.publish(next, |_| {})?;
-        self.registry()
+        self.commit_decision(actor, request, registry)
     }
     pub fn commit_catalog(
         &mut self,
@@ -423,18 +440,54 @@ impl Store {
         request: &Request,
         installed: &[AppPolicy],
     ) -> Result<&Registry> {
+        self.check_install_fence()?;
+        if matches!(request.change, Change::Profile { .. }) {
+            self.commit_profile(actor, request)?;
+            return self.registry();
+        }
+        if self.replayed_move(actor, request)? {
+            return self.registry();
+        }
         let registry = apply_catalog(self.registry()?, actor, request, installed)?;
-        self.publish(
-            Record {
-                registry,
-                ..self.current.clone()
-            },
-            |_| {},
-        )?;
+        self.commit_decision(actor, request, registry)
+    }
+    fn commit_decision(
+        &mut self,
+        actor: &str,
+        request: &Request,
+        registry: Registry,
+    ) -> Result<&Registry> {
+        let next = Record {
+            registry,
+            ..self.current.clone()
+        };
+        if matches!(request.change, Change::Move { .. }) {
+            self.stage_move(next, actor, request)?;
+        } else if let Change::RestoreDataset {
+            space,
+            app,
+            collection,
+        } = &request.change
+        {
+            if self
+                .current
+                .registry
+                .retained
+                .iter()
+                .any(|d| d.space == *space && d.policy.app == *app && d.collection == *collection)
+            {
+                self.clone_retained(next, space, app, collection)?;
+            } else {
+                self.publish(next, |_| {})?;
+            }
+        } else {
+            self.publish(next, |_| {})?;
+        }
         self.registry()
     }
     fn publish(&mut self, next: Record, mut boundary: impl FnMut(Boundary)) -> Result<()> {
         self.registry()?;
+        app_imports::allow_transition(&self.current, &next)?;
         let bytes = encode(&next)?;
         boundary(Boundary::BeforeLatest);
         let result = (|| {
@@ -459,6 +512,11 @@ mod tests;
 
 #[path = "backups.rs"]
 mod backups;
+#[path = "move_receipts.rs"]
+mod move_receipts;
+#[path = "profiles.rs"]
+mod profiles;
+use move_receipts::MoveReceipt;
 #[path = "payloads.rs"]
 mod payloads;
 fn write(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -500,3 +558,6 @@ fn write_at(path: &Path, bytes: &[u8], mut step: impl FnMut(FileStep)) -> Result
 
 #[path = "cleanup.rs"]
 mod cleanup;
+
+#[path = "app_imports.rs"]
+mod app_imports;

@@ -10,6 +10,8 @@ mod collections;
 mod history;
 pub mod icons;
 mod journal;
+mod portable;
+pub use portable::{PinnedHistory, QualifiedHistory};
 mod text;
 mod view;
 use super::{Result, err};

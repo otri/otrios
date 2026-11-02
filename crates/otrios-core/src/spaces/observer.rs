@@ -2,9 +2,31 @@
 //! RAM-only host observation and bounded management intents. Never replays a
 //! management action after reconnect: a lost outcome requires a fresh snapshot.
 use super::*;
+mod transfers;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
+    AppImported {
+        id: u32,
+        status: ManagementStatus,
+        state: Option<otrios_interfaces::transfers::AppImportState>,
+    },
+    AppShared {
+        id: u32,
+        status: ManagementStatus,
+        share: Option<otrios_interfaces::transfers::AppShare>,
+    },
+    Replacement {
+        id: u32,
+        status: ManagementStatus,
+        outcome: Option<otrios_interfaces::transfers::ReplacementOutcome>,
+    },
+    MoveStatus {
+        id: u32,
+        operation: String,
+        status: ManagementStatus,
+        generation: Option<u64>,
+    },
     Decided {
         id: u32,
         status: ManagementStatus,
@@ -13,6 +35,13 @@ pub enum Outcome {
     Unknown {
         id: u32,
     },
+}
+#[derive(Clone)]
+struct MoveWatch {
+    actor: String,
+    operation: String,
+    source: String,
+    destination: String,
 }
 #[derive(Default)]
 pub struct Observer {
@@ -26,6 +55,12 @@ pub struct Observer {
     cursor: Option<DiscoveryCursor>,
     next_id: u32,
     pending: Option<u32>,
+    sharing: bool,
+    move_watch: Option<MoveWatch>,
+    replacement_watch: Option<transfers::ReplacementWatch>,
+    import_watch: Option<transfers::ImportWatch>,
+    checking_move: bool,
+    move_query_blocked: bool,
     queued: Option<Command>,
     outcome: Option<Outcome>,
 }
@@ -48,6 +83,16 @@ impl Observer {
         self.fresh = false;
         self.unavailable = false;
         self.queued = None;
+        self.checking_move = false;
+        self.move_query_blocked = false;
+        self.sharing = false;
+        if let Some(watch) = &mut self.import_watch {
+            watch.due = true;
+        }
+        if let Some(watch) = &mut self.replacement_watch {
+            watch.checking = false;
+            watch.blocked = false;
+        }
         if let Some(id) = self.pending.take() {
             self.outcome = Some(Outcome::Unknown { id });
         }
@@ -67,7 +112,16 @@ impl Observer {
         self.enabled && !self.unavailable && self.snapshot.is_none()
     }
     pub fn pending(&self) -> bool {
+        // Disconnected hosts may replace their runtime. While connected, wait
+        // for the read-only outcome check before handing off the release.
         self.pending.is_some()
+            || self.fresh
+                && (self.move_watch.is_some()
+                    || self.replacement_watch.is_some()
+                    || self.import_watch.is_some())
+    }
+    pub fn has_outcome(&self) -> bool {
+        self.outcome.is_some()
     }
     pub fn take_outcome(&mut self) -> Option<Outcome> {
         self.outcome.take()
@@ -78,13 +132,33 @@ impl Observer {
             .as_ref()
             .filter(|_| self.fresh && !self.unavailable)
             .ok_or(Error::Unavailable)?;
-        if self.pending.is_some() {
+        if self.pending.is_some()
+            || self.move_watch.is_some()
+            || self.replacement_watch.is_some()
+            || self.import_watch.is_some()
+        {
             return Err(Error::Capacity);
         }
         if snapshot.identity.is_none() {
             return Err(Error::Denied);
         }
         let id = self.next_id.checked_add(1).ok_or(Error::Capacity)?;
+        let move_watch = if let Change::Move {
+            operation,
+            source,
+            destination,
+            ..
+        } = &change
+        {
+            Some(MoveWatch {
+                actor: snapshot.identity.clone().ok_or(Error::Denied)?,
+                operation: operation.clone(),
+                source: source.clone(),
+                destination: destination.clone(),
+            })
+        } else {
+            None
+        };
         let command = Command::Manage {
             version: VERSION,
             id,
@@ -96,6 +170,7 @@ impl Observer {
         };
         encode_command(&command)?;
         self.next_id = id;
+        self.move_watch = move_watch;
         self.pending = Some(id);
         self.queued = Some(command);
         self.outcome = None;
@@ -117,10 +192,35 @@ impl Observer {
             self.watched = true;
             return Ok(Some(bytes));
         }
-        self.queued
-            .take()
-            .map(|command| encode_command(&command))
-            .transpose()
+        if let Some(command) = self.queued.take() {
+            return encode_command(&command).map(Some);
+        }
+        if let Some(bytes) = self.replacement_query()? {
+            return Ok(Some(bytes));
+        }
+        if let Some(bytes) = self.import_query()? {
+            return Ok(Some(bytes));
+        }
+        if self.pending.is_none()
+            && self.fresh
+            && !self.move_query_blocked
+            && let Some(watch) = &self.move_watch
+        {
+            let id = self.next_id.checked_add(1).ok_or(Error::Capacity)?;
+            let command = Command::MoveStatus {
+                version: VERSION,
+                id,
+                operation: watch.operation.clone(),
+                source: watch.source.clone(),
+                destination: watch.destination.clone(),
+            };
+            let bytes = encode_command(&command)?;
+            self.next_id = id;
+            self.pending = Some(id);
+            self.checking_move = true;
+            return Ok(Some(bytes));
+        }
+        Ok(None)
     }
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
         if !self.enabled {
@@ -131,11 +231,72 @@ impl Observer {
             return Ok(false);
         }
         match event {
+            Event::AppImport {
+                id,
+                operation,
+                status,
+                state,
+                ..
+            } => Ok(self.import_result(id, &operation, status, state)),
+            Event::AppShared {
+                id, status, share, ..
+            } => {
+                if self.pending != Some(id)
+                    || !self.sharing
+                    || self.move_watch.is_some()
+                    || self.replacement_watch.is_some()
+                {
+                    return Ok(false);
+                }
+                self.pending = None;
+                self.sharing = false;
+                self.outcome = Some(Outcome::AppShared { id, status, share });
+                Ok(true)
+            }
+            Event::ReplacementStatus {
+                id,
+                replacement,
+                status,
+                outcome,
+                ..
+            } => Ok(self.replacement_result(id, &replacement, status, outcome)),
+            Event::MoveStatus {
+                id,
+                operation,
+                status,
+                generation,
+                ..
+            } => {
+                if self.pending != Some(id)
+                    || !self.checking_move
+                    || self
+                        .move_watch
+                        .as_ref()
+                        .is_none_or(|w| w.operation != operation)
+                {
+                    return Ok(false);
+                }
+                self.pending = None;
+                self.checking_move = false;
+                if status == ManagementStatus::Unavailable {
+                    self.move_query_blocked = true;
+                } else {
+                    self.move_watch = None;
+                }
+                self.outcome = Some(Outcome::MoveStatus {
+                    id,
+                    operation,
+                    status,
+                    generation,
+                });
+                Ok(true)
+            }
             Event::Snapshot {
                 observation,
                 snapshot,
                 ..
             } => {
+                let snapshot = *snapshot;
                 if observation != self.observation {
                     return Ok(false);
                 }
@@ -152,6 +313,42 @@ impl Observer {
                 }) {
                     return Ok(false);
                 }
+                if self
+                    .move_watch
+                    .as_ref()
+                    .is_some_and(|w| snapshot.identity.as_deref() != Some(w.actor.as_str()))
+                {
+                    self.move_watch = None;
+                    self.pending = None;
+                    self.checking_move = false;
+                    self.queued = None;
+                    self.outcome = None;
+                }
+                if self
+                    .replacement_watch
+                    .as_ref()
+                    .is_some_and(|w| snapshot.identity.as_deref() != Some(w.actor.as_str()))
+                {
+                    self.replacement_watch = None;
+                    self.pending = None;
+                    self.queued = None;
+                    self.outcome = None;
+                }
+                if self
+                    .import_watch
+                    .as_ref()
+                    .is_some_and(|w| snapshot.identity.as_deref() != Some(w.actor.as_str()))
+                {
+                    self.import_watch = None;
+                    self.pending = None;
+                    self.queued = None;
+                    self.outcome = None;
+                }
+                if let Some(watch) = &mut self.import_watch
+                    && self.cursor.as_ref() != Some(&snapshot.cursor)
+                {
+                    watch.due = true;
+                }
                 let changed = self.snapshot.as_ref() != Some(&snapshot);
                 self.cursor = Some(snapshot.cursor.clone());
                 self.snapshot = Some(snapshot);
@@ -165,10 +362,19 @@ impl Observer {
                 created,
                 ..
             } => {
-                if self.pending != Some(id) {
+                if self.pending != Some(id)
+                    || self.sharing
+                    || self.checking_move
+                    || self.replacement_watch.as_ref().is_some_and(|w| w.checking)
+                    || self.import_watch.is_some()
+                {
                     return Ok(false);
                 }
                 self.pending = None;
+                self.move_watch = None;
+                if status != ManagementStatus::Unavailable {
+                    self.replacement_watch = None;
+                }
                 self.outcome = Some(Outcome::Decided {
                     id,
                     status,

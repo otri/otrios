@@ -8,6 +8,17 @@ pub(super) struct Preview {
     position: [f32; 2],
 }
 impl Client {
+    /// Trusted host selection controls expose their role independently of value.
+    pub fn control_is_checkbox(&self, id: u32) -> Result<bool> {
+        if !self.host_active {
+            return Ok(false);
+        }
+        Ok(self.scene()?.controls().iter().any(|c| {
+            c.node.id == id
+                && matches!(c.node.responder, Some(TouchResponder::Activate(Action::AppEvent(control)))
+                    if matches!(self.host_actions.get(&control), Some(HostAction::ToggleRemoveData)))
+        }))
+    }
     pub(super) fn preview_map_drag(&mut self) {
         let preview = self.host.drag.as_ref().filter(|d| d.moving).and_then(|d| {
             let snapshot = self.spaces.snapshot()?;
@@ -23,6 +34,17 @@ impl Client {
                     .title
                     .clone(),
                 DragKind::Resize(_) => "Resize Space".into(),
+                DragKind::Dataset(space, _, cid) => format!(
+                    "{} (data)",
+                    snapshot
+                        .spaces
+                        .iter()
+                        .find(|s| s.id == *space)?
+                        .retained
+                        .iter()
+                        .find(|d| d.collection == *cid)?
+                        .title
+                ),
                 DragKind::Pan => return None,
             };
             Some(Preview {
@@ -41,7 +63,12 @@ impl Client {
         };
         let dt = now.saturating_sub(drag.last_tick).min(50) as f32 / 1000.;
         drag.last_tick = now;
-        if !drag.moving || !matches!(drag.kind, DragKind::Space(_) | DragKind::App(..)) {
+        if !drag.moving
+            || !matches!(
+                drag.kind,
+                DragKind::Space(_) | DragKind::App(..) | DragKind::Dataset(..)
+            )
+        {
             return Ok(false);
         }
         let Some(mount) = &mut self.active else {
@@ -120,6 +147,14 @@ impl Client {
         let Some(mount) = &mut self.active else {
             return Ok(false);
         };
+        if let Some(scroll) = &mut mount.panel_scroll {
+            let before = scroll.info().offset;
+            scroll.set_offset([0., before[1] + delta]);
+            self.host.panel_scroll = scroll.info().offset[1];
+            let changed = before != scroll.info().offset;
+            mount.invalidate_presentation();
+            return Ok(changed);
+        }
         let Some(scroll) = &mut mount.map_scroll else {
             return Ok(false);
         };
@@ -158,14 +193,17 @@ impl Client {
         self.host.editing
             && match self.map_action_for(id) {
                 Some(
-                    HostAction::MapSpace(s) | HostAction::MapApp(s, _) | HostAction::Resize(s),
+                    HostAction::MapSpace(s)
+                    | HostAction::MapApp(s, _)
+                    | HostAction::MapDataset(s, _, _)
+                    | HostAction::Resize(s),
                 ) => self.map_admin(s),
                 _ => false,
             }
     }
     fn send_map_change(&mut self, change: Change) -> Result<bool> {
         self.host.message = if self.spaces.request(change).is_ok() {
-            "Saving…"
+            ""
         } else {
             "Wait for the current change, then try again."
         }
@@ -180,6 +218,13 @@ impl Client {
         let Some(action) = self.map_action_for(id).cloned() else {
             return Ok(false);
         };
+        if dx == 0 && dy == 0 {
+            return match action {
+                HostAction::MapApp(s, a) => self.begin_host_move(s, a, None, None),
+                HostAction::MapDataset(s, a, cid) => self.begin_host_move(s, a, Some(cid), None),
+                _ => Ok(false),
+            };
+        }
         let direction = if dx != 0 { dx.signum() } else { -dy.signum() };
         let snapshot = self.spaces.snapshot().ok_or("Spaces unavailable")?;
         let change = match action {
@@ -187,7 +232,9 @@ impl Client {
                 let visible = snapshot
                     .spaces
                     .iter()
-                    .filter(|s| s.attached_count > 0 || s.role == Some(Role::Admin))
+                    .filter(|s| {
+                        !s.archived && (s.attached_count > 0 || s.role == Some(Role::Admin))
+                    })
                     .map(|s| s.id.clone())
                     .collect::<Vec<_>>();
                 let index = visible
@@ -263,7 +310,7 @@ impl Client {
         at: u64,
     ) -> Result<Option<bool>> {
         if !matches!(self.host.pane, Pane::Home | Pane::Spaces) {
-            return Ok(None);
+            return self.host_panel_pointer(epoch, event, at);
         }
         let viewport = self
             .viewport
@@ -273,12 +320,20 @@ impl Client {
             if epoch != self.epoch() || self.host.drag.is_some() {
                 return Ok(None);
             }
-            if event.position[1] < 104. || event.position[1] > viewport[1] - 80. {
+            if event.position[1] < 104. || event.position[1] >= viewport[1] {
                 return Ok(None);
             }
             let action = self.map_action_at(event.position)?;
             // Plus/ellipsis retain ordinary activation and never start a drag.
-            if matches!(action, Some(HostAction::Settings(..))) {
+            if matches!(
+                action,
+                Some(
+                    HostAction::Settings(..)
+                        | HostAction::Edit
+                        | HostAction::Page(_)
+                        | HostAction::Pane(Pane::Create)
+                )
+            ) {
                 return Ok(None);
             }
             let kind = match &action {
@@ -287,6 +342,11 @@ impl Client {
                 }
                 Some(HostAction::MapApp(s, a)) if self.host.editing && self.map_admin(s) => {
                     DragKind::App(s.clone(), a.clone())
+                }
+                Some(HostAction::MapDataset(s, a, cid))
+                    if self.host.editing && self.map_admin(s) =>
+                {
+                    DragKind::Dataset(s.clone(), a.clone(), cid.clone())
                 }
                 Some(HostAction::Resize(s)) if self.host.editing && self.map_admin(s) => {
                     DragKind::Resize(s.clone())
@@ -386,6 +446,7 @@ impl Client {
                         HostAction::MapSpace(s)
                         | HostAction::SpaceBody(s)
                         | HostAction::MapApp(s, _)
+                        | HostAction::MapDataset(s, _, _)
                         | HostAction::Settings(s, _),
                     ) if s != space => Some(s),
                     _ => return Ok(Some(true)),
@@ -411,6 +472,18 @@ impl Client {
                 Change::PlaceSpace { space, before }
             }
             DragKind::App(space, app) => {
+                if let Some(destination) = target
+                    .as_ref()
+                    .and_then(target_space)
+                    .filter(|s| *s != space)
+                {
+                    if self.map_admin(destination) {
+                        return self
+                            .begin_host_move(space, app, None, Some(destination.into()))
+                            .map(Some);
+                    }
+                    return Ok(Some(true));
+                }
                 let before = match target {
                     Some(HostAction::MapApp(s, a)) if s == space && a == app => {
                         return Ok(Some(true));
@@ -442,16 +515,27 @@ impl Client {
                     Some(
                         HostAction::MapSpace(s)
                         | HostAction::SpaceBody(s)
+                        | HostAction::MapDataset(s, _, _)
                         | HostAction::Settings(s, _),
                     ) if s == space => None,
                     _ => {
-                        self.host.message =
-                            "Moving apps between Spaces is not available yet.".into();
-                        self.build_host(true)?;
                         return Ok(Some(true));
                     }
                 };
                 Change::PlaceApp { space, app, before }
+            }
+            DragKind::Dataset(space, app, cid) => {
+                if let Some(destination) = target
+                    .as_ref()
+                    .and_then(target_space)
+                    .filter(|s| *s != space)
+                    && self.map_admin(destination)
+                {
+                    return self
+                        .begin_host_move(space, app, Some(cid), Some(destination.into()))
+                        .map(Some);
+                }
+                return Ok(Some(true));
             }
             DragKind::Resize(space) => {
                 let summary = self
@@ -475,6 +559,17 @@ impl Client {
     }
 }
 
+fn target_space(action: &HostAction) -> Option<&str> {
+    match action {
+        HostAction::MapSpace(s)
+        | HostAction::SpaceBody(s)
+        | HostAction::MapApp(s, _)
+        | HostAction::MapDataset(s, _, _)
+        | HostAction::Settings(s, _) => Some(s),
+        _ => None,
+    }
+}
+
 pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f32; 2]) {
     use crate::dashboard::components::{background, canvas, text};
     use otrios_interfaces::scene::Rect;
@@ -486,7 +581,7 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
         preview.position[1] - 76.
     };
     let caption: String = preview.caption.chars().take(24).collect();
-    root.children.push(canvas(
+    let mut preview = canvas(
         4_210_000_000,
         Rect::new(x, y, 180., 56.),
         vec![
@@ -499,7 +594,9 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
                 [44, 50, 43, 255],
             ),
         ],
-    ));
+    );
+    preview.responder = Some(TouchResponder::PassThrough);
+    root.children.push(preview);
 }
 
 /// Clip semantic controls on the presented clone, never the canonical layout.
@@ -507,37 +604,30 @@ pub(super) fn present_drag(root: &mut SceneNode, preview: &Preview, viewport: [f
 pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::text_scroll::Info) {
     use crate::dashboard::components::background;
     use otrios_interfaces::scene::Rect;
-    fn visible(node: &mut SceneNode, parent: [f32; 2], bounds: [f32; 2]) {
-        let position = [parent[0] + node.frame.x, parent[1] + node.frame.y];
-        if node.semantics.is_some()
-            && (position[0] < 0.
-                || position[1] < 0.
-                || position[0] + node.frame.width > bounds[0]
-                || position[1] + node.frame.height > bounds[1])
-        {
-            node.responder = None;
-            node.semantics = None;
-        }
-        for child in &mut node.children {
-            visible(child, position, bounds);
-        }
-    }
     if root.id == node {
         root.semantics = None;
         let bounds = [root.frame.width, root.frame.height];
         for child in &mut root.children {
-            visible(child, [0., 0.], bounds);
+            crate::dashboard::scene::clip_controls(child, [0., 0.], bounds);
         }
         if info.offset[1] + 0.5 < info.limit[1] {
+            let fade_height = 80_f32.min(bounds[1]);
+            let step_height = fade_height / 16.;
             for step in 0..16 {
                 let mut fade = background(
                     4_200_000_000 + step,
                     bounds[0],
-                    2.,
+                    step_height,
                     [247, 246, 240, ((step + 1) * 255 / 16) as u8],
                     0.,
                 );
-                fade.frame = Rect::new(0., bounds[1] - 32. + step as f32 * 2., bounds[0], 2.);
+                fade.frame = Rect::new(
+                    0.,
+                    bounds[1] - fade_height + step as f32 * step_height,
+                    bounds[0],
+                    step_height,
+                );
+                fade.responder = Some(TouchResponder::PassThrough);
                 root.children.push(fade);
             }
         }

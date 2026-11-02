@@ -219,18 +219,18 @@ RFC 0027 qualification's OTSP5-only fallback cannot write the upgraded registry.
 
 ### Short iteration loop
 
-Batch visual feedback in the local browser preview before freezing a candidate.
-Run the required `TMPDIR=/private/tmp bash scripts/check.sh` once for the final
-runtime changes. Browser qualification and documentation preparation can run in
-parallel when they use isolated fixtures. Build/sign the frozen candidate once;
-qualify its exact Wasm bytes rather than rebuilding another copy for acceptance.
-The frozen build's own checks remain part of signing.
+The default is live first: make a scoped change, compile/sign it, deploy to the
+existing Frame/Web environment, and test the changed behavior there. Use targeted
+local checks when useful; full repository suites and disposable browser campaigns
+are not routine pre-deployment gates. `watch-dashboard.py` builds and signs by
+default; pass `--checks` only when broad preflight is wanted.
 
-Deploy with the existing `deploy-dashboard-frame.py` workflow and a fresh private
-backup when required by the migration contract. Keep the compatible signed code
-fallback available. Exercise rollback for storage/protocol or deployment-mechanism
-changes; do not cycle releases for each visual refinement. Do not rerun the full
-suite after deployment when runtime source is unchanged.
+Use the existing signed activation workflow and retain a compatible signed code
+fallback. Ordinary PoC iterations do not require fresh paired data backups,
+confirmed-data inventories or preservation-audit campaigns. Add those steps when
+requested or when migration/recovery/rollback is the work being tested. Promotion
+keeps small private copies of previous release-control files without requiring a
+data snapshot. Do not roll confirmed data back as part of a code rollback.
 
 Finish with one combined readiness/health/collector check:
 
@@ -269,23 +269,24 @@ publisher public key. Unchanged authority bytes do not trigger a restart.
 ```sh
 python3 scripts/watch-dashboard.py --config /ABS/RUNTIME/config.json
 python3 scripts/watch-dashboard.py --config /ABS/STAGING-CONFIG.json --once --stage-only
+# Optional broad preflight:
+python3 scripts/watch-dashboard.py --config /ABS/STAGING-CONFIG.json --once --checks
 python3 scripts/activate-dashboard-release.py --help
 ```
 
 Staging writes `build/staged-release.json` without advancing the live pointer or
-source marker. Test a disposable authority first. Pause the watcher, snapshot
-service files and stopped durable state, install the matching authority and frame
-supervisor/helper, then activate. Keep one private operational rollback snapshot
-and signed cached releases. Rollback across retired protocols must restore the
-matching server and agents together; a browser may need a launcher-root visit.
+source marker. It is an artifact-building step, not a requirement for an isolated
+acceptance campaign. Deploy the signed candidate and perform focused live checks.
+For storage or protocol cutovers, retain the matching compatible server and agents;
+a browser may need a launcher-root visit after an incompatible rollback.
 
 ## Qualified cutover order
 
-Push the tested source commit and verify that the configured remote can fetch
-that exact SHA **before** stopping or activating anything. Freeze and qualify
-matching authority/native/browser builds, verify the signed local replica, then
-pin the watcher to that tested commit. Do not activate an unpushed source pin.
-Retain a rollback copy before replacing installed binaries/helpers.
+Build from a known local source revision, verify the signed replica and deploy it
+for live acceptance. Finish review follow-ups before the single completed push;
+do not require a work-in-progress push before each live iteration. Pin and resume
+the Git-backed watcher only after its exact source SHA is reachable remotely.
+Keep previous release-control files and a compatible signed release available.
 
 The frame supervisor and direct service are one deployment unit: install their
 matching versions together, preserving the accepted rotation and touch calibration.

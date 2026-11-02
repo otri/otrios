@@ -89,7 +89,7 @@ fn payload_path(path: &str) -> bool {
             .any(|prefix| path.starts_with(prefix)))
 }
 
-fn metadata<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
+pub(crate) fn metadata<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     if bytes.len() > MAX_METADATA_BYTES {
         return Err("Bundle metadata budget exceeded".into());
     }
@@ -244,6 +244,23 @@ pub fn compatible_install(previous: &VerifiedBundle, next: &VerifiedBundle) -> R
         || (previous.summary.digest != next.summary.digest && after.revision <= before.revision)
     {
         return Err("App install identity, state, policy or revision conflict".into());
+    }
+    Ok(())
+}
+
+/// The bounded Canvas host has stricter discovery/launch limits than offline
+/// metadata inspection. Reject an ineligible bundle before composing a release.
+pub fn qualify_install(bundle: &VerifiedBundle) -> Result<()> {
+    let app = &bundle.summary.info.app;
+    if app.title.trim().is_empty()
+        || app.title.len() > 96
+        || app.title.chars().any(char::is_control)
+        || !otrios_interfaces::canvas::valid_destination(&app.id)
+        || app.ui_ref != format!("app:{}/ui", app.id)
+        || app.state_ref.is_empty()
+        || app.state_ref.len() > 128
+    {
+        return Err("Bundle exceeds current host discovery/launch limits".into());
     }
     Ok(())
 }
