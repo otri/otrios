@@ -204,17 +204,19 @@ pub fn description() -> Ui {
     let wide = row(
         24.,
         vec![
-            place("preview", [584., 500.]),
-            place("inspector", [624., 500.]),
+            place("preview", [584., 500.]).flex_height(),
+            place("inspector", [624., 500.]).flex_height(),
         ],
-    );
+    )
+    .flex_height();
     let tall = column(
         24.,
         vec![
-            place("preview", [752., 450.]),
-            place("inspector", [752., 640.]),
+            place("preview", [752., 450.]).flex_height(),
+            place("inspector", [752., 640.]).flex_height(),
         ],
-    );
+    )
+    .flex_height();
     AppUi::new(
         "live-ui",
         "Live UI",

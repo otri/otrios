@@ -44,13 +44,16 @@ impl Document {
         };
         let encoded = bytes(&binding)?;
         let existing = payload(&self.tree, &[4, 0]).ok();
+        let mut initialize_instances = seed.instance_surface.is_some();
         if let Some(existing) = &existing {
+            let previous: Binding = decode(existing)?;
+            initialize_instances &= previous.seed.instance_surface.is_none();
             if *existing == encoded {
                 self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
                 self.oib_compiled(2)?;
                 return Ok(false);
             }
-            if !compatible_upgrade(&decode(existing)?, &binding) {
+            if !compatible_upgrade(&previous, &binding) {
                 return Err("OIB seed update needs explicit compatible migration".into());
             }
         }
@@ -93,7 +96,7 @@ impl Document {
                 }
             }
         }
-        if seed.instance_surface.is_some() {
+        if initialize_instances {
             let allocations = super::super::oib::instances::initial_allocations(seed);
             edits.push(Edit {
                 path: vec![4, 4],
@@ -757,6 +760,16 @@ fn property_text(
 }
 
 fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
+    // A signed presentation update can retain the exact OIB contract. Keep all
+    // allocated identities, tombstones and overrides; this is not seed rebasing.
+    if old.ui_ref == new.ui_ref
+        && bytes(&old.seed)
+            .ok()
+            .zip(bytes(&new.seed).ok())
+            .is_some_and(|(old, new)| old == new)
+    {
+        return true;
+    }
     let Some(surface) = &new.seed.instance_surface else {
         return false;
     };

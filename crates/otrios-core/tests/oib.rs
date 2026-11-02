@@ -216,7 +216,9 @@ fn invalid_and_unauthorized_edits_keep_the_active_ui_and_receipts_atomic() {
     );
     assert_eq!(doc.root_hash(), before);
     let mut changed = ui.clone();
-    changed.title = "Wrong seed".into();
+    if let Some(Presentation::Oib(seed)) = &mut changed.presentation {
+        seed.cells[0].default = Value::Text("Wrong seed".into());
+    }
     assert!(doc.configure_oib(&changed).is_err());
 }
 #[test]
@@ -912,6 +914,81 @@ fn exact_signed_o1_upgrade_preserves_properties_and_journal_recovery() {
 }
 
 #[test]
+fn signed_presentation_update_keeps_the_exact_seed_and_retained_instances() {
+    let bytes =
+        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-o2-ui.lz4")).unwrap();
+    let old = decode_ui(&bytes).unwrap();
+    let new = app::ui(&[]);
+    assert_eq!(oib::seed(&old), oib::seed(&new));
+    assert_ne!(old.layout, new.layout);
+    let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
+    doc.configure_oib(&old).unwrap();
+    let (mut a, mut sa) = adapter(&old, &mut doc, 1, true);
+    for name in ["retained", "removed"] {
+        a.instantiate_oib(10, Some(name.into())).unwrap();
+        sync(&mut doc, &mut sa, &mut a);
+    }
+    a.edit_oib_instance_property(65538, "label", Some(Value::Text("Keep".into())))
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut a);
+    a.remove_oib(65539).unwrap();
+    sync(&mut doc, &mut sa, &mut a);
+    doc.set_typed(&[(1, Value::Number(730.))]).unwrap();
+    let checkpoint = doc.save().unwrap();
+    let before = doc.clone();
+    assert!(doc.configure_oib(&new).unwrap());
+    assert_eq!(
+        doc.oib_allocations().unwrap(),
+        before.oib_allocations().unwrap()
+    );
+    for branch in [1, 2] {
+        assert_eq!(
+            doc.oib_live(branch).unwrap(),
+            before.oib_live(branch).unwrap()
+        );
+        assert_eq!(
+            doc.oib_values(branch).unwrap(),
+            before.oib_values(branch).unwrap()
+        );
+    }
+    assert_eq!(
+        doc.oib_status().unwrap().active_root,
+        before.oib_status().unwrap().active_root
+    );
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(730.));
+    let mut restored = Document::load(old.state_schema.clone(), "oib:test", &checkpoint).unwrap();
+    restored
+        .replay(&doc.journal_delta(&before).unwrap())
+        .unwrap();
+    assert!(!restored.configure_oib(&new).unwrap());
+    assert_eq!(restored.root_hash(), doc.root_hash());
+
+    let (mut client, mut session) = mounted_client(&new, &mut doc);
+    pump_client(&mut client, &mut doc, &mut session);
+    let scene = client.scene().unwrap();
+    let seed = oib::seed(&new).unwrap();
+    let surface = seed.instance_surface.as_ref().unwrap();
+    for (viewport, inset) in [
+        (surface.preview_viewport, 16.),
+        (seed.inspector_viewport, 16.),
+    ] {
+        let path = scene.path(u32::from(viewport)).unwrap();
+        let p = path.last().unwrap();
+        assert_eq!(p.origin[1] + p.node.frame.height * p.scale + inset, 776.);
+    }
+    client.set_viewport([800., 1280.]).unwrap();
+    let tall = client.scene().unwrap();
+    let path = tall.path(u32::from(seed.inspector_viewport)).unwrap();
+    let p = path.last().unwrap();
+    assert_eq!(p.origin[1] + p.node.frame.height * p.scale + 16., 1256.);
+    let mut incompatible = new.clone();
+    if let Some(Presentation::Oib(seed)) = &mut incompatible.presentation {
+        seed.cells[0].default = Value::Text("changed contract".into());
+    }
+    assert!(doc.configure_oib(&incompatible).is_err());
+}
+
+#[test]
 fn structural_activation_waits_for_a_held_slider_and_preserves_local_inspection() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase, TouchResponder};
     let (ui, mut doc) = setup();
@@ -984,8 +1061,8 @@ fn structural_activation_waits_for_a_held_slider_and_preserves_local_inspection(
             .iter()
             .filter(|c| matches!(c.node.responder, Some(TouchResponder::Drag(_))))
             .count(),
-        2,
-        "third slider starts below the clipped preview"
+        3,
+        "the taller preview exposes the third slider after activation"
     );
 }
 #[test]
