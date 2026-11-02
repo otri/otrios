@@ -599,12 +599,24 @@ pub fn decode_server(bytes: &[u8]) -> Result<ServerMessage> {
 pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Result<()> {
     let tag = match value {
         StateRequest::OibWrite { .. } => 37,
+        StateRequest::OibInstance { .. } => 38,
         StateRequest::Hello { .. } => 33,
         StateRequest::Write { .. } => 34,
         StateRequest::Ack { .. } => 35,
         StateRequest::Resync => 36,
     };
     write(out, tag, |w| match value {
+        StateRequest::OibInstance {
+            sequence,
+            operation,
+        } => {
+            w.u64(*sequence)?;
+            let bytes = flexbuffers::to_vec(operation).map_err(err)?;
+            if bytes.len() > otrios_interfaces::oib::MAX_BYTES {
+                return Err("OIB instance operation budget".into());
+            }
+            w.blob(&bytes)
+        }
         StateRequest::OibWrite { sequence, changes } => {
             if changes.is_empty() || changes.len() > otrios_interfaces::oib::MAX_CHANGES {
                 return Err("OIB batch limit".into());
@@ -652,6 +664,20 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
     }
     read(bytes, |r| {
         let message = match r.u8()? {
+            38 => {
+                let sequence = r.u64()?;
+                let bytes = r.blob(otrios_interfaces::oib::MAX_BYTES)?;
+                crate::flex_guard::validate(&bytes, 24, 131072, 65536)?;
+                let operation: otrios_interfaces::oib::InstanceOperation =
+                    flexbuffers::from_slice(&bytes).map_err(err)?;
+                if flexbuffers::to_vec(&operation).map_err(err)? != bytes {
+                    return Err("Noncanonical OIB instance operation".into());
+                }
+                StateRequest::OibInstance {
+                    sequence,
+                    operation,
+                }
+            }
             37 => {
                 let sequence = r.u64()?;
                 let bytes = r.blob(otrios_interfaces::oib::MAX_BYTES)?;

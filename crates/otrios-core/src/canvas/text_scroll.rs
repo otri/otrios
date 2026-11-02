@@ -29,6 +29,12 @@ impl Scroll {
             bounds_dirty: true,
         }
     }
+    pub fn set_content(&mut self, content: [f32; 2]) {
+        if self.content != content {
+            self.content = content;
+            self.bounds_dirty = true;
+        }
+    }
     pub fn node(&self) -> u32 {
         self.node
     }

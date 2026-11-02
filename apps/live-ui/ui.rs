@@ -114,6 +114,7 @@ pub fn description() -> Ui {
             },
         ],
         cells,
+        instance_surface: None,
         inspector_viewport: 0,
         inspector_content: [560., 1120.],
     };
@@ -128,47 +129,77 @@ pub fn description() -> Ui {
         ]);
     }
     let mut inspector = vec![];
-    let mut y = 0.;
-    for (owner, start) in [
-        ("Component: LabeledSlider", 100),
-        ("Instance: volume", 200),
-        ("Instance: brightness", 300),
+    for (owner, start, y) in [
+        ("Component: LabeledSlider", 100, 0.),
+        ("Instance: volume", 200, 344.),
+        ("Instance: brightness", 300, 752.),
     ] {
-        inspector.push(text(owner).frame([8., y, 540., 32.]).color(BLUE));
-        y += 48.;
+        let title = if start == 200 {
+            format!("{owner} · Volume binding")
+        } else if start == 300 {
+            format!("{owner} · Brightness binding")
+        } else {
+            owner.into()
+        };
+        let mut rows = vec![text(title.as_str()).frame([8., 0., 540., 32.]).color(BLUE)];
+        let mut row_y = 48.;
+        if start != 100 {
+            let instance = if start == 200 { 20 } else { 30 };
+            rows.push(
+                button("Duplicate")
+                    .frame([8., 40., 160., 56.])
+                    .on_press(Event::oib_instance(instance, InstanceAction::Duplicate)),
+            );
+            rows.push(
+                button("Remove")
+                    .frame([184., 40., 160., 56.])
+                    .on_press(Event::oib_instance(instance, InstanceAction::Remove)),
+            );
+            row_y = 112.;
+        }
         for (index, label) in ["Label", "Accent", "Width", "Spacing"].iter().enumerate() {
             let id = start + index as u64;
-            inspector.push(
+            rows.push(
                 text(ValueExpr::State(
                     StateField::normalized(0, "oib-cell", 0),
                     Projection::OibCell { cell: id },
                 ))
-                .frame([8., y + 4., 168., 48.])
+                .frame([8., row_y + 4., 168., 48.])
                 .font_scale(1.),
             );
-            inspector.push(
+            rows.push(
                 button("Change")
-                    .frame([176., y, 112., 56.])
+                    .frame([176., row_y, 112., 56.])
                     .semantic_label(&format!("{owner} {label} change"))
                     .on_press(Event::oib(id, InspectorAction::Cycle)),
             );
             if start != 100 {
-                inspector.push(
+                rows.push(
                     button("Reset")
-                        .frame([296., y, 112., 56.])
+                        .frame([296., row_y, 112., 56.])
                         .semantic_label(&format!("{owner} {label} reset"))
                         .on_press(Event::oib(id, InspectorAction::Clear)),
                 );
             }
-            inspector.push(
+            rows.push(
                 button("Default")
-                    .frame([416., y, 128., 56.])
+                    .frame([416., row_y, 128., 56.])
                     .semantic_label(&format!("{owner} {label} resolve to default"))
                     .on_press(Event::oib(id, InspectorAction::Resolve)),
             );
-            y += 68.;
+            row_y += 68.;
         }
-        y += 24.;
+        inspector.push(
+            component([560., 408.], rows)
+                .frame([0., y, 560., 408.])
+                .key(if start == 100 {
+                    "component-inspector"
+                } else if start == 200 {
+                    "volume-inspector"
+                } else {
+                    "brightness-inspector"
+                }),
+        );
     }
     let wide = row(
         24.,
@@ -195,6 +226,26 @@ pub fn description() -> Ui {
         column(24., vec![heading(), tall]),
     )
     .with_oib(seed, "inspector-scroll", targets)
+    .with_oib_instances(NamedOibSurface {
+        previous_ui_sha256: [
+            0x5a, 0x89, 0xe8, 0x8f, 0x9e, 0x00, 0xa6, 0xb3, 0x47, 0x1c, 0x2c, 0x14, 0x7c, 0x81,
+            0xa6, 0x4c, 0x83, 0xd4, 0xd1, 0x9f, 0xba, 0xff, 0x7f, 0xe9, 0xe0, 0xb8, 0x58, 0xc5,
+            0xe7, 0x38, 0x47, 0x02,
+        ]
+        .to_vec(),
+        preview: "preview-scroll".into(),
+        preview_stride: 216.,
+        inspector_start: 344.,
+        inspector_stride: 408.,
+        prototypes: [(20, "volume"), (30, "brightness")]
+            .into_iter()
+            .map(|(instance, name)| NamedOibPrototype {
+                instance,
+                preview: format!("{name}-preview"),
+                inspector: format!("{name}-inspector"),
+            })
+            .collect(),
+    })
     .build(
         "Live UI",
         vec![
@@ -202,14 +253,36 @@ pub fn description() -> Ui {
                 [584., 500.],
                 vec![
                     surface(CARD, 16.).pin_edges(0.),
-                    text("volume · LabeledSlider")
-                        .frame([24., 20., 536., 28.])
-                        .color(MUTED),
-                    slider("volume", VOLUME, 68.),
-                    text("brightness · LabeledSlider")
-                        .frame([24., 236., 536., 28.])
-                        .color(MUTED),
-                    slider("brightness", BRIGHTNESS, 284.),
+                    canvas(vec![
+                        component(
+                            [560., 216.],
+                            vec![
+                                button("volume · Volume binding")
+                                    .on_press(Event::oib_instance(20, InstanceAction::Inspect))
+                                    .frame([0., 0., 520., 40.]),
+                                slider("volume", VOLUME, 48.).x(0.0.into()),
+                            ],
+                        )
+                        .frame([0., 0., 560., 216.])
+                        .key("volume-preview"),
+                        component(
+                            [560., 216.],
+                            vec![
+                                button("brightness · Brightness binding")
+                                    .on_press(Event::oib_instance(30, InstanceAction::Inspect))
+                                    .frame([0., 0., 520., 40.]),
+                                slider("brightness", BRIGHTNESS, 48.).x(0.0.into()),
+                            ],
+                        )
+                        .frame([0., 216., 560., 216.])
+                        .key("brightness-preview"),
+                    ])
+                    .frame([24., 20., 536., 464.])
+                    .pin_left(24.)
+                    .pin_right(24.)
+                    .pin_top(20.)
+                    .pin_bottom(16.)
+                    .key("preview-scroll"),
                 ],
             )
             .frame([24., 120., 584., 500.])
@@ -225,12 +298,18 @@ pub fn description() -> Ui {
                     .frame([16., 12., 592., 32.])
                     .color(MUTED)
                     .pin_right(16.),
+                    button("Add LabeledSlider")
+                        .frame([16., 52., 280., 56.])
+                        .on_press(Event::oib_instance(10, InstanceAction::Add)),
+                    button("Remove pending")
+                        .frame([312., 52., 280., 56.])
+                        .on_press(Event::oib_instance(1, InstanceAction::RemovePending)),
                     canvas(inspector)
-                        .frame([16., 56., 592., 428.])
+                        .frame([16., 120., 592., 364.])
                         .key("inspector-scroll")
                         .pin_left(16.)
                         .pin_right(16.)
-                        .pin_top(56.)
+                        .pin_top(120.)
                         .pin_bottom(16.),
                 ],
             )

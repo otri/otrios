@@ -142,3 +142,7 @@ required-features = ["canvas", "host-sync"]
 [[example]]
 name = "touch_calibration"
 required-features = ["direct"]
+
+[[example]]
+name = "oib_instance_probe"
+required-features = ["canvas", "host-sync"]

@@ -2,15 +2,27 @@
 # Live OIB UI
 
 OIB O1 implements the property-editing slice of
-[RFC 0029](rfcs/0029-live-oib-ui.md). It is deployed and qualified on
-[browser and Frame](experiments/live-oib-2026-11-02.md). Structural
-graph editing and executable main-class APIs remain later increments.
+[RFC 0029](rfcs/0029-live-oib-ui.md). Its original qualification is recorded on
+[browser and Frame](experiments/live-oib-2026-11-02.md).
+[O2](rfcs/0030-live-oib-instances.md) adds bounded live creation, duplication and
+removal through shared typed operations. O2 live qualification is pending.
+Executable main-class and outlet APIs remain later increments.
 
 Add the installed **Live UI** app to a Space using its Admin controls, then open
 **Test Playground → Live UI** in that same Space (or launch its Space tile).
-The screen contains
-two instances, `volume` and `brightness`, of `LabeledSlider`. Its scrolling
-inspector has sections for the component and each instance.
+The screen starts with `volume` and `brightness` instances of `LabeledSlider`.
+Use **Add LabeledSlider** to create another instance. Tap an instance heading to
+inspect it, then use **Duplicate** or **Remove**. The preview and inspector scroll
+independently; pan the preview background or use a wheel over it to reach lower
+instances. The inspector contains the component and your locally selected instance.
+
+Added sliders use the declared Volume binding; duplicates retain their source's
+Volume or Brightness binding and copy its active overrides. Binding names are
+shown in the headings. Creating new app-content fields or reconnecting bindings
+is outside O2. The first delivery admits six live instances and ten lifetime
+allocations, including the seed instances. Removed identities remain retained;
+the status shows the remaining allocation budget. **Remove pending** resolves an
+unactivated new instance, such as a concurrent duplicate-name conflict.
 
 - **Change** cycles through suggestions authored by the app for label, accent,
   width or spacing. Component edits affect both instances unless overridden.
@@ -64,7 +76,8 @@ contains measurements and remaining limits.
 component/instance identities, the fixed property table and admitted mappings to
 layout nodes. O1 uses `otrios.declarative-v1`, the existing declarative event
 interpreter, without adding guest imports or an execution backend. The immutable
-bundle requires both `otrios-canvas-v8` and `otrios-oib-v1`. Old hosts reject these
+bundle requires `otrios-canvas-v8`, `otrios-oib-v1` and, for an instance surface,
+`otrios-oib-instances-v1`. Old hosts reject these
 requirements; they cannot silently interpret the OIB as legacy UI.
 
 The public contracts live in `otrios_interfaces::oib`, also reexported as
@@ -73,15 +86,29 @@ The public contracts live in `otrios_interfaces::oib`, also reexported as
 apps. App-defined inspector choices are data; the runtime contains no slider-
 specific labels, colors or property names.
 
+`Client::instantiate_oib(component_id, name)`, `duplicate_oib(instance_id, name)`
+and `remove_oib(instance_id)` use the same operations as the inspector.
+`edit_oib_instance_property(instance_id, "label", Some(Value::Text(...)))`
+addresses a declared named property; `None` clears its override. The corresponding
+StateAdapter methods use the same admitted property table. Wasm host exports
+`oib_instantiate`, `oib_duplicate`, `oib_remove`, `oib_property` and `oib_inspect`
+expose this host API; they do not add a guest Wasm import or execution backend.
+Wait for confirmation after creation, then find the allocated stable ID among
+`resource_usage().oib.instances`, filtering for active instances. Local inspection
+uses `Client::inspect_oib` and never emits a shared operation.
+
 `Client::edit_oib(&[(cell_id, Some(value))])` and
 `StateAdapter::edit_oib` use the same typed operation as the inspector. `None`
 causally clears an instance override. Only one issued OIB batch is retained per
 writer; wait for confirmation before submitting another. A batch has at most
 16 distinct cells. Observed leaf snapshots are captured before issuing it.
 
-The new request is tag 37 in state protocol **v21**: u64 writer sequence followed
+Property writes use tag 37 in state protocol **v22** (introduced in v21): u64 writer sequence followed
 by a bounded blob containing the canonical FlexBuffers vector of `Change` values.
-Each change contains a stable u64 cell ID, optional typed value and the observed
+Tag 38 carries one bounded canonical InstanceOperation under the same writer
+sequence/receipt contract. Allocation, draft/active changes and receipt are
+journaled before publication. A rejected draft keeps the exact active root.
+Each property change contains a stable u64 cell ID, optional typed value and the observed
 canonical Merkle leaf. The authority checks observed context against its retained
 context, then assigns against that observation and joins concurrent values. It
 does not turn a stale observation into a write against the newest authority head.
@@ -94,6 +121,9 @@ The collection's existing Canvas root adds branch 4:
 | `[4, 1, <13 base-32 digits of CellId>]` | Draft causal property register |
 | `[4, 2, <13 base-32 digits of CellId>]` | Active resolved property register |
 | `[4, 3]` | Active generation/root, source draft hash, conflict IDs and bounded error |
+| `[4, 4]` | Append-only authority allocation ledger |
+| `[4, 5, <13 base-32 digits of InstanceId>]` | Draft causal presence |
+| `[4, 6, <13 base-32 digits of InstanceId>]` | Active resolved presence |
 
 Cell paths have depth 15 and fanout at most 32. The current implementation stores
 the fixed descriptor table once in metadata instead of at every cell. Clients
@@ -117,9 +147,14 @@ message, receipt and journal limits continue to apply.
 
 ## Current boundaries
 
-The graph and bindings are fixed by the signed seed. Creating/deleting instances,
-reparenting, new code connections, arbitrary guest UI mutation imports and seed
-rebasing are not implemented. An incompatible seed reports unavailable retained
+Component factories and bindings are fixed by the signed seed. O2 creates,
+duplicates and removes instances under the main OIB in authority allocation
+order. Reparenting, arbitrary template edits, new code connections, guest UI
+mutation imports and general seed rebasing are not implemented. The signed O2
+surface permits one exact O1 upgrade, preserving its property contracts, values,
+conflicts and app data. O2 bundles require `otrios-oib-instances-v1`; derived
+layout v5 reserves sparse responder identities without increasing control-count
+limits. Earlier layouts retain their event-ID bound. An incompatible seed reports unavailable retained
 UI rather than silently discarding its overrides. Resetting one property is an
 ordinary causal edit; code rollback never restores old app data.
 
@@ -127,7 +162,7 @@ The inspector currently offers app-authored choices. The typed client API accept
 other values within the admitted property type and limits. A general free-text
 property editor remains separate UI work.
 
-**Portable data export/replacement for Live UI is unavailable in O1.** Its
+**Portable data export/replacement for Live UI remains unavailable in O2.** Its
 current codec does not yet include the OIB
 namespace, so the authority refuses the entire transfer instead of omitting UI
 state. Other apps retain their existing portable transfers. Signed app sharing

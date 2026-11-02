@@ -225,6 +225,39 @@ impl CanvasApp {
     pub fn scroll_map(&mut self, epoch: u32, delta: f32) -> Result<bool, String> {
         self.inner.scroll_map(epoch, delta)
     }
+    pub fn scroll_at(&mut self, epoch: u32, delta: f32, x: f32, y: f32) -> Result<bool, String> {
+        self.inner.scroll_at(epoch, delta, [x, y])
+    }
+    pub fn oib_instantiate(
+        &mut self,
+        component: u64,
+        name: Option<String>,
+    ) -> Result<bool, String> {
+        self.inner.instantiate_oib(component, name)
+    }
+    pub fn oib_duplicate(&mut self, instance: u64, name: Option<String>) -> Result<bool, String> {
+        self.inner.duplicate_oib(instance, name)
+    }
+    pub fn oib_remove(&mut self, instance: u64) -> Result<bool, String> {
+        self.inner.remove_oib(instance)
+    }
+    pub fn oib_inspect(&mut self, instance: u64) -> Result<bool, String> {
+        self.inner.inspect_oib(instance)
+    }
+    pub fn oib_property(
+        &mut self,
+        instance: u64,
+        property: &str,
+        value: &str,
+    ) -> Result<bool, String> {
+        if property.len() > 64 || value.len() > 1024 {
+            return Err("OIB property argument budget".into());
+        }
+        let value: Option<otrios_interfaces::layout::Value> =
+            serde_json::from_str(value).map_err(|e| e.to_string())?;
+        self.inner
+            .edit_oib_instance_property(instance, property, value)
+    }
     pub fn scroll_text_input(&mut self, epoch: u32, id: u32, offset: f32) -> Result<bool, String> {
         self.inner.scroll_text_input(epoch, id, offset)
     }

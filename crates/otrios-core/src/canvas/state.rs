@@ -629,6 +629,49 @@ impl Document {
             .writer
             .ok_or("State write without admitted writer")?;
         match request {
+            StateRequest::OibInstance {
+                sequence,
+                operation,
+            } => {
+                if !session.oib_edit {
+                    return Err("OIB editing requires Space Admin admission".into());
+                }
+                let slot = session.slot.ok_or("Missing OIB writer receipt")?;
+                let mut receipt: Receipt = decode(&payload(&self.tree, &path(2, slot))?)?;
+                if receipt.writer != hash(&writer) {
+                    return Err("OIB writer receipt retired".into());
+                }
+                let digest = hash(&bytes(&("oib-instances-v1", &operation))?);
+                if sequence <= receipt.sequence {
+                    if sequence != receipt.sequence || receipt.digest != digest {
+                        return Err("Changed OIB replay".into());
+                    }
+                    return Ok(false);
+                }
+                if sequence
+                    != receipt
+                        .sequence
+                        .checked_add(1)
+                        .ok_or("Writer sequence exhausted")?
+                {
+                    return Err("OIB intent sequence gap".into());
+                }
+                let mut candidate = self.clone();
+                candidate.oib_instance_write(writer, &operation)?;
+                receipt.sequence = sequence;
+                receipt.digest = digest;
+                receipt.time = self.wall;
+                candidate.change(
+                    &[],
+                    vec![Edit {
+                        path: path(2, slot),
+                        schema: self.extra_schema(2, slot),
+                        value: Some(bytes(&receipt)?),
+                    }],
+                )?;
+                self.tree = candidate.tree;
+                Ok(true)
+            }
             StateRequest::OibWrite { sequence, changes } => {
                 if !session.oib_edit {
                     return Err("OIB editing requires Space Admin admission".into());
@@ -790,6 +833,7 @@ impl Document {
 #[derive(Clone)]
 struct Flight {
     oib: Vec<otrios_interfaces::oib::Change>,
+    oib_instance: Option<otrios_interfaces::oib::InstanceOperation>,
     sequence: u64,
     values: Vec<(u16, Value)>,
     sent: bool,
@@ -1040,10 +1084,9 @@ impl StateAdapter {
     }
     pub fn pending_count(&self) -> usize {
         self.pending.len()
-            + self
-                .flight
-                .as_ref()
-                .map_or(0, |f| f.values.len() + f.oib.len())
+            + self.flight.as_ref().map_or(0, |f| {
+                f.values.len() + f.oib.len() + usize::from(f.oib_instance.is_some())
+            })
     }
     pub fn state_usage(&self) -> StateUsage {
         StateUsage {
@@ -1059,10 +1102,9 @@ impl StateAdapter {
     pub fn dispatch_usage(&self) -> DispatchUsage {
         DispatchUsage {
             pending_fields: self.pending.len(),
-            issued_fields: self
-                .flight
-                .as_ref()
-                .map_or(0, |f| f.values.len() + f.oib.len()),
+            issued_fields: self.flight.as_ref().map_or(0, |f| {
+                f.values.len() + f.oib.len() + usize::from(f.oib_instance.is_some())
+            }),
             pending_payload_bytes: self.pending.values().map(value_payload_bytes).sum(),
             issued_payload_bytes: self.flight.as_ref().map_or(0, |f| {
                 f.values.iter().map(|(_, v)| value_payload_bytes(v)).sum()
@@ -1176,6 +1218,7 @@ impl StateAdapter {
                     .ok_or("Intent sequence exhausted")?,
                 values,
                 oib: vec![],
+                oib_instance: None,
                 sent: false,
                 issued_at: self.clock,
             });
@@ -1184,6 +1227,13 @@ impl StateAdapter {
             && !f.sent
         {
             f.sent = true;
+            if let Some(operation) = &f.oib_instance {
+                return encode_state_request(&StateRequest::OibInstance {
+                    sequence: f.sequence,
+                    operation: operation.clone(),
+                })
+                .map(Some);
+            }
             if !f.oib.is_empty() {
                 return encode_state_request(&StateRequest::OibWrite {
                     sequence: f.sequence,

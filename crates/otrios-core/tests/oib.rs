@@ -509,6 +509,8 @@ fn inspector_panning_retains_uploaded_content_including_initially_hidden_buttons
     use std::sync::Arc;
     let (ui, mut doc) = setup();
     let (mut client, _) = mounted_client(&ui, &mut doc);
+    assert!(client.inspect_oib(30).unwrap());
+    client.scroll_map(client.epoch(), -10_000.).unwrap();
     let font = otrios_core::dashboard::font::Font::from_zstd(
         include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
@@ -519,7 +521,7 @@ fn inspector_panning_retains_uploaded_content_including_initially_hidden_buttons
     let vertices = before.base.mesh.vertices.clone();
     let glyphs = before.base.mesh.glyph_vertices.clone();
     let info = client.resource_usage().oib.unwrap();
-    for _ in 0..30 {
+    for _ in 0..50 {
         client.scroll_map(client.epoch(), 20.).unwrap();
         let frame = composer.compose(&mut client, &font).unwrap();
         assert!(
@@ -569,6 +571,8 @@ fn slider_feedback_keeps_inspector_content_and_saving_status_unchanged() {
     use std::sync::Arc;
     let (ui, mut doc) = setup();
     let (mut client, _) = mounted_client(&ui, &mut doc);
+    assert!(client.inspect_oib(30).unwrap());
+    client.scroll_map(client.epoch(), -10_000.).unwrap();
     let font = otrios_core::dashboard::font::Font::from_zstd(
         include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
@@ -673,4 +677,473 @@ fn slider_captures_reach_both_endpoints_even_outside_the_track() {
             assert_eq!(doc.typed_value(field).unwrap(), Value::Number(1000.));
         }
     }
+}
+
+fn issue_instance(client: &mut StateAdapter) -> Vec<u8> {
+    while let Some(bytes) = client.generate().unwrap() {
+        if matches!(
+            decode_state_request(&bytes).unwrap(),
+            StateRequest::OibInstance { .. }
+        ) {
+            return bytes;
+        }
+    }
+    panic!("Missing instance intent")
+}
+#[test]
+fn instance_creation_duplication_inheritance_and_removal_share_typed_operations() {
+    use otrios_interfaces::oib::InstanceAction;
+    let (ui, mut doc) = setup();
+    let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
+    let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
+    let before = doc.clone();
+    assert!(a.instantiate_oib(10, Some("gain".into())).unwrap());
+    let request = issue_instance(&mut a);
+    doc.receive(&mut sa, &request).unwrap();
+    assert!(
+        !doc.receive(&mut sa, &request).unwrap(),
+        "retry cannot allocate a second object"
+    );
+    sync(&mut doc, &mut sa, &mut a);
+    sync(&mut doc, &mut sb, &mut b);
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
+    );
+    let allocations = doc.oib_allocations().unwrap();
+    let gain = allocations[2].id;
+    assert_eq!(allocations[2].name, "gain");
+    let seed = oib::seed(&ui).unwrap();
+    let label = oib::instances::cell_id(seed, &allocations, gain, 100).unwrap();
+    let accent = oib::instances::cell_id(seed, &allocations, gain, 101).unwrap();
+    b.edit_oib_instance_property(gain, "label", Some(Value::Text("Gain".into())))
+        .unwrap();
+    sync(&mut doc, &mut sb, &mut b);
+    sync(&mut doc, &mut sa, &mut a);
+    a.edit_oib(&[(101, Some(Value::Color([1, 2, 3, 255])))])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut a);
+    sync(&mut doc, &mut sb, &mut b);
+    let expanded = oib::instances::expanded_seed(seed, &allocations).unwrap();
+    assert_eq!(
+        oib::effective(&expanded, &b.oib_active().unwrap(), accent).unwrap(),
+        Value::Color([1, 2, 3, 255])
+    );
+    assert_eq!(
+        oib::effective(&expanded, &b.oib_active().unwrap(), label).unwrap(),
+        Value::Text("Gain".into())
+    );
+    assert!(
+        a.oib_instance_action(gain, InstanceAction::Duplicate)
+            .unwrap()
+    );
+    sync(&mut doc, &mut sa, &mut a);
+    let all = doc.oib_allocations().unwrap();
+    let copy = all[3].id;
+    let copied_label = oib::instances::cell_id(seed, &all, copy, 100).unwrap();
+    assert_eq!(
+        doc.oib_values(2).unwrap()[&copied_label],
+        Some(Value::Text("Gain".into()))
+    );
+    let (resolved, _) = doc.oib_compiled(2).unwrap();
+    assert_eq!(
+        resolved
+            .handlers
+            .iter()
+            .filter(|h| h.kind == GestureKind::Slider)
+            .count(),
+        4
+    );
+    assert!(a.remove_oib(gain).unwrap());
+    sync(&mut doc, &mut sa, &mut a);
+    assert!(!doc.oib_live(2).unwrap().contains(&gain));
+    assert!(doc.oib_live(2).unwrap().contains(&copy));
+    assert_eq!(
+        doc.oib_allocations().unwrap().len(),
+        4,
+        "deleted allocation is retained"
+    );
+    let mut restored =
+        Document::load(ui.state_schema.clone(), "oib:test", &doc.save().unwrap()).unwrap();
+    assert!(!restored.configure_oib(&ui).unwrap());
+    assert_eq!(restored.oib_live(2).unwrap(), doc.oib_live(2).unwrap());
+    let mut replayed = before;
+    replayed
+        .replay(&doc.journal_delta(&replayed).unwrap())
+        .unwrap();
+    assert_eq!(replayed.root_hash(), doc.root_hash());
+}
+#[test]
+fn removing_an_instance_wins_over_a_concurrent_property_edit_without_reusing_ids() {
+    let (ui, mut doc) = setup();
+    let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
+    let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
+    a.remove_oib(20).unwrap();
+    b.edit_oib(&[(200, Some(Value::Text("stale edit".into())))])
+        .unwrap();
+    let remove = issue_instance(&mut a);
+    let edit = issue(&mut b);
+    doc.receive(&mut sa, &remove).unwrap();
+    doc.receive(&mut sb, &edit).unwrap();
+    assert!(!doc.oib_live(2).unwrap().contains(&20));
+    assert!(doc.oib_status().unwrap().error.is_none());
+    sync(&mut doc, &mut sa, &mut a);
+    a.instantiate_oib(10, Some("replacement".into())).unwrap();
+    sync(&mut doc, &mut sa, &mut a);
+    let all = doc.oib_allocations().unwrap();
+    assert_ne!(all.last().unwrap().id, 20);
+    let (resolved, _) = doc.oib_compiled(2).unwrap();
+    let old_control = ui
+        .handlers
+        .iter()
+        .find(|h| h.kind == GestureKind::Slider && h.fields == [1])
+        .unwrap()
+        .control;
+    assert!(!resolved.handlers.iter().any(|h| h.control == old_control));
+    assert!(
+        resolved
+            .handlers
+            .iter()
+            .any(|h| h.kind == GestureKind::Slider && h.fields == [1])
+    );
+}
+#[test]
+fn instance_name_conflicts_retain_the_active_graph_and_can_be_removed() {
+    let (ui, mut doc) = setup();
+    let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
+    let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
+    a.instantiate_oib(10, Some("gain".into())).unwrap();
+    b.instantiate_oib(10, Some("gain".into())).unwrap();
+    doc.receive(&mut sa, &issue_instance(&mut a)).unwrap();
+    let active = doc.oib_live(2).unwrap();
+    let active_root = doc.oib_status().unwrap().active_root;
+    doc.receive(&mut sb, &issue_instance(&mut b)).unwrap();
+    assert_eq!(
+        doc.oib_status().unwrap().active_root,
+        active_root,
+        "invalid graph must retain the exact active closure"
+    );
+    assert!(
+        doc.oib_status()
+            .unwrap()
+            .error
+            .unwrap()
+            .contains("Duplicate instance name")
+    );
+    assert_eq!(doc.oib_live(2).unwrap(), active);
+    sync(&mut doc, &mut sa, &mut a);
+    let pending = doc.oib_allocations().unwrap().last().unwrap().id;
+    a.remove_oib(pending).unwrap();
+    sync(&mut doc, &mut sa, &mut a);
+    assert!(doc.oib_status().unwrap().error.is_none());
+    assert_eq!(doc.oib_live(2).unwrap(), active);
+}
+#[test]
+fn instance_requests_are_authorized_and_budgeted_before_allocation() {
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
+    let (_, mut member) = adapter(&ui, &mut doc, 2, false);
+    admin.instantiate_oib(10, None).unwrap();
+    let wire = issue_instance(&mut admin);
+    let before = doc.root_hash();
+    assert!(doc.receive(&mut member, &wire).is_err());
+    assert_eq!(doc.root_hash(), before);
+    let request = decode_state_request(&wire).unwrap();
+    assert_eq!(
+        decode_state_request(&encode_state_request(&request).unwrap()).unwrap(),
+        request
+    );
+    doc.receive(&mut sa, &wire).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    while doc.oib_live(2).unwrap().len() < otrios_interfaces::oib::MAX_LIVE_INSTANCES {
+        assert!(admin.instantiate_oib(10, None).unwrap());
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    assert!(!admin.instantiate_oib(10, None).unwrap());
+    for id in doc.oib_live(2).unwrap() {
+        doc.oib_compiled_selected(2, Some(id)).unwrap();
+    }
+}
+
+#[test]
+fn exact_signed_o1_upgrade_preserves_properties_and_journal_recovery() {
+    use sha2::{Digest, Sha256};
+    let bytes =
+        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-o1-ui.lz4")).unwrap();
+    let old = decode_ui(&bytes).unwrap();
+    let new = app::ui(&[]);
+    assert_eq!(
+        Sha256::digest(&bytes).as_slice(),
+        oib::seed(&new)
+            .unwrap()
+            .instance_surface
+            .as_ref()
+            .unwrap()
+            .previous_ui_sha256
+    );
+    let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
+    doc.configure_oib(&old).unwrap();
+    let (mut a, mut sa) = adapter(&old, &mut doc, 1, true);
+    a.edit_oib(&[(201, Some(Value::Color([7, 8, 9, 255])))])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut a);
+    doc.set_typed(&[(1, Value::Number(730.))]).unwrap();
+    let checkpoint = doc.save().unwrap();
+    let before = doc.clone();
+    assert!(doc.configure_oib(&new).unwrap());
+    assert_eq!(
+        doc.oib_values(2).unwrap()[&201],
+        Some(Value::Color([7, 8, 9, 255]))
+    );
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(730.));
+    let mut restored = Document::load(old.state_schema.clone(), "oib:test", &checkpoint).unwrap();
+    restored
+        .replay(&doc.journal_delta(&before).unwrap())
+        .unwrap();
+    assert!(!restored.configure_oib(&new).unwrap());
+    assert_eq!(restored.root_hash(), doc.root_hash());
+    let mut incompatible = new.clone();
+    if let Some(Presentation::Oib(seed)) = &mut incompatible.presentation {
+        seed.cells[0].default = Value::Text("changed contract".into());
+    }
+    let mut original = before;
+    assert!(original.configure_oib(&incompatible).is_err());
+}
+
+#[test]
+fn structural_activation_waits_for_a_held_slider_and_preserves_local_inspection() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, TouchResponder};
+    let (ui, mut doc) = setup();
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    assert!(client.inspect_oib(30).unwrap());
+    let epoch = client.epoch();
+    let scene = client.scene().unwrap();
+    let slider = scene
+        .controls()
+        .into_iter()
+        .find(|c| matches!(c.node.responder, Some(TouchResponder::Drag(_))))
+        .unwrap();
+    let start = [
+        slider.origin[0] + slider.node.frame.width * slider.scale / 2.,
+        slider.origin[1] + 24. * slider.scale,
+    ];
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 21,
+                phase: PointerPhase::Down,
+                position: start,
+            },
+            100,
+        )
+        .unwrap();
+    let (mut editor, mut se) = adapter(&ui, &mut doc, 9, true);
+    editor.instantiate_oib(10, Some("gain".into())).unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    pump_client(&mut client, &mut doc, &mut session);
+    let info = client.resource_usage().oib.unwrap();
+    assert!(info.active_generation > info.presented_generation);
+    assert_eq!(info.selected_instance, Some(30));
+    assert_eq!(client.epoch(), epoch);
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 21,
+                phase: PointerPhase::Move,
+                position: [start[0] + 40., start[1]],
+            },
+            200,
+        )
+        .unwrap();
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 21,
+                phase: PointerPhase::Up,
+                position: [start[0] + 40., start[1]],
+            },
+            250,
+        )
+        .unwrap();
+    pump_client(&mut client, &mut doc, &mut session);
+    client.tick(500, 0).unwrap();
+    let info = client.resource_usage().oib.unwrap();
+    assert_eq!(info.active_generation, info.presented_generation);
+    assert_eq!(info.selected_instance, Some(30));
+    assert_eq!(client.epoch(), epoch);
+    assert!(!client.input_busy());
+    assert_eq!(
+        client
+            .scene()
+            .unwrap()
+            .controls()
+            .iter()
+            .filter(|c| matches!(c.node.responder, Some(TouchResponder::Drag(_))))
+            .count(),
+        2,
+        "third slider starts below the clipped preview"
+    );
+}
+#[test]
+fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
+    let (ui, mut doc) = setup();
+    let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
+    editor.instantiate_oib(10, Some("gain".into())).unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    pump_client(&mut client, &mut doc, &mut session);
+    let root = doc.root_hash();
+    assert!(client.inspect_oib(30).unwrap());
+    assert_eq!(doc.root_hash(), root);
+    let viewport = oib::seed(&ui)
+        .unwrap()
+        .instance_surface
+        .as_ref()
+        .unwrap()
+        .preview_viewport;
+    let scene = client.scene().unwrap();
+    let path = scene.path(u32::from(viewport)).unwrap();
+    let p = path.last().unwrap();
+    let position = [
+        p.origin[0] + p.node.frame.width * p.scale / 2.,
+        p.origin[1] + p.node.frame.height * p.scale / 2.,
+    ];
+    let inspector = client.resource_usage().panel_scroll.unwrap().offset;
+    assert!(client.scroll_at(client.epoch(), 200., position).unwrap());
+    let usage = client.resource_usage();
+    assert!(usage.oib_preview_scroll.unwrap().offset[1] > 0.);
+    assert_eq!(usage.panel_scroll.unwrap().offset, inspector);
+    assert_eq!(usage.oib.unwrap().selected_instance, Some(30));
+    assert_eq!(doc.root_hash(), root);
+    assert!(client.outgoing().unwrap().is_none());
+}
+
+#[test]
+fn allocation_history_is_bounded_and_an_empty_preview_can_be_repopulated() {
+    let (ui, mut doc) = setup();
+    let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
+    for id in [20, 30] {
+        a.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut a);
+    }
+    assert!(doc.oib_live(2).unwrap().is_empty());
+    doc.oib_compiled(2).unwrap();
+    while doc.oib_allocations().unwrap().len() < otrios_interfaces::oib::MAX_ALLOCATIONS {
+        assert!(a.instantiate_oib(10, None).unwrap());
+        sync(&mut doc, &mut sa, &mut a);
+        assert!(
+            doc.oib_status().unwrap().error.is_none(),
+            "{} allocations: {:?}",
+            doc.oib_allocations().unwrap().len(),
+            doc.oib_status().unwrap().error
+        );
+        let id = doc.oib_allocations().unwrap().last().unwrap().id;
+        doc.oib_compiled_selected(2, Some(id)).unwrap();
+        a.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut a);
+    }
+    let before = doc.root_hash();
+    assert!(!a.instantiate_oib(10, None).unwrap());
+    assert_eq!(doc.root_hash(), before);
+    assert!(doc.oib_live(2).unwrap().is_empty());
+    assert_eq!(
+        doc.oib_allocations()
+            .unwrap()
+            .iter()
+            .map(|a| a.id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        otrios_interfaces::oib::MAX_ALLOCATIONS
+    );
+}
+
+#[test]
+fn reconnect_keeps_local_inspector_selection_and_both_scroll_offsets() {
+    let (ui, mut doc) = setup();
+    let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
+    editor.instantiate_oib(10, None).unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    pump_client(&mut client, &mut doc, &mut session);
+    client.inspect_oib(30).unwrap();
+    let surface = oib::seed(&ui).unwrap().instance_surface.as_ref().unwrap();
+    let scene = client.scene().unwrap();
+    let path = scene.path(u32::from(surface.preview_viewport)).unwrap();
+    let p = path.last().unwrap();
+    client
+        .scroll_at(
+            client.epoch(),
+            150.,
+            [p.origin[0] + 40., p.origin[1] + 100.],
+        )
+        .unwrap();
+    let before = client.resource_usage();
+    let inspector = before.panel_scroll.unwrap().offset;
+    let preview = before.oib_preview_scroll.unwrap().offset;
+    client.reset_connection();
+    let ClientMessage::Mount {
+        epoch,
+        writer,
+        resume,
+        ..
+    } = decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("Mount");
+    };
+    let (mut next, _) = doc.open_session(&writer, resume).unwrap();
+    next.set_oib_editable(true);
+    next.set_selection(StateSelection::from_ui(&ui).unwrap())
+        .unwrap();
+    let bytes = encode_ui(&ui).unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&bytes),
+                ui: bytes,
+                code: vec![],
+                state: doc.generate(&mut next).unwrap().unwrap(),
+                binding: None,
+                initial_view: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),
+        ClientMessage::AcceptMount { .. }
+    ));
+    pump_client(&mut client, &mut doc, &mut next);
+    let after = client.resource_usage();
+    assert_eq!(after.oib.unwrap().selected_instance, Some(30));
+    assert_eq!(after.panel_scroll.unwrap().offset, inspector);
+    assert_eq!(after.oib_preview_scroll.unwrap().offset, preview);
+}
+
+#[test]
+fn sparse_layout_events_are_versioned_and_keep_the_host_reservation() {
+    use otrios_core::dashboard::layout::Layout;
+    use otrios_interfaces::layout::{Responder, TemplateNode};
+    fn control(root: &mut TemplateNode, value: u8) -> bool {
+        if let Some(Responder::AppEvent { control, .. }) = &mut root.responder {
+            *control = value;
+            return true;
+        }
+        root.children.iter_mut().any(|c| control(c, value))
+    }
+    let (mut ui, _) = setup();
+    let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
+    assert!(control(&mut blueprint.templates[0].root, 200));
+    ui.layout = Layout::encode(&blueprint).unwrap();
+    assert!(oib::compile(&ui, &Default::default()).is_err());
+    blueprint.schema = otrios_interfaces::layout::SPARSE_EVENTS_FORMAT.into();
+    ui.layout = Layout::encode(&blueprint).unwrap();
+    oib::compile(&ui, &Default::default()).unwrap();
+    assert!(control(&mut blueprint.templates[0].root, 255));
+    ui.layout = Layout::encode(&blueprint).unwrap();
+    assert!(oib::compile(&ui, &Default::default()).is_err());
 }

@@ -7,6 +7,7 @@ use otrios_interfaces::{
     oib::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
+pub mod instances;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Info {
@@ -15,6 +16,17 @@ pub struct Info {
     pub conflicts: Vec<u64>,
     pub status: String,
     pub properties: BTreeMap<u64, String>,
+    pub instances: Vec<InstanceInfo>,
+    pub allocations_remaining: usize,
+    pub selected_instance: Option<u64>,
+}
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct InstanceInfo {
+    pub id: u64,
+    pub name: String,
+    pub component: u64,
+    pub prototype: u64,
+    pub active: bool,
 }
 
 pub fn seed(ui: &Ui) -> Option<&Seed> {
@@ -87,6 +99,29 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             return Err("Invalid OIB instance identity".into());
         }
     }
+    if let Some(surface) = &seed.instance_surface
+        && (surface.previous_ui_sha256.len() != 32
+            || surface.prototypes.len() != seed.instances.len()
+            || seed.instances.len() > MAX_ALLOCATIONS
+            || seed.instances.len() > MAX_LIVE_INSTANCES
+            || ids.iter().any(|id| *id >= 0x1_0000)
+            || seed.cells.iter().any(|c| c.id >= 0x100_0000)
+            || [
+                surface.preview_stride,
+                surface.inspector_start,
+                surface.inspector_stride,
+            ]
+            .iter()
+            .any(|v| !v.is_finite() || *v <= 0. || *v > 1000.)
+            || surface
+                .prototypes
+                .iter()
+                .map(|p| p.instance)
+                .collect::<BTreeSet<_>>()
+                != seed.instances.iter().map(|i| i.id).collect())
+    {
+        return Err("Invalid bounded OIB instance surface".into());
+    }
     let mut cells = BTreeSet::new();
     let mut targets = BTreeSet::new();
     let mut properties = BTreeSet::new();
@@ -157,6 +192,17 @@ pub fn validate(ui: &Ui) -> Result<()> {
         .ok_or("Missing OIB inspector viewport")?;
     if !matches!(viewport.shape, Shape::Canvas { clip: true }) {
         return Err("OIB inspector must be a clipped scrolling panel".into());
+    }
+    if let Some(surface) = &seed.instance_surface {
+        let preview = found
+            .templates
+            .iter_mut()
+            .find_map(|t| node(&mut t.root, surface.preview_viewport))
+            .ok_or("Missing OIB preview viewport")?;
+        if !matches!(preview.shape, Shape::Canvas { clip: true }) {
+            return Err("OIB preview must be clipped".into());
+        }
+        instances::validate_surface(ui)?;
     }
     Ok(())
 }

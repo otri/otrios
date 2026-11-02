@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 pub const FORMAT: &str = "otrios-oib-v1";
 pub const FEATURE: &str = "otrios-oib-v1";
+pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
+/// Includes deleted allocations: their identities and causal context are retained.
+pub const MAX_ALLOCATIONS: usize = 10;
+pub const MAX_LIVE_INSTANCES: usize = 6;
 pub const MAX_CELLS: usize = 64;
 pub const MAX_CHANGES: usize = 16;
 pub const MAX_BYTES: usize = 64 * 1024;
@@ -21,6 +25,64 @@ pub struct Seed {
     pub cells: Vec<Cell>,
     pub inspector_viewport: u16,
     pub inspector_content: [f32; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_surface: Option<InstanceSurface>,
+}
+/// Signed factories reuse admitted nodes, bindings, properties and event contracts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstanceSurface {
+    /// Explicit one-time upgrade from the exact O1 UI; not a general seed rebase.
+    pub previous_ui_sha256: Vec<u8>,
+    pub preview_viewport: u16,
+    pub preview_stride: f32,
+    pub inspector_start: f32,
+    pub inspector_stride: f32,
+    pub prototypes: Vec<Prototype>,
+    pub node_base: u16,
+    pub node_stride: u16,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Prototype {
+    pub instance: u64,
+    pub preview_root: u16,
+    pub inspector_root: u16,
+    pub nodes: Vec<u16>,
+}
+/// Authority-owned immutable allocation descriptor. It survives removal.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Allocation {
+    pub id: u64,
+    pub name: String,
+    pub component: u64,
+    /// Signed seed instance supplying the admitted data binding and template.
+    pub prototype: u64,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum InstanceOperation {
+    Instantiate {
+        component: u64,
+        name: Option<String>,
+    },
+    Duplicate {
+        instance: u64,
+        name: Option<String>,
+    },
+    Remove {
+        instance: u64,
+        observed: Vec<u8>,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InstanceAction {
+    Inspect,
+    RemovePending,
+    Add,
+    Duplicate,
+    Remove,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

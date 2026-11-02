@@ -91,6 +91,10 @@ pub enum GestureKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Operation {
+    OibInstance {
+        target: u64,
+        action: crate::oib::InstanceAction,
+    },
     Oib {
         cell: u64,
         action: crate::oib::InspectorAction,
@@ -328,6 +332,10 @@ pub struct MountBinding {
 /// Versioned inner state protocol. Client clocks/trees are never accepted as writes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateRequest {
+    OibInstance {
+        sequence: u64,
+        operation: crate::oib::InstanceOperation,
+    },
     OibWrite {
         sequence: u64,
         changes: Vec<crate::oib::Change>,

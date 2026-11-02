@@ -7,6 +7,7 @@ pub struct StateSelection {
     pub(crate) fields: u64,
     pub(crate) signals: u64,
     oib: bool,
+    oib_instances: bool,
 }
 impl StateSelection {
     pub(crate) fn all(schema: &StateSchema) -> Self {
@@ -18,6 +19,7 @@ impl StateSelection {
             fields,
             signals: fields,
             oib: false,
+            oib_instances: false,
         }
     }
     pub fn from_ui(ui: &Ui) -> Result<Self> {
@@ -115,6 +117,7 @@ impl StateSelection {
             fields,
             signals,
             oib: super::oib::seed(ui).is_some(),
+            oib_instances: super::oib::seed(ui).is_some_and(|s| s.instance_surface.is_some()),
         })
     }
     pub(crate) fn coverage_oib(
@@ -138,7 +141,11 @@ impl StateSelection {
             if edit {
                 vec![vec![4]]
             } else {
-                vec![vec![4, 0], vec![4, 2], vec![4, 3]]
+                let mut active = vec![vec![4, 0], vec![4, 2], vec![4, 3]];
+                if self.oib_instances {
+                    active.extend([vec![4, 4], vec![4, 6]]);
+                }
+                active
             }
         } else {
             vec![]
