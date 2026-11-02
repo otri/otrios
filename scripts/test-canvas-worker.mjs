@@ -8,6 +8,7 @@ function workerContext(fields){
   if(fields.fake){
     const app=fields.fake;
     let dirty=false,inFlight=null,serial=0n;
+    app.control_is_checkbox??=()=>false;
     app.document_chunk_geometry??=()=>new Float32Array();
     app.request_frame??=()=>{dirty=true;};
     app.begin_frame??=()=>{if(!dirty||inFlight!==null)return;dirty=false;return inFlight=++serial;};

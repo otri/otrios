@@ -2262,6 +2262,76 @@ fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
 }
 
 #[test]
+fn remove_data_checkbox_toggles_by_box_label_and_accessible_activation_without_a_write() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive, SceneNode};
+    let checkbox = |client: &Client| -> (SceneNode, [f32; 2]) {
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.semantics.as_ref().unwrap().label == "Remove Data")
+            .unwrap();
+        assert!(client.control_is_checkbox(control.node.id).unwrap());
+        (control.node.clone(), control.origin)
+    };
+    for delete_space in [false, true] {
+        let (mut client, _) = fixture(Role::Admin);
+        click(&mut client, "Edit");
+        if delete_space {
+            click(&mut client, "Space settings: Household");
+            click(&mut client, "Delete Space");
+        } else {
+            click(&mut client, "Delete App: Counter in Household");
+        }
+        let (unchecked, _) = checkbox(&client);
+        assert!(!unchecked.semantics.as_ref().unwrap().checked);
+        for (i, x) in [22., 80.].into_iter().enumerate() {
+            let (control, origin) = checkbox(&client);
+            let position = [origin[0] + x, origin[1] + control.frame.height / 2.];
+            let epoch = client.epoch();
+            for (phase, delta) in [(PointerPhase::Down, 0), (PointerPhase::Up, 50)] {
+                client
+                    .pointer_at(
+                        epoch,
+                        PointerEvent {
+                            id: 1,
+                            phase,
+                            position,
+                        },
+                        100 + i as u64 * 100 + delta,
+                    )
+                    .unwrap();
+            }
+            let (current, _) = checkbox(&client);
+            assert_eq!(current.semantics.as_ref().unwrap().checked, i == 0);
+            if i == 0 {
+                assert_ne!(
+                    current.children, unchecked.children,
+                    "the checked state must visibly change"
+                );
+                assert!(
+                    current
+                        .children
+                        .iter()
+                        .any(|n| matches!(n.primitive, Primitive::Path { .. })),
+                    "the check mark is drawn without a font glyph"
+                );
+            }
+            assert!(client.spaces_outgoing().unwrap().is_none());
+        }
+        click(&mut client, "Remove Data");
+        assert!(checkbox(&client).0.semantics.unwrap().checked);
+        click(&mut client, "Cancel");
+        assert!(client.spaces_outgoing().unwrap().is_none());
+        if delete_space {
+            click(&mut client, "Delete Space");
+        } else {
+            click(&mut client, "Delete App: Counter in Household");
+        }
+        assert!(!checkbox(&client).0.semantics.unwrap().checked);
+    }
+}
+#[test]
 fn map_delete_app_defaults_to_keep_data_and_checked_delete_targets_reviewed_collection() {
     for remove_data in [false, true] {
         let (mut client, _) = fixture(Role::Admin);

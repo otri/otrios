@@ -378,6 +378,9 @@ impl CanvasApp {
             .and_then(|c| c.node.semantics.as_ref())
             .is_some_and(|s| s.checked))
     }
+    pub fn control_is_checkbox(&self, id: u32) -> Result<bool, String> {
+        self.inner.control_is_checkbox(id)
+    }
     pub fn outgoing(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.inner.outgoing()
     }

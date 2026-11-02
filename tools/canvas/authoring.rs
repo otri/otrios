@@ -339,6 +339,7 @@ pub struct Element {
     paint: Paint,
     children: Vec<Element>,
     label: Option<String>,
+    checked: bool,
     interaction: Option<Interaction>,
     resize: Option<[AxisResize; 2]>,
     frame_size: [f32; 2],
@@ -353,6 +354,7 @@ impl Element {
             paint,
             children: vec![],
             label: None,
+            checked: false,
             interaction: None,
             resize: None,
             frame_size: [frame[2], frame[3]],
@@ -371,6 +373,11 @@ impl Element {
     }
     pub fn semantic_label(mut self, label: &str) -> Self {
         self.label = Some(label.into());
+        self
+    }
+    /// Current checked state of an interactive selection control.
+    pub fn semantic_checked(mut self, checked: bool) -> Self {
+        self.checked = checked;
         self
     }
     pub fn frame(mut self, frame: [f32; 4]) -> Self {
@@ -1163,7 +1170,7 @@ impl Compiler {
                 label: Expr::Literal(Value::Text(
                     n.label.expect("interactive element needs a semantic label"),
                 )),
-                checked: no(),
+                checked: if n.checked { yes() } else { no() },
             })
         } else {
             None

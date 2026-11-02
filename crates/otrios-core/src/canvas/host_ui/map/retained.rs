@@ -175,16 +175,7 @@ pub(super) fn render(
                 .push(text("Delete App", [left, top, width, 40.], 3.));
             b.nodes
                 .push(text(&data.title, [left, top + 72., width, 40.], 2.));
-            b.flat(
-                "Remove Data",
-                if model.remove_data {
-                    "●  Remove Data"
-                } else {
-                    "○  Remove Data"
-                },
-                [left, top + 144., width, 56.],
-                HostAction::ToggleRemoveData,
-            );
+            b.remove_data(model.remove_data, [left, top + 144., width, 56.]);
             let change = if model.remove_data {
                 Change::DeleteData {
                     space: space.id.clone(),
@@ -339,16 +330,7 @@ pub(super) fn render(
                 .push(text("Delete Space", [left, top, width, 40.], 3.));
             b.nodes
                 .push(text(&space.name, [left, top + 72., width, 40.], 2.));
-            b.flat(
-                "Remove Data",
-                if model.remove_data {
-                    "●  Remove Data"
-                } else {
-                    "○  Remove Data"
-                },
-                [left, top + 144., width, 56.],
-                HostAction::ToggleRemoveData,
-            );
+            b.remove_data(model.remove_data, [left, top + 144., width, 56.]);
             b.flat(
                 "Cancel",
                 "Cancel",

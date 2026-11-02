@@ -8,6 +8,17 @@ pub(super) struct Preview {
     position: [f32; 2],
 }
 impl Client {
+    /// Trusted host selection controls expose their role independently of value.
+    pub fn control_is_checkbox(&self, id: u32) -> Result<bool> {
+        if !self.host_active {
+            return Ok(false);
+        }
+        Ok(self.scene()?.controls().iter().any(|c| {
+            c.node.id == id
+                && matches!(c.node.responder, Some(TouchResponder::Activate(Action::AppEvent(control)))
+                    if matches!(self.host_actions.get(&control), Some(HostAction::ToggleRemoveData)))
+        }))
+    }
     pub(super) fn preview_map_drag(&mut self) {
         let preview = self.host.drag.as_ref().filter(|d| d.moving).and_then(|d| {
             let snapshot = self.spaces.snapshot()?;

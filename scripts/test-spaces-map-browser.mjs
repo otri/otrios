@@ -246,6 +246,16 @@ try {
  await click(a,'Close');await click(a,'Delete App: Bundle Counter in Empty Space');
  // Duplicate canonical names are disambiguated by the containing Space on map tiles;
  // the minus button must also carry its Space scope.
+ const checked=()=>evaluate(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('aria-checked')`);
+ assert.equal(await checked(),'false');
+ await press(a,'Remove Data');await wait(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('aria-checked')==='true'`);
+ assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('role')`),'checkbox');
+ await shot(a,'remove-data-checked');
+ await evaluate(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))}).focus()`);
+ await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32},a);
+ await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32},a);
+ await wait(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('aria-checked')==='false'`);
+ await shot(a,'remove-data-unchecked');
  await click(a,'Remove Data');await click(a,'Cancel');
  await click(a,'Delete App: Bundle Counter in Empty Space');await click(a,'Delete');
  for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).apps[0].attached;n++)await new Promise(r=>setTimeout(r,50));
@@ -263,7 +273,7 @@ try {
  for(let n=0;n<100&&(await get()).spaces.find(s=>s.id===empty.id).archived;n++)await new Promise(r=>setTimeout(r,50));
  assert.equal((await get()).spaces.find(s=>s.id===empty.id).archived,false);
  await click(a,'Close');await click(a,'Done');
- await writeFile(output+'/retained-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,default_keep_data:true,cancel_clears_remove_data:true,exact_identity_restore:true,checked_remove_data:true,deleted_space_recovery:true,silent_success:true,runtime_errors:errors},null,2));
+ await writeFile(output+'/retained-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,default_keep_data:true,cancel_clears_remove_data:true,visible_checkbox_and_accessible_checked_state:true,exact_identity_restore:true,checked_remove_data:true,deleted_space_recovery:true,silent_success:true,runtime_errors:errors},null,2));
  // One transfer path covers the browser keyboard pickup, shared review and fresh binding.
  await manage({type:'create',name:'Transfer target'});
  const transferTarget=(await get()).spaces.find(s=>s.name==='Transfer target');

@@ -135,6 +135,44 @@ fn app_tile(
     nodes
 }
 impl Builder<'_> {
+    fn remove_data(&mut self, checked: bool, frame: [f32; 4]) {
+        // Draw the indicator with shared primitives: the bundled font does not
+        // contain the former circle glyphs, so both states looked identical.
+        let mut nodes = vec![
+            a::rounded_rect(if checked { [52, 77, 61, 255] } else { SOFT })
+                .frame([10., 16., 24., 24.])
+                .corner_radius(4.0.into()),
+        ];
+        if checked {
+            nodes.push(
+                a::series(
+                    a::ValueExpr::Literal(Expr::Literal(Value::Series(vec![55., 25., 85.]))),
+                    WHITE,
+                )
+                .frame([15., 20., 14., 16.]),
+            );
+        } else {
+            nodes.push(
+                a::rounded_rect(WHITE)
+                    .frame([12., 18., 20., 20.])
+                    .corner_radius(2.0.into()),
+            );
+        }
+        let line = self.font.map_or(32., |f| f.metrics().line_height(2.));
+        nodes.push(text(
+            "Remove Data",
+            [48., (frame[3] - line) / 2., frame[2] - 56., line],
+            2.,
+        ));
+        self.nodes.push(
+            a::canvas(nodes)
+                .frame(frame)
+                .semantic_label("Remove Data")
+                .semantic_checked(checked)
+                .on_press(a::Event::back()),
+        );
+        self.actions.push(HostAction::ToggleRemoveData);
+    }
     fn profile(&mut self, avatar: &str, width: f32, font: Option<&crate::dashboard::font::Font>) {
         let (x, y) = font.map_or((19.5, 18.), |font| {
             let [left, bottom, right, top] = font.measure_text(avatar, 2.).ink_bounds;
