@@ -10,6 +10,13 @@ removal through shared typed operations. Its
 input, live API edits and the deployed browser Wasm client observing the same data.
 Executable main-class and outlet APIs remain later increments.
 
+[O3 component geometry](rfcs/0031-live-oib-component-geometry.md) adds declared
+live layout properties: label and track placement, widths, heading visibility and
+row pitch. These use the same CRDT property batch as labels/colors. The component
+definition still admits the available targets; arbitrary tree editing and panel
+constraints remain outside this surface. The graphical inspector currently exposes
+its original property rows; geometry can be edited through the typed host API.
+
 Add the installed **Live UI** app to a Space using its Admin controls, then open
 **Test Playground → Live UI** in that same Space (or launch its Space tile).
 The screen starts with `volume` and `brightness` instances of `LabeledSlider`.
@@ -105,7 +112,7 @@ causally clears an instance override. Only one issued OIB batch is retained per
 writer; wait for confirmation before submitting another. A batch has at most
 16 distinct cells. Observed leaf snapshots are captured before issuing it.
 
-Property writes use tag 37 in state protocol **v22** (introduced in v21): u64 writer sequence followed
+Property writes use tag 37 in state protocol **v24** (introduced in v21): u64 writer sequence followed
 by a bounded blob containing the canonical FlexBuffers vector of `Change` values.
 Tag 38 carries one bounded canonical InstanceOperation under the same writer
 sequence/receipt contract. Allocation, draft/active changes and receipt are
@@ -142,7 +149,8 @@ independent of the new state codec.
 O1 admits at most 16 definitions, 64 authored objects, 64 editable cells, 8
 inspector suggestions per cell and 24 KiB of encoded seed descriptors. The draft
 branch is bounded at 64 KiB, including causal metadata. Text properties are at
-most 96 UTF-8 bytes; numeric property values must be finite in 0..1000. Compiled
+most 96 UTF-8 bytes; numeric property values must be finite in 0..1000. Declared
+boolean properties control visibility. Compiled
 geometry, layout bytes, expanded scene/control counts and both supported logical
 orientations must also qualify before activation. Existing Merkle actor/context,
 message, receipt and journal limits continue to apply.
@@ -164,8 +172,19 @@ Signed app presentation updates may retain the exact canonical OIB seed. Those
 updates change the admitted UI hash while preserving the allocation ledger,
 presence, removed identities, property registers and app values. They do not
 reinitialize instances. Changed seed definitions still require an explicit
-compatible migration. A signed presentation update is distinct from a live CRDT
+compatible migration. The component-geometry increment explicitly appends
+component cells from exact signed predecessors while preserving old contracts,
+allocations and values. A signed presentation update is distinct from a live CRDT
 edit: panel layout constraints are not yet editable OIB properties.
+
+Geometry-enabled bundles require `otrios-oib-layout-v1`. Component targets are
+remapped to each instance without adding per-instance geometry registers. The
+`row pitch` cell controls both instance placement and preview scrolling extent.
+Painted content must fit its row; invalid geometry keeps the previous active
+design. Layout activation waits for held gestures and preserves the mounted app.
+`Client::edit_oib` accepts one atomic batch; browser host `oib_edit` accepts the
+same `(cell ID, optional typed Value)` pairs as bounded JSON. The
+[layout RFC](rfcs/0031-live-oib-component-geometry.md) lists the compact-row cells.
 
 The inspector currently offers app-authored choices. The typed client API accepts
 other values within the admitted property type and limits. A general free-text
@@ -181,3 +200,10 @@ Runtime implementation and tests remain under LGPL-3.0-only in
 `crates/otrios-core`. Contracts, SDK declarations, app authoring and tools retain
 their Apache-2.0 boundaries. No dependencies, identities, trust roots or services
 are added by O1.
+
+**Restore sliders** brings back the authored Volume/Brightness pair and bindings,
+while keeping the live component design and prior instance overrides. Extras are
+deactivated and their history retained. **Reset UI defaults** also restores signed
+component defaults and clears instance overrides; it preserves current slider
+values. Both operations reuse original objects without consuming allocation slots.
+See [restoration](rfcs/0032-oib-restoration.md) for causality and compatibility.

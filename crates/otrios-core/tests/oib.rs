@@ -14,6 +14,21 @@ fn setup() -> (Ui, Document) {
     assert!(doc.configure_oib(&ui).unwrap());
     (ui, doc)
 }
+#[test]
+fn absolute_width_aliases_cannot_target_the_same_frame_twice() {
+    let (mut ui, _) = setup();
+    if let Some(Presentation::Oib(seed)) = &mut ui.presentation {
+        let mut target = seed.cells.iter().find(|c| c.id == 202).unwrap().targets[0].clone();
+        target.property = otrios_interfaces::oib::Property::FrameWidth;
+        seed.cells
+            .iter_mut()
+            .find(|c| c.id == 105)
+            .unwrap()
+            .targets
+            .push(target);
+        assert!(oib::validate_seed(seed).is_err());
+    }
+}
 fn compact_changes() -> Vec<(u64, Option<Value>)> {
     let mut changes: Vec<_> = [
         (104, 10.),
@@ -35,6 +50,70 @@ fn compact_changes() -> Vec<(u64, Option<Value>)> {
         (300, Some(Value::Text("brightness".into()))),
     ]);
     changes
+}
+
+#[test]
+fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
+    use std::collections::BTreeSet;
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
+    admin.edit_oib(&compact_changes()).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin.edit_oib(&[(112, Some(Value::Number(80.)))]).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
+        .unwrap();
+    while doc.oib_allocations().unwrap().len() < otrios_interfaces::oib::MAX_ALLOCATIONS {
+        admin.instantiate_oib(10, None).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+        let last = doc.oib_allocations().unwrap().last().unwrap().id;
+        admin.remove_oib(last).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    for id in doc.oib_live(2).unwrap() {
+        admin.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    let ledger = doc.oib_allocations().unwrap();
+    let (_, mut member) = adapter(&ui, &mut doc, 7, false);
+    let before = doc.root_hash();
+    admin.restore_oib(false).unwrap();
+    let request = issue_instance(&mut admin);
+    assert!(doc.receive(&mut member, &request).is_err());
+    assert_eq!(doc.root_hash(), before);
+    doc.receive(&mut sa, &request).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let restored = doc.root_hash();
+    doc.receive(&mut sa, &request).unwrap();
+    assert_eq!(doc.root_hash(), restored);
+    assert_eq!(doc.oib_allocations().unwrap(), ledger);
+    assert_eq!(doc.oib_live(2).unwrap(), BTreeSet::from([20, 30]));
+    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(80.)));
+    assert_eq!(
+        doc.oib_values(2).unwrap()[&200],
+        Some(Value::Text("volume".into()))
+    );
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
+    let (resolved, _) = doc.oib_compiled(2).unwrap();
+    let bindings: Vec<_> = resolved
+        .handlers
+        .iter()
+        .filter(|h| h.kind == GestureKind::Slider)
+        .map(|h| h.fields.clone())
+        .collect();
+    assert_eq!(bindings, vec![vec![1], vec![2]]);
+    admin.edit_oib(&[(106, Some(Value::Number(900.)))]).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(doc.oib_status().unwrap().error.is_some());
+    admin.restore_oib(true).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(216.)));
+    assert_eq!(doc.oib_values(2).unwrap()[&113], Some(Value::Boolean(true)));
+    assert_eq!(doc.oib_values(2).unwrap()[&200], None);
+    assert_eq!(doc.oib_allocations().unwrap(), ledger);
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
 }
 
 #[test]

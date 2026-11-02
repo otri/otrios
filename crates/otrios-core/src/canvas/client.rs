@@ -2751,6 +2751,18 @@ impl Client {
         }
         Ok(changed)
     }
+    pub fn restore_oib(&mut self, defaults: bool) -> Result<bool> {
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = m.doc.restore_oib(defaults)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
     pub fn edit_oib_instance_property(
         &mut self,
         instance: u64,
@@ -4124,7 +4136,9 @@ fn qualify(
                     && super::oib::seed(&ui).is_some_and(|s| {
                         s.instance_surface.is_some()
                             && match action {
-                                otrios_interfaces::oib::InstanceAction::RemovePending => {
+                                otrios_interfaces::oib::InstanceAction::RemovePending
+                                | otrios_interfaces::oib::InstanceAction::Restore
+                                | otrios_interfaces::oib::InstanceAction::ResetDefaults => {
                                     *target == s.main_oib
                                 }
                                 otrios_interfaces::oib::InstanceAction::Add => {
@@ -4758,6 +4772,11 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
                                         | otrios_interfaces::oib::InstanceAction::Duplicate
                                         | otrios_interfaces::oib::InstanceAction::Remove
                                         | otrios_interfaces::oib::InstanceAction::RemovePending,
+                                    ..
+                                }
+                                | Operation::OibInstance {
+                                    action: otrios_interfaces::oib::InstanceAction::Restore
+                                        | otrios_interfaces::oib::InstanceAction::ResetDefaults,
                                     ..
                                 }
                         )

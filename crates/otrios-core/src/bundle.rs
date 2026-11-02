@@ -188,6 +188,18 @@ pub fn pack(
             }
         }
     }
+    if ui.handlers.iter().any(|h| {
+        matches!(
+            h.operation,
+            otrios_interfaces::canvas::Operation::OibInstance {
+                action: otrios_interfaces::oib::InstanceAction::Restore
+                    | otrios_interfaces::oib::InstanceAction::ResetDefaults,
+                ..
+            }
+        )
+    }) {
+        required_features.push(otrios_interfaces::oib::RESTORE_FEATURE.into());
+    }
     if crate::dashboard::layout::Layout::from_bytes(&ui.layout)?
         .blueprint()
         .schema
@@ -385,6 +397,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-v1"
                     | "otrios-oib-instances-v1"
                     | "otrios-oib-layout-v1"
+                    | "otrios-oib-restore-v1"
                     | "otrios-layout-v5"
             )
         })
@@ -392,6 +405,19 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
         return Err("Unsupported required bundle feature".into());
     }
     let ui = canvas::decode_ui(get(UI_PATH)?)?;
+    if ui.handlers.iter().any(|h| {
+        matches!(
+            h.operation,
+            otrios_interfaces::canvas::Operation::OibInstance {
+                action: otrios_interfaces::oib::InstanceAction::Restore
+                    | otrios_interfaces::oib::InstanceAction::ResetDefaults,
+                ..
+            }
+        )
+    }) && !features.contains(otrios_interfaces::oib::RESTORE_FEATURE)
+    {
+        return Err("Missing required OIB restore feature".into());
+    }
     canvas::validate_ui_format(&ui)?;
     if canvas::oib::seed(&ui).is_some() && !features.contains(otrios_interfaces::oib::FEATURE) {
         return Err("Missing required OIB feature".into());

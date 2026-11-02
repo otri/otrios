@@ -279,6 +279,7 @@ pub fn description() -> Ui {
     .with_oib_instances(NamedOibSurface {
         layout: Some(LayoutSurface {
             previous_ui_sha256: [
+                "f810f69342264e7778aeaee97646bbaf8fe8182fb4acfd8fcd110a49e58ce8ce",
                 "22fa4203073790b9d1f5c16663a8ea4445760641dbe6274aaee5276490698f7f",
                 "886b642a9b6c651ad8b4e43a53812a98862c6a6be272b09cb32319f13c06f7d8",
             ]
@@ -370,14 +371,22 @@ pub fn description() -> Ui {
                         .frame([16., 52., 280., 56.])
                         .on_press(Event::oib_instance(10, InstanceAction::Add)),
                     button("Remove pending")
-                        .frame([312., 52., 280., 56.])
+                        .frame([16., 120., 280., 56.])
                         .on_press(Event::oib_instance(1, InstanceAction::RemovePending)),
+                    button("Restore sliders")
+                        .frame([312., 52., 280., 56.])
+                        .semantic_label("Restore original slider bindings; keep UI design")
+                        .on_press(Event::oib_instance(1, InstanceAction::Restore)),
+                    button("Reset UI defaults")
+                        .frame([312., 120., 280., 56.])
+                        .semantic_label("Reset app UI defaults; keep slider values")
+                        .on_press(Event::oib_instance(1, InstanceAction::ResetDefaults)),
                     canvas(inspector)
-                        .frame([16., 120., 592., 364.])
+                        .frame([16., 188., 592., 296.])
                         .key("inspector-scroll")
                         .pin_left(16.)
                         .pin_right(16.)
-                        .pin_top(120.)
+                        .pin_top(188.)
                         .pin_bottom(16.),
                 ],
             )

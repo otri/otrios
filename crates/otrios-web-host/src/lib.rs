@@ -241,6 +241,9 @@ impl CanvasApp {
     pub fn oib_remove(&mut self, instance: u64) -> Result<bool, String> {
         self.inner.remove_oib(instance)
     }
+    pub fn oib_restore(&mut self, defaults: bool) -> Result<bool, String> {
+        self.inner.restore_oib(defaults)
+    }
     pub fn oib_inspect(&mut self, instance: u64) -> Result<bool, String> {
         self.inner.inspect_oib(instance)
     }

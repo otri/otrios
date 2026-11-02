@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0031: Live OIB component geometry
 
-Date: 2026-11-03. Status: **implemented; live qualification pending**.
+Date: 2026-11-03. Status: **implemented and live qualified**.
 
 Extends [O2](0030-live-oib-instances.md) with declared component-owned layout
 properties. The initial use is a compact LabeledSlider row: name on the left,

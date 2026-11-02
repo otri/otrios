@@ -169,7 +169,14 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
         for target in &cell.targets {
             if !target.scale.is_finite()
                 || !target.offset.is_finite()
-                || !targets.insert((target.node, target.property as u8))
+                || !targets.insert((
+                    target.node,
+                    if target.property == Property::FrameWidth {
+                        Property::Width as u8
+                    } else {
+                        target.property as u8
+                    },
+                ))
             {
                 return Err("Duplicated or nonfinite OIB target".into());
             }

@@ -709,7 +709,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v23","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v24","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -907,7 +907,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v23","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v24","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -5860,7 +5860,7 @@ fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, Strin
             assets.insert(path.clone(), entry);
         }
     }
-    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v23","assets":assets,"authority":authority}).to_string().into_bytes();
+    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v24","assets":assets,"authority":authority}).to_string().into_bytes();
     let release = canvas::hex(&canvas::hash(&manifest));
     let root = rig.root.join("releases").join(&release);
     fs::create_dir_all(&root).unwrap();
@@ -5887,7 +5887,7 @@ fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, Strin
         root.join("manifest.sig"),
     )
     .unwrap();
-    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v23"}).to_string()).unwrap();
+    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v24"}).to_string()).unwrap();
     (tree, digest, release)
 }
 fn public_get(address: &str, path: &str) -> (u16, String, Vec<u8>) {
@@ -6688,4 +6688,42 @@ fn oib_instances_recover_unknown_outcomes_and_retained_removals_across_authority
     let all = recovered.oib_instances().unwrap();
     assert_eq!(all.len(), 4);
     assert_ne!(all.last().unwrap().id, created);
+    recovered.restore_oib(false).unwrap();
+    settle(&mut admin, &mut recovered);
+    assert_eq!(
+        recovered
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .filter(|a| a.active)
+            .map(|a| a.id)
+            .collect::<Vec<_>>(),
+        vec![20, 30]
+    );
+    assert_eq!(recovered.oib_property_text(104), "label y: 10 (default)");
+    let resume = recovered.resume_sequence();
+    recovered.restore_oib(true).unwrap();
+    flush(&mut admin, &mut recovered);
+    let (mut observer, mut view, _) = open(&rig, &space, &ui, 'b', 0);
+    settle(&mut observer, &mut view);
+    while view.oib_property_text(104) != "label y: 0 (default)" {
+        if let ServerMessage::Sync { bytes, .. } = read(&mut observer) {
+            view.receive(&bytes).unwrap();
+            flush(&mut observer, &mut view);
+        }
+    }
+    drop(observer);
+    drop(admin);
+    rig.stop();
+    rig.restart(&binary, true, true);
+    let (mut admin, mut final_state, _) = open(&rig, &space, &ui, 'a', resume);
+    final_state.restore_pending(&recovered).unwrap();
+    settle(&mut admin, &mut final_state);
+    assert_eq!(final_state.value(1).unwrap(), 632);
+    assert_eq!(final_state.oib_property_text(104), "label y: 0 (default)");
+    assert_eq!(
+        final_state.oib_property_text(113),
+        "heading visible: true (default)"
+    );
+    assert_eq!(final_state.oib_instances().unwrap().len(), all.len());
 }

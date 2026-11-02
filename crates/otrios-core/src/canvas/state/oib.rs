@@ -963,6 +963,37 @@ impl Document {
         let mut candidate = self.clone();
         let mut allocations = self.oib_allocations()?;
         match operation {
+            InstanceOperation::Restore { defaults } => {
+                let mut edits = Vec::new();
+                for allocation in &allocations {
+                    edits.push(Edit {
+                        path: cell_path(5, allocation.id),
+                        schema: self.oib_instance_schema(allocation.id),
+                        value: seed
+                            .instances
+                            .iter()
+                            .any(|s| s.id == allocation.id)
+                            .then(|| bytes(&true))
+                            .transpose()?,
+                    });
+                }
+                if *defaults {
+                    for cell in candidate.oib_resolved_seed()?.cells {
+                        edits.push(Edit {
+                            path: cell_path(1, cell.id),
+                            schema: self.oib_cell_schema(cell.id),
+                            value: if cell.inherit.is_some() {
+                                None
+                            } else {
+                                Some(bytes(&cell.default)?)
+                            },
+                        });
+                    }
+                }
+                // Restore is deliberately an authoritative owner command against
+                // the current heads, not a stale property write or a new identity.
+                candidate.tree = candidate.tree.edit(writer, &edits).map_err(err)?.0;
+            }
             InstanceOperation::Remove { instance, observed } => {
                 if !allocations.iter().any(|a| a.id == *instance) {
                     return Err("Unknown instance".into());
@@ -1066,6 +1097,9 @@ impl Document {
     }
 }
 impl StateAdapter {
+    pub fn restore_oib(&mut self, defaults: bool) -> Result<bool> {
+        self.edit_oib_instance(InstanceOperation::Restore { defaults })
+    }
     pub fn edit_oib_instance_property(
         &mut self,
         instance: u64,
@@ -1107,6 +1141,7 @@ impl StateAdapter {
         }
         let allocations = self.doc.oib_allocations()?;
         match &operation {
+            InstanceOperation::Restore { .. } => {}
             InstanceOperation::Instantiate { component, name } => {
                 if !seed.components.iter().any(|c| c.id == *component) {
                     return Err("Unknown OIB component".into());
@@ -1158,6 +1193,8 @@ impl StateAdapter {
     }
     pub fn oib_instance_action(&mut self, target: u64, action: InstanceAction) -> Result<bool> {
         match action {
+            InstanceAction::Restore => self.restore_oib(false),
+            InstanceAction::ResetDefaults => self.restore_oib(true),
             InstanceAction::Inspect => Ok(false),
             InstanceAction::RemovePending => {
                 let active = self.doc.oib_live(2)?;

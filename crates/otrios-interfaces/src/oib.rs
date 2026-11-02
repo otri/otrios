@@ -7,6 +7,7 @@ pub const FORMAT: &str = "otrios-oib-v1";
 pub const FEATURE: &str = "otrios-oib-v1";
 pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
 pub const LAYOUT_FEATURE: &str = "otrios-oib-layout-v1";
+pub const RESTORE_FEATURE: &str = "otrios-oib-restore-v1";
 /// Includes deleted allocations: their identities and causal context are retained.
 pub const MAX_ALLOCATIONS: usize = 10;
 pub const MAX_LIVE_INSTANCES: usize = 6;
@@ -75,6 +76,11 @@ pub struct Allocation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum InstanceOperation {
+    /// Restore authored identities/bindings. Optionally reset all UI properties.
+    /// This explicit owner command observes current heads at authority acceptance.
+    Restore {
+        defaults: bool,
+    },
     Instantiate {
         component: u64,
         name: Option<String>,
@@ -95,6 +101,8 @@ pub enum InstanceAction {
     Add,
     Duplicate,
     Remove,
+    Restore,
+    ResetDefaults,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

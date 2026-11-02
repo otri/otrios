@@ -103,6 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let id = step["id"].as_u64().unwrap_or(10);
         let name = step["name"].as_str().map(str::to_owned);
         let changed = match step["op"].as_str().ok_or("Operation required")? {
+            "restore" => client.restore_oib(step["defaults"].as_bool().unwrap_or(false))?,
             "add" => client.instantiate_oib(id, name)?,
             "duplicate" => client.duplicate_oib(id, name)?,
             "remove" => client.remove_oib(id)?,
