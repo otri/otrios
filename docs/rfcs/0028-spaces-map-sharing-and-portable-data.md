@@ -1,27 +1,26 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028: Spaces map, app sharing and portable data
 
-Date: 2026-11-01; delivery plan revised 2026-11-02. Status: **Map, retained data and scoped moves deployed;
-combined delivery incomplete while portable transfers are implemented**.
-Records the agreed interaction design and a proposed minimum transfer contract. The shared map and
-consolidated settings are deployed in browsers and on Frame; see the
-[M1 qualification](../experiments/spaces-map-frame-2026-11-01.md).
-Retained-data and scoped-move deployment evidence is recorded in the
-[retained-data qualification](../experiments/spaces-retained-data-2026-11-01.md)
-and [admin/moves qualification](../experiments/spaces-admin-and-moves-2026-11-01.md).
-The browser concept remains illustrative for unfinished transfer work. Bundle downloads,
-portable installation, export and data replacement are unavailable in the deployed
-release; its transfer controls report unavailable. Portable codecs, data replacement
-and authenticated export are being integrated in the feature worktree. Signed code
-publication/download and bounded file/public-HTTPS intake now have local process
-coverage; intake produces a temporary review only. Shared-session install decisions
-and the Mac signer bridge now have local signed-process coverage, including
-activation interruption/recovery and unchanged confirmed data. Shared transfer UI,
-browser/Frame I/O adapters and fixed codec fixtures now have local checks;
-integrated qualification and deployed acceptance remain unfinished. Aaron authorized completion of the remaining scope
-on 2026-11-01 and consolidated the former M2–M4 into one delivery step on
-2026-11-02. Develop retained data, scoped moves and portable transfers together,
-with one integrated qualification and deployment acceptance pass.
+Date: 2026-11-01; delivery plan revised 2026-11-02. Status: **combined implementation
+deployed; final Safari acceptance pending**.
+
+Map/settings, retained data, scoped moves, signed app sharing/import and portable
+data export/replacement are implemented in the single M2 delivery. The active
+Frame/Web release uses state v20, Spaces envelope v5 and registry OTSP9 while
+preserving opening release-control v1. See the continuing
+[combined qualification record](../experiments/spaces-portable-transfers-2026-11-02.md)
+for exact signed hashes, full local/process checks, real browser and calibrated
+Frame transfers, live migration, compatible rollback and preservation evidence.
+Safari acceptance remains outstanding, so this RFC is not marked complete and
+no final review PR has been opened.
+
+Aaron authorized completion on 2026-11-01 and consolidated the former M2–M4
+into one delivery step on 2026-11-02. The earlier
+[M1](../experiments/spaces-map-frame-2026-11-01.md),
+[retained-data](../experiments/spaces-retained-data-2026-11-01.md) and
+[admin/moves](../experiments/spaces-admin-and-moves-2026-11-01.md) records remain
+historical baseline evidence. The browser concept remains illustrative; deployed
+operations and qualification results establish behavior.
 
 Builds on [Spaces and app data](0027-spaces-and-app-data.md),
 [signed app bundles](0025-standalone-app-bundles.md),

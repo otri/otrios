@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Spaces management contract
 
-The RFC 0028 completion branch adds staged portable replacement using state
-protocol v20, Spaces envelope v5 and registry framing OTSP9. This extension is
-not yet deployed; the deployed admin/moves release remains v19/OTSP8. Its
-qualification records remain historical evidence for that baseline. Portable
-payload details and current local validation are in [Transfers](TRANSFERS.md).
+The deployed RFC 0028 implementation uses state protocol v20, Spaces envelope
+v5 and registry framing OTSP9, including staged portable replacement. Earlier
+v19/OTSP8 qualification remains historical evidence. See
+[Transfers](TRANSFERS.md) for payload details and the
+[combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
+for deployed migration/rollback and preservation results. Final Safari acceptance
+is still pending.
 
 The covered `otrios_core::spaces` library implements registry transitions and
 admission. The authority additionally supports an explicit managed mode via
@@ -138,12 +140,12 @@ are its primary actions. No width/height fields or separate
 appearance panel is added. In Edit, an app opens a name field over its immutable
 bundle ID. Enter, blur or closing commits a changed label; there is no Rename,
 Move or Delete App button in that panel. Share App, Export Data and Replace Data
-truthfully report unavailable until the transfer milestone qualifies. Unmeasured
+use the shared reviewed transfer workflow and qualified host adapters. Unmeasured
 active-user totals remain unavailable only where no admitted-mount inventory is
 available. The authority supplies Admin-only counts from accepted, currently
 admitted mounts, deduplicating authenticated people and counting anonymous
 connections separately. Successful changes do not display a Saved
-message. Transfer actions remain unavailable until M4 qualifies portable codecs.
+message. An unavailable codec or host capability remains explicit.
 
 In Edit, the red minus opens Delete App with Remove Data unchecked. Cancel
 changes nothing and resets that choice. Delete without Remove Data detaches the
@@ -165,7 +167,8 @@ No second active instance of a bundle is created. Registry limits bound sealed
 backups to 512 per authority and 128 total datasets per Space; reaching the limit
 rejects restoration without discarding any dataset. Usage includes preferred and
 sealed collections once each. Unavailable storage or schema/code compatibility
-keeps Restore unavailable; sharing/export/replacement codecs remain M4 work.
+keeps Restore unavailable. Export/replacement also require the installed compatible
+portable codec; see [Transfers](TRANSFERS.md).
 
 Cross-Space moves require current Admin authority in both Spaces. A review pins
 both exact collection bindings, the registry generation and discovery cursor;
@@ -187,8 +190,9 @@ promoted under fresh collection identities, followed by the current registry and
 durable outcome receipt. Startup finishes this exact decision before admission.
 The source's tombstone/pins retain existing cleanup protections; copied assets
 have independent ownership rather than mutable links to source storage.
-The unified admin UI writes OTSP8 for custom RGB backgrounds. The M2 rollback
-baseline rejects this framing and cannot recover an unfinished OTSR3 move plan.
+The deployed writer uses OTSP9, retaining OTSP8 custom RGB backgrounds and OTSR3
+move recovery. Older writers that cannot preserve current decisions reject this
+framing; the historical retained-data baseline also cannot recover OTSR3 plans.
 Use a current compatible reader/writer for code rollback; preserve the paired
 pre-deployment backup for an explicitly authorized state reset. Never remove the plan or restore older safety metadata.
 

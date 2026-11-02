@@ -1,20 +1,13 @@
 # Portable app and data transfers v1
 
-Status: combined RFC 0028 delivery implementation contract, not deployed acceptance evidence. RFC 0028
-defines the experience; this document pins its payload boundary. The deployed
-admin/moves milestone does not yet implement these transfers.
-
-Development checkpoint, 2026-11-02: `feat/spaces-portable-transfers` is the single
-continuation branch. It includes the retained-data and admin/move histories;
-their milestone commits remain preserved by dated tags. The root checkout's
-earlier combined-delivery planning edits are incorporated here with the newer
-deployment facts. Shared transfer panels, the browser adapter, native private
-Transfers-folder adapter and fixed codec fixtures now have local checks. The
-integrated release qualification and browser/physical Frame acceptance remain
-unfinished. This
-checkpoint is development work, not a qualified release or a final review PR.
-The continuing [combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
-distinguishes passing local checks from the remaining signed/deployed gates.
+Status: implemented and deployed in the combined RFC 0028 campaign, using state
+v20 / Spaces v5 / OTSP9. Safari acceptance remains pending, so the RFC is not yet
+complete. This document pins the payload boundary; the
+[combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
+contains exact signed artifacts, local/process checks, physical Frame transfers,
+public HTTPS sharing/intake, live migration, compatible rollback and final
+preservation/readiness evidence. The single continuation branch is
+`feat/spaces-portable-transfers`.
 
 ## Containers and delivery
 

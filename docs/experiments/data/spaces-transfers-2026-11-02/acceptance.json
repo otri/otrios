@@ -1,0 +1,165 @@
+{
+  "date": "2026-11-02",
+  "status": "deployed-safari-acceptance-pending",
+  "rfc_complete": false,
+  "implementation_source": "9a61137e8585531ab6930d61723d71f2fa7bbafb",
+  "source_fingerprint": "7fdbac615e03cfcbad46c71ba1970e691825ee8b237eee28ca0d13201ea24d4d",
+  "checks": {
+    "scripts/check.sh": "exit 0",
+    "real_authority_process_cases": 32,
+    "ordinary_workspace_process_scaffolds_are_acceptance": false,
+    "public_host_conformance_checks": 180,
+    "production_password_login_tested": false
+  },
+  "shadow_arm": {
+    "arm_migration": "OTSP8-to-OTSP9",
+    "original_metadata_preserved": true,
+    "payload_files_byte_identical": 56,
+    "obsolete_writer_refused": true,
+    "v20_reopen_passed": true,
+    "server_unprivileged": true,
+    "private_mount_namespace": true,
+    "passed": true,
+    "live_release_unchanged": true,
+    "private_data_copy_removed": true,
+    "private_metadata_exported": false
+  },
+  "live_migration": {
+    "passed": true,
+    "space_metadata_preserved": true,
+    "confirmed_noncollector_files_byte_identical": 54,
+    "auth_identity_calibration_and_collector_binding_preserved": true,
+    "registry_framing": "OTSP9",
+    "private_metadata_exported": false,
+    "data_restored": false
+  },
+  "browser_upgrade": {
+    "passed": true,
+    "before": "50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c",
+    "after": "6fd416fb81ec6013eb493bf6575ea8729675ae867727ddecee0663c0a5cb141b",
+    "same_open_tab": true,
+    "public_only_controls": true,
+    "live": true,
+    "runtime_error": "",
+    "manual_browser": "T3 Chromium"
+  },
+  "deployed_acceptance": {
+    "app": {
+      "passed": true,
+      "physical_signed_app_import_applied": true,
+      "physical_explicit_publication": true,
+      "anonymous_https_page_and_download": true,
+      "download_signature_and_exact_bundle_verified": true,
+      "server_received_shared_https_url": true,
+      "url_review_cancelled_without_mutation": true,
+      "app_digest": "e54e2c9ab7bdbca46e9f32bafbb655391ca6c7ca9ea9e87393250a5108323365",
+      "release": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3",
+      "pixels_exported": false
+    },
+    "rollback": {
+      "passed": true,
+      "release": "6fd416fb81ec6013eb493bf6575ea8729675ae867727ddecee0663c0a5cb141b",
+      "latest_confirmed_metadata_preserved": true,
+      "confirmed_payload_files_byte_identical": 60,
+      "latest_replacement_binding_preserved": true,
+      "complete_reexport_byte_identical": true,
+      "data_restored": false,
+      "registry_framing": "OTSP9"
+    },
+    "reactivation": {
+      "passed": true,
+      "release": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3",
+      "latest_confirmed_metadata_preserved": true,
+      "confirmed_payload_files_byte_identical": 60,
+      "latest_replacement_binding_preserved": true,
+      "complete_reexport_byte_identical": true,
+      "data_restored": false,
+      "registry_framing": "OTSP9"
+    },
+    "preservation": {
+      "passed": true,
+      "original_space_metadata_and_relative_order_preserved": true,
+      "original_noncollector_payload_files_byte_identical": 54,
+      "extra_data_payloads_restricted_to_disposable_collections": true,
+      "independent_verified_public_code_objects": 1,
+      "only_added_scope_archived_and_unattached": true,
+      "credentials_memberships_identity_calibration_collector_binding_preserved": true,
+      "explicit_approved_host_operators": 2,
+      "registry_framing": "OTSP9",
+      "data_restored": false,
+      "private_metadata_exported": false
+    },
+    "data": {
+      "physical_export_and_file_picker": true,
+      "review_did_not_mutate": true,
+      "explicit_confirmation_fresh_binding_and_retained_outgoing": true,
+      "complete_reexport_byte_identical": true,
+      "archive_bytes": 1235,
+      "input": "synthetic evdev through calibrated physical-device reader",
+      "human_touch_observation": false,
+      "pixels_exported": false
+    }
+  },
+  "final_controls": {
+    "passed": true,
+    "final_release": "057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c",
+    "source_pin": "9a61137e8585531ab6930d61723d71f2fa7bbafb",
+    "wasm_sha256": "17004c8f0db653131b11f4bba522e750d5d6ac757291b318b5154096f5090f81",
+    "native_sha256": "4095e8ed392a2d09a6ff1384986cb38fae0342e8ceb027e85a25ee8285378ea5",
+    "host_artifacts_identical_across_A_B_C": true,
+    "signed_closure_verified": true,
+    "mac_pointer_and_staging_match": true,
+    "existing_watcher_running": true,
+    "compatible_fallback": "d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3"
+  },
+  "final_readiness": {
+    "passed": true,
+    "release": "057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c",
+    "state_protocol": "otrios-canvas-sync-v20",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c",
+      "runtime_release": "057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 11.575
+  },
+  "remaining": [
+    "Safari acceptance with an accessible Mac window",
+    "Final RFC completion review/PR after acceptance"
+  ],
+  "after_fixture_removal": {
+    "published_code_available_after_fixture_app_and_space_removal": true,
+    "transfer_folder_contains_only_owner_lock": true
+  }
+}

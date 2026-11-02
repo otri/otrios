@@ -1,19 +1,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028 portable transfers — 2026-11-02
 
-Status: implementation and local integration checks pass. **Not deployed or
-qualified on physical Frame yet.** This is the continuing combined qualification
-record for [RFC 0028](../rfcs/0028-spaces-map-sharing-and-portable-data.md), including
-the previously deployed retained-data and scoped-move baseline. The remaining
-signed artifact, migration/rollback and real deployed browser/Frame gates below
-must pass before the RFC is complete.
+Status: **implemented and deployed; Safari acceptance remains pending**. This is
+one continuing qualification campaign for the combined [RFC 0028](../rfcs/0028-spaces-map-sharing-and-portable-data.md)
+scope. The [aggregate record](data/spaces-transfers-2026-11-02/acceptance.json)
+contains technical results only. RFC completion and a final review PR remain
+pending until Safari acceptance passes.
 
-The continuation branch is `feat/spaces-portable-transfers`. It preserves the
-retained-data and admin/moves histories and includes current `main`. The deployed
-authority and native reader were rechecked over pinned SSH: both still run
-`50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c`,
-with `otrios-canvas-sync-v19` and healthy authority status. No release, service
-configuration or confirmed data was changed by the local qualification.
+The implementation is pushed at `9a61137e8585531ab6930d61723d71f2fa7bbafb` on
+`feat/spaces-portable-transfers`. It preserves the retained-data/admin-moves
+histories and includes current `main`. Before cutover, authority and native ran
+`50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c`
+with state v19. The final active signed release is
+`057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c`,
+using state v20, Spaces envelope v5, registry OTSP9 and opening control v1.
 
 ## Implementation and local evidence
 
@@ -83,9 +83,11 @@ no runtime exceptions. This fixture's counter value is zero; nondefault values,
 complete histories beyond the UI window and assets are established by the fixed
 fixture and real-process tests, not inferred from that browser value.
 
-These are development artifacts from a dirty implementation checkout. They do
-not substitute for qualification of the final frozen signed Wasm/native pair,
-Safari acceptance or physical-device input through the Frame's calibrated reader.
+The first development artifacts came from a dirty checkout. The full driver and
+populated-map variant subsequently passed again using canonical Mac binaries and
+the exact signed candidate Wasm (`17004c8f…`). Their synthetic catalog/release
+remains separate from live production state. They do not establish Safari or
+physical Frame input; the latter is covered by the deployed evidence below.
 
 The thin `transfer_ui_probe` helper derives private on-device control coordinates
 from negotiated discovery, the matching catalog and a local review recipe. It
@@ -98,24 +100,110 @@ input, actual host I/O and independently observed authority decisions must still
 establish the on-device transfer results. The canonical ARM build includes this
 helper and the existing authenticated management probe for that work.
 
-## Remaining release gates
+## Signed deployment, migration and recovery
 
-- Freeze committed implementation inputs and build/sign through the existing Mac
-  workflow. Qualify the exact emitted browser/native bytes and populated map.
-- Preserve a private paired pre-cutover backup and confirm the existing identities,
-  layouts, memberships, bindings, app-owned content and assets before migration.
-- Activate the completed signed code replica before publishing upgrade events;
-  preserve opening control hello v1 while negotiating state v20/Spaces v5.
-- Verify OTSP8-to-OTSP9 migration on the live environment without rebinding existing
-  collections or losing confirmed content. A v19/OTSP8 writer is not a compatible
-  rollback after this upgrade; keep and exercise a verified v20/OTSP9 fallback.
-- Exercise real deployed browser and physical Frame export/replacement and signed
-  app publication/import, including file/shared-HTTPS URL receipt, explicit review,
-  current host operator policy and the Mac signer bridge. Preserve existing content
-  through activation and rollback, clean up disposable acceptance scopes and record
-  actual aggregate results without exporting private inventories or pixels.
-- Finish with matching signed pointers, healthy authority/collector services,
-  confirmed native state and idle input; then promote the validated source pin.
+The existing Mac workflow built and verified candidate A:
+`6fd416fb81ec6013eb493bf6575ea8729675ae867727ddecee0663c0a5cb141b`.
+The exact Wasm SHA-256 is
+`17004c8f0db653131b11f4bba522e750d5d6ac757291b318b5154096f5090f81`;
+the native ARM SHA-256 is
+`4095e8ed392a2d09a6ff1384986cb38fae0342e8ceb027e85a25ee8285378ea5`.
+No implementation inputs changed after freezing. The exact-Wasm browser driver
+and populated 14-app/four-Space variant both passed on committed source.
 
-No PR has been opened. This record remains incomplete until those gates have
-authoritative evidence. UI/process checks do not establish Linux shared-memory IPC.
+`backup-frame-release.py --tag 2026-11-02-spaces-portable-transfers` verified
+265 files in a paired private Frame/Mac pre-cutover kit and restored services.
+Raw metadata, inventories and credentials remain private. Before live activation,
+the actual unprivileged ARM server recovered a disposable copy in a private
+mount namespace at the original canonical storage path. This preserved pairing
+invariants without weakening them. OTSP8-to-OTSP9 migration preserved metadata and
+all 56 copied payload files; v20 reopened successfully. The obsolete writer
+remained running but returned 503 for state/health with invalid storage. The check was corrected to assert this fail-closed behavior instead of
+assuming process exit. The clone was removed and live state stayed unchanged.
+
+Pinned-SSH deployment activated A before sending upgrade events. The live audit
+then confirmed unchanged original Space metadata and 54 non-collector payload
+files, device identity, credentials, calibration and collector binding. Primary
+and latest registry use OTSP9. An anonymous browser tab opened on v19 upgraded
+to A automatically, stayed connected, and exposed only public controls.
+
+Aaron explicitly approved host-operator rights for the two existing human/Frame
+identities after automatic approval review requested that specific authorization.
+Actual IDs were resolved privately. No credentials or memberships were added or
+changed. Only the configured operator list changed, with its original privately
+backed up.
+
+## Deployed transfer acceptance and compatible rollback
+
+The physical Frame exercised these operations in one new Closed fixture Space:
+
+1. Export through the shared UI and native adapter to a private 0600 `.otdata`
+   file. Metadata generation remained unchanged.
+2. Select that file through the actual native picker, observe review without a
+   mutation, then explicitly confirm replacement. A fresh CID became active and
+   the exact outgoing CID remained a BeforeReplacement backup. The complete
+   1,235-byte archive re-export matched byte-for-byte. The first input
+   sequence missed its target; resetting to a known home state and using paced
+   input with readiness checks resolved the driver sequencing issue. Direct real-authority intake
+   independently qualified the file and its temporary review was cancelled.
+3. Receive a distinct standalone `transfer-counter` SDK payload. Review/cancel
+   did not install code. The actual native file picker and explicit confirmation
+   queued its durable import. `process-app-imports.py` used the existing Mac-only
+   signer bridge to activate app-only release B:
+   `d0fd9ecfb6327910171ebdde8f8b2c448959c6daea8a81fb1e67f370b65699b3`.
+   Qualified host binaries and original data stayed unchanged.
+4. Publish that verified SDK code through the native Share App / Publish App
+   controls. An anonymous ordinary browser showed its title, Download App, the
+   code-only explanation, project source and hosting guide. HTTPS download
+   unpacked and verified against the independent pinned publisher with exact
+   bundle digest `e54e2c9ab7bdbca46e9f32bafbb655391ca6c7ca9ea9e87393250a5108323365`.
+   Actual authority HTTPS URL intake returned the same installed digest; its
+   review was cancelled without a metadata change. This URL check used the real
+   server fetcher; it is not a claim of typing the URL on the physical keyboard.
+
+Input was synthetic evdev through the actual calibrated physical-device reader,
+not observed human finger input. No Frame pixels or private inventories were
+exported. Nondefault fields, long histories, historical profiles and owned assets
+are established by fixed-fixture/process tests, not inferred from this small
+live dataset. The production-origin host checker also passed all 180 public
+signed-code, negotiation and isolation checks; production password login was
+not tested.
+
+Cloudflare returned error 1010 to the diagnostic's default Python User-Agent.
+The ordinary browser and product URL fetcher succeeded. Giving the diagnostic
+an identifying application User-Agent completed its independent download check;
+no routing/security policy changed. See [Cloudflare's documented cause](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/).
+
+A new replacement was confirmed under B, then verified code-only rollback B→A
+and reactivation A→B both preserved its latest binding, exact metadata and all
+60 non-collector payload files. Re-export stayed byte-identical in both releases.
+No data snapshot was restored. A separately verified v20 fallback, matching
+server and control tools remain in the private rollback kit independently of
+cache pruning. The older v19 release is not a compatible current-data rollback.
+
+The fixture Space was archived with its data removed through the authority's
+normal flow; its three known Transfers files were removed. Removing only the
+temporary SDK app through `install-app.py` produced final app-only release C:
+`057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c`.
+All A/B/C Wasm and native hashes are identical. The explicitly published SDK
+code object remains independent of installed code and Space deletion; its exact
+verified archive is the one accounted-for additional code object, with no data.
+
+Final preservation rechecks confirm unchanged original metadata and relative
+order, all 54 original non-collector files, credentials, memberships, identity,
+calibration and collector binding. Only the added fixture appears archived.
+C's full signed closure verifies; Mac/current/staging, authority and native
+last-good agree. A cold native boot runs C itself, confirmed and idle, with
+healthy authority, native and tunnel services and successful monitoring. The
+existing Mac watcher/signing bridge is running on exact pushed source `9a61137…`
+with its source inbox fingerprint matching the frozen build. Previous controls
+and launch configuration remain private in the rollback kit.
+
+## Remaining gate
+
+Safari's computer-use entry point returned `cgWindowNotFound` after stalling;
+no Safari acceptance is claimed. The user has been asked to open an accessible
+Safari window. Complete that focused check, then finalize RFC status and the
+review PR. No PR has been opened while this gate remains. Documentation-only
+updates do not invalidate the frozen implementation checks. These UI/process
+results do not establish Linux shared-memory IPC.
