@@ -1,9 +1,295 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 #![cfg(feature = "canvas")]
 use otrios_core::{authoring as a, canvas::*, spaces};
+use otrios_interfaces::transfers::*;
 use otrios_interfaces::{canvas::*, keyboard::Edit, spaces::*};
 
 const SPACE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn data_review() -> DataReview {
+    DataReview {
+        stage: "e".repeat(32),
+        replacement: Replacement {
+            space: SPACE.into(),
+            app: "counter".into(),
+            collection: "d".repeat(32),
+            replacement: "f".repeat(32),
+            expected_generation: 1,
+        },
+        audience: Audience::Closed,
+        schema_sha256: "b".repeat(64),
+        archive_sha256: "1".repeat(64),
+        bytes: 100,
+        expires_unix_ms: u64::MAX,
+    }
+}
+fn transfer_fixture() -> Client {
+    let (mut client, _) = fixture(Role::Admin);
+    client
+        .set_transfer_host("https://otrios.example", true, true, true)
+        .unwrap();
+    client
+}
+#[test]
+fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session_commit() {
+    let mut client = transfer_fixture();
+    click(&mut client, "Edit");
+    click(&mut client, "Counter");
+    click(&mut client, "Export Data");
+    let export = client.take_transfer_task().unwrap();
+    assert_eq!(export.io, TransferIo::Export);
+    assert_eq!(
+        export.target,
+        TransferTarget::Data {
+            dataset: DatasetRef {
+                space: SPACE.into(),
+                app: "counter".into(),
+                collection: "d".repeat(32),
+                schema: "b".repeat(64)
+            }
+        }
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    assert!(
+        !client.reload_ready(),
+        "connected export waits for its host result"
+    );
+    client
+        .receive_transfer(
+            export.id,
+            TransferReply::Exported {
+                name: "counter.otdata".into(),
+            },
+        )
+        .unwrap();
+    assert!(!labels(&client).contains(&"Saved".into()));
+    click(&mut client, "Close");
+    click(&mut client, "Replace Data");
+    click(&mut client, "Choose File");
+    let picker = client.take_transfer_task().unwrap();
+    assert_eq!(picker.io, TransferIo::Pick);
+    let file = TransferFile {
+        id: "9".repeat(32),
+        name: "archive.otdata".into(),
+        bytes: 100,
+    };
+    client
+        .receive_transfer(
+            picker.id,
+            TransferReply::Files {
+                files: vec![file.clone()],
+            },
+        )
+        .unwrap();
+    click(&mut client, "Choose archive.otdata");
+    let upload = client.take_transfer_task().unwrap();
+    assert_eq!(upload.target, export.target);
+    assert_eq!(upload.io, TransferIo::File { file: file.id });
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client
+        .receive_transfer(
+            upload.id,
+            TransferReply::Data {
+                review: data_review(),
+            },
+        )
+        .unwrap();
+    assert!(labels(&client).contains(&"Confirm Replacement".into()));
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "review cannot publish"
+    );
+    assert_eq!(
+        client
+            .spaces_snapshot()
+            .unwrap()
+            .selected
+            .as_ref()
+            .unwrap()
+            .apps[0]
+            .collection,
+        "d".repeat(32)
+    );
+    click(&mut client, "Confirm Replacement");
+    assert!(
+        matches!(spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap(), Command::ReplaceData { stage, .. } if stage == data_review().stage)
+    );
+    assert!(
+        client.spaces_outgoing().unwrap().is_none(),
+        "no replacement replay"
+    );
+}
+#[test]
+fn closing_a_data_review_or_its_inflight_picker_disposes_the_stage_without_replacement() {
+    for close_early in [false, true] {
+        let mut client = transfer_fixture();
+        click(&mut client, "Edit");
+        click(&mut client, "Counter");
+        click(&mut client, "Replace Data");
+        click(&mut client, "Choose File");
+        let upload = client.take_transfer_task().unwrap();
+        if close_early {
+            click(&mut client, "Close");
+        }
+        client
+            .receive_transfer(
+                upload.id,
+                TransferReply::Data {
+                    review: data_review(),
+                },
+            )
+            .unwrap();
+        if !close_early {
+            click(&mut client, "Close");
+        }
+        assert!(
+            matches!(spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap(), Command::CancelData { stage, .. } if stage == data_review().stage)
+        );
+        assert!(!labels(&client).contains(&"Confirm Replacement".into()));
+    }
+}
+#[test]
+fn role_loss_and_mismatched_review_cannot_offer_or_send_a_transfer_commit() {
+    for revoke in [false, true] {
+        let mut client = transfer_fixture();
+        click(&mut client, "Edit");
+        click(&mut client, "Counter");
+        click(&mut client, "Replace Data");
+        click(&mut client, "Choose File");
+        let task = client.take_transfer_task().unwrap();
+        let mut review = data_review();
+        if revoke {
+            client
+                .receive_spaces(
+                    &spaces::encode_event(&Event::Snapshot {
+                        observation: 1,
+                        snapshot: Box::new(snapshot(Role::Member, 2)),
+                        resync: false,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+        } else {
+            review.replacement.collection = "8".repeat(32);
+        }
+        client
+            .receive_transfer(task.id, TransferReply::Data { review })
+            .unwrap();
+        assert!(!labels(&client).contains(&"Confirm Replacement".into()));
+        assert!(client.take_transfer_task().is_none());
+        assert!(client.spaces_outgoing().unwrap().is_none());
+    }
+}
+#[test]
+fn app_upload_tile_and_explicit_host_wide_review_precede_import_commit() {
+    let mut client = transfer_fixture();
+    click(&mut client, "Edit");
+    click(&mut client, "Add app: Household");
+    assert!(labels(&client).contains(&"Upload".into()));
+    click(&mut client, "Upload");
+    click(&mut client, "Shared app URL");
+    client
+        .hardware_edit(&Edit::Commit(format!(
+            "https://publisher.example/apps/counter/{}",
+            "7".repeat(64)
+        )))
+        .unwrap();
+    click(&mut client, "Review URL");
+    let task = client.take_transfer_task().unwrap();
+    assert!(matches!(task.io, TransferIo::Url { url } if url.ends_with("/download")));
+    let review = AppReview {
+        stage: "6".repeat(32),
+        space: SPACE.into(),
+        app: "counter".into(),
+        digest: "7".repeat(64),
+        title: "Canonical Counter".into(),
+        revision: u64::MAX,
+        bytes: 100,
+        installed: Some("8".repeat(64)),
+        affected_spaces: 3,
+        expected_generation: 1,
+        catalog: vec![],
+        release: "9".repeat(64),
+        audience: Audience::Closed,
+        expires_unix_ms: u64::MAX,
+    };
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    client
+        .receive_transfer(task.id, TransferReply::App { review })
+        .unwrap();
+    let panel = format!("{:?}", client.scene().unwrap());
+    assert!(panel.contains("Canonical Counter"));
+    assert!(panel.contains("Affected Spaces: 3"));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Confirm Import");
+    assert!(
+        matches!(spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap(), Command::ImportApp { stage, .. } if stage == "6".repeat(32))
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
+#[test]
+fn share_link_is_immutable_and_appears_only_after_confirmed_publication() {
+    let mut client = transfer_fixture();
+    let mut state = snapshot(Role::Admin, 2);
+    state.catalog = client.catalog_hash().to_vec();
+    let code = &mut state.selected.as_mut().unwrap().installed[0];
+    code.bundle_sha256 = Some("7".repeat(64));
+    code.title = "Canonical Counter".into();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: Box::new(state),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    click(&mut client, "Counter");
+    click(&mut client, "Share App");
+    assert!(!labels(&client).contains(&"Copy link".into()));
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    click(&mut client, "Publish App");
+    let Command::ShareApp {
+        id,
+        app,
+        digest,
+        expected_generation,
+        ..
+    } = spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("share")
+    };
+    assert_eq!(app, "counter");
+    assert_eq!(digest, "7".repeat(64));
+    assert_eq!(expected_generation, 2);
+    assert!(!labels(&client).contains(&"Copy link".into()));
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::AppShared {
+                version: VERSION,
+                id,
+                status: ManagementStatus::Applied,
+                share: Some(AppShare {
+                    app,
+                    digest,
+                    title: "Canonical Counter".into(),
+                }),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Copy link");
+    let task = client.take_transfer_task().unwrap();
+    assert_eq!(
+        task.io,
+        TransferIo::Copy {
+            text: format!("https://otrios.example/apps/counter/{}", "7".repeat(64))
+        }
+    );
+    assert!(client.spaces_outgoing().unwrap().is_none());
+}
 fn snapshot(role: Role, revision: u64) -> Discovery {
     let installed = InstalledApp {
         bundle_sha256: None,

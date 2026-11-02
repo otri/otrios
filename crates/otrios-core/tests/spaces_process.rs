@@ -5047,6 +5047,59 @@ fn portable_export_reads_confirmed_owned_data_and_denies_deleted_or_unadmitted_b
         return;
     };
     let mut rig = Rig::start(&binary);
+    // Frame learns only the configured public share origin on the trusted
+    // listener. Loopback, an Origin header, and a browser-shaped request confer
+    // no native admission; no Space/account metadata belongs in this response.
+    let context = |address: &str, actor: Option<char>, origin: bool, requested: bool| {
+        let mut socket = TcpStream::connect(address).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            socket,
+            "GET /transfers/context HTTP/1.0\r\nHost: {address}\r\n"
+        )
+        .unwrap();
+        if let Some(actor) = actor {
+            write!(
+                socket,
+                "Authorization: Bearer {}\r\n",
+                actor.to_string().repeat(64)
+            )
+            .unwrap();
+        }
+        if origin {
+            write!(socket, "Origin: {ORIGIN}\r\n").unwrap();
+        }
+        if requested {
+            socket
+                .write_all(b"X-OTriOS-Request: transfers\r\n")
+                .unwrap();
+        }
+        socket.write_all(b"\r\n").unwrap();
+        let mut bytes = vec![];
+        socket.read_to_end(&mut bytes).unwrap();
+        let at = bytes.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+        let status: u16 = std::str::from_utf8(&bytes[..at])
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap();
+        (
+            status,
+            serde_json::from_slice::<Json>(&bytes[at + 4..]).unwrap_or(Json::Null),
+        )
+    };
+    assert_eq!(
+        context(&rig.native, Some('a'), false, true),
+        (200, json!({"origin":ORIGIN}))
+    );
+    assert_eq!(context(&rig.native, None, false, true).0, 403);
+    assert_eq!(context(&rig.native, Some('a'), true, true).0, 403);
+    assert_eq!(context(&rig.native, Some('a'), false, false).0, 403);
+    assert_eq!(context(&rig.public, Some('a'), false, true).0, 404);
     let space = rig.space("Export source");
     rig.change(
         'a',

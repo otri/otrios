@@ -16,8 +16,9 @@ and authenticated export are being integrated in the feature worktree. Signed co
 publication/download and bounded file/public-HTTPS intake now have local process
 coverage; intake produces a temporary review only. Shared-session install decisions
 and the Mac signer bridge now have local signed-process coverage, including
-activation interruption/recovery and unchanged confirmed data. Transfer UI, codec
-conformance and integrated deployed acceptance remain unfinished. Aaron authorized completion of the remaining scope
+activation interruption/recovery and unchanged confirmed data. Shared transfer UI,
+browser/Frame I/O adapters and fixed codec fixtures now have local checks;
+integrated qualification and deployed acceptance remain unfinished. Aaron authorized completion of the remaining scope
 on 2026-11-01 and consolidated the former M2–M4 into one delivery step on
 2026-11-02. Develop retained data, scoped moves and portable transfers together,
 with one integrated qualification and deployment acceptance pass.

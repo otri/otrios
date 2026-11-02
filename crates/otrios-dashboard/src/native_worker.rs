@@ -28,6 +28,9 @@ mod bench_telemetry;
 mod local_apps;
 #[path = "session_client.rs"]
 mod session_client;
+#[cfg(unix)]
+#[path = "native_worker/transfers.rs"]
+mod transfers;
 enum NetworkEvent {
     Connected(u64),
     Packet(u64, Instant, Vec<u8>),
@@ -308,20 +311,32 @@ fn authenticated_request(
         .map_err(|_| "Invalid session URL")?;
     if let Some(path) = identity {
         use std::io::Read;
-        let metadata = fs::symlink_metadata(path).map_err(|_| "Cannot inspect Frame identity")?;
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = options
+            .open(path)
+            .map_err(|_| "Cannot open Frame identity")?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| "Cannot inspect Frame identity")?;
         if !metadata.is_file() || !(64..=65).contains(&metadata.len()) {
             return Err("Invalid Frame identity file".into());
         }
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o077 != 0 {
-                return Err("Frame identity must be mode 0600".into());
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            if metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
+                return Err("Frame identity must be private and unlinked".into());
             }
         }
         let mut token = String::new();
-        fs::File::open(path)
-            .and_then(|f| f.take(66).read_to_string(&mut token))
+        file.take(66)
+            .read_to_string(&mut token)
             .map_err(|_| "Cannot read Frame identity")?;
         let token = token.trim();
         if token.len() != 64
@@ -420,6 +435,17 @@ pub(super) fn state_worker(
             .and_then(|(_, selected)| selected),
     ));
     let mut client = Client::default();
+    #[cfg(unix)]
+    let mut transfers = o.url.as_ref().and_then(|url| {
+        let path = std::env::var_os("OTRIOS_TRANSFERS")?;
+        match transfers::Worker::start(url, std::path::Path::new(&path)) {
+            Ok(worker) => Some(worker),
+            Err(error) => {
+                eprintln!("Native transfers unavailable: {error}");
+                None
+            }
+        }
+    });
     #[cfg(unix)]
     let local_apps = o
         .local_apps
@@ -729,6 +755,27 @@ pub(super) fn state_worker(
                     }
                     NetworkEvent::Spaces(..) => {}
                 }
+            }
+        }
+        #[cfg(unix)]
+        if let Some(worker) = &mut transfers {
+            worker.actor(client.transfer_actor());
+            for _ in 0..2 {
+                match worker.poll() {
+                    Some(transfers::Event::Ready(origin)) => {
+                        client.set_transfer_host(&origin, true, true, false)?;
+                        dirty = true;
+                    }
+                    Some(transfers::Event::Reply(id, reply)) => {
+                        dirty |= client.receive_transfer(id, *reply)?;
+                    }
+                    None => break,
+                }
+            }
+            if let Some(task) = client.take_transfer_task()
+                && let Some((id, reply)) = worker.submit(task)
+            {
+                dirty |= client.receive_transfer(id, reply)?;
             }
         }
         ink_active.store(
@@ -2039,6 +2086,13 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            let alias = path.with_extension("alias");
+            fs::hard_link(&path, &alias).unwrap();
+            assert!(authenticated_request(url, Some(&path)).is_err());
+            fs::remove_file(&alias).unwrap();
+            std::os::unix::fs::symlink(&path, &alias).unwrap();
+            assert!(authenticated_request(url, Some(&alias)).is_err());
+            fs::remove_file(&alias).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
             assert!(authenticated_request(url, Some(&path)).is_err());
         }

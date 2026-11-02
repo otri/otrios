@@ -8,10 +8,13 @@ Development checkpoint, 2026-11-02: `feat/spaces-portable-transfers` is the sing
 continuation branch. It includes the retained-data and admin/move histories;
 their milestone commits remain preserved by dated tags. The root checkout's
 earlier combined-delivery planning edits are incorporated here with the newer
-deployment facts. Transfer panels, the browser adapter and streaming transport
-are being connected; the native Transfers-folder adapter, UI qualification,
-remaining codec fixtures and final deployment acceptance are unfinished. This
+deployment facts. Shared transfer panels, the browser adapter, native private
+Transfers-folder adapter and fixed codec fixtures now have local checks. The
+integrated release qualification and browser/physical Frame acceptance remain
+unfinished. This
 checkpoint is development work, not a qualified release or a final review PR.
+The continuing [combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
+distinguishes passing local checks from the remaining signed/deployed gates.
 
 ## Containers and delivery
 
@@ -392,9 +395,88 @@ and the high-water mark; reopening must reproduce every original causal row.
 
 The owned asset files are the exact union referenced by all qualified chat
 roots. Missing files, unused files or conflicting lengths reject. The codecs
-are implemented but remain **unqualified for deployment** until their complete
-conformance vectors and end-to-end delivery/replacement acceptance are recorded.
+are implemented with the fixed fixtures below but remain **unqualified for
+deployment** until integrated release and end-to-end delivery/replacement acceptance.
 Other app codecs remain unavailable rather than exporting runtime directories.
+
+### Fixed portable data fixtures
+
+[`portable-data-fixtures.json`](../crates/otrios-core/tests/fixtures/portable-data-fixtures.json)
+publishes exact bytes, SHA-256 hashes and expected logical values. It includes
+nondefault numeric/Unicode/Boolean fields, absent and retained signal history,
+an empty auxiliary root, two immutable historical sender profiles, redaction gaps
+with a sequence high-water mark beyond the final retained message, and an owned
+attachment inside a complete two-root `.otdata` archive. Fixtures contain synthetic
+data and fixed causal actors; no source authority identity, credentials or grants.
+
+| Frozen payload | SHA-256 |
+| --- | --- |
+| Canvas fields | `56a89ee11487736fc6e556342d5748d0759820f9e5f909f324acaca105eb2121` |
+| Canvas with signals | `92d0084292718672b596347e2dbcde933e07e446b4966b8e2052e1fd71c07fce` |
+| Empty auxiliary Canvas | `ec1f6a60b8fcfcd25147fc4261f78815db84eacfaa14be04bfd64790bae466a3` |
+| Complete chat checkpoint | `88c910194c553b350bb268ed2e5aab90de3d9342910b1b2a72513547a0255c97` |
+| Two-root collection checkpoint | `8f7cc25edc5c385305248ad1aa11e229d4d6a588d1ec75dcfb6b7113a184ce80` |
+| Complete data archive | `730ccd65407c0cc6357ae918c1c3358d2b666310438e3066ba1e1cf0c1e4046e` |
+
+The `portable_data_fixtures` Rust tests compare current encoding against these
+frozen bytes and hashes, qualify the imported values, then reopen every staged
+root, complete chat journal and asset without changing their portable bytes.
+Signal history does not enable a new authority's capture policy. Truncated framing,
+wrong causal subtrees and invalid history bounds reject. An independent Python
+stdlib oracle checks ZIP closure, little-endian framing, causal node ordering,
+SHA-256 node closure, clocks and record/high-water boundaries. It treats embedded
+FlexBuffers values as opaque; canonical FlexBuffers bytes and typed semantics
+are checked by the Rust fixtures, not claimed as a second FlexBuffers implementation.
+
+Maintenance commands use the pinned toolchain, offline dependencies and a reviewed
+byte/format decision before replacing any fixture:
+
+```sh
+cargo run -p otrios-core --example portable_data_fixtures --features canvas --locked --offline -- --check
+cargo test -p otrios-core --features canvas --test portable_data_fixtures --locked --offline
+python3 crates/otrios-core/tests/fixtures/verify-portable-data-fixtures.py
+```
+
+### Browser and Frame transport adapters
+
+Shared core owns destination selection, current-Admin checks, exact reviews and
+the explicit publication/import/replacement decisions. File/URL receipt alone
+cannot install code or change a binding. Both adapters return typed, correlated
+results to that core; all commits use the existing Spaces session channel.
+
+The browser uses its file picker or a drop on the active upload panel, posts only
+to the same authority, and downloads a complete bounded Blob. Supplied app URLs
+are sent to the authority's qualified fetch route, never fetched with browser
+credentials. Reset aborts old actor I/O, including file selection; stale completions
+cannot remove a newer task. Raw JSON review bytes preserve exact `u64` values in
+Wasm. Clipboard permission/failure affects Copy link only.
+
+Frame uses `OTRIOS_TRANSFERS`, defaulting to `Transfers` inside its existing cache.
+The directory is private (0700), exclusively owned by one adapter and bounded to
+64 files/128 MiB. Compatible `.otapp.zip`/`.otdata` files must be private regular
+files (0600) without symbolic/hard links; selection exposes single-use opaque IDs
+bound to inspected file metadata. A changed file requires selection again. Users
+can place payloads in this host folder; app code receives no filesystem path or
+general file access. Exports stream to private temporary files, fsync, and promote
+without overwriting existing files. Names include the app ID and a random suffix.
+Failures/cancelled accounts remove temporary downloads. An operator can remove
+unused exports from this folder when its explicit quota is full.
+
+Native I/O runs on one bounded worker thread, independently of input/rendering and
+release discovery. It sends the existing private `OTRIOS_IDENTITY_FILE` credential
+only to the configured authority, uses verified TLS for remote connections and
+allows plain HTTP only for a loopback authority. It accepts no redirects. The
+trusted listener's authenticated, no-Origin `GET /transfers/context` supplies only
+the configured public HTTPS origin for shared links and POST Origin checks; it is
+absent on the public listener. The authority's original transfer checks still
+apply on every request. A native account change interrupts socket I/O and invalidates
+picker IDs; clipboard is unavailable on Frame and no Copy link control is shown.
+
+Local checks pass 38 shared UI cases, 18 native owner cases (including five transfer
+adapter cases), eight browser transfer cases and 15 browser worker cases. macOS
+Unix socket tests require a short `TMPDIR` such as `/private/tmp`; the default long
+per-user path exceeds the OS socket name limit. These checks prove local software
+behavior; they do not establish final browser or physical Frame acceptance.
 
 ## Implementation progress — 2026-11-02
 
@@ -458,8 +540,8 @@ bytes. Targeted strict core Clippy and the browser session/UI-update Node checks
 pass. These checks do not qualify deployed transfer UI or constitute the final
 repository-wide release qualification.
 
-Native/browser transfer controls, remaining codec conformance vectors and final
-integrated release qualification are still required.
+The host controls and fixed codec fixtures above have local coverage. Final
+integrated release qualification and real browser/Frame acceptance are still required.
 The deployed release remains unchanged. Run the complete repository and scoped
 integration suites on the final combined candidate before signed deployment and
 browser/physical Frame migration and rollback acceptance.

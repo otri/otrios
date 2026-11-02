@@ -27,7 +27,7 @@ export async function boundedBody(response,limit,signal){
 }
 export class AppTransfers{
   constructor({origin,chooseFile,download,copy,reply,fetchImpl=globalThis.fetch}){
-    this.origin=new URL(origin).origin;this.chooseFile=chooseFile;this.download=download;this.copy=copy;this.reply=reply;this.fetch=fetchImpl;this.active=new Map();this.generation=0;
+    this.origin=new URL(origin).origin;this.chooseFile=chooseFile;this.download=download;this.copy=copy;this.reply=reply;this.fetch=fetchImpl.bind(globalThis);this.active=new Map();this.generation=0;
   }
   reset(){this.generation++;for(const controller of this.active.values())controller.abort();this.active.clear();}
   async run(task,providedFile){
@@ -61,13 +61,14 @@ export class AppTransfers{
       const response=await this.fetch(new URL(path,this.origin),{method,body,headers,credentials:'same-origin',redirect:'error',cache:'no-store',signal:controller.signal});
       if(!response.ok){await response.body?.cancel();throw Error(responseError(response.status));}
       if(method==='GET'){
-        if(response.headers.get('content-type')?.split(';')[0]!==DATA)throw Error('The server did not return a portable data payload.');
+        if(response.headers.get('content-type')?.split(';')[0]!==DATA){await response.body?.cancel();throw Error('The server did not return a portable data payload.');}
         const chunks=await boundedBody(response,limit,controller.signal);
         if(generation!==this.generation)return;
         const name=`${task.target.dataset.app}.otdata`;
         await this.download(new Blob(chunks,{type:DATA}),name);
         send({type:'exported',name});
       }else{
+        if(response.headers.get('content-type')?.split(';')[0]!=='application/json'){await response.body?.cancel();throw Error('The server did not return a transfer review.');}
         const chunks=await boundedBody(response,16*1024,controller.signal);
         const text=await new Blob(chunks).text();
         // Preserve exact u64 review integers for serde in Wasm; don't round-trip
@@ -75,6 +76,6 @@ export class AppTransfers{
         send(`{"type":"${kind}","review":${text}}`);
       }
     }catch(error){if(generation===this.generation)send({type:'failed',message:timedOut?'The transfer timed out. An unconfirmed upload will expire automatically.':String(error.message||'The transfer failed.')});}
-    finally{clearTimeout(timer);this.active.delete(id);}
+    finally{clearTimeout(timer);if(this.active.get(id)===controller)this.active.delete(id);}
   }
 }

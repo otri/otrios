@@ -27,7 +27,7 @@ try {
  });
  const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(method));},20000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params,sessionId}));});
  const evaluate=async(session,expression)=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true},session);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
- const wait=async(session,expression)=>{for(let i=0;i<600;i++){const value=await evaluate(session,expression);if(value)return value;await new Promise(r=>setTimeout(r,100));}throw Error('Browser timeout: '+expression+' '+await evaluate(session,"JSON.stringify({body:document.body.innerText.slice(-1000),ui:document.querySelector('#revision')?.dataset.ui,error:document.querySelector('#error')?.textContent})"));};
+ const wait=async(session,expression)=>{for(let i=0;i<600;i++){const value=await evaluate(session,expression);if(value)return value;await new Promise(r=>setTimeout(r,100));}const png=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(output+'/failure.png',Buffer.from(png.data,'base64'));throw Error('Browser timeout: '+expression+' '+await evaluate(session,"JSON.stringify({body:document.body.innerText.slice(-1000),view:document.querySelector('#view')?.getAttribute('aria-label'),controls:[...document.querySelectorAll('#controls button')].map(e=>e.getAttribute('aria-label')),ui:document.querySelector('#revision')?.dataset.ui,error:document.querySelector('#error')?.textContent})"));};
  const inputProbe="(()=>{window.__spaceProbe=[];const save=x=>{window.__spaceProbe.push({at:performance.now(),...x});if(window.__spaceProbe.length>128)window.__spaceProbe.shift();};for(const type of ['focus','blur','pointerdown','pointermove','pointerup','pointercancel','gotpointercapture','lostpointercapture'])window.addEventListener(type,e=>save({kind:'dom',type,target:e.target===window?'window':e.target.tagName,pointer:e.pointerId,buttons:e.buttons,eventTime:e.timeStamp,capture:e.pointerId!==undefined&&document.querySelector('#view')?.hasPointerCapture(e.pointerId),coalesced:e.getCoalescedEvents?.().map(s=>s.timeStamp)}),true);})()";
  // macOS headless windows can stay hidden after bringToFront; keep every test view visible.
  const page=async(token,space,path)=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});contexts.set(sessionId,browserContextId);for(const type of ['Page','Runtime','Network'])await call(type+'.enable',{},sessionId);await call('Emulation.setFocusEmulationEnabled',{enabled:true},sessionId);await call('Page.addScriptToEvaluateOnNewDocument',{source:inputProbe},sessionId);await call('Page.navigate',{url:fixture.url+(path||'/bundle-counter?space='+space)},sessionId);await call('Page.bringToFront',{},sessionId);if(token){await wait(sessionId,"document.querySelector('#monitoring-login')?.open");await evaluate(sessionId,`(()=>{const f=document.querySelector('#monitoring-form');f.elements.username.value=${JSON.stringify(token)};f.elements.password.value='password';f.requestSubmit();})()`);}return sessionId;};
@@ -40,7 +40,8 @@ try {
  const view="(document.querySelector('#view')?.getAttribute('aria-label')||'')";
  const ui="document.querySelector('#revision')?.dataset.ui";
  const selector=label=>'#controls button[aria-label='+JSON.stringify(label)+']';
- const click=async(session,label)=>{await evaluate(session,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await wait(session,`!!document.querySelector(${JSON.stringify(selector(label))})`);await evaluate(session,`document.querySelector(${JSON.stringify(selector(label))}).click()`);};
+ let clickSequence=0;
+ const click=async(session,label)=>{const key=++clickSequence;await wait(session,`(()=>{const button=document.querySelector(${JSON.stringify(selector(label))}),previous=window.__spaceClick;if(!button||previous?.key!==${key}||previous.epoch!==button.dataset.epoch){window.__spaceClick={key:${key},epoch:button?.dataset.epoch,at:performance.now()};return false;}if(performance.now()-previous.at<120)return false;button.click();delete window.__spaceClick;return true;})()`);};
  const press=async(session,label)=>{await wait(session,`!!document.querySelector(${JSON.stringify(selector(label))})`);const p=await evaluate(session,`(()=>{const r=document.querySelector(${JSON.stringify(selector(label))}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...p},session);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...p},session);};
  const shot=async(session,name)=>{assert(!await evaluate(session,"(()=>{const e=document.querySelector('#error');return e&&!e.hidden&&e.textContent})()"),'visible host error');await evaluate(session,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');const png=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(output+'/'+name+'.png',Buffer.from(png.data,'base64'));};
  if(fixture.populated){
@@ -186,7 +187,20 @@ try {
  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter'},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter'},a);
  for(let i=0;i<100&&(await get()).spaces.find(s=>s.id===fixture.space_a).apps[0].label!=='Tally';i++)await new Promise(r=>setTimeout(r,50));
  changed=await get();assert.equal(changed.spaces.find(s=>s.id===fixture.space_a).apps[0].label,'Tally');
- await click(a,'Export Data');await wait(a,view+".includes('not available')");await shot(a,'app-settings');await click(a,'Close');
+ const transferDownloads=join(output,'downloads',contexts.get(a));await mkdir(transferDownloads,{recursive:true});
+ await call('Browser.setDownloadBehavior',{behavior:'allow',browserContextId:contexts.get(a),downloadPath:transferDownloads,eventsEnabled:true});
+ const exportStart=downloadEvents.length;
+ await click(a,'Export Data');await wait(a,view+".includes('bundle-counter.otdata')");await shot(a,'data-export');
+ let portableDownload;
+ for(let n=0;n<100;n++){
+  portableDownload=downloadEvents.slice(exportStart).find(event=>event.suggestedFilename==='bundle-counter.otdata');
+  if(portableDownload&&downloadStates.get(portableDownload.guid)==='completed')break;
+  await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ assert(portableDownload&&downloadStates.get(portableDownload.guid)==='completed','the browser must complete the actual portable download');
+ const portableFile=join(transferDownloads,portableDownload.suggestedFilename),portableBytes=await readFile(portableFile);
+ assert.equal(portableBytes.subarray(0,4).toString('hex'),'504b0304');assert(portableBytes.length>128);
+ await click(a,'Close');await shot(a,'app-settings');await click(a,'Close');
  // Keyboard resize produces the same shared metadata transition as the corner.
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Resize: Workshop'))})`);
  const size=changed.spaces.find(s=>s.id===fixture.space_a).layout;
@@ -258,7 +272,10 @@ try {
  const movingCID=(await get()).spaces.find(s=>s.id===empty.id).apps[0].collection;
  await click(a,'Edit');
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter in Empty Space'))})`);
- await evaluate(a,`document.querySelector(${JSON.stringify(selector('Bundle Counter in Empty Space'))}).dispatchEvent(new KeyboardEvent('keydown',{key:' ',code:'Space',bubbles:true,cancelable:true}))`);
+ await wait(a,`document.querySelector(${JSON.stringify(selector('Bundle Counter in Empty Space'))})?.dataset.draggable==='true'`);
+ await evaluate(a,`document.querySelector(${JSON.stringify(selector('Bundle Counter in Empty Space'))}).focus()`);
+ await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32},a);
+ await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32},a);
  await click(a,'Move to Transfer target');await wait(a,view+".includes('Public · read only')");
  await shot(a,'cross-space-public-review');await click(a,'Move and publish data');
  for(let n=0;n<100&&!(await get()).spaces.find(s=>s.id===transferTarget.id).apps.length;n++)await new Promise(r=>setTimeout(r,50));
@@ -269,6 +286,38 @@ try {
  await manage({type:'delete-space',space:transferTarget.id,remove_data:true});
  await click(a,'Done');
  await writeFile(output+'/moves-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,keyboard_pickup:true,public_exposure_review:true,fresh_destination_binding:true,source_retired:true,silent_success:true,runtime_errors:errors},null,2));
+ // Exercise real file picking and reviewed replacement in a disposable Space.
+ // Existing fixture CIDs and the other client's replica remain unchanged.
+ await manage({type:'create',name:'Portable fixture'});
+ const portableSpace=(await get()).spaces.find(space=>space.name==='Portable fixture');
+ await manage({type:'attach',space:portableSpace.id,app:'bundle-counter'});
+ const outgoingCID=(await get()).spaces.find(space=>space.id===portableSpace.id).apps[0].collection;
+ await click(a,'Space: Portable fixture');await wait(a,ui+"==='app:bundle-counter/ui'");
+ await click(a,'Back to OTriOS');await click(a,'Edit');await click(a,'Bundle Counter in Portable fixture');
+ await click(a,'Replace Data');
+ await call('Page.setInterceptFileChooserDialog',{enabled:true},a);choosers.delete(a);
+ await click(a,'Choose File');
+ for(let n=0;n<100&&!choosers.has(a);n++)await new Promise(resolve=>setTimeout(resolve,50));
+ assert(choosers.has(a),'host must invoke its real file picker');
+ const document=await call('DOM.getDocument',{},a);
+ const {nodeId}=await call('DOM.querySelector',{nodeId:document.root.nodeId,selector:'#app-transfer-file'},a);
+ await call('DOM.setFileInputFiles',{nodeId,files:[portableFile]},a);
+ await wait(a,`!!document.querySelector(${JSON.stringify(selector('Confirm Replacement'))})`);
+ assert.equal((await get()).spaces.find(space=>space.id===portableSpace.id).apps[0].collection,outgoingCID,'upload and review must not activate data');
+ await shot(a,'data-replacement-review');await click(a,'Confirm Replacement');
+ let replacementCID=outgoingCID;
+ for(let n=0;n<100;n++){
+  replacementCID=(await get()).spaces.find(space=>space.id===portableSpace.id).apps[0].collection;
+  if(replacementCID!==outgoingCID)break;
+  await new Promise(resolve=>setTimeout(resolve,50));
+ }
+ assert.notEqual(replacementCID,outgoingCID);assert(!await evaluate(a,view+".includes('Saved.')"));
+ assert((await get()).spaces.find(space=>space.id===portableSpace.id).retained.some(dataset=>dataset.collection===outgoingCID&&dataset.origin==='before-replacement'),'the exact outgoing collection must remain sealed');
+ await wait(a,`[...document.querySelectorAll('#controls button')].some(button=>{const label=button.getAttribute('aria-label');return label.startsWith('Bundle Counter before replacement')&&label.endsWith(' (data) in Portable fixture');})`);
+ await shot(a,'data-replacement-backup');await click(a,'Done');await click(a,'Space: Portable fixture');
+ await wait(a,ui+"==='app:bundle-counter/ui'");assert.equal(await count(a),heldValue,'all exported confirmed fields survive replacement');
+ await click(a,'Back to OTriOS');await manage({type:'delete-space',space:portableSpace.id,remove_data:true});
+ await writeFile(output+'/portable-data-acceptance.json',JSON.stringify({passed:true,source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,archive_sha256:createHash('sha256').update(portableBytes).digest('hex'),actual_browser_download:true,actual_file_picker:true,review_has_no_mutation:true,fresh_binding:true,retained_outgoing_data:true,confirmed_value:heldValue,runtime_errors:errors},null,2));
  // Switching to another Space's app stays within one browser session and opens it.
  await click(a,'Bundle Counter');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&"+ui+"==='app:bundle-counter/ui'");
  await click(a,'Back to OTriOS');await click(a,'Profile');await click(a,'Sign out');

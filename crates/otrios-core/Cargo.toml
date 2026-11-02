@@ -125,3 +125,7 @@ required-features = ["canvas"]
 [[example]]
 name = "message_frames"
 required-features = ["canvas"]
+
+[[example]]
+name = "portable_data_fixtures"
+required-features = ["canvas"]

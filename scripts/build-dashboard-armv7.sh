@@ -8,7 +8,7 @@ build_container=$(docker create otrios-dashboard-armv7:rust1.90 sleep infinity)
 build_stage=$(mktemp -d)
 trap 'docker rm -f "$build_container" >/dev/null; rm -rf "$build_stage"' EXIT
 docker start "$build_container" >/dev/null
-COPYFILE_DISABLE=1 tar -cf "$build_stage/source.tar" Cargo.toml Cargo.lock rust-toolchain.toml crates apps tools web/shared/fonts
+COPYFILE_DISABLE=1 tar --no-xattrs -cf "$build_stage/source.tar" Cargo.toml Cargo.lock rust-toolchain.toml LICENSES crates apps tools web/shared/fonts
 docker cp "$build_stage/source.tar" "$build_container:/tmp/source.tar"
 docker exec "$build_container" tar -xf /tmp/source.tar -C /src
 docker exec "$build_container" cargo build --release --locked -p otrios-dashboard --features direct,server,canvas --target armv7-unknown-linux-gnueabihf

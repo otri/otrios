@@ -5,40 +5,43 @@ use crate::canvas::host_ui::transfers::{Purpose, Step};
 use otrios_interfaces::{spaces::Audience, transfers::TransferTarget};
 fn paragraph(b: &mut Builder<'_>, value: &str, x: f32, y: &mut f32, width: f32) {
     // Full bounded review/link text, rather than the map's two-line captions.
-    let mut line = String::new();
-    for word in value.split_whitespace() {
-        if !line.is_empty()
-            && (line.len() + word.len() + 1 > 64
-                || b.font
-                    .is_some_and(|f| f.text_width(&format!("{line} {word}"), 1.) > width))
-        {
-            b.nodes.push(text(&line, [x, *y, width, 28.], 1.));
-            *y += 30.;
-            line.clear();
-        }
-        if word.len() > 64 {
-            if !line.is_empty() {
-                b.nodes.push(text(&line, [x, *y, width, 28.], 1.));
-                *y += 30.;
-                line.clear();
-            }
-            for bytes in word.as_bytes().chunks(48) {
-                // URLs and digests are ASCII.
-                let chunk = String::from_utf8_lossy(bytes);
-                b.nodes.push(text(&chunk, [x, *y, width, 28.], 1.));
-                *y += 30.;
-            }
-        } else {
-            if !line.is_empty() {
-                line.push(' ');
-            }
-            line.push_str(word);
-        }
-    }
-    if !line.is_empty() {
+    for line in wrapped(value, |s| {
+        s.chars().count() <= 90
+            && b.font
+                .map_or(s.chars().count() as f32 * 12., |f| f.text_width(s, 1.))
+                <= width
+    }) {
         b.nodes.push(text(&line, [x, *y, width, 28.], 1.));
         *y += 30.;
     }
+}
+fn wrapped(value: &str, fits: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in value.split_whitespace() {
+        let candidate = if line.is_empty() {
+            word.into()
+        } else {
+            format!("{line} {word}")
+        };
+        if fits(&candidate) {
+            line = candidate;
+            continue;
+        }
+        if !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        for ch in word.chars() {
+            if !line.is_empty() && !fits(&format!("{line}{ch}")) {
+                lines.push(std::mem::take(&mut line));
+            }
+            line.push(ch);
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 fn audience(value: Audience) -> &'static str {
     match value {
@@ -54,9 +57,7 @@ pub(super) fn render(
     geometry: [f32; 4],
 ) -> Option<String> {
     let [left, top, width, _] = geometry;
-    let Some(draft) = model.transfer.clone() else {
-        return None;
-    };
+    let draft = model.transfer.clone()?;
     let title = match draft.purpose {
         Purpose::Share => "Share App",
         Purpose::Upload => "Upload App",
@@ -126,21 +127,25 @@ pub(super) fn render(
                             &mut y,
                             width,
                         );
-                        b.flat(
-                            "Download Data",
-                            "Download Data",
-                            [left, y + 12., width, 56.],
-                            HostAction::TransferExport(
-                                match &draft.target {
-                                    TransferTarget::Data { dataset } => dataset.app.clone(),
-                                    _ => String::new(),
-                                },
-                                match &draft.target {
-                                    TransferTarget::Data { dataset } => dataset.collection.clone(),
-                                    _ => String::new(),
-                                },
-                            ),
-                        );
+                        if model.transfer_caps.export {
+                            b.flat(
+                                "Download Data",
+                                "Download Data",
+                                [left, y + 12., width, 56.],
+                                HostAction::TransferExport(
+                                    match &draft.target {
+                                        TransferTarget::Data { dataset } => dataset.app.clone(),
+                                        _ => String::new(),
+                                    },
+                                    match &draft.target {
+                                        TransferTarget::Data { dataset } => {
+                                            dataset.collection.clone()
+                                        }
+                                        _ => String::new(),
+                                    },
+                                ),
+                            );
+                        }
                         y += 76.;
                     }
                     _ => (),
@@ -344,4 +349,34 @@ pub(super) fn render(
         HostAction::TransferCancel,
     );
     entry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrapped;
+    #[test]
+    fn complete_review_words_and_long_unicode_titles_fit_without_splitting_utf8() {
+        let title = "共有データ🗺️".repeat(16);
+        let url = format!("https://example.org/apps/counter/{}", "a".repeat(64));
+        for value in [title, url, "Canonical name and reviewed destination".into()] {
+            let lines = wrapped(&value, |s| s.chars().count() <= 19);
+            assert!(
+                lines
+                    .iter()
+                    .all(|s| !s.is_empty() && s.chars().count() <= 19)
+            );
+            assert_eq!(
+                lines
+                    .concat()
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect::<String>(),
+                value
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect::<String>()
+            );
+            assert!(lines.iter().all(|s| !s.contains('\u{fffd}')));
+        }
+    }
 }
