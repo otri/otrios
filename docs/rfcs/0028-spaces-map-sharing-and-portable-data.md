@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028: Spaces map, app sharing and portable data
 
-Date: 2026-11-01; delivery plan revised 2026-11-02. Status: **combined implementation
-deployed; final Safari acceptance pending**.
+Date: 2026-11-01; delivery plan revised 2026-11-02. Status: **complete, validated and
+deployed**.
 
 Map/settings, retained data, scoped moves, signed app sharing/import and portable
 data export/replacement are implemented in the single M2 delivery. The active
@@ -11,8 +11,8 @@ preserving opening release-control v1. See the continuing
 [combined qualification record](../experiments/spaces-portable-transfers-2026-11-02.md)
 for exact signed hashes, full local/process checks, real browser and calibrated
 Frame transfers, live migration, compatible rollback and preservation evidence.
-Safari acceptance remains outstanding, so this RFC is not marked complete and
-no final review PR has been opened.
+Safari and physical Frame acceptance passed, including the final shared Close-button
+padding correction. The full scope is ready for final review.
 
 Aaron authorized completion on 2026-11-01 and consolidated the former M2–M4
 into one delivery step on 2026-11-02. The earlier
@@ -383,9 +383,9 @@ or automatically repeat replacement. Restoring a backup follows the same path.
 Before the combined milestone ships, pin the exact FlexBuffers field types,
 magic/version prefixes, canonical manifest encoding, archive and checkpoint
 budgets, codec conformance vectors and media types in a versioned public contract.
-This RFC defines the minimum semantics and file/URL shape, not an implemented or
-already stabilized wire format. Current runtime limits must not be relaxed merely
-because an archive can contain a larger file.
+This RFC defines the minimum semantics and file/URL shape; the implemented byte
+layouts are pinned in the versioned transfer contract and fixed fixtures. Runtime
+limits are not relaxed merely because an archive can contain a larger file.
 
 ## Admin UI completion and execution order
 
@@ -435,7 +435,7 @@ Complete this refinement of M1/M2 while finishing M3, then implement M4:
 5. **Transfers in this UI.** Finish M4's real Share App/download page, Upload by
    payload or shared URL, Export Data and reviewed Replace Data inside these
    same panels. Preserve confirmed content and owned assets; retain outgoing
-   data before replacement. Prototype preview messages do not satisfy M4.
+   data before replacement. Prototype preview messages do not satisfy transfer acceptance.
 
 Use a small critical-path UI set: panel opening/closing and focus, one access
 review, exact retained-data actions, one move review, and transfer round trips.

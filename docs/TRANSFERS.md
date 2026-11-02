@@ -1,8 +1,8 @@
 # Portable app and data transfers v1
 
 Status: implemented and deployed in the combined RFC 0028 campaign, using state
-v20 / Spaces v5 / OTSP9. Safari acceptance remains pending, so the RFC is not yet
-complete. This document pins the payload boundary; the
+v20 / Spaces v5 / OTSP9. Safari and physical Frame acceptance passed; RFC 0028
+is complete. This document pins the payload boundary; the
 [combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
 contains exact signed artifacts, local/process checks, physical Frame transfers,
 public HTTPS sharing/intake, live migration, compatible rollback and final
@@ -533,11 +533,11 @@ bytes. Targeted strict core Clippy and the browser session/UI-update Node checks
 pass. These checks do not qualify deployed transfer UI or constitute the final
 repository-wide release qualification.
 
-The host controls and fixed codec fixtures above have local coverage. Final
-integrated release qualification and real browser/Frame acceptance are still required.
-The deployed release remains unchanged. Run the complete repository and scoped
-integration suites on the final combined candidate before signed deployment and
-browser/physical Frame migration and rollback acceptance.
+Those development checkpoints were followed by the complete repository and
+32-case real-authority process suite, final signed build, browser/Safari and
+physical Frame qualification, live migration, compatible rollback and preservation
+audits. See the [combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
+for current counts, exact deployed hashes and evidence scope.
 
 ## Export and replacement
 

@@ -9,8 +9,11 @@ These historical milestone notes record qualified increments and their evidence.
 common browser/native entrance, editable Space layouts and consolidated settings.
 The [Frame acceptance record](experiments/spaces-map-frame-2026-11-01.md) records
 signed deployment, exact metadata migration, confirmed-data preservation, physical
-GLES2/input checks and an OTSP6-compatible code rollback. Retained-data map UX,
-cross-Space dragging and portable app/data transfers remain later milestones.
+GLES2/input checks and an OTSP6-compatible code rollback. The combined
+[RFC 0028 completion](experiments/spaces-portable-transfers-2026-11-02.md) adds
+retained data, scoped app/data moves, signed app sharing/import and portable
+export/replacement. It records state v20/OTSP9 deployment, Safari and physical
+Frame acceptance, compatible code rollback and preservation of existing content.
 
 [Standalone app bundles](rfcs/0025-standalone-app-bundles.md) install independently
 of the host source registry. The [Frame qualification](experiments/app-bundle-frame-2026-10-29.md)

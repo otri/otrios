@@ -1,18 +1,17 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028 portable transfers â€” 2026-11-02
 
-Status: **implemented and deployed; Safari acceptance remains pending**. This is
-one continuing qualification campaign for the combined [RFC 0028](../rfcs/0028-spaces-map-sharing-and-portable-data.md)
+Status: **complete, validated and deployed**. This records one continuing
+qualification campaign for the combined [RFC 0028](../rfcs/0028-spaces-map-sharing-and-portable-data.md)
 scope. The [aggregate record](data/spaces-transfers-2026-11-02/acceptance.json)
-contains technical results only. RFC completion and a final review PR remain
-pending until Safari acceptance passes.
+contains the requirement audit and technical results, without private inventories.
 
-The implementation is pushed at `9a61137e8585531ab6930d61723d71f2fa7bbafb` on
+The final implementation is pushed at `5a5a86bbdccff490734c15d26f1838ad9867ba26` on
 `feat/spaces-portable-transfers`. It preserves the retained-data/admin-moves
 histories and includes current `main`. Before cutover, authority and native ran
 `50e8bc2e1ece14aa9feafc366df095ea475c93e991c2be29cf05d19db7a28a0c`
 with state v19. The final active signed release is
-`057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c`,
+`ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2`,
 using state v20, Spaces envelope v5, registry OTSP9 and opening control v1.
 
 ## Implementation and local evidence
@@ -25,7 +24,8 @@ file selection, bounded streaming, atomic export completion and account cancella
 Installation and replacement still commit only through the existing Spaces channel.
 
 `TMPDIR=/private/tmp bash scripts/check.sh` exited **0** on the integrated candidate.
-The final log is retained locally at `target/rfc0028-check-final.log`. Rust 1.90.0,
+The initial log is `target/rfc0028-check-final.log`; the final padding-fix run
+also exited 0 in `target/rfc0028-padding-check.log`. Rust 1.90.0,
 locked offline dependencies, isolated `CARGO_TARGET_DIR` and two test threads were
 used. The gate includes strict workspace Clippy, Rust/Python/Node checks, signed
 release installation/recovery and a separate real-authority process invocation.
@@ -108,7 +108,8 @@ The exact Wasm SHA-256 is
 `17004c8f0db653131b11f4bba522e750d5d6ac757291b318b5154096f5090f81`;
 the native ARM SHA-256 is
 `4095e8ed392a2d09a6ff1384986cb38fae0342e8ceb027e85a25ee8285378ea5`.
-No implementation inputs changed after freezing. The exact-Wasm browser driver
+That frozen implementation qualified before the later Close-padding correction below.
+The exact-Wasm browser driver
 and populated 14-app/four-Space variant both passed on committed source.
 
 `backup-frame-release.py --tag 2026-11-02-spaces-portable-transfers` verified
@@ -183,13 +184,13 @@ cache pruning. The older v19 release is not a compatible current-data rollback.
 
 The fixture Space was archived with its data removed through the authority's
 normal flow; its three known Transfers files were removed. Removing only the
-temporary SDK app through `install-app.py` produced final app-only release C:
+temporary SDK app through `install-app.py` produced cleanup app-only release C:
 `057aca96209224b3249ef9895a390c456e6a26cb466861e0552d3db41665223c`.
 All A/B/C Wasm and native hashes are identical. The explicitly published SDK
 code object remains independent of installed code and Space deletion; its exact
 verified archive is the one accounted-for additional code object, with no data.
 
-Final preservation rechecks confirm unchanged original metadata and relative
+Post-cleanup preservation rechecks confirm unchanged original metadata and relative
 order, all 54 original non-collector files, credentials, memberships, identity,
 calibration and collector binding. Only the added fixture appears archived.
 C's full signed closure verifies; Mac/current/staging, authority and native
@@ -199,11 +200,73 @@ existing Mac watcher/signing bridge is running on exact pushed source `9a61137â€
 with its source inbox fingerprint matching the frozen build. Previous controls
 and launch configuration remain private in the rollback kit.
 
-## Remaining gate
+## Final Safari qualification and Close padding
 
-Safari's computer-use entry point returned `cgWindowNotFound` after stalling;
-no Safari acceptance is claimed. The user has been asked to open an accessible
-Safari window. Complete that focused check, then finalize RFC status and the
-review PR. No PR has been opened while this gate remains. Documentation-only
-updates do not invalidate the frozen implementation checks. These UI/process
-results do not establish Linux shared-memory IPC.
+After Safari became accessible, Safari 27.0.1 signed into the disposable fixture
+on its first submitted attempt and rendered 14 apps across four Spaces. Through
+actual authored controls it opened Bundle Counter, changed its value from 0 to 1,
+returned through the breadcrumb, downloaded `.otdata`, selected that exact file
+through Safari's native file chooser, reviewed and cancelled without changing
+metadata, then confirmed replacement. Authority reads verified one generation
+advance, a fresh CID, the exact outgoing backup and unchanged other bindings.
+The complete 1,963-byte re-export matched SHA-256
+`79c7b8e9e4d22cd518ffe5dd8480c7c48bb0805610bbf01f4f09147907fcf62d`.
+The reopened app displayed 1. Both downloaded files were preserved in the ignored
+fixture output; the temporary server and agent-created Safari tabs were closed.
+
+The user observed that the transfer Close button sat too close to the right
+edge. The shared footer had assumed a 100-pixel button while transfers use 120.
+It now mirrors the authored content inset using the actual width. The existing
+export/replacement UI case checks alignment against the content's right edge.
+The focused case and the full `bash scripts/check.sh` both passed on `5a5a86b`,
+including all 32 real-authority cases and signed installer/recovery checks.
+
+The final canonical Mac build signed release D:
+`ea25d0ba1e159c71762f77050da9063d7e786e76c13a79825c77fa92cd24c0e2`.
+Its frozen source fingerprint is
+`75b7fb32da92fcf9222a9540e78c710dd22054fc20852a1b22c0318562f6cfe3`.
+Wasm SHA-256 is
+`632a7965c51a22c1320bb78071b85883bcbe9b0adf0672cc75ca7b1113f27947`;
+native ARM SHA-256 is
+`bd425e9d28fbcfba81a8f9dbfc5b9107c2d615390fc732226ddc021993b4a526`.
+Every signed app byte and the catalog are identical to C. Protocol/storage code
+is unchanged; state v20, Spaces v5 and OTSP9 remain current. Existing migration,
+rollback and codec evidence applies. The exact new Wasm with the newly built
+authority passed the integrated browser driver again, including real download,
+picker, fresh replacement, retained backup and zero runtime exceptions.
+
+Safari's existing fixture received the final Wasm by signed activation and kept
+its confirmed value 1. The corrected export and replacement footers visibly
+share the content inset. A second full Safari download/picker/review/confirmation
+on that exact Wasm again advanced generation once, retained every previous backup,
+created a fresh CID and reproduced the complete archive. The reopened value was 1.
+The fixture authority retained its compatible backend during this UI-only refresh;
+the integrated driver separately exercised the newly built authority. Safari
+also opened the deployed D public map, entered the read-only public app and
+returned via its breadcrumb; anonymous Edit remained unavailable. Its ordinary
+public share page showed the canonical title, download, instructions and project
+links. Production password login was not tested.
+
+The compatible C pre-padding backup verified 269 files in the private paired kit
+`2026-11-02-spaces-transfer-padding`. Deployment activated D through pinned SSH.
+A matching ARM coordinate helper drove the actual calibrated reader at a point
+six logical pixels inside the new Close button's left edge, outside its former
+misplaced bounds. A second read-only export proved the first Close returned to
+settings. Both private temporary exports were removed; metadata and calibration
+stayed unchanged. This remains synthetic evdev input, not human-finger observation.
+
+The final public-host probe passed **173** checks on D; the earlier **180** checks
+were on the temporary app-install release. Signed closure and private/admin
+isolation pass. Final audits preserve all original Space metadata and all 54
+original non-collector files, plus exact current metadata and 55 current
+non-collector files including the separately published SDK code object. Credentials,
+identity, calibration and collector binding are unchanged by the padding rollout.
+No data snapshot was restored. Mac/current/staging, authority and native last-good
+match D, and the running native executable itself is D, confirmed and idle.
+Monitoring succeeded. The existing Mac signer watcher is running on exact pushed
+source `5a5a86b`, with its source inbox matching the frozen build. Prior controls
+and the verified compatible fallback remain private in the rollback kits.
+
+All RFC requirements have corresponding evidence in the aggregate completion
+audit. Final documentation-only edits preserve the implementation fingerprint.
+These UI/process checks do not establish Linux shared-memory IPC.

@@ -6,8 +6,8 @@ v5 and registry framing OTSP9, including staged portable replacement. Earlier
 v19/OTSP8 qualification remains historical evidence. See
 [Transfers](TRANSFERS.md) for payload details and the
 [combined qualification record](experiments/spaces-portable-transfers-2026-11-02.md)
-for deployed migration/rollback and preservation results. Final Safari acceptance
-is still pending.
+for completed Safari/physical Frame acceptance, deployed migration/rollback and
+preservation results.
 
 The covered `otrios_core::spaces` library implements registry transitions and
 admission. The authority additionally supports an explicit managed mode via

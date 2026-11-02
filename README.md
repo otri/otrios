@@ -15,7 +15,7 @@ builds outside the host source registry. Native Wasm AOT compilation remains a
 [Portable transfers](docs/TRANSFERS.md) now connect signed app sharing/import and
 complete confirmed data export/replacement to the shared Spaces controls. The
 [combined qualification record](docs/experiments/spaces-portable-transfers-2026-11-02.md)
-tracks deployed acceptance and the remaining Safari check.
+records completed Safari/Frame acceptance, migration, rollback and data preservation.
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
