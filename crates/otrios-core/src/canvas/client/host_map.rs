@@ -320,12 +320,20 @@ impl Client {
             if epoch != self.epoch() || self.host.drag.is_some() {
                 return Ok(None);
             }
-            if event.position[1] < 104. || event.position[1] > viewport[1] - 80. {
+            if event.position[1] < 104. || event.position[1] >= viewport[1] {
                 return Ok(None);
             }
             let action = self.map_action_at(event.position)?;
             // Plus/ellipsis retain ordinary activation and never start a drag.
-            if matches!(action, Some(HostAction::Settings(..))) {
+            if matches!(
+                action,
+                Some(
+                    HostAction::Settings(..)
+                        | HostAction::Edit
+                        | HostAction::Page(_)
+                        | HostAction::Pane(Pane::Create)
+                )
+            ) {
                 return Ok(None);
             }
             let kind = match &action {
@@ -603,15 +611,22 @@ pub(super) fn present_map(root: &mut SceneNode, node: u32, info: super::super::t
             crate::dashboard::scene::clip_controls(child, [0., 0.], bounds);
         }
         if info.offset[1] + 0.5 < info.limit[1] {
+            let fade_height = 80_f32.min(bounds[1]);
+            let step_height = fade_height / 16.;
             for step in 0..16 {
                 let mut fade = background(
                     4_200_000_000 + step,
                     bounds[0],
-                    2.,
+                    step_height,
                     [247, 246, 240, ((step + 1) * 255 / 16) as u8],
                     0.,
                 );
-                fade.frame = Rect::new(0., bounds[1] - 32. + step as f32 * 2., bounds[0], 2.);
+                fade.frame = Rect::new(
+                    0.,
+                    bounds[1] - fade_height + step as f32 * step_height,
+                    bounds[0],
+                    step_height,
+                );
                 fade.responder = Some(TouchResponder::PassThrough);
                 root.children.push(fade);
             }

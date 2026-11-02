@@ -78,7 +78,7 @@ try {
    assert.deepEqual(await bounds('Profile'),profile,'profile remains fixed');assert.deepEqual(await bounds('Edit'),edit,'footer remains fixed');
    const png=await call('Page.captureScreenshot',{format:'png'},a);const bytes=Buffer.from(png.data,'base64'),im=pngPixels(bytes);
    const pixel=(x,y)=>[...im.pixels.subarray((y*im.width+x)*im.channels,(y*im.width+x)*im.channels+3)];
-   for(const [x,y]of [[10,790],[640,790],[10,750],[50,719]]){
+   for(const [x,y]of [[10,799],[640,799]]){
     const actual=pixel(x,y);assert(actual.every((v,c)=>Math.abs(v-[247,246,240][c])<=2),`page/fade edge ${x},${y}: ${actual}`);
    }
    samples.push((await evaluate(a,scroll)).offset[1]);await writeFile(output+'/populated-'+samples.length+'.png',bytes);
@@ -133,7 +133,7 @@ try {
   for(const touch of [false,true]){
    await wait(a,`document.querySelector('#view').dataset.logicalSize===${JSON.stringify(expectedMapSize)}`);
    await call('Emulation.setTouchEmulationEnabled',{enabled:touch,maxTouchPoints:1},a);
-   const stage=await evaluate(a,"(()=>{const c=document.querySelector('#view'),r=c.getBoundingClientRect(),e=c.dataset.logicalSize.split('x').map(Number);return {bottom:r.top+(e[1]-80)*r.height/e[1],scale:r.height/e[1]};})()");
+   const stage=await evaluate(a,"(()=>{const c=document.querySelector('#view'),r=c.getBoundingClientRect(),e=c.dataset.logicalSize.split('x').map(Number);return {bottom:r.bottom,scale:r.height/e[1]};})()");
    let rect;
    for(let n=0;n<120;n++){
     rect=await bounds('Monitoring');
@@ -145,7 +145,7 @@ try {
    await settledBounds(a,'Monitoring');rect=await bounds('Monitoring');
    assert(rect&&rect.height>=16*stage.scale&&rect.height<144*stage.scale&&Math.abs(rect.bottom-stage.bottom)<1,'Monitoring intersects the fade and is partly clipped: '+JSON.stringify({rect,stage}));
    const point={x:rect.x+rect.width/2,y:rect.bottom-8*stage.scale};
-   assert(point.y>=stage.bottom-32*stage.scale&&point.y<stage.bottom,'input lands inside the painted fade');
+   assert(point.y>=stage.bottom-80*stage.scale&&point.y<stage.bottom,'input lands inside the painted fade');
    await shot(a,'monitoring-in-fade-'+(touch?'touch':'mouse'));
    if(touch){await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:0,radiusX:1,radiusY:1,force:1}]},a);await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]},a);}
    else{await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point},a);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point},a);}

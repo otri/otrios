@@ -1802,7 +1802,7 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
 fn a_partly_visible_app_launches_through_the_home_fade() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
     let (mut client, _) = fixture(Role::Admin);
-    client.set_viewport([390., 340.]).unwrap();
+    client.set_viewport([390., 270.]).unwrap();
     let mut state = snapshot(Role::Admin, 2);
     state.spaces[0].layout.height = 6;
     client
@@ -1821,7 +1821,7 @@ fn a_partly_visible_app_launches_through_the_home_fade() {
         .into_iter()
         .find(|c| c.node.semantics.as_ref().unwrap().label == "Counter")
         .unwrap();
-    let bottom = 340. - 80.;
+    let bottom = 270.;
     assert_eq!(control.origin[1] + control.node.frame.height, bottom);
     assert!(
         control.node.frame.height < 144.,

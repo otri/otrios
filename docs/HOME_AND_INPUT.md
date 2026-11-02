@@ -159,3 +159,10 @@ surfaces retain the visible part of a clipped control's hit rectangle, adjusting
 its children to preserve paint positions. A tile entering the fade can therefore
 be clicked or tapped before it is fully visible. Completely offscreen controls
 remain absent from semantic navigation; settings backdrops remain inert.
+
+Edit/Done floats over the home fade. The map viewport reaches the bottom edge;
+its last 80 logical units are scrolling content padding, rather than a permanently
+reserved blank toolbar. The fade ends at the screen edge and lets input through
+around the fixed controls. At the end of a scroll, the spacer raises the final
+content above those controls. Browser map canvases align to the bottom of their
+visible window while retaining uniform scaling.

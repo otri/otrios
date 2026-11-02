@@ -1177,7 +1177,9 @@ fn map_body<'a>(
         ));
     }
     let total = skyline.into_iter().fold(0., f32::max);
-    model.scroll_limit = (total - (h - TOP - foot)).max(0.);
+    // The fixed controls float over the map. Padding belongs to the scrolling
+    // content, so its final item can clear the controls at the end of a scroll.
+    model.scroll_limit = (total + foot - (h - TOP)).max(0.);
     model.scroll = model.scroll.clamp(0., model.scroll_limit);
     for (space, frame, columns) in positions {
         let [x, y, width, height] = frame;
@@ -1350,15 +1352,13 @@ fn map_body<'a>(
     }
     b.nodes.push(
         a::canvas(content.nodes)
-            .frame([0., TOP, w, (h - TOP - foot).max(1.)])
+            .frame([0., TOP, w, (h - TOP).max(1.)])
             .semantic_label("Spaces map"),
     );
     b.actions.extend(content.actions);
-    // Fixed header and footer stay clear of the clipped map content.
+    // Only the header masks content. Footer controls float above the edge fade.
     b.nodes.push(a::rectangle(PAPER).frame([0., 0., w, TOP]));
     b.nodes.push(text("OTriOS", [28., 26., 168., 42.], 3.));
-    b.nodes
-        .push(a::rectangle(PAPER).frame([0., h - foot, w, foot]));
     // Profile is appended again here so overflow masking cannot hide it.
     if let Some(identity) = &snapshot.identity {
         let avatar = snapshot
