@@ -593,3 +593,84 @@ fn slider_feedback_keeps_inspector_content_and_saving_status_unchanged() {
     assert_eq!(client.resource_usage().oib.unwrap().status, status);
     assert_eq!(client.typed_value(1).unwrap(), Value::Number(650.));
 }
+
+#[test]
+fn slider_captures_reach_both_endpoints_even_outside_the_track() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, TouchResponder};
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        let (ui, mut doc) = setup();
+        let (mut client, mut session) = mounted_client(&ui, &mut doc);
+        client.set_viewport(viewport).unwrap();
+        for field in [1, 2] {
+            let control = ui
+                .handlers
+                .iter()
+                .find(|h| h.fields == [field])
+                .unwrap()
+                .control;
+            let scene = client.scene().unwrap();
+            let track = scene
+                .controls()
+                .into_iter()
+                .find(|c| {
+                    c.node.responder
+                        == Some(TouchResponder::Drag(
+                            otrios_interfaces::scene::Action::AppEvent(control),
+                        ))
+                })
+                .unwrap();
+            let origin = track.origin;
+            let width = track.node.frame.width * track.scale;
+            let y = origin[1] + track.node.frame.height * track.scale / 2.;
+            let epoch = client.epoch();
+            let mut at = 20_000;
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 11,
+                        phase: PointerPhase::Down,
+                        position: [origin[0] + width / 2., y],
+                    },
+                    at,
+                )
+                .unwrap();
+            for (fraction, expected) in [
+                (0.15, 150.),
+                (0.05, 50.),
+                (0., 0.),
+                (-0.05, 0.),
+                (1., 1000.),
+                (1.05, 1000.),
+            ] {
+                at += 50;
+                client
+                    .pointer_at(
+                        epoch,
+                        PointerEvent {
+                            id: 11,
+                            phase: PointerPhase::Move,
+                            position: [origin[0] + width * fraction, y],
+                        },
+                        at,
+                    )
+                    .unwrap();
+                assert_eq!(client.typed_value(field).unwrap(), Value::Number(expected));
+                client.scene().unwrap();
+            }
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 11,
+                        phase: PointerPhase::Up,
+                        position: [origin[0] + width * 1.05, y],
+                    },
+                    at + 100,
+                )
+                .unwrap();
+            pump_client(&mut client, &mut doc, &mut session);
+            assert_eq!(doc.typed_value(field).unwrap(), Value::Number(1000.));
+        }
+    }
+}

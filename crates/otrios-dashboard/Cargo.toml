@@ -138,3 +138,7 @@ required-features = ["canvas", "host-sync"]
 [[example]]
 name = "transfer_ui_probe"
 required-features = ["canvas", "host-sync"]
+
+[[example]]
+name = "touch_calibration"
+required-features = ["direct"]

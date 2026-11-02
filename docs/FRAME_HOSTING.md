@@ -24,8 +24,8 @@ listener. Native state and code use `http://127.0.0.1:8876`, including the stabl
 v1 hello on `/session`; remote code still requires HTTPS and signed native bytes.
 Browser clients retain the existing cookie/private-admission boundaries.
 
-No kernel, graphics driver, panel, rotation, calibration, CMA or zram policy
-changes are involved. Local confirmed edits and cached code remain usable when
+Authority deployment preserves the kernel, graphics driver, panel, rotation,
+accepted touch mapping, CMA and zram policy. Local confirmed edits and cached code remain usable when
 the Internet is unavailable; public access and fresh metrics require networking.
 Frame power and home networking determine public site availability.
 
@@ -64,6 +64,12 @@ permanent release-watch process, separate ink socket, Wayland, SDL or browser is
 needed on the frame. `--url` and `--code-url` both use `http://127.0.0.1:8876` on the frame.
 Plain HTTP/WS is accepted only for literal loopback addresses; remote origins
 require HTTPS/WSS. Native signature checks remain mandatory.
+
+Frame's touch mapping pairs `/lib/firmware/moonka/moonka-gsl1680f.config` with
+`/etc/udev/rules.d/99-spd-touch.rules`. Preserve both during app deployment and
+reprovisioning. The [2026-11-03 range correction](experiments/frame-touch-range-2026-11-03.md)
+records the accepted pair, offline preparation, physical slider evidence and
+device-local rollback. PhotoFrame's image builder includes the same correction.
 
 ## State, policy and failures
 
