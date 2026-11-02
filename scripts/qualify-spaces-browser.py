@@ -49,7 +49,7 @@ def qualify(args):
     with tempfile.TemporaryDirectory(prefix='otrios-spaces-browser-') as temporary:
         root = pathlib.Path(temporary)
         subprocess.run([str(args.bin_dir / 'examples/bundle_counter'), str(root / 'apps')], check=True, stdout=subprocess.DEVNULL)
-        subprocess.run([str(args.bin_dir / 'examples/space_ink_probe'), str(root / 'apps')], check=True)
+        subprocess.run([str(args.bin_dir / 'examples/space_ink_probe'), str(root / 'apps')] + (['--populated'] if args.populated else []), check=True)
         subprocess.run([str(args.bin_dir / 'examples/space_chat_probe'), str(root / 'apps'), str(root / 'state/brass-relay.journal')], check=True)
         shutil.copytree(REPO / 'web/canvas', root / 'web', ignore=shutil.ignore_patterns('pkg'))
         shutil.copytree(REPO / 'web/shared', root / 'shared')
@@ -68,9 +68,18 @@ def qualify(args):
             for name in ['alice', 'bob']], 'native': [
                 {'identity': 'alice', 'token_sha256': digest(('a' * 64).encode())}]}))
         private(root / 'admin.identity', 'a' * 64)
-        private(root / 'provision.json', json.dumps({'version': 2, 'spaces': [
+        provision_spaces = [
             {'name': 'Browser A', 'admins': ['alice'], 'members': ['bob'], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}, {'id': 'brass-relay', 'legacy_chat_root': 'app:brass-relay/state'}]},
-            {'name': 'Browser B', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}, {'id': 'brass-relay'}]}]}))
+            {'name': 'Browser B', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'bundle-counter'}, {'id': 'space-ink-probe'}, {'id': 'brass-relay'}]},
+        ]
+        if args.populated:
+            provision_spaces[0]['apps'] = [{'id': app} for app in ['bundle-counter', 'notes', 'sketches', 'component-playground', 'layout-lab', 'layout-text-scroll', 'layout-document', 'input-lab', 'animation-lab', 'three-d-lab']]
+            provision_spaces[1]['apps'] = [{'id': 'brass-relay'}]
+            provision_spaces += [
+                {'name': 'Operations', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'monitoring'}]},
+                {'name': 'Workshop', 'admins': ['alice'], 'members': [], 'apps': [{'id': 'notes'}, {'id': 'sketches'}]},
+            ]
+        private(root / 'provision.json', json.dumps({'version': 2, 'spaces': provision_spaces}))
         command = [str(args.bin_dir / 'dashboard-server'), '--apps', str(root / 'apps'),
                    '--app-state', str(root / 'state'), '--spaces-registry', str(root / 'spaces.flex')]
         provision = subprocess.run(command + ['--provision-spaces', str(root / 'provision.json')], check=True, capture_output=True, text=True)
@@ -111,7 +120,7 @@ def qualify(args):
         attachment.write_bytes((bytes(range(256)) * 782)[:200000])
         fixture = {'root': str(root), 'url': url, 'space_a': spaces[0]['space'], 'space_b': spaces[1]['space'],
                    'attachment': str(attachment), 'attachment_sha256': digest(attachment.read_bytes()),
-                   'release': release, 'source': source, 'source_dirty': dirty, 'output': str(output),
+                   'populated': args.populated, 'spaces': spaces, 'release': release, 'source': source, 'source_dirty': dirty, 'output': str(output),
                    'authority_sha256': digest((args.bin_dir / 'dashboard-server').read_bytes()),
                    'wasm_sha256': digest((args.wasm_pkg / 'otrios_dashboard_bg.wasm').read_bytes())}
         (root / 'fixture.json').write_text(json.dumps(fixture))
@@ -146,5 +155,6 @@ if __name__ == '__main__':
     parser.add_argument('--bin-dir', type=pathlib.Path, default=REPO / 'target/debug')
     parser.add_argument('--wasm-pkg', type=pathlib.Path, default=REPO / 'target/spaces-web/pkg')
     parser.add_argument('--output', type=pathlib.Path, default=REPO / 'target/spaces-browser')
+    parser.add_argument('--populated', action='store_true')
     parser.add_argument('--driver', type=pathlib.Path, default=REPO / 'scripts/test-spaces-browser.mjs')
     qualify(parser.parse_args())

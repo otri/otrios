@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real isolated Chromium contexts against the disposable Space authority fixture.
 import assert from 'node:assert/strict';
+import {pngPixels} from './browser-pixels.mjs';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {readFile,mkdtemp,mkdir,writeFile,rm,stat} from 'node:fs/promises';
@@ -29,7 +30,7 @@ try {
  const wait=async(session,expression)=>{for(let i=0;i<600;i++){const value=await evaluate(session,expression);if(value)return value;await new Promise(r=>setTimeout(r,100));}throw Error('Browser timeout: '+expression+' '+await evaluate(session,"JSON.stringify({body:document.body.innerText.slice(-1000),ui:document.querySelector('#revision')?.dataset.ui,error:document.querySelector('#error')?.textContent})"));};
  const inputProbe="(()=>{window.__spaceProbe=[];const save=x=>{window.__spaceProbe.push({at:performance.now(),...x});if(window.__spaceProbe.length>128)window.__spaceProbe.shift();};for(const type of ['focus','blur','pointerdown','pointermove','pointerup','pointercancel','gotpointercapture','lostpointercapture'])window.addEventListener(type,e=>save({kind:'dom',type,target:e.target===window?'window':e.target.tagName,pointer:e.pointerId,buttons:e.buttons,eventTime:e.timeStamp,capture:e.pointerId!==undefined&&document.querySelector('#view')?.hasPointerCapture(e.pointerId),coalesced:e.getCoalescedEvents?.().map(s=>s.timeStamp)}),true);})()";
  // macOS headless windows can stay hidden after bringToFront; keep every test view visible.
- const page=async(token,space)=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});contexts.set(sessionId,browserContextId);for(const type of ['Page','Runtime','Network'])await call(type+'.enable',{},sessionId);await call('Emulation.setFocusEmulationEnabled',{enabled:true},sessionId);await call('Page.addScriptToEvaluateOnNewDocument',{source:inputProbe},sessionId);await call('Page.navigate',{url:fixture.url+'/bundle-counter?space='+space},sessionId);await call('Page.bringToFront',{},sessionId);if(token){await wait(sessionId,"document.querySelector('#monitoring-login')?.open");await evaluate(sessionId,`(()=>{const f=document.querySelector('#monitoring-form');f.elements.username.value=${JSON.stringify(token)};f.elements.password.value='password';f.requestSubmit();})()`);}return sessionId;};
+ const page=async(token,space,path)=>{const {browserContextId}=await call('Target.createBrowserContext');const {targetId}=await call('Target.createTarget',{url:'about:blank',browserContextId});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});contexts.set(sessionId,browserContextId);for(const type of ['Page','Runtime','Network'])await call(type+'.enable',{},sessionId);await call('Emulation.setFocusEmulationEnabled',{enabled:true},sessionId);await call('Page.addScriptToEvaluateOnNewDocument',{source:inputProbe},sessionId);await call('Page.navigate',{url:fixture.url+(path||'/bundle-counter?space='+space)},sessionId);await call('Page.bringToFront',{},sessionId);if(token){await wait(sessionId,"document.querySelector('#monitoring-login')?.open");await evaluate(sessionId,`(()=>{const f=document.querySelector('#monitoring-form');f.elements.username.value=${JSON.stringify(token)};f.elements.password.value='password';f.requestSubmit();})()`);}return sessionId;};
  const count=async(session)=>evaluate(session,"Number((document.querySelector('#view')?.getAttribute('aria-label')||'').match(/A small shared counter\\D*(\\d+)/)?.[1])");
  const adminToken=(await readFile(fixture.root+'/admin.identity','utf8')).trim();
 
@@ -42,8 +43,84 @@ try {
  const click=async(session,label)=>{await evaluate(session,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await wait(session,`!!document.querySelector(${JSON.stringify(selector(label))})`);await evaluate(session,`document.querySelector(${JSON.stringify(selector(label))}).click()`);};
  const press=async(session,label)=>{await wait(session,`!!document.querySelector(${JSON.stringify(selector(label))})`);const p=await evaluate(session,`(()=>{const r=document.querySelector(${JSON.stringify(selector(label))}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...p},session);await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...p},session);};
  const shot=async(session,name)=>{assert(!await evaluate(session,"(()=>{const e=document.querySelector('#error');return e&&!e.hidden&&e.textContent})()"),'visible host error');await evaluate(session,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');const png=await call('Page.captureScreenshot',{format:'png'},session);await writeFile(output+'/'+name+'.png',Buffer.from(png.data,'base64'));};
+ if(fixture.populated){
+  // Match the deployed home density using only synthetic documents/identities.
+  await manage({type:'audience',space:fixture.space_b,audience:'public-comment'});
+  const a=await page(null,fixture.space_b,'/');
+  await call('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false},a);
+  await wait(a,ui+"==='app:spaces-host/ui'");
+  await click(a,'Sign in');await wait(a,"document.querySelector('#monitoring-login').open");
+  await evaluate(a,"(()=>{const f=document.querySelector('#monitoring-form');f.elements.username.value='alice@spaces.test';f.elements.password.value='password';})()");
+  // Keyboard/viewport changes must not cancel the common-entry sign-in request.
+  await call('Emulation.setDeviceMetricsOverride',{width:1278,height:798,deviceScaleFactor:1,mobile:false},a);
+  await evaluate(a,'new Promise(r=>setTimeout(r,150))');
+  assert(await evaluate(a,"document.querySelector('#monitoring-login').open"));
+  assert.equal(await evaluate(a,"document.querySelector('#monitoring-form').elements.password.value"),'password');
+  const signInAt=Date.now();
+  await evaluate(a,"document.querySelector('#monitoring-form').requestSubmit()");
+  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Profile'))})&&!document.querySelector('#monitoring-login').open`);
+  const signInMs=Date.now()-signInAt;
+  await call('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false},a);
+  const all=await get();assert.equal(all.spaces.length,4);assert.equal(all.spaces.reduce((n,s)=>n+s.apps.length,0),14);
+  for(const [i,space]of all.spaces.entries())await manage({type:'configure-space',space:space.id,name:space.name,layout:{width:[3,1,1,3][i],height:[2,1,1,1][i],background:['sage','sand','stone','lilac'][i]}});
+  const scroll="JSON.parse(document.querySelector('#revision')?.dataset.mapScroll||'null')";
+  await wait(a,scroll+"?.limit[1]>0");
+  const bounds=label=>evaluate(a,`document.querySelector(${JSON.stringify(selector(label))})?.getBoundingClientRect().toJSON()`);
+  const profile=await bounds('Profile'),edit=await bounds('Edit');
+  const samples=[];
+  for(const delta of [96,96,100000,-96,-100000,100000,-100000]){
+   const before=await evaluate(a,scroll);
+   await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:delta},a);
+   await wait(a,scroll+"?.offset[1]==="+Math.max(0,Math.min(before.limit[1],before.offset[1]+delta)));
+   assert.deepEqual(await bounds('Profile'),profile,'profile remains fixed');assert.deepEqual(await bounds('Edit'),edit,'footer remains fixed');
+   const png=await call('Page.captureScreenshot',{format:'png'},a);const bytes=Buffer.from(png.data,'base64'),im=pngPixels(bytes);
+   const pixel=(x,y)=>[...im.pixels.subarray((y*im.width+x)*im.channels,(y*im.width+x)*im.channels+3)];
+   for(const [x,y]of [[10,790],[640,790],[10,750],[50,719]]){
+    const actual=pixel(x,y);assert(actual.every((v,c)=>Math.abs(v-[247,246,240][c])<=2),`page/fade edge ${x},${y}: ${actual}`);
+   }
+   samples.push((await evaluate(a,scroll)).offset[1]);await writeFile(output+'/populated-'+samples.length+'.png',bytes);
+  }
+  // Drag the second Space over a full-screen first Space without releasing.
+  // Exercise a narrow touch viewport and desktop pointer frames with one epoch.
+  const reorderChecks=[];
+  await click(a,'Edit');
+  for(const [width,touch]of [[390,true],[1280,false]]){
+   await manage({type:'configure-space',space:fixture.space_a,name:'Browser A',layout:{width:6,height:6,background:'sage'}});
+   if((await get()).spaces[0].id!==fixture.space_a)await manage({type:'place-space',space:fixture.space_a,before:fixture.space_b});
+   await call('Emulation.setDeviceMetricsOverride',{width,height:700,deviceScaleFactor:1,mobile:false},a);
+   await call('Emulation.setTouchEmulationEnabled',{enabled:touch,maxTouchPoints:1},a);
+   await wait(a,'innerWidth==='+width);
+   await wait(a,scroll+'?.limit[1]>500');
+   await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:100000},a);
+   await wait(a,scroll+'?.offset[1]==='+scroll+'?.limit[1]');
+   for(let n=0;n<30&&!await bounds('Space: Browser B');n++){
+    const old=(await evaluate(a,scroll)).offset[1];
+    await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:400,deltaX:0,deltaY:-80},a);
+    await wait(a,scroll+'?.offset[1]<'+old);
+   }
+   const rect=await bounds('Space: Browser B');assert(rect,'source title becomes visible');
+   assert(!await bounds('Space: Browser A'),'destination title starts above the viewport');
+   const epoch=await evaluate(a,`document.querySelector(${JSON.stringify(selector('Done'))}).dataset.epoch`);
+   const start={x:rect.x+4,y:rect.y+4},edge={x:start.x,y:108};
+   const input=async(phase,p)=>touch
+    ?call('Input.dispatchTouchEvent',{type:phase,touchPoints:phase==='touchEnd'?[]:[{...p,id:0,radiusX:1,radiusY:1,force:1}]},a)
+    :call('Input.dispatchMouseEvent',{type:phase,button:'left',buttons:phase==='mouseReleased'?0:1,clickCount:1,...p},a);
+   await input(touch?'touchStart':'mousePressed',start);
+   await input(touch?'touchMove':'mouseMoved',edge);
+   await wait(a,scroll+'?.offset[1]===0');
+   assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Done'))}).dataset.epoch`),epoch,'preview and autoscroll retain native capture epoch');
+   await shot(a,'reorder-edge-'+width);
+   await input(touch?'touchEnd':'mouseReleased',edge);
+   for(let n=0;n<100&&(await get()).spaces[0].id!==fixture.space_b;n++)await new Promise(r=>setTimeout(r,50));
+   assert.equal((await get()).spaces[0].id,fixture.space_b);
+   reorderChecks.push({width,input:touch?'touch':'mouse',offscreen_destination:true,stationary_edge_scroll:true,stable_epoch:true});
+  }
+  assert.equal(errors.length,0,JSON.stringify(errors));
+  await writeFile(output+'/populated-acceptance.json',JSON.stringify({passed:true,spaces:4,apps:14,first_attempt_sign_in:true,sign_in_ms:signInMs,viewport_resize_preserves_sign_in:true,fixed_header_footer:true,fade_and_footer_pixels:true,scroll_samples:samples,reorder_checks:reorderChecks,source:fixture.source,source_dirty:fixture.source_dirty,wasm_sha256:fixture.wasm_sha256,runtime_errors:errors},null,2));
+  console.log('Populated map pixels, scrolling and first-attempt sign-in passed');
+ }else{
  const a=await page('alice@spaces.test',fixture.space_a);
- await wait(a,ui+"==='app:bundle-counter/ui'");await click(a,'Quit');await wait(a,ui+"==='app:spaces-host/ui'");
+ await wait(a,ui+"==='app:bundle-counter/ui'");await click(a,'Back to OTriOS');await wait(a,ui+"==='app:spaces-host/ui'");
  await wait(a,"document.querySelector('#connection')?.textContent==='Live shared space'");
  assert(await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Edit'))})`));
  assert(!await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Spaces'))})`));
@@ -56,11 +133,40 @@ try {
  await wait(a,view+".includes('Browser A')");
  assert(!await evaluate(a,view+".includes('Empty Space')"));
  await shot(a,'map');
+ await call('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false},a);
+ await wait(a,"innerWidth===1280");
+ // Regression: wheel input and repeated bound-to-bound pointer reversals retain
+ // the mount, restore clipped controls, and leave no captured pointer behind.
+ await manage({type:'configure-space',space:fixture.space_a,name:'Browser A',layout:{width:3,height:6,background:'sage'}});
+ const scroll="JSON.parse(document.querySelector('#revision')?.dataset.mapScroll||'null')";
+ await wait(a,scroll+"?.limit[1]>300");
+ const mapEpoch=await evaluate(a,`document.querySelector(${JSON.stringify(selector('Profile'))}).dataset.epoch`);
+ assert(!await evaluate(a,`!!document.querySelector(${JSON.stringify(selector('Scroll down'))})`));
+ for(let round=0;round<4;round++){
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:10000},a);
+  await wait(a,scroll+"?.offset[1]==="+scroll+"?.limit[1]");
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:-10000},a);
+  await wait(a,scroll+"?.offset[1]===0");
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,x:20,y:650},a);
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,x:20,y:-10000},a);
+  await wait(a,scroll+"?.offset[1]==="+scroll+"?.limit[1]");
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,x:20,y:20000},a);
+  await wait(a,scroll+"?.offset[1]===0");
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,x:20,y:20000},a);
+  assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Profile'))}).dataset.epoch`),mapEpoch);
+ }
+ await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter in Browser A'))})`);
+ await shot(a,'scroll-returned-top');
+ await manage({type:'configure-space',space:fixture.space_a,name:'Browser A',layout:{width:3,height:2,background:'sage'}});
+ await wait(a,scroll+"?.limit[1]<300");
  await click(a,'Edit');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Space settings: Empty Space'))})`);
  await shot(a,'map-edit');
+ await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:10000},a);
  await click(a,'Add app: Empty Space');
  await wait(a,`!!document.querySelector(${JSON.stringify(selector('Bundle Counter'))})`);
  await shot(a,'add-app');await click(a,'Close');
+ await wait(a,scroll+"!==null");
+ await call('Input.dispatchMouseEvent',{type:'mouseWheel',x:20,y:600,deltaX:0,deltaY:-10000},a);
  await click(a,'Space settings: Browser A');await wait(a,`!!document.querySelector(${JSON.stringify(selector('Name'))})`);
  await press(a,'Name');await wait(a,"document.activeElement?.classList.contains('canvas-editor')");
  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:4},a);await call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:4},a);
@@ -119,9 +225,9 @@ try {
  await call('Emulation.clearDeviceMetricsOverride',{},a);
  // Switching to another Space's app stays within one browser session and opens it.
  await click(a,'Bundle Counter');await wait(a,"location.search.includes("+JSON.stringify(fixture.space_b)+")&&"+ui+"==='app:bundle-counter/ui'");
- await click(a,'Quit');await click(a,'Profile');await click(a,'Sign out');
+ await click(a,'Back to OTriOS');await click(a,'Profile');await click(a,'Sign out');
  await manage({type:'audience',space:fixture.space_b,audience:'public-comment'});
- const anonymous=await page(null,fixture.space_b);await wait(anonymous,ui+"==='app:bundle-counter/ui'");await click(anonymous,'Quit');
+ const anonymous=await page(null,fixture.space_b);await wait(anonymous,ui+"==='app:bundle-counter/ui'");await click(anonymous,'Back to OTriOS');
  assert(!await evaluate(anonymous,`!!document.querySelector(${JSON.stringify(selector('Edit'))})`));
  assert(!await evaluate(anonymous,view+".includes('Workshop')"));
  await shot(anonymous,'public-map');
@@ -130,6 +236,7 @@ try {
  await click(anonymous,'Space: Browser B');await wait(anonymous,ui+"==='app:bundle-counter/ui'");
  const final=await get();assert.deepEqual(final.spaces.flatMap(s=>s.apps.map(a=>a.collection)).sort(),ids.sort());
  assert.equal(errors.length,0,JSON.stringify(errors));
- await writeFile(output+'/map-acceptance.json',JSON.stringify({source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,protocols:hellos,collections_preserved:true,checks:['common map','empty edit-only','Space name/color','implicit app name','stable bundle ID','keyboard resize','pointer Space/app reorder','mounted peer preserved','responsive bounds','same-session Space switch','anonymous filtering','single-app direct launch'],exceptions:errors},null,2));
+ await writeFile(output+'/map-acceptance.json',JSON.stringify({source:fixture.source,source_dirty:fixture.source_dirty,release:fixture.release,authority_sha256:fixture.authority_sha256,wasm_sha256:fixture.wasm_sha256,protocols:hellos,collections_preserved:true,checks:['wheel and repeated scroll reversal','stable map epoch','restored clipped controls','common map','empty edit-only','Space name/color','implicit app name','stable bundle ID','keyboard resize','pointer Space/app reorder','mounted peer preserved','responsive bounds','same-session Space switch','anonymous filtering','single-app direct launch'],exceptions:errors},null,2));
  console.log('Spaces map browser acceptance passed');
+ }
 } finally {socket?.close();chrome.kill('SIGTERM');await new Promise(r=>chrome.once('exit',r));await rm(profile,{recursive:true,force:true});}

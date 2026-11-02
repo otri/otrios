@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "spaces": 4,
+  "apps": 14,
+  "first_attempt_sign_in": true,
+  "sign_in_ms": 1022,
+  "viewport_resize_preserves_sign_in": true,
+  "fixed_header_footer": true,
+  "fade_and_footer_pixels": true,
+  "scroll_samples": [
+    96,
+    96,
+    96,
+    0,
+    0,
+    96,
+    0
+  ],
+  "reorder_checks": [
+    {
+      "width": 390,
+      "input": "touch",
+      "offscreen_destination": true,
+      "stationary_edge_scroll": true,
+      "stable_epoch": true
+    },
+    {
+      "width": 1280,
+      "input": "mouse",
+      "offscreen_destination": true,
+      "stationary_edge_scroll": true,
+      "stable_epoch": true
+    }
+  ],
+  "source": "1d058fdc33b1255cf293f4facecc6a25027a1933",
+  "source_dirty": false,
+  "wasm_sha256": "c5c8a2f36bc3cf940aad76ae57a298ef48e1b30fc65689e440aa5abcfdc567ac",
+  "runtime_errors": []
+}

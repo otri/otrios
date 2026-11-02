@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "release": "bc1aa7847a6a4f4f42b7cc4482f7dc2adef9a20c2c199a278ec1a93aeb7a146f",
+  "state_protocol": "otrios-canvas-sync-v17",
+  "health": "ok",
+  "ready": {
+    "ui_ref": "app:spaces-host/ui",
+    "release": "bc1aa7847a6a4f4f42b7cc4482f7dc2adef9a20c2c199a278ec1a93aeb7a146f",
+    "runtime_release": "bc1aa7847a6a4f4f42b7cc4482f7dc2adef9a20c2c199a278ec1a93aeb7a146f",
+    "state_confirmed": true,
+    "stream_ready": true,
+    "input_busy": false,
+    "pending_commands": 0,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ],
+    "touch_devices": 1,
+    "touch_calibrated": true,
+    "scanout_format": "RGB565",
+    "color_bits": [
+      5,
+      6,
+      5,
+      0
+    ]
+  },
+  "services": {
+    "otrios-authority": "active",
+    "otrios-dashboard-direct": "active",
+    "otrios-tunnel": "active",
+    "otrios-monitoring.timer": "active"
+  },
+  "collector_resumed": true,
+  "collector_result": "success",
+  "pixels_exported": false,
+  "authority_restarted": false,
+  "data_restored": false,
+  "elapsed_seconds": 13.448
+}

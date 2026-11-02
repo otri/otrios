@@ -363,7 +363,7 @@ fn launch_access(
         .unwrap()
         .controls()
         .iter()
-        .find(|v| v.node.semantics.as_ref().unwrap().label == "Quit")
+        .find(|v| v.node.semantics.as_ref().unwrap().label == "Back to OTriOS")
         .unwrap()
         .node
         .id;
@@ -1419,4 +1419,449 @@ fn dropping_an_app_on_a_later_tile_reorders_without_launching_or_rebinding() {
     );
     assert!(client.outgoing().unwrap().is_none());
     assert!(client.spaces_ui());
+}
+
+#[test]
+fn map_scroll_reverses_repeatedly_without_remounting_or_losing_controls() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 440.]).unwrap();
+    let mut next = snapshot(Role::Admin, 2);
+    next.spaces[0].layout.height = 6;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: next,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let epoch = client.epoch();
+    let limit = client.resource_usage().map_scroll.unwrap().limit[1];
+    assert!(limit > 500.);
+    assert!(labels(&client).contains(&"Counter".into()));
+    for unwanted in ["Scroll up", "Scroll down"] {
+        assert!(!labels(&client).contains(&unwanted.into()));
+    }
+    assert!(
+        format!("{:?}", client.scene().unwrap()).contains("4200000000"),
+        "edge fade at the top"
+    );
+    for round in 0..4 {
+        let time = round * 1000;
+        for (phase, y, at, expected) in [
+            (Down, 330., time, 0.),
+            (Move, -4000., time + 20, limit),
+            (Move, -3990., time + 40, limit - 10.),
+            (Move, 4000., time + 60, 0.),
+            (Move, 3990., time + 80, 10.),
+            (Move, 4000., time + 100, 0.),
+            (Up, 4000., time + 200, 0.),
+        ] {
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 42,
+                        phase,
+                        position: [20., y],
+                    },
+                    at,
+                )
+                .unwrap();
+            assert_eq!(
+                client.resource_usage().map_scroll.unwrap().offset[1],
+                expected
+            );
+            assert_eq!(
+                client.epoch(),
+                epoch,
+                "scrolling must retain the admitted map"
+            );
+            let scene = client.scene().unwrap();
+            for c in scene.controls() {
+                assert!(c.origin[1] >= 0. && c.origin[1] + c.node.frame.height * c.scale <= 440.);
+            }
+        }
+        assert!(!client.input_busy());
+        assert!(
+            labels(&client).contains(&"Counter".into()),
+            "reverse restores controls"
+        );
+    }
+    assert!(client.scroll_map(epoch, 100000.).unwrap());
+    assert_eq!(client.resource_usage().map_scroll.unwrap().offset[1], limit);
+    assert!(
+        !format!("{:?}", client.scene().unwrap()).contains("4200000000"),
+        "fade disappears at the bottom"
+    );
+    assert!(!labels(&client).contains(&"Counter".into()));
+    assert!(client.scroll_map(epoch, -100000.).unwrap());
+    assert!(labels(&client).contains(&"Counter".into()));
+    assert!(!client.scroll_map(epoch - 1, 100.).unwrap());
+    assert!(!client.scroll_map(epoch, f32::NAN).unwrap());
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    assert!(client.outgoing().unwrap().is_none());
+}
+
+#[test]
+fn map_momentum_and_cancel_use_sample_time_and_release_capture() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 440.]).unwrap();
+    let mut next = snapshot(Role::Admin, 2);
+    next.spaces[0].layout.height = 6;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: next,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let epoch = client.epoch();
+    for (phase, y, at) in [
+        (Down, 330., 0),
+        (Move, 290., 20),
+        (Move, 250., 40),
+        (Move, 210., 60),
+        (Up, 210., 60),
+    ] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 42,
+                    phase,
+                    position: [20., y],
+                },
+                at,
+            )
+            .unwrap();
+    }
+    let before = client.resource_usage().map_scroll.unwrap().offset[1];
+    assert!(!client.input_busy());
+    assert!(client.tick(100, 0).unwrap());
+    assert!(client.resource_usage().map_scroll.unwrap().offset[1] > before);
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 43,
+                phase: Down,
+                position: [20., 300.],
+            },
+            110,
+        )
+        .unwrap();
+    assert!(client.input_busy());
+    client.cancel().unwrap();
+    assert!(!client.input_busy());
+    let before = client.resource_usage().map_scroll.unwrap().offset;
+    client.tick(1000, 0).unwrap();
+    assert_eq!(client.resource_usage().map_scroll.unwrap().offset, before);
+    assert_eq!(client.epoch(), epoch);
+}
+
+#[test]
+fn managed_app_breadcrumb_returns_home_from_corner_padding() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, ui) = fixture(Role::Admin);
+    let mut authority = Document::new(ui.state_schema.clone(), "app:counter/state").unwrap();
+    launch(&mut client, &ui, &mut authority);
+    let epoch = client.epoch();
+    assert!(!format!("{:?}", client.scene().unwrap()).contains("Quit"));
+    for phase in [Down, Up] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 1,
+                    phase,
+                    position: [5., 5.],
+                },
+                100,
+            )
+            .unwrap();
+    }
+    assert!(client.spaces_ui());
+    assert!(!client.input_busy());
+}
+
+#[test]
+fn populated_map_keeps_header_footer_and_viewport_fixed_during_scroll() {
+    let (mut client, _) = fixture(Role::Admin);
+    let mut next = snapshot(Role::Admin, 2);
+    let base = next.spaces[0].clone();
+    next.selected = None;
+    let apps = [
+        "bundle-counter",
+        "notes",
+        "sketches",
+        "component-playground",
+        "layout-lab",
+        "layout-text-scroll",
+        "layout-document",
+        "input-lab",
+        "animation-lab",
+        "three-d-lab",
+    ];
+    next.spaces = [10, 1, 1, 2]
+        .into_iter()
+        .enumerate()
+        .map(|(index, count)| {
+            let mut space = base.clone();
+            space.id = format!("{:032x}", index + 10);
+            space.name = format!("Populated {index}");
+            space.layout.width = [3, 1, 1, 3][index];
+            space.apps = apps[..count]
+                .iter()
+                .map(|id| MapApp {
+                    app: (*id).into(),
+                    title: format!("{id} example"),
+                    availability: AppAvailability::Available,
+                })
+                .collect();
+            space.attached_count = count as u16;
+            space
+        })
+        .collect();
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: next,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    let fixed = |client: &Client| {
+        let scene = client.scene().unwrap();
+        ["Profile", "Edit"].map(|label| {
+            let controls = scene.controls();
+            let c = controls
+                .iter()
+                .find(|c| c.node.semantics.as_ref().unwrap().label == label)
+                .expect("fixed chrome remains visible");
+            (c.origin, c.node.frame)
+        })
+    };
+    let before = fixed(&client);
+    let epoch = client.epoch();
+    for delta in [96., 96., 100000., -96., -100000.] {
+        client.scroll_map(epoch, delta).unwrap();
+        assert_eq!(fixed(&client), before);
+        // The page background stays at the origin; only the explicit map's
+        // content is translated. The outer page is also a clipped canvas.
+        let scene = client.scene().unwrap();
+        assert_eq!(scene.root().children[0].frame.y, 0.);
+    }
+}
+
+#[test]
+fn common_entry_sign_in_survives_viewport_and_metadata_rebuilds() {
+    let (mut client, _) = fixture(Role::Member);
+    let mut visitor = snapshot(Role::Member, 2);
+    visitor.identity = None;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: visitor.clone(),
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Sign in");
+    assert!(client.auth_required());
+    client.set_viewport([800., 615.]).unwrap();
+    assert!(client.auth_required());
+    visitor.generation += 1;
+    visitor.cursor.revision += 1;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: visitor,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(client.auth_required());
+    client.retry_mount();
+    assert!(!client.auth_required());
+}
+
+#[test]
+fn title_drag_holds_native_epoch_and_scrolls_to_an_offscreen_space() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    for width in [390., 1280.] {
+        let (mut client, _) = fixture(Role::Admin);
+        client.set_viewport([width, 600.]).unwrap();
+        let mut next = snapshot(Role::Admin, 2);
+        next.spaces[0].layout.width = 6;
+        next.spaces[0].layout.height = 6;
+        let mut relay = next.spaces[0].clone();
+        relay.id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into();
+        relay.name = "Brass Relay".into();
+        relay.layout.height = 1;
+        next.spaces.push(relay);
+        client
+            .receive_spaces(
+                &spaces::encode_event(&Event::Snapshot {
+                    observation: 1,
+                    snapshot: next,
+                    resync: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        click(&mut client, "Edit");
+        let epoch = client.epoch();
+        assert!(client.scroll_map(epoch, 100000.).unwrap());
+        assert!(!labels(&client).contains(&"Space: Household".into()));
+        let scene = client.scene().unwrap();
+        let title = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.semantics.as_ref().unwrap().label == "Space: Brass Relay")
+            .unwrap();
+        // Touch blank title padding, then emulate native frames between samples.
+        let start = [title.origin[0] + 4., title.origin[1] + 4.];
+        for (phase, point, at) in [(Down, start, 100), (Move, [start[0], 108.], 120)] {
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 7,
+                        phase,
+                        position: point,
+                    },
+                    at,
+                )
+                .unwrap();
+            client.scene().unwrap();
+            assert_eq!(
+                client.epoch(),
+                epoch,
+                "native capture must survive preview frames"
+            );
+        }
+        assert!(client.input_busy());
+        for at in (128..10000).step_by(16) {
+            client.tick(at, 0).unwrap();
+            client.scene().unwrap();
+            assert_eq!(client.epoch(), epoch);
+            if client.resource_usage().map_scroll.unwrap().offset[1] == 0. {
+                break;
+            }
+        }
+        assert_eq!(client.resource_usage().map_scroll.unwrap().offset[1], 0.);
+        assert!(labels(&client).contains(&"Space: Household".into()));
+        // The title is stationary at the edge throughout autoscroll.
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 7,
+                    phase: Up,
+                    position: [start[0], 108.],
+                },
+                10000,
+            )
+            .unwrap();
+        let Command::Manage { request, .. } =
+            spaces::decode_command(&client.spaces_outgoing().unwrap().unwrap()).unwrap()
+        else {
+            panic!("Space reorder")
+        };
+        assert_eq!(
+            request.change,
+            Change::PlaceSpace {
+                space: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                before: Some(SPACE.into())
+            }
+        );
+        assert_eq!(request.expected_generation, 2);
+        assert!(!client.input_busy());
+        assert!(client.outgoing().unwrap().is_none());
+    }
+}
+
+#[test]
+fn edit_drag_autoscroll_stops_in_middle_and_cancel_writes_nothing() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase::*};
+    let (mut client, _) = fixture(Role::Admin);
+    client.set_viewport([390., 600.]).unwrap();
+    let mut next = snapshot(Role::Admin, 2);
+    next.spaces[0].layout.height = 6;
+    client
+        .receive_spaces(
+            &spaces::encode_event(&Event::Snapshot {
+                observation: 1,
+                snapshot: next,
+                resync: false,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    click(&mut client, "Edit");
+    let epoch = client.epoch();
+    let scene = client.scene().unwrap();
+    let title = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Space: Household")
+        .unwrap();
+    let start = [title.origin[0] + 10., title.origin[1] + 10.];
+    for (phase, position, at) in [(Down, start, 100), (Move, [100., 510.], 120)] {
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 3,
+                    phase,
+                    position,
+                },
+                at,
+            )
+            .unwrap();
+    }
+    for at in (128..512).step_by(16) {
+        client.tick(at, 0).unwrap();
+    }
+    let offset = client.resource_usage().map_scroll.unwrap().offset[1];
+    assert!(offset > 80.);
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 3,
+                phase: Move,
+                position: [100., 300.],
+            },
+            520,
+        )
+        .unwrap();
+    client.tick(600, 0).unwrap();
+    assert_eq!(
+        client.resource_usage().map_scroll.unwrap().offset[1],
+        offset
+    );
+    client.cancel().unwrap();
+    client.tick(1000, 0).unwrap();
+    assert_eq!(client.epoch(), epoch);
+    assert!(!client.input_busy());
+    assert!(client.spaces_outgoing().unwrap().is_none());
+    assert_eq!(
+        client.resource_usage().map_scroll.unwrap().offset[1],
+        offset
+    );
 }

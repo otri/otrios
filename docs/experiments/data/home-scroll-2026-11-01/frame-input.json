@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "release": "54922c1c300dadd6b85ef120240bb0ee895a6b6d23b71d233574fc62c6d07391",
+  "scroll_round_trips": 3,
+  "stable_map_epoch": true,
+  "immediate_bound_reversal": true,
+  "corner_return": [
+    5,
+    5
+  ],
+  "app_ui": "app:brass-relay/ui",
+  "input": "synthetic evdev through calibrated physical-device reader",
+  "human_touch_observation": false,
+  "app_writes": 0,
+  "pixels_exported": false,
+  "calibration_unchanged": true,
+  "readiness_wait_ms_max": 273.3
+}

@@ -179,10 +179,19 @@ impl Scene {
                     return true;
                 }
             }
-            if !matches!(
-                n.primitive,
-                Primitive::Canvas { .. } | Primitive::Viewport { .. }
-            ) && contains(n, local)
+            // Interactive canvases own their declared touch rectangle, including
+            // unpainted padding. Text-only breadcrumbs must not require hitting
+            // the text's narrower line box to activate their surrounding button.
+            if matches!(n.primitive, Primitive::Canvas { .. })
+                && matches!(
+                    n.responder,
+                    Some(TouchResponder::Activate(_) | TouchResponder::Drag(_))
+                )
+                && rect_contains(n.frame, local)
+                || !matches!(
+                    n.primitive,
+                    Primitive::Canvas { .. } | Primitive::Viewport { .. }
+                ) && contains(n, local)
             {
                 return true;
             }
@@ -298,6 +307,27 @@ mod tests {
         .unwrap();
         assert!(scene.hit_path([100., 200.]).is_empty());
         assert_eq!(scene.hit_path([150., 250.]).last().unwrap().node.id, 3);
+    }
+    #[test]
+    fn text_only_canvas_buttons_hit_padding_but_still_respect_parent_clipping() {
+        use otrios_interfaces::scene::Action;
+        let mut button = canvas(
+            1,
+            Rect::new(0., 0., 180., 96.),
+            vec![text(
+                2,
+                Rect::new(24., 40., 120., 32.),
+                "< OTriOS",
+                2,
+                WHITE,
+            )],
+        );
+        button.responder = Some(TouchResponder::Activate(Action::AppEvent(7)));
+        let scene = Scene::new(canvas(0, Rect::new(0., 0., 160., 96.), vec![button])).unwrap();
+        assert_eq!(scene.hit_path([5., 5.]).last().unwrap().node.id, 1);
+        assert_eq!(scene.hit_path([150., 90.]).last().unwrap().node.id, 1);
+        assert!(scene.hit_path([170., 90.]).is_empty());
+        assert!(scene.hit_path([-1., 5.]).is_empty());
     }
     #[test]
     fn invalid_trees_are_rejected_before_publication() {

@@ -174,6 +174,9 @@ impl CanvasApp {
     pub fn blur_text_input(&mut self, epoch: u32, id: u32) -> Result<bool, String> {
         self.inner.blur_text_input(epoch, id)
     }
+    pub fn scroll_map(&mut self, epoch: u32, delta: f32) -> Result<bool, String> {
+        self.inner.scroll_map(epoch, delta)
+    }
     pub fn scroll_text_input(&mut self, epoch: u32, id: u32, offset: f32) -> Result<bool, String> {
         self.inner.scroll_text_input(epoch, id, offset)
     }

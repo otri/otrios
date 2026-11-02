@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "release": "bc1aa7847a6a4f4f42b7cc4482f7dc2adef9a20c2c199a278ec1a93aeb7a146f",
+  "source_pin": "1d058fdc33b1255cf293f4facecc6a25027a1933",
+  "mac_and_frame_pointers_match": true,
+  "previous_config_pointer_and_source_marker_preserved_privately": true
+}

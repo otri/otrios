@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "spaces": 4,
+  "apps": 14,
+  "first_attempt_sign_in": true,
+  "sign_in_ms": 1025,
+  "viewport_resize_preserves_sign_in": true,
+  "fixed_header_footer": true,
+  "fade_and_footer_pixels": true,
+  "scroll_samples": [
+    96,
+    96,
+    96,
+    0,
+    0,
+    96,
+    0
+  ],
+  "source": "cf3782f408a57fe37706dd5a6d3bfbb380a7a341",
+  "source_dirty": false,
+  "wasm_sha256": "b8f06a6aca9cdeef1f6111ef65e8cb3cd6cdd161e164bff8172e61b2cd00444f",
+  "runtime_errors": []
+}

@@ -29,12 +29,22 @@ impl Scroll {
             bounds_dirty: true,
         }
     }
+    pub fn node(&self) -> u32 {
+        self.node
+    }
     pub fn info(&self) -> Info {
         Info {
             offset: self.axes.each_ref().map(|a| a.offset),
             limit: self.axes.each_ref().map(|a| a.limit()),
             active: self.axes.iter().any(TextViewport::animating),
             velocity: self.axes.each_ref().map(|a| a.velocity()),
+        }
+    }
+    /// Wheel/trackpad deltas already include the platform's acceleration.
+    pub fn set_offset(&mut self, offset: [f32; 2]) {
+        self.cancel();
+        for (axis, value) in self.axes.iter_mut().zip(offset) {
+            axis.offset = value.clamp(0., axis.limit());
         }
     }
     pub fn touching(&self) -> bool {

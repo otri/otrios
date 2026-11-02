@@ -26,8 +26,8 @@ pub(in crate::canvas) struct Drag {
     pub kind: DragKind,
     pub start: [f32; 2],
     pub position: [f32; 2],
-    pub scroll: f32,
     pub moving: bool,
+    pub last_tick: u64,
     pub action: Option<HostAction>,
 }
 fn color(value: Background) -> [u8; 4] {
@@ -175,13 +175,7 @@ impl Builder {
         );
     }
 }
-fn finish(
-    mut b: Builder,
-    draft: &str,
-    title: &str,
-    form: bool,
-    viewport: [f32; 2],
-) -> Result<Rendered> {
+fn finish(mut b: Builder, draft: &str, title: &str, form: bool, is_map: bool) -> Result<Rendered> {
     if form {
         b.nodes.push(
             crate::components::keyboard()
@@ -221,61 +215,34 @@ fn finish(
     if controls.len() != b.actions.len() {
         return Err("Host action layout mismatch".into());
     }
-    fn clip_map(node: &mut otrios_interfaces::layout::TemplateNode, viewport: [f32; 2]) {
-        if node
-            .semantics
-            .as_ref()
-            .is_some_and(|s| s.label == Expr::Literal(Value::Text("Spaces map".into())))
-        {
-            node.shape = otrios_interfaces::layout::Shape::Canvas { clip: true };
-            node.semantics = None;
-            fn responders(
-                node: &mut otrios_interfaces::layout::TemplateNode,
-                parent_y: f32,
-                bottom: f32,
-            ) {
-                let literal = |expr: &Expr| {
-                    if let Expr::Literal(Value::Number(n)) = expr {
-                        *n
-                    } else {
-                        0.
-                    }
-                };
-                let y = parent_y + literal(&node.frame[1]);
-                let height = literal(&node.frame[3]);
-                let body = node
-                    .semantics
-                    .as_ref()
-                    .is_some_and(|s| s.label == Expr::Literal(Value::Text("Space body".into())));
-                if body {
-                    node.semantics = None;
-                }
-                if !body && node.responder.is_some() && (y < 0. || y + height > bottom) {
-                    node.responder = None;
-                    node.semantics = None;
-                }
-                for child in &mut node.children {
-                    responders(child, y, bottom);
-                }
+    let mut map_viewport = None;
+    if is_map {
+        // AppUi's three fixed header nodes precede our map viewport. A label
+        // on a noninteractive authoring canvas is deliberately not compiled.
+        let map = &mut blueprint.templates[0].root.children[3];
+        map_viewport = Some(map.id);
+        map.shape = otrios_interfaces::layout::Shape::Canvas { clip: true };
+        fn bodies(node: &mut otrios_interfaces::layout::TemplateNode) {
+            if node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == Expr::Literal(Value::Text("Space body".into())))
+            {
+                node.semantics = None;
             }
-            let bottom = if let Expr::Literal(Value::Number(height)) = node.frame[3] {
-                height
-            } else {
-                (viewport[1] - TOP - FOOT).max(1.)
-            };
             for child in &mut node.children {
-                responders(child, 0., bottom);
+                bodies(child);
             }
         }
-        for child in &mut node.children {
-            clip_map(child, viewport);
+        for child in &mut map.children {
+            bodies(child);
         }
     }
-    clip_map(&mut blueprint.templates[0].root, viewport);
     ui.layout = crate::dashboard::layout::Layout::encode(&blueprint)?;
     Ok(Rendered {
         ui,
         actions: controls.into_iter().zip(b.actions).collect(),
+        map_viewport,
     })
 }
 pub(super) fn render(
@@ -383,8 +350,7 @@ pub(super) fn render(
         let total = skyline.into_iter().fold(0., f32::max);
         model.scroll_limit = (total - (h - TOP - foot)).max(0.);
         model.scroll = model.scroll.clamp(0., model.scroll_limit);
-        for (space, mut frame, columns) in positions {
-            frame[1] -= model.scroll;
+        for (space, frame, columns) in positions {
             let [x, y, width, height] = frame;
             let editable = model.editing && space.role == Some(Role::Admin);
             let mut card = Builder {
@@ -559,24 +525,6 @@ pub(super) fn render(
                 HostAction::Pane(Pane::Create),
             );
         }
-        if model.scroll_limit > 0. {
-            if model.scroll > 0. {
-                b.flat(
-                    "Scroll up",
-                    "^",
-                    [w / 2. - 24., h - 68., 36., 48.],
-                    HostAction::Scroll(-1),
-                );
-            }
-            if model.scroll < model.scroll_limit {
-                b.flat(
-                    "Scroll down",
-                    "v",
-                    [w / 2. + 16., h - 68., 36., 48.],
-                    HostAction::Scroll(1),
-                );
-            }
-        }
         if any_admin {
             b.flat(
                 if model.editing { "Done" } else { "Edit" },
@@ -592,41 +540,7 @@ pub(super) fn render(
                 1.5,
             ));
         }
-        if let Some(drag) = model
-            .drag
-            .as_ref()
-            .filter(|d| d.moving && !matches!(d.kind, DragKind::Pan))
-        {
-            let caption = match &drag.kind {
-                DragKind::Space(id) => snapshot
-                    .spaces
-                    .iter()
-                    .find(|s| &s.id == id)
-                    .map_or("Space", |s| s.name.as_str()),
-                DragKind::App(s, id) => snapshot
-                    .spaces
-                    .iter()
-                    .find(|v| &v.id == s)
-                    .and_then(|s| s.apps.iter().find(|a| &a.app == id))
-                    .map_or("App", |a| a.title.as_str()),
-                DragKind::Resize(_) => "Resize Space",
-                DragKind::Pan => "",
-            };
-            let x = (drag.position[0] - 90.).clamp(0., (w - 180.).max(0.));
-            let y = if drag.position[1] + 76. < h - FOOT {
-                drag.position[1] + 20.
-            } else {
-                drag.position[1] - 76.
-            };
-            b.nodes.push(
-                a::canvas(vec![
-                    a::surface(WHITE, 14.).pin_edges(0.),
-                    text(&short(caption, 24), [12., 14., 156., 32.], 2.),
-                ])
-                .frame([x, y, 180., 56.]),
-            );
-        }
-        return finish(b, "", "OTriOS", false, viewport);
+        return finish(b, "", "OTriOS", false, true);
     }
     let left = if w < 600. { 20. } else { (w - 500.) / 2. };
     let width = (w - left * 2.).min(500.);
@@ -890,5 +804,5 @@ pub(super) fn render(
         [left, (h - 88.).min(top + 544.), 100., 56.],
         HostAction::Pane(Pane::Home),
     );
-    finish(b, &value, "OTriOS", form, viewport)
+    finish(b, &value, "OTriOS", form, false)
 }

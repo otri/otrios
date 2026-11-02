@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "spaces_granted": 2,
+  "existing_native_identity": true,
+  "active_collections_preserved": true,
+  "app_state_byte_identical_during_grant": true,
+  "auth_configuration_unchanged": true,
+  "touch_calibration_unchanged": true,
+  "audiences_and_layout_unchanged": true,
+  "data_restored": false,
+  "private_metadata_exported": false
+}

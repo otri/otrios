@@ -612,7 +612,7 @@ impl Client {
                     f.text_width(value, heading_scale as f32)
                 })
         };
-        let back_label = if self.managed { "< Quit" } else { "< OTriOS" };
+        let back_label = "< OTriOS";
         let back_width = measure(back_label);
         let line_height = self
             .font
@@ -621,12 +621,8 @@ impl Client {
         let heading_y = 24. + (60. - line_height) / 2.;
         p.button(
             0,
-            [24., 24., back_width + 8., 60.],
-            if self.managed {
-                "Quit"
-            } else {
-                "Back to OTriOS"
-            },
+            [0., 0., back_width + 48., 95.],
+            "Back to OTriOS",
             "",
             false,
         );
@@ -643,7 +639,7 @@ impl Client {
         }
         back.children.push(text(
             back.id + 3,
-            Rect::new(0., heading_y - 24., back_width + 8., line_height),
+            Rect::new(24., heading_y, back_width + 8., line_height),
             back_label,
             heading_scale,
             TEXT,

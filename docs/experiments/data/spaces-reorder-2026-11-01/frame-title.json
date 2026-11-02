@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "release": "bc1aa7847a6a4f4f42b7cc4482f7dc2adef9a20c2c199a278ec1a93aeb7a146f",
+  "stable_epoch_during_drag": true,
+  "authoritative_management_recorded": true,
+  "app_writes": 0,
+  "private_metadata_exported": false,
+  "pixels_exported": false,
+  "sampled_input_busy_all_frames": false,
+  "input_busy_sampling_is_asynchronous": true
+}

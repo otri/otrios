@@ -1728,7 +1728,12 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
                 let controls = scene.controls();
                 let quit = controls
                     .iter()
-                    .filter(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == "Quit"))
+                    .filter(|c| {
+                        c.node
+                            .semantics
+                            .as_ref()
+                            .is_some_and(|s| s.label == "Back to OTriOS")
+                    })
                     .collect::<Vec<_>>();
                 assert_eq!(quit.len(), 1, "one host-owned Quit control");
                 assert!(matches!(
@@ -4550,8 +4555,10 @@ fn chat_reflows_into_keyboard_height_without_losing_heading_alignment_or_control
         let members = members.last().unwrap();
         let profile = scene.path(node(&c, "Edit profile")).unwrap();
         let profile = profile.last().unwrap();
-        assert!((members.origin[1] - back.origin[1]).abs() < 0.01);
-        assert!((profile.origin[1] - back.origin[1]).abs() < 0.01);
+        // The return target includes the corner padding; visible header
+        // labels keep their existing common 24px inset.
+        assert!((members.origin[1] - back.origin[1] - 24. * back.scale).abs() < 0.01);
+        assert!((profile.origin[1] - back.origin[1] - 24. * back.scale).abs() < 0.01);
         assert!(title.origin[0] + title.node.frame.width * title.scale < members.origin[0]);
         check(&c);
         c.activate(c.epoch(), node(&c, "Message composer")).unwrap();
