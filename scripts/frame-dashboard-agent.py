@@ -209,6 +209,7 @@ class Host:
         env.setdefault('OTRIOS_CHAT_IDENTITY',str(a.cache/'guest.identity'))
         # Presentation only; old native releases safely ignore this during rollback.
         env['OTRIOS_PRIVATE_APP_ACCESS']='true'
+        env.setdefault('OTRIOS_TRANSFERS',str(a.cache/'Transfers'))
         command=[str(exe),'--sync',a.url.rstrip('/')+'/session','--exit-file',str(self.stop),'--ready-file',str(self.ready)]
         # An older verified binary must reject this required option rather than
         # silently ignoring installation policy supplied only in its environment.

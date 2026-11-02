@@ -145,6 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .find(|p| p.app.id == policy.app)
                 .ok_or("Installed app missing")?;
             let launch = InstalledApp {
+                bundle_sha256: None,
                 code_bytes: None,
                 revision: None,
                 policy: policy.clone(),
@@ -168,7 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 attached,
                 availability: AppAvailability::Available,
                 stored_bytes: None,
-                launch: attached.then_some(launch.clone()),
+                launch: attached.then_some(launch.clone().into()),
             });
             installed.push(launch);
         }

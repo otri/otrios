@@ -353,7 +353,7 @@ fn otsp5_without_presentation_fields_upgrades_without_rebinding_confirmed_data()
     let mut upgraded = Store::open(fixture.path()).unwrap();
     original.registry.spaces[0].layout.width = 1;
     assert!(upgraded.current == original);
-    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP8"));
+    assert!(fs::read(fixture.path()).unwrap().starts_with(b"OTSP9"));
     let request = Request {
         version: VERSION,
         expected_generation: upgraded.registry().unwrap().generation,
@@ -433,4 +433,53 @@ fn otsp6_migration_keeps_user_layout_and_does_not_rebind_any_confirmed_data() {
         Operation::Edit,
     )
     .unwrap();
+}
+
+#[test]
+fn otsp8_upgrade_preserves_custom_layout_retained_datasets_and_existing_bindings() {
+    let fixture = Fixture::new();
+    let (store, binding) = fixture.seeded();
+    let mut original = store.current.clone();
+    original.registry.spaces[0].layout.background = Background::Rgb([21, 34, 55]);
+    original.registry.spaces[0].apps[0].label = "Confirmed app label".into();
+    original.registry.retained.push(RetainedDataset {
+        space: binding.space.clone(),
+        policy: original.registry.spaces[0].apps[0].policy.clone(),
+        collection: "d".repeat(32),
+        label: "Sealed older dataset".into(),
+        origin: DatasetOrigin::BeforeRestore,
+        generation: original.registry.generation,
+    });
+    let latest = store.latest_path().to_owned();
+    let root = store.root_id().to_owned();
+    let mut bytes = encode(&original).unwrap();
+    bytes[..5].copy_from_slice(b"OTSP8");
+    drop(store);
+    for path in [fixture.path(), latest.clone()] {
+        write(&path, &bytes).unwrap();
+    }
+    let payload = fixture
+        .storage()
+        .join(format!("collection-{}.merkle", binding.collection));
+    write_private(
+        &payload,
+        b"confirmed payload stays outside metadata migration",
+    );
+    let recovered = Store::open(fixture.path()).unwrap();
+    assert_eq!(recovered.root_id(), root);
+    assert!(recovered.current == original);
+    authorize(
+        recovered.registry().unwrap(),
+        Some("alice"),
+        &binding,
+        Operation::Edit,
+    )
+    .unwrap();
+    let primary = fs::read(fixture.path()).unwrap();
+    assert!(primary.starts_with(b"OTSP9"));
+    assert_eq!(primary, fs::read(latest).unwrap());
+    assert_eq!(
+        fs::read(payload).unwrap(),
+        b"confirmed payload stays outside metadata migration"
+    );
 }

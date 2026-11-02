@@ -1,8 +1,298 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::super::super::tests::Fixture;
 use super::*;
+use crate::transfers::ReplacementOutcome;
 use std::process::Command;
 const NOW: u64 = 1_800_000_000_000;
+
+fn portable_schema() -> otrios_interfaces::canvas::StateSchema {
+    use otrios_interfaces::{
+        canvas::{Field, StateSchema},
+        layout::Value,
+    };
+    StateSchema {
+        id: "portable-replacement-test-v1".into(),
+        fields: vec![Field {
+            id: 1,
+            name: "value".into(),
+            default: Value::Number(0.),
+            writable: true,
+        }],
+    }
+}
+fn portable_import() -> (AppPolicy, crate::transfers::QualifiedCollection) {
+    use crate::transfers::*;
+    let root = "app:notes/state";
+    let schema = portable_schema();
+    let hash = collection_schema(&[RootSchema {
+        state_ref: root.into(),
+        schema: schema.clone(),
+    }])
+    .unwrap();
+    let policy = AppPolicy {
+        app: "notes".into(),
+        schema: hash.clone(),
+        closed_only: false,
+        editable: true,
+        comments: false,
+    };
+    let mut doc = crate::canvas::Document::new(schema.clone(), root).unwrap();
+    doc.set(&[(1, 123)]).unwrap();
+    let checkpoint = encode_collection(&[OwnedRoot {
+        state_ref: root.into(),
+        canvas: doc.portable_checkpoint().unwrap(),
+        chat: None,
+    }])
+    .unwrap();
+    let data = encode_data(
+        DataInfo {
+            format: DATA_FORMAT.into(),
+            bundle_id: "notes".into(),
+            schema_sha256: hash.clone(),
+            codec: COLLECTION_CODEC.into(),
+            codec_version: 1,
+            checkpoint: "State/checkpoint.bin".into(),
+        },
+        checkpoint,
+        BTreeMap::new(),
+    )
+    .unwrap();
+    let data = inspect_data(archive::decode(archive::Kind::Data, &data).unwrap()).unwrap();
+    let qualified = QualifiedCollection::qualify(
+        data,
+        "notes",
+        &hash,
+        &[RootPolicy {
+            state_ref: root.into(),
+            schema,
+            chat: false,
+        }],
+    )
+    .unwrap();
+    (policy, qualified)
+}
+fn portable_prepared() -> (Fixture, Store, crate::transfers::Replacement, AppPolicy) {
+    let fixture = Fixture::new();
+    let mut store = Store::open(fixture.path()).unwrap();
+    new_directory(&fixture.storage()).unwrap();
+    store.bind_storage(&fixture.storage()).unwrap();
+    store
+        .commit(
+            "alice",
+            &Request {
+                version: VERSION,
+                expected_generation: 0,
+                change: Change::Create {
+                    name: "Test".into(),
+                },
+            },
+            None,
+        )
+        .unwrap();
+    let space = store.registry().unwrap().spaces[0].id.clone();
+    let (policy, _) = portable_import();
+    store
+        .commit(
+            "alice",
+            &Request {
+                version: VERSION,
+                expected_generation: 1,
+                change: Change::Attach {
+                    space: space.clone(),
+                    app: "notes".into(),
+                },
+            },
+            Some(&policy),
+        )
+        .unwrap();
+    let collection = store.registry().unwrap().spaces[0].apps[0]
+        .collection
+        .clone();
+    write(
+        &fixture
+            .storage()
+            .join(format!("collection-{collection}.merkle")),
+        b"outgoing confirmed bytes",
+    )
+    .unwrap();
+    let review = crate::transfers::Replacement {
+        space,
+        app: "notes".into(),
+        collection,
+        replacement: "c".repeat(32),
+        expected_generation: store.registry().unwrap().generation,
+    };
+    (fixture, store, review, policy)
+}
+#[test]
+fn portable_replacement_rechecks_admin_generation_and_binding_and_retains_outgoing_bytes() {
+    let (fixture, mut store, review, policy) = portable_prepared();
+    let (_, imported) = portable_import();
+    assert_eq!(
+        store.replace_portable("bob", &review, &policy, "app:notes/state", &imported),
+        Err(Error::Denied)
+    );
+    let mut stale = review.clone();
+    stale.expected_generation -= 1;
+    assert_eq!(
+        store.replace_portable("alice", &stale, &policy, "app:notes/state", &imported),
+        Err(Error::Conflict)
+    );
+    let mut wrong = review.clone();
+    wrong.collection = "a".repeat(32);
+    assert_eq!(
+        store.replace_portable("alice", &wrong, &policy, "app:notes/state", &imported),
+        Err(Error::Conflict)
+    );
+    assert_eq!(
+        store
+            .replacement_committed("alice", &review.space, &review.replacement)
+            .unwrap(),
+        ReplacementOutcome::Unknown
+    );
+    let generation = store
+        .replace_portable("alice", &review, &policy, "app:notes/state", &imported)
+        .unwrap();
+    assert_eq!(generation, review.expected_generation + 1);
+    assert_eq!(
+        store.registry().unwrap().retained[0].collection,
+        review.collection
+    );
+    assert_eq!(
+        store.registry().unwrap().retained[0].origin,
+        DatasetOrigin::BeforeReplacement
+    );
+    assert_eq!(
+        fs::read(
+            fixture
+                .storage()
+                .join(format!("collection-{}.merkle", review.collection))
+        )
+        .unwrap(),
+        b"outgoing confirmed bytes"
+    );
+    assert_eq!(
+        store
+            .replacement_committed("alice", &review.space, &review.replacement)
+            .unwrap(),
+        ReplacementOutcome::Committed
+    );
+    assert_eq!(
+        store.replacement_committed("bob", &review.space, &review.replacement),
+        Err(Error::Denied)
+    );
+    assert!(
+        store
+            .replace_portable("alice", &review, &policy, "app:notes/state", &imported)
+            .is_err(),
+        "uncertain mutation is not replayed"
+    );
+}
+#[test]
+fn portable_replacement_child() {
+    let Ok(path) = std::env::var("OTRIOS_REPLACEMENT_TEST_PATH") else {
+        return;
+    };
+    let mut store = Store::open(path.into()).unwrap();
+    let registry = store.registry().unwrap();
+    let space = &registry.spaces[0];
+    let review = crate::transfers::Replacement {
+        space: space.id.clone(),
+        app: "notes".into(),
+        collection: space.apps[0].collection.clone(),
+        replacement: "c".repeat(32),
+        expected_generation: registry.generation,
+    };
+    let (policy, imported) = portable_import();
+    let index: usize = std::env::var("OTRIOS_REPLACEMENT_TEST_BOUNDARY")
+        .unwrap()
+        .parse()
+        .unwrap();
+    store
+        .replace_portable_at(
+            "alice",
+            &review,
+            &policy,
+            "app:notes/state",
+            &imported,
+            |step| {
+                if step == RETAINED_STEPS[index] {
+                    std::process::exit(79);
+                }
+            },
+        )
+        .unwrap();
+    panic!("replacement boundary not reached");
+}
+#[test]
+fn portable_replacement_process_exits_never_publish_partial_data_or_lose_outgoing_history() {
+    for index in 0..RETAINED_STEPS.len() {
+        let (fixture, store, review, _) = portable_prepared();
+        drop(store);
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "spaces::store::backups::restore::tests::portable_replacement_child",
+                "--nocapture",
+            ])
+            .env("OTRIOS_REPLACEMENT_TEST_PATH", fixture.path())
+            .env("OTRIOS_REPLACEMENT_TEST_BOUNDARY", index.to_string())
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(79),
+            "{} {}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
+        let mut store = Store::open(fixture.path()).unwrap();
+        if (1..5).contains(&index) {
+            assert!(store.registry().is_err());
+        }
+        store.recover_storage().unwrap();
+        let committed = index > 0;
+        assert_eq!(
+            store
+                .replacement_committed("alice", &review.space, &review.replacement)
+                .unwrap(),
+            if committed {
+                ReplacementOutcome::Committed
+            } else {
+                ReplacementOutcome::Unknown
+            }
+        );
+        assert_eq!(
+            store.registry().unwrap().generation,
+            review.expected_generation + u64::from(committed)
+        );
+        assert_eq!(
+            fs::read(
+                fixture
+                    .storage()
+                    .join(format!("collection-{}.merkle", review.collection))
+            )
+            .unwrap(),
+            b"outgoing confirmed bytes"
+        );
+        if committed {
+            let bytes = fs::read(
+                fixture
+                    .storage()
+                    .join(format!("collection-{}.merkle", review.replacement)),
+            )
+            .unwrap();
+            let doc = crate::canvas::Document::load(portable_schema(), "app:notes/state", &bytes)
+                .unwrap();
+            assert_eq!(doc.value(1).unwrap(), 123);
+            assert_eq!(
+                store.registry().unwrap().retained[0].collection,
+                review.collection
+            );
+        }
+        assert!(!suffix(store.path(), ".restore").exists());
+    }
+}
 
 fn prepared() -> (Fixture, Store, Binding, String) {
     let fixture = Fixture::new();
@@ -323,7 +613,7 @@ fn initial_ledger_framing_upgrades_without_changing_root_or_membership() {
     let recovered = Store::open(fixture.path()).unwrap();
     assert_eq!(recovered.root_id(), root);
     assert_eq!(recovered.registry().unwrap(), &registry);
-    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP8");
+    assert_eq!(&fs::read(recovered.path()).unwrap()[..5], b"OTSP9");
     assert_eq!(
         fs::read(recovered.path()).unwrap(),
         fs::read(latest).unwrap()
@@ -809,4 +1099,76 @@ fn process_exits_recover_one_move_decision_and_its_durable_operation_outcome_bef
         }
         assert!(!suffix(store.path(), ".restore").exists());
     }
+}
+
+#[test]
+fn portable_replacement_of_a_sealed_ghost_preserves_the_active_slot_and_both_inactive_datasets() {
+    let (fixture, mut store, review, policy) = portable_prepared();
+    let (_, imported) = portable_import();
+    store
+        .replace_portable("alice", &review, &policy, "app:notes/state", &imported)
+        .unwrap();
+    let active_before = fs::read(
+        fixture
+            .storage()
+            .join(format!("collection-{}.merkle", review.replacement)),
+    )
+    .unwrap();
+    let sealed = crate::transfers::Replacement {
+        replacement: "d".repeat(32),
+        expected_generation: store.registry().unwrap().generation,
+        ..review.clone()
+    };
+    store
+        .replace_portable("alice", &sealed, &policy, "app:notes/state", &imported)
+        .unwrap();
+    assert_eq!(
+        store.registry().unwrap().spaces[0].apps[0].collection,
+        review.replacement
+    );
+    assert_eq!(store.registry().unwrap().retained.len(), 2);
+    assert_eq!(
+        store.registry().unwrap().retained[0].collection,
+        review.collection
+    );
+    assert_eq!(
+        store.registry().unwrap().retained[1].collection,
+        sealed.replacement
+    );
+    assert_eq!(
+        store.registry().unwrap().retained[1].origin,
+        DatasetOrigin::Imported
+    );
+    assert_eq!(
+        fs::read(
+            fixture
+                .storage()
+                .join(format!("collection-{}.merkle", review.replacement))
+        )
+        .unwrap(),
+        active_before
+    );
+    assert_eq!(
+        fs::read(
+            fixture
+                .storage()
+                .join(format!("collection-{}.merkle", review.collection))
+        )
+        .unwrap(),
+        b"outgoing confirmed bytes"
+    );
+    drop(store);
+    let mut recovered = Store::open(fixture.path()).unwrap();
+    recovered.bind_storage(&fixture.storage()).unwrap();
+    recovered.recover_storage().unwrap();
+    assert_eq!(
+        recovered.registry().unwrap().spaces[0].apps[0].collection,
+        review.replacement
+    );
+    assert_eq!(
+        recovered
+            .replacement_committed("alice", &review.space, &sealed.replacement)
+            .unwrap(),
+        ReplacementOutcome::Committed
+    );
 }

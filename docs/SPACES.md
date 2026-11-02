@@ -1,6 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Spaces management contract
 
+The RFC 0028 completion branch adds staged portable replacement using state
+protocol v20, Spaces envelope v5 and registry framing OTSP9. This extension is
+not yet deployed; the deployed admin/moves release remains v19/OTSP8. Its
+qualification records remain historical evidence for that baseline. Portable
+payload details and current local validation are in [Transfers](TRANSFERS.md).
+
 The covered `otrios_core::spaces` library implements registry transitions and
 admission. The authority additionally supports an explicit managed mode via
 `--spaces-registry /ABS/PRIVATE/spaces.flex`. The live Frame was migrated on
@@ -20,7 +26,7 @@ receipts, and checks reads and writes against the current binding. Membership
 changes revoke staged/active mounts, and queued payloads revalidate under the same
 management lock before delivery. Native loopback grants no managed access.
 
-State protocol `otrios-canvas-sync-v19` includes a version-2 presentation binding
+State protocol `otrios-canvas-sync-v20` includes a version-2 presentation binding
 in each managed mount: collection identity and effective edit/comment/moderation
 actions. These describe authority decisions and are never credentials. A client
 resumes pending RAM intents only when collection identity, effective actions and
@@ -48,15 +54,19 @@ Legacy/local mounts retain their existing handshake until explicit cutover.
 
 ## Discovery on the shared session
 
-Management/discovery uses its v4 binary envelope on channel 5 of the same
+Management/discovery uses its v5 binary envelope on channel 5 of the same
 negotiated session. Both hosts use the covered RAM-only observer; it sends Watch after each reconnect. The
-browser/native state protocol is v19; v10 introduced discovery, v11 added the
+browser/native state protocol is v20; v10 introduced discovery, v11 added the
 managed activation acknowledgement, v12 scoped auxiliary payloads by mount,
 v13 added a qualified first chat transcript window, and v14 added collection-specific
 delete confirmations and Admin cleanup metadata. V15 adds owned attachments,
 reviewed publication and message moderation. V16 adds request-correlated replies
 and the version-2 actor context. V17 adds bounded Space previews and presentation
-management commands. V18 adds archived Spaces, exact retained datasets and reviewed recovery/deletion commands. V19 adds scoped moves and durable outcome queries; numeric management request version 1 remains unchanged.
+management commands. V18 adds archived Spaces, exact retained datasets and reviewed recovery/deletion commands. V19 adds scoped moves and durable outcome queries. V20 adds staged portable
+replacement, cancellation, read-only replacement outcome queries and explicit
+host-authorized code publication. Launch references avoid duplicating installed
+code facts in each app row; numeric
+management request version 1 remains unchanged.
 Managed hosts send Leave(epoch) after discarding revoked replicas; the authority holds cleanup pins until then.
 Release discovery remains on its unchanged control v1 envelope.
 
@@ -173,7 +183,7 @@ without changing either Space. Service credentials never move.
 
 The existing `.restore` admission barrier journals a scoped OTSR3 move plan.
 Complete confirmed files and owned assets are staged and synced first, then
-promoted under fresh collection identities, followed by the OTSP8 registry and a
+promoted under fresh collection identities, followed by the current registry and a
 durable outcome receipt. Startup finishes this exact decision before admission.
 The source's tombstone/pins retain existing cleanup protections; copied assets
 have independent ownership rather than mutable links to source storage.
@@ -710,14 +720,14 @@ An `OTCHAT01` journal is recovered completely, then atomically compacted into
 `OTCHAT02` before its next durable write. Older writers reject the new framing
 without truncating it. Legacy journal-only manifests reject owned attachment
 references rather than silently losing their namespace; use paired collection
-backup/restore for owned data. Registry framing is `OTSP8`; release-control v1 remains
-independent. State protocol v19 retains these commands and correlates moderation/download replies
+backup/restore for owned data. Registry framing is `OTSP9`; release-control v1 remains
+independent. State protocol v20 retains these commands and correlates moderation/download replies
 with request nonces.
 
 
 ## Persistence
 
-The native Store writes `OTSP8`, a 32-byte SHA-256 payload digest, and a bounded
+The native Store writes `OTSP9`, a 32-byte SHA-256 payload digest, and a bounded
 FlexBuffers record containing the registry, a stable authority-root identity and
 its paired app-storage path and migration-original retention decisions. The
 registry remains bounded at 2 MiB; attribution metadata adds at most 2 MiB and
@@ -727,17 +737,17 @@ Recovery checks byte bounds, digest, structural nesting/visit bounds, version,
 unique IDs, last-Admin invariants and epochs before admitting any data. The digest
 detects corruption; it does not authenticate an operator or grant access.
 
-Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3`, `OTSP4`, `OTSP5`, `OTSP6` and `OTSP7` registries while preserving their decisions;
+Recovery upgrades `OTSP1`, `OTSP2`, `OTSP3`, `OTSP4`, `OTSP5`, `OTSP6`, `OTSP7` and `OTSP8` registries while preserving their decisions;
 the initial prototype defaults older members' continuous-membership generation
 to zero. The upgrade writes the latest decision ledger before replacing the
-primary. Older writers reject `OTSP8`, including writers that cannot honor
+primary. Older writers reject `OTSP9`, including writers that cannot honor
 an incomplete payload restore or migration-original retention protections. Rollback must use a reader/writer that
-supports this framing and the current admission rules. OTSP8 adds custom RGB background colors; OTSP7 added archived Space and sealed-dataset decisions; OTSP6 added Space layout and
+supports this framing and the current admission rules. OTSP9 adds imported inactive dataset provenance and fences older portable-replacement writers. OTSP8 added custom RGB background colors; OTSP7 added archived Space and sealed-dataset decisions; OTSP6 added Space layout and
 Space-local app labels; omitted legacy fields default without rebinding collections.
 Legacy Spaces start at one to three cells wide according to attached-app count;
 existing OTSP6 layout edits are preserved on every later recovery.
 Never downgrade current safety metadata to make an older writer accept it.
-Management request version 1 and release-control v1 remain stable. Current state protocol v19 retains the
+Management request version 1 and release-control v1 remain stable. Current state protocol v20 retains the
 collection-specific deletion confirmation and Admin-only cleanup metadata and adds
 reviewed publication, attachment blobs and message moderation.
 

@@ -7,6 +7,7 @@ use otrios_interfaces::layout::Value;
 use otrios_interfaces::spaces::{AppAvailability, Change, Discovery};
 use std::collections::BTreeMap;
 mod map;
+pub(super) mod transfers;
 pub(super) use map::{Drag, DragKind};
 
 pub(super) const FIELD: a::StateField = a::StateField::text(1, "entry");
@@ -49,6 +50,7 @@ pub(super) enum Pane {
     },
     MoveDestinations,
     MoveReview,
+    Transfer,
 }
 #[derive(Clone)]
 pub(super) struct MoveDraft {
@@ -106,6 +108,8 @@ pub(super) struct Model {
     pub form_pending: Option<(String, String)>,
     pub form_blocked: bool,
     pub profile_revision: u64,
+    pub transfer: Option<transfers::Draft>,
+    pub transfer_caps: transfers::Capabilities,
 }
 #[derive(Clone, Debug)]
 pub(super) enum HostAction {
@@ -138,6 +142,16 @@ pub(super) enum HostAction {
     ToggleRemoveData,
     Reviewed(Change, u64),
     Unavailable(&'static str),
+    TransferUpload,
+    TransferShare(String),
+    TransferExport(String, String),
+    TransferReplace(String, String),
+    TransferPick,
+    TransferUrl,
+    TransferFile(String),
+    TransferCommit,
+    TransferCancel,
+    TransferCopy,
 }
 pub(super) struct Rendered {
     pub ui: Ui,

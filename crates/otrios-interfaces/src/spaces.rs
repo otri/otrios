@@ -141,6 +141,7 @@ pub struct Space {
 pub enum DatasetOrigin {
     BeforeReplacement,
     BeforeRestore,
+    Imported,
 }
 
 /// An inactive sealed dataset is distinct from the bundle's single app slot.
@@ -329,6 +330,46 @@ pub struct DiscoveryCursor {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
+    ImportApp {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    ImportStatus {
+        version: u32,
+        id: u32,
+        operation: String,
+    },
+    CancelApp {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    ShareApp {
+        version: u32,
+        id: u32,
+        space: String,
+        app: String,
+        digest: String,
+        expected_generation: u64,
+        catalog: Vec<u8>,
+    },
+    ReplaceData {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    CancelData {
+        version: u32,
+        id: u32,
+        stage: String,
+    },
+    ReplacementStatus {
+        version: u32,
+        id: u32,
+        space: String,
+        replacement: String,
+    },
     MoveStatus {
         version: u32,
         id: u32,
@@ -353,12 +394,30 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstalledApp {
+    pub bundle_sha256: Option<String>,
     pub code_bytes: Option<u64>,
     pub revision: Option<u64>,
     pub policy: AppPolicy,
     pub title: String,
     pub ui_ref: String,
     pub state_ref: String,
+}
+
+/// Enough metadata to request a mount. Catalog facts are carried once for Admin
+/// settings; these references never grant execution or data access.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchApp {
+    pub ui_ref: String,
+    pub state_ref: String,
+}
+impl From<InstalledApp> for LaunchApp {
+    fn from(app: InstalledApp) -> Self {
+        Self {
+            ui_ref: app.ui_ref,
+            state_ref: app.state_ref,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,7 +478,7 @@ pub struct AppSummary {
     /// Managed checkpoint/journal/presentation bytes, excluding shared runtime
     /// code and backups. None means unavailable, never an invented zero.
     pub stored_bytes: Option<u64>,
-    pub launch: Option<InstalledApp>,
+    pub launch: Option<LaunchApp>,
 }
 
 /// Admin-only deletion progress. Unmanaged/offline copies cannot be verified.
@@ -476,6 +535,26 @@ pub enum ManagementStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Event {
+    AppImport {
+        version: u32,
+        id: u32,
+        operation: String,
+        status: ManagementStatus,
+        state: Option<crate::transfers::AppImportState>,
+    },
+    AppShared {
+        version: u32,
+        id: u32,
+        status: ManagementStatus,
+        share: Option<crate::transfers::AppShare>,
+    },
+    ReplacementStatus {
+        version: u32,
+        id: u32,
+        replacement: String,
+        status: ManagementStatus,
+        outcome: Option<crate::transfers::ReplacementOutcome>,
+    },
     MoveStatus {
         version: u32,
         id: u32,

@@ -6,6 +6,7 @@ use otrios_interfaces::{canvas::*, keyboard::Edit, spaces::*};
 const SPACE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 fn snapshot(role: Role, revision: u64) -> Discovery {
     let installed = InstalledApp {
+        bundle_sha256: None,
         code_bytes: None,
         revision: None,
         policy: AppPolicy {
@@ -59,7 +60,7 @@ fn snapshot(role: Role, revision: u64) -> Discovery {
                 attached: true,
                 availability: AppAvailability::Available,
                 stored_bytes: (role == Role::Admin).then_some(1234),
-                launch: Some(installed.clone()),
+                launch: Some(installed.clone().into()),
             }],
             installed: if role == Role::Admin {
                 vec![installed]

@@ -51,6 +51,8 @@ pub mod chat;
 pub mod device_apps;
 #[cfg(feature = "layout")]
 pub mod spaces;
+#[cfg(feature = "layout")]
+pub mod transfers;
 
 pub mod collection;
 pub mod merkle;

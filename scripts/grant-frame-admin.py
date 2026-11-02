@@ -20,6 +20,10 @@ token=pathlib.Path('/etc/otrios-dashboard.identity').read_text().strip()
 auth=pathlib.Path('/etc/otrios-authority/monitoring-auth.json')
 configuration=json.loads(auth.read_text())
 native=next(x['identity']for x in configuration['native']if x['token_sha256']==hashlib.sha256(token.encode()).hexdigest())
+if login:
+ matches=[x.get('identity',x['username'])for x in configuration['users']if x['username'].lower()==login.lower()]
+ assert len(matches)==1,'Expected one configured operator login'
+ actor=matches[0]
 def metadata():
  req=urllib.request.Request('http://127.0.0.1:8877/spaces',headers={'Authorization':'Bearer '+token,'Origin':'https://otrios.otri.ca'})
  for attempt in range(100):
@@ -28,7 +32,27 @@ def metadata():
    if attempt==99:raise
    time.sleep(.1)
 before=metadata()
-selected=[next(s for s in before['spaces']if s['name']==name)for name in names]
+selected=[]
+for index,name in enumerate(names):
+ matches=[s for s in before['spaces']if s['name']==name]
+ assert len(matches)<=1,'Ambiguous visible Space name'
+ expected=expected_ids[index]if expected_ids else None
+ if matches:
+  assert expected is None or matches[0]['id']==expected,'Visible Space identity changed'
+  selected.append(matches[0])
+ else:
+  assert expected,'Use --space-id for an existing Space not visible to Frame'
+  # A supplied ID comes from an authenticated current UI. Also require a prior
+  # authority provisioning record, so this maintenance path cannot bootstrap a
+  # new Space merely because the device cannot see it yet.
+  records=[]
+  for path in root.glob('spaces.flex.provisioned-*.json'):
+   records.extend(json.loads(path.read_text()).get('spaces',[]))
+  collector=root/'collector-binding.json'
+  service=json.loads(collector.read_text()).get('binding',{})if collector.exists()else{}
+  assert (any(s.get('space')==expected and s.get('name')==name for s in records)
+          or service.get('space')==expected),'Existing Space provisioning or service binding not found'
+  selected.append({'id':expected,'name':name})
 assert len(set(s['id']for s in selected))==len(names),'Ambiguous Space selection'
 plan={'version':2,'spaces':[{'name':s['name'],'admins':[actor,native],'members':[],'apps':[]}for s in selected]}
 work=root/('provision-'+tag);work.mkdir(mode=0o700,exist_ok=True)
@@ -63,9 +87,16 @@ after=metadata()
 for old in selected:
  new=next(s for s in after['spaces']if s['id']==old['id'])
  assert new['role']=='admin','Native Admin grant missing'
- for key in ['id','name','layout','audience']:assert new[key]==old[key],'Unexpected Space configuration change'
- old_apps=[a for a in old['apps']if a['attached']];new_apps=[a for a in new['apps']if a['attached']]
- assert old_apps==new_apps,'Active collection bindings changed'
+ for key in ['id','name','layout','audience']:
+  if key in old:assert new[key]==old[key],'Unexpected Space configuration change'
+ if 'apps'in old:
+  old_apps=[a for a in old['apps']if a['attached']];new_apps=[a for a in new['apps']if a['attached']]
+  assert old_apps==new_apps,'Active collection bindings changed'
+for old in before['spaces']:
+ if old['id']in [s['id']for s in selected]:continue
+ new=next(s for s in after['spaces']if s['id']==old['id'])
+ for key in ['id','name','archived','layout','audience','role','apps','members','retained']:
+  if key in old:assert new[key]==old[key],'Unrelated Space changed'
 print(json.dumps({'passed':True,'spaces_granted':len(names),'existing_native_identity':True,
  'active_collections_preserved':True,'app_state_byte_identical_during_grant':True,
  'auth_configuration_unchanged':True,'touch_calibration_unchanged':True,
@@ -76,16 +107,21 @@ print(json.dumps({'passed':True,'spaces_granted':len(names),'existing_native_ide
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=pathlib.Path, required=True)
-    parser.add_argument('--actor', required=True)
+    operator=parser.add_mutually_exclusive_group(required=True)
+    operator.add_argument('--actor')
+    operator.add_argument('--login',help='Resolve an existing human actor from private credential configuration')
     parser.add_argument('--space', action='append', required=True)
+    parser.add_argument('--space-id',action='append',help='Expected existing ID for each --space, in the same order')
     parser.add_argument('--tag', required=True)
     parser.add_argument('--output', type=pathlib.Path, required=True)
     args = parser.parse_args()
     import re
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}-[a-z0-9-]+', args.tag):
         parser.error('Use an ISO-date-first maintenance tag')
+    if args.space_id and (len(args.space_id)!=len(args.space)or any(not re.fullmatch(r'[a-f0-9]{32}',v)for v in args.space_id)):
+        parser.error('Supply one canonical --space-id per --space')
     config = json.loads(args.config.read_text())
-    values = {'actor': args.actor, 'names': args.space, 'tag': args.tag}
+    values = {'actor': args.actor,'login':args.login,'expected_ids':args.space_id, 'names': args.space, 'tag': args.tag}
     script = '\n'.join(k + '=' + repr(v) for k, v in values.items()) + '\n' + REMOTE
     result = subprocess.run(config['frame']['ssh'] + ['python3 -c ' + shlex.quote(script)],
                             capture_output=True, text=True, timeout=180)

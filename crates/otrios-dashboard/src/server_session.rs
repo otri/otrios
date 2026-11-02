@@ -987,6 +987,9 @@ mod tests {
             origins: vec![],
             peers: Arc::new(Semaphore::new(4)),
             public_peers: Arc::new(Semaphore::new(4)),
+            transfer_jobs: Arc::new(Semaphore::new(1)),
+            public_transfer_jobs: Arc::new(Semaphore::new(1)),
+            publications: Arc::new(std::sync::Mutex::new(None)),
             peer_limits: [4, 4],
         });
         let locked = app.apps.lock().await;

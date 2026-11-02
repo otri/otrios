@@ -13,6 +13,7 @@ pub struct Sessions {
     sessions: Mutex<HashMap<String, (String, Instant)>>,
     attempts: Mutex<(Instant, u32)>,
     verifier: Arc<Semaphore>,
+    operators: otrios_core::transfers::HostPolicy,
 }
 struct Login {
     identity: String,
@@ -167,6 +168,27 @@ impl Sessions {
                 }
             }
         }
+        let operators = match config.get("operators") {
+            None => vec![],
+            Some(value) => value
+                .as_array()
+                .ok_or("Invalid host operator list")?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or("Invalid host operator identity")
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        if operators.iter().any(|id| {
+            !users.values().any(|user| user.identity == *id)
+                && !native.values().any(|identity| identity == id)
+        }) {
+            return Err("Host operator must name a configured identity".into());
+        }
+        let operators = otrios_core::transfers::HostPolicy::new(operators)?;
         Ok(Self {
             users,
             native,
@@ -174,7 +196,11 @@ impl Sessions {
             sessions: Mutex::new(HashMap::new()),
             attempts: Mutex::new((Instant::now(), 0)),
             verifier: Arc::new(Semaphore::new(1)),
+            operators,
         })
+    }
+    pub(super) fn host_policy(&self) -> &otrios_core::transfers::HostPolicy {
+        &self.operators
     }
     pub(super) async fn principal(&self, key: &str) -> Option<String> {
         if let Some(identity) = self.native.get(key) {
@@ -392,6 +418,7 @@ mod identity_tests {
             sessions.principal(&key).await.as_deref(),
             Some("frame-household")
         );
+        assert!(!sessions.host_policy().allows("frame-household"));
         let mut invalid = HeaderMap::new();
         invalid.insert(
             header::AUTHORIZATION,
@@ -400,6 +427,25 @@ mod identity_tests {
         assert!(sessions.key(&invalid).await.is_none());
         headers.insert(header::COOKIE, format!("{COOKIE}={token}").parse().unwrap());
         assert!(sessions.key(&headers).await.is_none());
+        fs::remove_file(path).unwrap();
+    }
+    #[tokio::test]
+    async fn host_operator_is_an_explicit_configured_identity_permission() {
+        let token = "e".repeat(64);
+        let (path, sessions) = config(
+            json!({"version":1,"users":[],"operators":["frame-household"],"native":[
+                {"identity":"frame-household","token_sha256":digest(&token)},
+                {"identity":"another-device","token_sha256":digest(&"f".repeat(64))}
+            ]}),
+        );
+        assert!(sessions.host_policy().allows("frame-household"));
+        assert!(!sessions.host_policy().allows("another-device"));
+        assert!(!sessions.host_policy().allows("unconfigured"));
+        fs::remove_file(path).unwrap();
+        let (path, _) = config(json!({"version":1,"users":[],"native":[]}));
+        let invalid = json!({"version":1,"users":[],"operators":["unconfigured"],"native":[]});
+        fs::write(&path, invalid.to_string()).unwrap();
+        assert!(Sessions::load(&path, Duration::from_secs(60)).is_err());
         fs::remove_file(path).unwrap();
     }
     #[tokio::test]

@@ -1,15 +1,26 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0028: Spaces map, app sharing and portable data
 
-Date: 2026-11-01. Status: **M1–M2 deployed; M3–M4 proposed**. Records the agreed
-interaction design and a proposed minimum transfer contract. The shared map and
+Date: 2026-11-01; delivery plan revised 2026-11-02. Status: **Map, retained data and scoped moves deployed;
+combined delivery incomplete while portable transfers are implemented**.
+Records the agreed interaction design and a proposed minimum transfer contract. The shared map and
 consolidated settings are deployed in browsers and on Frame; see the
 [M1 qualification](../experiments/spaces-map-frame-2026-11-01.md).
-The browser concept remains illustrative for later milestones. Bundle downloads,
-portable installation, export and data replacement are not implemented; transfer
-controls report unavailable. Aaron authorized completion of M2–M4 in milestone
-order on 2026-11-01; each milestone still requires its own implementation,
-validation and deployment acceptance before advancing to the next.
+Retained-data and scoped-move deployment evidence is recorded in the
+[retained-data qualification](../experiments/spaces-retained-data-2026-11-01.md)
+and [admin/moves qualification](../experiments/spaces-admin-and-moves-2026-11-01.md).
+The browser concept remains illustrative for unfinished transfer work. Bundle downloads,
+portable installation, export and data replacement are unavailable in the deployed
+release; its transfer controls report unavailable. Portable codecs, data replacement
+and authenticated export are being integrated in the feature worktree. Signed code
+publication/download and bounded file/public-HTTPS intake now have local process
+coverage; intake produces a temporary review only. Shared-session install decisions
+and the Mac signer bridge now have local signed-process coverage, including
+activation interruption/recovery and unchanged confirmed data. Transfer UI, codec
+conformance and integrated deployed acceptance remain unfinished. Aaron authorized completion of the remaining scope
+on 2026-11-01 and consolidated the former M2–M4 into one delivery step on
+2026-11-02. Develop retained data, scoped moves and portable transfers together,
+with one integrated qualification and deployment acceptance pass.
 
 Builds on [Spaces and app data](0027-spaces-and-app-data.md),
 [signed app bundles](0025-standalone-app-bundles.md),
@@ -281,6 +292,10 @@ bundle. No store, ratings, account connection or custom URL scheme is required.
 
 ## Minimum transfer contract
 
+The [versioned payload contract](../TRANSFERS.md) pins container/media types,
+budgets and the metadata boundary. Its reserved checkpoint identifiers require
+exact codec layouts and conformance vectors before deployment.
+
 ### Immutable app URL and payload
 
 ```text
@@ -365,7 +380,7 @@ and authorization after any upload delay. Invalidate former mounts and stale
 writer contexts. A failure or unknown outcome must not partially overwrite data
 or automatically repeat replacement. Restoring a backup follows the same path.
 
-Before the payload milestone ships, pin the exact FlexBuffers field types,
+Before the combined milestone ships, pin the exact FlexBuffers field types,
 magic/version prefixes, canonical manifest encoding, archive and checkpoint
 budgets, codec conformance vectors and media types in a versioned public contract.
 This RFC defines the minimum semantics and file/URL shape, not an implemented or
@@ -432,17 +447,45 @@ changes, and create the final PR only after the full scope is ready for review.
 
 ## Implementation and acceptance
 
-Select and implement one milestone at a time. The concept screens are fixtures,
-not acceptance evidence. Runtime transitions, validation and their tests belong
-in LGPL `otrios-core`; public contracts, schemas, docs and thin tools remain Apache.
+Map, retained-data and scoped-move deployments are the current baseline.
+Complete and qualify RFC 0028 together as one **M2: Retained
+data and transfers** delivery. The former M2, M3 and M4 are work areas within
+this milestone, without separate qualification, deployment or approval gates.
+The concept screens are fixtures, not acceptance evidence. Runtime transitions,
+validation and their tests belong in LGPL `otrios-core`; public contracts,
+schemas, docs and thin tools remain Apache.
 Do not copy runtime implementation into the permissive app/tool packages.
 
 | Milestone | Scope and required evidence |
 | --- | --- |
 | M1: Map and settings | Filtered common entry; destination-preserving sign-in; single-app launch; Admin-only Edit; shared name/color/order/size; title drag and corner resizing; no empty Spaces outside Edit; implicit labels with stable bundle IDs; native/browser parity and keyboard/reduced-motion checks |
-| M2: Retained data UX | Exact ghost identity/order; unchecked/checked Remove Data; restore and backup replacement; no duplicate active instances; existing deletion/revocation rules; truthful usage and unavailable-codec states |
-| M3: Scoped moves | Every app/data combination; occupied destinations; public exposure review; incompatible/private-only rejection; separate process write/revocation races; crash recovery; stale receipts cannot recreate source data; no shared-blob loss |
-| M4: Transfer contracts | Pinned codec/bounds/fixtures; archive round trips and malformed-input rejection; signed cross-host app import without auto-trust; ordinary-browser page; upload by file/URL; complete confirmed data/assets export; replacement with backup and fresh bindings; failed imports preserve all existing content |
+| M2: Retained data and transfers | Retained datasets and backups; scoped app/data moves; signed app sharing/import; portable data export/replacement; the integrated acceptance coverage below |
+
+Build shared mechanisms once: a versioned dataset registry and binding lifecycle,
+coherent snapshot/asset staging, backup replacement, durable management decisions
+and recovery. Reuse them for restore, move and import instead of introducing
+temporary implementations between those features. Pin the public transfer
+contracts early, then connect authority operations and native/browser controls
+to the same implementation. Internal commits may follow dependency order without
+requiring an intermediate release.
+
+Use one acceptance matrix and qualification record for the combined scope:
+
+| Work area | Required evidence |
+| --- | --- |
+| Retained data | Exact ghost identity/order; unchecked/checked Remove Data; restore and backup replacement; no duplicate active instances; existing deletion/revocation rules; truthful usage and unavailable-codec states |
+| Scoped moves | Every app/data combination; occupied destinations; public exposure review; incompatible/private-only rejection; separate process write/revocation races; crash recovery; stale receipts cannot recreate source data; no shared-blob loss |
+| Transfer contracts | Pinned codec/bounds/fixtures; archive round trips and malformed-input rejection; signed cross-host app import without auto-trust; ordinary-browser page; upload by file/URL; complete confirmed data/assets export; replacement with backup and fresh bindings; failed imports preserve all existing content |
+
+Exercise common replacement, revocation and recovery invariants in shared tests,
+with operation-specific cases for restore, move and import. Reuse that evidence
+across work areas; retain distinct authorization, failure and process-boundary
+cases where behavior differs. During development run checks affected by each
+change. Run the complete `bash scripts/check.sh` and scoped integration suite on
+the final candidate, then perform one signed-release qualification campaign with
+real browser/physical Frame acceptance, migration and rollback verification.
+Repeat checks when subsequent changes invalidate their evidence; completing a
+work area alone does not require repeating the full campaign.
 
 Preserve the v1 opening release-control envelope and event-driven upgrade discovery.
 Version changed management formats and bump the declared state protocol whenever
@@ -456,24 +499,11 @@ changes a binding. Older writers that cannot preserve retained backups or durabl
 move/replacement decisions must reject the new format. Roll back only to compatible
 code; never substitute an old registry or state snapshot for current confirmed data.
 
-Each implementation runs `bash scripts/check.sh` and its scoped integration tests.
-Deployable work follows the existing verified signed-release, migration and rollback
-workflow, with confirmed-data inventories and real browser/physical Frame acceptance.
+The combined delivery follows the existing verified signed-release, migration and
+rollback workflow, with confirmed-data inventories before and after acceptance.
 Do not claim Linux shared-memory IPC acceptance from these UI/process checks.
 
-M1 must not require deploying unfinished portable import, cross-Space movement or
-public sharing. Keep unavailable actions truthful until their milestone qualifies.
-This documentation proposal itself requires no deployment, data migration, new
-publisher trust, public share or change to the existing Frame's confirmed data.
-
-### Shared admin implementation details (2026-11-01)
-
-Admin panels share one modal renderer, local scrolling and input isolation on
-Web and Frame. The map backdrop is an inert scene composed separately from the
-panel layout, so a populated map plus the native keyboard does not exceed one
-layout admission budget. Appearance includes presets, None and a custom
-six-digit RGB hex field, with light labels on dark backgrounds. The registry
-writer advances to OTSP8; OTSP1–7 migration preserves collections and decisions.
-M2 rejects OTSP8. Rollback requires a compatible current writer, or an explicit
-state-reset decision using the paired pre-deployment backup. Release-control v1
-and the unpublished v19 / Spaces envelope v4 remain the protocol boundary.
+Keep unavailable actions truthful until the combined milestone qualifies; the
+current deployed release remains the baseline while development proceeds. This delivery-plan
+revision itself requires no deployment, data migration, new publisher trust,
+public share or change to the existing Frame's confirmed data.

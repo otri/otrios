@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tungstenite::client::IntoClientRequest;
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if !(4..=5).contains(&args.len()) || !args[0].starts_with("ws://127.0.0.1:") {
+    if !(4..=6).contains(&args.len()) || !args[0].starts_with("ws://127.0.0.1:") {
         return Err(
             "Use bundle_app_probe LOOPBACK_SESSION CATALOG APP (increase|read|deny)".into(),
         );
@@ -23,10 +23,18 @@ fn main() -> Result<()> {
         .as_str()
         .into_client_request()
         .map_err(|e| e.to_string())?;
-    if let Some(origin) = args.get(4) {
+    if let Some(origin) = args.get(4).filter(|o| o.as_str() != "-") {
         request.headers_mut().insert(
             "Origin",
             origin.parse().map_err(|_| "Invalid probe Origin")?,
+        );
+    }
+    if let Ok(token) = std::env::var("OTRIOS_PROBE_TOKEN") {
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {token}")
+                .parse()
+                .map_err(|_| "Invalid probe credential")?,
         );
     }
     let (mut socket, _) = tungstenite::connect(request).map_err(|e| e.to_string())?;
@@ -38,11 +46,23 @@ fn main() -> Result<()> {
     session_client::negotiate(&mut socket)?;
     let mut client = Client::default();
     client.admit_catalog(&bytes)?;
-    client.open(&entry.app.ui_ref, &entry.app.state_ref);
+    let mut opened = args.get(5).is_none();
+    if let Some(space) = args.get(5) {
+        client.configure_spaces(Some(space))?;
+    } else {
+        client.open(&entry.app.ui_ref, &entry.app.state_ref);
+    }
     let start = Instant::now();
     let mut before = None;
     loop {
         client.tick(start.elapsed().as_millis() as u64, 0)?;
+        while let Some(bytes) = client.spaces_outgoing()? {
+            socket
+                .send(tungstenite::Message::Binary(
+                    otrios_interfaces::session::frame(5, bytes).into(),
+                ))
+                .map_err(|e| e.to_string())?;
+        }
         while let Some(bytes) = client.outgoing()? {
             socket
                 .send(tungstenite::Message::Binary(
@@ -52,7 +72,11 @@ fn main() -> Result<()> {
         }
         match socket.read() {
             Ok(tungstenite::Message::Binary(bytes)) => {
-                client.receive(bytes.strip_prefix(&[1]).ok_or("Unexpected state channel")?)?;
+                if let Some(bytes) = bytes.strip_prefix(&[5]) {
+                    client.receive_spaces(bytes)?;
+                } else {
+                    client.receive(bytes.strip_prefix(&[1]).ok_or("Unexpected state channel")?)?;
+                }
             }
             Err(tungstenite::Error::Io(error))
                 if matches!(
@@ -62,6 +86,10 @@ fn main() -> Result<()> {
             Err(error) => return Err(error.to_string()),
             _ => {}
         }
+        if !opened && client.spaces_snapshot().is_some() {
+            client.open(&entry.app.ui_ref, &entry.app.state_ref);
+            opened = true;
+        }
         if args[3] == "deny" && client.auth_required() {
             if !client.ui_ref().is_empty() {
                 return Err("Private UI leaked before admission".into());
@@ -69,7 +97,7 @@ fn main() -> Result<()> {
             println!("DENIED app={} payloads=false", entry.app.id);
             break;
         }
-        if args[3] != "deny" && !client.ui_ref().is_empty() && client.confirmed() {
+        if args[3] != "deny" && client.ui_ref() == entry.app.ui_ref && client.confirmed() {
             if args[3] == "controls" {
                 let scene = client.scene()?;
                 let controls:Vec<_>=scene.controls().into_iter().map(|control|serde_json::json!({

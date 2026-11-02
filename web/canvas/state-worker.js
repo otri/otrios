@@ -14,7 +14,7 @@ let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
 let transportReady=false,transportEpoch=0,stateSends=0,inkSending=false,inkActive=false,inFlight=null,started=false,authenticated=false,lastStall=0;
 let chatIdentityReady=false,chatIdentityRequested=false,chatSending=false,collectionSending=false;
-let chatLogKey='',spacesSending=false,signingOut=false;
+let chatLogKey='',spacesSending=false,signingOut=false,transferActor;
 function pumpSpaces(){if(transportReady&&!spacesSending){const bytes=app?.spaces_outgoing();if(bytes){spacesSending=true;postMessage({type:'spaces-send',bytes,epoch:transportEpoch},[bytes.buffer]);}}}
 function pumpChat(){
   if(app?.screen()==='brass-relay'&&!app.space_managed()&&!chatIdentityReady){if(!chatIdentityRequested){chatIdentityRequested=true;postMessage({type:'chat-identity'});}return;}
@@ -37,7 +37,7 @@ function sendFrame(){
   const ui=app.ui_ref();
   const plan=ui?JSON.parse(app.prepare_frame()):{revisions:{content:0,placement:0,semantics:0,effects:0},order:[]};
   const revisions=plan.revisions;
-  const frame={inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
+  const frame={transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
   if(frame.authRequired){frame.path="/"+app.pending_path();frame.title=app.title();}
@@ -58,7 +58,7 @@ function sendFrame(){
 function clearPresentation(){chatLogKey='';composition=null;documents.reset();syncInk();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
 async function signOut(){if(signingOut)return;signingOut=true;transportReady=false;dropPrivate();app.set_session_controls(false);publish();const done=await monitoring.logout();signingOut=false;if(done)postMessage({type:'transport-reconnect'});else postMessage({type:'warning',message:'Could not finish signing out. Reload to retry.'});}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
-function outgoing(){if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();const download=JSON.parse(app.take_chat_download());if(download){const [asset,data]=download,bytes=Uint8Array.from(data);postMessage({type:'chat-download',epoch:app.epoch(),name:asset.name,bytes},[bytes.buffer]);}}
+function outgoing(){const actor=app.transfer_actor();if(actor!==transferActor){transferActor=actor;postMessage({type:'transfer-reset'});}const task=JSON.parse(app.take_transfer_task());if(task)postMessage({type:'transfer-task',task});if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();const download=JSON.parse(app.take_chat_download());if(download){const [asset,data]=download,bytes=Uint8Array.from(data);postMessage({type:'chat-download',epoch:app.epoch(),name:asset.name,bytes},[bytes.buffer]);}}
 function reloadReady(){return !composition&&!app.input_busy()&&(!stateOnline||app.reload_ready());}
 function release(message){
   const r=message.release;if(!validRelease(r))return;
@@ -111,7 +111,7 @@ function navigate(screen){
 onmessage=async({data:m})=>{try{
   if(m.type==='release-discovered'){if(validRelease(m.release)){discoveredRelease=m.release;if(app&&started)release(m);}return;}
   if(m.type==='start'){
-    if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_layout_viewport(...(m.layoutViewport||m.viewport||[1280,800]));app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);app.configure_spaces(m.space||undefined);activeRelease=m.release;
+    if(started)throw Error('App host is already initialized');started=true;timings=!!m.timings;if(timings)navigationTiming={id:0,workerStarted:timingNow()};await init({module_or_path:m.wasmModule});hostUrl=m.moduleUrl||location.href;admittedManifest=m.manifest;app=new CanvasApp();app.set_layout_viewport(...(m.layoutViewport||m.viewport||[1280,800]));app.set_viewport(...(m.viewport||[1280,800]));app.set_font(m.fontBytes,m.fontHash);app.admit_catalog(m.catalogBytes);app.configure_spaces(m.space||undefined);app.set_transfer_host(new URL(hostUrl).origin,true,true,!!m.clipboard);activeRelease=m.release;
     app.set_reduced_motion(!!m.reducedMotion);
     for(const name of ['otrios-demo-v3','otrios-dashboard-v2'])try{indexedDB.deleteDatabase(name);}catch{}
     monitoring=new MonitoringSession({onStatus:applyAuthenticationStatus});
@@ -123,6 +123,7 @@ onmessage=async({data:m})=>{try{
   if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;return;}
   if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();lastTextGeneration=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
   if(!app)return;
+  if(m.type==='transfer-reply'){try{if(app.receive_transfer(m.id,m.reply))publish();}catch{if(app.receive_transfer(m.id,JSON.stringify({type:'failed',message:'The transfer reply was invalid. Close and try again.'})))publish();}outgoing();return;}
   if(m.type==='transport'){
     if(stopped)return;const was=transportReady,changed=m.epoch!==transportEpoch;transportReady=m.ready;transportEpoch=m.epoch;if(changed){stateSends=0;inkSending=false;chatSending=false;collectionSending=false;spacesSending=false;}
     if(transportReady&&(!was||changed)){app.reset_connection();outgoing();syncInk();}
@@ -153,6 +154,8 @@ onmessage=async({data:m})=>{try{
     case 'logout':signOut();changed=true;break;
     case 'pointer':if(!app.ui_ref())break;changed=applyPointer(m.args);break;
     case 'pointer-batch':if(!app.ui_ref())break;if(!Array.isArray(m.samples)||m.samples.length>64)throw Error('Pointer batch limit');for(const args of m.samples)changed=applyPointer(args)||changed;break;
+    case 'transfer-file-drop':if(m.epoch===app.epoch()){changed=app.drop_transfer_file();const task=JSON.parse(app.take_transfer_task());if(task)postMessage({type:'transfer-task',task,file:m.file});}break;
+    case 'transfer-url-drop':if(m.epoch===app.epoch())changed=app.drop_transfer_url(m.url);break;
     case 'chat-attachment':changed=app.send_chat_attachment(m.epoch,m.name,m.bytes);break;
     case 'activate':if(!app.ui_ref())break;changed=app.activate(m.epoch??app.epoch(),m.id);break;
     case 'adjust':if(!app.ui_ref())break;if(m.epoch===undefined||m.epoch===app.epoch())changed=app.adjust_control(m.id,m.dx,m.dy);break;

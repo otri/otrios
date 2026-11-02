@@ -84,6 +84,40 @@ impl CanvasApp {
     pub fn spaces_info(&self) -> Result<String, String> {
         serde_json::to_string(&self.inner.spaces_snapshot()).map_err(|e| e.to_string())
     }
+    pub fn set_transfer_host(
+        &mut self,
+        origin: &str,
+        picker: bool,
+        export: bool,
+        clipboard: bool,
+    ) -> Result<(), String> {
+        self.inner
+            .set_transfer_host(origin, picker, export, clipboard)
+    }
+    pub fn take_transfer_task(&mut self) -> Result<String, String> {
+        serde_json::to_string(&self.inner.take_transfer_task()).map_err(|e| e.to_string())
+    }
+    pub fn transfer_actor(&self) -> Option<String> {
+        self.inner.transfer_actor().map(str::to_owned)
+    }
+    pub fn transfer_drop_kind(&self) -> Option<String> {
+        self.inner.transfer_drop_kind().map(str::to_owned)
+    }
+    pub fn drop_transfer_file(&mut self) -> Result<bool, String> {
+        self.inner.drop_transfer_file()
+    }
+    pub fn drop_transfer_url(&mut self, url: &str) -> Result<bool, String> {
+        self.inner.drop_transfer_url(url)
+    }
+    pub fn receive_transfer(&mut self, id: u32, reply: &str) -> Result<bool, String> {
+        if reply.len() > 16 * 1024 {
+            return Err("Transfer reply budget".into());
+        }
+        self.inner.receive_transfer(
+            id,
+            serde_json::from_str(reply).map_err(|_| "Invalid transfer reply")?,
+        )
+    }
     pub fn can_update_catalog(&mut self) -> bool {
         self.inner.can_update_catalog()
     }

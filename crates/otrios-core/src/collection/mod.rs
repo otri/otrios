@@ -12,7 +12,7 @@ mod wire;
 
 pub use channel::{Access, Channel, ChannelSession, Event, Policy};
 pub use client::{Change, Client};
-pub use index::{Budget, Collection, IndexWork, Records, Schema};
+pub use index::{Budget, Collection, IndexWork, MAX_RECORD_BYTES, Records, Schema};
 pub use lease::{Authority, Lease, Offer, Replica, Session};
 pub use otrios_interfaces::collection::*;
 pub use synthetic::{Synthetic, synthetic_schema};

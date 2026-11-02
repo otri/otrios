@@ -250,13 +250,13 @@ pub(super) fn render(
                 "Export Data",
                 "Export Data",
                 [left, top + 388., width, 56.],
-                HostAction::Unavailable("Data export is not available for this dataset yet."),
+                HostAction::TransferExport(data.app.clone(), data.collection.clone()),
             );
             b.flat(
                 "Replace Data",
                 "Replace Data",
                 [left, top + 448., width, 56.],
-                HostAction::Unavailable("Data replacement is not available for this dataset yet."),
+                HostAction::TransferReplace(data.app.clone(), data.collection.clone()),
             );
         }
         Pane::DeleteDataset(cid) | Pane::RestoreDataset(cid) => {

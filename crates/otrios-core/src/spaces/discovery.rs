@@ -137,7 +137,7 @@ pub fn discovery_with_cleanup(
                             && a.attached
                             && availability == AppAvailability::Available
                         {
-                            app.cloned()
+                            app.cloned().map(LaunchApp::from)
                         } else {
                             None
                         },
@@ -206,6 +206,12 @@ fn availability(
 }
 fn valid_installed(app: &InstalledApp) -> bool {
     valid_policy(&app.policy)
+        && app.bundle_sha256.as_ref().is_none_or(|hash| {
+            hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
         && !app.title.is_empty()
         && app.title.len() <= 96
         && app.ui_ref == format!("app:{}/ui", app.policy.app)
@@ -314,8 +320,9 @@ pub(super) fn validate_discovery(snapshot: &Discovery) -> Result<()> {
                 || a.title.len() > 128
                 || (!admin && (!a.attached || a.stored_bytes.is_some()))
                 || a.launch.as_ref().is_some_and(|p| {
-                    !valid_installed(p)
-                        || p.policy.app != a.app
+                    p.ui_ref != format!("app:{}/ui", a.app)
+                        || p.state_ref.is_empty()
+                        || p.state_ref.len() > 128
                         || !a.attached
                         || a.availability != AppAvailability::Available
                 })
@@ -376,6 +383,7 @@ fn retained_summaries(
         let suffix = match d.origin {
             DatasetOrigin::BeforeRestore => "before restore",
             DatasetOrigin::BeforeReplacement => "before replacement",
+            DatasetOrigin::Imported => "imported",
         };
         let base = title(&data, app);
         let mut caption = format!(

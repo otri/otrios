@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 2 * 1024 * 1024 + 8192;
+const MAX_STORE_BYTES: usize = MAX_REGISTRY_BYTES + 2 * 1024 * 1024 + 128 * 1024;
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -18,6 +18,8 @@ struct Record {
     registry: Registry,
     #[serde(default)]
     legacy_sources: Option<backups::legacy_sources::Originals>,
+    #[serde(default)]
+    imports: Vec<app_imports::Install>,
 }
 pub struct Store {
     current: Record,
@@ -61,6 +63,7 @@ fn suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 fn validate_record(record: &Record) -> Result<()> {
     validate(&record.registry)?;
+    app_imports::validate_installs(record)?;
     if flexbuffers::to_vec(&record.registry)
         .map_err(io_error)?
         .len()
@@ -90,7 +93,7 @@ fn encode(record: &Record) -> Result<Vec<u8>> {
         return Err(Error::Capacity);
     }
     // Earlier writers reject this framing rather than ignore the safety ledger.
-    let mut bytes = b"OTSP8".to_vec();
+    let mut bytes = b"OTSP9".to_vec();
     bytes.extend(crate::canvas::hash(&payload));
     bytes.extend(payload);
     Ok(bytes)
@@ -111,10 +114,14 @@ fn payload<'a>(bytes: &'a [u8], headers: &[&[u8]]) -> Result<&'a [u8]> {
 fn decode(bytes: &[u8]) -> Result<Record> {
     let mut record: Record = flexbuffers::from_slice(payload(
         bytes,
-        &[b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6", b"OTSP7", b"OTSP8"],
+        &[
+            b"OTSP3", b"OTSP4", b"OTSP5", b"OTSP6", b"OTSP7", b"OTSP8", b"OTSP9",
+        ],
     )?)
     .map_err(|_| Error::Invalid)?;
-    if !bytes.starts_with(b"OTSP6") && !bytes.starts_with(b"OTSP7") && !bytes.starts_with(b"OTSP8")
+    if ![b"OTSP6", b"OTSP7", b"OTSP8", b"OTSP9"]
+        .iter()
+        .any(|h| bytes.starts_with(*h))
     {
         initial_layouts(&mut record.registry);
     }
@@ -128,6 +135,7 @@ fn current_framing(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"OTSP6")
         || bytes.starts_with(b"OTSP7")
         || bytes.starts_with(b"OTSP8")
+        || bytes.starts_with(b"OTSP9")
 }
 fn legacy(bytes: &[u8]) -> Result<Registry> {
     let mut registry: Registry = flexbuffers::from_slice(payload(bytes, &[b"OTSP1", b"OTSP2"])?)
@@ -293,6 +301,7 @@ impl Store {
                 root: fresh()?,
                 storage: None,
                 legacy_sources: None,
+                imports: vec![],
                 registry: primary
                     .as_ref()
                     .map(|b| legacy(b))
@@ -414,6 +423,7 @@ impl Store {
         request: &Request,
         installed: Option<&AppPolicy>,
     ) -> Result<&Registry> {
+        self.check_install_fence()?;
         if matches!(request.change, Change::Profile { .. }) {
             self.commit_profile(actor, request)?;
             return self.registry();
@@ -430,6 +440,7 @@ impl Store {
         request: &Request,
         installed: &[AppPolicy],
     ) -> Result<&Registry> {
+        self.check_install_fence()?;
         if matches!(request.change, Change::Profile { .. }) {
             self.commit_profile(actor, request)?;
             return self.registry();
@@ -476,6 +487,7 @@ impl Store {
     }
     fn publish(&mut self, next: Record, mut boundary: impl FnMut(Boundary)) -> Result<()> {
         self.registry()?;
+        app_imports::allow_transition(&self.current, &next)?;
         let bytes = encode(&next)?;
         boundary(Boundary::BeforeLatest);
         let result = (|| {
@@ -546,3 +558,6 @@ fn write_at(path: &Path, bytes: &[u8], mut step: impl FnMut(FileStep)) -> Result
 
 #[path = "cleanup.rs"]
 mod cleanup;
+
+#[path = "app_imports.rs"]
+mod app_imports;

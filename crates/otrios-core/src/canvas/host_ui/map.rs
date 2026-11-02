@@ -9,6 +9,7 @@ mod access;
 mod moves;
 mod panel;
 mod retained;
+mod transfers;
 const PAPER: [u8; 4] = [247, 246, 240, 255];
 const INK: [u8; 4] = [44, 50, 43, 255];
 const SOFT: [u8; 4] = [109, 116, 105, 255];
@@ -162,6 +163,8 @@ impl Builder<'_> {
                 | HostAction::AccessApply
                 | HostAction::MoveConfirm
                 | HostAction::Create
+                | HostAction::TransferCommit
+                | HostAction::TransferUrl
                 | HostAction::Reviewed(Change::RestoreDataset { .. }, _)
                 | HostAction::Manage(Change::RestoreSpace { .. })
         ) || label == "Done";
@@ -415,6 +418,7 @@ pub(super) fn render(
                 | Pane::Members
                 | Pane::AccessAudience
                 | Pane::AudienceConfirm { .. }
+                | Pane::Transfer
         )
     {
         model.pane = Pane::Home;
@@ -447,6 +451,21 @@ pub(super) fn render(
     let mut value = draft.to_owned();
     let mut form = false;
     match &model.pane {
+        Pane::Transfer => {
+            if let Some(entry) = transfers::render(&mut b, snapshot, model, [left, top, width, h]) {
+                value = if model
+                    .field_owner
+                    .as_ref()
+                    .is_some_and(|s| s.starts_with("transfer:url:"))
+                    && !draft.is_empty()
+                {
+                    draft.into()
+                } else {
+                    entry
+                };
+                form = true;
+            }
+        }
         Pane::Create => {
             form = true;
             b.nodes.push(text("New Space", [left, top, width, 40.], 2.));
@@ -623,8 +642,30 @@ pub(super) fn render(
                             .any(|a| a.attached && a.app == app.policy.app)
                     })
                     .collect::<Vec<_>>();
-                model.page = model.page.min(apps.len().saturating_sub(1) / PAGE);
-                for (index, app) in apps.iter().skip(model.page * PAGE).take(PAGE).enumerate() {
+                let count = apps.len() + 1;
+                model.page = model.page.min(count.saturating_sub(1) / PAGE);
+                for position in 0..PAGE {
+                    let index = model.page * PAGE + position;
+                    let tile = width / 2.;
+                    let frame = [
+                        left + (position % 2) as f32 * tile,
+                        top + 64. + (position / 2) as f32 * 152.,
+                        tile,
+                        144.,
+                    ];
+                    if index == 0 {
+                        b.nodes.push(
+                            a::canvas(app_tile("upload", "Upload", tile, true, font))
+                                .frame(frame)
+                                .semantic_label("Upload")
+                                .on_press(a::Event::back()),
+                        );
+                        b.actions.push(HostAction::TransferUpload);
+                        continue;
+                    }
+                    let Some(app) = apps.get(index - 1) else {
+                        break;
+                    };
                     let compatible = selected
                         .apps
                         .iter()
@@ -633,15 +674,9 @@ pub(super) fn render(
                     let public = summary
                         .is_some_and(|s| s.audience != otrios_interfaces::spaces::Audience::Closed);
                     let allowed = compatible && !(public && app.policy.closed_only);
-                    let tile = width / 2.;
                     let node =
                         a::canvas(app_tile(&app.policy.app, &app.title, tile, allowed, font))
-                            .frame([
-                                left + (index % 2) as f32 * tile,
-                                top + 64. + (index / 2) as f32 * 152.,
-                                tile,
-                                144.,
-                            ]);
+                            .frame(frame);
                     if allowed {
                         b.nodes.push(
                             node.semantic_label(&short(&app.title, 94))
@@ -655,13 +690,6 @@ pub(super) fn render(
                         b.nodes.push(node);
                     }
                 }
-                if apps.is_empty() {
-                    b.nodes.push(text(
-                        "All installed apps are attached.",
-                        [left, top + 72., width, 64.],
-                        2.,
-                    ));
-                }
                 if model.page > 0 {
                     b.flat(
                         "Previous",
@@ -670,7 +698,7 @@ pub(super) fn render(
                         HostAction::Page(-1),
                     );
                 }
-                if (model.page + 1) * PAGE < apps.len() {
+                if (model.page + 1) * PAGE < count {
                     b.flat(
                         "Next",
                         "›",
@@ -976,18 +1004,15 @@ pub(super) fn render(
                     [left, top + 328., width, 40.],
                 );
                 b.divider([left, top + 386., width, 1.]);
-                for (i, (label, message)) in [
-                    (
-                        "Share App",
-                        "App sharing is not available on this host yet.",
-                    ),
+                for (i, (label, action)) in [
+                    ("Share App", HostAction::TransferShare(app.app.clone())),
                     (
                         "Export Data",
-                        "Data export is not available for this app yet.",
+                        HostAction::TransferExport(app.app.clone(), app.collection.clone()),
                     ),
                     (
                         "Replace Data",
-                        "Data replacement is not available for this app yet.",
+                        HostAction::TransferReplace(app.app.clone(), app.collection.clone()),
                     ),
                 ]
                 .into_iter()
@@ -997,7 +1022,7 @@ pub(super) fn render(
                         label,
                         label,
                         [left, top + 408. + i as f32 * 60., width, 56.],
-                        HostAction::Unavailable(message),
+                        action,
                     );
                 }
             }
@@ -1051,6 +1076,7 @@ pub(super) fn render(
                 | Pane::BeginMove { .. }
                 | Pane::MoveDestinations
                 | Pane::MoveReview
+                | Pane::Transfer
         )
     {
         b.flat(

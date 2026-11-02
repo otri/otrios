@@ -4,6 +4,7 @@
 import argparse, fcntl, hashlib, io, json, os, pathlib, shutil, subprocess, sys, tarfile, tempfile, time
 from importlib.machinery import SourceFileLoader
 publisher=SourceFileLoader('otrios_publisher',str(pathlib.Path(__file__).with_name('publish-dashboard.py'))).load_module()
+app_imports=SourceFileLoader('otrios_app_imports',str(pathlib.Path(__file__).with_name('process-app-imports.py'))).load_module()
 
 def inputs(repo):
     exact=['Cargo.toml','Cargo.lock','rust-toolchain.toml','LICENSES/Apache-2.0.txt','assets/fonts/roboto/Roboto.ttf','assets/fonts/roboto/OFL.txt']
@@ -33,7 +34,7 @@ def rebuild(config,wanted,activate=True):
     env=dict(os.environ,**config['build_env'],CARGO_TARGET_DIR=str(build/'mac-target'))
     run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
     run(['cargo','test','-p','otrios-dashboard','--features','server,canvas,host-sync','--locked'],cwd=source,env=env)
-    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--locked'],cwd=source,env=env)
+    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--example','app_management_probe','--locked'],cwd=source,env=env)
     for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py','scripts/test_app_bundles.py']:
         run([sys.executable,script],cwd=source,env=dict(env,OTRIOS_TEST_BIN_DIR=str(build/'mac-target/debug')))
     run([sys.executable,'scripts/generate-slug-shaders.py','--check'],cwd=source)
@@ -134,7 +135,7 @@ def refresh_git(config):
 def main(config,once,activate=True):
     runtime=pathlib.Path(config['runtime']);lock=open(runtime/'watcher.lock','a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     repo=pathlib.Path(config['repo']);marker=runtime/'build/source-id';last=marker.read_text() if marker.exists() else None
-    retry_at=0;next_git=0
+    retry_at=0;next_git=0;next_import=0
     while True:
         try:
             if time.monotonic()>=next_git:
@@ -145,6 +146,10 @@ def main(config,once,activate=True):
                 if fingerprint(repo)!=wanted:continue
                 rebuild(config,wanted,activate);last=wanted
             if once:return
+            if activate and config.get('frame') and time.monotonic()>=next_import:
+                next_import=time.monotonic()+5
+                try:app_imports.service(config)
+                except Exception as error:print('APP IMPORT PENDING: '+str(error),flush=True)
         except Exception as e:
             print('BUILD/ACTIVATION FAILED; inspect active pointer: '+str(e),flush=True)
             if once:raise

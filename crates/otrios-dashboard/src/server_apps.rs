@@ -8,9 +8,12 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     io::Read,
 };
+#[path = "server_app_transfers.rs"]
+mod transfers;
 
 #[derive(Clone)]
 struct Package {
+    bundle_sha256: Option<String>,
     app: AppContract,
     ui: Vec<u8>,
     ui_hash: Vec<u8>,
@@ -59,6 +62,8 @@ pub(super) struct Hub {
     next_maintenance: Option<std::time::Instant>,
     presence: Vec<std::sync::Weak<Presence>>,
     next_presence: u64,
+    staged_data: Option<transfers::PendingData>,
+    staged_app: Option<transfers::PendingApp>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Grant {
@@ -240,6 +245,8 @@ impl Hub {
             next_maintenance: None,
             presence: vec![],
             next_presence: 0,
+            staged_data: None,
+            staged_app: None,
         })
     }
     pub(super) fn trust_publisher(&mut self, key: [u8; 32]) {
@@ -293,6 +300,8 @@ impl Hub {
         self.cleanup.get(space)
     }
     pub(super) fn maintain_storage(&mut self, force: bool) -> Result<bool> {
+        self.expire_data_stage(chat::now());
+        self.expire_app_stage(chat::now());
         if self.spaces.is_none() {
             return Ok(false);
         }
@@ -938,6 +947,7 @@ impl Hub {
             .flat_map(|b| b.packages.values())
             .filter(|p| !p.app.id.contains('/'))
             .map(|p| InstalledApp {
+                bundle_sha256: p.bundle_sha256.clone(),
                 code_bytes: p.code_bytes,
                 revision: p.revision,
                 policy: p.policy.clone(),
@@ -1446,15 +1456,18 @@ impl Hub {
         binding: &otrios_interfaces::spaces::Binding,
         package: &Package,
     ) -> Result<PathBuf> {
+        self.collection_path(&binding.collection, package)
+    }
+    fn collection_path(&self, collection: &str, package: &Package) -> Result<PathBuf> {
         let root = self
             .state
             .as_ref()
             .ok_or("Durable collection storage required")?;
         if package.app.state_ref == package.primary_ref {
-            Ok(root.join(format!("collection-{}.merkle", binding.collection)))
+            Ok(root.join(format!("collection-{collection}.merkle")))
         } else {
             Ok(root
-                .join(format!("collection-{}.data", binding.collection))
+                .join(format!("collection-{collection}.data"))
                 .join(format!(
                     "doc-{}.merkle",
                     canvas::hex(&canvas::hash(package.app.state_ref.as_bytes()))
@@ -1487,6 +1500,14 @@ impl Hub {
     }
     pub(super) fn refresh(&mut self, releases: &Option<PathBuf>, release: &Value) -> Result<()> {
         let id = release["id"].as_str().unwrap_or("development");
+        if let Some(store) = &self.spaces
+            && let Some(job) = store.pending_app_install().map_err(|e| e.to_string())?
+            && job.state.phase == otrios_core::transfers::AppImportPhase::Armed
+            && id != job.review.release
+            && job.state.release.as_deref() != Some(id)
+        {
+            return Err("An armed app install requires its exact planned release".into());
+        }
         if valid_id(id) && self.active_release == id {
             return Ok(());
         }
@@ -1597,6 +1618,7 @@ impl Hub {
                         .as_ref()
                         .ok_or("Missing trusted bundle publisher key")?,
                 )?;
+                otrios_core::bundle::qualify_install(&verified)?;
                 if verified.summary().info.app != a
                     || verified.summary().info.private != entry.private
                 {
@@ -1746,6 +1768,7 @@ impl Hub {
                 .insert(
                     a.ui_ref.clone(),
                     Package {
+                        bundle_sha256: verified.as_ref().map(|v| v.summary().digest.clone()),
                         code_bytes: verified.as_ref().map(|v| v.summary().bytes as u64),
                         revision: verified.as_ref().map(|v| v.summary().info.revision),
                         app: a,
@@ -1859,6 +1882,9 @@ impl Hub {
         }
         self.active = catalog_hash;
         self.active_release = id.into();
+        if self.spaces.is_some() {
+            self.finish_install()?;
+        }
         self.discovery_catalog_changed()?;
         Ok(())
     }

@@ -50,6 +50,21 @@ pub fn read_message(row: &Snapshot) -> Result<Message> {
     super::validate_message_assets(&message.assets)?;
     Ok(message)
 }
+pub(super) fn canonical_row(message: &Message) -> Result<Snapshot> {
+    let bytes = flexbuffers::to_vec(message).map_err(err)?;
+    super::check(&bytes, MAX_MESSAGE_BYTES)?;
+    Snapshot::empty()
+        .edit(
+            [22; 16],
+            &[Edit {
+                path: vec![MESSAGE_FIELD],
+                schema: message_schema().id,
+                value: Some(bytes),
+            }],
+        )
+        .map(|result| result.0)
+        .map_err(err)
+}
 
 pub(super) struct Prepared {
     expected: Hash,
@@ -101,19 +116,7 @@ impl History {
         Ok(())
     }
     pub fn prepare(&self, message: &Message) -> Result<Prepared> {
-        let bytes = flexbuffers::to_vec(message).map_err(err)?;
-        super::check(&bytes, MAX_MESSAGE_BYTES)?;
-        let row = Snapshot::empty()
-            .edit(
-                [22; 16],
-                &[Edit {
-                    path: vec![MESSAGE_FIELD],
-                    schema: message_schema().id,
-                    value: Some(bytes),
-                }],
-            )
-            .map_err(err)?
-            .0;
+        let row = canonical_row(message)?;
         let mut current = self.snapshot()?;
         let expected = current.revision();
         loop {

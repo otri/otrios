@@ -76,6 +76,243 @@ fn verify_file(path: &Path, expected: &SavedFile) -> Result<()> {
     Ok(())
 }
 impl Store {
+    /// Recheck the current Space Admin and reviewed binding, keep the outgoing
+    /// CID sealed, then atomically publish a fully qualified fresh collection.
+    /// The caller also fences collector/service bindings and verifies the
+    /// reviewed installed catalog before invoking this under its admission lock.
+    pub fn replace_portable(
+        &mut self,
+        actor: &str,
+        review: &crate::transfers::Replacement,
+        policy: &AppPolicy,
+        primary: &str,
+        imported: &crate::transfers::QualifiedCollection,
+    ) -> Result<u64> {
+        self.replace_portable_at(actor, review, policy, primary, imported, |_| {})
+    }
+    fn replace_portable_at(
+        &mut self,
+        actor: &str,
+        review: &crate::transfers::Replacement,
+        policy: &AppPolicy,
+        primary: &str,
+        imported: &crate::transfers::QualifiedCollection,
+        mut step: impl FnMut(RestoreStep),
+    ) -> Result<u64> {
+        self.check_install_fence()?;
+        let registry = self.registry()?;
+        if !valid_id(&review.space)
+            || !valid_id(&review.collection)
+            || !valid_id(&review.replacement)
+            || !valid_identity(actor)
+            || !valid_policy(policy)
+            || review.app != policy.app
+            || !imported.matches(&policy.app, &policy.schema)
+        {
+            return Err(Error::Invalid);
+        }
+        let index = registry
+            .spaces
+            .iter()
+            .position(|s| s.id == review.space)
+            .ok_or(Error::Denied)?;
+        let space = &registry.spaces[index];
+        admin(space, actor)?;
+        if space.archived {
+            return Err(Error::Unavailable);
+        }
+        if registry.generation != review.expected_generation {
+            return Err(Error::Conflict);
+        }
+        let slot = space
+            .apps
+            .iter()
+            .position(|a| a.policy.app == review.app && a.collection == review.collection);
+        let retained = registry.retained.iter().find(|d| {
+            d.space == review.space
+                && d.policy.app == review.app
+                && d.collection == review.collection
+        });
+        let source_policy = slot
+            .map(|i| &space.apps[i].policy)
+            .or_else(|| retained.map(|d| &d.policy))
+            .ok_or(Error::Conflict)?;
+        if source_policy.schema != policy.schema
+            || policy.closed_only && space.audience != Audience::Closed
+        {
+            return Err(Error::Incompatible);
+        }
+        if registry
+            .spaces
+            .iter()
+            .flat_map(|s| &s.apps)
+            .any(|a| a.collection == review.replacement)
+            || registry
+                .retained
+                .iter()
+                .any(|d| d.collection == review.replacement)
+            || registry
+                .deletions
+                .iter()
+                .any(|d| d.collection == review.replacement)
+        {
+            return Err(Error::Conflict);
+        }
+        if registry.retained.len() >= MAX_RETAINED_DATASETS
+            || space.apps.len()
+                + registry
+                    .retained
+                    .iter()
+                    .filter(|d| d.space == review.space)
+                    .count()
+                >= MAX_APPS
+        {
+            return Err(Error::Capacity);
+        }
+        let storage = self.checked_storage()?.to_path_buf();
+        // A fresh registry identity must also have no unmanaged on-disk bytes.
+        let prefix = format!("collection-{}.", review.replacement);
+        for (visited, entry) in fs::read_dir(&storage).map_err(io_error)?.enumerate() {
+            if visited >= 65536 {
+                return Err(Error::Capacity);
+            }
+            if entry
+                .map_err(io_error)?
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&prefix)
+            {
+                return Err(Error::Conflict);
+            }
+        }
+        let generation = registry.generation.checked_add(1).ok_or(Error::Capacity)?;
+        let mut next = self.current.clone();
+        next.registry.generation = generation;
+        if let Some(slot) = slot {
+            let app = &mut next.registry.spaces[index].apps[slot];
+            next.registry.retained.push(RetainedDataset {
+                space: review.space.clone(),
+                policy: app.policy.clone(),
+                collection: app.collection.clone(),
+                label: app.label.clone(),
+                origin: DatasetOrigin::BeforeReplacement,
+                generation,
+            });
+            app.collection = review.replacement.clone();
+            app.attachment_epoch = generation;
+            app.policy = policy.clone();
+        } else {
+            // Replacing a sealed ghost preserves both inactive datasets. It
+            // neither changes the app's preferred binding nor executes code.
+            let source = retained.ok_or(Error::Conflict)?;
+            next.registry.retained.push(RetainedDataset {
+                space: review.space.clone(),
+                policy: policy.clone(),
+                collection: review.replacement.clone(),
+                label: source.label.clone(),
+                origin: DatasetOrigin::Imported,
+                generation,
+            });
+        }
+        validate_record(&next)?;
+        let stage_id = fresh()?;
+        let stage = storage.join(format!(".spaces-restore-{stage_id}"));
+        new_directory(&stage)?;
+        let result = (|| {
+            imported
+                .write_stage(&stage, primary, &review.replacement)
+                .map_err(io_error)?;
+            let collections = BTreeMap::from([(review.replacement.clone(), policy.schema.clone())]);
+            let mut files = vec![];
+            let mut remaining = MAX_BACKUP_BYTES;
+            for relative in snapshot_files(&stage, &collections)? {
+                let metadata = fs::symlink_metadata(stage.join(&relative)).map_err(io_error)?;
+                private(&metadata)?;
+                if metadata.len() > MAX_FILE_BYTES || metadata.len() > remaining {
+                    return Err(Error::Capacity);
+                }
+                remaining -= metadata.len();
+                let bytes = read(&stage.join(&relative), MAX_FILE_BYTES as usize, true)?
+                    .ok_or(Error::Invalid)?;
+                files.push(SavedFile {
+                    path: relative,
+                    bytes: bytes.len() as u64,
+                    sha256: crate::canvas::hash(&bytes),
+                });
+            }
+            sync_tree(&stage)?;
+            sync_directory(&storage)?;
+            step(RestoreStep::Staged);
+            let plan = RestorePlan {
+                version: 2,
+                root: self.current.root.clone(),
+                stage: stage_id,
+                collections: vec![SavedCollection {
+                    collection: review.replacement.clone(),
+                    schema: policy.schema.clone(),
+                }],
+                files,
+                remove: vec![],
+                decision: Some(next),
+                receipt: None,
+            };
+            let bytes = flexbuffers::to_vec(plan).map_err(io_error)?;
+            if bytes.len() > MAX_MANIFEST_BYTES {
+                return Err(Error::Capacity);
+            }
+            let mut framed = b"OTSR2".to_vec();
+            framed.extend(crate::canvas::hash(&bytes));
+            framed.extend(bytes);
+            self.restoring = true;
+            if let Err(e) = write(&suffix(self.path(), ".restore"), &framed) {
+                self.failed = true;
+                return Err(e);
+            }
+            step(RestoreStep::Fenced);
+            self.resume_restore(&mut step)?;
+            Ok(generation)
+        })();
+        if result.is_err() && !self.restoring {
+            let _ = fs::remove_dir_all(stage);
+        }
+        result
+    }
+    /// Read-only resolution after an uncertain response. Fresh CIDs are never
+    /// reused and remain in the current binding, sealed history or deletion
+    /// ledger. Unknown never gives permission to replay a replacement.
+    pub fn replacement_committed(
+        &self,
+        actor: &str,
+        space: &str,
+        replacement: &str,
+    ) -> Result<crate::transfers::ReplacementOutcome> {
+        if !valid_id(space) || !valid_id(replacement) {
+            return Err(Error::Invalid);
+        }
+        let registry = self.registry()?;
+        let selected = registry
+            .spaces
+            .iter()
+            .find(|s| s.id == space)
+            .ok_or(Error::Denied)?;
+        admin(selected, actor)?;
+        Ok(
+            if selected.apps.iter().any(|a| a.collection == replacement)
+                || registry
+                    .retained
+                    .iter()
+                    .any(|d| d.space == space && d.collection == replacement)
+                || registry
+                    .deletions
+                    .iter()
+                    .any(|d| d.space == space && d.collection == replacement)
+            {
+                crate::transfers::ReplacementOutcome::Committed
+            } else {
+                crate::transfers::ReplacementOutcome::Unknown
+            },
+        )
+    }
     pub(in crate::spaces::store) fn clone_retained(
         &mut self,
         next: Record,
@@ -284,6 +521,7 @@ impl Store {
         producers_stopped: bool,
         mut step: impl FnMut(RestoreStep),
     ) -> Result<usize> {
+        self.check_install_fence()?;
         self.registry()?;
         if !producers_stopped || now_unix_ms >= expiry(id)? {
             return Err(Error::Unavailable);

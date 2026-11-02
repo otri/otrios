@@ -91,6 +91,202 @@ async fn worker(
                 return;
             };
             match command {
+                command @ (contract::Command::ImportApp { .. }
+                | contract::Command::ImportStatus { .. }) => {
+                    let (id, operation, commit) = match command {
+                        contract::Command::ImportApp { id, stage, .. } => (id, stage, true),
+                        contract::Command::ImportStatus { id, operation, .. } => {
+                            (id, operation, false)
+                        }
+                        _ => unreachable!(),
+                    };
+                    let result = {
+                        let mut guard = app.apps.lock().await;
+                        let current = identity(&app, &key).await;
+                        match (guard.as_mut(), current.as_deref(), app.auth.as_ref()) {
+                            (Some(hub), Some(actor), Some(auth)) if commit => hub
+                                .import_app_stage(actor, auth.host_policy(), &operation)
+                                .map(Some),
+                            (Some(hub), Some(actor), _) => hub.import_status(actor, &operation),
+                            (Some(_), None, _) => Err(core::Error::Denied),
+                            _ => Err(core::Error::Unavailable),
+                        }
+                    };
+                    if commit && result.is_ok() {
+                        announce(&app).await;
+                    }
+                    let (status, state) = result.map_or_else(
+                        |e| (core::management_status(&e), None),
+                        |s| (contract::ManagementStatus::Applied, s),
+                    );
+                    if !emit(
+                        &output,
+                        contract::Event::AppImport {
+                            version: contract::VERSION,
+                            id,
+                            operation,
+                            status,
+                            state,
+                        },
+                        principal.clone(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                    force = true;
+                }
+                command @ contract::Command::ShareApp { .. } => {
+                    let contract::Command::ShareApp { id, .. } = &command else {
+                        unreachable!()
+                    };
+                    let id = *id;
+                    let result = {
+                        let guard = app.apps.lock().await;
+                        let current = identity(&app, &key).await;
+                        match (
+                            guard.as_ref(),
+                            current.as_deref(),
+                            app.auth.as_ref(),
+                            app.releases.as_deref(),
+                        ) {
+                            (Some(hub), Some(actor), Some(auth), Some(releases)) => {
+                                match hub.share_candidate(
+                                    actor,
+                                    auth.host_policy(),
+                                    &command,
+                                    releases,
+                                ) {
+                                    Ok(tree) => {
+                                        match app.public_transfer_jobs.clone().try_acquire_owned() {
+                                            Ok(credit) => super::super::transfers::publications(
+                                                &app,
+                                                move |store| {
+                                                    let _credit = credit;
+                                                    let summary = store.publish(tree)?;
+                                                    Ok(otrios_interfaces::transfers::AppShare {
+                                                        app: summary.info.app.id,
+                                                        title: summary.info.app.title,
+                                                        digest: summary.digest,
+                                                    })
+                                                },
+                                            )
+                                            .await
+                                            .map_err(|_| core::Error::Unavailable),
+                                            Err(_) => Err(core::Error::Capacity),
+                                        }
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            (Some(_), None, ..) => Err(core::Error::Denied),
+                            _ => Err(core::Error::Unavailable),
+                        }
+                    };
+                    let (status, share) = match result {
+                        Ok(share) => (contract::ManagementStatus::Applied, Some(share)),
+                        Err(e) => (core::management_status(&e), None),
+                    };
+                    if !emit(
+                        &output,
+                        contract::Event::AppShared {
+                            version: contract::VERSION,
+                            id,
+                            status,
+                            share,
+                        },
+                        principal.clone(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                }
+                command @ (contract::Command::ReplaceData { .. }
+                | contract::Command::CancelData { .. }
+                | contract::Command::CancelApp { .. }) => {
+                    let cancel_app = matches!(&command, contract::Command::CancelApp { .. });
+                    let (id, stage, replace) = match command {
+                        contract::Command::ReplaceData { id, stage, .. } => (id, stage, true),
+                        contract::Command::CancelData { id, stage, .. } => (id, stage, false),
+                        contract::Command::CancelApp { id, stage, .. } => (id, stage, false),
+                        _ => unreachable!(),
+                    };
+                    let result = {
+                        let mut guard = app.apps.lock().await;
+                        let current = identity(&app, &key).await;
+                        match (guard.as_mut(), current.as_deref()) {
+                            (Some(hub), Some(actor)) if replace => {
+                                hub.replace_data_stage(actor, &stage).map(|_| ())
+                            }
+                            (Some(hub), Some(actor)) if cancel_app => {
+                                hub.cancel_app_stage(actor, &stage)
+                            }
+                            (Some(hub), Some(actor)) => hub.cancel_data_stage(actor, &stage),
+                            (Some(_), None) => Err(core::Error::Denied),
+                            _ => Err(core::Error::Unavailable),
+                        }
+                    };
+                    if replace && result.is_ok() {
+                        announce(&app).await;
+                    }
+                    let status = result.map_or_else(
+                        |e| core::management_status(&e),
+                        |_| contract::ManagementStatus::Applied,
+                    );
+                    if !emit(
+                        &output,
+                        contract::Event::Result {
+                            version: contract::VERSION,
+                            id,
+                            status,
+                            created: None,
+                        },
+                        principal.clone(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                    force = true;
+                }
+                contract::Command::ReplacementStatus {
+                    id,
+                    space,
+                    replacement,
+                    ..
+                } => {
+                    let result = {
+                        let guard = app.apps.lock().await;
+                        let current = identity(&app, &key).await;
+                        match (guard.as_ref(), current.as_deref()) {
+                            (Some(hub), Some(actor)) => {
+                                hub.replacement_outcome(actor, &space, &replacement)
+                            }
+                            (Some(_), None) => Err(core::Error::Denied),
+                            _ => Err(core::Error::Unavailable),
+                        }
+                    };
+                    let (status, outcome) = match result {
+                        Ok(outcome) => (contract::ManagementStatus::Applied, Some(outcome)),
+                        Err(e) => (core::management_status(&e), None),
+                    };
+                    if !emit(
+                        &output,
+                        contract::Event::ReplacementStatus {
+                            version: contract::VERSION,
+                            id,
+                            replacement,
+                            status,
+                            outcome,
+                        },
+                        principal.clone(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                }
                 contract::Command::MoveStatus {
                     id,
                     operation,

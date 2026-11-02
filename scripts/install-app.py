@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Install/remove a signed app by publishing a complete registry with unchanged host binaries."""
 import argparse,fcntl,importlib.util,json,pathlib,re,shutil,subprocess,tempfile
+from types import SimpleNamespace
 
 def module(name,file):
     spec=importlib.util.spec_from_file_location(name,pathlib.Path(__file__).with_name(file))
@@ -16,9 +17,18 @@ def run(checker,*args):
 
 def install(a):
     key=a.runtime/'publisher/public.pem';private=a.runtime/'publisher/private.pem'
+    if getattr(a,'payload',None):
+        if not getattr(a,'expected_release',None) or getattr(a,'expected_bundle',None) is None or not getattr(a,'expected_candidate',None):
+            raise ValueError('Portable imports require the reviewed release, installed bundle and candidate digest')
+        with tempfile.TemporaryDirectory(prefix='app-payload-',dir=a.runtime/'build')as tmp:
+            candidate=pathlib.Path(tmp)/'candidate.otapp'
+            run(a.checker,'unpack',a.payload,candidate,'--key',key,'--openssl',a.openssl)
+            return install(SimpleNamespace(**{**vars(a),'payload':None,'bundle':candidate}))
     baseline=a.baseline or a.runtime/'releases/current.json'
     raw=baseline.read_bytes()
     base_id=activation.verify(a.runtime/'releases',key,a.openssl,raw,bundle_checker=a.checker)
+    if getattr(a,'expected_release',None) and a.expected_release!=base_id:
+        raise ValueError('Reviewed release baseline changed')
     base=a.runtime/'releases'/base_id
     before=json.loads((base/'manifest.json').read_bytes())
     if before.get('bundle_abi')!='otrios-app-bundle-v1':raise ValueError('Qualify/deploy the bundle-capable host before installing apps')
@@ -28,7 +38,14 @@ def install(a):
         app,digest=result[1:]
     else:
         app=a.remove;digest=None
+    if getattr(a,'expected_candidate',None) and digest!=a.expected_candidate:raise ValueError('Reviewed candidate bytes changed')
+    if getattr(a,'expected_app',None) and app!=a.expected_app:raise ValueError('Reviewed app identity changed')
     if app=='home':raise ValueError('Home is owned by registry composition')
+    expected_bundle=getattr(a,'expected_bundle',None)
+    if expected_bundle is not None:
+        current=base/'authority/bundles'/(app+'.otapp')
+        actual=run(a.checker,'verify',current,'--key',key,'--openssl',a.openssl).split()[2] if current.exists() else 'absent'
+        if expected_bundle!=actual:raise ValueError('Reviewed installed bundle changed')
     with tempfile.TemporaryDirectory(prefix='app-install-',dir=a.runtime/'build')as tmp:
         stage=pathlib.Path(tmp);source=stage/'input'
         shutil.copytree(base/'authority/bundles',source,symlinks=True)
@@ -60,10 +77,16 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--runtime',type=pathlib.Path,required=True)
     p.add_argument('--baseline',type=pathlib.Path)
-    action=p.add_mutually_exclusive_group(required=True);action.add_argument('--bundle',type=pathlib.Path);action.add_argument('--remove')
+    action=p.add_mutually_exclusive_group(required=True);action.add_argument('--bundle',type=pathlib.Path);action.add_argument('--payload',type=pathlib.Path);action.add_argument('--remove')
+    p.add_argument('--expected-release');p.add_argument('--expected-bundle')
+    p.add_argument('--expected-candidate');p.add_argument('--expected-app')
     p.add_argument('--checker',type=pathlib.Path,required=True);p.add_argument('--openssl',default='openssl')
     p.add_argument('--deploy-config',type=pathlib.Path)
     a=p.parse_args()
+    if a.expected_release and not re.fullmatch(r'[a-f0-9]{64}',a.expected_release):p.error('Invalid reviewed release')
+    if a.expected_candidate and not re.fullmatch(r'[a-f0-9]{64}',a.expected_candidate):p.error('Invalid reviewed candidate')
+    if a.expected_app and not re.fullmatch(r'[a-z0-9-]{1,64}',a.expected_app):p.error('Invalid reviewed app')
+    if a.expected_bundle and a.expected_bundle!='absent' and not re.fullmatch(r'[a-f0-9]{64}',a.expected_bundle):p.error('Invalid reviewed bundle')
     if a.remove and not re.fullmatch(r'[a-z-]+',a.remove):p.error('Invalid app identity')
     lock=(a.runtime/'watcher.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     install(a)

@@ -115,6 +115,17 @@ pub(super) fn name(value: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 impl Room {
+    /// Caller checks current admission under its authority lock. The returned
+    /// immutable pin excludes presence, credentials and admission receipts.
+    pub fn pin_portable_history(&self) -> Result<super::PinnedHistory> {
+        if !self.healthy() {
+            return Err("Room requires journal recovery".into());
+        }
+        Ok(super::PinnedHistory::new(
+            self.history.snapshot()?,
+            self.sequence,
+        ))
+    }
     /// An uncertain durable outcome must remain poisoned, including while idle.
     pub fn healthy(&self) -> bool {
         !self.failed && self.journal.as_ref().is_none_or(Journal::healthy)

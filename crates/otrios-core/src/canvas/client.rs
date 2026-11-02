@@ -6,6 +6,7 @@ mod host_access;
 mod host_map;
 mod host_moves;
 mod host_panel;
+mod host_transfers;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -174,6 +175,10 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    transfer_caps: super::host_ui::transfers::Capabilities,
+    transfer_task: Option<otrios_interfaces::transfers::TransferTask>,
+    next_transfer: u32,
+    transfer_copy: Option<u32>,
     local_apps: super::device_apps::LocalApps,
     local_uninstall: bool,
     local_apps_offline: bool,
@@ -369,6 +374,23 @@ impl Client {
             None
         };
         let changed = self.spaces.receive(bytes).map_err(err)?;
+        if self.host.transfer.as_ref().is_some_and(|d| {
+            self.spaces.snapshot().is_none_or(|s| {
+                s.identity.as_deref() != Some(d.actor.as_str())
+                    || !s.spaces.iter().any(|space| {
+                        space.id == d.space
+                            && space.role == Some(otrios_interfaces::spaces::Role::Admin)
+                    })
+            })
+        }) {
+            self.host.transfer = None;
+            self.transfer_task = None;
+            self.transfer_copy = None;
+            if self.host.pane == super::host_ui::Pane::Transfer {
+                self.host.pane = super::host_ui::Pane::Home;
+            }
+            self.host.field_owner = None;
+        }
         let map_unchanged = !self.spaces.has_outcome()
             && previous_map.is_some_and(|(generation, identity, catalog, profile, spaces)| {
                 self.spaces.snapshot().is_some_and(|s| {
@@ -534,6 +556,7 @@ impl Client {
         Ok(true)
     }
     fn build_host(&mut self, preserve: bool) -> Result<()> {
+        self.host.transfer_caps = self.transfer_caps.clone();
         // Only metadata/navigation rebuild the host. Local drag feedback must
         // retain the mount; an external rebuild invalidates the captured drag.
         self.host.drag = None;
@@ -553,6 +576,9 @@ impl Client {
             String::new()
         };
         if let Some(outcome) = self.spaces.take_outcome() {
+            if let crate::spaces::Outcome::AppShared { status, share, .. } = &outcome {
+                self.transfer_share_outcome(*status, share.as_ref());
+            }
             self.host.background = None;
             match &outcome {
                 crate::spaces::Outcome::Unknown { .. } => self.host.form_blocked = true,
@@ -571,6 +597,30 @@ impl Client {
                 }
             }
             self.host.message = match outcome {
+                crate::spaces::Outcome::AppImported { status, state, .. } => {
+                    use otrios_interfaces::{spaces::ManagementStatus as Status, transfers::AppImportPhase as Phase};
+                    match (status, state.map(|s| s.phase)) {
+                        (Status::Applied, Some(Phase::Applied)) => "",
+                        (Status::Applied, Some(Phase::Queued | Phase::Armed)) => "Installing app…",
+                        (Status::Applied, Some(Phase::Rejected)) => "The install was cancelled or its review changed. Review the current Space before trying again.",
+                        (Status::Denied, _) => "Current Space Admin and host installation authorization are required.",
+                        _ => "Installation outcome is unknown. Reconnect to check before trying again.",
+                    }.into()
+                }
+                crate::spaces::Outcome::AppShared { status, share, .. } => {
+                    match (status, share) {
+                        (otrios_interfaces::spaces::ManagementStatus::Applied, Some(share)) => if self.host.transfer.is_some() { String::new() } else { format!("App shared without data: {}/apps/{}/{}", self.transfer_caps.origin, share.app, share.digest) },
+                        (otrios_interfaces::spaces::ManagementStatus::Denied, _) => "Host publication authorization and Space Admin access are required.".into(),
+                        _ => "The app changed or sharing is unavailable. Refresh before reviewing it again.".into(),
+                    }
+                }
+                crate::spaces::Outcome::Replacement { status, outcome, .. } => {
+                    match (status, outcome) {
+                        (otrios_interfaces::spaces::ManagementStatus::Applied, Some(otrios_interfaces::transfers::ReplacementOutcome::Committed)) => "",
+                        (otrios_interfaces::spaces::ManagementStatus::Denied, _) => "Admin access is required to check this replacement.",
+                        _ => "Replacement outcome is unknown. Refresh the dataset before reviewing another change.",
+                    }.into()
+                }
                 crate::spaces::Outcome::MoveStatus { status, .. } => match status {
                     otrios_interfaces::spaces::ManagementStatus::Applied => "",
                     otrios_interfaces::spaces::ManagementStatus::Conflict => {
@@ -753,6 +803,16 @@ impl Client {
         use super::host_ui::{HostAction, Pane};
         self.host.message.clear();
         match action {
+            action @ (HostAction::TransferUpload
+            | HostAction::TransferShare(_)
+            | HostAction::TransferExport(..)
+            | HostAction::TransferReplace(..)
+            | HostAction::TransferPick
+            | HostAction::TransferUrl
+            | HostAction::TransferFile(_)
+            | HostAction::TransferCommit
+            | HostAction::TransferCancel
+            | HostAction::TransferCopy) => return self.host_transfer_action(action),
             HostAction::Pane(pane) => {
                 if !matches!(
                     pane,
@@ -1720,6 +1780,11 @@ impl Client {
     /// unconfirmed user intent and active input prevent code replacement.
     pub fn reload_ready(&self) -> bool {
         !self.input_busy()
+            && !self
+                .host
+                .transfer
+                .as_ref()
+                .is_some_and(|d| matches!(d.step, super::host_ui::transfers::Step::Waiting { .. }))
             && !self.spaces.pending()
             && (self.local || self.active.as_ref().is_none_or(|m| m.doc.confirmed()))
             && self
@@ -2005,6 +2070,8 @@ impl Client {
         self.navigate("").is_ok()
     }
     pub fn clear_private(&mut self) {
+        self.transfer_task = None;
+        self.transfer_copy = None;
         let host = self.host_active;
         self.host_active = false;
         self.host_actions.clear();
@@ -3297,6 +3364,9 @@ impl Client {
     }
     pub fn back(&mut self) -> Result<bool> {
         if self.host_active {
+            if self.host.pane == super::host_ui::Pane::Transfer {
+                return self.host_transfer_action(super::host_ui::HostAction::TransferCancel);
+            }
             if self.host.drag.is_some() {
                 return self.cancel();
             }
