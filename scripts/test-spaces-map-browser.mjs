@@ -247,6 +247,7 @@ try {
  // Duplicate canonical names are disambiguated by the containing Space on map tiles;
  // the minus button must also carry its Space scope.
  const checked=()=>evaluate(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('aria-checked')`);
+ await wait(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('aria-checked')==='false'`);
  assert.equal(await checked(),'false');
  await press(a,'Remove Data');await wait(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('aria-checked')==='true'`);
  assert.equal(await evaluate(a,`document.querySelector(${JSON.stringify(selector('Remove Data'))})?.getAttribute('role')`),'checkbox');
