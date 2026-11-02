@@ -35,6 +35,16 @@ fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session
     let mut client = transfer_fixture();
     click(&mut client, "Edit");
     click(&mut client, "Counter");
+    let right = |client: &Client, label: &str| {
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|c| c.node.semantics.as_ref().is_some_and(|s| s.label == label))
+            .unwrap();
+        control.origin[0] + control.node.frame.width * control.scale
+    };
+    let content_right = right(&client, "Export Data");
     click(&mut client, "Export Data");
     let export = client.take_transfer_task().unwrap();
     assert_eq!(export.io, TransferIo::Export);
@@ -63,6 +73,10 @@ fn exact_data_export_and_replacement_are_host_io_then_an_explicit_shared_session
         )
         .unwrap();
     assert!(!labels(&client).contains(&"Saved".into()));
+    assert!(
+        (right(&client, "Close") - content_right).abs() < 0.01,
+        "the wider transfer Close button shares the content's right inset"
+    );
     click(&mut client, "Close");
     click(&mut client, "Replace Data");
     click(&mut client, "Choose File");

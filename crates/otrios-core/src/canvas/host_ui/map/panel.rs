@@ -92,7 +92,8 @@ pub(super) fn finish(
     }
     if let Some(index) = close {
         let close = &mut panel.children[index];
-        close.frame[0] = Expr::Literal(Value::Number(width - 124.));
+        let inset = number(&close.frame[0])?;
+        close.frame[0] = Expr::Literal(Value::Number(width - inset - number(&close.frame[2])?));
         close.frame[1] = Expr::Literal(Value::Number(bottom + 24.));
         bottom += 24. + number(&close.frame[3])?;
     }
