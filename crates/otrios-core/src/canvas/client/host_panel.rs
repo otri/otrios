@@ -161,7 +161,17 @@ impl Client {
             let scene = self.scene()?;
             let hit = scene.hit_path(event.position);
             let viewport = m.preview_scroll.as_ref().ok_or("Missing preview")?.node();
-            if !hit.iter().any(|p| p.node.id == viewport) {
+            let path = scene.path(viewport).ok_or("Missing preview frame")?;
+            let parent = path.iter().rev().nth(1).map(|p| p.node.id);
+            // Unpainted viewport space hits the card painted behind it, rather
+            // than the viewport itself. Admit that background through its
+            // containing card; Scroll::pointer still checks viewport bounds.
+            // A sibling overlay or modal keeps its own hit path/barrier.
+            if !hit.is_empty()
+                && !hit
+                    .iter()
+                    .any(|p| p.node.id == viewport || Some(p.node.id) == parent)
+            {
                 return Ok(None);
             }
             if hit.iter().any(|p| {

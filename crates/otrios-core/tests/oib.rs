@@ -1020,6 +1020,44 @@ fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
     assert_eq!(usage.oib.unwrap().selected_instance, Some(30));
     assert_eq!(doc.root_hash(), root);
     assert!(client.outgoing().unwrap().is_none());
+
+    // Preview card background has no responder in the viewport, but must start a touch
+    // pan. A wheel-only check cannot exercise this routing decision.
+    let background = [
+        p.origin[0] + (p.node.frame.width - 4.) * p.scale,
+        p.origin[1] + (p.node.frame.height - 8.) * p.scale,
+    ];
+    let background_scene = client.scene().unwrap();
+    let hit = background_scene.hit_path(background);
+    assert!(!hit.iter().any(|p| p.node.id == u32::from(viewport)));
+    assert!(hit.iter().all(|p| p.node.responder.is_none()));
+    client.scroll_at(client.epoch(), -1000., position).unwrap();
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    for (phase, y, at) in [
+        (PointerPhase::Down, background[1], 100),
+        (PointerPhase::Move, background[1] - 100., 200),
+        (PointerPhase::Up, background[1] - 100., 220),
+    ] {
+        assert!(
+            client
+                .pointer_at(
+                    client.epoch(),
+                    PointerEvent {
+                        id: 71,
+                        phase,
+                        position: [background[0], y],
+                    },
+                    at,
+                )
+                .unwrap()
+        );
+    }
+    let usage = client.resource_usage();
+    assert!(usage.oib_preview_scroll.unwrap().offset[1] > 0.);
+    assert_eq!(usage.panel_scroll.unwrap().offset, inspector);
+    assert_eq!(usage.oib.unwrap().selected_instance, Some(30));
+    assert_eq!(doc.root_hash(), root);
+    assert!(client.outgoing().unwrap().is_none());
 }
 
 #[test]
