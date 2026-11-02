@@ -61,6 +61,37 @@ fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16
 pub fn expanded_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
     let mut resolved = seed.clone();
     for (index, allocation) in allocations.iter().enumerate().skip(seed.instances.len()) {
+        let prototype = seed
+            .instance_surface
+            .as_ref()
+            .ok_or("Missing instance surface")?
+            .prototypes
+            .iter()
+            .find(|p| p.instance == allocation.prototype)
+            .ok_or("Missing prototype")?;
+        for source in seed
+            .cells
+            .iter()
+            .filter(|c| c.owner == allocation.component)
+        {
+            let targets = source
+                .targets
+                .iter()
+                .filter(|t| prototype.nodes.contains(&t.node))
+                .map(|t| {
+                    let mut target = t.clone();
+                    target.node = mapped_node(seed, index, allocation.prototype, target.node)?;
+                    Ok(target)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            resolved
+                .cells
+                .iter_mut()
+                .find(|c| c.id == source.id)
+                .ok_or("Missing component property")?
+                .targets
+                .extend(targets);
+        }
         resolved.instances.push(Object {
             id: allocation.id,
             name: allocation.name.clone(),
@@ -181,10 +212,22 @@ pub fn expand(
     allocations: &[Allocation],
     live: &BTreeSet<u64>,
     selected: Option<u64>,
+    values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Ui> {
     let seed = seed(ui).ok_or("Missing OIB seed")?;
     let Some(surface) = &seed.instance_surface else {
         return Ok(ui.clone());
+    };
+    let pitch = if let Some(layout) = &surface.layout {
+        let Value::Number(pitch) = effective(seed, values, layout.preview_pitch_cell)? else {
+            return Err("Row pitch must be numeric".into());
+        };
+        if !(48. ..=1000.).contains(&pitch) {
+            return Err("Row pitch must be at least 48 pixels".into());
+        }
+        pitch
+    } else {
+        surface.preview_stride
     };
     if live.len() > MAX_LIVE_INSTANCES {
         return Err("OIB live instance capacity exhausted".into());
@@ -368,7 +411,7 @@ pub fn expand(
                     .cloned(),
             );
         }
-        preview.frame[1] = Expr::Literal(Value::Number(row as f32 * surface.preview_stride));
+        preview.frame[1] = Expr::Literal(Value::Number(row as f32 * pitch));
         inspector.frame[1] = Expr::Literal(Value::Number(surface.inspector_start));
         blueprint
             .templates
@@ -388,6 +431,20 @@ pub fn expand(
         }
     }
     let mut resolved = expanded_seed(seed, allocations)?;
+    resolved
+        .instance_surface
+        .as_mut()
+        .ok_or("Missing instance surface")?
+        .preview_stride = pitch;
+    fn has_node(blueprint: &Blueprint, id: u16) -> bool {
+        blueprint
+            .templates
+            .iter()
+            .any(|t| find(&t.root, id).is_some())
+    }
+    for cell in &mut resolved.cells {
+        cell.targets.retain(|t| has_node(&blueprint, t.node));
+    }
     resolved.instances.retain(|i| live.contains(&i.id));
     resolved
         .cells
@@ -494,6 +551,86 @@ pub fn validate_surface(ui: &Ui) -> Result<()> {
             if cell.targets.iter().any(|t| find(a, t.node).is_none()) {
                 return Err("Instance property escapes its signed preview template".into());
             }
+        }
+    }
+    if let Some(layout) = &surface.layout {
+        let pitch = seed
+            .cells
+            .iter()
+            .find(|c| c.id == layout.preview_pitch_cell)
+            .ok_or("Missing row pitch")?;
+        for prototype in &surface.prototypes {
+            if !seed
+                .instances
+                .iter()
+                .any(|i| i.id == prototype.instance && i.component == Some(pitch.owner))
+                || !pitch.targets.iter().any(|t| {
+                    t.node == prototype.preview_root
+                        && t.property == Property::Height
+                        && t.scale == 1.
+                        && t.offset == 0.
+                })
+            {
+                return Err("Row pitch must size every component preview row".into());
+            }
+        }
+        for cell in seed
+            .cells
+            .iter()
+            .filter(|c| seed.components.iter().any(|o| o.id == c.owner))
+        {
+            for target in &cell.targets {
+                if !surface.prototypes.iter().any(|p| {
+                    preview
+                        .children
+                        .iter()
+                        .find(|c| c.id == p.preview_root)
+                        .is_some_and(|r| find(r, target.node).is_some())
+                        && seed
+                            .instances
+                            .iter()
+                            .any(|i| i.id == p.instance && i.component == Some(cell.owner))
+                }) {
+                    return Err("Component layout target escapes its preview factories".into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Painted content and touch targets must fit within their admitted row, even
+/// when nonpainting component containers extend past it.
+pub fn validate_row_geometry(scene: &crate::dashboard::scene::Scene, viewport: u16) -> Result<()> {
+    use otrios_interfaces::scene::{Primitive, SceneNode, TouchResponder};
+    fn visit(node: &SceneNode, parent: [f32; 2], size: [f32; 2]) -> Result<()> {
+        let at = [parent[0] + node.frame.x, parent[1] + node.frame.y];
+        if !matches!(
+            node.primitive,
+            Primitive::Canvas { .. } | Primitive::Viewport { .. }
+        ) && (at.iter().any(|v| *v < -0.01)
+            || at[0] + node.frame.width > size[0] + 0.01
+            || at[1] + node.frame.height > size[1] + 0.01)
+        {
+            return Err("OIB painted content escapes its row; adjust geometry or row pitch".into());
+        }
+        if matches!(node.responder, Some(TouchResponder::Drag(_)))
+            && (node.frame.width < 48. || node.frame.height < 32.)
+        {
+            return Err("OIB slider touch target is too small".into());
+        }
+        for child in &node.children {
+            visit(child, at, size)?;
+        }
+        Ok(())
+    }
+    let path = scene
+        .path(u32::from(viewport))
+        .ok_or("Missing row viewport")?;
+    for row in &path.last().ok_or("Missing row viewport")?.node.children {
+        let size = [row.frame.width, row.frame.height];
+        for child in &row.children {
+            visit(child, [0., 0.], size)?;
         }
     }
     Ok(())

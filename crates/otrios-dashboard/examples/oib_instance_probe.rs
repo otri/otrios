@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     settle(&mut client, &mut socket, start)?;
     println!(
         "{}",
-        json!({"phase":"mounted","epoch":client.epoch(),"oib":client.resource_usage().oib})
+        json!({"phase":"mounted","epoch":client.epoch(),"oib":client.resource_usage().oib,"scene":client.scene()?.root()})
     );
     for step in steps {
         let id = step["id"].as_u64().unwrap_or(10);
@@ -124,6 +124,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 client.edit_oib(&[(id, value)])?
             }
+            "properties" => {
+                let changes = step["changes"]
+                    .as_array()
+                    .ok_or("Property batch required")?;
+                if changes.len() > 16 {
+                    return Err("Property batch limit".into());
+                }
+                let changes = changes
+                    .iter()
+                    .map(|change| {
+                        let cell = change["cell"].as_u64().ok_or("Cell required")?;
+                        let value = if change["value"].is_null() {
+                            None
+                        } else {
+                            Some(serde_json::from_value(change["value"].clone())?)
+                        };
+                        Ok((cell, value))
+                    })
+                    .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+                client.edit_oib(&changes)?
+            }
             "observe" => false,
             _ => return Err("Unknown OIB probe operation".into()),
         };
@@ -131,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let usage = client.resource_usage();
         println!(
             "{}",
-            json!({"phase":"step","step":step,"changed":changed,"epoch":client.epoch(),"oib":usage.oib,"confirmed":client.confirmed(),"input_busy":client.input_busy(),"elapsed_ms":start.elapsed().as_millis()})
+            json!({"phase":"step","step":step,"changed":changed,"epoch":client.epoch(),"oib":usage.oib,"confirmed":client.confirmed(),"input_busy":client.input_busy(),"elapsed_ms":start.elapsed().as_millis(),"scene":client.scene()?.root()})
         );
     }
     let _ = socket.close(None);

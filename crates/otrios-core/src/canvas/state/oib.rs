@@ -45,8 +45,10 @@ impl Document {
         let encoded = bytes(&binding)?;
         let existing = payload(&self.tree, &[4, 0]).ok();
         let mut initialize_instances = seed.instance_surface.is_some();
+        let mut previous_cells = BTreeSet::new();
         if let Some(existing) = &existing {
             let previous: Binding = decode(existing)?;
+            previous_cells.extend(previous.seed.cells.iter().map(|c| c.id));
             initialize_instances &= previous.seed.instance_surface.is_none();
             if *existing == encoded {
                 self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
@@ -80,8 +82,12 @@ impl Document {
             schema: self.extra_schema(4, 0),
             value: Some(encoded),
         }];
-        if existing.is_none() {
-            for cell in &seed.cells {
+        {
+            for cell in seed
+                .cells
+                .iter()
+                .filter(|c| !previous_cells.contains(&c.id))
+            {
                 let value = if cell.inherit.is_some() {
                     None
                 } else {
@@ -241,13 +247,15 @@ impl Document {
         selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
         let ui = self.oib_ui()?;
+        let values = self.oib_values(branch)?;
         let resolved = super::super::oib::instances::expand(
             ui,
             &self.oib_allocations()?,
             &self.oib_live(branch)?,
             selected,
+            &values,
         )?;
-        let layout = super::super::oib::compile(&resolved, &self.oib_values(branch)?)?;
+        let layout = super::super::oib::compile(&resolved, &values)?;
         Ok((resolved, layout))
     }
     pub fn oib_values(&self, branch: u64) -> Result<BTreeMap<u64, Option<Value>>> {
@@ -747,6 +755,7 @@ fn property_text(
         Value::Text(v) => v,
         Value::Number(v) => format!("{v:.0}"),
         Value::Color(c) => format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2]),
+        Value::Boolean(v) => v.to_string(),
         _ => String::new(),
     };
     let kind = if cell.inherit.is_none() {
@@ -769,6 +778,47 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
             .is_some_and(|(old, new)| old == new)
     {
         return true;
+    }
+    let layout_upgrade = new
+        .seed
+        .instance_surface
+        .as_ref()
+        .and_then(|s| s.layout.as_ref())
+        .is_some_and(|l| {
+            l.previous_ui_sha256.contains(&old.ui_hash)
+                || (old.seed.instance_surface.is_none()
+                    && new
+                        .seed
+                        .instance_surface
+                        .as_ref()
+                        .is_some_and(|s| s.previous_ui_sha256 == old.ui_hash))
+        });
+    if layout_upgrade
+        && old.ui_ref == new.ui_ref
+        && old.seed.main_oib == new.seed.main_oib
+        && old.seed.main_class == new.seed.main_class
+        && old.seed.components == new.seed.components
+        && old.seed.instances == new.seed.instances
+    {
+        let retained = old.seed.cells.iter().all(|a| {
+            new.seed.cells.iter().any(|b| {
+                a.id == b.id
+                    && a.owner == b.owner
+                    && a.name == b.name
+                    && a.default == b.default
+                    && a.choices == b.choices
+                    && a.inherit == b.inherit
+            })
+        });
+        let appended = new
+            .seed
+            .cells
+            .iter()
+            .filter(|c| !old.seed.cells.iter().any(|old| old.id == c.id))
+            .all(|c| c.inherit.is_none() && new.seed.components.iter().any(|o| o.id == c.owner));
+        if retained && appended {
+            return true;
+        }
     }
     let Some(surface) = &new.seed.instance_surface else {
         return false;

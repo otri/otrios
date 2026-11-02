@@ -179,6 +179,13 @@ pub fn pack(
         required_features.push(otrios_interfaces::oib::FEATURE.into());
         if canvas::oib::seed(&ui).is_some_and(|s| s.instance_surface.is_some()) {
             required_features.push(otrios_interfaces::oib::INSTANCES_FEATURE.into());
+            if canvas::oib::seed(&ui).is_some_and(|s| {
+                s.instance_surface
+                    .as_ref()
+                    .is_some_and(|s| s.layout.is_some())
+            }) {
+                required_features.push(otrios_interfaces::oib::LAYOUT_FEATURE.into());
+            }
         }
     }
     if crate::dashboard::layout::Layout::from_bytes(&ui.layout)?
@@ -377,6 +384,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-canvas-v8"
                     | "otrios-oib-v1"
                     | "otrios-oib-instances-v1"
+                    | "otrios-oib-layout-v1"
                     | "otrios-layout-v5"
             )
         })
@@ -392,6 +400,14 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
         && !features.contains(otrios_interfaces::oib::INSTANCES_FEATURE)
     {
         return Err("Missing required OIB instance feature".into());
+    }
+    if canvas::oib::seed(&ui).is_some_and(|s| {
+        s.instance_surface
+            .as_ref()
+            .is_some_and(|s| s.layout.is_some())
+    }) && !features.contains(otrios_interfaces::oib::LAYOUT_FEATURE)
+    {
+        return Err("Missing required OIB layout feature".into());
     }
     if crate::dashboard::layout::Layout::from_bytes(&ui.layout)?
         .blueprint()

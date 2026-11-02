@@ -840,6 +840,7 @@ pub struct NamedOibPrototype {
     pub inspector: String,
 }
 pub struct NamedOibSurface {
+    pub layout: Option<otrios_interfaces::oib::LayoutSurface>,
     pub previous_ui_sha256: Vec<u8>,
     pub preview: String,
     pub preview_stride: f32,
@@ -1018,6 +1019,7 @@ impl AppUi {
                     .max()
                     .unwrap_or(0);
                 seed.instance_surface = Some(otrios_interfaces::oib::InstanceSurface {
+                    layout: surface.layout,
                     previous_ui_sha256: surface.previous_ui_sha256,
                     preview_viewport: compiler.named_nodes[&surface.preview],
                     preview_stride: surface.preview_stride,

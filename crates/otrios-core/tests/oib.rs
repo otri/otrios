@@ -14,6 +14,189 @@ fn setup() -> (Ui, Document) {
     assert!(doc.configure_oib(&ui).unwrap());
     (ui, doc)
 }
+fn compact_changes() -> Vec<(u64, Option<Value>)> {
+    let mut changes: Vec<_> = [
+        (104, 10.),
+        (105, 128.),
+        (106, 144.),
+        (107, 0.),
+        (108, 288.),
+        (109, 10.),
+        (110, 76.),
+        (111, 0.),
+        (112, 64.),
+    ]
+    .into_iter()
+    .map(|(id, v)| (id, Some(Value::Number(v))))
+    .collect();
+    changes.extend([
+        (113, Some(Value::Boolean(false))),
+        (200, Some(Value::Text("volume".into()))),
+        (300, Some(Value::Text("brightness".into()))),
+    ]);
+    changes
+}
+
+#[test]
+fn live_geometry_batches_compact_rows_preserve_values_and_style_new_instances() {
+    use otrios_interfaces::scene::TouchResponder;
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    client.inspect_oib(30).unwrap();
+    let epoch = client.epoch();
+    let panel = client.resource_usage().panel_scroll.unwrap().offset;
+    admin.edit_oib(&compact_changes()).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
+    );
+    pump_client(&mut client, &mut doc, &mut session);
+    assert_eq!(client.epoch(), epoch);
+    assert_eq!(client.resource_usage().panel_scroll.unwrap().offset, panel);
+    assert_eq!(
+        client.resource_usage().oib.unwrap().selected_instance,
+        Some(30)
+    );
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(400.));
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(700.));
+    let scene = client.scene().unwrap();
+    let controls = scene.controls();
+    let tracks: Vec<_> = controls
+        .iter()
+        .filter(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
+        .collect();
+    assert_eq!(tracks.len(), 2);
+    assert_eq!(tracks[0].node.frame.width, 288.);
+    assert_eq!(tracks[1].origin[1] - tracks[0].origin[1], 64.);
+    assert_eq!(tracks[0].origin, [192., 140.]);
+    let label = controls
+        .iter()
+        .find(|p| {
+            p.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Inspect volume")
+        })
+        .unwrap();
+    assert_eq!(label.origin, [48., 150.]);
+    assert_eq!(label.node.frame.width, 128.);
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
+    for (destination, expected) in [(0., 0.), (1000., 1000.)] {
+        for (phase, x) in [
+            (PointerPhase::Down, 330.),
+            (PointerPhase::Move, destination),
+            (PointerPhase::Up, destination),
+        ] {
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 72,
+                        phase,
+                        position: [x, 164.],
+                    },
+                    300,
+                )
+                .unwrap();
+        }
+        pump_client(&mut client, &mut doc, &mut session);
+        assert_eq!(doc.typed_value(1).unwrap(), Value::Number(expected));
+    }
+    admin.duplicate_oib(20, Some("copy".into())).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    let scene = client.scene().unwrap();
+    let tracks: Vec<_> = scene
+        .controls()
+        .into_iter()
+        .filter(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
+        .collect();
+    assert_eq!(tracks.len(), 3);
+    assert!(tracks.iter().all(|p| p.node.frame.width == 288.));
+    assert_eq!(tracks[2].origin[1] - tracks[1].origin[1], 64.);
+    let root = doc.oib_status().unwrap().active_root;
+    for (id, value) in [(112, 32.), (106, 900.), (108, 20.)] {
+        admin.edit_oib(&[(id, Some(Value::Number(value)))]).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+        assert!(doc.oib_status().unwrap().error.is_some());
+        assert_eq!(doc.oib_status().unwrap().active_root, root);
+        admin.edit_oib(&compact_changes()).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+        assert!(doc.oib_status().unwrap().error.is_none());
+    }
+    let saved = doc.save().unwrap();
+    let mut restored = Document::load(ui.state_schema.clone(), "oib:test", &saved).unwrap();
+    assert!(!restored.configure_oib(&ui).unwrap());
+    assert_eq!(restored.oib_status().unwrap().active_root, root);
+}
+
+#[test]
+fn live_geometry_activation_waits_for_a_held_slider_without_remounting() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, TouchResponder};
+    let (ui, mut doc) = setup();
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    let epoch = client.epoch();
+    let scene = client.scene().unwrap();
+    let track = scene
+        .controls()
+        .into_iter()
+        .find(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
+        .unwrap();
+    let point = [track.origin[0] + 200., track.origin[1] + 24.];
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 91,
+                phase: PointerPhase::Down,
+                position: point,
+            },
+            100,
+        )
+        .unwrap();
+    pump_client(&mut client, &mut doc, &mut session);
+    let old = client.resource_usage().oib.unwrap().presented_generation;
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 9, true);
+    admin.edit_oib(&compact_changes()).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    assert_eq!(
+        client.resource_usage().oib.unwrap().presented_generation,
+        old
+    );
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 91,
+                phase: PointerPhase::Up,
+                position: point,
+            },
+            200,
+        )
+        .unwrap();
+    pump_client(&mut client, &mut doc, &mut session);
+    let info = client.resource_usage().oib.unwrap();
+    assert_eq!(info.active_generation, info.presented_generation);
+    assert!(info.presented_generation > old);
+    assert_eq!(client.epoch(), epoch);
+}
+
+#[test]
+fn identical_layout_seed_presentation_updates_keep_active_roots() {
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
+    admin.edit_oib(&compact_changes()).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let root = doc.oib_status().unwrap().active_root;
+    let mut next = ui.clone();
+    next.title = "Presentation update".into();
+    assert!(doc.configure_oib(&next).unwrap());
+    assert_eq!(doc.oib_status().unwrap().active_root, root);
+}
 fn adapter(ui: &Ui, doc: &mut Document, actor: u8, edit: bool) -> (StateAdapter, Session) {
     let (mut session, _) = doc.open_session(&[actor; 16], 0).unwrap();
     session.set_oib_editable(edit);
@@ -914,12 +1097,12 @@ fn exact_signed_o1_upgrade_preserves_properties_and_journal_recovery() {
 }
 
 #[test]
-fn signed_presentation_update_keeps_the_exact_seed_and_retained_instances() {
+fn signed_layout_surface_upgrade_keeps_retained_instances_and_properties() {
     let bytes =
         lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-o2-ui.lz4")).unwrap();
     let old = decode_ui(&bytes).unwrap();
     let new = app::ui(&[]);
-    assert_eq!(oib::seed(&old), oib::seed(&new));
+    assert!(oib::seed(&new).unwrap().cells.len() > oib::seed(&old).unwrap().cells.len());
     assert_ne!(old.layout, new.layout);
     let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
     doc.configure_oib(&old).unwrap();
@@ -946,15 +1129,12 @@ fn signed_presentation_update_keeps_the_exact_seed_and_retained_instances() {
             doc.oib_live(branch).unwrap(),
             before.oib_live(branch).unwrap()
         );
-        assert_eq!(
-            doc.oib_values(branch).unwrap(),
-            before.oib_values(branch).unwrap()
-        );
+        let values = doc.oib_values(branch).unwrap();
+        for (id, value) in before.oib_values(branch).unwrap() {
+            assert_eq!(values[&id], value);
+        }
     }
-    assert_eq!(
-        doc.oib_status().unwrap().active_root,
-        before.oib_status().unwrap().active_root
-    );
+    assert!(doc.oib_values(2).unwrap().contains_key(&112));
     assert_eq!(doc.typed_value(1).unwrap(), Value::Number(730.));
     let mut restored = Document::load(old.state_schema.clone(), "oib:test", &checkpoint).unwrap();
     restored

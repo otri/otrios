@@ -258,6 +258,15 @@ impl CanvasApp {
         self.inner
             .edit_oib_instance_property(instance, property, value)
     }
+    /// One bounded atomic property batch, including declared component geometry.
+    pub fn oib_edit(&mut self, changes: &str) -> Result<bool, String> {
+        if changes.len() > 16384 {
+            return Err("OIB property argument budget".into());
+        }
+        let changes: Vec<(u64, Option<otrios_interfaces::layout::Value>)> =
+            serde_json::from_str(changes).map_err(|e| e.to_string())?;
+        self.inner.edit_oib(&changes)
+    }
     pub fn scroll_text_input(&mut self, epoch: u32, id: u32, offset: f32) -> Result<bool, String> {
         self.inner.scroll_text_input(epoch, id, offset)
     }

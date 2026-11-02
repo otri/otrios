@@ -15,10 +15,16 @@ fn slider(name: &str, field: StateField, y: f32) -> Element {
         vec![
             text("Level")
                 .frame([0., 0., 360., 28.])
-                .key(&format!("{name}-label")),
+                .key(&format!("{name}-label"))
+                .semantic_label(&format!("Inspect {name}"))
+                .on_press(Event::oib_instance(
+                    if name == "volume" { 20 } else { 30 },
+                    InstanceAction::Inspect,
+                )),
             text(field.percent())
                 .frame([416., 0., 104., 28.])
                 .pin_right(0.)
+                .key(&format!("{name}-percentage"))
                 .color(BLUE),
             component(
                 [520., 48.],
@@ -43,8 +49,14 @@ fn slider(name: &str, field: StateField, y: f32) -> Element {
                 ],
             )
             .frame([0., 64., 520., 48.])
-            .pin_left(0.)
-            .pin_right(0.)
+            .resizing(Resizing {
+                horizontal: AxisResize::Springs {
+                    leading: false,
+                    length: true,
+                    trailing: false,
+                },
+                vertical: AxisResize::Fixed,
+            })
             .key(&format!("{name}-track"))
             .on_drag(name, Event::slider(field)),
         ],
@@ -92,6 +104,28 @@ pub fn description() -> Ui {
             });
         }
     }
+    for (id, name, default) in [
+        (104, "label y", Value::Number(0.)),
+        (105, "label width", Value::Number(360.)),
+        (106, "track x", Value::Number(0.)),
+        (107, "track y", Value::Number(64.)),
+        (108, "track width", Value::Number(520.)),
+        (109, "percentage y", Value::Number(0.)),
+        (110, "percentage width", Value::Number(104.)),
+        (111, "content y", Value::Number(48.)),
+        (112, "row pitch", Value::Number(216.)),
+        (113, "heading visible", Value::Boolean(true)),
+    ] {
+        cells.push(Cell {
+            id,
+            owner: 10,
+            name: name.into(),
+            default,
+            choices: vec![],
+            inherit: None,
+            targets: vec![],
+        });
+    }
     let seed = Seed {
         format: FORMAT.into(),
         main_oib: 1,
@@ -127,6 +161,20 @@ pub fn description() -> Ui {
             target(start + 2, name, Property::Width, 0.),
             target(start + 3, &format!("{name}-track"), Property::Y, 40.),
         ]);
+        for (id, key, property, offset) in [
+            (104, format!("{name}-label"), Property::Y, 0.),
+            (105, format!("{name}-label"), Property::FrameWidth, 0.),
+            (106, format!("{name}-track"), Property::X, 0.),
+            (107, format!("{name}-track"), Property::OffsetY, -64.),
+            (108, format!("{name}-track"), Property::FrameWidth, 0.),
+            (109, format!("{name}-percentage"), Property::Y, 0.),
+            (110, format!("{name}-percentage"), Property::FrameWidth, 0.),
+            (111, name.into(), Property::Y, 0.),
+            (112, format!("{name}-preview"), Property::Height, 0.),
+            (113, format!("{name}-heading"), Property::Visible, 0.),
+        ] {
+            targets.push(target(id, &key, property, offset));
+        }
     }
     let mut inspector = vec![];
     for (owner, start, y) in [
@@ -229,6 +277,22 @@ pub fn description() -> Ui {
     )
     .with_oib(seed, "inspector-scroll", targets)
     .with_oib_instances(NamedOibSurface {
+        layout: Some(LayoutSurface {
+            previous_ui_sha256: [
+                "22fa4203073790b9d1f5c16663a8ea4445760641dbe6274aaee5276490698f7f",
+                "886b642a9b6c651ad8b4e43a53812a98862c6a6be272b09cb32319f13c06f7d8",
+            ]
+            .into_iter()
+            .map(|hex| {
+                (0..32)
+                    .map(|i| {
+                        u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("constant SHA-256")
+                    })
+                    .collect()
+            })
+            .collect(),
+            preview_pitch_cell: 112,
+        }),
         previous_ui_sha256: [
             0x5a, 0x89, 0xe8, 0x8f, 0x9e, 0x00, 0xa6, 0xb3, 0x47, 0x1c, 0x2c, 0x14, 0x7c, 0x81,
             0xa6, 0x4c, 0x83, 0xd4, 0xd1, 0x9f, 0xba, 0xff, 0x7f, 0xe9, 0xe0, 0xb8, 0x58, 0xc5,
@@ -260,6 +324,7 @@ pub fn description() -> Ui {
                             [560., 216.],
                             vec![
                                 button("volume · Volume binding")
+                                    .key("volume-heading")
                                     .on_press(Event::oib_instance(20, InstanceAction::Inspect))
                                     .frame([0., 0., 520., 40.]),
                                 slider("volume", VOLUME, 48.).x(0.0.into()),
@@ -271,6 +336,7 @@ pub fn description() -> Ui {
                             [560., 216.],
                             vec![
                                 button("brightness · Brightness binding")
+                                    .key("brightness-heading")
                                     .on_press(Event::oib_instance(30, InstanceAction::Inspect))
                                     .frame([0., 0., 520., 40.]),
                                 slider("brightness", BRIGHTNESS, 48.).x(0.0.into()),

@@ -39,6 +39,7 @@ pub fn validate_value(cell: &Cell, value: &Value) -> Result<()> {
     let valid = match (&cell.default, value) {
         (Value::Text(_), Value::Text(v)) => !v.is_empty() && v.len() <= 96 && !v.contains('\0'),
         (Value::Color(_), Value::Color(_)) => true,
+        (Value::Boolean(_), Value::Boolean(_)) => true,
         (Value::Number(_), Value::Number(v)) => v.is_finite() && (0. ..=1000.).contains(v),
         _ => false,
     };
@@ -174,6 +175,34 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             }
         }
     }
+    if let Some(layout) = seed
+        .instance_surface
+        .as_ref()
+        .and_then(|s| s.layout.as_ref())
+    {
+        if layout.previous_ui_sha256.is_empty()
+            || layout.previous_ui_sha256.len() > 8
+            || layout.previous_ui_sha256.iter().any(|h| h.len() != 32)
+            || !seed.cells.iter().any(|c| {
+                c.id == layout.preview_pitch_cell
+                    && seed.components.iter().any(|o| o.id == c.owner)
+                    && matches!(c.default, Value::Number(_))
+            })
+        {
+            return Err("Invalid OIB layout surface".into());
+        }
+    } else if seed.cells.iter().flat_map(|c| &c.targets).any(|t| {
+        matches!(
+            t.property,
+            Property::X
+                | Property::Height
+                | Property::FrameWidth
+                | Property::OffsetY
+                | Property::Visible
+        )
+    }) {
+        return Err("Geometry targets require an OIB layout surface".into());
+    }
     Ok(())
 }
 pub fn validate(ui: &Ui) -> Result<()> {
@@ -241,6 +270,10 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
                 .find_map(|t| node(&mut t.root, target.node))
                 .ok_or("Missing OIB target node")?;
             match (target.property, &value) {
+                (Property::OffsetY, Value::Number(_)) => {}
+                (Property::Visible, Value::Boolean(v)) => {
+                    node.visible = Expr::Literal(Value::Boolean(*v))
+                }
                 (Property::Text, Value::Text(v)) => match &mut node.shape {
                     Shape::Text { value, .. } => *value = Expr::Literal(Value::Text(v.clone())),
                     _ => return Err("OIB text target is not text".into()),
@@ -257,20 +290,53 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
                     | Shape::Circle { color } => *color = Expr::Literal(Value::Color(*v)),
                     _ => return Err("OIB color target is unsupported".into()),
                 },
-                (Property::Width, Value::Number(v)) | (Property::Y, Value::Number(v)) => {
-                    let index = if target.property == Property::Width {
-                        2
-                    } else {
-                        1
+                (
+                    Property::Width
+                    | Property::Y
+                    | Property::X
+                    | Property::Height
+                    | Property::FrameWidth,
+                    Value::Number(v),
+                ) => {
+                    let index = match target.property {
+                        Property::X => 0,
+                        Property::Y => 1,
+                        Property::Width | Property::FrameWidth => 2,
+                        _ => 3,
                     };
                     let v = v * target.scale + target.offset;
-                    if !v.is_finite() || (index == 2 && v < 240.) {
+                    if !v.is_finite()
+                        || (target.property == Property::Width && v < 240.)
+                        || (index >= 2 && v < 1.)
+                    {
                         return Err("Invalid OIB geometry".into());
                     }
                     node.frame[index] = Expr::Literal(Value::Number(v));
                 }
                 _ => return Err("OIB property target type mismatch".into()),
             }
+        }
+    }
+    for cell in &seed.cells {
+        for target in cell
+            .targets
+            .iter()
+            .filter(|t| t.property == Property::OffsetY)
+        {
+            let Value::Number(value) = effective(seed, values, cell.id)? else {
+                return Err("OIB offset needs a number".into());
+            };
+            let node = blueprint
+                .templates
+                .iter_mut()
+                .find_map(|t| node(&mut t.root, target.node))
+                .ok_or("Missing OIB offset target")?;
+            node.frame[1] = Expr::Add(
+                Box::new(node.frame[1].clone()),
+                Box::new(Expr::Literal(Value::Number(
+                    value * target.scale + target.offset,
+                ))),
+            );
         }
     }
     let layout = Layout::from_bytes(&Layout::encode(&blueprint)?)?;
@@ -293,7 +359,13 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
         };
         slots.insert(selector.local, value);
     }
-    layout.resolve_viewport(&slots, [1280., 800.])?;
-    layout.resolve_viewport(&slots, [800., 1280.])?;
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        let scene = layout.resolve_viewport(&slots, viewport)?;
+        if let Some(surface) = &seed.instance_surface
+            && surface.layout.is_some()
+        {
+            instances::validate_row_geometry(&scene, surface.preview_viewport)?;
+        }
+    }
     Ok(layout)
 }

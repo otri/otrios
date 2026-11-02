@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT: &str = "otrios-oib-v1";
 pub const FEATURE: &str = "otrios-oib-v1";
 pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
+pub const LAYOUT_FEATURE: &str = "otrios-oib-layout-v1";
 /// Includes deleted allocations: their identities and causal context are retained.
 pub const MAX_ALLOCATIONS: usize = 10;
 pub const MAX_LIVE_INSTANCES: usize = 6;
@@ -32,6 +33,8 @@ pub struct Seed {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstanceSurface {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<LayoutSurface>,
     /// Explicit one-time upgrade from the exact O1 UI; not a general seed rebase.
     pub previous_ui_sha256: Vec<u8>,
     pub preview_viewport: u16,
@@ -41,6 +44,15 @@ pub struct InstanceSurface {
     pub prototypes: Vec<Prototype>,
     pub node_base: u16,
     pub node_stride: u16,
+}
+/// Component-owned geometry remains bounded by signed mappings and normal admission.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutSurface {
+    /// Exact admitted predecessors permitted to append component layout cells.
+    pub previous_ui_sha256: Vec<Vec<u8>>,
+    /// Component numeric property controlling the preview row pitch/content extent.
+    pub preview_pitch_cell: u64,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,6 +124,13 @@ pub enum Property {
     Width,
     Y,
     SemanticLabel,
+    X,
+    Height,
+    /// Raw frame width; legacy Width retains its 240-pixel container minimum.
+    FrameWidth,
+    /// Added after absolute Y assignments, independent of property ordering.
+    OffsetY,
+    Visible,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
