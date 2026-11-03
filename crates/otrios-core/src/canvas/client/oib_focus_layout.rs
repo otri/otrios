@@ -183,11 +183,13 @@ pub(super) fn project(
     if open {
         // Consume needs a leaf hit target in empty gutters. Keep the visual
         // surface pass-through and put a full-area input shield behind it.
+        // The square drawer surface completely covers this opaque fill. An
+        // invisible alpha-zero shield would enable mesh-wide native blending.
         let mut barrier = background(
             CHROME + 26,
             DRAWER,
             (height - HEADER).max(1.),
-            [0, 0, 0, 0],
+            CARD,
             0.,
         );
         barrier.responder = Some(TouchResponder::Consume);
