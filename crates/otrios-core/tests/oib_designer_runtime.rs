@@ -1263,3 +1263,62 @@ fn declared_toggle_source_must_match_checked_expression_and_mutation_field() {
         "OIB control and property binding use different app fields"
     );
 }
+
+#[test]
+fn factories_require_signed_document_membership_before_state_changes() {
+    let mut phantom = fixture();
+    let mut blueprint = Layout::from_bytes(&phantom.layout)
+        .unwrap()
+        .blueprint()
+        .clone();
+    blueprint.templates[0].root.children[0]
+        .children
+        .push(container(32, vec![]));
+    blueprint.templates[0].root.children[1]
+        .children
+        .push(container(33, vec![]));
+    phantom.layout = Layout::encode(&blueprint).unwrap();
+    let s = seed_mut(&mut phantom);
+    s.instances.push(contract::Object {
+        id: 50,
+        name: "phantom".into(),
+        component: Some(11),
+    });
+    s.designer
+        .as_mut()
+        .unwrap()
+        .mappings
+        .roots
+        .push(RootCellMapping {
+            prototype: InstanceId(50),
+            cells: vec![],
+        });
+    s.instance_surface
+        .as_mut()
+        .unwrap()
+        .prototypes
+        .push(contract::Prototype {
+            instance: 50,
+            preview_root: 32,
+            inspector_root: 33,
+            nodes: vec![32, 33],
+        });
+
+    let mut mismatched = fixture();
+    seed_mut(&mut mismatched).instances[0].component = Some(12);
+    for invalid in [&phantom, &mismatched] {
+        assert_eq!(
+            oib::validate(invalid).unwrap_err(),
+            "OIB factory/document instance mismatch"
+        );
+        let mut state = StateDocument::new(invalid.state_schema.clone(), "oib:runtime").unwrap();
+        let before = state.root_hash();
+        assert_eq!(
+            state.configure_oib(invalid).unwrap_err(),
+            "OIB factory/document instance mismatch"
+        );
+        assert_eq!(state.root_hash(), before);
+        assert!(state.configure_oib(&fixture()).unwrap());
+        state.oib_compiled(2).unwrap();
+    }
+}

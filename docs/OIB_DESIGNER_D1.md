@@ -348,4 +348,21 @@ container is used before any builder activation. No live pointer or watcher
 configuration has been changed. Signed release and Frame/Web acceptance remain
 outstanding.
 
+The independent re-check confirmed the first two fixes and found an empty-cell
+factory could be absent from the signed document instance list. Admission now
+requires every factory's identity and definition to match a document instance,
+before any state configuration. The regression covers missing membership and
+mismatched definitions, unchanged state on rejection, and successful subsequent
+valid configuration. Runtime tests now pass 17 cases; fixture tests pass nine.
+The parent process rerun after the original fixes passed all three real-authority
+cases (none skipped) in 98.82 seconds. No Linux IPC claim follows from this.
+
+Signed v27 recovery release `44f01574` and candidate `796142a3` were built in the
+isolated builder and signature/asset-closure verified. The latter predates the
+membership correction and will be replaced before deployment. Matching recovery
+ARM binaries are retained separately. Neither release has been activated live.
+The existing bounded loopback OIB probe now accepts an explicit app reference,
+typed selection, Edit/Test mode, viewport, semantic activation and pointer input
+for focused companion-app acceptance; its legacy Live UI defaults are retained.
+
 Update this record at integration gates with actual commits, commands and results.

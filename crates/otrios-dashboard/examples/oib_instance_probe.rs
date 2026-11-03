@@ -3,6 +3,9 @@
 #[path = "../src/session_client.rs"]
 mod session_client;
 use otrios_core::canvas::Client;
+use otrios_interfaces::oib::designer::{
+    DefinitionId, DesignerMode, DocumentId, ObjectAddress, Selection,
+};
 use serde_json::{Value, json};
 use std::net::TcpStream;
 use std::{
@@ -92,7 +95,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
     )?));
     client.admit_catalog(&catalog)?;
-    client.open("app:live-ui/ui", "app:live-ui/state");
+    client.open(
+        request["ui_ref"].as_str().unwrap_or("app:live-ui/ui"),
+        request["state_ref"].as_str().unwrap_or("app:live-ui/state"),
+    );
     let start = Instant::now();
     settle(&mut client, &mut socket, start)?;
     println!(
@@ -108,6 +114,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "duplicate" => client.duplicate_oib(id, name)?,
             "remove" => client.remove_oib(id)?,
             "inspect" => client.inspect_oib(id)?,
+            "selection" => {
+                let selection = match step["scope"].as_str().ok_or("Selection scope required")? {
+                    "document" => Selection::Document(DocumentId(id)),
+                    "definition" => Selection::Definition(DefinitionId(id)),
+                    "object" => Selection::Object(serde_json::from_value::<ObjectAddress>(
+                        step["address"].clone(),
+                    )?),
+                    _ => return Err("Unknown selection scope".into()),
+                };
+                client.inspect_oib_selection(selection)?
+            }
+            "mode" => client.set_oib_designer_mode(match step["mode"].as_str() {
+                Some("edit") => DesignerMode::Edit,
+                Some("test") => DesignerMode::Test,
+                _ => return Err("Explicit edit/test mode required".into()),
+            })?,
+            "viewport" => client.set_viewport(serde_json::from_value(step["size"].clone())?)?,
+            "activate" => client.activate(client.epoch(), u32::try_from(id)?)?,
+            "pointer" => client.pointer_at(
+                client.epoch(),
+                serde_json::from_value(step["event"].clone())?,
+                start.elapsed().as_millis() as u64,
+            )?,
             "instance-property" => {
                 let property = step["property"].as_str().ok_or("Named property required")?;
                 let value = if step["value"].is_null() {

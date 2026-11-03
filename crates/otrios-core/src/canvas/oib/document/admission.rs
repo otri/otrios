@@ -500,6 +500,14 @@ pub fn validate(seed: &Seed) -> Result<()> {
         factories == doc.mappings.roots.iter().map(|m| m.prototype).collect(),
         "OIB factory root mapping mismatch",
     )?;
+    for factory in &seed.instances {
+        require(
+            doc.instances.iter().any(|root| {
+                root.id.0 == factory.id && factory.component == Some(root.definition.0)
+            }),
+            "OIB factory/document instance mismatch",
+        )?;
+    }
     let mut expected_objects = BTreeSet::new();
     let mut sibling_order = BTreeSet::new();
     let presented = instance(doc, doc.presented_root)?;
