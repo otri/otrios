@@ -348,6 +348,15 @@ fn activate_snapshot(
     private: bool,
     state_bytes: Vec<u8>,
 ) {
+    // D1 defers local reflow while OIB state is unconfirmed. Model the live
+    // mount's authoritative seed instead of leaving that fixture half-open.
+    let mut authority = if state_bytes.is_empty() && oib::seed(&ui).is_some() {
+        let mut document = Document::new(ui.state_schema.clone(), state).unwrap();
+        document.configure_oib(&ui).unwrap();
+        Some(document)
+    } else {
+        None
+    };
     let bytes = encode_ui(&ui).unwrap();
     let id = ui
         .ui_ref
@@ -380,10 +389,23 @@ fn activate_snapshot(
     )
     .unwrap();
     c.open(&ui.ui_ref, state);
-    let ClientMessage::Mount { epoch, .. } =
+    let ClientMessage::Mount { epoch, writer, .. } =
         decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
     else {
         panic!("missingmount")
+    };
+    let mut session = authority.as_mut().map(|document| {
+        let (mut session, _) = document.open_session(&writer, 0).unwrap();
+        session.set_oib_editable(true);
+        session
+            .set_selection(StateSelection::from_ui(&ui).unwrap())
+            .unwrap();
+        session
+    });
+    let state_bytes = if let (Some(document), Some(session)) = (&authority, &mut session) {
+        document.generate(session).unwrap().unwrap()
+    } else {
+        state_bytes
     };
     c.receive(
         &encode_server(&ServerMessage::Mounted {
@@ -402,6 +424,9 @@ fn activate_snapshot(
     assert!(
         matches!(decode_client(&c.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:e} if e==epoch)
     );
+    if let (Some(document), Some(session)) = (&mut authority, &mut session) {
+        pump(c, document, session);
+    }
 }
 fn pump(c: &mut Client, authority: &mut Document, session: &mut Session) {
     for step in 0..20 {
@@ -3551,7 +3576,7 @@ fn shipped_apps_include_the_retained_text_and_document_subscreens() {
     .into_iter()
     .flat_map(|screens| screens())
     .collect();
-    assert_eq!(screens.len(), 11);
+    assert_eq!(screens.len(), 12);
     assert_eq!(
         screens
             .iter()
