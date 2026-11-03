@@ -658,6 +658,16 @@ fn slab_pans_reuse_paint_buffers_and_capture_keeps_typed_action() {
     let (s, mut d) = populated_designer(&base);
     let font = crate::dashboard::font::test_font();
     let mut paint = TextPresentation::default();
+    // For a 588-unit viewport the former independent bottom edge crossed at
+    // offset 20, even though the top remained in slab zero.
+    d.panels[0].scroll.set_offset([0., 0.]);
+    let edge = paint.compose(&presented(&d, &base), &font);
+    for offset in [16., 24., 40.] {
+        d.panels[0].scroll.set_offset([0., offset]);
+        let frame = paint.compose(&presented(&d, &base), &font);
+        assert_eq!(frame.generation, edge.generation);
+        assert!(Arc::ptr_eq(&frame.mesh, &edge.mesh));
+    }
     d.panels[0].scroll.set_offset([0., 40.]);
     let scene = presented(&d, &base);
     let id = d.panels[0].nodes[2].id;
@@ -729,7 +739,7 @@ fn slab_pans_reuse_paint_buffers_and_capture_keeps_typed_action() {
     }
     // Passing the previous 152-unit boundary now retains the same geometry;
     // visibility checks still reject a captured action that has scrolled away.
-    for offset in [160., 200.] {
+    for offset in [160., 200., 300.] {
         d.panels[0].scroll.set_offset([0., offset]);
         let scene = presented(&d, &base);
         let frame = paint.compose(&scene, &font);

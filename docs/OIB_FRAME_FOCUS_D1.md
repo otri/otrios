@@ -255,3 +255,38 @@ profiling harness failed because stopping the service removes its runtime path
 and release supervisor socket; it produced no valid performance result. The
 successful trial instead used a temporary environment override on the existing
 service and preserved its release supervisor. No new service was installed.
+
+### Warmed Frame trials on `2e6823c`
+
+Release `26f5d06c07148a8c8387975852e508a02a9a05f141f799e3fbae7ee1c5b3aa55`
+passed signed activation, matching host/native readiness and existing display/input
+contracts. Each trial used six active roots, a separate cold gesture, 30 offered
+samples/s for 30 seconds, unique input sequences joined across worker and actual
+renderer returns, DRM flip timestamps, zero dropped timing rows, and orderly log
+flush. Temporary runtime environment overrides were removed after each trial;
+the normal existing native service was restored.
+
+| Pan | Unique updates/s | p95 return interval | Maximum return interval | Result |
+| --- | ---: | ---: | ---: | --- |
+| Hierarchy | 27.9974 | 35.383 ms | 53.019 ms | Strict 28/s gate remains open |
+| Selected slider inspector | 28.3314 | 35.367 ms | 53.481 ms | Passed |
+| Overflowing six-panel preview | 28.3982 | 35.368 ms | 36.095 ms | Passed |
+
+All three pans retained generation 18 and released input. Before these trials,
+the actual Frame software keyboard entered non-preset width 347: generation 17
+remained unchanged throughout draft editing, then Enter confirmed only cell 202
+at generation 18. The original width override 320 is recorded for restoration.
+
+The next focused optimization anchors the retained window's bottom to its top
+slab. Previously the bottom crossed a separate boundary halfway through a top
+slab, rebuilding topology unnecessarily. A fixed `(ceil(height / step) + 1)` span
+equals the previous maximum aligned span, preserving worst-case overscan and
+scene/control ceilings. The regression checks reuse across the former lower-edge
+boundary as well as the previous 152-unit boundary; offscreen captures still
+reject. Actual hardware acceptance of this final follow-up remains pending.
+
+The actual Frame software-keyboard label flow also passed: Tab traversed the
+nested slider fields to Label, Sound stayed a local draft until Enter, cell 203
+confirmed `Sound (override)`, and the visible Reset override control restored
+`Volume (authored)`. Generation advanced only for those two intended writes
+(18 → 20); input was released, with the native process/epoch retained.

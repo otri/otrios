@@ -422,7 +422,12 @@ impl Designer {
             }
             let offset = panel.scroll.info().offset[1];
             let top = (offset / WINDOW_STEP).floor() * WINDOW_STEP;
-            let bottom = ((offset + node.frame.height) / WINDOW_STEP).ceil() * WINDOW_STEP;
+            // Anchor both edges to the same slab. Letting the lower edge
+            // advance independently changes topology halfway through a slab.
+            // This fixed span equals the previous maximum aligned span, so it
+            // adds no worst-case overscan or scene budget.
+            let span = (node.frame.height / WINDOW_STEP).ceil() + 1.;
+            let bottom = top + span * WINDOW_STEP;
             // Retained top-level rows contain all their own paint and actions.
             // Clone only rows intersecting the viewport's aligned window; no
             // glyph/inspector construction or full-tree clone on a pan sample.
