@@ -1,0 +1,18 @@
+{
+  "release": "27262dd14d5a99bd136145338f44e50a5d48026a1f688a32a0adccb3909f0a21",
+  "source_pin": "6354cd2417ead19df02d70258b745050784f9db1",
+  "implementation_source": "e8a33bb2430cbf0e0a51fc7e53200d919a9012c0",
+  "build_input_sha256": "a872545bde47317286d40ff8f8e8a16d74599f78645cd704aaa4eabc3b240215",
+  "signature_and_closure_verified": true,
+  "mac_and_frame_pointers_match": true,
+  "existing_watcher_resumed": true,
+  "remote_source_loaded": true,
+  "persistent_build_environment_preserved": true,
+  "temporary_diagnostics_removed": true,
+  "rollback_release": "f62027700e7d8a05a6791866231d22a7ea230f3324079e6e853a250f0dfee8ef",
+  "app_data_restored": false,
+  "identities_copied": false,
+  "pixels_exported": false,
+  "visual_acceptance": "pending approval or user feedback",
+  "authenticated_browser_editor_acceptance": "pending"
+}

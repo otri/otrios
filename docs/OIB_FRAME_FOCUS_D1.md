@@ -149,6 +149,15 @@ Compatible code-only rollback remains verified at signed release
 source `03e5aab7ef0656617166c1330bfacf699a611777`. It preserves persistent sessions
 and protocol compatibility. No app data or identity backup/restore was used.
 
+Release automation is restored. The existing launch agent fetched source pin
+`6354cd2417ead19df02d70258b745050784f9db1`; its code inputs match the qualified
+`e8a33bb` build. Mac and Frame pointers match the signed release above. The
+original persistent build environment and publisher are retained. Previous
+release-control files were preserved privately under the date-first record
+`2026-11-04-frame-focus-control`. Temporary Frame helper binaries, timing folders
+and service environment overrides were removed. The normal native service is
+confirmed and idle. No new service was installed.
+
 ## Outstanding acceptance
 
 - Live visual readability has not been independently viewed: automatic approval
@@ -158,7 +167,5 @@ and protocol compatibility. No app data or identity backup/restore was used.
 - Public signed-out browser presentation correctly exposes read-only properties.
   Authenticated browser direct-editor acceptance remains unproven; host/wasm and
   input-bridge tests do not substitute for that live path.
-- Restore the exact-source release watcher after the final completed source is
-  reachable remotely, record promotion, and perform the final completion audit.
 - No PR is open for this milestone. Do not mark the goal complete or open a ready
   PR until the remaining scoped acceptance and release-control work is finished.
