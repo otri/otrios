@@ -179,6 +179,22 @@ using Identity and Nonzero respectively. Named tooling viewports are
 Per-factory inspector nodes are empty placeholders for existing factory machinery;
 the client generates the actual selected inspector locally.
 
+Fixture lane authoring measurements (before integrated Canvas admission): compiled
+layout 24,427 bytes; combined Seed/Document 10,009 bytes; 26 authored objects,
+four definitions, nine classes, eight property descriptors, 18 initial causal
+cells, 70 scene nodes, template depth six, six handlers, and eight selectors.
+Three static authoring checks passed through actual dashboard Layout/font
+measurement with an explicit unused-behavior trap. This is not Canvas admission,
+authority-process acceptance, or live/platform qualification.
+
+The measured compiled viewport nodes are hierarchy 15, preview 21 (shell 40/node
+1), and inspector 67. Factory surface node base is 70 and stride 21; Audio preview
+22/inspector 68, Display preview 42/inspector 69. Consumers use signed metadata,
+not hardcoded copies of these measurements. The fixture's runtime tests include
+renderer slot nine, nine residents/60 cells and ten-resident/66-cell rejection;
+these checks remain pending integration. The reported Canvas build blocker is
+the new Nonzero arm in client.rs, assigned to the client lane that owns the file.
+
 Parent owns interface/protocol/package activation, host exports, process-test
 integration, release staging and live acceptance. Runtime and client lanes must
 not edit each other's files. The contract note freezes their Rust query boundary;
