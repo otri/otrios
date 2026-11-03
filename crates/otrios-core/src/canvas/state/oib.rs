@@ -440,7 +440,9 @@ impl Document {
                 }
                 for (_, _, value) in r.values() {
                     if let Some(value) = value {
-                        super::super::oib::validate_value(cell, &decode(value)?)?;
+                        let value = decode(value)?;
+                        super::super::oib::validate_value(cell, &value)?;
+                        super::super::oib::document::validate_edit(seed, cell.id, Some(&value))?;
                     } else if cell.inherit.is_none() {
                         return Err("Deleted OIB definition default".into());
                     }
@@ -477,6 +479,7 @@ impl Document {
             if !seen.insert(cell.id) {
                 return Err("Duplicate OIB cell edit".into());
             }
+            super::super::oib::document::validate_edit(&seed, cell.id, change.value.as_ref())?;
             if let Some(value) = &change.value {
                 super::super::oib::validate_value(cell, value)?;
             } else if cell.inherit.is_none() {
@@ -722,6 +725,7 @@ impl StateAdapter {
                 .iter()
                 .find(|c| c.id == *id)
                 .ok_or("Unknown OIB property")?;
+            super::super::oib::document::validate_edit(seed, *id, value.as_ref())?;
             if let Some(value) = value {
                 super::super::oib::validate_value(cell, value)?;
             } else if cell.inherit.is_none() {
@@ -819,6 +823,9 @@ fn property_text(
 }
 
 fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
+    if !super::super::oib::document::compatible_mappings(&old.seed, &new.seed) {
+        return false;
+    }
     // A signed presentation update can retain the exact OIB contract. Keep all
     // allocated identities, tombstones and overrides; this is not seed rebasing.
     if old.ui_ref == new.ui_ref
@@ -826,6 +833,39 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
             .ok()
             .zip(bytes(&new.seed).ok())
             .is_some_and(|(old, new)| old == new)
+    {
+        return true;
+    }
+    // D1's signed predecessor allowlist may update presentation labels/order.
+    // Register identity is checked by explicit definition/path/key/alias mappings;
+    // no vector rank or display name participates in compatibility.
+    if old.seed.designer.is_some()
+        && new.seed.designer.is_some()
+        && old.ui_ref == new.ui_ref
+        && old.seed.main_oib == new.seed.main_oib
+        && old.seed.main_class == new.seed.main_class
+        && new.seed.instance_surface.as_ref().is_some_and(|s| {
+            s.previous_ui_sha256 == old.ui_hash
+                || s.layout
+                    .as_ref()
+                    .is_some_and(|l| l.previous_ui_sha256.contains(&old.ui_hash))
+        })
+        && old
+            .seed
+            .components
+            .iter()
+            .map(|c| c.id)
+            .collect::<BTreeSet<_>>()
+            == new.seed.components.iter().map(|c| c.id).collect()
+        && old.seed.instances == new.seed.instances
+        && old.seed.cells.iter().all(|a| {
+            new.seed.cells.iter().any(|b| {
+                a.id == b.id
+                    && a.owner == b.owner
+                    && a.inherit == b.inherit
+                    && std::mem::discriminant(&a.default) == std::mem::discriminant(&b.default)
+            })
+        })
     {
         return true;
     }
@@ -922,6 +962,13 @@ fn compatible_geometry_default(
     geometry(old)
         && geometry(new)
         && std::mem::discriminant(&old.default) == std::mem::discriminant(&new.default)
+}
+fn admitted_instance_name(seed: &otrios_interfaces::oib::Seed, name: &str) -> bool {
+    if seed.designer.is_some() {
+        !name.is_empty() && name.len() <= 64 && !name.contains('\0')
+    } else {
+        instance_name(name)
+    }
 }
 fn instance_name(name: &str) -> bool {
     !name.is_empty()
@@ -1126,12 +1173,34 @@ impl Document {
                 });
                 for cell in expanded.cells.iter().filter(|c| c.owner == id) {
                     let value = if let Some(source) = source {
-                        let source_cell = super::super::oib::instances::cell_id(
-                            seed,
-                            &allocations,
-                            source,
-                            cell.inherit.ok_or("Missing inherited property")?,
-                        )?;
+                        let source_cell = if seed.designer.is_some() {
+                            let doc = expanded
+                                .designer
+                                .as_ref()
+                                .ok_or("Missing expanded D1 mappings")?;
+                            let row = doc
+                                .mappings
+                                .roots
+                                .iter()
+                                .find(|t| t.prototype.0 == id)
+                                .and_then(|t| t.cells.iter().find(|r| r.initial_cell == cell.id))
+                                .ok_or("Missing copied D1 relative key")?;
+                            super::super::oib::document::cell_for_address(
+                                seed,
+                                &allocations,
+                                &otrios_interfaces::oib::designer::PropertyAddress::Occurrence {
+                                    instance: otrios_interfaces::oib::designer::InstanceId(source),
+                                    path: row.path.clone(),
+                                },
+                            )?
+                        } else {
+                            super::super::oib::instances::cell_id(
+                                seed,
+                                &allocations,
+                                source,
+                                cell.inherit.ok_or("Missing inherited property")?,
+                            )?
+                        };
                         values[&source_cell].as_ref().map(bytes).transpose()?
                     } else {
                         None
@@ -1205,7 +1274,7 @@ impl StateAdapter {
                     return Ok(false);
                 }
                 if let Some(name) = name
-                    && !instance_name(name)
+                    && !admitted_instance_name(&seed, name)
                 {
                     return Err("Invalid OIB instance name".into());
                 }
@@ -1218,7 +1287,7 @@ impl StateAdapter {
                     return Ok(false);
                 }
                 if let Some(name) = name
-                    && !instance_name(name)
+                    && !admitted_instance_name(&seed, name)
                 {
                     return Err("Invalid OIB instance name".into());
                 }
@@ -1266,5 +1335,25 @@ impl StateAdapter {
             InstanceAction::Duplicate => self.duplicate_oib(target, None),
             InstanceAction::Remove => self.remove_oib(target),
         }
+    }
+}
+
+impl StateAdapter {
+    /// Actual authority-owned resident descriptors, including reusable slots.
+    pub(in crate::canvas) fn oib_allocations(&self) -> Result<Vec<Allocation>> {
+        self.doc.oib_allocations()
+    }
+    pub fn edit_oib_property(
+        &mut self,
+        address: &otrios_interfaces::oib::designer::PropertyAddress,
+        value: Option<Value>,
+    ) -> Result<bool> {
+        let seed = self.doc.oib_binding()?.seed;
+        let id = super::super::oib::document::cell_for_address(
+            &seed,
+            &self.doc.oib_allocations()?,
+            address,
+        )?;
+        self.edit_oib(&[(id, value)])
     }
 }

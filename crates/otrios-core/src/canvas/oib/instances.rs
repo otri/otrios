@@ -17,6 +17,24 @@ pub fn initial_allocations(seed: &Seed) -> Vec<Allocation> {
         .collect()
 }
 pub fn cell_id(seed: &Seed, allocations: &[Allocation], owner: u64, property: u64) -> Result<u64> {
+    if seed.designer.is_some() {
+        let aliases: Vec<_> = seed
+            .cells
+            .iter()
+            .filter(|c| {
+                c.owner
+                    == allocations
+                        .iter()
+                        .find(|a| a.id == owner)
+                        .map_or(0, |a| a.prototype)
+                    && c.inherit == Some(property)
+            })
+            .collect();
+        if aliases.len() != 1 {
+            return Err("Ambiguous D1 inherited property; use full address or source alias".into());
+        }
+        return document::cell_for_alias(seed, allocations, owner, aliases[0].id);
+    }
     let index = allocations
         .iter()
         .position(|a| a.id == owner)
@@ -41,7 +59,7 @@ pub fn cell_id(seed: &Seed, allocations: &[Allocation], owner: u64, property: u6
         .and_then(|id| id.checked_add(0x100_0000 + slot as u64))
         .ok_or_else(|| "OIB property identity exhausted".into())
 }
-fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16> {
+pub(super) fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16> {
     let surface = seed
         .instance_surface
         .as_ref()
@@ -65,6 +83,9 @@ fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16
 pub fn expanded_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
     if seed.instance_surface.is_none() {
         return Ok(seed.clone());
+    }
+    if seed.designer.is_some() {
+        return expanded_designer_seed(seed, allocations);
     }
     let mut resolved = seed.clone();
     resolved.instances.clear();
@@ -197,7 +218,9 @@ fn remap(
         map_expr(&mut semantics.label, locals);
         map_expr(&mut semantics.checked, locals);
         if let Expr::Literal(Value::Text(text)) = &mut semantics.label {
-            *text = text.replace(old_name, new_name);
+            if seed.designer.is_none() {
+                *text = text.replace(old_name, new_name);
+            }
         }
     }
     match &mut root.shape {
@@ -210,7 +233,9 @@ fn remap(
             map_expr(scale, locals);
             map_expr(color, locals);
             if let Expr::Literal(Value::Text(text)) = value {
-                *text = text.replace(old_name, new_name);
+                if seed.designer.is_none() {
+                    *text = text.replace(old_name, new_name);
+                }
             }
         }
         Shape::Superellipse { radius, color, .. } => {
@@ -238,6 +263,24 @@ pub fn expand(
     let Some(surface) = &seed.instance_surface else {
         return Ok(ui.clone());
     };
+    let ordered;
+    let allocations = if let Some(doc) = &seed.designer {
+        let mut roots = allocations.to_vec();
+        roots.sort_by_key(|a| {
+            if a.id == a.prototype {
+                doc.instances
+                    .iter()
+                    .find(|i| i.id.0 == a.prototype)
+                    .map_or(u64::MAX, |i| u64::from(i.order))
+            } else {
+                a.id
+            }
+        });
+        ordered = roots;
+        ordered.as_slice()
+    } else {
+        allocations
+    };
     let pitch = if let Some(layout) = &surface.layout {
         let Value::Number(pitch) = effective(seed, values, layout.preview_pitch_cell)? else {
             return Err("Row pitch must be numeric".into());
@@ -259,10 +302,11 @@ pub fn expand(
             .map(|a| a.id)
     });
     let mut names = BTreeSet::new();
-    if allocations
-        .iter()
-        .filter(|a| live.contains(&a.id))
-        .any(|a| !names.insert(a.name.as_str()))
+    if seed.designer.is_none()
+        && allocations
+            .iter()
+            .filter(|a| live.contains(&a.id))
+            .any(|a| !names.insert(a.name.as_str()))
     {
         return Err("Duplicate instance name; remove a pending instance to resolve".into());
     }
@@ -352,12 +396,7 @@ pub fn expand(
                         u16::try_from(1024 + index * 128 + usize::from(selector.local))
                             .map_err(err)?;
                     selector.projection = Projection::OibCell {
-                        cell: cell_id(
-                            seed,
-                            allocations,
-                            allocation.id,
-                            source.inherit.ok_or("Missing inherited property")?,
-                        )?,
+                        cell: mapped_cell(seed, allocations, allocation.id, source)?,
                     };
                     locals.insert(
                         ui.selectors
@@ -414,15 +453,10 @@ pub fn expand(
                             .iter()
                             .find(|c| c.id == *cell)
                             .ok_or("Missing OIB handler cell")?;
-                        *cell = cell_id(
-                            seed,
-                            allocations,
-                            allocation.id,
-                            source.inherit.ok_or("Missing inherited property")?,
-                        )?;
+                        *cell = mapped_cell(seed, allocations, allocation.id, source)?;
                     }
                     Operation::OibInstance { target, .. } => *target = allocation.id,
-                    Operation::Set => {}
+                    Operation::Set | Operation::Toggle => {}
                     _ => return Err("OIB factory cannot instantiate this operation".into()),
                 }
                 result.handlers.push(h);
@@ -563,6 +597,15 @@ pub fn validate_surface(ui: &Ui) -> Result<()> {
         for h in ui.handlers.iter().filter(|h| set.contains(&h.control)) {
             match h.operation {
                 Operation::Set if h.fields.len() == 1 => {}
+                Operation::Toggle
+                    if seed.designer.is_some()
+                        && h.kind == GestureKind::Activate
+                        && h.fields.len() == 1
+                        && ui.state_schema.fields.iter().any(|f| {
+                            f.id == h.fields[0]
+                                && f.writable
+                                && matches!(f.default, Value::Number(n) if n == 0. || n == 1000.)
+                        }) => {}
                 Operation::Oib { cell, .. }
                     if seed
                         .cells
@@ -663,4 +706,102 @@ pub fn validate_row_geometry(scene: &crate::dashboard::scene::Scene, viewport: u
         }
     }
     Ok(())
+}
+
+fn mapped_cell(seed: &Seed, allocations: &[Allocation], owner: u64, source: &Cell) -> Result<u64> {
+    if seed.designer.is_some() {
+        document::cell_for_alias(seed, allocations, owner, source.id)
+    } else {
+        cell_id(
+            seed,
+            allocations,
+            owner,
+            source.inherit.ok_or("Missing inherited property")?,
+        )
+    }
+}
+fn expanded_designer_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
+    let doc = document::metadata(seed)?;
+    let count = doc
+        .mappings
+        .definitions
+        .len()
+        .checked_add(allocations.iter().try_fold(0usize, |total, a| {
+            let count = doc
+                .mappings
+                .roots
+                .iter()
+                .find(|r| r.prototype.0 == a.prototype)
+                .ok_or("Unknown signed D1 factory")?
+                .cells
+                .len();
+            total
+                .checked_add(count)
+                .ok_or("OIB resident cell count overflow")
+        })?)
+        .ok_or("OIB resident cell count overflow")?;
+    if count > MAX_CELLS {
+        return Err("OIB resident property capacity exhausted".into());
+    }
+    let mut resolved = seed.clone();
+    resolved.designer = Some(document::expanded_metadata(seed, allocations)?);
+    resolved.instances = allocations
+        .iter()
+        .map(|a| Object {
+            id: a.id,
+            name: a.name.clone(),
+            component: Some(a.component),
+        })
+        .collect();
+    resolved.cells.retain(|c| c.inherit.is_none());
+    // Shared outputs outside factories (e.g. fixed shell) remain static. Outputs
+    // inside a factory follow its admitted occurrence, regardless of def owner.
+    for cell in &mut resolved.cells {
+        let original = cell.targets.clone();
+        cell.targets.retain(|t| {
+            !seed
+                .instance_surface
+                .as_ref()
+                .is_some_and(|s| s.prototypes.iter().any(|p| p.nodes.contains(&t.node)))
+        });
+        for a in allocations {
+            let p = seed
+                .instance_surface
+                .as_ref()
+                .and_then(|s| s.prototypes.iter().find(|p| p.instance == a.prototype))
+                .ok_or("Missing factory surface")?;
+            for t in original.iter().filter(|t| p.nodes.contains(&t.node)) {
+                let mut t = t.clone();
+                if a.id != a.prototype {
+                    t.node = mapped_node(seed, usize::from(a.slot), a.prototype, t.node)?;
+                }
+                cell.targets.push(t);
+            }
+        }
+    }
+    for a in allocations {
+        let table = doc
+            .mappings
+            .roots
+            .iter()
+            .find(|r| r.prototype.0 == a.prototype)
+            .ok_or("Missing D1 factory key table")?;
+        for row in &table.cells {
+            let mut cell = seed
+                .cells
+                .iter()
+                .find(|c| c.id == row.initial_cell)
+                .ok_or("Missing source alias")?
+                .clone();
+            cell.id = document::lower(a, row)?;
+            cell.owner = a.id;
+            if a.id != a.prototype {
+                for t in &mut cell.targets {
+                    t.node = mapped_node(seed, usize::from(a.slot), a.prototype, t.node)?;
+                }
+            }
+            resolved.cells.push(cell);
+        }
+    }
+    Ok(resolved)
 }
