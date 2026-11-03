@@ -117,6 +117,16 @@ Parent decisions after the runtime mapping:
 - New real authority-process tests must set `OTRIOS_SPACES_SERVER` explicitly and
   use distinct volume/brightness fields. A silently skipped process test is not
   recovery evidence.
+- Generate only the locally selected inspector. Hierarchy expansion and row
+  selection must not allocate a replicated handler/property set per descendant.
+  Use core-local routing for designer controls and keep Edit/Test mode local.
+- Start with admitted boolean choices, bounded numeric suggestions/steps, color
+  palettes, and text suggestions. General free-text inspector editing requires a
+  deliberate adapter and is not implied by an existing text-input demo.
+- Target three reusable definitions and roughly 20 shared plus six occurrence
+  cells per resident panel. This is a design estimate: six roots would use 56
+  cells, while ten populated residents would exceed 64. Admission must check the
+  complete resident closure before allocation; do not raise ceilings silently.
 
 ### G2: runtime and designer implementation
 
@@ -175,7 +185,11 @@ finished release. Only then is D1 ready for final review and any requested PR.
 - Runtime mapping completed read-only: existing causal publication and rendering
   can be reused; property-rank IDs, toggle admission, full-ancestry selection and
   forwarding need focused changes. No runtime implementation accepted yet.
-- Designer/fixture mapping delegated; implementation pending contract freeze.
+- Designer/fixture mapping completed read-only: use three local scrolling areas,
+  a nonvisual object selection case, one selected inspector, signed numeric
+  0/1000 toggle fields with boolean semantics, and explicit Edit/Test interaction.
+  Fixture estimates require measured admission before activation. Implementation
+  remains pending contract freeze.
 - Runtime tests, process acceptance, deployment and live acceptance: not run.
 
 Update this record at integration gates with actual commits, commands and results.
