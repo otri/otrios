@@ -10,6 +10,9 @@ impl Document {
     /// carries neither permission nor the source authority's writer/root state.
     pub fn portable_checkpoint(&self) -> Result<Vec<u8>> {
         self.validate_tree()?;
+        if self.tree.subtree(&[4]).is_ok() {
+            return Err("Live UI data export is not available yet".into());
+        }
         let checkpoint = CanvasCheckpoint {
             format: CANVAS_CODEC.into(),
             scope: self.scope.clone(),

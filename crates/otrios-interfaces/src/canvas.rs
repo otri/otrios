@@ -20,6 +20,11 @@ pub struct StateSchema {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Projection {
+    /// Local rendering of the admitted OIB inspector; field is reserved zero.
+    OibStatus,
+    OibCell {
+        cell: u64,
+    },
     /// Preserve the declared typed value for text, booleans, colors and bounded series.
     Identity,
     NumberText {
@@ -86,6 +91,14 @@ pub enum GestureKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Operation {
+    OibInstance {
+        target: u64,
+        action: crate::oib::InstanceAction,
+    },
+    Oib {
+        cell: u64,
+        action: crate::oib::InspectorAction,
+    },
     /// Fixed host presentation action. Chat owns controls 40..=254 and reserves
     /// 255 for Quit; descriptions cannot remap them. Compatible older descriptions
     /// need not list newer host actions. The server independently authorizes wire commands.
@@ -149,6 +162,7 @@ pub struct TextResource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Presentation {
+    Oib(crate::oib::Seed),
     /// Dynamic shared-room blocks and local composer, backed by session channel 3.
     Chat,
     /// Read-only, wrapped document; source is not stored in scene text nodes.
@@ -310,6 +324,7 @@ pub struct MountBinding {
     pub actor: [u8; 32],
     pub collection: String,
     pub editable: bool,
+    pub ui_editable: bool,
     pub comments: bool,
     pub moderate: bool,
 }
@@ -317,6 +332,14 @@ pub struct MountBinding {
 /// Versioned inner state protocol. Client clocks/trees are never accepted as writes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateRequest {
+    OibInstance {
+        sequence: u64,
+        operation: crate::oib::InstanceOperation,
+    },
+    OibWrite {
+        sequence: u64,
+        changes: Vec<crate::oib::Change>,
+    },
     Hello {
         writer: Vec<u8>,
         resume: u64,

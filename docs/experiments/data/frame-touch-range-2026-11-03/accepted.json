@@ -1,0 +1,34 @@
+{
+  "status": "physically-accepted",
+  "config_sha256": "723e0773d6b197d505ed58bc4310cf0af3dd6478a335bc0b9599a6aa0308825a",
+  "rule_sha256": "a8f9fc76ad8c66fe9a2c4d785846b04d3660d9871ed5a49fb3aa41fa1d6be3fa",
+  "matrix": [
+    0.015712494730600653,
+    1.6870310806857056,
+    -0.0015025430311241435,
+    -1.5865761587117841,
+    0.011670689687965577,
+    0.9888240903108156
+  ],
+  "release": "802dba22acd4be013d2d21109bcab12f86368b1b59644610391bc429f8583831",
+  "user_result": "Hey, we got it working!",
+  "services": [
+    "active",
+    "active",
+    "active"
+  ],
+  "ready": {
+    "pid": 9995,
+    "release": "802dba22acd4be013d2d21109bcab12f86368b1b59644610391bc429f8583831",
+    "runtime_release": "802dba22acd4be013d2d21109bcab12f86368b1b59644610391bc429f8583831",
+    "ui_release": "802dba22acd4be013d2d21109bcab12f86368b1b59644610391bc429f8583831",
+    "state_confirmed": true,
+    "input_busy": false,
+    "touch_calibrated": true,
+    "touch_devices": 1,
+    "rotation": 90,
+    "screen": "test-playground/live-ui",
+    "stream_ready": true,
+    "reload_ready": true
+  }
+}

@@ -12,7 +12,7 @@ def inputs(repo):
     files.extend((repo/'crates/otrios-core/tests/fixtures').rglob('*.json'))
     for tree in ['crates','scripts','web','apps','tools/dashboard','tools/canvas']:
         for p in (repo/tree).rglob('*'):
-            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.vert','.frag','.txt','.service','.timer'):files.append(p)
+            if p.is_file() and 'pkg' not in p.parts and 'package' not in p.parts and p.relative_to(repo).as_posix()!='apps/catalog.flex' and '__pycache__' not in p.parts and p.suffix in ('.rs','.toml','.py','.sh','.js','.html','.css','.fbs','.flex','.c','.h','.mjs','.wat','.zst','.lz4','.vert','.frag','.txt','.service','.timer'):files.append(p)
     return sorted(set(files))
 def fingerprint(repo):
     h=hashlib.sha256()
@@ -35,7 +35,7 @@ def rebuild(config,wanted,activate=True,checks=False):
     if checks:
         run(['cargo','test','-p','otrios-core','--features','canvas','--locked'],cwd=source,env=env)
         run(['cargo','test','-p','otrios-dashboard','--features','server,canvas,host-sync','--locked'],cwd=source,env=env)
-    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--example','app_management_probe','--locked'],cwd=source,env=env)
+    run(['cargo','build','-p','otrios-dashboard','--features','server,canvas,host-sync','--bin','canvas-bundle','--bin','canvas-pack','--bin','dashboard-server','--example','bundle_counter','--example','bundle_app_probe','--example','app_management_probe','--example','oib_instance_probe','--locked'],cwd=source,env=env)
     if checks:
         for script in ['scripts/test_dashboard_release.py','scripts/test_frame_hosting.py','scripts/test_app_bundles.py']:
             run([sys.executable,script],cwd=source,env=dict(env,OTRIOS_TEST_BIN_DIR=str(build/'mac-target/debug')))
@@ -60,11 +60,11 @@ def rebuild(config,wanted,activate=True,checks=False):
     host=config.get('native_host','direct')
     if host!='direct':raise ValueError('Slug requires the direct GLES host')
     feature,binary='direct,server,canvas','dashboard-direct'
-    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--example','space_map_probe','--example','app_management_probe','--example','transfer_ui_probe','--target','armv7-unknown-linux-gnueabihf'])
+    run(['docker','exec','-e','CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc',name,'cargo','build','--release','--locked','-p','otrios-dashboard','--features',feature,'--bin',binary,'--bin','session-bootstrap','--bin','dashboard-server','--bin','dashboard-monitoring','--bin','canvas-bundle','--example','space_map_probe','--example','app_management_probe','--example','transfer_ui_probe','--example','oib_instance_probe','--target','armv7-unknown-linux-gnueabihf'])
     native=build/'dashboard-native';run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+binary,native])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/session-bootstrap',build/'session-bootstrap'])
     run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/examples/space_map_probe',build/'frame-space-map-probe'])
-    for example in ['app_management_probe','transfer_ui_probe']:
+    for example in ['app_management_probe','transfer_ui_probe','oib_instance_probe']:
         run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/examples/'+example,build/('frame-'+example.replace('_','-'))])
     for program in ['dashboard-server','dashboard-monitoring','canvas-bundle']:
         run(['docker','cp',name+':/src/target/armv7-unknown-linux-gnueabihf/release/'+program,build/('frame-'+program)])

@@ -31,11 +31,20 @@ struct OrderDrag {
     position: [f32; 2],
     moving: bool,
 }
+struct OibView {
+    root: crate::merkle::Hash,
+    saving: bool,
+    deferred: bool,
+    info: super::oib::Info,
+}
 struct Mount {
     epoch: u32,
     viewport: [f32; 2],
     ui: Ui,
     layout: Layout,
+    oib_generation: Option<u64>,
+    oib_view: Option<OibView>,
+    oib_selected: Option<u64>,
     doc: StateAdapter,
     behavior: Option<Behavior>,
     input: InputRouter,
@@ -55,6 +64,7 @@ struct Mount {
     text_scroll: Option<super::text_scroll::Scroll>,
     map_scroll: Option<super::text_scroll::Scroll>,
     panel_scroll: Option<super::text_scroll::Scroll>,
+    preview_scroll: Option<super::text_scroll::Scroll>,
     host_backdrop: Option<SceneNode>,
     map_drag: Option<host_map::Preview>,
     text_document: Option<super::document::Viewport>,
@@ -155,6 +165,7 @@ impl StressWorkload {
 /// counters exclude container overhead, GPU buffers, guest runtime and process RSS.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct ResourceUsage {
+    pub oib: Option<super::oib::Info>,
     pub chat: Option<super::chat::Info>,
     pub sampled_monotonic_ms: u64,
     pub dispatch: DispatchUsage,
@@ -171,6 +182,7 @@ pub struct ResourceUsage {
     pub text_scroll: Option<super::text_scroll::Info>,
     pub map_scroll: Option<super::text_scroll::Info>,
     pub panel_scroll: Option<super::text_scroll::Info>,
+    pub oib_preview_scroll: Option<super::text_scroll::Info>,
     pub text_document: Option<super::document::Stats>,
 }
 #[derive(Default)]
@@ -1752,6 +1764,7 @@ impl Client {
                     || m.keyboard_pointer.is_some()
                     || m.order_drag.is_some()
                     || m.text_views.values().any(TextViewport::active)
+                    || m.preview_scroll.as_ref().is_some_and(|s| s.touching())
                     || m.text_scroll.as_ref().is_some_and(|s| s.touching())
                     || m.text_document.as_ref().is_some_and(|s| s.touching())
             })
@@ -1896,6 +1909,10 @@ impl Client {
     }
     pub fn resource_usage(&self) -> ResourceUsage {
         ResourceUsage {
+            oib: self
+                .active
+                .as_ref()
+                .and_then(|m| m.oib_view.as_ref().map(|view| view.info.clone())),
             chat: self.chat_info(),
             sampled_monotonic_ms: self.wire_clock,
             dispatch: self.dispatch_usage(),
@@ -1928,6 +1945,11 @@ impl Client {
                 .active
                 .as_ref()
                 .and_then(|m| m.map_scroll.as_ref())
+                .map(|s| s.info()),
+            oib_preview_scroll: self
+                .active
+                .as_ref()
+                .and_then(|m| m.preview_scroll.as_ref())
                 .map(|s| s.info()),
             panel_scroll: self
                 .active
@@ -2616,7 +2638,11 @@ impl Client {
         }
         if reconnecting
             && self.active.as_ref().is_some_and(|old| {
-                old.ui == candidate.ui
+                (old.ui == candidate.ui
+                    || old
+                        .doc
+                        .admitted_oib_hash()
+                        .is_some_and(|h| Some(h) == candidate.doc.admitted_oib_hash()))
                     && old.state_ref == candidate.state_ref
                     && old.binding == candidate.binding
             })
@@ -2670,6 +2696,117 @@ impl Client {
     pub fn scene(&self) -> Result<Arc<Scene>> {
         cached_scene(self.active.as_ref().ok_or("No Canvas")?)
     }
+    pub fn edit_oib(&mut self, changes: &[(u64, Option<Value>)]) -> Result<bool> {
+        let mount = self.active.as_mut().ok_or("No Canvas")?;
+        if mount.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = mount.doc.edit_oib(changes)?;
+        if changed {
+            mount.refresh()?;
+            mount.invalidate();
+        }
+        Ok(changed)
+    }
+    /// Select an inspector locally; this never emits an authoritative operation.
+    pub fn inspect_oib(&mut self, instance: u64) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if !m
+            .doc
+            .oib_info()?
+            .instances
+            .iter()
+            .any(|a| a.id == instance && a.active)
+        {
+            return Ok(false);
+        }
+        let (ui, layout) = m.doc.oib_compiled(Some(instance))?;
+        m.oib_selected = Some(instance);
+        if let Some(view) = &mut m.oib_view {
+            view.info.selected_instance = Some(instance);
+        }
+        m.ui = ui;
+        m.layout = layout;
+        m.invalidate();
+        m.sync_panel_scroll()?;
+        if let Some(seed) = super::oib::seed(&m.ui)
+            && let Some(surface) = &seed.instance_surface
+            && let Some(scroll) = &mut m.panel_scroll
+        {
+            scroll.set_offset([0., surface.inspector_start]);
+        }
+        Ok(true)
+    }
+    pub fn instantiate_oib(&mut self, component: u64, name: Option<String>) -> Result<bool> {
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = m.doc.instantiate_oib(component, name)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
+    pub fn restore_oib(&mut self, defaults: bool) -> Result<bool> {
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = m.doc.restore_oib(defaults)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
+    pub fn edit_oib_instance_property(
+        &mut self,
+        instance: u64,
+        property: &str,
+        value: Option<Value>,
+    ) -> Result<bool> {
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = m
+            .doc
+            .edit_oib_instance_property(instance, property, value)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
+    pub fn duplicate_oib(&mut self, instance: u64, name: Option<String>) -> Result<bool> {
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = m.doc.duplicate_oib(instance, name)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
+    pub fn remove_oib(&mut self, instance: u64) -> Result<bool> {
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let changed = m.doc.remove_oib(instance)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
     pub fn event(&mut self, epoch: u32, control: u8, a: u16, b: u16) -> Result<bool> {
         if self.local_uninstall {
             return Ok(false);
@@ -2708,12 +2845,45 @@ impl Client {
             .is_some_and(|m| m.binding.as_ref().is_some_and(|b| !b.editable))
             && !matches!(
                 h.operation,
-                Operation::Chat(_) | Operation::Back | Operation::SignOut
+                Operation::Chat(_)
+                    | Operation::Back
+                    | Operation::SignOut
+                    | Operation::OibInstance {
+                        action: otrios_interfaces::oib::InstanceAction::Inspect,
+                        ..
+                    }
             )
         {
             return Ok(false);
         }
         match h.operation {
+            Operation::OibInstance { target, action } => {
+                if action == otrios_interfaces::oib::InstanceAction::Inspect {
+                    return self.inspect_oib(target);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+                    return Ok(false);
+                }
+                let changed = m.doc.oib_instance_action(target, action)?;
+                if changed {
+                    m.refresh()?;
+                    m.invalidate();
+                }
+                return Ok(changed);
+            }
+            Operation::Oib { cell, action } => {
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+                    return Ok(false);
+                }
+                let changed = m.doc.oib_inspector_action(cell, action)?;
+                if changed {
+                    m.refresh()?;
+                    m.invalidate();
+                }
+                return Ok(changed);
+            }
             Operation::Chat(command) => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 let chat = m.chat.as_mut().ok_or("No chat presentation")?;
@@ -2856,6 +3026,20 @@ impl Client {
         }
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
+        }
+        if !self.host_active
+            && let Some(changed) = self.oib_preview_pointer(epoch, event, at)?
+        {
+            return Ok(changed);
+        }
+        if !self.host_active
+            && self
+                .active
+                .as_ref()
+                .is_some_and(|m| super::oib::seed(&m.ui).is_some())
+            && let Some(changed) = self.host_panel_pointer(epoch, event, at)?
+        {
+            return Ok(changed);
         }
         // Captured text pans use layout coordinates, which do not move with the
         // text. Avoid constructing a second presented tree between physics and
@@ -3113,6 +3297,13 @@ impl Client {
             Some(Presentation::Chat) => {
                 super::document::scene::split(scene, u32::from(super::chat::VIEWPORT)).map(Some)
             }
+            Some(Presentation::Oib(seed)) => {
+                // Numeric preview feedback and inspector content have different
+                // lifetimes. Use the existing ordered base/overlay resources so
+                // one changed percentage cannot upload the whole inspector.
+                super::document::scene::split_before(scene, u32::from(seed.inspector_viewport))
+                    .map(Some)
+            }
             _ => Ok(None),
         }
     }
@@ -3344,7 +3535,14 @@ impl Client {
             }
             return Ok(true);
         }
+        self.host.drag = None;
         if let Some(m) = &mut self.active {
+            if let Some(scroll) = &mut m.preview_scroll {
+                scroll.cancel();
+            }
+            if let Some(scroll) = &mut m.panel_scroll {
+                scroll.cancel();
+            }
             m.input.cancel_all();
             if let Some(s) = &mut m.text_scroll {
                 s.cancel();
@@ -3452,6 +3650,11 @@ impl Client {
             return Ok(false);
         };
         m.now = now;
+        let oib_changed = if super::oib::seed(&m.ui).is_some() {
+            m.refresh()?
+        } else {
+            false
+        };
         let (chat_changed, chat_bounds_changed, chat_effects) = if let Some(chat) = &mut m.chat {
             chat.prepare(m.viewport, m.keyboard.visible, m.font.clone());
             let old_bounds = (chat.input_height(), chat.draft_height());
@@ -3498,6 +3701,10 @@ impl Client {
             scrolled |= s.tick(now);
             self.host.scroll = s.info().offset[1];
         }
+        m.sync_panel_scroll()?;
+        if let Some(s) = &mut m.preview_scroll {
+            scrolled |= s.tick(now);
+        }
         if let Some(s) = &mut m.panel_scroll {
             scrolled |= s.tick(now);
             self.host.panel_scroll = s.info().offset[1];
@@ -3535,7 +3742,7 @@ impl Client {
         if let Some(edit) = edit {
             return self.hardware_edit(&edit);
         }
-        Ok(changed || feedback_changed || paint != 0)
+        Ok(oib_changed || changed || feedback_changed || paint != 0)
     }
     pub fn ink_outgoing(&mut self, now: u64) -> Vec<u8> {
         self.active.as_mut().map_or_else(Vec::new, |m| {
@@ -3718,6 +3925,12 @@ impl Mount {
             chat.prepare(self.viewport, self.keyboard.visible, self.font.clone());
         }
         self.layout_scene.take();
+        if let Some(scroll) = &mut self.panel_scroll {
+            scroll.bounds_dirty = true;
+        }
+        if let Some(scroll) = &mut self.preview_scroll {
+            scroll.bounds_dirty = true;
+        }
         if let Some(s) = &mut self.text_document {
             s.bounds_dirty = true;
         }
@@ -3727,7 +3940,58 @@ impl Mount {
     fn invalidate_presentation(&mut self) {
         self.scene.take();
     }
+    fn sync_panel_scroll(&mut self) -> Result<()> {
+        if self.preview_scroll.as_ref().is_some_and(|s| s.bounds_dirty) {
+            let scene = cached_layout(self)?;
+            self.preview_scroll
+                .as_mut()
+                .ok_or("Missing preview scroll")?
+                .sync(&scene)?;
+        }
+        if self.panel_scroll.as_ref().is_some_and(|s| s.bounds_dirty) {
+            let scene = cached_layout(self)?;
+            self.panel_scroll
+                .as_mut()
+                .ok_or("Missing panel scroll")?
+                .sync(&scene)?;
+        }
+        Ok(())
+    }
     fn refresh(&mut self) -> Result<bool> {
+        let mut oib_changed = self.refresh_oib_view()?;
+        if let Some(generation) = self
+            .oib_view
+            .as_ref()
+            .map(|view| view.info.active_generation)
+            && self.oib_generation != Some(generation)
+            && !self.oib_activation_blocked()
+        {
+            let (ui, layout) = self.doc.oib_compiled(self.oib_selected)?;
+            let previous_ui = std::mem::replace(&mut self.ui, ui);
+            let previous = std::mem::replace(&mut self.layout, layout);
+            if let Err(error) = resolve_scene(self) {
+                self.layout = previous;
+                self.ui = previous_ui;
+                return Err(error);
+            }
+            if let Some(seed) = super::oib::seed(&self.ui)
+                && let Some(scroll) = &mut self.panel_scroll
+            {
+                scroll.set_content(seed.inspector_content);
+            }
+            if let Some(seed) = super::oib::seed(&self.ui)
+                && let Some(surface) = &seed.instance_surface
+                && let Some(scroll) = &mut self.preview_scroll
+            {
+                scroll.set_content([0., seed.instances.len() as f32 * surface.preview_stride]);
+            }
+            self.oib_generation = Some(generation);
+            if let Some(view) = &mut self.oib_view {
+                view.info.presented_generation = generation;
+            }
+            self.invalidate();
+            oib_changed = true;
+        }
         for (id, editor) in &mut self.editors {
             if let Value::Text(text) = self.doc.typed_value(*id)?
                 && editor.text() != text
@@ -3737,11 +4001,68 @@ impl Mount {
         }
         let values = selected_values(self)?;
         if values == self.visible {
-            return Ok(false);
+            return Ok(oib_changed);
         }
         self.visible = values;
         self.invalidate();
         Ok(true)
+    }
+    fn oib_activation_blocked(&self) -> bool {
+        self.input.active()
+            || self.panel_scroll.as_ref().is_some_and(|s| s.touching())
+            || self.preview_scroll.as_ref().is_some_and(|s| s.touching())
+            || !self.doc.confirmed()
+    }
+    fn refresh_oib_view(&mut self) -> Result<bool> {
+        if super::oib::seed(&self.ui).is_none() {
+            return Ok(false);
+        }
+        let root = self.doc.oib_root().ok_or("Missing OIB state")?;
+        let saving = self.doc.oib_saving();
+        let generation = self
+            .oib_view
+            .as_ref()
+            .filter(|v| v.root == root)
+            .map(|v| v.info.active_generation)
+            .or_else(|| self.doc.oib_generation());
+        let deferred = generation != self.oib_generation && self.oib_activation_blocked();
+        if self
+            .oib_view
+            .as_ref()
+            .is_some_and(|v| v.root == root && v.saving == saving && v.deferred == deferred)
+        {
+            return Ok(false);
+        }
+        let mut info = self.doc.oib_info()?;
+        if deferred {
+            // These properties still belong to the displayed inspector. Pin only
+            // its presentation until the held gesture and pending edits finish;
+            // the authority has already reclaimed the deleted object itself.
+            if let Some(previous) = &self.oib_view {
+                info.properties.clone_from(&previous.info.properties);
+            }
+        } else if self
+            .oib_selected
+            .is_none_or(|id| !info.instances.iter().any(|a| a.id == id && a.active))
+        {
+            self.oib_selected = info.instances.iter().find(|a| a.active).map(|a| a.id);
+        }
+        info.selected_instance = self.oib_selected;
+        info.presented_generation = self.oib_generation.unwrap_or(0);
+        let changed = self
+            .oib_view
+            .as_ref()
+            .is_none_or(|v| v.info.status != info.status || v.info.properties != info.properties);
+        self.oib_view = Some(OibView {
+            root,
+            saving,
+            deferred,
+            info,
+        });
+        if changed {
+            self.invalidate();
+        }
+        Ok(changed)
     }
 }
 struct Qualification {
@@ -3781,6 +4102,12 @@ fn qualify(
     for s in &ui.selectors {
         if !locals.insert(s.local)
             || match s.projection {
+                Projection::OibStatus => s.field != 0 || super::oib::seed(&ui).is_none(),
+                Projection::OibCell { cell } => {
+                    s.field != 0
+                        || !super::oib::seed(&ui)
+                            .is_some_and(|seed| seed.cells.iter().any(|c| c.id == cell))
+                }
                 Projection::KeyboardLabel { key } => {
                     s.field != 0 || key >= crate::dashboard::keyboard::KEY_COUNT
                 }
@@ -3827,6 +4154,27 @@ fn qualify(
             return Err("Gesture does not match its typed fields".into());
         }
         let valid = match &h.operation {
+            Operation::OibInstance { target, action } => {
+                h.fields.is_empty()
+                    && super::oib::seed(&ui).is_some_and(|s| {
+                        s.instance_surface.is_some()
+                            && match action {
+                                otrios_interfaces::oib::InstanceAction::RemovePending
+                                | otrios_interfaces::oib::InstanceAction::Restore
+                                | otrios_interfaces::oib::InstanceAction::ResetDefaults => {
+                                    *target == s.main_oib
+                                }
+                                otrios_interfaces::oib::InstanceAction::Add => {
+                                    s.components.iter().any(|c| c.id == *target)
+                                }
+                                _ => s.instances.iter().any(|i| i.id == *target),
+                            }
+                    })
+            }
+            Operation::Oib { cell, .. } => {
+                h.fields.is_empty()
+                    && super::oib::seed(&ui).is_some_and(|s| s.cells.iter().any(|c| c.id == *cell))
+            }
             Operation::Chat(command) => {
                 h.fields.is_empty()
                     && *command <= 214
@@ -3858,6 +4206,7 @@ fn qualify(
     }
     if let Some(p) = &ui.presentation {
         match p {
+            Presentation::Oib(_) => super::oib::validate(&ui)?,
             Presentation::Chat => {
                 if !ui.state_schema.fields.is_empty() || ui.behavior.is_some() {
                     return Err(
@@ -4114,13 +4463,26 @@ fn qualify(
         },
         text_scroll,
         map_scroll: None,
-        panel_scroll: None,
+        preview_scroll: super::oib::seed(&ui).and_then(|s| {
+            s.instance_surface.as_ref().map(|surface| {
+                super::text_scroll::Scroll::new(
+                    surface.preview_viewport,
+                    [0., s.instances.len() as f32 * surface.preview_stride],
+                )
+            })
+        }),
+        panel_scroll: super::oib::seed(&ui).map(|seed| {
+            super::text_scroll::Scroll::new(seed.inspector_viewport, seed.inspector_content)
+        }),
         host_backdrop: None,
         map_drag: None,
         epoch,
         viewport: [1280., 800.],
         ui,
         layout,
+        oib_generation: None,
+        oib_view: None,
+        oib_selected: None,
         doc,
         behavior,
         input: InputRouter::default(),
@@ -4155,7 +4517,26 @@ fn qualify(
         order_editing: false,
         order_drag: None,
     };
+    if super::oib::seed(&m.ui).is_some() {
+        let (ui, layout) = m.doc.oib_compiled(m.oib_selected)?;
+        m.ui = ui;
+        m.layout = layout;
+        if let Some(seed) = super::oib::seed(&m.ui)
+            && let Some(scroll) = &mut m.panel_scroll
+        {
+            scroll.set_content(seed.inspector_content);
+        }
+        if let Some(seed) = super::oib::seed(&m.ui)
+            && let Some(surface) = &seed.instance_surface
+            && let Some(scroll) = &mut m.preview_scroll
+        {
+            scroll.set_content([0., seed.instances.len() as f32 * surface.preview_stride]);
+        }
+        m.oib_generation = m.doc.oib_generation();
+        m.refresh_oib_view()?;
+    }
     m.visible = selected_values(&m)?;
+    m.sync_panel_scroll()?;
     resolve_scene(&m)?;
     Ok(m)
 }
@@ -4174,7 +4555,24 @@ fn selected_values(m: &Mount) -> Result<BTreeMap<u16, Value>> {
 fn resolve_layout(m: &Mount) -> Result<Scene> {
     let mut bindings = BTreeMap::new();
     for s in &m.ui.selectors {
-        let value = if let Projection::KeyboardLabel { key } = s.projection {
+        let value = if matches!(s.projection, Projection::OibStatus) {
+            Value::Text(
+                m.oib_view
+                    .as_ref()
+                    .ok_or("Missing OIB view")?
+                    .info
+                    .status
+                    .clone(),
+            )
+        } else if let Projection::OibCell { cell } = s.projection {
+            Value::Text(
+                m.oib_view
+                    .as_ref()
+                    .and_then(|v| v.info.properties.get(&cell))
+                    .ok_or("Missing OIB property view")?
+                    .clone(),
+            )
+        } else if let Projection::KeyboardLabel { key } = s.projection {
             Value::Text(m.keyboard.label(key))
         } else if matches!(s.projection, Projection::ReorderLabel) {
             Value::Text(if m.order_editing { "Done" } else { "Edit" }.into())
@@ -4239,7 +4637,9 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
                 Projection::WindowSignal { seconds } => {
                     Value::TimedSeries(m.doc.signal(s.field, m.wall, *seconds))
                 }
-                Projection::KeyboardLabel { .. }
+                Projection::OibStatus
+                | Projection::OibCell { .. }
+                | Projection::KeyboardLabel { .. }
                 | Projection::KeyboardVisible
                 | Projection::SessionControls
                 | Projection::SessionAccess { .. }
@@ -4274,6 +4674,10 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     if let Some(scroll) = &m.map_scroll {
         scroll.present(&mut root);
         host_map::present_map(&mut root, scroll.node(), scroll.info());
+    }
+    if let Some(scroll) = &m.preview_scroll {
+        scroll.present(&mut root);
+        host_panel::present_panel(&mut root, scroll.node());
     }
     if let Some(scroll) = &m.panel_scroll {
         scroll.present(&mut root);
@@ -4358,7 +4762,15 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             if let Some(Action::AppEvent(control)) = action
                 && ui.handlers.iter().any(|h| {
                     h.control == control
-                        && !matches!(h.operation, Operation::Back | Operation::SignOut)
+                        && !matches!(
+                            h.operation,
+                            Operation::Back
+                                | Operation::SignOut
+                                | Operation::OibInstance {
+                                    action: otrios_interfaces::oib::InstanceAction::Inspect,
+                                    ..
+                                }
+                        )
                 })
             {
                 node.responder = None;
@@ -4369,6 +4781,38 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             }
         }
         disable(&mut root, &m.ui);
+    }
+    if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+        fn disable_oib(node: &mut SceneNode, ui: &Ui) {
+            if let Some(TouchResponder::Activate(Action::AppEvent(control))) = node.responder
+                && ui.handlers.iter().any(|h| {
+                    h.control == control
+                        && matches!(
+                            h.operation,
+                            Operation::Oib { .. }
+                                | Operation::OibInstance {
+                                    action: otrios_interfaces::oib::InstanceAction::Add
+                                        | otrios_interfaces::oib::InstanceAction::Duplicate
+                                        | otrios_interfaces::oib::InstanceAction::Remove
+                                        | otrios_interfaces::oib::InstanceAction::RemovePending,
+                                    ..
+                                }
+                                | Operation::OibInstance {
+                                    action: otrios_interfaces::oib::InstanceAction::Restore
+                                        | otrios_interfaces::oib::InstanceAction::ResetDefaults,
+                                    ..
+                                }
+                        )
+                })
+            {
+                node.responder = None;
+                node.semantics = None;
+            }
+            for child in &mut node.children {
+                disable_oib(child, ui);
+            }
+        }
+        disable_oib(&mut root, &m.ui);
     }
     if let Some(control) = m.quit_control
         && m.chat.is_none()

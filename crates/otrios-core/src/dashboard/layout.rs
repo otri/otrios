@@ -207,7 +207,11 @@ fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {
 fn validate_blueprint(b: &Blueprint) -> Result<()> {
     if !matches!(
         b.schema.as_str(),
-        "otrios-layout-v1" | "otrios-layout-v2" | "otrios-layout-v3" | "otrios-layout-v4"
+        "otrios-layout-v1"
+            | "otrios-layout-v2"
+            | "otrios-layout-v3"
+            | "otrios-layout-v4"
+            | "otrios-layout-v5"
     ) || b.templates.is_empty()
         || b.templates.len() > 32
     {
@@ -347,8 +351,10 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
         return Err("Root layout instance must be the screen".into());
     }
     if let Some(plan) = &b.composition {
-        if !matches!(b.schema.as_str(), "otrios-layout-v3" | "otrios-layout-v4")
-            || b.root.id != 0
+        if !matches!(
+            b.schema.as_str(),
+            "otrios-layout-v3" | "otrios-layout-v4" | "otrios-layout-v5"
+        ) || b.root.id != 0
             || !b.root.children.is_empty()
         {
             return Err("Composition requires a v3 app root".into());
@@ -366,7 +372,7 @@ fn validate_blueprint(b: &Blueprint) -> Result<()> {
                 _ => false,
             }
         }
-        if b.schema != "otrios-layout-v4"
+        if !matches!(b.schema.as_str(), "otrios-layout-v4" | "otrios-layout-v5")
             && (wraps(&plan.wide.content) || wraps(&plan.tall.content))
         {
             return Err("Wrapping flow requires layout v4".into());
@@ -630,7 +636,10 @@ fn expand(
         let responder = if let Some(r) = n.responder {
             Some(match r {
                 Responder::AppEvent { control, drag } => {
-                    if control >= 128 {
+                    if (c.b.schema != otrios_interfaces::layout::SPARSE_EVENTS_FORMAT
+                        && control >= 128)
+                        || control == 255
+                    {
                         return Err("Canvas event index exceeds limit".into());
                     }
                     if drag {

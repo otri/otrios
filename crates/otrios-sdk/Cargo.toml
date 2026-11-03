@@ -10,5 +10,8 @@ license = "Apache-2.0"
 [dependencies]
 otrios-interfaces = { path = "../otrios-interfaces" }
 
+[features]
+oib = ["otrios-interfaces/layout"]
+
 [lints]
 workspace = true

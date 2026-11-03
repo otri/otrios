@@ -265,10 +265,49 @@ impl Mesh {
             f.width * factor,
             f.height * factor,
         );
+        if !matches!(
+            node.primitive,
+            Primitive::Canvas { .. } | Primitive::Viewport { .. } | Primitive::Text { .. }
+        ) && let Some(paint) = retained.as_deref_mut()
+        {
+            // Geometry uses the same immutable local coordinates and translated
+            // clip contract as glyphs. Scrolling a button must not tessellate it
+            // again or upload a new mesh. Keep this run separate from neighbors
+            // because their placement/ancestor clipping may differ.
+            let first = self.vertices.len() / 6;
+            let before = self.draws.len();
+            let previous = self.draws.last().copied();
+            let mut local = node.clone();
+            local.frame.x = 0.;
+            local.frame.y = 0.;
+            self.paint(
+                &local,
+                [0., 0.],
+                factor,
+                Clip {
+                    left: -100_000.,
+                    top: -100_000.,
+                    right: 100_000.,
+                    bottom: 100_000.,
+                },
+                font,
+                None,
+            );
+            let count = self.vertices.len() / 6 - first;
+            self.draws.truncate(before);
+            if let Some(old) = previous {
+                self.draws[before - 1] = old;
+            }
+            if count > 0 {
+                paint.runs.push((self.draws.len() / 3, node.id));
+                self.draws.extend([0, first as u32, count as u32]);
+            }
+            return;
+        }
         match &node.primitive {
             Primitive::Canvas { clip: enabled } => {
                 let clip = if *enabled { clip.intersect(r) } else { clip };
-                if !clip.empty() {
+                if !clip.empty() || retained.is_some() {
                     for child in &node.children {
                         self.paint(
                             child,
@@ -283,7 +322,7 @@ impl Mesh {
             }
             Primitive::Viewport { scale } => {
                 let clip = clip.intersect(r);
-                if !clip.empty() {
+                if !clip.empty() || retained.is_some() {
                     for child in &node.children {
                         self.paint(
                             child,

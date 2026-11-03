@@ -31,7 +31,7 @@ try{
   await screenshot('home');
   await evaluate("document.querySelector('#controls button[aria-label=\"Bundle Counter\"]').click()");
   await wait("document.querySelector('#revision')?.dataset.ui==='app:bundle-counter/ui'&&!!document.querySelector('#controls button[aria-label=\"Increase counter\"]')");
-  const before=await sample();assert.equal(before.release,expected);assert.notEqual(before.value,null);assert.equal(hello?.version,1);assert.equal(hello?.state_protocol,'otrios-canvas-sync-v20');assert.equal(hello?.release,expected);
+  const before=await sample();assert.equal(before.release,expected);assert.notEqual(before.value,null);assert.equal(hello?.version,1);assert.equal(hello?.state_protocol,'otrios-canvas-sync-v26');assert.equal(hello?.release,expected);
   let after=before;
   if(args.includes('--click')){
     await evaluate("document.querySelector('#controls button[aria-label=\"Increase counter\"]').click()");

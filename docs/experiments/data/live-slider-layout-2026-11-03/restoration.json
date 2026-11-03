@@ -1,0 +1,398 @@
+{
+  "release": "e42845712c5dadc91f515af29361faac886c3d483482eb6c0a1afc5927bda35d",
+  "protocol": "otrios-canvas-sync-v24",
+  "pid": 1605,
+  "mount_epoch": 1,
+  "before_generation": 97,
+  "restore_generation": 98,
+  "defaults_generation": 99,
+  "final_generation": 100,
+  "restored_original_bindings": [
+    20,
+    30
+  ],
+  "allocations_remaining": 2,
+  "final_properties": {
+    "100": "label: Level (default)",
+    "101": "accent: #5588FF (default)",
+    "102": "width: 520 (default)",
+    "103": "spacing: 24 (default)",
+    "104": "label y: 10 (default)",
+    "105": "label width: 128 (default)",
+    "106": "track x: 144 (default)",
+    "107": "track y: 0 (default)",
+    "108": "track width: 288 (default)",
+    "109": "percentage y: 10 (default)",
+    "110": "percentage width: 76 (default)",
+    "111": "content y: 0 (default)",
+    "112": "row pitch: 80 (default)",
+    "113": "heading visible: false (default)",
+    "16777344": "label: Level (inherited)",
+    "16777345": "accent: #5588FF (inherited)",
+    "16777346": "width: 520 (inherited)",
+    "16777347": "spacing: 24 (inherited)",
+    "16777408": "label: Level (inherited)",
+    "16777409": "accent: #5588FF (inherited)",
+    "16777410": "width: 520 (inherited)",
+    "16777411": "spacing: 24 (inherited)",
+    "16777472": "label: Level (inherited)",
+    "16777473": "accent: #5588FF (inherited)",
+    "16777474": "width: 520 (inherited)",
+    "16777475": "spacing: 24 (inherited)",
+    "16777536": "label: Level (inherited)",
+    "16777537": "accent: #5588FF (inherited)",
+    "16777538": "width: 520 (inherited)",
+    "16777539": "spacing: 24 (inherited)",
+    "16777600": "label: Level (inherited)",
+    "16777601": "accent: #5588FF (inherited)",
+    "16777602": "width: 520 (inherited)",
+    "16777603": "spacing: 24 (inherited)",
+    "16777664": "label: Level (inherited)",
+    "16777665": "accent: #5588FF (inherited)",
+    "16777666": "width: 520 (inherited)",
+    "16777667": "spacing: 24 (inherited)",
+    "200": "label: volume (override)",
+    "201": "accent: #5588FF (inherited)",
+    "202": "width: 520 (inherited)",
+    "203": "spacing: 24 (inherited)",
+    "300": "label: brightness (override)",
+    "301": "accent: #5588FF (inherited)",
+    "302": "width: 520 (inherited)",
+    "303": "spacing: 24 (inherited)"
+  },
+  "final_instances": [
+    {
+      "active": true,
+      "component": 10,
+      "id": 20,
+      "name": "volume",
+      "prototype": 20
+    },
+    {
+      "active": true,
+      "component": 10,
+      "id": 30,
+      "name": "brightness",
+      "prototype": 30
+    },
+    {
+      "active": false,
+      "component": 10,
+      "id": 65538,
+      "name": "instance-3",
+      "prototype": 20
+    },
+    {
+      "active": false,
+      "component": 10,
+      "id": 65539,
+      "name": "code-slider",
+      "prototype": 20
+    },
+    {
+      "active": false,
+      "component": 10,
+      "id": 65540,
+      "name": "code-copy",
+      "prototype": 20
+    },
+    {
+      "active": false,
+      "component": 10,
+      "id": 65541,
+      "name": "instance-6",
+      "prototype": 20
+    },
+    {
+      "active": false,
+      "component": 10,
+      "id": 65542,
+      "name": "instance-7",
+      "prototype": 20
+    },
+    {
+      "active": false,
+      "component": 10,
+      "id": 65543,
+      "name": "instance-8",
+      "prototype": 20
+    }
+  ],
+  "percentages_before_defaults": [
+    "58%",
+    "48%"
+  ],
+  "percentages_after_defaults": [
+    "58%",
+    "48%"
+  ],
+  "percentages_after_final_design": [
+    "58%",
+    "48%"
+  ],
+  "final_track_bounds": [
+    [
+      192.0,
+      140.0,
+      288.0,
+      48.0
+    ],
+    [
+      192.0,
+      220.0,
+      288.0,
+      48.0
+    ]
+  ],
+  "native_inline_name_taps": {
+    "inline_names_work": true,
+    "records": [
+      {
+        "selected": 30,
+        "generation": 100,
+        "pid": 1605,
+        "epoch": 1
+      },
+      {
+        "selected": 20,
+        "generation": 100,
+        "pid": 1605,
+        "epoch": 1
+      }
+    ]
+  },
+  "public_wasm_final": {
+    "type": "snapshot",
+    "epoch": 1,
+    "confirmed": true,
+    "oib": {
+      "active_generation": 100,
+      "presented_generation": 100,
+      "conflicts": [],
+      "status": "Live \u00b7 revision 100 \u00b7 2 instances \u00b7 2 IDs left",
+      "properties": {
+        "100": "label: Level (default)",
+        "101": "accent: #5588FF (default)",
+        "102": "width: 520 (default)",
+        "103": "spacing: 24 (default)",
+        "104": "label y: 10 (default)",
+        "105": "label width: 128 (default)",
+        "106": "track x: 144 (default)",
+        "107": "track y: 0 (default)",
+        "108": "track width: 288 (default)",
+        "109": "percentage y: 10 (default)",
+        "110": "percentage width: 76 (default)",
+        "111": "content y: 0 (default)",
+        "112": "row pitch: 80 (default)",
+        "113": "heading visible: false (default)",
+        "200": "label: volume (override)",
+        "201": "accent: #5588FF (inherited)",
+        "202": "width: 520 (inherited)",
+        "203": "spacing: 24 (inherited)",
+        "300": "label: brightness (override)",
+        "301": "accent: #5588FF (inherited)",
+        "302": "width: 520 (inherited)",
+        "303": "spacing: 24 (inherited)",
+        "16777344": "label: Level (inherited)",
+        "16777345": "accent: #5588FF (inherited)",
+        "16777346": "width: 520 (inherited)",
+        "16777347": "spacing: 24 (inherited)",
+        "16777408": "label: Level (inherited)",
+        "16777409": "accent: #5588FF (inherited)",
+        "16777410": "width: 520 (inherited)",
+        "16777411": "spacing: 24 (inherited)",
+        "16777472": "label: Level (inherited)",
+        "16777473": "accent: #5588FF (inherited)",
+        "16777474": "width: 520 (inherited)",
+        "16777475": "spacing: 24 (inherited)",
+        "16777536": "label: Level (inherited)",
+        "16777537": "accent: #5588FF (inherited)",
+        "16777538": "width: 520 (inherited)",
+        "16777539": "spacing: 24 (inherited)",
+        "16777600": "label: Level (inherited)",
+        "16777601": "accent: #5588FF (inherited)",
+        "16777602": "width: 520 (inherited)",
+        "16777603": "spacing: 24 (inherited)",
+        "16777664": "label: Level (inherited)",
+        "16777665": "accent: #5588FF (inherited)",
+        "16777666": "width: 520 (inherited)",
+        "16777667": "spacing: 24 (inherited)"
+      },
+      "instances": [
+        {
+          "id": 20,
+          "name": "volume",
+          "component": 10,
+          "prototype": 20,
+          "active": true
+        },
+        {
+          "id": 30,
+          "name": "brightness",
+          "component": 10,
+          "prototype": 30,
+          "active": true
+        },
+        {
+          "id": 65538,
+          "name": "instance-3",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65539,
+          "name": "code-slider",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65540,
+          "name": "code-copy",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65541,
+          "name": "instance-6",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65542,
+          "name": "instance-7",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        },
+        {
+          "id": 65543,
+          "name": "instance-8",
+          "component": 10,
+          "prototype": 20,
+          "active": false
+        }
+      ],
+      "allocations_remaining": 2,
+      "selected_instance": 20
+    },
+    "panel_scroll": {
+      "offset": [
+        0,
+        0
+      ],
+      "limit": [
+        0,
+        300
+      ],
+      "active": false,
+      "velocity": [
+        0,
+        0
+      ]
+    },
+    "oib_preview_scroll": {
+      "offset": [
+        0,
+        0
+      ],
+      "limit": [
+        0,
+        0
+      ],
+      "active": false,
+      "velocity": [
+        0,
+        0
+      ]
+    },
+    "text": "< OTriOS. < Test Playground. \u2022. Live UI. volume. 58%. brightness. 48%. Live \u00b7 revision 100 \u00b7 2 instances \u00b7 2 IDs left. Add LabeledSlider. Remove pending. Restore sliders. Reset UI defaults. Component: LabeledSlider. label: Level (default). Change. Default. accent: #5588FF (default). Change. Default. width: 520 (default). Change. Default. spacing: 24 (default). Change. Default. Instance: volume \u00b7 Volume binding. Duplicate. Remove. label: volume (override). Change. Reset. Default. accent: #5588FF (inherited). Change. Reset. Default. width: 520 (inherited). Change. Reset. Default. spacing: 24 (inherited). Change. Reset. Default",
+    "controls": [
+      {
+        "id": 3,
+        "label": "Back to OTriOS",
+        "bounds": [
+          0,
+          0,
+          187.81869506835938,
+          96
+        ]
+      },
+      {
+        "id": 5,
+        "label": "Test Playground",
+        "bounds": [
+          175.81869506835938,
+          24,
+          278.19781494140625,
+          60
+        ]
+      },
+      {
+        "id": 22,
+        "label": "Inspect volume",
+        "bounds": [
+          48,
+          150,
+          128,
+          28
+        ]
+      },
+      {
+        "id": 34,
+        "label": "Inspect brightness",
+        "bounds": [
+          48,
+          230,
+          128,
+          28
+        ]
+      }
+    ],
+    "observed_at": 1793647291.334666
+  },
+  "restore_button": {
+    "synthetic_evdev": true,
+    "points": [
+      [
+        1084,
+        200,
+        true,
+        0.08
+      ],
+      [
+        1084,
+        200,
+        false,
+        0.05
+      ]
+    ]
+  },
+  "defaults_button": {
+    "synthetic_evdev": true,
+    "points": [
+      [
+        1084,
+        268,
+        true,
+        0.08
+      ],
+      [
+        1084,
+        268,
+        false,
+        0.05
+      ]
+    ]
+  },
+  "services": {
+    "otrios-authority": "active",
+    "otrios-dashboard-direct": "active",
+    "otrios-tunnel": "active"
+  },
+  "compatible_signed_code_kit_verified": true,
+  "cross_release_rollback_exercised": false
+}

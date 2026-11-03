@@ -5,6 +5,32 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Authored instance defaults](rfcs/0034-oib-authored-instance-defaults.md) keep
+Volume/Brightness label defaults and suggestions separate while sharing styling.
+Reset and restoration now retain the correct binding-specific label.
+
+[OIB reclamation](rfcs/0033-oib-instance-reclamation.md) separates fresh object
+identities from reusable renderer slots and removes deleted properties, presence
+and descriptors. The previous ten-creation lifetime budget is retired; current
+scene and simultaneous instance bounds remain.
+
+[OIB component geometry](rfcs/0031-live-oib-component-geometry.md) adds live
+placement, dimensions, visibility and row pitch through bounded property batches.
+[Restoration](rfcs/0032-oib-restoration.md) recovers authored bindings without
+allocating new identities and can separately reset UI defaults. The
+[Frame/Wasm record](experiments/live-slider-layout-2026-11-03.md) records the
+accepted compact design, live spacing edit, protocol v24 and both recovery controls.
+The [compact-default follow-up](experiments/compact-slider-defaults-2026-11-03.md)
+makes the approved 80 px compact rows the authored reusable component default,
+including after remove/add, Restore and Reset UI defaults.
+
+[OIB O2](rfcs/0030-live-oib-instances.md) adds bounded live creation, duplication
+and removal of named reusable instances through shared UI/code operations. Its
+[qualification](experiments/live-oib-instances-2026-11-03.md) records the exact
+O1 seed upgrade, state v22 deployment, calibrated Frame input and the deployed
+Wasm client retaining local inspection/scroll while receiving graph changes.
+Executable class/outlet APIs and arbitrary graph placement remain deferred.
+
 [Spaces map M1](rfcs/0028-spaces-map-sharing-and-portable-data.md) provides the
 common browser/native entrance, editable Space layouts and consolidated settings.
 The [Frame acceptance record](experiments/spaces-map-frame-2026-11-01.md) records

@@ -287,6 +287,22 @@ impl Event {
             operation: Operation::EditOrder,
         }
     }
+    pub fn oib(cell: u64, action: otrios_interfaces::oib::InspectorAction) -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::Oib { cell, action },
+        }
+    }
+    pub fn oib_instance(target: u64, action: otrios_interfaces::oib::InstanceAction) -> Self {
+        Self {
+            kind: GestureKind::Activate,
+            fields: vec![],
+            behavior: None,
+            operation: Operation::OibInstance { target, action },
+        }
+    }
     pub fn sign_out() -> Self {
         Self {
             kind: GestureKind::Activate,
@@ -811,7 +827,30 @@ impl Arrangement {
         }
     }
 }
+pub struct NamedOibTarget {
+    pub cell: u64,
+    pub node: String,
+    pub property: otrios_interfaces::oib::Property,
+    pub scale: f32,
+    pub offset: f32,
+}
+pub struct NamedOibPrototype {
+    pub instance: u64,
+    pub preview: String,
+    pub inspector: String,
+}
+pub struct NamedOibSurface {
+    pub layout: Option<otrios_interfaces::oib::LayoutSurface>,
+    pub previous_ui_sha256: Vec<u8>,
+    pub preview: String,
+    pub preview_stride: f32,
+    pub inspector_start: f32,
+    pub inspector_stride: f32,
+    pub prototypes: Vec<NamedOibPrototype>,
+}
 pub struct AppUi {
+    oib: Option<(otrios_interfaces::oib::Seed, String, Vec<NamedOibTarget>)>,
+    oib_surface: Option<NamedOibSurface>,
     id: String,
     title: String,
     breadcrumbs: Vec<(String, String)>,
@@ -828,6 +867,8 @@ pub struct AppUi {
 impl AppUi {
     pub fn new(id: &str, title: &str, schema: StateSchema) -> Self {
         Self {
+            oib: None,
+            oib_surface: None,
             id: id.into(),
             title: title.into(),
             breadcrumbs: vec![],
@@ -841,6 +882,19 @@ impl AppUi {
             text_document: None,
             reorder: vec![],
         }
+    }
+    pub fn with_oib(
+        mut self,
+        seed: otrios_interfaces::oib::Seed,
+        inspector: &str,
+        targets: Vec<NamedOibTarget>,
+    ) -> Self {
+        self.oib = Some((seed, inspector.into(), targets));
+        self
+    }
+    pub fn with_oib_instances(mut self, surface: NamedOibSurface) -> Self {
+        self.oib_surface = Some(surface);
+        self
     }
     pub fn with_composition(mut self, wide: Arrangement, tall: Arrangement) -> Self {
         self.composition = Some((wide, tall));
@@ -930,7 +984,74 @@ impl AppUi {
                 content: tall.compile(&compiler.named_nodes),
             },
         });
-        let presentation = if let Some((key, source, scale, color)) = self.text_document {
+        let presentation = if let Some((mut seed, inspector, targets)) = self.oib {
+            if let Some(surface) = self.oib_surface {
+                fn collect(root: &TemplateNode, id: u16, inside: bool, nodes: &mut Vec<u16>) {
+                    let inside = inside || root.id == id;
+                    if inside {
+                        nodes.push(root.id);
+                    }
+                    for c in &root.children {
+                        collect(c, id, inside, nodes);
+                    }
+                }
+                let prototypes: Vec<_> = surface
+                    .prototypes
+                    .into_iter()
+                    .map(|p| {
+                        let preview_root = compiler.named_nodes[&p.preview];
+                        let inspector_root = compiler.named_nodes[&p.inspector];
+                        let mut nodes = vec![];
+                        collect(&root, preview_root, false, &mut nodes);
+                        collect(&root, inspector_root, false, &mut nodes);
+                        nodes.sort_unstable();
+                        otrios_interfaces::oib::Prototype {
+                            instance: p.instance,
+                            preview_root,
+                            inspector_root,
+                            nodes,
+                        }
+                    })
+                    .collect();
+                let node_stride = prototypes
+                    .iter()
+                    .map(|p| p.nodes.len() as u16)
+                    .max()
+                    .unwrap_or(0);
+                seed.instance_surface = Some(otrios_interfaces::oib::InstanceSurface {
+                    layout: surface.layout,
+                    previous_ui_sha256: surface.previous_ui_sha256,
+                    preview_viewport: compiler.named_nodes[&surface.preview],
+                    preview_stride: surface.preview_stride,
+                    inspector_start: surface.inspector_start,
+                    inspector_stride: surface.inspector_stride,
+                    node_base: compiler.next_node,
+                    node_stride,
+                    prototypes,
+                });
+            }
+            seed.inspector_viewport = *compiler
+                .named_nodes
+                .get(&inspector)
+                .expect("OIB inspector node");
+            for target in targets {
+                seed.cells
+                    .iter_mut()
+                    .find(|c| c.id == target.cell)
+                    .expect("OIB target cell")
+                    .targets
+                    .push(otrios_interfaces::oib::Target {
+                        node: *compiler
+                            .named_nodes
+                            .get(&target.node)
+                            .expect("OIB target node"),
+                        property: target.property,
+                        scale: target.scale,
+                        offset: target.offset,
+                    });
+            }
+            Some(Presentation::Oib(seed))
+        } else if let Some((key, source, scale, color)) = self.text_document {
             Some(Presentation::TextDocument {
                 viewport: *compiler
                     .named_nodes
@@ -1007,7 +1128,9 @@ impl AppUi {
         })
         .expect("valid authored app primitives");
         Ui {
-            format: if compiler
+            format: if matches!(presentation, Some(Presentation::Oib(_))) {
+                "otrios-canvas-v8"
+            } else if compiler
                 .selectors
                 .iter()
                 .any(|s| matches!(s.projection, Projection::SessionAccess { .. }))

@@ -163,7 +163,7 @@ onmessage=async({data:m})=>{try{
     case 'back':changed=app.back();break;
     case 'text-focus':changed=app.activate(m.epoch,m.id);break;
     case 'text-input':changed=app.replace_text_input(m.epoch,m.id,m.text,m.cursor,m.anchor,!!m.selectionOnly);changed=app.scroll_text_input(m.epoch,m.id,m.scroll||0)||changed;break;
-    case 'map-scroll':changed=app.scroll_map(m.epoch,m.delta);break;
+    case 'map-scroll':changed=Array.isArray(m.position)?app.scroll_at(m.epoch,m.delta,...m.position):app.scroll_map(m.epoch,m.delta);break;
     case 'text-scroll':changed=app.scroll_text_input(m.epoch,m.id,m.scroll);break;
     case 'text-enter':changed=app.text_input_key(m.epoch,m.id,'Enter');break;
     case 'text-blur':changed=app.blur_text_input(m.epoch,m.id);break;

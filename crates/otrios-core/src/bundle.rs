@@ -175,6 +175,43 @@ pub fn pack(
     if code.is_some() {
         required_features.push(BEHAVIOR_FEATURE.into());
     }
+    if canvas::oib::seed(&ui).is_some() {
+        required_features.push(otrios_interfaces::oib::FEATURE.into());
+        if canvas::oib::seed(&ui)
+            .is_some_and(|s| s.cells.iter().any(|c| c.authored_override.is_some()))
+        {
+            required_features.push(otrios_interfaces::oib::AUTHORED_DEFAULTS_FEATURE.into());
+        }
+        if canvas::oib::seed(&ui).is_some_and(|s| s.instance_surface.is_some()) {
+            required_features.push(otrios_interfaces::oib::INSTANCES_FEATURE.into());
+            if canvas::oib::seed(&ui).is_some_and(|s| {
+                s.instance_surface
+                    .as_ref()
+                    .is_some_and(|s| s.layout.is_some())
+            }) {
+                required_features.push(otrios_interfaces::oib::LAYOUT_FEATURE.into());
+            }
+        }
+    }
+    if ui.handlers.iter().any(|h| {
+        matches!(
+            h.operation,
+            otrios_interfaces::canvas::Operation::OibInstance {
+                action: otrios_interfaces::oib::InstanceAction::Restore
+                    | otrios_interfaces::oib::InstanceAction::ResetDefaults,
+                ..
+            }
+        )
+    }) {
+        required_features.push(otrios_interfaces::oib::RESTORE_FEATURE.into());
+    }
+    if crate::dashboard::layout::Layout::from_bytes(&ui.layout)?
+        .blueprint()
+        .schema
+        == otrios_interfaces::layout::SPARSE_EVENTS_FORMAT
+    {
+        required_features.push(otrios_interfaces::layout::SPARSE_EVENTS_FORMAT.into());
+    }
     required_features.sort();
     let info = BundleInfo {
         app: entry.app.clone(),
@@ -361,13 +398,62 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-canvas-v5"
                     | "otrios-canvas-v6"
                     | "otrios-canvas-v7"
+                    | "otrios-canvas-v8"
+                    | "otrios-oib-v1"
+                    | "otrios-oib-instances-v1"
+                    | "otrios-oib-layout-v1"
+                    | "otrios-oib-restore-v1"
+                    | "otrios-oib-authored-defaults-v1"
+                    | "otrios-layout-v5"
             )
         })
     {
         return Err("Unsupported required bundle feature".into());
     }
     let ui = canvas::decode_ui(get(UI_PATH)?)?;
+    if canvas::oib::seed(&ui).is_some_and(|s| s.cells.iter().any(|c| c.authored_override.is_some()))
+        && !features.contains(otrios_interfaces::oib::AUTHORED_DEFAULTS_FEATURE)
+    {
+        return Err("Missing required OIB authored defaults feature".into());
+    }
+    if ui.handlers.iter().any(|h| {
+        matches!(
+            h.operation,
+            otrios_interfaces::canvas::Operation::OibInstance {
+                action: otrios_interfaces::oib::InstanceAction::Restore
+                    | otrios_interfaces::oib::InstanceAction::ResetDefaults,
+                ..
+            }
+        )
+    }) && !features.contains(otrios_interfaces::oib::RESTORE_FEATURE)
+    {
+        return Err("Missing required OIB restore feature".into());
+    }
     canvas::validate_ui_format(&ui)?;
+    if canvas::oib::seed(&ui).is_some() && !features.contains(otrios_interfaces::oib::FEATURE) {
+        return Err("Missing required OIB feature".into());
+    }
+    if canvas::oib::seed(&ui).is_some_and(|s| s.instance_surface.is_some())
+        && !features.contains(otrios_interfaces::oib::INSTANCES_FEATURE)
+    {
+        return Err("Missing required OIB instance feature".into());
+    }
+    if canvas::oib::seed(&ui).is_some_and(|s| {
+        s.instance_surface
+            .as_ref()
+            .is_some_and(|s| s.layout.is_some())
+    }) && !features.contains(otrios_interfaces::oib::LAYOUT_FEATURE)
+    {
+        return Err("Missing required OIB layout feature".into());
+    }
+    if crate::dashboard::layout::Layout::from_bytes(&ui.layout)?
+        .blueprint()
+        .schema
+        == otrios_interfaces::layout::SPARSE_EVENTS_FORMAT
+        && !features.contains(otrios_interfaces::layout::SPARSE_EVENTS_FORMAT)
+    {
+        return Err("Missing required sparse-layout event feature".into());
+    }
     canvas::validate_schema(&ui.state_schema)?;
     if ui.ui_ref != info.app.ui_ref
         || canvas::decode_schema(get(SCHEMA_PATH)?)? != ui.state_schema

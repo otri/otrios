@@ -12,7 +12,7 @@ fn code() -> (Vec<u8>, [u8; 32]) {
         format: "otrios-canvas-v2".into(),
         ui_ref: "app:sample/ui".into(),
         title: "Sample".into(),
-        layout: vec![],
+        layout: crate::test_support::empty_layout(),
         state_schema: StateSchema {
             id: "sample-v1".into(),
             fields: vec![],

@@ -230,6 +230,12 @@ share added width in a 1:4 ratio; `.center_x()` expresses exact centering instea
 
 ## Independent UI updates
 
+[Live OIB UI](../docs/OIB.md) supplies data-only property editing for the new
+Live UI companion app linked from Test Playground. Its named component defaults
+and instance overrides synchronize within its own Space-bound collection, without
+rebuilding or publishing a package for each edit. Existing demos remain separate
+attachments with unchanged schemas. General graph/class APIs remain future work.
+
 All apps use the same package factory and update contract. See
 [RFC 0013](../docs/rfcs/0013-app-ui-updates.md) for UI-only publishing, qualified
 runtime reuse and idempotent activation. UI data can change while compatible

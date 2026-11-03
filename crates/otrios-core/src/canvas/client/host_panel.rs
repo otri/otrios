@@ -135,3 +135,104 @@ pub(super) fn present_panel(root: &mut SceneNode, id: u32) {
         }
     }
 }
+
+impl Client {
+    pub(super) fn oib_preview_pointer(
+        &mut self,
+        epoch: u32,
+        event: PointerEvent,
+        at: u64,
+    ) -> Result<Option<bool>> {
+        let Some(m) = self.active.as_ref() else {
+            return Ok(None);
+        };
+        if m.preview_scroll.is_none() {
+            return Ok(None);
+        }
+        if epoch != m.epoch {
+            return Ok(Some(false));
+        }
+        if event.phase == PointerPhase::Down {
+            // Slider gestures keep their target. Panning starts on the preview's
+            // noninteractive background, never on a sibling panel or modal.
+            if self.host.drag.is_some() || m.input.active() {
+                return Ok(None);
+            }
+            let scene = self.scene()?;
+            let hit = scene.hit_path(event.position);
+            let viewport = m.preview_scroll.as_ref().ok_or("Missing preview")?.node();
+            let path = scene.path(viewport).ok_or("Missing preview frame")?;
+            let parent = path.iter().rev().nth(1).map(|p| p.node.id);
+            // Unpainted viewport space hits the card painted behind it, rather
+            // than the viewport itself. Admit that background through its
+            // containing card; Scroll::pointer still checks viewport bounds.
+            // A sibling overlay or modal keeps its own hit path/barrier.
+            if !hit.is_empty()
+                && !hit
+                    .iter()
+                    .any(|p| p.node.id == viewport || Some(p.node.id) == parent)
+            {
+                return Ok(None);
+            }
+            if hit.iter().any(|p| {
+                p.node.responder.is_some_and(|r| {
+                    matches!(
+                        r,
+                        TouchResponder::Drag(_)
+                            | TouchResponder::Activate(_)
+                            | TouchResponder::Consume
+                    )
+                })
+            }) {
+                return Ok(None);
+            }
+        }
+        let m = self.active.as_mut().ok_or("Missing Canvas")?;
+        let scene = cached_layout(m)?;
+        let changed = m
+            .preview_scroll
+            .as_mut()
+            .ok_or("Missing preview")?
+            .pointer(&scene, event, at)?;
+        if changed.is_some() {
+            m.invalidate_presentation();
+        }
+        Ok(changed)
+    }
+}
+
+impl Client {
+    /// Route a wheel delta to the viewport under the pointer; keyboard commands
+    /// retain their existing inspector/map destination.
+    pub fn scroll_at(&mut self, epoch: u32, delta: f32, position: [f32; 2]) -> Result<bool> {
+        if epoch != self.epoch()
+            || !delta.is_finite()
+            || position.iter().any(|v| !v.is_finite())
+            || self.input_busy()
+        {
+            return Ok(false);
+        }
+        if !self.host_active
+            && let Some(m) = &mut self.active
+        {
+            m.sync_panel_scroll()?;
+            let scene = cached_layout(m)?;
+            if let Some(scroll) = &mut m.preview_scroll {
+                let path = scene.path(scroll.node()).ok_or("Missing OIB preview")?;
+                let p = path.last().ok_or("Missing preview frame")?;
+                let x = (position[0] - p.origin[0]) / p.scale;
+                let y = (position[1] - p.origin[1]) / p.scale;
+                if x >= 0. && y >= 0. && x < p.node.frame.width && y < p.node.frame.height {
+                    let before = scroll.info().offset;
+                    scroll.set_offset([0., before[1] + delta]);
+                    let changed = before != scroll.info().offset;
+                    if changed {
+                        m.invalidate_presentation();
+                    }
+                    return Ok(changed);
+                }
+            }
+        }
+        self.scroll_map(epoch, delta)
+    }
+}

@@ -37,3 +37,9 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0026: Target-specific Wasm compilation](0026-target-wasm-compilation.md) | Proposed experiment; no execution backend selected or integrated |
 | [RFC 0027: Spaces, membership and app data](0027-spaces-and-app-data.md) | Bounded implementation deployed and qualified on Frame; Member/Admin roles, public audiences, Space-owned collections and deletion lifecycle |
 | [RFC 0028: Spaces map, app sharing and portable data](0028-spaces-map-sharing-and-portable-data.md) | Complete and deployed: combined map, retained data, scoped moves and portable transfers; Safari/Frame, migration and rollback qualified |
+| [RFC 0029: OIB components and live UI data](0029-live-oib-ui.md) | O1 properties and O2 bounded instances implemented; arbitrary graph placement and executable class APIs remain proposed |
+| [RFC 0030: Bounded live OIB instances](0030-live-oib-instances.md) | O2 implemented; Frame input, typed API and live Wasm-client qualification recorded |
+| [RFC 0031: Live OIB component geometry](0031-live-oib-component-geometry.md) | Live compact design and spacing edits qualified on Frame and the deployed Wasm client |
+| [RFC 0032: Restore authored OIB instances and UI defaults](0032-oib-restoration.md) | Restore/default controls qualified on Frame and the deployed Wasm client; original bindings restored |
+| [RFC 0033: Reclaim deleted OIB instances](0033-oib-instance-reclamation.md) | Fresh IDs, reusable renderer slots and removal of unused OIB references |
+| [RFC 0034: Authored instance defaults](0034-oib-authored-instance-defaults.md) | Per-factory label defaults and inspector choices, independent of shared styling |

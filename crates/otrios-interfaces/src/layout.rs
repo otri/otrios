@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Versioned FlexBuffers layout contract. Serde connects typed Rust values directly to binary.
 use serde::{Deserialize, Serialize};
+/// Sparse u8 responder identities; 255 remains reserved for the host.
+/// Control/scene counts retain their existing admission bounds.
+pub const SPARSE_EVENTS_FORMAT: &str = "otrios-layout-v5";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Number(f32),

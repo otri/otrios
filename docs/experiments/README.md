@@ -7,6 +7,9 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Live OIB UI — 2026-11-02](live-oib-2026-11-02.md): named component properties,
+  instance overrides, durable causal edits and live browser/Frame acceptance.
+
 - [Space admission — 2026-11-01 JST](spaces-admission-2026-11-01.md): isolated collections, identities, migration, revocation and real browser qualification; Frame deployment remains pending.
 
 - [Offline app bundles — 2026-10-29](app-bundles-2026-10-29.md): flat FlexBuffers package export/integrity inspection; installation and AOT remain deferred.

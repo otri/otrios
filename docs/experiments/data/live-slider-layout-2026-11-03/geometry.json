@@ -1,0 +1,1590 @@
+{
+  "release": "df731b0ff67af52ff260be7631512ed289719e13ae15940716fbeba3f46145ed",
+  "protocol": "otrios-canvas-sync-v23",
+  "compact": {
+    "release": "df731b0ff67af52ff260be7631512ed289719e13ae15940716fbeba3f46145ed",
+    "pid_before": 31126,
+    "pid_after": 31126,
+    "epoch_before": 1,
+    "epoch_after": 1,
+    "generation_before": 80,
+    "generation_after": 81,
+    "percentages_preserved": [
+      "61%",
+      "57%",
+      "61%"
+    ],
+    "row_tracks": [
+      [
+        192.0,
+        140.0,
+        288.0,
+        48.0
+      ],
+      [
+        192.0,
+        204.0,
+        288.0,
+        48.0
+      ],
+      [
+        192.0,
+        268.0,
+        288.0,
+        48.0
+      ]
+    ],
+    "request": {
+      "changes": [
+        {
+          "cell": 104,
+          "value": {
+            "Number": 10
+          }
+        },
+        {
+          "cell": 105,
+          "value": {
+            "Number": 128
+          }
+        },
+        {
+          "cell": 106,
+          "value": {
+            "Number": 144
+          }
+        },
+        {
+          "cell": 107,
+          "value": {
+            "Number": 0
+          }
+        },
+        {
+          "cell": 108,
+          "value": {
+            "Number": 288
+          }
+        },
+        {
+          "cell": 109,
+          "value": {
+            "Number": 10
+          }
+        },
+        {
+          "cell": 110,
+          "value": {
+            "Number": 76
+          }
+        },
+        {
+          "cell": 111,
+          "value": {
+            "Number": 0
+          }
+        },
+        {
+          "cell": 112,
+          "value": {
+            "Number": 64
+          }
+        },
+        {
+          "cell": 113,
+          "value": {
+            "Boolean": false
+          }
+        },
+        {
+          "cell": 200,
+          "value": {
+            "Text": "volume"
+          }
+        },
+        {
+          "cell": 300,
+          "value": {
+            "Text": "brightness"
+          }
+        }
+      ],
+      "op": "properties"
+    },
+    "native_selected": 30,
+    "native_panel_offset": [
+      0.0,
+      232.0
+    ],
+    "rows_before": [
+      {
+        "bounds": [
+          184.80218505859375,
+          146.8131866455078,
+          246.39561462402344,
+          26.373626708984375
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "volume \u00b7 Volume binding"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          48.0,
+          188.0,
+          360.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "Level"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 1
+          }
+        }
+      },
+      {
+        "bounds": [
+          464.0,
+          188.0,
+          104.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "61%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          48.0,
+          252.0,
+          520.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 2
+          }
+        }
+      },
+      {
+        "bounds": [
+          153.38461303710938,
+          362.8131866455078,
+          309.23077392578125,
+          26.373626708984375
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "brightness \u00b7 Brightness binding"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          48.0,
+          404.0,
+          360.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "Level"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 4
+          }
+        }
+      },
+      {
+        "bounds": [
+          464.0,
+          404.0,
+          104.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "57%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          48.0,
+          468.0,
+          520.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 5
+          }
+        }
+      },
+      {
+        "bounds": [
+          184.80218505859375,
+          578.8131866455078,
+          246.39561462402344,
+          26.373626708984375
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "instance-3 \u00b7 Volume binding"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          48.0,
+          620.0,
+          360.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "Frame"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 45
+          }
+        }
+      },
+      {
+        "bounds": [
+          464.0,
+          620.0,
+          104.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "61%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          48.0,
+          684.0,
+          520.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 46
+          }
+        }
+      }
+    ],
+    "rows_after": [
+      {
+        "bounds": [
+          48.0,
+          150.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "volume"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 1
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          150.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "61%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          140.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 2
+          }
+        }
+      },
+      {
+        "bounds": [
+          48.0,
+          214.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "brightness"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 4
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          214.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "57%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          204.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 5
+          }
+        }
+      },
+      {
+        "bounds": [
+          48.0,
+          278.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "Frame"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 45
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          278.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "61%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          268.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 46
+          }
+        }
+      }
+    ],
+    "elapsed_seconds": 3.461
+  },
+  "spacing": {
+    "release": "df731b0ff67af52ff260be7631512ed289719e13ae15940716fbeba3f46145ed",
+    "pid_before": 31126,
+    "pid_after": 31126,
+    "epoch_before": 1,
+    "epoch_after": 1,
+    "generation_before": 81,
+    "generation_after": 82,
+    "percentages_preserved": [
+      "53%",
+      "48%",
+      "53%"
+    ],
+    "row_tracks": [
+      [
+        192.0,
+        140.0,
+        288.0,
+        48.0
+      ],
+      [
+        192.0,
+        220.0,
+        288.0,
+        48.0
+      ],
+      [
+        192.0,
+        300.0,
+        288.0,
+        48.0
+      ]
+    ],
+    "request": {
+      "changes": [
+        {
+          "cell": 112,
+          "value": {
+            "Number": 80
+          }
+        }
+      ],
+      "op": "properties"
+    },
+    "native_selected": 30,
+    "native_panel_offset": [
+      0.0,
+      232.0
+    ],
+    "rows_before": [
+      {
+        "bounds": [
+          48.0,
+          150.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "volume"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 1
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          150.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "53%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          140.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 2
+          }
+        }
+      },
+      {
+        "bounds": [
+          48.0,
+          214.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "brightness"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 4
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          214.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "48%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          204.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 5
+          }
+        }
+      },
+      {
+        "bounds": [
+          48.0,
+          278.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "Frame"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 45
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          278.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "53%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          268.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 46
+          }
+        }
+      }
+    ],
+    "rows_after": [
+      {
+        "bounds": [
+          48.0,
+          150.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "volume"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 1
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          150.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "53%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          140.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 2
+          }
+        }
+      },
+      {
+        "bounds": [
+          48.0,
+          230.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "brightness"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 4
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          230.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "48%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          220.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 5
+          }
+        }
+      },
+      {
+        "bounds": [
+          48.0,
+          310.0,
+          128.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              239,
+              241,
+              237,
+              255
+            ],
+            "scale": 2,
+            "value": "Frame"
+          }
+        },
+        "responder": {
+          "Activate": {
+            "AppEvent": 45
+          }
+        }
+      },
+      {
+        "bounds": [
+          492.0,
+          310.0,
+          76.0,
+          28.0
+        ],
+        "primitive": {
+          "Text": {
+            "color": [
+              85,
+              136,
+              255,
+              255
+            ],
+            "scale": 2,
+            "value": "53%"
+          }
+        },
+        "responder": null
+      },
+      {
+        "bounds": [
+          192.0,
+          300.0,
+          288.0,
+          48.0
+        ],
+        "primitive": {
+          "Canvas": {
+            "clip": true
+          }
+        },
+        "responder": {
+          "Drag": {
+            "AppEvent": 46
+          }
+        }
+      }
+    ],
+    "elapsed_seconds": 3.404
+  },
+  "public_wasm_snapshots": [
+    {
+      "type": "snapshot",
+      "epoch": 1,
+      "confirmed": true,
+      "oib": {
+        "active_generation": 80,
+        "presented_generation": 80,
+        "conflicts": [],
+        "status": "Live \u00b7 revision 80 \u00b7 3 instances \u00b7 4 IDs left",
+        "properties": {
+          "100": "label: Level (default)",
+          "101": "accent: #5588FF (default)",
+          "102": "width: 520 (default)",
+          "103": "spacing: 24 (default)",
+          "104": "label y: 0 (default)",
+          "105": "label width: 360 (default)",
+          "106": "track x: 0 (default)",
+          "107": "track y: 64 (default)",
+          "108": "track width: 520 (default)",
+          "109": "percentage y: 0 (default)",
+          "110": "percentage width: 104 (default)",
+          "111": "content y: 48 (default)",
+          "112": "row pitch: 216 (default)",
+          "113": "heading visible: true (default)",
+          "200": "label: Level (inherited)",
+          "201": "accent: #5588FF (inherited)",
+          "202": "width: 520 (inherited)",
+          "203": "spacing: 24 (inherited)",
+          "300": "label: Level (inherited)",
+          "301": "accent: #5588FF (inherited)",
+          "302": "width: 520 (inherited)",
+          "303": "spacing: 24 (inherited)",
+          "16777344": "label: Frame (override)",
+          "16777345": "accent: #5588FF (inherited)",
+          "16777346": "width: 520 (inherited)",
+          "16777347": "spacing: 24 (inherited)",
+          "16777408": "label: Code (override)",
+          "16777409": "accent: #5588FF (inherited)",
+          "16777410": "width: 520 (inherited)",
+          "16777411": "spacing: 24 (inherited)",
+          "16777472": "label: Code (override)",
+          "16777473": "accent: #5588FF (inherited)",
+          "16777474": "width: 520 (inherited)",
+          "16777475": "spacing: 24 (inherited)",
+          "16777536": "label: Frame (override)",
+          "16777537": "accent: #5588FF (inherited)",
+          "16777538": "width: 520 (inherited)",
+          "16777539": "spacing: 24 (inherited)"
+        },
+        "instances": [
+          {
+            "id": 20,
+            "name": "volume",
+            "component": 10,
+            "prototype": 20,
+            "active": true
+          },
+          {
+            "id": 30,
+            "name": "brightness",
+            "component": 10,
+            "prototype": 30,
+            "active": true
+          },
+          {
+            "id": 65538,
+            "name": "instance-3",
+            "component": 10,
+            "prototype": 20,
+            "active": true
+          },
+          {
+            "id": 65539,
+            "name": "code-slider",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          },
+          {
+            "id": 65540,
+            "name": "code-copy",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          },
+          {
+            "id": 65541,
+            "name": "instance-6",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          }
+        ],
+        "allocations_remaining": 4,
+        "selected_instance": 20
+      },
+      "panel_scroll": {
+        "offset": [
+          0,
+          100
+        ],
+        "limit": [
+          0,
+          232
+        ],
+        "active": false,
+        "velocity": [
+          0,
+          0
+        ]
+      },
+      "oib_preview_scroll": {
+        "offset": [
+          0,
+          0
+        ],
+        "limit": [
+          0,
+          28
+        ],
+        "active": false,
+        "velocity": [
+          0,
+          0
+        ]
+      },
+      "text": "< OTriOS. < Test Playground. \u2022. Live UI. volume \u00b7 Volume binding. Level. 61%. brightness \u00b7 Brightness binding. Level. 57%. instance-3 \u00b7 Volume binding. Frame. 61%. Live \u00b7 revision 80 \u00b7 3 instances \u00b7 4 IDs left. Add LabeledSlider. Remove pending. Component: LabeledSlider. label: Level (default). Change. Default. accent: #5588FF (default). Change. Default. width: 520 (default). Change. Default. spacing: 24 (default). Change. Default. Instance: volume \u00b7 Volume binding. Duplicate. Remove. label: Level (inherited). Change. Reset. Default. accent: #5588FF (inherited). Change. Reset. Default. width: 520 (inherited). Change. Reset. Default. spacing: 24 (inherited). Change. Reset. Default",
+      "controls": [
+        {
+          "id": 3,
+          "label": "Back to OTriOS",
+          "bounds": [
+            0,
+            0,
+            187.81869506835938,
+            96
+          ]
+        },
+        {
+          "id": 5,
+          "label": "Test Playground",
+          "bounds": [
+            175.81869506835938,
+            24,
+            278.19781494140625,
+            60
+          ]
+        },
+        {
+          "id": 16,
+          "label": "volume \u00b7 Volume binding",
+          "bounds": [
+            48,
+            140,
+            520,
+            40
+          ]
+        },
+        {
+          "id": 22,
+          "label": "Inspect volume",
+          "bounds": [
+            48,
+            188,
+            360,
+            28
+          ]
+        },
+        {
+          "id": 28,
+          "label": "brightness \u00b7 Brightness binding",
+          "bounds": [
+            48,
+            356,
+            520,
+            40
+          ]
+        },
+        {
+          "id": 34,
+          "label": "Inspect brightness",
+          "bounds": [
+            48,
+            404,
+            360,
+            28
+          ]
+        },
+        {
+          "id": 254,
+          "label": "instance-3 \u00b7 Volume binding",
+          "bounds": [
+            48,
+            572,
+            520,
+            40
+          ]
+        },
+        {
+          "id": 260,
+          "label": "Inspect instance-3",
+          "bounds": [
+            48,
+            620,
+            360,
+            28
+          ]
+        }
+      ],
+      "observed_at": 1793645965.271393
+    },
+    {
+      "type": "snapshot",
+      "epoch": 1,
+      "confirmed": true,
+      "oib": {
+        "active_generation": 81,
+        "presented_generation": 81,
+        "conflicts": [],
+        "status": "Live \u00b7 revision 81 \u00b7 3 instances \u00b7 4 IDs left",
+        "properties": {
+          "100": "label: Level (default)",
+          "101": "accent: #5588FF (default)",
+          "102": "width: 520 (default)",
+          "103": "spacing: 24 (default)",
+          "104": "label y: 10 (default)",
+          "105": "label width: 128 (default)",
+          "106": "track x: 144 (default)",
+          "107": "track y: 0 (default)",
+          "108": "track width: 288 (default)",
+          "109": "percentage y: 10 (default)",
+          "110": "percentage width: 76 (default)",
+          "111": "content y: 0 (default)",
+          "112": "row pitch: 64 (default)",
+          "113": "heading visible: false (default)",
+          "200": "label: volume (override)",
+          "201": "accent: #5588FF (inherited)",
+          "202": "width: 520 (inherited)",
+          "203": "spacing: 24 (inherited)",
+          "300": "label: brightness (override)",
+          "301": "accent: #5588FF (inherited)",
+          "302": "width: 520 (inherited)",
+          "303": "spacing: 24 (inherited)",
+          "16777344": "label: Frame (override)",
+          "16777345": "accent: #5588FF (inherited)",
+          "16777346": "width: 520 (inherited)",
+          "16777347": "spacing: 24 (inherited)",
+          "16777408": "label: Code (override)",
+          "16777409": "accent: #5588FF (inherited)",
+          "16777410": "width: 520 (inherited)",
+          "16777411": "spacing: 24 (inherited)",
+          "16777472": "label: Code (override)",
+          "16777473": "accent: #5588FF (inherited)",
+          "16777474": "width: 520 (inherited)",
+          "16777475": "spacing: 24 (inherited)",
+          "16777536": "label: Frame (override)",
+          "16777537": "accent: #5588FF (inherited)",
+          "16777538": "width: 520 (inherited)",
+          "16777539": "spacing: 24 (inherited)"
+        },
+        "instances": [
+          {
+            "id": 20,
+            "name": "volume",
+            "component": 10,
+            "prototype": 20,
+            "active": true
+          },
+          {
+            "id": 30,
+            "name": "brightness",
+            "component": 10,
+            "prototype": 30,
+            "active": true
+          },
+          {
+            "id": 65538,
+            "name": "instance-3",
+            "component": 10,
+            "prototype": 20,
+            "active": true
+          },
+          {
+            "id": 65539,
+            "name": "code-slider",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          },
+          {
+            "id": 65540,
+            "name": "code-copy",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          },
+          {
+            "id": 65541,
+            "name": "instance-6",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          }
+        ],
+        "allocations_remaining": 4,
+        "selected_instance": 20
+      },
+      "panel_scroll": {
+        "offset": [
+          0,
+          100
+        ],
+        "limit": [
+          0,
+          232
+        ],
+        "active": false,
+        "velocity": [
+          0,
+          0
+        ]
+      },
+      "oib_preview_scroll": {
+        "offset": [
+          0,
+          0
+        ],
+        "limit": [
+          0,
+          0
+        ],
+        "active": false,
+        "velocity": [
+          0,
+          0
+        ]
+      },
+      "text": "< OTriOS. < Test Playground. \u2022. Live UI. volume. 61%. brightness. 57%. Frame. 61%. Live \u00b7 revision 81 \u00b7 3 instances \u00b7 4 IDs left. Add LabeledSlider. Remove pending. Component: LabeledSlider. label: Level (default). Change. Default. accent: #5588FF (default). Change. Default. width: 520 (default). Change. Default. spacing: 24 (default). Change. Default. Instance: volume \u00b7 Volume binding. Duplicate. Remove. label: volume (override). Change. Reset. Default. accent: #5588FF (inherited). Change. Reset. Default. width: 520 (inherited). Change. Reset. Default. spacing: 24 (inherited). Change. Reset. Default",
+      "controls": [
+        {
+          "id": 3,
+          "label": "Back to OTriOS",
+          "bounds": [
+            0,
+            0,
+            187.81869506835938,
+            96
+          ]
+        },
+        {
+          "id": 5,
+          "label": "Test Playground",
+          "bounds": [
+            175.81869506835938,
+            24,
+            278.19781494140625,
+            60
+          ]
+        },
+        {
+          "id": 22,
+          "label": "Inspect volume",
+          "bounds": [
+            48,
+            150,
+            128,
+            28
+          ]
+        },
+        {
+          "id": 34,
+          "label": "Inspect brightness",
+          "bounds": [
+            48,
+            214,
+            128,
+            28
+          ]
+        },
+        {
+          "id": 260,
+          "label": "Inspect instance-3",
+          "bounds": [
+            48,
+            278,
+            128,
+            28
+          ]
+        }
+      ],
+      "observed_at": 1793645998.3513138
+    },
+    {
+      "type": "snapshot",
+      "epoch": 1,
+      "confirmed": true,
+      "oib": {
+        "active_generation": 82,
+        "presented_generation": 82,
+        "conflicts": [],
+        "status": "Live \u00b7 revision 82 \u00b7 3 instances \u00b7 4 IDs left",
+        "properties": {
+          "100": "label: Level (default)",
+          "101": "accent: #5588FF (default)",
+          "102": "width: 520 (default)",
+          "103": "spacing: 24 (default)",
+          "104": "label y: 10 (default)",
+          "105": "label width: 128 (default)",
+          "106": "track x: 144 (default)",
+          "107": "track y: 0 (default)",
+          "108": "track width: 288 (default)",
+          "109": "percentage y: 10 (default)",
+          "110": "percentage width: 76 (default)",
+          "111": "content y: 0 (default)",
+          "112": "row pitch: 80 (default)",
+          "113": "heading visible: false (default)",
+          "200": "label: volume (override)",
+          "201": "accent: #5588FF (inherited)",
+          "202": "width: 520 (inherited)",
+          "203": "spacing: 24 (inherited)",
+          "300": "label: brightness (override)",
+          "301": "accent: #5588FF (inherited)",
+          "302": "width: 520 (inherited)",
+          "303": "spacing: 24 (inherited)",
+          "16777344": "label: Frame (override)",
+          "16777345": "accent: #5588FF (inherited)",
+          "16777346": "width: 520 (inherited)",
+          "16777347": "spacing: 24 (inherited)",
+          "16777408": "label: Code (override)",
+          "16777409": "accent: #5588FF (inherited)",
+          "16777410": "width: 520 (inherited)",
+          "16777411": "spacing: 24 (inherited)",
+          "16777472": "label: Code (override)",
+          "16777473": "accent: #5588FF (inherited)",
+          "16777474": "width: 520 (inherited)",
+          "16777475": "spacing: 24 (inherited)",
+          "16777536": "label: Frame (override)",
+          "16777537": "accent: #5588FF (inherited)",
+          "16777538": "width: 520 (inherited)",
+          "16777539": "spacing: 24 (inherited)"
+        },
+        "instances": [
+          {
+            "id": 20,
+            "name": "volume",
+            "component": 10,
+            "prototype": 20,
+            "active": true
+          },
+          {
+            "id": 30,
+            "name": "brightness",
+            "component": 10,
+            "prototype": 30,
+            "active": true
+          },
+          {
+            "id": 65538,
+            "name": "instance-3",
+            "component": 10,
+            "prototype": 20,
+            "active": true
+          },
+          {
+            "id": 65539,
+            "name": "code-slider",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          },
+          {
+            "id": 65540,
+            "name": "code-copy",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          },
+          {
+            "id": 65541,
+            "name": "instance-6",
+            "component": 10,
+            "prototype": 20,
+            "active": false
+          }
+        ],
+        "allocations_remaining": 4,
+        "selected_instance": 20
+      },
+      "panel_scroll": {
+        "offset": [
+          0,
+          100
+        ],
+        "limit": [
+          0,
+          232
+        ],
+        "active": false,
+        "velocity": [
+          0,
+          0
+        ]
+      },
+      "oib_preview_scroll": {
+        "offset": [
+          0,
+          0
+        ],
+        "limit": [
+          0,
+          0
+        ],
+        "active": false,
+        "velocity": [
+          0,
+          0
+        ]
+      },
+      "text": "< OTriOS. < Test Playground. \u2022. Live UI. volume. 53%. brightness. 48%. Frame. 53%. Live \u00b7 revision 82 \u00b7 3 instances \u00b7 4 IDs left. Add LabeledSlider. Remove pending. Component: LabeledSlider. label: Level (default). Change. Default. accent: #5588FF (default). Change. Default. width: 520 (default). Change. Default. spacing: 24 (default). Change. Default. Instance: volume \u00b7 Volume binding. Duplicate. Remove. label: volume (override). Change. Reset. Default. accent: #5588FF (inherited). Change. Reset. Default. width: 520 (inherited). Change. Reset. Default. spacing: 24 (inherited). Change. Reset. Default",
+      "controls": [
+        {
+          "id": 3,
+          "label": "Back to OTriOS",
+          "bounds": [
+            0,
+            0,
+            187.81869506835938,
+            96
+          ]
+        },
+        {
+          "id": 5,
+          "label": "Test Playground",
+          "bounds": [
+            175.81869506835938,
+            24,
+            278.19781494140625,
+            60
+          ]
+        },
+        {
+          "id": 22,
+          "label": "Inspect volume",
+          "bounds": [
+            48,
+            150,
+            128,
+            28
+          ]
+        },
+        {
+          "id": 34,
+          "label": "Inspect brightness",
+          "bounds": [
+            48,
+            230,
+            128,
+            28
+          ]
+        },
+        {
+          "id": 260,
+          "label": "Inspect instance-3",
+          "bounds": [
+            48,
+            310,
+            128,
+            28
+          ]
+        }
+      ],
+      "observed_at": 1793646110.373791
+    }
+  ],
+  "owner_confirmed_compact_design": true,
+  "owner_confirmed_80_px_spacing": true,
+  "compatible_signed_code_kit_verified": true,
+  "full_check_script_run": false
+}

@@ -275,6 +275,36 @@ impl Snapshot {
     pub fn edit(&self, actor: Actor, edits: &[Edit]) -> Result<(Self, Work)> {
         self.edit_with_workspace(actor, edits, &mut Workspace::default())
     }
+    /// Assign against the writer's observed leaf, preserving concurrent values.
+    /// Policy and typed value validation belong to the admitting application.
+    pub fn edit_observed(&self, actor: Actor, edit: &Edit, observed: &Self) -> Result<Self> {
+        let current = self.subtree(&edit.path)?;
+        let here = current.register().ok_or(Error::Missing)?;
+        let seen = observed.register().ok_or(Error::Missing)?;
+        if current.child_keys().next().is_some()
+            || observed.child_keys().next().is_some()
+            || here.schema != edit.schema
+            || seen.schema != edit.schema
+            || seen
+                .context
+                .iter()
+                .any(|(actor, n)| here.context.get(actor).copied().unwrap_or(0) < *n)
+            || here.context.get(&actor) != seen.context.get(&actor)
+        {
+            return Err(Error::Stale);
+        }
+        let next = observed
+            .edit(
+                actor,
+                &[Edit {
+                    path: vec![],
+                    schema: edit.schema,
+                    value: edit.value.clone(),
+                }],
+            )?
+            .0;
+        Ok(self.merge_subtree(&edit.path, &next)?.0)
+    }
     /// Reuse the caller's bounded hash workspace across atomic publications.
     pub fn edit_with_workspace(
         &self,

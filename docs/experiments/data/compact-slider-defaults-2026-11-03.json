@@ -1,0 +1,117 @@
+{
+  "release": "a8341bf77f91c8c26cf2f6ae23bf75c1df51e0bd4f748865aa3970db49d93cdb",
+  "state_protocol": "otrios-canvas-sync-v24",
+  "passed": true,
+  "native_pid": 13653,
+  "mount_epoch": 1,
+  "percentages_before": [
+    "72%",
+    "48%"
+  ],
+  "percentages_after": [
+    "72%",
+    "48%"
+  ],
+  "public_wasm_generations": [
+    129,
+    130,
+    131,
+    132,
+    133,
+    134,
+    135
+  ],
+  "public_wasm_confirmed": true,
+  "steps": [
+    {
+      "operation": "observe",
+      "defaults": null,
+      "generation": 129,
+      "track_count": 2,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    },
+    {
+      "operation": "remove",
+      "defaults": null,
+      "generation": 130,
+      "track_count": 1,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    },
+    {
+      "operation": "remove",
+      "defaults": null,
+      "generation": 131,
+      "track_count": 0,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    },
+    {
+      "operation": "add",
+      "defaults": null,
+      "generation": 132,
+      "track_count": 1,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    },
+    {
+      "operation": "restore",
+      "defaults": false,
+      "generation": 133,
+      "track_count": 2,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    },
+    {
+      "operation": "restore",
+      "defaults": true,
+      "generation": 134,
+      "track_count": 2,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    },
+    {
+      "operation": "properties",
+      "defaults": null,
+      "generation": 135,
+      "track_count": 2,
+      "row_pitch": 80,
+      "track_size": [
+        288,
+        48
+      ]
+    }
+  ],
+  "active_instances": [
+    20,
+    30
+  ],
+  "retained_allocation_count": 9,
+  "allocations_remaining": 1,
+  "checks": {
+    "oib_tests": 28,
+    "authority_process_tests": 2,
+    "strict_clippy": true,
+    "broad_suite_run": false,
+    "cross_release_rollback_run": false
+  }
+}

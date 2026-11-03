@@ -128,7 +128,7 @@ try{
       const inputIds=new Set((f.inputs||[]).map(d=>d.id));for(const [id,b]of controls){b.tabIndex=inputIds.has(id)?-1:0;if(inputIds.has(id))b.setAttribute('aria-hidden','true');else b.removeAttribute('aria-hidden');}
       textInputs.accept(f);
       if(focusKey&&!document.activeElement?.matches('.canvas-editor')){const b=controls.get(Number(focusKey.id));if(b?.getAttribute('aria-label')===focusKey.label)b.focus({preventScroll:true});}
-      const panelOpen=!!f.resources?.panel_scroll;
+      const panelOpen=!!f.resources?.panel_scroll&&!f.resources?.oib;
       if(panelOpen){
         controlsLayer.setAttribute('role','dialog');controlsLayer.setAttribute('aria-modal','true');controlsLayer.setAttribute('aria-label','Settings');
         if(!panelWasOpen){panelReturnFocus=focusKey?.label||null;if(!document.activeElement?.matches('.canvas-editor'))(panelFocusables().find(b=>b.getAttribute('aria-label')?.startsWith('Move to '))||panelFocusables()[0])?.focus({preventScroll:true});}
@@ -188,12 +188,13 @@ try{
     if((e.key==='Tab')||(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)&&e.target.matches('#controls button'))){const items=panelFocusables();if(items.length){e.preventDefault();e.stopImmediatePropagation();const at=items.indexOf(document.activeElement),back=e.shiftKey||['ArrowUp','ArrowLeft'].includes(e.key);items[(at+(back?-1:1)+items.length)%items.length].focus({preventScroll:true});}}
   },{capture:true});
   canvas.addEventListener('wheel',e=>{
-    if(graphicsLost||!(model?.resources?.map_scroll||model?.resources?.panel_scroll))return;
+    if(graphicsLost||!(model?.resources?.map_scroll||model?.resources?.panel_scroll||model?.resources?.oib_preview_scroll))return;
     e.preventDefault();
     const rect=canvas.getBoundingClientRect();
     const unit=e.deltaMode===1?32:e.deltaMode===2?rect.height:1;
     const delta=e.deltaY*unit*(model.extent[1]/rect.height);
-    if(Number.isFinite(delta))command({type:'map-scroll',epoch:model.epoch,viewportRevision:model.viewportRevision,delta});
+    const position=pointerPosition(e.clientX,e.clientY,rect,model.extent);
+    if(Number.isFinite(delta))command({type:'map-scroll',epoch:model.epoch,viewportRevision:model.viewportRevision,delta,position,id:position.map(Math.round).join(',')});
   },{passive:false});
   canvas.addEventListener('pointerdown',e=>{if(graphicsLost)return;e.preventDefault();if(!document.activeElement?.matches('.canvas-editor'))canvas.focus({preventScroll:true});pointers.add(e.pointerId);if(timings)pointerStarts.set(e.pointerId,timingTools.eventTimestamp(e,performance));canvas.setPointerCapture(e.pointerId);command(pointer(e,0));});
   canvas.addEventListener('pointermove',e=>{if(pointers.has(e.pointerId))moves.add(e,s=>pointer(s,1));});

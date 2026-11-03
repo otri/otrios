@@ -1,0 +1,113 @@
+{
+  "passed": true,
+  "release": "2b89991d519006358a070b24900c49d0489a2096b8d03b016c9dec4d1079e4f7",
+  "state_protocol": "otrios-canvas-sync-v26",
+  "volume_instance": 65553,
+  "brightness_instance": 65554,
+  "percentages_before": [
+    "68%",
+    "31%"
+  ],
+  "percentages_after": [
+    "68%",
+    "31%"
+  ],
+  "native_pid": 24818,
+  "mount_epoch": 1,
+  "selected_instance": 65554,
+  "label_checks": [
+    {
+      "generation": 205,
+      "volume": "label: Volume (authored)",
+      "brightness": "label: Brightness (authored)"
+    },
+    {
+      "generation": 206,
+      "volume": "label: Volume (authored)",
+      "brightness": "label: Volume (override)"
+    },
+    {
+      "generation": 207,
+      "volume": "label: Volume (authored)",
+      "brightness": "label: Brightness (authored)"
+    },
+    {
+      "generation": 208,
+      "volume": "label: Volume (authored)",
+      "brightness": "label: Light (override)"
+    },
+    {
+      "generation": 209,
+      "volume": "label: Volume (authored)",
+      "brightness": "label: Brightness (override)"
+    },
+    {
+      "generation": 210,
+      "volume": "label: Volume (authored)",
+      "brightness": "label: Brightness (authored)"
+    }
+  ],
+  "native_taps": [
+    {
+      "label": "Inspect brightness",
+      "point": [
+        112.0,
+        244.0
+      ],
+      "generation": 205
+    },
+    {
+      "label": "Instance: brightness Label reset",
+      "point": [
+        1000.0,
+        492.0
+      ],
+      "generation": 207
+    },
+    {
+      "label": "Instance: brightness Label change",
+      "point": [
+        880.0,
+        492.0
+      ],
+      "generation": 208
+    },
+    {
+      "label": "Instance: brightness Label resolve to default",
+      "point": [
+        1128.0,
+        492.0
+      ],
+      "generation": 209
+    },
+    {
+      "label": "Instance: brightness Label reset",
+      "point": [
+        1000.0,
+        492.0
+      ],
+      "generation": 210
+    }
+  ],
+  "public_wasm_generations": [
+    205,
+    206,
+    207,
+    208,
+    209,
+    210
+  ],
+  "other_properties_preserved": true,
+  "instance_roster_preserved": true,
+  "row_pitch": 80,
+  "checks": {
+    "oib_tests": 35,
+    "authority_process_tests": 2,
+    "unified_session_tests": 2,
+    "node_tests": 34,
+    "release_tests": 35,
+    "strict_core_clippy": true,
+    "broad_suite_run": false,
+    "cross_release_rollback_run": false
+  }
+}

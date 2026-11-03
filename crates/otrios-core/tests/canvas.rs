@@ -68,7 +68,16 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
                 &frame.base.views[i * 8..i * 8 + 8]
             );
         }
-        assert_eq!(identities(&tall), before, "{}", app.id);
+        if oib::seed(&factory(bytes)).is_some() {
+            // The scrolling inspector reveals a different admitted subset by viewport.
+            for (id, label) in identities(&tall) {
+                if let Some((_, old)) = before.iter().find(|(node, _)| *node == id) {
+                    assert_eq!(&label, old);
+                }
+            }
+        } else {
+            assert_eq!(identities(&tall), before, "{}", app.id);
+        }
         assert_eq!(c.epoch(), epoch);
         assert_eq!(
             [tall.root().frame.width, tall.root().frame.height],
@@ -1403,6 +1412,7 @@ fn reconnect_restores_pending_intents_only_for_the_same_collection_and_actions()
                 actor: [1; 32],
                 collection: collection.repeat(32),
                 editable,
+                ui_editable: false,
                 comments: false,
                 moderate: false,
             })
@@ -1517,6 +1527,7 @@ fn managed_candidates_remain_invisible_until_activation_and_are_discarded_on_den
                             actor: [1; 32],
                             collection: "a".repeat(32),
                             editable: true,
+                            ui_editable: false,
                             comments: false,
                             moderate: false
                         }),
@@ -1645,6 +1656,7 @@ fn managed_chat_qualifies_its_first_transcript_before_activation_and_never_resum
                     actor: [1; 32],
                     collection: "d".repeat(32),
                     editable: true,
+                    ui_editable: false,
                     comments: false,
                     moderate: true,
                 }),
@@ -1811,6 +1823,7 @@ fn managed_aggregate_candidates_require_a_usable_initial_view_before_acceptance(
                     actor: [1; 32],
                     collection: "b".repeat(32),
                     editable: false,
+                    ui_editable: false,
                     comments: false,
                     moderate: false,
                 }),
@@ -3196,7 +3209,7 @@ fn playground_cards(client: &Client) -> Vec<(String, u32, [f32; 2])> {
             c.node
                 .semantics
                 .as_ref()
-                .is_none_or(|s| s.label != "OTriOS")
+                .is_none_or(|s| s.label != "OTriOS" && s.label != "Live UI")
         })
         .filter(|c| {
             matches!(
@@ -3538,7 +3551,7 @@ fn shipped_apps_include_the_retained_text_and_document_subscreens() {
     .into_iter()
     .flat_map(|screens| screens())
     .collect();
-    assert_eq!(screens.len(), 10);
+    assert_eq!(screens.len(), 11);
     assert_eq!(
         screens
             .iter()
@@ -5068,6 +5081,7 @@ fn managed_read_only_chat_is_readable_without_joining_or_enabling_composition() 
                     actor: [1; 32],
                     collection: "d".repeat(32),
                     editable: false,
+                    ui_editable: false,
                     comments: false,
                     moderate: false,
                 }),
