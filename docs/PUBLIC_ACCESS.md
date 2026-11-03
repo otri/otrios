@@ -78,6 +78,11 @@ opaque session; only its digest is kept server-side. The browser receives a
 host-only `Secure; HttpOnly; SameSite=Strict; Path=/` cookie, expiring after eight
 hours by default. Sessions are RAM-only; restarting the server signs browsers out.
 
+A failed status request caused by rate limiting or a server/proxy outage does
+not change the last confirmed browser sign-in status. An authoritative 401 still
+revokes it immediately; protected requests are always checked by the authority.
+This does not extend the eight-hour expiry or retain sessions across a restart.
+
 POST/DELETE require the exact Origin and a custom request header; login uses
 JSON. Verification has one worker slot, 20 attempts/minute globally and 128
 sessions. Passwords/tokens do not enter URLs, document state or logs. The browser
