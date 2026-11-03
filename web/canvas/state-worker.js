@@ -166,6 +166,8 @@ onmessage=async({data:m})=>{try{
     case 'map-scroll':changed=Array.isArray(m.position)?app.scroll_at(m.epoch,m.delta,...m.position):app.scroll_map(m.epoch,m.delta);break;
     case 'text-scroll':changed=app.scroll_text_input(m.epoch,m.id,m.scroll);break;
     case 'text-enter':changed=app.text_input_key(m.epoch,m.id,'Enter');break;
+    case 'text-tab':changed=app.text_input_key(m.epoch,m.id,m.backward?'BackTab':'Tab');break;
+    case 'text-cancel':changed=app.cancel_text_input(m.epoch,m.id);break;
     case 'text-blur':changed=app.blur_text_input(m.epoch,m.id);break;
     case 'text-composition':if(m.epoch===app.epoch())composition=m.active?{epoch:m.epoch,id:m.id}:null;break;
     case 'key':if(app.editing())changed=app.key(m.key,m.select);break;
