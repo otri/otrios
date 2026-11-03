@@ -180,6 +180,19 @@ pub(super) fn project(
             hierarchy,
         ],
     );
+    if open {
+        // Consume needs a leaf hit target in empty gutters. Keep the visual
+        // surface pass-through and put a full-area input shield behind it.
+        let mut barrier = background(
+            CHROME + 26,
+            DRAWER,
+            (height - HEADER).max(1.),
+            [0, 0, 0, 0],
+            0.,
+        );
+        barrier.responder = Some(TouchResponder::Consume);
+        drawer.children.insert(0, barrier);
+    }
     drawer.responder = Some(TouchResponder::Consume);
     let mut backdrop = background(CHROME + 13, width, scene.root().frame.height, BG, 0.);
     backdrop.responder = Some(TouchResponder::PassThrough);

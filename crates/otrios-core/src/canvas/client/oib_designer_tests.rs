@@ -1304,6 +1304,39 @@ fn frame_focus_drawer_geometry_hits_and_release_outside_are_local() {
             !hit.iter().any(|n| n.node.id == preview),
             "drawer barrier covers preview"
         );
+        // Empty gutters need a real modal hit target too; decoration passes
+        // through, and a Consume canvas alone does not establish a leaf hit.
+        for point in [
+            [310., 200.],
+            [310., 66.],
+            [1., 300.],
+            [310., viewport[1] - 1.],
+        ] {
+            let hit = opened.hit_path(point);
+            assert!(
+                !hit.iter().any(|n| n.node.id == preview),
+                "blank drawer gutter leaks at {point:?}"
+            );
+            assert!(
+                hit.iter()
+                    .any(|n| n.node.responder == Some(TouchResponder::Consume))
+            );
+            let mut router = crate::dashboard::input::InputRouter::default();
+            for phase in [PointerPhase::Down, PointerPhase::Move, PointerPhase::Up] {
+                let delivery = router.dispatch(
+                    opened.clone(),
+                    PointerEvent {
+                        id: 991,
+                        phase,
+                        position: point,
+                    },
+                );
+                assert!(
+                    delivery.action.is_none() && delivery.gesture.is_none(),
+                    "drawer gutter must never dispatch an app action or drag"
+                );
+            }
+        }
         assert!(
             client
                 .designer_activate(super::super::oib_focus_layout::LAYERS)

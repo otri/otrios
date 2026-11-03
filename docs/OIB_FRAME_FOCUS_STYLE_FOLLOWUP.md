@@ -102,3 +102,22 @@ Independent integrated review, signed staging/deployment, final fixture capture
 and changed-paint-path Frame timing remain pending for this styling follow-up.
 The earlier performance qualification continues to describe its exact prior
 release; it is not claimed as measurement of the new outlined paint workload.
+
+## Independent modal-barrier finding and correction
+
+The first integrated review passed 29 Designer, 5 surface and 9 fixture tests,
+and 6,381 joint pane-edge cases including provenance details and keyboard off/on.
+Maximum scenes were 400 nodes / 58 controls and 419 / 72, below existing limits.
+It found one P2 issue: the decorative outlined drawer surface passes through,
+while Consume on a Canvas alone cannot establish a leaf hit in a blank gutter.
+At [310, 200], the underlying preview slider received an app drag.
+
+The permanent drawer regression reproduced that failure before the fix. The
+parent added a transparent, full-area Consume leaf behind drawer controls only
+while the drawer is open. Visual layers remain pass-through; foreground controls
+retain priority. No handler, semantic control or resource limit was added.
+The regression now checks blank left/right/top/bottom gutters in both orientations
+through actual InputRouter Down/Move/Up dispatch, as well as the existing closed
+layout and release-outside checks. All 29 Designer tests passed after correction.
+A fresh independent recheck and rebuilt signed candidate are required before
+this follow-up can deploy; the earlier staged artifact is superseded.
