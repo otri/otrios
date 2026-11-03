@@ -17,7 +17,7 @@ pub struct Info {
     pub status: String,
     pub properties: BTreeMap<u64, String>,
     pub instances: Vec<InstanceInfo>,
-    pub allocations_remaining: usize,
+    pub available_instance_slots: usize,
     pub selected_instance: Option<u64>,
 }
 #[derive(Clone, Debug, serde::Serialize)]

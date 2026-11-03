@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Deterministic expansion of signed factories. Allocated IDs never depend on live order.
+//! Signed factories with durable object identities and reusable renderer slots.
 use super::*;
 use otrios_interfaces::layout::{Binding as LocalBinding, Responder};
 
 pub fn initial_allocations(seed: &Seed) -> Vec<Allocation> {
     seed.instances
         .iter()
-        .map(|i| Allocation {
+        .enumerate()
+        .map(|(slot, i)| Allocation {
             id: i.id,
             name: i.name.clone(),
             component: i.component.expect("validated instance"),
             prototype: i.id,
+            slot: slot as u16,
         })
         .collect()
 }
@@ -24,7 +26,7 @@ pub fn cell_id(seed: &Seed, allocations: &[Allocation], owner: u64, property: u6
         .iter()
         .find(|c| c.owner == allocations[index].prototype && c.inherit == Some(property))
         .ok_or("Undeclared instance property")?;
-    if index < seed.instances.len() {
+    if owner == allocations[index].prototype {
         return Ok(source.id);
     }
     let slot = seed
@@ -33,7 +35,11 @@ pub fn cell_id(seed: &Seed, allocations: &[Allocation], owner: u64, property: u6
         .filter(|c| c.owner == allocations[index].prototype)
         .position(|c| c.id == source.id)
         .ok_or("Missing instance property")?;
-    Ok(0x100_0000 + index as u64 * 64 + slot as u64)
+    owner
+        .checked_sub(0x1_0000)
+        .and_then(|id| id.checked_mul(64))
+        .and_then(|id| id.checked_add(0x100_0000 + slot as u64))
+        .ok_or_else(|| "OIB property identity exhausted".into())
 }
 fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16> {
     let surface = seed
@@ -50,17 +56,31 @@ fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16
         .iter()
         .position(|n| *n == id)
         .ok_or("Node escapes instance prototype")?;
-    let mapped = usize::from(surface.node_base)
-        + (index - seed.instances.len()) * usize::from(surface.node_stride)
-        + rank;
+    let mapped = usize::from(surface.node_base) + index * usize::from(surface.node_stride) + rank;
     if mapped >= 1000 {
-        return Err("OIB retained node identity capacity exhausted".into());
+        return Err("OIB renderer slot capacity exhausted".into());
     }
     u16::try_from(mapped).map_err(err)
 }
 pub fn expanded_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
+    if seed.instance_surface.is_none() {
+        return Ok(seed.clone());
+    }
     let mut resolved = seed.clone();
-    for (index, allocation) in allocations.iter().enumerate().skip(seed.instances.len()) {
+    resolved.instances.clear();
+    resolved.cells.retain(|c| c.inherit.is_none());
+    for cell in &mut resolved.cells {
+        cell.targets.clear();
+    }
+    for allocation in allocations {
+        let index = usize::from(allocation.slot);
+        let map = |id| {
+            if allocation.id == allocation.prototype {
+                Ok(id)
+            } else {
+                mapped_node(seed, index, allocation.prototype, id)
+            }
+        };
         let prototype = seed
             .instance_surface
             .as_ref()
@@ -80,7 +100,7 @@ pub fn expanded_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
                 .filter(|t| prototype.nodes.contains(&t.node))
                 .map(|t| {
                     let mut target = t.clone();
-                    target.node = mapped_node(seed, index, allocation.prototype, target.node)?;
+                    target.node = map(target.node)?;
                     Ok(target)
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -111,13 +131,13 @@ pub fn expanded_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
                 cell.inherit.ok_or("Instance needs inheritance")?,
             )?;
             for t in &mut cell.targets {
-                t.node = mapped_node(seed, index, allocation.prototype, t.node)?;
+                t.node = map(t.node)?;
             }
             resolved.cells.push(cell);
         }
     }
     if resolved.cells.len() > MAX_CELLS {
-        return Err("OIB retained property capacity exhausted".into());
+        return Err("OIB resident property capacity exhausted".into());
     }
     Ok(resolved)
 }
@@ -247,6 +267,15 @@ pub fn expand(
         return Err("Duplicate instance name; remove a pending instance to resolve".into());
     }
     let mut result = ui.clone();
+    // Only the selected inspector exists in the expanded graph. Do not retain
+    // selectors referencing a deleted factory instance's former property cells.
+    result.selectors.retain(|s| match s.projection {
+        Projection::OibCell { cell } => seed
+            .cells
+            .iter()
+            .any(|c| c.id == cell && (c.inherit.is_none() || selected == Some(c.owner))),
+        _ => true,
+    });
     let mut blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
     blueprint.schema = otrios_interfaces::layout::SPARSE_EVENTS_FORMAT.into();
     let mut roots = BTreeMap::new();
@@ -290,22 +319,22 @@ pub fn expand(
     for t in &mut blueprint.templates {
         remove(&mut t.root, &removed);
     }
-    for (row, (index, allocation)) in allocations
+    for (row, allocation) in allocations
         .iter()
-        .enumerate()
-        .filter(|(_, a)| live.contains(&a.id))
+        .filter(|a| live.contains(&a.id))
         .enumerate()
     {
+        let index = usize::from(allocation.slot);
         let (mut preview, mut inspector, set) = roots
             .get(&allocation.prototype)
             .ok_or("Undeclared OIB prototype")?
             .clone();
-        if index >= seed.instances.len() {
+        if allocation.id != allocation.prototype {
             let control_ids: BTreeMap<_, _> = set
                 .iter()
                 .enumerate()
                 .map(|(n, old)| {
-                    let new = original_max + 1 + (index - seed.instances.len()) * stride + n;
+                    let new = original_max + 1 + index * stride + n;
                     Ok((*old, u8::try_from(new).map_err(err)?))
                 })
                 .collect::<Result<_>>()?;

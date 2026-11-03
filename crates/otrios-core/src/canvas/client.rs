@@ -34,6 +34,7 @@ struct OrderDrag {
 struct OibView {
     root: crate::merkle::Hash,
     saving: bool,
+    deferred: bool,
     info: super::oib::Info,
 }
 struct Mount {
@@ -3963,10 +3964,7 @@ impl Mount {
             .as_ref()
             .map(|view| view.info.active_generation)
             && self.oib_generation != Some(generation)
-            && !self.input.active()
-            && !self.panel_scroll.as_ref().is_some_and(|s| s.touching())
-            && !self.preview_scroll.as_ref().is_some_and(|s| s.touching())
-            && self.doc.confirmed()
+            && !self.oib_activation_blocked()
         {
             let (ui, layout) = self.doc.oib_compiled(self.oib_selected)?;
             let previous_ui = std::mem::replace(&mut self.ui, ui);
@@ -4009,21 +4007,41 @@ impl Mount {
         self.invalidate();
         Ok(true)
     }
+    fn oib_activation_blocked(&self) -> bool {
+        self.input.active()
+            || self.panel_scroll.as_ref().is_some_and(|s| s.touching())
+            || self.preview_scroll.as_ref().is_some_and(|s| s.touching())
+            || !self.doc.confirmed()
+    }
     fn refresh_oib_view(&mut self) -> Result<bool> {
         if super::oib::seed(&self.ui).is_none() {
             return Ok(false);
         }
         let root = self.doc.oib_root().ok_or("Missing OIB state")?;
         let saving = self.doc.oib_saving();
+        let generation = self
+            .oib_view
+            .as_ref()
+            .filter(|v| v.root == root)
+            .map(|v| v.info.active_generation)
+            .or_else(|| self.doc.oib_generation());
+        let deferred = generation != self.oib_generation && self.oib_activation_blocked();
         if self
             .oib_view
             .as_ref()
-            .is_some_and(|v| v.root == root && v.saving == saving)
+            .is_some_and(|v| v.root == root && v.saving == saving && v.deferred == deferred)
         {
             return Ok(false);
         }
         let mut info = self.doc.oib_info()?;
-        if self
+        if deferred {
+            // These properties still belong to the displayed inspector. Pin only
+            // its presentation until the held gesture and pending edits finish;
+            // the authority has already reclaimed the deleted object itself.
+            if let Some(previous) = &self.oib_view {
+                info.properties.clone_from(&previous.info.properties);
+            }
+        } else if self
             .oib_selected
             .is_none_or(|id| !info.instances.iter().any(|a| a.id == id && a.active))
         {
@@ -4035,7 +4053,12 @@ impl Mount {
             .oib_view
             .as_ref()
             .is_none_or(|v| v.info.status != info.status || v.info.properties != info.properties);
-        self.oib_view = Some(OibView { root, saving, info });
+        self.oib_view = Some(OibView {
+            root,
+            saving,
+            deferred,
+            info,
+        });
         if changed {
             self.invalidate();
         }

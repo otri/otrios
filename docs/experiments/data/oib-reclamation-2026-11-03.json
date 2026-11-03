@@ -1,0 +1,166 @@
+{
+  "release": "537317f876a610c8e95b818ef8080bec406d07b94c549079a7231483c0be6bb4",
+  "state_protocol": "otrios-canvas-sync-v25",
+  "passed": true,
+  "migration": {
+    "release": "93b35b47874b0a9dcbe0dfdaa37336f8fa598d7facb3d59362db4de1ac955292",
+    "before_records": 10,
+    "before_properties": 54,
+    "after_records": 2,
+    "after_properties": 22,
+    "first_new_ids": [
+      65546,
+      65547,
+      65548
+    ]
+  },
+  "fresh_ids": [
+    65549,
+    65550,
+    65551
+  ],
+  "reused_renderer_nodes": [
+    272,
+    272,
+    272
+  ],
+  "native_pid": 18471,
+  "mount_epoch": 1,
+  "percentages_before": [
+    "67%",
+    "25%"
+  ],
+  "percentages_after": [
+    "67%",
+    "25%"
+  ],
+  "public_wasm_generations": [
+    172,
+    173,
+    174,
+    175,
+    176,
+    177,
+    178,
+    179
+  ],
+  "public_wasm_confirmed": true,
+  "resident_instances": [
+    20,
+    30
+  ],
+  "property_count": 22,
+  "available_instance_slots": 4,
+  "steps": [
+    {
+      "operation": "observe",
+      "generation": 172,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Live \u00b7 revision 172 \u00b7 2 instances \u00b7 4 slots available"
+    },
+    {
+      "operation": "add",
+      "generation": 173,
+      "records": 3,
+      "properties": 26,
+      "available_slots": 3,
+      "track_count": 3,
+      "status": "Live \u00b7 revision 173 \u00b7 3 instances \u00b7 3 slots available"
+    },
+    {
+      "operation": "remove",
+      "generation": 174,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Live \u00b7 revision 174 \u00b7 2 instances \u00b7 4 slots available"
+    },
+    {
+      "operation": "add",
+      "generation": 175,
+      "records": 3,
+      "properties": 26,
+      "available_slots": 3,
+      "track_count": 3,
+      "status": "Live \u00b7 revision 175 \u00b7 3 instances \u00b7 3 slots available"
+    },
+    {
+      "operation": "remove",
+      "generation": 176,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Live \u00b7 revision 176 \u00b7 2 instances \u00b7 4 slots available"
+    },
+    {
+      "operation": "add",
+      "generation": 177,
+      "records": 3,
+      "properties": 26,
+      "available_slots": 3,
+      "track_count": 3,
+      "status": "Live \u00b7 revision 177 \u00b7 3 instances \u00b7 3 slots available"
+    },
+    {
+      "operation": "remove",
+      "generation": 178,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Live \u00b7 revision 178 \u00b7 2 instances \u00b7 4 slots available"
+    },
+    {
+      "operation": "property",
+      "generation": 178,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Draft: OIB painted content escapes its row; adjust geometry or row pitch"
+    },
+    {
+      "operation": "add",
+      "generation": 178,
+      "records": 3,
+      "properties": 26,
+      "available_slots": 3,
+      "track_count": 2,
+      "status": "Draft: OIB painted content escapes its row; adjust geometry or row pitch"
+    },
+    {
+      "operation": "remove",
+      "generation": 178,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Draft: OIB painted content escapes its row; adjust geometry or row pitch"
+    },
+    {
+      "operation": "property",
+      "generation": 179,
+      "records": 2,
+      "properties": 22,
+      "available_slots": 4,
+      "track_count": 2,
+      "status": "Live \u00b7 revision 179 \u00b7 2 instances \u00b7 4 slots available"
+    }
+  ],
+  "checks": {
+    "oib_tests": 33,
+    "legacy_migration_tests": 1,
+    "authority_process_tests": 2,
+    "unified_session_tests": 2,
+    "node_tests": 34,
+    "release_tests": 35,
+    "strict_core_clippy": true,
+    "broad_suite_run": false,
+    "cross_release_rollback_run": false
+  }
+}

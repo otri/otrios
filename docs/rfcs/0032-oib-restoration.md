@@ -4,6 +4,11 @@
 Date: 2026-11-03. Status: **implemented, deployed and live qualified**.
 See [Frame/Wasm acceptance](../experiments/live-slider-layout-2026-11-03.md).
 
+Lifecycle follow-up: [RFC 0033](0033-oib-instance-reclamation.md) supersedes this
+delivery's retention and identity-revival rules. Deleted objects are reclaimed;
+Restore recreates missing factories with fresh IDs and preserves surviving
+objects. The v24 behavior below records the original restoration increment.
+
 The bounded OIB editor can remove its original controls, but Add only instantiates
 the component's first signed factory. It cannot recreate a deleted Brightness
 binding. Restoration is an explicit owner command, separate from allocating a new

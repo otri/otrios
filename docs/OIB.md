@@ -28,16 +28,20 @@ instances. The inspector contains the component and your locally selected instan
 Added sliders use the declared Volume binding; duplicates retain their source's
 Volume or Brightness binding and copy its active overrides. Binding names are
 shown in the headings. Creating new app-content fields or reconnecting bindings
-is outside O2. The first delivery admits six live instances and ten lifetime
-allocations, including the seed instances. Removed identities remain retained;
-the status shows the remaining allocation budget. **Remove pending** resolves an
+is outside O2. The current delivery admits six live instances, with bounded
+resident draft/active records and reusable renderer slots. There is no ten-object
+lifetime allocation budget: deleted objects' properties, presence and descriptors
+are reclaimed once neither draft nor active UI uses them. Fresh IDs come from a durable monotonic
+counter; delayed operations for deleted IDs are acknowledged and discarded.
+The status shows available instance slots. **Remove pending** resolves an
 unactivated new instance, such as a concurrent duplicate-name conflict.
 
 **Restore sliders** brings back the authored Volume/Brightness pair and bindings,
-while keeping the live component design and prior instance overrides. Extras are
-deactivated and their history retained. **Reset UI defaults** also restores signed
+while keeping the live component design and overrides on surviving objects.
+Deleted objects are recreated with fresh IDs and inherited properties; extras
+are removed and reclaimed. **Reset UI defaults** also restores signed
 component defaults and clears instance overrides; it preserves current slider
-values. Both operations reuse original objects without consuming allocation slots.
+values. These operations preserve surviving authored objects and reclaim unused slots.
 See [restoration](rfcs/0032-oib-restoration.md) for causality and compatibility.
 The signed component defaults now use the approved compact row: 128 px label,
 288 px track, 76 px percentage column and 80 px row pitch. Added sliders inherit
@@ -124,7 +128,7 @@ causally clears an instance override. Only one issued OIB batch is retained per
 writer; wait for confirmation before submitting another. A batch has at most
 16 distinct cells. Observed leaf snapshots are captured before issuing it.
 
-Property writes use tag 37 in state protocol **v24** (introduced in v21): u64 writer sequence followed
+Property writes use tag 37 in state protocol **v25** (introduced in v21): u64 writer sequence followed
 by a bounded blob containing the canonical FlexBuffers vector of `Change` values.
 Tag 38 carries one bounded canonical InstanceOperation under the same writer
 sequence/receipt contract. Allocation, draft/active changes and receipt are
@@ -142,9 +146,10 @@ The collection's existing Canvas root adds branch 4:
 | `[4, 1, <13 base-32 digits of CellId>]` | Draft causal property register |
 | `[4, 2, <13 base-32 digits of CellId>]` | Active resolved property register |
 | `[4, 3]` | Active generation/root, source draft hash, conflict IDs and bounded error |
-| `[4, 4]` | Append-only authority allocation ledger |
+| `[4, 4]` | Resident authority descriptors with reusable renderer slots |
 | `[4, 5, <13 base-32 digits of InstanceId>]` | Draft causal presence |
 | `[4, 6, <13 base-32 digits of InstanceId>]` | Active resolved presence |
+| `[4, 7]` | Durable next object ID; never decreases or reuses a deleted ID |
 
 Cell paths have depth 15 and fanout at most 32. The current implementation stores
 the fixed descriptor table once in metadata instead of at every cell. Clients
@@ -181,8 +186,8 @@ UI rather than silently discarding its overrides. Resetting one property is an
 ordinary causal edit; code rollback never restores old app data.
 
 Signed app presentation updates may retain the exact canonical OIB seed. Those
-updates change the admitted UI hash while preserving the allocation ledger,
-presence, removed identities, property registers and app values. They do not
+updates change the admitted UI hash while preserving live descriptors,
+presence, property registers and app values. They do not
 reinitialize instances. Changed seed definitions still require an explicit
 compatible migration. The component-geometry increment explicitly appends
 component cells from exact signed predecessors while preserving old contracts,

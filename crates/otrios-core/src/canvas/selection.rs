@@ -143,7 +143,7 @@ impl StateSelection {
             } else {
                 let mut active = vec![vec![4, 0], vec![4, 2], vec![4, 3]];
                 if self.oib_instances {
-                    active.extend([vec![4, 4], vec![4, 6]]);
+                    active.extend([vec![4, 4], vec![4, 6], vec![4, 7]]);
                 }
                 active
             }

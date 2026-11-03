@@ -6,6 +6,7 @@ use otrios_interfaces::oib::{
     MAX_CHANGES,
 };
 use std::collections::BTreeSet;
+mod lifecycle;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,18 +45,20 @@ impl Document {
         };
         let encoded = bytes(&binding)?;
         let existing = payload(&self.tree, &[4, 0]).ok();
+        let lifecycle_upgrade =
+            seed.instance_surface.is_some() && self.tree.subtree(&[4, 7]).is_err();
         let mut initialize_instances = seed.instance_surface.is_some();
         let mut previous_cells = BTreeSet::new();
         if let Some(existing) = &existing {
             let previous: Binding = decode(existing)?;
             previous_cells.extend(previous.seed.cells.iter().map(|c| c.id));
             initialize_instances &= previous.seed.instance_surface.is_none();
-            if *existing == encoded {
+            if *existing == encoded && !lifecycle_upgrade {
                 self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
                 self.oib_compiled(2)?;
                 return Ok(false);
             }
-            if !compatible_upgrade(&previous, &binding) {
+            if *existing != encoded && !compatible_upgrade(&previous, &binding) {
                 return Err("OIB seed update needs explicit compatible migration".into());
             }
         }
@@ -119,7 +122,33 @@ impl Document {
                 }
             }
         }
+        if lifecycle_upgrade {
+            let allocations = if initialize_instances {
+                super::super::oib::instances::initial_allocations(seed)
+            } else {
+                self.oib_allocations()?
+            };
+            let next = allocations
+                .iter()
+                .map(|a| a.id.saturating_add(1))
+                .max()
+                .unwrap_or(0)
+                .max(lifecycle::FIRST_ID);
+            // Replace the earlier initialization edit rather than assigning a
+            // metadata register twice in one canonical batch.
+            edits.retain(|e| e.path != [4, 4]);
+            for (kind, value) in [(4, bytes(&allocations)?), (7, bytes(&next)?)] {
+                edits.push(Edit {
+                    path: vec![4, kind],
+                    schema: self.extra_schema(4, kind as usize),
+                    value: Some(value),
+                });
+            }
+        }
         self.change(&[], edits)?;
+        if lifecycle_upgrade {
+            self.oib_reclaim()?;
+        }
         status.active_root = self.oib_active_root()?;
         status.source_draft = self.oib_draft_root()?;
         self.change(
@@ -168,7 +197,12 @@ impl Document {
         if seed.instance_surface.is_none() {
             return Ok(super::super::oib::instances::initial_allocations(&seed));
         }
-        decode(&payload(&self.tree, &[4, 4])?)
+        let encoded = payload(&self.tree, &[4, 4])?;
+        if self.tree.subtree(&[4, 7]).is_err() {
+            lifecycle::decode_legacy_allocations(&encoded, seed.instances.len())
+        } else {
+            decode(&encoded)
+        }
     }
     pub fn oib_live(&self, branch: u64) -> Result<BTreeSet<u64>> {
         let seed = if let Some(ui) = &self.oib_ui {
@@ -312,7 +346,7 @@ impl Document {
         if branch.register().is_some()
             || branch.child_keys().any(|k| {
                 k > if binding.seed.instance_surface.is_some() {
-                    6
+                    7
                 } else {
                     3
                 }
@@ -432,6 +466,9 @@ impl Document {
         let mut next = self.tree.clone();
         let mut seen = BTreeSet::new();
         for change in changes {
+            if self.oib_retired_cell(change.cell)? {
+                continue;
+            }
             let cell = seed
                 .cells
                 .iter()
@@ -452,6 +489,9 @@ impl Document {
                 value: change.value.as_ref().map(bytes).transpose()?,
             };
             next = next.edit_observed(writer, &edit, &observed).map_err(err)?;
+        }
+        if seen.is_empty() {
+            return Ok(());
         }
         self.activate_oib(next)
     }
@@ -535,6 +575,10 @@ impl Document {
             }
         }
         draft.change(&[], edits)?;
+        draft.oib_reclaim()?;
+        if status.error.is_none() && status.conflicts.is_empty() {
+            status.source_draft = draft.oib_draft_root()?;
+        }
         status.active_root = draft.oib_active_root()?;
         draft.change(
             &[],
@@ -587,8 +631,7 @@ impl StateAdapter {
                 })
                 .collect(),
             selected_instance: None,
-            allocations_remaining: MAX_ALLOCATIONS
-                .saturating_sub(self.doc.oib_allocations()?.len()),
+            available_instance_slots: self.oib_available_slots(),
         })
     }
     pub(in crate::canvas) fn admitted_oib_hash(&self) -> Option<Vec<u8>> {
@@ -649,10 +692,10 @@ impl StateAdapter {
             .is_ok_and(|b| b.seed.instance_surface.is_some())
         {
             format!(
-                "Live · revision {} · {} instances · {} IDs left",
+                "Live · revision {} · {} instances · {} slots available",
                 status.generation,
                 self.doc.oib_live(2).map_or(0, |v| v.len()),
-                MAX_ALLOCATIONS.saturating_sub(self.doc.oib_allocations().map_or(0, |v| v.len()))
+                self.oib_available_slots()
             )
         } else {
             format!("Live · revision {}", status.generation)
@@ -903,6 +946,12 @@ fn trie_ids(tree: &Snapshot, depth: usize, id: u64, seen: &mut BTreeSet<u64>) ->
 }
 impl Document {
     fn validate_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
+        if self.tree.subtree(&[4, 7]).is_ok() {
+            return self.validate_resident_allocations(old);
+        }
+        self.validate_legacy_allocations(old)
+    }
+    fn validate_legacy_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
         let seed = self.oib_binding()?.seed;
         if seed.instance_surface.is_none() {
             return Ok(());
@@ -920,7 +969,7 @@ impl Document {
             return Err("Invalid OIB allocation ledger".into());
         }
         if let Some(previous) = old.and_then(|t| payload(t, &[4, 4]).ok()) {
-            let previous: Vec<Allocation> = decode(&previous)?;
+            let previous = lifecycle::decode_legacy_allocations(&previous, seed.instances.len())?;
             if !allocations.starts_with(&previous) {
                 return Err("OIB identities cannot be changed or reused".into());
             }
@@ -992,37 +1041,18 @@ impl Document {
         let mut allocations = self.oib_allocations()?;
         match operation {
             InstanceOperation::Restore { defaults } => {
-                let mut edits = Vec::new();
-                for allocation in &allocations {
-                    edits.push(Edit {
-                        path: cell_path(5, allocation.id),
-                        schema: self.oib_instance_schema(allocation.id),
-                        value: seed
-                            .instances
-                            .iter()
-                            .any(|s| s.id == allocation.id)
-                            .then(|| bytes(&true))
-                            .transpose()?,
-                    });
+                candidate.oib_restore_residents(*defaults, writer)?;
+                if candidate.oib_compiled(1).is_err() {
+                    // A restore replaces the roster atomically. Its disposable
+                    // candidate may free old slots, but an invalid target must
+                    // not reclaim objects still used by the published graph.
+                    return self.activate_oib(self.tree.clone());
                 }
-                if *defaults {
-                    for cell in candidate.oib_resolved_seed()?.cells {
-                        edits.push(Edit {
-                            path: cell_path(1, cell.id),
-                            schema: self.oib_cell_schema(cell.id),
-                            value: if cell.inherit.is_some() {
-                                None
-                            } else {
-                                Some(bytes(&cell.default)?)
-                            },
-                        });
-                    }
-                }
-                // Restore is deliberately an authoritative owner command against
-                // the current heads, not a stale property write or a new identity.
-                candidate.tree = candidate.tree.edit(writer, &edits).map_err(err)?.0;
             }
             InstanceOperation::Remove { instance, observed } => {
+                if self.oib_retired_instance(*instance)? {
+                    return Ok(());
+                }
                 if !allocations.iter().any(|a| a.id == *instance) {
                     return Err("Unknown instance".into());
                 }
@@ -1055,6 +1085,9 @@ impl Document {
                         (*component, prototype, None, name)
                     }
                     InstanceOperation::Duplicate { instance, name } => {
+                        if self.oib_retired_instance(*instance)? {
+                            return Ok(());
+                        }
                         let source = allocations
                             .iter()
                             .find(|a| a.id == *instance)
@@ -1066,23 +1099,9 @@ impl Document {
                     }
                     _ => unreachable!(),
                 };
-                let index = allocations.len();
-                let id = 0x1_0000 + index as u64;
-                let name = name
-                    .clone()
-                    .unwrap_or_else(|| format!("instance-{}", index + 1));
-                if !instance_name(&name) {
-                    return Err(
-                        "Instance names use 1–64 ASCII letters, digits, hyphens or underscores"
-                            .into(),
-                    );
-                }
-                let new = Allocation {
-                    id,
-                    name,
-                    component,
-                    prototype,
-                };
+                let new = candidate.oib_allocate(&allocations, prototype, name.clone())?;
+                debug_assert_eq!(new.component, component);
+                let id = new.id;
                 allocations.push(new);
                 let expanded = super::super::oib::instances::expanded_seed(seed, &allocations)?;
                 let values = self.oib_values(2)?;
@@ -1167,16 +1186,13 @@ impl StateAdapter {
         if seed.instance_surface.is_none() {
             return Err("OIB instance surface unavailable".into());
         }
-        let allocations = self.doc.oib_allocations()?;
         match &operation {
             InstanceOperation::Restore { .. } => {}
             InstanceOperation::Instantiate { component, name } => {
                 if !seed.components.iter().any(|c| c.id == *component) {
                     return Err("Unknown OIB component".into());
                 }
-                if allocations.len() >= MAX_ALLOCATIONS
-                    || self.doc.oib_live(1)?.len() >= otrios_interfaces::oib::MAX_LIVE_INSTANCES
-                {
+                if self.oib_available_slots() == 0 {
                     return Ok(false);
                 }
                 if let Some(name) = name
@@ -1189,9 +1205,7 @@ impl StateAdapter {
                 if !self.doc.oib_live(2)?.contains(instance) {
                     return Err("Source instance is not active".into());
                 }
-                if allocations.len() >= MAX_ALLOCATIONS
-                    || self.doc.oib_live(1)?.len() >= otrios_interfaces::oib::MAX_LIVE_INSTANCES
-                {
+                if self.oib_available_slots() == 0 {
                     return Ok(false);
                 }
                 if let Some(name) = name

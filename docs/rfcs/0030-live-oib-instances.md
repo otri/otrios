@@ -1,6 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0030: Bounded live OIB instances
 
+The lifetime allocation/retention rules in this delivery are superseded by
+[RFC 0033: reclamation](0033-oib-instance-reclamation.md). Current instances use
+fresh object IDs and reusable renderer slots; deleted references are reclaimed.
+
 Date: 2026-11-03. Status: **O2 implemented and deployed**.
 See the [live qualification](../experiments/live-oib-instances-2026-11-03.md).
 Extends [OIB O1](0029-live-oib-ui.md) with creation, duplication and removal in

@@ -39,6 +39,29 @@ fn absolute_width_aliases_cannot_target_the_same_frame_twice() {
         assert!(oib::validate_seed(seed).is_err());
     }
 }
+
+#[test]
+fn first_oib_admission_and_creation_replay_from_a_pre_oib_checkpoint() {
+    let ui = app::ui(&[]);
+    let mut doc = Document::new(ui.state_schema.clone(), "oib:test").unwrap();
+    let saved = doc.save().unwrap();
+    let before = doc.clone();
+    doc.configure_oib(&ui).unwrap();
+    let mut recovered = Document::load(ui.state_schema.clone(), "oib:test", &saved).unwrap();
+    recovered
+        .replay(&doc.journal_delta(&before).unwrap())
+        .unwrap();
+    let admitted = doc.clone();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
+    admin.instantiate_oib(10, None).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    recovered
+        .replay(&doc.journal_delta(&admitted).unwrap())
+        .unwrap();
+    assert!(!recovered.configure_oib(&ui).unwrap());
+    assert_eq!(recovered.root_hash(), doc.root_hash());
+    assert_eq!(recovered.oib_allocations().unwrap().len(), 3);
+}
 fn compact_changes() -> Vec<(u64, Option<Value>)> {
     let mut changes: Vec<_> = [
         (104, 10.),
@@ -109,7 +132,14 @@ fn compact_defaults_survive_remove_add_restore_and_reset() {
     sync(&mut doc, &mut sa, &mut admin);
     pump_client(&mut client, &mut doc, &mut session);
     check(&client, 2, 80.);
-    admin.remove_oib(20).unwrap();
+    let volume = doc
+        .oib_allocations()
+        .unwrap()
+        .iter()
+        .find(|a| a.prototype == 20)
+        .unwrap()
+        .id;
+    admin.remove_oib(volume).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     admin
         .instantiate_oib(10, Some("after-reset".into()))
@@ -192,7 +222,7 @@ fn signed_compact_default_upgrade_retains_edits_history_and_recovery() {
 }
 
 #[test]
-fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
+fn restore_authored_bindings_uses_fresh_ids_after_reclamation_and_keeps_design() {
     use std::collections::BTreeSet;
     let (ui, mut doc) = setup_stacked();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
@@ -202,7 +232,7 @@ fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
     sync(&mut doc, &mut sa, &mut admin);
     doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
         .unwrap();
-    while doc.oib_allocations().unwrap().len() < otrios_interfaces::oib::MAX_ALLOCATIONS {
+    for _ in 0..24 {
         admin.instantiate_oib(10, None).unwrap();
         sync(&mut doc, &mut sa, &mut admin);
         let last = doc.oib_allocations().unwrap().last().unwrap().id;
@@ -213,7 +243,7 @@ fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
         admin.remove_oib(id).unwrap();
         sync(&mut doc, &mut sa, &mut admin);
     }
-    let ledger = doc.oib_allocations().unwrap();
+    assert!(doc.oib_allocations().unwrap().is_empty());
     let (_, mut member) = adapter(&ui, &mut doc, 7, false);
     let before = doc.root_hash();
     admin.restore_oib(false).unwrap();
@@ -225,13 +255,19 @@ fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
     let restored = doc.root_hash();
     doc.receive(&mut sa, &request).unwrap();
     assert_eq!(doc.root_hash(), restored);
-    assert_eq!(doc.oib_allocations().unwrap(), ledger);
-    assert_eq!(doc.oib_live(2).unwrap(), BTreeSet::from([20, 30]));
-    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(80.)));
-    assert_eq!(
-        doc.oib_values(2).unwrap()[&200],
-        Some(Value::Text("volume".into()))
+    let ledger = doc.oib_allocations().unwrap();
+    assert_eq!(ledger.len(), 2);
+    assert!(
+        doc.oib_live(2)
+            .unwrap()
+            .is_disjoint(&BTreeSet::from([20, 30]))
     );
+    assert_eq!(
+        ledger.iter().map(|a| a.prototype).collect::<Vec<_>>(),
+        [20, 30]
+    );
+    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(80.)));
+    assert!(!doc.oib_values(2).unwrap().contains_key(&200));
     assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
     assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
     let (resolved, _) = doc.oib_compiled(2).unwrap();
@@ -249,7 +285,7 @@ fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
     sync(&mut doc, &mut sa, &mut admin);
     assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(216.)));
     assert_eq!(doc.oib_values(2).unwrap()[&113], Some(Value::Boolean(true)));
-    assert_eq!(doc.oib_values(2).unwrap()[&200], None);
+    assert!(!doc.oib_values(2).unwrap().contains_key(&200));
     assert_eq!(doc.oib_allocations().unwrap(), ledger);
     assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
     assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
@@ -1164,8 +1200,8 @@ fn instance_creation_duplication_inheritance_and_removal_share_typed_operations(
     assert!(doc.oib_live(2).unwrap().contains(&copy));
     assert_eq!(
         doc.oib_allocations().unwrap().len(),
-        4,
-        "deleted allocation is retained"
+        3,
+        "deleted allocation is reclaimed"
     );
     let mut restored =
         Document::load(ui.state_schema.clone(), "oib:test", &doc.save().unwrap()).unwrap();
@@ -1241,6 +1277,128 @@ fn instance_name_conflicts_retain_the_active_graph_and_can_be_removed() {
     sync(&mut doc, &mut sa, &mut a);
     assert!(doc.oib_status().unwrap().error.is_none());
     assert_eq!(doc.oib_live(2).unwrap(), active);
+}
+
+#[test]
+fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
+    admin.instantiate_oib(10, Some("temporary".into())).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let old = doc.oib_allocations().unwrap().pop().unwrap();
+    let old_cell = oib::instances::cell_id(
+        oib::seed(&ui).unwrap(),
+        &doc.oib_allocations().unwrap(),
+        old.id,
+        100,
+    )
+    .unwrap();
+    let pinned = doc.clone();
+    let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
+    let (mut remover, mut sr) = adapter(&ui, &mut doc, 3, true);
+    let (mut copier, mut sc) = adapter(&ui, &mut doc, 4, true);
+    editor
+        .edit_oib(&[(old_cell, Some(Value::Text("Delayed".into())))])
+        .unwrap();
+    remover.remove_oib(old.id).unwrap();
+    copier
+        .duplicate_oib(old.id, Some("stale-copy".into()))
+        .unwrap();
+    let edit = issue(&mut editor);
+    let remove = issue_instance(&mut remover);
+    let copy = issue_instance(&mut copier);
+    admin.remove_oib(old.id).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin.instantiate_oib(10, Some("temporary".into())).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let new = doc.oib_allocations().unwrap().pop().unwrap();
+    let new_cell = oib::instances::cell_id(
+        oib::seed(&ui).unwrap(),
+        &doc.oib_allocations().unwrap(),
+        new.id,
+        100,
+    )
+    .unwrap();
+    assert!(new.id > old.id);
+    assert_eq!(new.slot, old.slot);
+    assert_ne!(new_cell, old_cell);
+    let active = doc.oib_status().unwrap().active_root;
+    let generation = doc.oib_status().unwrap().generation;
+    for (session, request) in [(&mut se, &edit), (&mut sr, &remove), (&mut sc, &copy)] {
+        assert!(doc.receive(session, request).unwrap());
+        assert!(
+            !doc.receive(session, request).unwrap(),
+            "discarded operations are acknowledged idempotently"
+        );
+        assert_eq!(doc.oib_status().unwrap().active_root, active);
+        assert_eq!(doc.oib_status().unwrap().generation, generation);
+        assert_eq!(doc.oib_allocations().unwrap().len(), 3);
+        assert!(!doc.oib_values(1).unwrap().contains_key(&old_cell));
+        assert_eq!(doc.oib_values(1).unwrap()[&new_cell], None);
+    }
+    assert!(pinned.oib_values(1).unwrap().contains_key(&old_cell));
+    pinned.oib_compiled(2).unwrap();
+    doc.oib_compiled(2).unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    assert!(editor.confirmed());
+}
+
+#[test]
+fn unused_pending_objects_are_reclaimed_while_other_draft_geometry_is_invalid() {
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
+    let active = doc.oib_status().unwrap().active_root;
+    admin.edit_oib(&[(106, Some(Value::Number(900.)))]).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    for _ in 0..12 {
+        assert!(admin.instantiate_oib(10, Some("pending".into())).unwrap());
+        sync(&mut doc, &mut sa, &mut admin);
+        let pending = doc.oib_allocations().unwrap().pop().unwrap().id;
+        assert!(doc.oib_status().unwrap().error.is_some());
+        assert_eq!(doc.oib_status().unwrap().active_root, active);
+        admin.remove_oib(pending).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+        assert_eq!(doc.oib_allocations().unwrap().len(), 2);
+        assert_eq!(doc.oib_values(1).unwrap().len(), 22);
+        assert_eq!(doc.oib_status().unwrap().active_root, active);
+        assert!(doc.oib_status().unwrap().error.is_some());
+    }
+    admin.edit_oib(&[(106, Some(Value::Number(144.)))]).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(doc.oib_status().unwrap().error.is_none());
+}
+
+#[test]
+fn invalid_restore_retains_the_active_roster_and_does_not_consume_fresh_ids() {
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
+    admin.instantiate_oib(10, Some("extra".into())).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin.remove_oib(20).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let roster = doc.oib_allocations().unwrap();
+    let active = doc.oib_status().unwrap().active_root;
+    admin.edit_oib(&[(106, Some(Value::Number(900.)))]).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin.restore_oib(false).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(admin.confirmed());
+    assert_eq!(doc.oib_allocations().unwrap(), roster);
+    assert_eq!(doc.oib_status().unwrap().active_root, active);
+    assert!(doc.oib_status().unwrap().error.is_some());
+    admin.restore_oib(true).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(doc.oib_status().unwrap().error.is_none());
+    let allocations = doc.oib_allocations().unwrap();
+    assert_eq!(allocations.len(), 2);
+    assert_eq!(
+        allocations[0].id, 65539,
+        "failed restoration consumes no IDs"
+    );
+    assert_eq!(
+        allocations.iter().map(|a| a.prototype).collect::<Vec<_>>(),
+        [20, 30]
+    );
 }
 #[test]
 fn instance_requests_are_authorized_and_budgeted_before_allocation() {
@@ -1464,6 +1622,72 @@ fn structural_activation_waits_for_a_held_slider_and_preserves_local_inspection(
     );
 }
 #[test]
+fn reclaimed_slot_and_deleted_inspector_wait_for_the_held_gesture() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, TouchResponder};
+    let (ui, mut doc) = setup();
+    let (mut editor, mut se) = adapter(&ui, &mut doc, 9, true);
+    editor
+        .instantiate_oib(10, Some("old-control".into()))
+        .unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    let old = doc.oib_allocations().unwrap().pop().unwrap();
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    client.inspect_oib(old.id).unwrap();
+    let epoch = client.epoch();
+    let generation = client.resource_usage().oib.unwrap().presented_generation;
+    let scene = client.scene().unwrap();
+    let track = scene
+        .controls()
+        .into_iter()
+        .rev()
+        .find(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
+        .unwrap();
+    let at = [track.origin[0] + 100., track.origin[1] + 24.];
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 61,
+                phase: PointerPhase::Down,
+                position: at,
+            },
+            100,
+        )
+        .unwrap();
+    editor.remove_oib(old.id).unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    editor
+        .instantiate_oib(10, Some("replacement".into()))
+        .unwrap();
+    sync(&mut doc, &mut se, &mut editor);
+    let new = doc.oib_allocations().unwrap().pop().unwrap();
+    assert_eq!(old.slot, new.slot);
+    assert_ne!(old.id, new.id);
+    pump_client(&mut client, &mut doc, &mut session);
+    let held = client.resource_usage().oib.unwrap();
+    assert_eq!(held.presented_generation, generation);
+    assert!(held.active_generation > generation);
+    assert_eq!(held.selected_instance, Some(old.id));
+    client
+        .pointer_at(
+            epoch,
+            PointerEvent {
+                id: 61,
+                phase: PointerPhase::Up,
+                position: at,
+            },
+            200,
+        )
+        .unwrap();
+    pump_client(&mut client, &mut doc, &mut session);
+    let done = client.resource_usage().oib.unwrap();
+    assert_eq!(done.active_generation, done.presented_generation);
+    assert_ne!(done.selected_instance, Some(old.id));
+    assert_eq!(client.epoch(), epoch);
+    assert!(!client.input_busy());
+}
+
+#[test]
 fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
     let (ui, mut doc) = setup();
     let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
@@ -1541,42 +1765,34 @@ fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
 }
 
 #[test]
-fn allocation_history_is_bounded_and_an_empty_preview_can_be_repopulated() {
+fn removed_objects_do_not_accumulate_and_an_empty_preview_can_be_repopulated() {
     let (ui, mut doc) = setup();
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     for id in [20, 30] {
         a.remove_oib(id).unwrap();
         sync(&mut doc, &mut sa, &mut a);
     }
-    assert!(doc.oib_live(2).unwrap().is_empty());
-    doc.oib_compiled(2).unwrap();
-    while doc.oib_allocations().unwrap().len() < otrios_interfaces::oib::MAX_ALLOCATIONS {
+    let baseline = doc.save().unwrap().len();
+    let mut ids = std::collections::BTreeSet::new();
+    for _ in 0..64 {
         assert!(a.instantiate_oib(10, None).unwrap());
         sync(&mut doc, &mut sa, &mut a);
-        assert!(
-            doc.oib_status().unwrap().error.is_none(),
-            "{} allocations: {:?}",
-            doc.oib_allocations().unwrap().len(),
-            doc.oib_status().unwrap().error
-        );
-        let id = doc.oib_allocations().unwrap().last().unwrap().id;
-        doc.oib_compiled_selected(2, Some(id)).unwrap();
-        a.remove_oib(id).unwrap();
+        assert!(doc.oib_status().unwrap().error.is_none());
+        let allocation = doc.oib_allocations().unwrap().pop().unwrap();
+        assert!(ids.insert(allocation.id));
+        assert_eq!(allocation.slot, 0, "renderer slot is reusable");
+        doc.oib_compiled_selected(2, Some(allocation.id)).unwrap();
+        a.remove_oib(allocation.id).unwrap();
         sync(&mut doc, &mut sa, &mut a);
+        assert!(doc.oib_allocations().unwrap().is_empty());
+        assert_eq!(doc.oib_values(1).unwrap().len(), 14);
+        assert_eq!(doc.oib_values(2).unwrap().len(), 14);
+        assert!(doc.save().unwrap().len() <= baseline + 128);
     }
-    let before = doc.root_hash();
-    assert!(!a.instantiate_oib(10, None).unwrap());
-    assert_eq!(doc.root_hash(), before);
     assert!(doc.oib_live(2).unwrap().is_empty());
-    assert_eq!(
-        doc.oib_allocations()
-            .unwrap()
-            .iter()
-            .map(|a| a.id)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len(),
-        otrios_interfaces::oib::MAX_ALLOCATIONS
-    );
+    assert!(a.instantiate_oib(10, None).unwrap());
+    sync(&mut doc, &mut sa, &mut a);
+    assert_eq!(doc.oib_allocations().unwrap().len(), 1);
 }
 
 #[test]

@@ -8,7 +8,7 @@ pub const FEATURE: &str = "otrios-oib-v1";
 pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
 pub const LAYOUT_FEATURE: &str = "otrios-oib-layout-v1";
 pub const RESTORE_FEATURE: &str = "otrios-oib-restore-v1";
-/// Includes deleted allocations: their identities and causal context are retained.
+/// Resident draft/active objects, independent of lifetime creation count.
 pub const MAX_ALLOCATIONS: usize = 10;
 pub const MAX_LIVE_INSTANCES: usize = 6;
 pub const MAX_CELLS: usize = 64;
@@ -63,7 +63,7 @@ pub struct Prototype {
     pub inspector_root: u16,
     pub nodes: Vec<u16>,
 }
-/// Authority-owned immutable allocation descriptor. It survives removal.
+/// Authority-owned resident descriptor. Removed objects are reclaimed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Allocation {
@@ -72,11 +72,14 @@ pub struct Allocation {
     pub component: u64,
     /// Signed seed instance supplying the admitted data binding and template.
     pub prototype: u64,
+    /// Reusable renderer slot, never used as an object/property identity.
+    pub slot: u16,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum InstanceOperation {
-    /// Restore authored identities/bindings. Optionally reset all UI properties.
+    /// Restore authored factories/bindings, giving deleted objects fresh IDs.
+    /// Optionally reset all UI properties.
     /// This explicit owner command observes current heads at authority acceptance.
     Restore {
         defaults: bool,

@@ -5,6 +5,11 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[OIB reclamation](rfcs/0033-oib-instance-reclamation.md) separates fresh object
+identities from reusable renderer slots and removes deleted properties, presence
+and descriptors. The previous ten-creation lifetime budget is retired; current
+scene and simultaneous instance bounds remain.
+
 [OIB component geometry](rfcs/0031-live-oib-component-geometry.md) adds live
 placement, dimensions, visibility and row pitch through bounded property batches.
 [Restoration](rfcs/0032-oib-restoration.md) recovers authored bindings without
