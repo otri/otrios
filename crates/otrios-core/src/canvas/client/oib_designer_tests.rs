@@ -2084,3 +2084,91 @@ fn frame_focus_hierarchy_selection_after_valid_blur_waits_for_confirmation() {
         Some(Value::Text("Sound".into()))
     );
 }
+
+#[test]
+fn frame_focus_split_buttons_and_color_swatches_keep_their_declared_widths() {
+    let mut client = mounted_six_panel_fixture(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.designer_action(LocalAction::Layers).unwrap();
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let scope = *d
+        .actions
+        .iter()
+        .find(|(_, a)| **a == LocalAction::TreeScope(HierarchyScope::Composition))
+        .unwrap()
+        .0;
+    assert_eq!(
+        client
+            .scene()
+            .unwrap()
+            .path(scope)
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .frame
+            .width,
+        140.
+    );
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    client.designer_action(LocalAction::Layers).unwrap();
+    let action = LocalAction::Apply(editor_address(2));
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let apply = *d.actions.iter().find(|(_, a)| **a == action).unwrap().0;
+    let y = d
+        .panels
+        .last()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.id == apply)
+        .unwrap()
+        .frame
+        .y;
+    fixture_scroll_to(&mut client, 1, y - 8.);
+    assert_eq!(
+        client
+            .scene()
+            .unwrap()
+            .path(apply)
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .frame
+            .width,
+        148.
+    );
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let swatch = d
+        .panels
+        .last()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| {
+            n.frame.x == 0. && matches!(d.actions.get(&n.id), Some(LocalAction::PickColor(_, _)))
+        })
+        .unwrap();
+    let (id, y) = (swatch.id, swatch.frame.y);
+    fixture_scroll_to(&mut client, 1, y - 8.);
+    assert_eq!(
+        client
+            .scene()
+            .unwrap()
+            .path(id)
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .frame
+            .width,
+        72.
+    );
+}

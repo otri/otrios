@@ -452,7 +452,10 @@ impl Designer {
             // completely, including padding/corners, without covering siblings.
             fn fit(nodes: &mut [SceneNode], width: f32) {
                 for n in nodes {
-                    if matches!(n.primitive, Primitive::Canvas { .. }) && n.frame.x == 0. {
+                    if matches!(n.primitive, Primitive::Canvas { .. })
+                        && n.frame.x == 0.
+                        && matches!(n.frame.width, 240. | 288. | 320.)
+                    {
                         n.frame.width = width;
                         if let Some(bg) = n.children.first_mut() {
                             bg.frame.width = width;
