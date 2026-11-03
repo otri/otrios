@@ -3,6 +3,9 @@
 use crate::layout::Value;
 use serde::{Deserialize, Serialize};
 
+/// Additive RFC 0035 D1 proposal; not attached to the v26 seed or state wire.
+pub mod designer;
+
 pub const FORMAT: &str = "otrios-oib-v1";
 pub const FEATURE: &str = "otrios-oib-v1";
 pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
