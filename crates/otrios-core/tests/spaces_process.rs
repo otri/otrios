@@ -6325,7 +6325,7 @@ fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
     let package = rig.root.join("apps/counter/package/ui.flex");
     let mut ui = canvas::decode_ui(&fs::read(&package).unwrap()).unwrap();
     ui.format = "otrios-canvas-v8".into();
-    ui.presentation = Some(Presentation::Oib(Seed {
+    ui.presentation = Some(Presentation::Oib(Box::new(Seed {
         designer: None,
         instance_surface: None,
         format: FORMAT.into(),
@@ -6353,7 +6353,7 @@ fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
         }],
         inspector_viewport: 0,
         inspector_content: [500., 500.],
-    }));
+    })));
     let bytes = canvas::encode_ui(&ui).unwrap();
     fs::write(&package, &bytes).unwrap();
     let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();

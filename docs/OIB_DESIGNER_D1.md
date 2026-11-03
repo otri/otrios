@@ -298,4 +298,19 @@ separate pending check. Checkpoint recovery is in-process evidence. Authority
 process recovery, independent final review, signed deployment and Frame/Web
 acceptance remain unperformed.
 
+Viewport follow-up `da81b58` integrated as `79c38a7`. Presented chrome now uses
+aligned viewport windows over bounded retained rows; cached nodes/actions are
+bounded separately from the unchanged 512-node/128-control presented limits.
+Offscreen, fully clipped and retired semantic IDs cannot activate cached actions.
+The real six-root fixture is exercised in both orientations with scrolling,
+clipped taps, capture safety and paint reuse. Parent reran all 16 designer tests,
+eight fixture tests and 14 runtime tests successfully after integration.
+
+`cargo test -p otrios-core --features canvas --test oib --locked --offline`
+passed all 35 legacy OIB regression tests. Focused core-library strict Clippy
+identified a large presentation enum and five style findings; parent boxed the
+Oib seed payload (transparent serialization) and fixed the findings without lint
+suppression. `cargo clippy -p otrios-core --features canvas --lib --locked --offline -- -D warnings`
+then passed; the runtime/fixture regression rerun also passed.
+
 Update this record at integration gates with actual commits, commands and results.

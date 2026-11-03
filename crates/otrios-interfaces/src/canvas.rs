@@ -164,7 +164,7 @@ pub struct TextResource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Presentation {
-    Oib(crate::oib::Seed),
+    Oib(Box<crate::oib::Seed>),
     /// Dynamic shared-room blocks and local composer, backed by session channel 3.
     Chat,
     /// Read-only, wrapped document; source is not stored in scene text nodes.

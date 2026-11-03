@@ -373,7 +373,7 @@ fn fixture() -> Ui {
         handlers: vec![],
         navigation: vec![],
         behavior: None,
-        presentation: Some(Presentation::Oib(contract::Seed {
+        presentation: Some(Presentation::Oib(Box::new(contract::Seed {
             format: contract::FORMAT.into(),
             designer: Some(doc),
             main_oib: 1,
@@ -421,7 +421,7 @@ fn fixture() -> Ui {
                 node_base: 40,
                 node_stride: 8,
             }),
-        })),
+        }))),
     }
 }
 fn seed(ui: &Ui) -> &contract::Seed {

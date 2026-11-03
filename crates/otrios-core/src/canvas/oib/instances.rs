@@ -217,10 +217,10 @@ fn remap(
     if let Some(semantics) = &mut root.semantics {
         map_expr(&mut semantics.label, locals);
         map_expr(&mut semantics.checked, locals);
-        if let Expr::Literal(Value::Text(text)) = &mut semantics.label {
-            if seed.designer.is_none() {
-                *text = text.replace(old_name, new_name);
-            }
+        if let Expr::Literal(Value::Text(text)) = &mut semantics.label
+            && seed.designer.is_none()
+        {
+            *text = text.replace(old_name, new_name);
         }
     }
     match &mut root.shape {
@@ -232,10 +232,10 @@ fn remap(
             map_expr(value, locals);
             map_expr(scale, locals);
             map_expr(color, locals);
-            if let Expr::Literal(Value::Text(text)) = value {
-                if seed.designer.is_none() {
-                    *text = text.replace(old_name, new_name);
-                }
+            if let Expr::Literal(Value::Text(text)) = value
+                && seed.designer.is_none()
+            {
+                *text = text.replace(old_name, new_name);
             }
         }
         Shape::Superellipse { radius, color, .. } => {
@@ -518,7 +518,7 @@ pub fn expand(
         } else {
             0.
         };
-    result.presentation = Some(Presentation::Oib(resolved));
+    result.presentation = Some(Presentation::Oib(Box::new(resolved)));
     result.layout = Layout::encode(&blueprint)?;
     if result.handlers.len() > 128 || result.selectors.len() > 128 {
         return Err("OIB expanded control/selector budget".into());

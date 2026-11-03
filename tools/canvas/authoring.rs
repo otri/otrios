@@ -1165,7 +1165,7 @@ impl AppUi {
                     instance.assignments.sort_by(|a, b| a.target.cmp(&b.target));
                 }
             }
-            Some(Presentation::Oib(seed))
+            Some(Presentation::Oib(Box::new(seed)))
         } else if let Some((key, source, scale, color)) = self.text_document {
             Some(Presentation::TextDocument {
                 viewport: *compiler

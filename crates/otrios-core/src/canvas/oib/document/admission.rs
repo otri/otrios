@@ -457,8 +457,8 @@ pub fn validate(seed: &Seed) -> Result<()> {
         require(
             valid_text(&cell.name, 64)
                 && cell.targets.iter().all(|t| {
-                    !(t.scale == 0. && t.scale.is_sign_negative())
-                        && !(t.offset == 0. && t.offset.is_sign_negative())
+                    !(t.scale == 0. && t.scale.is_sign_negative()
+                        || t.offset == 0. && t.offset.is_sign_negative())
                 }),
             "Noncanonical OIB cell name/float",
         )?;
@@ -867,33 +867,34 @@ pub fn validate_layout(ui: &Ui) -> Result<()> {
             )?;
             previous = Some(rank);
         }
-        if mapping.address.references.is_empty() && mapping.address.node == def.root {
-            if let Some(parent) = &root.visual_parent {
-                let parent_id = doc
-                    .mappings
-                    .objects
+        if mapping.address.references.is_empty()
+            && mapping.address.node == def.root
+            && let Some(parent) = &root.visual_parent
+        {
+            let parent_id = doc
+                .mappings
+                .objects
+                .iter()
+                .find(|m| m.address == *parent)
+                .and_then(|m| m.layout_node)
+                .ok_or("Missing document visual parent mapping")?;
+            require(
+                layout_node(&blueprint, parent_id)?
+                    .children
                     .iter()
-                    .find(|m| m.address == *parent)
-                    .and_then(|m| m.layout_node)
-                    .ok_or("Missing document visual parent mapping")?;
+                    .any(|n| n.id == id),
+                "OIB root does not retain signed parent attachment",
+            )?;
+            if doc.mappings.roots.iter().any(|t| t.prototype == root.id) {
                 require(
-                    layout_node(&blueprint, parent_id)?
-                        .children
-                        .iter()
-                        .any(|n| n.id == id),
-                    "OIB root does not retain signed parent attachment",
+                    seed.instance_surface.as_ref().is_some_and(|s| {
+                        s.preview_viewport == parent_id
+                            && s.prototypes
+                                .iter()
+                                .any(|p| p.instance == root.id.0 && p.preview_root == id)
+                    }),
+                    "OIB factory root/surface attachment mismatch",
                 )?;
-                if doc.mappings.roots.iter().any(|t| t.prototype == root.id) {
-                    require(
-                        seed.instance_surface.as_ref().is_some_and(|s| {
-                            s.preview_viewport == parent_id
-                                && s.prototypes
-                                    .iter()
-                                    .any(|p| p.instance == root.id.0 && p.preview_root == id)
-                        }),
-                        "OIB factory root/surface attachment mismatch",
-                    )?;
-                }
             }
         }
     }
@@ -984,10 +985,11 @@ pub fn validate_layout(ui: &Ui) -> Result<()> {
                     &mapping.address.references,
                     mapping.address.node,
                 )?;
-                if def.id == m.definition && n.id == m.node {
-                    if let Some(id) = mapping.layout_node {
-                        containers.push(id);
-                    }
+                if def.id == m.definition
+                    && n.id == m.node
+                    && let Some(id) = mapping.layout_node
+                {
+                    containers.push(id);
                 }
             }
         } else {

@@ -12,6 +12,8 @@ The declarations are in `otrios_interfaces::oib::designer`; the existing SDK's
 `Seed.designer` is an optional signed attachment requiring
 `otrios-oib-designer-v1`. Absence omits the field and preserves legacy canonical
 seed bytes. `Cell`, `Target` and `Allocation` retain their existing encodings.
+`Presentation::Oib` boxes the Seed in Rust to keep the presentation enum bounded;
+Serde's transparent Box handling leaves the existing encoded Oib payload intact.
 The next release uses state protocol v27, coordinated across hosts/publisher;
 release-control v1 is unchanged. This is not a claim that v27 is deployed.
 
