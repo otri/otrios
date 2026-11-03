@@ -9,6 +9,7 @@ mod host_panel;
 mod host_transfers;
 mod oib_designer;
 mod oib_focus_layout;
+mod oib_property_editor;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -1427,6 +1428,13 @@ impl Client {
         {
             let scene = self.scene()?;
             if let Some(owner) = scene.controls().into_iter().find(|owner| {
+                if m.designer
+                    .as_ref()
+                    .and_then(|d| d.keyboard_key(owner.node.id))
+                    == Some(key)
+                {
+                    return true;
+                }
                 let Some(TouchResponder::Activate(Action::AppEvent(control))) =
                     owner.node.responder
                 else {
@@ -3143,6 +3151,13 @@ impl Client {
             .iter()
             .rev()
             .find_map(|node| {
+                if let Some(key) = m
+                    .designer
+                    .as_ref()
+                    .and_then(|d| d.keyboard_key(node.node.id))
+                {
+                    return Some(key);
+                }
                 let Some(TouchResponder::Activate(Action::AppEvent(control))) = node.node.responder
                 else {
                     return None;
@@ -3357,7 +3372,9 @@ impl Client {
     }
     pub fn editing(&self) -> bool {
         self.active.as_ref().is_some_and(|m| {
-            m.focus.is_some() || m.chat.as_ref().is_some_and(super::chat::Client::editing)
+            m.focus.is_some()
+                || m.designer.as_ref().is_some_and(|d| d.editor_focused())
+                || m.chat.as_ref().is_some_and(super::chat::Client::editing)
         })
     }
     /// Native browser fields mirror only visible, editable controls in this
@@ -3371,7 +3388,10 @@ impl Client {
         };
         let scene = self.scene()?;
         let frames = editor_frames(m, &scene);
-        let mut inputs = vec![];
+        let mut inputs = m
+            .designer
+            .as_ref()
+            .map_or_else(Vec::new, |d| d.editor_inputs(&scene, font));
         for owner in scene.controls() {
             let Some(TouchResponder::Activate(Action::AppEvent(control))) = owner.node.responder
             else {
@@ -3432,6 +3452,9 @@ impl Client {
         if epoch != self.epoch() || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused) {
             return Ok(false);
         }
+        if let Some(changed) = self.designer_blur_input(id)? {
+            return Ok(changed);
+        }
         self.commit_host_label()?;
         let m = self.active.as_mut().ok_or("No Canvas")?;
         m.focus = None;
@@ -3491,6 +3514,9 @@ impl Client {
         }
         if self.requested.as_ref().is_some_and(|r| !r.reconnecting) || self.active.is_none() {
             return Ok(false);
+        }
+        if let Some(changed) = self.designer_edit(edit)? {
+            return Ok(changed);
         }
         if matches!(edit, Edit::Enter) {
             self.commit_host_label()?;
@@ -3614,6 +3640,15 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if !self.host_active
+            && let Some(address) = self
+                .active
+                .as_ref()
+                .and_then(|m| m.designer.as_ref())
+                .and_then(|d| d.focused_property())
+        {
+            return self.designer_discard_property(&address);
+        }
         if self.host_active {
             if self.host.pane == super::host_ui::Pane::Transfer {
                 return self.host_transfer_action(super::host_ui::HostAction::TransferCancel);
@@ -4734,7 +4769,13 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
                 .iter()
                 .find(|h| matches!(h.operation, Operation::Back))
                 .map(|h| h.control);
-        oib_focus_layout::project(&scene, seed, back, designer.layers_open())?
+        oib_focus_layout::project(
+            &scene,
+            seed,
+            back,
+            designer.layers_open(),
+            m.keyboard.visible,
+        )?
     } else {
         scene
     };
@@ -4775,6 +4816,10 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
                 }
             ),
         )?;
+        if let Some(font) = &m.font {
+            designer.present_editor_fields(&mut root, font);
+        }
+        designer.present_editor_keyboard(&mut root, &m.keyboard)?;
     }
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);

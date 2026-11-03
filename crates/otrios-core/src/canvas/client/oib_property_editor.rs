@@ -50,6 +50,7 @@ pub(crate) enum EditResult {
     Traverse { backward: bool },
 }
 
+#[derive(Clone)]
 pub(crate) struct Field {
     pub id: u32,
     pub part: Part,
@@ -71,6 +72,7 @@ impl Field {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Draft {
     pub address: PropertyAddress,
     pub fields: Vec<Field>,
@@ -170,6 +172,7 @@ pub(crate) struct Candidate {
 /// IDs are monotonic over this engine's entire lifetime, including cancellation.
 /// Reserve a disjoint ID range from other tooling controls. Recreating the engine
 /// requires a new range or retiring the entire old host input session.
+#[derive(Clone)]
 pub(crate) struct PropertyDrafts {
     drafts: Vec<Draft>,
     focus: Option<Focus>,

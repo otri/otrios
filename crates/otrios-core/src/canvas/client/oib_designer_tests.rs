@@ -814,6 +814,9 @@ fn fixture_sync(
     panic!("designer fixture sync did not settle");
 }
 fn mounted_six_panel_fixture(focus: bool) -> Client {
+    mounted_fixture_session(focus).0
+}
+fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Session) {
     assert!(
         designer_fixture::manifest()
             .dependencies
@@ -889,7 +892,7 @@ fn mounted_six_panel_fixture(focus: bool) -> Client {
     if !focus {
         assert!(m.designer.as_ref().unwrap().actions.len() > 128);
     }
-    client
+    (client, authority, session)
 }
 fn fixture_scroll_to(client: &mut Client, panel: usize, offset: f32) {
     let scene = client.scene().unwrap();
@@ -1399,4 +1402,287 @@ fn frame_focus_tree_disclosure_and_full_expansion_stay_bounded() {
             .iter()
             .all(|r| !matches!(r.selection, Some(Selection::Object(_))))
     );
+}
+
+fn editor_address(property: u64) -> PropertyAddress {
+    PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: PropertyPath {
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+            property: PropertyId(property),
+        },
+    }
+}
+fn focus_property(client: &mut Client, property: u64) -> u32 {
+    let address = editor_address(property);
+    let m = client.active.as_mut().unwrap();
+    m.font = Some(Arc::new(crate::dashboard::font::test_font()));
+    let d = m.designer.as_ref().unwrap();
+    let id = d.drafts.draft(&address).unwrap().fields[0].id;
+    let y = d
+        .panels
+        .last()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.id == id)
+        .unwrap()
+        .frame
+        .y;
+    fixture_scroll_to(client, 1, y - 8.);
+    assert_eq!(client.designer_activate(id).unwrap(), Some(true));
+    // Software keyboard reduces the dock height; keep the field visible.
+    fixture_scroll_to(client, 1, y - 8.);
+    id
+}
+fn settle_editor(
+    client: &mut Client,
+    authority: &mut crate::canvas::Document,
+    session: &mut Session,
+) {
+    let m = client.active.as_mut().unwrap();
+    fixture_sync(authority, session, &mut m.doc);
+    m.refresh().unwrap();
+}
+#[test]
+fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
+    let id = focus_property(&mut client, 3);
+    let root = client.active.as_ref().unwrap().doc.oib_root();
+    let epoch = client.epoch();
+    assert!(
+        client
+            .edit_text_input(
+                epoch,
+                id,
+                &Edit::Replace {
+                    text: "Sound".into(),
+                    cursor: 5,
+                    anchor: 5,
+                    selection_only: false
+                }
+            )
+            .unwrap()
+    );
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        client
+            .text_inputs()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == id && i.focused && i.value == "Sound")
+    );
+    assert!(client.edit_text_input(epoch, id, &Edit::Enter).unwrap());
+    assert!(client.active.as_ref().unwrap().doc.oib_saving());
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    let seed = crate::canvas::oib::seed(&m.ui).unwrap();
+    assert_eq!(
+        crate::canvas::oib::effective(seed, &m.doc.oib_active().unwrap(), 203).unwrap(),
+        Value::Text("Sound".into())
+    );
+    assert!(
+        client
+            .designer_action(LocalAction::Write(editor_address(3), None))
+            .unwrap()
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    let seed = crate::canvas::oib::seed(&m.ui).unwrap();
+    assert_eq!(
+        crate::canvas::oib::effective(seed, &m.doc.oib_active().unwrap(), 203).unwrap(),
+        Value::Text("Volume".into())
+    );
+    let id = focus_property(&mut client, 2);
+    assert!(
+        client
+            .edit_text_input(
+                epoch,
+                id,
+                &Edit::Replace {
+                    text: "377.5".into(),
+                    cursor: 5,
+                    anchor: 5,
+                    selection_only: false
+                }
+            )
+            .unwrap()
+    );
+    assert!(client.blur_text_input(epoch, id).unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&202],
+        Some(Value::Number(377.5))
+    );
+    assert_eq!(
+        [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap()),
+        fields
+    );
+}
+#[test]
+fn frame_focus_invalid_drafts_cancel_and_color_picker_stay_local_until_apply() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let id = focus_property(&mut client, 2);
+    let epoch = client.epoch();
+    let root = client.active.as_ref().unwrap().doc.oib_root();
+    assert!(
+        client
+            .edit_text_input(
+                epoch,
+                id,
+                &Edit::Replace {
+                    text: "NaN".into(),
+                    cursor: 3,
+                    anchor: 3,
+                    selection_only: false
+                }
+            )
+            .unwrap()
+    );
+    client.blur_text_input(epoch, id).unwrap();
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert!(d.drafts.draft(&editor_address(2)).unwrap().dirty);
+    assert!(d.drafts.draft(&editor_address(2)).unwrap().error.is_some());
+    let new = focus_property(&mut client, 2);
+    assert!(!client.cancel_text_input(epoch + 1, new).unwrap());
+    assert!(client.cancel_text_input(epoch, new).unwrap());
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
+    assert!(
+        !client
+            .edit_text_input(epoch, new, &Edit::Commit("400".into()))
+            .unwrap()
+    );
+    let address = editor_address(1);
+    assert!(
+        client
+            .designer_action(LocalAction::PickColor(address.clone(), [12, 34, 56, 128]))
+            .unwrap()
+    );
+    assert!(
+        client
+            .designer_action(LocalAction::Opacity(address.clone(), 50))
+            .unwrap()
+    );
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    assert!(client.designer_action(LocalAction::Apply(address)).unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&201],
+        Some(Value::Color([12, 34, 56, 128]))
+    );
+}
+
+#[test]
+fn frame_focus_software_keyboard_routes_shared_input_and_preserves_held_geometry() {
+    let mut client = mounted_six_panel_fixture(true);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let field = focus_property(&mut client, 3);
+    let scene = client.scene().unwrap();
+    let key = scene
+        .controls()
+        .into_iter()
+        .find(|n| n.node.responder == Some(TouchResponder::Activate(Action::KeyboardKey(34))))
+        .unwrap();
+    let point = [key.origin[0] + 8., key.origin[1] + 8.];
+    let epoch = client.epoch();
+    assert!(
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 88,
+                    phase: PointerPhase::Down,
+                    position: point
+                },
+                10
+            )
+            .unwrap()
+    );
+    assert!(client.input_busy());
+    let old = client.active.as_ref().unwrap().viewport;
+    client.set_viewport([800., 1280.]).unwrap();
+    assert_eq!(client.active.as_ref().unwrap().viewport, old);
+    assert!(
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 88,
+                    phase: PointerPhase::Up,
+                    position: point
+                },
+                11
+            )
+            .unwrap()
+    );
+    assert!(!client.input_busy());
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(
+        d.drafts
+            .draft(&editor_address(3))
+            .unwrap()
+            .field(super::super::oib_property_editor::Part::Value)
+            .unwrap()
+            .buffer()
+            .text(),
+        "Volume "
+    );
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+    let composed = client.scene().unwrap();
+    assert!(count_nodes(composed.root()) <= 512 && composed.controls().len() <= 128);
+    assert!(client.cancel_text_input(epoch, field).unwrap());
+    assert!(!client.keyboard_visible());
+    assert!(!client.editing());
 }

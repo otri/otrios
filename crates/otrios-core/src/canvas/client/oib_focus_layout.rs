@@ -40,6 +40,7 @@ pub(super) fn project(
     seed: &Seed,
     back_action: Option<u8>,
     open: bool,
+    keyboard: bool,
 ) -> Result<Scene, String> {
     let doc = seed.designer.as_ref().ok_or("Missing designer metadata")?;
     let hierarchy = doc.hierarchy_viewport.ok_or("Missing hierarchy viewport")?;
@@ -58,7 +59,7 @@ pub(super) fn project(
         .ok_or("Missing hierarchy viewport")?
         .clone();
     let width = scene.root().frame.width;
-    let height = scene.root().frame.height;
+    let height = scene.root().frame.height - if keyboard { 240. } else { 0. };
     // Keep a usable canvas even on narrow windows. Tooling remains physical-size;
     // this is not a scale transform of the authored document or its text.
     let dock = DOCK.min((width - 240.).max(240.));

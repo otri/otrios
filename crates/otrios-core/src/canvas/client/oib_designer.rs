@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
+mod editing;
+use super::oib_property_editor::PropertyDrafts;
 use super::*;
 use crate::canvas::oib::document::{
     HierarchyKey, HierarchyRow, HierarchyScope, ObjectInfo, PropertyInfo,
@@ -30,6 +32,12 @@ const WINDOW_STEP: f32 = 4. * ROW;
 enum LocalAction {
     Select(Selection),
     Layers,
+    FocusField(u32),
+    Apply(PropertyAddress),
+    Discard(PropertyAddress),
+    PickColor(PropertyAddress, [u8; 4]),
+    Opacity(PropertyAddress, u8),
+    DraftBool(PropertyAddress, bool),
     TreeExpand(HierarchyKey),
     TreeScope(HierarchyScope),
     Expand(Selection),
@@ -61,6 +69,10 @@ pub(super) struct Designer {
     tree_closed: Vec<HierarchyKey>,
     tree_initialized: Vec<HierarchyScope>,
     reveal_selection: bool,
+    drafts: PropertyDrafts,
+    properties: Vec<PropertyInfo>,
+    editor_notice: Option<String>,
+    editor_revision: u64,
     mode: DesignerMode,
     pending_mode: Option<DesignerMode>,
     pending_viewport: Option<[f32; 2]>,
@@ -86,6 +98,10 @@ impl Clone for Designer {
             tree_closed: self.tree_closed.clone(),
             tree_initialized: self.tree_initialized.clone(),
             reveal_selection: self.reveal_selection,
+            drafts: self.drafts.clone(),
+            properties: self.properties.clone(),
+            editor_notice: self.editor_notice.clone(),
+            editor_revision: self.editor_revision,
             mode: self.mode,
             pending_mode: self.pending_mode,
             pending_viewport: self.pending_viewport,
@@ -134,6 +150,10 @@ impl Designer {
             tree_closed: vec![],
             tree_initialized: vec![],
             reveal_selection: false,
+            drafts: PropertyDrafts::new(2_800_000_000, 2_900_000_000 - 1),
+            properties: vec![],
+            editor_notice: None,
+            editor_revision: 0,
             mode: DesignerMode::Edit,
             pending_mode: None,
             pending_viewport: None,
@@ -267,15 +287,29 @@ impl Designer {
         } else {
             None
         };
-        let mut inspector = inspector(
-            &mut builder,
-            seed,
-            &self.selection,
-            properties,
-            conflicts,
-            status,
-            editable,
-        )?;
+        self.properties = properties.to_vec();
+        let mut inspector = if self.focus_layout {
+            editing::inspector(
+                &mut builder,
+                &mut self.drafts,
+                properties,
+                conflicts,
+                status,
+                editable,
+                self.editor_revision,
+                self.editor_notice.as_deref(),
+            )?
+        } else {
+            inspector(
+                &mut builder,
+                seed,
+                &self.selection,
+                properties,
+                conflicts,
+                status,
+                editable,
+            )?
+        };
 
         if let Some(selected) = objects.iter().find(|o| o.selection == self.selection)
             && let Some(title) = inspector.0.first_mut()
@@ -1080,6 +1114,7 @@ impl Mount {
                         .id,
                 ));
             }
+            designer.editor_revision = self.doc.oib_generation().unwrap_or(0);
             let properties = super::super::oib::document::properties(
                 seed,
                 &allocations,
@@ -1171,7 +1206,22 @@ impl Client {
     }
     fn designer_action(&mut self, action: LocalAction) -> Result<bool> {
         match action {
-            LocalAction::Select(selection) => self.inspect_oib_selection(selection),
+            LocalAction::PickColor(address, color) => {
+                self.designer_preview_color(&address, Some(color), None, None)
+            }
+            LocalAction::Opacity(address, opacity) => {
+                self.designer_preview_color(&address, None, Some(opacity), None)
+            }
+            LocalAction::DraftBool(address, value) => {
+                self.designer_preview_color(&address, None, None, Some(value))
+            }
+            LocalAction::FocusField(id) => self.designer_focus_field(id),
+            LocalAction::Apply(address) => self.designer_commit_property(&address, false),
+            LocalAction::Discard(address) => self.designer_discard_property(&address),
+            LocalAction::Select(selection) => {
+                self.designer_blur_focused()?;
+                self.inspect_oib_selection(selection)
+            }
             LocalAction::TreeScope(scope) => {
                 if self.input_busy() {
                     return Ok(false);
@@ -1275,7 +1325,19 @@ impl Client {
         let Some(d) = &m.designer else {
             return Ok(None);
         };
-        if (FIRST..END).contains(&id) || id == super::oib_focus_layout::LAYERS {
+        if let Some(key) = d.keyboard_key(id) {
+            if !self.scene()?.controls().iter().any(|c| c.node.id == id) {
+                return Ok(Some(false));
+            }
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            let edit = m.keyboard.press(key);
+            m.invalidate();
+            if let Some(edit) = edit {
+                return self.hardware_edit(&edit).map(Some);
+            }
+            return Ok(Some(true));
+        }
+        if (FIRST..2_900_000_000).contains(&id) || id == super::oib_focus_layout::LAYERS {
             let action = d.semantic_action(self.scene()?.as_ref(), id);
             return action.map_or(Ok(Some(false)), |a| self.designer_action(a).map(Some));
         }
