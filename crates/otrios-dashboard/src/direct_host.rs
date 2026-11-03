@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use crate::native_input::{self, Sample, Target};
+use crate::native_worker::bench_telemetry::{PanRecorder, process_us};
 use crate::native_worker::{DisplayInfo, Frame, Input, options, state_worker};
 use otrios_core::dashboard::{
     display::Surface,
@@ -18,6 +19,11 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+// CPU payload submitted through this host; excludes opaque document_gpu uploads,
+// glyph-cache texture traffic and driver-internal copies.
+fn vertex_bytes(vertices: &[f32], glyphs: &[f32]) -> usize {
+    std::mem::size_of_val(vertices) + std::mem::size_of_val(glyphs)
+}
 fn percentile(v: &[u64], q: f64) -> u64 {
     v.get(((v.len().saturating_sub(1)) as f64 * q).round() as usize)
         .copied()
@@ -74,6 +80,8 @@ pub(super) fn run() -> Result<(), String> {
         initial.blue,
         initial.alpha
     );
+    let mut pan = PanRecorder::from_env("renderer")?;
+    let mut input_pan = PanRecorder::from_env("input")?;
     let (input_tx, input_rx) = mpsc::sync_channel(128);
     let (frame_tx, frame_rx) = mpsc::sync_channel(1);
     let worker = thread::spawn(move || state_worker(o, input_rx, frame_tx));
@@ -89,12 +97,21 @@ pub(super) fn run() -> Result<(), String> {
                 input.read().map(|events| {
                     events
                         .into_iter()
-                        .map(|e| Sample {
-                            phase: e.phase,
-                            position: [e.x, e.y],
-                            sampled: Instant::now()
+                        .map(|e| {
+                            let received = Instant::now();
+                            let sampled = received
                                 .checked_sub(Duration::from_micros(e.age_us))
-                                .unwrap_or_else(Instant::now),
+                                .unwrap_or(received);
+                            input_pan.record(|| {
+                                serde_json::json!({"event":"receive",
+                                "sampled_us":process_us(sampled),"received_us":process_us(received),
+                                "device_age_us":e.age_us,"phase":e.phase})
+                            });
+                            Sample {
+                                phase: e.phase,
+                                position: [e.x, e.y],
+                                sampled,
+                            }
                         })
                         .collect()
                 })
@@ -147,6 +164,8 @@ pub(super) fn run() -> Result<(), String> {
     let mut flips = Vec::new();
     let result = (|| -> Result<(), String> {
         loop {
+            let mut vertex_upload_bytes = 0_usize;
+            let mut upload_calls = 0_usize;
             if input_worker.is_finished() {
                 return Err("Touch input worker stopped unexpectedly".into());
             }
@@ -162,6 +181,11 @@ pub(super) fn run() -> Result<(), String> {
             }
             let mut revoked = model.as_mut().is_some_and(Frame::redact_if_revoked);
             while let Ok(mut next) = frame_rx.try_recv() {
+                pan.record(|| {
+                    serde_json::json!({"event":"renderer_receive","serial":next.serial,
+                    "epoch":next.epoch,"received_us":process_us(Instant::now()),
+                    "input":next.local_input.map(|i| i.json()),"local_update":next.local_update})
+                });
                 revoked |= next.redact_if_revoked();
                 revoked |= model.as_mut().is_some_and(Frame::redact_if_revoked);
                 if model
@@ -179,6 +203,9 @@ pub(super) fn run() -> Result<(), String> {
                     retained_overlay = None;
                     effect_revision = None;
                     display.upload_scene(2, &[], &[], &[])?;
+                    if pan.enabled() {
+                        upload_calls += 1;
+                    }
                     presenter = Presenter::default();
                     scroll_meter = Default::default();
                     scroll_active = false;
@@ -223,11 +250,27 @@ pub(super) fn run() -> Result<(), String> {
                             &mesh.glyph_vertices,
                             &mesh.draws,
                         )?;
+                        if pan.enabled() {
+                            vertex_upload_bytes +=
+                                vertex_bytes(&mesh.vertices, &mesh.glyph_vertices);
+                            upload_calls += 1;
+                        }
                         dirty = true;
                     }
                 }
                 if dirty || animated || flowing {
                     let before = Instant::now();
+                    let draw_started = pan.start();
+                    let base_changed = pan.enabled()
+                        && retained
+                            .as_ref()
+                            .is_none_or(|old| !Arc::ptr_eq(old, &f.paint.base.mesh));
+                    let overlay_changed = pan.enabled()
+                        && f.paint.overlay.as_ref().is_some_and(|overlay| {
+                            retained_overlay
+                                .as_ref()
+                                .is_none_or(|old| !Arc::ptr_eq(old, &overlay.mesh))
+                        });
                     if f.paint.reflow.is_some() {
                         let mesh = reflow.mesh(now);
                         display.upload_scene(
@@ -236,6 +279,11 @@ pub(super) fn run() -> Result<(), String> {
                             &mesh.glyph_vertices,
                             &mesh.draws,
                         )?;
+                        if pan.enabled() {
+                            vertex_upload_bytes +=
+                                vertex_bytes(&mesh.vertices, &mesh.glyph_vertices);
+                            upload_calls += 1;
+                        }
                         retained = None;
                     } else if retained
                         .as_ref()
@@ -247,6 +295,13 @@ pub(super) fn run() -> Result<(), String> {
                             &f.paint.base.mesh.glyph_vertices,
                             &f.paint.base.mesh.draws,
                         )?;
+                        if pan.enabled() {
+                            vertex_upload_bytes += vertex_bytes(
+                                &f.paint.base.mesh.vertices,
+                                &f.paint.base.mesh.glyph_vertices,
+                            );
+                            upload_calls += 1;
+                        }
                         display.text_styles(0, &f.paint.base.styles)?;
                         retained = Some(f.paint.base.mesh.clone());
                     }
@@ -262,6 +317,10 @@ pub(super) fn run() -> Result<(), String> {
                             f.paint.motion.unwrap_or([80., 280., 1120., 400.]),
                         );
                         display.upload(1, &mesh.vertices)?;
+                        if pan.enabled() {
+                            vertex_upload_bytes += vertex_bytes(&mesh.vertices, &[]);
+                            upload_calls += 1;
+                        }
                         let bucket = (now / 1000.) as u64;
                         if hud != bucket
                             && hud_tx
@@ -298,6 +357,13 @@ pub(super) fn run() -> Result<(), String> {
                                 &overlay.mesh.glyph_vertices,
                                 &overlay.mesh.draws,
                             )?;
+                            if pan.enabled() {
+                                vertex_upload_bytes += vertex_bytes(
+                                    &overlay.mesh.vertices,
+                                    &overlay.mesh.glyph_vertices,
+                                );
+                                upload_calls += 1;
+                            }
                             display.text_styles(1, &overlay.styles)?;
                             retained_overlay = Some(overlay.mesh.clone());
                         }
@@ -330,6 +396,10 @@ pub(super) fn run() -> Result<(), String> {
                         && effect_revision != Some(f.paint.revisions.effects)
                     {
                         display.upload(2, &f.paint.effects)?;
+                        if pan.enabled() {
+                            vertex_upload_bytes += vertex_bytes(&f.paint.effects, &[]);
+                            upload_calls += 1;
+                        }
                         effect_revision = Some(f.paint.revisions.effects);
                     }
                     let mut slots = vec![];
@@ -352,7 +422,9 @@ pub(super) fn run() -> Result<(), String> {
                     if animated || scrolling.is_some() {
                         slots.push(2);
                     }
+                    let draw_call_started = pan.start();
                     display.draw_slots(surface.projection_for(f.paint.viewport), &slots)?;
+                    let draw_submitted = pan.start();
                     if drawn >= capture_after
                         && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()
@@ -373,6 +445,22 @@ pub(super) fn run() -> Result<(), String> {
                     }
                     let before = Instant::now();
                     let flip = display.present()?;
+                    // Capture actual display completion before target locks, HUD or credit work.
+                    let returned = pan.start();
+                    if let (Some(draw_started), Some(returned)) = (draw_started, returned) {
+                        pan.record(|| serde_json::json!({"event":"present","serial":f.serial,
+                            "epoch":f.epoch,"input":f.local_input.map(|i| i.json()),
+                            "local_update":f.local_update,"unique_serial":acked != f.serial,
+                            "prepare_started_us":process_us(draw_started),
+                            "draw_started_us":draw_call_started.map(process_us),
+                            "draw_submitted_us":draw_submitted.map(process_us),"present_started_us":process_us(before),
+                            "returned_us":process_us(returned),"drm_usec":flip.usec,
+                            "drm_sequence":flip.sequence,"drm_crtc":flip.crtc,
+                            "base_mesh_changed":base_changed,"overlay_mesh_changed":overlay_changed,
+                            "host_vertex_upload_bytes":vertex_upload_bytes,"host_upload_calls":upload_calls,
+                            "base_views":f.paint.base.views.len(),"document_uploading":uploading,
+                            "document_upload_bytes_unmeasured":f.paint.document.is_some()}));
+                    }
                     *input_target.lock().map_err(|_| "Touch target poisoned")? =
                         (!f.ui_ref.is_empty()).then(|| Target {
                             epoch: f.epoch,

@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 #[path = "bench_telemetry.rs"]
-mod bench_telemetry;
+pub(super) mod bench_telemetry;
 #[cfg(unix)]
 #[path = "native_worker/local_apps.rs"]
 mod local_apps;
@@ -63,6 +63,8 @@ pub(super) struct Frame {
     pub(super) updates: u64,
     pub(super) received_updates: u64,
     pub(super) remote_sample: Option<(u64, Instant)>,
+    pub(super) local_input: Option<bench_telemetry::LocalInput>,
+    pub(super) local_update: bool,
     pub(super) serial: u64,
     pub(super) epoch: u32,
     pub(super) motion_kind: Option<bool>,
@@ -103,6 +105,8 @@ impl Frame {
             updates: 0,
             received_updates: 0,
             remote_sample: None,
+            local_input: None,
+            local_update: false,
             serial,
             epoch: 0,
             motion_kind: None,
@@ -588,6 +592,10 @@ pub(super) fn state_worker(
     let mut remote_sample = None;
     let mut measured_sample = 0;
     let mut bench_present = bench_telemetry::Recorder::from_env()?;
+    let mut pan = bench_telemetry::PanRecorder::from_env("worker")?;
+    let mut local_input = None;
+    let mut local_sequence = 0_u64;
+    let mut local_update = false;
     let mut sync_to_present_ms = None;
     let mut last_status = None;
     let mut last_online = false;
@@ -635,11 +643,59 @@ pub(super) fn state_worker(
                         .checked_duration_since(started)
                         .unwrap_or_default()
                         .as_millis() as u64;
-                    dirty |= client.pointer_at(generation, e, at)?;
+                    let began = pan.start();
+                    let changed = client.pointer_at(generation, e, at)?;
+                    dirty |= changed;
+                    if let Some(began) = began {
+                        local_sequence += 1;
+                        let mark = bench_telemetry::LocalInput {
+                            sequence: local_sequence,
+                            epoch: generation,
+                            sampled: Some(sampled),
+                            phase: match e.phase {
+                                otrios_interfaces::scene::PointerPhase::Down => "down",
+                                otrios_interfaces::scene::PointerPhase::Move => "move",
+                                otrios_interfaces::scene::PointerPhase::Up => "up",
+                                otrios_interfaces::scene::PointerPhase::Cancel => "cancel",
+                            },
+                        };
+                        local_input = Some(mark);
+                        local_update |= changed;
+                        let ended = Instant::now();
+                        pan.record(|| {
+                            serde_json::json!({"event":"processed","input":mark.json(),
+                            "dequeued_us":bench_telemetry::process_us(began),
+                            "sample_age_us":began.saturating_duration_since(sampled).as_micros(),
+                            "ended_us":bench_telemetry::process_us(ended),"changed":changed,
+                            "client_epoch":client.epoch(),"pointer":e.id})
+                        });
+                    }
                 }
                 Input::CanvasCancel(generation) => {
-                    if generation == client.epoch() {
-                        dirty |= client.cancel()?;
+                    let began = pan.start();
+                    let changed = if generation == client.epoch() {
+                        client.cancel()?
+                    } else {
+                        false
+                    };
+                    dirty |= changed;
+                    if let Some(began) = began {
+                        local_sequence += 1;
+                        let mark = bench_telemetry::LocalInput {
+                            sequence: local_sequence,
+                            epoch: generation,
+                            sampled: None,
+                            phase: "route_cancel",
+                        };
+                        local_input = Some(mark);
+                        local_update |= changed;
+                        let ended = Instant::now();
+                        pan.record(|| {
+                            serde_json::json!({"event":"processed","input":mark.json(),
+                            "dequeued_us":bench_telemetry::process_us(began),
+                            "ended_us":bench_telemetry::process_us(ended),"changed":changed,
+                            "sample_unavailable":true,"client_epoch":client.epoch()})
+                        });
                     }
                 }
                 #[cfg(test)]
@@ -649,7 +705,11 @@ pub(super) fn state_worker(
                     demand.presented(serial);
                 }
                 Input::Presented(frame, renderer, display) => {
-                    demand.presented(frame.serial);
+                    let credit_started = pan.start();
+                    let accepted = demand.presented(frame.serial);
+                    pan.record(|| serde_json::json!({"event":"credit","serial":frame.serial,
+                        "credit_us":credit_started.map(bench_telemetry::process_us),"accepted":accepted,
+                        "input":frame.local_input.map(|i| i.json()),"dirty":dirty}));
                     if let Some((id, at)) = frame.remote_sample
                         && id > measured_sample
                     {
@@ -663,6 +723,12 @@ pub(super) fn state_worker(
                         fs::write(&tmp, info.to_string())
                             .and_then(|_| fs::rename(tmp, path))
                             .map_err(|e| e.to_string())?;
+                    }
+                    if let Some(began) = credit_started {
+                        let ended = Instant::now();
+                        pan.record(|| serde_json::json!({"event":"credit_handled","serial":frame.serial,
+                            "started_us":bench_telemetry::process_us(began),
+                            "ended_us":bench_telemetry::process_us(ended),"ready_file":o.ready_file.is_some()}));
                     }
                 }
             }
@@ -857,7 +923,17 @@ pub(super) fn state_worker(
                 }
             }
         }
-        dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        let tick_started = pan.start();
+        let tick_changed = client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        dirty |= tick_changed;
+        if let Some(began) = tick_started.filter(|_| tick_changed || local_update) {
+            let ended = Instant::now();
+            pan.record(|| {
+                serde_json::json!({"event":"tick","started_us":bench_telemetry::process_us(began),
+                "ended_us":bench_telemetry::process_us(ended),"changed":tick_changed,
+                "input":local_input.map(|i| i.json())})
+            });
+        }
         if client.take_collection_revoked() {
             revoke_display(&mut display_access, &mut composer);
         }
@@ -983,6 +1059,7 @@ pub(super) fn state_worker(
             dirty = false;
         }
         if let Some(serial) = demand.begin() {
+            let frame_started = pan.start();
             if client.ui_ref().is_empty() {
                 let mut frame = Frame::blank(serial, online);
                 frame.access = display_access.clone();
@@ -993,7 +1070,9 @@ pub(super) fn state_worker(
                     .map_err(|e| format!("Render credit violated: {e}"))?;
                 composer.clear();
             } else {
+                let compose_started = pan.start();
                 let paint = composer.compose(&mut client, &font)?.clone();
+                let compose_ended = pan.start();
                 let motion = client.motion_intent()?;
                 let mut intent = motion.map(|v| v.1).unwrap_or_default();
                 if o.objects > 0 {
@@ -1021,12 +1100,26 @@ pub(super) fn state_worker(
                     updates,
                     received_updates,
                     remote_sample,
+                    local_input,
+                    local_update,
                     serial,
                     epoch: client.epoch(),
                     motion_kind: motion.map(|v| v.0),
                     state_ref,
                     ui_ref,
                 };
+                if let (Some(began), Some(ended)) = (compose_started, compose_ended) {
+                    let produced = Instant::now();
+                    pan.record(|| serde_json::json!({"event":"produced","serial":serial,
+                        "epoch":frame.epoch,"input":local_input.map(|i| i.json()),"local_update":local_update,
+                        "serial_created_us":frame_started.map(bench_telemetry::process_us),
+                        "compose_started_us":bench_telemetry::process_us(began),
+                        "compose_ended_us":bench_telemetry::process_us(ended),
+                        "produced_us":bench_telemetry::process_us(produced),
+                        "content_revision":frame.paint.revisions.content,
+                        "placement_revision":frame.paint.revisions.placement}));
+                }
+                local_update = false;
                 frames
                     .try_send(frame)
                     .map_err(|e| format!("Render credit violated: {e}"))?;
@@ -1523,6 +1616,117 @@ mod tests {
         let frame = fr.recv_timeout(timeout).unwrap();
         tx.send(Input::RenderReady(frame.serial)).unwrap();
         frame
+    }
+    // Re-exec keeps env opt-in isolated from parallel tests without unsafe set_var.
+    #[test]
+    fn local_pan_trace_preserves_samples_and_exact_credit() {
+        const CHILD: &str = "OTRIOS_PAN_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let root =
+                std::env::temp_dir().join(format!("otrios-pan-worker-{}", std::process::id()));
+            fs::create_dir_all(&root).unwrap();
+            let prefix = root.join("trace");
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "native_worker::tests::local_pan_trace_preserves_samples_and_exact_credit",
+                ])
+                .env(CHILD, "1")
+                .env("OTRIOS_NATIVE_PAN_LOG", &prefix)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let rows: Vec<serde_json::Value> = fs::read_to_string(root.join("trace.worker.jsonl"))
+                .unwrap()
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            assert_eq!(rows.last().unwrap()["dropped"], 0);
+            let processed: Vec<_> = rows.iter().filter(|r| r["event"] == "processed").collect();
+            assert_eq!(processed.len(), 3);
+            for (n, phase) in ["down", "move", "up"].iter().enumerate() {
+                assert_eq!(processed[n]["input"]["sequence"], n + 1);
+                assert_eq!(processed[n]["input"]["phase"], *phase);
+                assert!(processed[n]["sample_age_us"].as_u64().unwrap() >= 100_000);
+            }
+            let made = rows
+                .iter()
+                .find(|r| r["event"] == "produced" && r["local_update"] == true)
+                .unwrap();
+            assert_eq!(made["input"]["sequence"], 3);
+            let credits: Vec<_> = rows.iter().filter(|r| r["event"] == "credit").collect();
+            assert_eq!(credits[0]["accepted"], false);
+            assert_eq!(credits[1]["accepted"], true);
+            assert_eq!(credits[2]["accepted"], false);
+            assert!(
+                rows.iter().all(|r| r["event"] != "present"),
+                "Worker credit must never invent display completion"
+            );
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        let fixture = fixture();
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let apps = fixture.root.to_string_lossy().into_owned();
+        let worker = thread::spawn(move || {
+            state_worker(
+                Options {
+                    apps: Some(apps),
+                    screen: Some("three-d-lab".into()),
+                    ..Options::default()
+                },
+                rx,
+                ft,
+            )
+        });
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let sampled = Instant::now() - Duration::from_millis(100);
+        for (phase, x) in [
+            (otrios_interfaces::scene::PointerPhase::Down, 128.),
+            (otrios_interfaces::scene::PointerPhase::Move, 640.),
+            (otrios_interfaces::scene::PointerPhase::Up, 2000.),
+        ] {
+            tx.send(Input::CanvasPointer(
+                first.epoch,
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position: [x, 400.],
+                },
+                sampled,
+            ))
+            .unwrap();
+        }
+        let display = DisplayInfo {
+            video: "test",
+            rotation: 0,
+            output: [1280, 800],
+            touch_calibrated: false,
+            touch_devices: 0,
+            format: "test",
+            color_bits: [8, 8, 8, 8],
+            stride: 5120,
+        };
+        let mut stale = first.clone();
+        stale.serial += 1;
+        tx.send(Input::Presented(Box::new(stale), "test".into(), display))
+            .unwrap();
+        assert!(fr.recv_timeout(Duration::from_millis(100)).is_err());
+        tx.send(Input::Presented(
+            Box::new(first.clone()),
+            "test".into(),
+            display,
+        ))
+        .unwrap();
+        let next = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(next.local_input.unwrap().sampled, Some(sampled));
+        assert!(next.local_update);
+        assert_eq!(next.serial, first.serial + 1);
+        tx.send(Input::Presented(Box::new(first), "test".into(), display))
+            .unwrap();
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
     }
     #[test]
     fn renderer_credit_defers_composition_but_not_navigation() {
