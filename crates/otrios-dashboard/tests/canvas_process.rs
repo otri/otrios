@@ -59,7 +59,7 @@ impl Server {
         // shipped read-only scroll demo has no State fields to exercise here.
         let mut catalog =
             decode_catalog(&std::fs::read(root.join("apps/catalog.flex")).unwrap()).unwrap();
-        assert_eq!(catalog.apps.len(), 12);
+        assert_eq!(catalog.apps.len(), 13);
         assert_eq!(
             catalog
                 .apps
@@ -69,6 +69,7 @@ impl Server {
                 .collect::<std::collections::BTreeSet<_>>(),
             [
                 "test-playground/live-ui",
+                "test-playground/oib-designer",
                 "test-playground/components",
                 "test-playground/layouts",
                 "test-playground/text-input",

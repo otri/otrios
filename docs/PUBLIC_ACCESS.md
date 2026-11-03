@@ -61,7 +61,7 @@ route, despite residing beside public assets in the single signed local store.
 A lock icon or client-side `authenticated` field grants no authority.
 
 Leaving Monitoring drops its scoped view; logout revokes its server session.
-Private leases are checked on input, once a second for expiry, and before queued
+Private leases are checked on input, once a second for revocation, and before queued
 private bytes leave the socket. Public code and authorized viewers cannot recall
 copies already delivered to a signed-in user. This remains a bounded demo policy,
 not the future general OTriOS capability runtime.
@@ -75,17 +75,32 @@ retain an Argon2id `password_hash`; device/collector entries retain token digest
 Space roles and service grants are separate from authentication. Never commit it,
 tunnel credentials or signing keys. Successful login rotates a random 256-bit
 opaque session; only its digest is kept server-side. The browser receives a
-host-only `Secure; HttpOnly; SameSite=Strict; Path=/` cookie, expiring after eight
-hours by default. Sessions are RAM-only; restarting the server signs browsers out.
+host-only `Secure; HttpOnly; SameSite=Strict; Path=/` persistent cookie. Server
+sessions have no time or idle expiry and survive refreshes, deployments and
+server restarts. Sign Out durably revokes that browser's token; another browser
+stays signed in. Login rotation and explicit account/credential changes revoke
+superseded grants. The browser cookie uses a 400-day lifetime, renewed whenever
+an authenticated session check succeeds; browsers may impose retention limits
+or users may clear site data.
+
+Only token digests and credential-bound identity records are stored in a private,
+atomically replaced mode-600 session file, outside signed releases and app data.
+Its default is `--app-state` with extension `sessions.json` (on Frame,
+`/var/lib/otrios-authority/state.sessions.json`); without app state it is adjacent
+to the auth file. `--sessions-file` selects an explicit private path. One authority
+owns its lock. Corrupt/unreadable state fails closed, and a failed durable login
+or sign-out reports failure instead of confirming an uncommitted change.
+The former `--session-seconds` option is removed.
 
 A failed status request caused by rate limiting or a server/proxy outage does
 not change the last confirmed browser sign-in status. An authoritative 401 still
 revokes it immediately; protected requests are always checked by the authority.
-This does not extend the eight-hour expiry or retain sessions across a restart.
+Authentication state is recovered independently of CRDT state and release discovery.
 
 POST/DELETE require the exact Origin and a custom request header; login uses
 JSON. Verification has one worker slot, 20 attempts/minute globally and 128
-sessions. Passwords/tokens do not enter URLs, document state or logs. The browser
+sessions. Reaching that bound rejects a new login rather than evicting an existing
+browser; replacing the current browser token does not consume another slot. Passwords/tokens do not enter URLs, document state or logs. The browser
 uses standard password fields and reconnects its single session after login to
 acquire the new cookie. The native Frame uses its private token file on the
 loopback listener; loopback access itself grants no managed admission.

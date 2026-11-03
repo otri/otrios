@@ -85,7 +85,7 @@ fn restart(room: &mut Room) {
 #[test]
 fn admitted_collection_owns_sent_snapshots_receipts_and_all_tab_kick_revocation() {
     use otrios_core::collection as col;
-    let mut room = room(true, 60);
+    let mut room = room(true);
     let mut writer = socket(&room.private, None);
     let (author, resume, epoch) = join(&mut writer, None);
     let mut reader = socket(&room.private, None);
@@ -318,7 +318,7 @@ fn admitted_collection_owns_sent_snapshots_receipts_and_all_tab_kick_revocation(
 }
 #[test]
 fn room_adapter_handles_identity_live_drafts_native_auth_all_tab_kick_and_recovery() {
-    let mut room = room(true, 60);
+    let mut room = room(true);
     let headers = [("Origin", ORIGIN), ("x-otrios-request", "session")];
     assert_eq!(
         request(&room.public, "POST", "/chat/identity", &[], &[]).0,

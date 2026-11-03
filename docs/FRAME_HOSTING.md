@@ -77,7 +77,7 @@ The trusted loopback listener admits private apps for the local display and acce
 monitoring collector's `/presentation` upload. The public listener uses an exact
 route/Origin allowlist and Monitoring's HttpOnly cookie; static paths cannot
 expose `authority/bundles/` or legacy `authority/apps/`. Public demos share the frame's per-app data roots.
-Navigation remains local. Private leases are checked on input, expiry and before
+Navigation remains local. Private leases are checked on input, revocation and before
 queued bytes leave the socket. [Public access](PUBLIC_ACCESS.md) details policy.
 
 Each app has a Merkle checkpoint and bounded append journal. Changed nodes and
@@ -159,7 +159,8 @@ python3 scripts/deploy-dashboard-frame.py --config /PRIVATE/config.json \
 The receiver verifies every signed asset before changing the pointer. Authority
 executables and helpers are installed through trusted SSH; they are not part of
 the signed renderer update manifest. Server byte changes restart the authority,
-which revokes RAM-only browser sessions; renderer-only updates retain hot reload.
+which recovers durable browser sessions from `state.sessions.json`; renderer-only
+updates retain hot reload. Neither kind of update signs the browser out.
 `/admin/activate` publishes upgrades after the complete replica is installed.
 Release discovery remains independent of state negotiation/recovery.
 

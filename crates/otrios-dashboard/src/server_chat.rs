@@ -185,7 +185,11 @@ impl Hub {
                         match &auth{Some(auth)=>match auth.authenticate(&username,&password).await{Ok((_,key))=>{auth_key=Some(key);hub.run(move|room|Ok(room.set_admin(id,true))).await},Err(_)=>Err("Monitoring sign-in failed; check credentials or wait before retrying".into())},None=>Err("Monitoring sign-in is unavailable".into())}
                     }
                     Command::Authenticate{..}=>Err("Use the Monitoring sign-in form".into()),
-                    Command::SignOut=>{if let (Some(auth),Some(key))=(&auth,auth_key.take()){auth.revoke(&key).await;}hub.run(move|room|Ok(room.set_admin(id,false))).await},
+                    Command::SignOut=>{
+                        let revoked = if let (Some(auth),Some(key))=(&auth,auth_key.as_deref()){auth.revoke(key).await}else{Ok(())};
+                        if revoked.is_err(){Err("Could not finish signing out".into())}
+                        else{auth_key=None;hub.run(move|room|Ok(room.set_admin(id,false))).await}
+                    },
                     command=>hub.run(move|room|room.handle(id,command,now())).await,
                 };
                 match result {

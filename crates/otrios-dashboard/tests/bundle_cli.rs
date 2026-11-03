@@ -230,7 +230,7 @@ fn offline_export_inspect_and_filesystem_failures_in_real_processes() {
     let catalog =
         otrios_core::canvas::decode_catalog(&fs::read(installed.join("catalog.flex")).unwrap())
             .unwrap();
-    assert_eq!(catalog.apps.len(), 13);
+    assert_eq!(catalog.apps.len(), 14);
     let home = otrios_core::canvas::decode_ui(
         &fs::read(installed.join("home.otapp/UI/main.flex")).unwrap(),
     )
