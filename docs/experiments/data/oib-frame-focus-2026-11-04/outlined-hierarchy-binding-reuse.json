@@ -1,0 +1,31 @@
+{
+  "release": "c1c14dcae31a6437578266d730ffe09fb52106b75091b8ca1c405338b42c01cd",
+  "trial": "hierarchy-geometry-bindings",
+  "seconds": 29.966724,
+  "device_move_samples": 900,
+  "unique_move_updates": 743,
+  "updates_per_second": 24.794168358209593,
+  "return_intervals": {
+    "n": 742,
+    "p95_ms": 53.006,
+    "max_ms": 53.098
+  },
+  "sample_to_return": {
+    "n": 743,
+    "p95_ms": 78.726,
+    "max_ms": 84.741
+  },
+  "boundary_gaps_ms": [
+    40.473,
+    0.0
+  ],
+  "drm_flip_intervals": {
+    "n": 742,
+    "p95_ms": 52.963,
+    "max_ms": 52.976
+  },
+  "topology_rebuilds": 15,
+  "pass": false,
+  "logs_dropped": 0,
+  "service_restored": true
+}

@@ -138,6 +138,7 @@ pub(super) enum Input {
     Back,
     // Renderer consumed the immutable snapshot; this is not a display ack.
     RenderReady(u64),
+    PrepareReload(mpsc::SyncSender<bool>),
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
 }
@@ -602,6 +603,9 @@ pub(super) fn state_worker(
     let mut composer = Composer::default();
     let mut display_access = Arc::new(AtomicBool::new(true));
     let mut stopping: Option<Instant> = None;
+    let mut reload_committed = false;
+    let mut ready_report: Option<serde_json::Value> = None;
+    let mut ready_dirty = false;
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
     loop {
@@ -638,7 +642,20 @@ pub(super) fn state_worker(
                 Input::Stop => {
                     stopping.get_or_insert_with(Instant::now);
                 }
+                Input::PrepareReload(reply) => {
+                    let online = o.url.is_none()
+                        || (epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id)
+                            && stream_ready.load(Ordering::Acquire));
+                    let safe = !client.input_busy() && (!online || client.reload_ready());
+                    // Commit at the state owner's input boundary. Contacts
+                    // arriving after this grant must not start a new gesture.
+                    reload_committed |= safe;
+                    let _ = reply.try_send(safe);
+                }
                 Input::CanvasPointer(generation, e, sampled) => {
+                    if reload_committed {
+                        continue;
+                    }
                     let at = sampled
                         .checked_duration_since(started)
                         .unwrap_or_default()
@@ -672,6 +689,9 @@ pub(super) fn state_worker(
                     }
                 }
                 Input::CanvasCancel(generation) => {
+                    if reload_committed {
+                        continue;
+                    }
                     let began = pan.start();
                     let changed = if generation == client.epoch() {
                         client.cancel()?
@@ -721,12 +741,10 @@ pub(super) fn state_worker(
                         bench_present.presented(id, at, frame.intent.count)?;
                         sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
                     }
-                    if let Some(path) = &o.ready_file {
+                    if o.ready_file.is_some() {
                         let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"reload_ready":frame.reload_ready,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"runtime_resources":frame.resources,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":frame.ui_release,"runtime_release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default(),"ui_updates":true,"ui_release":frame.ui_release});
-                        let tmp = format!("{path}.tmp");
-                        fs::write(&tmp, info.to_string())
-                            .and_then(|_| fs::rename(tmp, path))
-                            .map_err(|e| e.to_string())?;
+                        ready_report = Some(info);
+                        ready_dirty = true;
                     }
                     if let Some(began) = credit_started {
                         let ended = Instant::now();
@@ -1055,6 +1073,37 @@ pub(super) fn state_worker(
         );
         dirty |= last_status != Some(status);
         last_status = Some(status);
+        if let (Some(path), Some(report)) = (&o.ready_file, ready_report.as_mut()) {
+            // Display identity stays at the last completed present. These
+            // authorization fields instead describe the state owner now,
+            // including changes received without any new renderer credit.
+            for (key, value) in [
+                ("upgrade_guard", serde_json::json!("worker-quiescent-v1")),
+                ("input_busy", serde_json::json!(client.input_busy())),
+                ("stream_ready", serde_json::json!(online)),
+                ("state_confirmed", serde_json::json!(confirmed)),
+                (
+                    "reload_ready",
+                    serde_json::json!(reload_ready && !reload_committed),
+                ),
+                (
+                    "pending_commands",
+                    serde_json::json!(client.pending_count()),
+                ),
+            ] {
+                if report[key] != value {
+                    report[key] = value;
+                    ready_dirty = true;
+                }
+            }
+            if ready_dirty {
+                let tmp = format!("{path}.tmp");
+                fs::write(&tmp, report.to_string())
+                    .and_then(|_| fs::rename(tmp, path))
+                    .map_err(|e| e.to_string())?;
+                ready_dirty = false;
+            }
+        }
         if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
             return Ok(());
         }
@@ -1746,6 +1795,89 @@ mod tests {
         tx.send(Input::RenderReady(next.serial)).unwrap();
         tx.send(Input::Presented(Box::new(next), "test".into(), display))
             .unwrap();
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
+    #[test]
+    fn reload_admission_uses_current_state_and_seals_the_input_boundary() {
+        use otrios_interfaces::scene::PointerPhase;
+        let fixture = fixture();
+        let ready = fixture.root.join("reload-ready.json");
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("three-d-lab".into()),
+            ready_file: Some(ready.to_string_lossy().into()),
+            ..Options::default()
+        };
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let display = DisplayInfo {
+            video: "completed-test",
+            rotation: 90,
+            output: [800, 1280],
+            touch_calibrated: true,
+            touch_devices: 1,
+            format: "test-format",
+            color_bits: [8, 8, 8, 0],
+            stride: 3200,
+        };
+        let presented = || Input::Presented(Box::new(first.clone()), "test".into(), display);
+        let report = |busy: bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                if let Ok(bytes) = fs::read(&ready) {
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    if value["input_busy"] == busy {
+                        return value;
+                    }
+                }
+                assert!(Instant::now() < deadline, "current readiness deadline");
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        tx.send(presented()).unwrap();
+        assert_eq!(report(false)["reload_ready"], true);
+        let pointer = |phase, position| {
+            Input::CanvasPointer(
+                first.epoch,
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position,
+                },
+                Instant::now(),
+            )
+        };
+        tx.send(pointer(PointerPhase::Down, [128., 400.])).unwrap();
+        let (reply, answer) = mpsc::sync_channel(1);
+        tx.send(Input::PrepareReload(reply)).unwrap();
+        assert!(!answer.recv_timeout(Duration::from_secs(3)).unwrap());
+        let busy = report(true);
+        assert_eq!(busy["reload_ready"], false);
+        assert_eq!(busy["screen"], first.screen);
+        let second = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(second.input_busy);
+        // A delayed display acknowledgement must not restore old idle flags.
+        tx.send(presented()).unwrap();
+        let (reply, answer) = mpsc::sync_channel(1);
+        tx.send(Input::PrepareReload(reply)).unwrap();
+        assert!(!answer.recv_timeout(Duration::from_secs(3)).unwrap());
+        assert_eq!(report(true)["reload_ready"], false);
+        tx.send(pointer(PointerPhase::Up, [2000., 400.])).unwrap();
+        let (reply, answer) = mpsc::sync_channel(1);
+        tx.send(Input::PrepareReload(reply)).unwrap();
+        assert!(answer.recv_timeout(Duration::from_secs(3)).unwrap());
+        // A contact queued after the grant is outside the admitted old host.
+        tx.send(pointer(PointerPhase::Down, [128., 400.])).unwrap();
+        tx.send(Input::RenderReady(second.serial)).unwrap();
+        let next = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(!next.input_busy);
+        let idle = report(false);
+        assert_eq!(idle["reload_ready"], false);
+        assert_eq!(idle["upgrade_guard"], "worker-quiescent-v1");
+        assert_eq!(idle["screen"], first.screen);
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
     }

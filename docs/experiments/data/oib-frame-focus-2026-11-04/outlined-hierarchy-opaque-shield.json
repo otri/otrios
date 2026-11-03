@@ -1,0 +1,31 @@
+{
+  "release": "7604ff8a9cdc74853150243f8cffd86dd77809940b11e209e0ef3ab3c711142a",
+  "trial": "hierarchy-opaque-shield",
+  "seconds": 29.966795,
+  "device_move_samples": 900,
+  "unique_move_updates": 735,
+  "updates_per_second": 24.527147464385163,
+  "return_intervals": {
+    "n": 734,
+    "p95_ms": 53.004,
+    "max_ms": 53.076
+  },
+  "sample_to_return": {
+    "n": 735,
+    "p95_ms": 77.513,
+    "max_ms": 84.249
+  },
+  "boundary_gaps_ms": [
+    42.698,
+    0.0
+  ],
+  "drm_flip_intervals": {
+    "n": 734,
+    "p95_ms": 52.963,
+    "max_ms": 52.978
+  },
+  "topology_rebuilds": 15,
+  "pass": false,
+  "logs_dropped": 0,
+  "service_restored": true
+}

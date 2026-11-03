@@ -159,6 +159,8 @@ pub(super) fn run() -> Result<(), String> {
     let mut drawn = 0;
     let mut acked = 0;
     let mut capacity_released = 0;
+    let mut reload_check: Option<mpsc::Receiver<bool>> = None;
+    let mut reload_retry = Instant::now();
     let mut dirty = true;
     let mut compose = Vec::new();
     let mut present = Vec::new();
@@ -173,12 +175,31 @@ pub(super) fn run() -> Result<(), String> {
             if worker.is_finished() {
                 return Err("State worker stopped unexpectedly".into());
             }
-            if seconds.is_some_and(|s| started.elapsed() >= Duration::from_secs(s))
-                || exit_file
-                    .as_ref()
-                    .is_some_and(|p| std::path::Path::new(p).exists())
-            {
+            if seconds.is_some_and(|s| started.elapsed() >= Duration::from_secs(s)) {
                 break;
+            }
+            if exit_file
+                .as_ref()
+                .is_some_and(|p| std::path::Path::new(p).exists())
+            {
+                if reload_check.is_none() && Instant::now() >= reload_retry {
+                    let (reply, check) = mpsc::sync_channel(1);
+                    send(Input::PrepareReload(reply))?;
+                    reload_check = Some(check);
+                }
+                if let Some(check) = &reload_check {
+                    match check.try_recv() {
+                        Ok(true) => break,
+                        Ok(false) => {
+                            reload_check = None;
+                            reload_retry = Instant::now() + Duration::from_millis(100);
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            return Err("Reload admission worker disconnected".into());
+                        }
+                    }
+                }
             }
             let mut revoked = model.as_mut().is_some_and(Frame::redact_if_revoked);
             while let Ok(mut next) = frame_rx.try_recv() {

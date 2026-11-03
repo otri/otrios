@@ -240,13 +240,19 @@ class Host:
             self.offered_ui=release
         info=self.info()
         return info.get('ui_release')==release and hot_reload_ready(info)
-    def close(self):
+    def close(self,for_upgrade=False):
+        guarded=for_upgrade and self.info().get('upgrade_guard')=='worker-quiescent-v1'
         self.stop.touch()
-        try:self.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.process.terminate()
-            try:self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
+        while True:
+            try:self.process.wait(timeout=.5 if guarded else 5);break
+            except subprocess.TimeoutExpired:
+                # A signed replacement must wait for the old state owner to
+                # admit shutdown. Explicit service shutdown retains force-close.
+                if guarded and running:continue
+                self.process.terminate()
+                try:self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
+                break
         self.stop.unlink(missing_ok=True);self.ready.unlink(missing_ok=True);self.ui_socket.unlink(missing_ok=True)
 
 class ReleaseFeed:
@@ -334,7 +340,7 @@ def main(a):
                         atomic(good_file,json.dumps({'id':release}).encode());print('UI ACTIVE signed_release='+release,flush=True)
                     continue
                 host=None
-                if old:old.close()
+                if old:old.close(for_upgrade=True)
                 candidate=Host(a,release,exe,screen=info.get('screen') if info.get('ui_ref') else None)
                 try:candidate.wait_ready(require_stream=old is not None and info.get('stream_ready') is not False)
                 except Exception:

@@ -121,3 +121,85 @@ through actual InputRouter Down/Move/Up dispatch, as well as the existing closed
 layout and release-outside checks. All 29 Designer tests passed after correction.
 A fresh independent recheck and rebuilt signed candidate are required before
 this follow-up can deploy; the earlier staged artifact is superseded.
+
+
+## First signed styling measurement and bounded correction
+
+Source `433b876`, signed release
+`5e66183daaa83b10673f6e957cf1c8f738f4b152df9b4587be06082d9a0147f7`,
+passed signature/closure, authority/native activation and healthy v27 checks.
+Actual fixture-only Frame and signed-in browser images confirmed the outlined
+controls, dark fields, shared palette and larger type. Browser login survived
+the cutover. The four app values stayed [440,700,1000,0].
+
+Actual six-root Frame pans did not pass the unchanged 28 Hz target: hierarchy
+24.1935 Hz (p95 53.006 ms), selected inspector 27.6976 Hz (p95 35.623 ms).
+Both logs had zero drops, 15 topology rebuilds and unchanged generation 40.
+An earlier timing capture was truncated by the controller and discarded; the
+valid runs used one sequential controller that restores the host after the full
+gesture. Temporary roots 65542–65545 were removed and original width/color
+state restored at generation 45. These failures remain recorded, not rounded up.
+
+Read-only investigation found steady rendering cost rather than repeated mesh
+uploads. The transparent modal shield introduced for correct blank-gutter hits
+forced native blending across its entire retained geometry slot. The bounded
+correction uses opaque CARD behind the fully covering square-corner drawer;
+identity, geometry, responder, ordering and visible appearance are unchanged.
+Independent review found no correctness objections. Its disposable host probe
+checked two/six roots, both orientations and keyboard off/on: all eight fixed
+overlays had zero nonopaque geometry vertices, versus six with the transparent
+shield restored. Hit/capture results matched. The permanent drawer test passed.
+
+Source `e822802` is the single-variable signed candidate. Its actual Frame
+performance is still pending; the blending diagnosis alone is not acceptance.
+
+The signed opaque-shield experiment (release `7604ff8a`, source `e822802`)
+verified and activated normally. The same actual six-root hierarchy trial gave
+24.5271 Hz, p95 53.004 ms and maximum 53.076 ms, zero dropped logs and 15 rebuilds;
+generation 49 stayed unchanged. It still fails the 28 Hz gate. Disabling the
+shield-triggered blending therefore does not explain most of the regression.
+The normal service was restored; temporary roots 65546–65549 were removed.
+App values and original overrides remain unchanged. Further work targets repeated
+geometry state setup between consecutive outlined fills; hardware acceptance and
+release automation promotion remain incomplete.
+
+The slot-local geometry-binding change (`cf4dbcc`, release `c1c14dca`) passed
+its actual-source GL harness, sanitizer runs and independent 20,000-case
+base/HEAD trace equivalence check. Matching ARM/wasm builds and signed closure
+verification passed; authority/native activation and health passed. Actual
+hierarchy timing remained below target: 24.7942 Hz, p95 53.006 ms, maximum
+53.098 ms, zero drops and 15 topology rebuilds. Generation 57 stayed unchanged
+through the gesture. Temporary roots 65550–65553 were removed; the original two
+roots, values and overrides were confirmed at generation 61. This call-count
+optimization is not a claimed performance qualification. Next work examines
+overlapping bounded composition with the display's present wait while keeping
+actual presentation acknowledgements and input targets tied to completed flips.
+
+
+## Overlap review and release authorization correction
+
+The first bounded overlap candidate (`ab87763`, signed `060c83a3`) built and
+verified but was never activated. Independent review reproduced a P1: late
+Presented could publish old idle upgrade flags while the worker held a new
+gesture. The supervisor's exact hot-reload predicate accepted the stale report.
+
+The correction keeps completed-frame identity separate from current safety.
+Once a displayed report exists, the worker updates input/confirmation/pending and
+reload fields whenever its current state changes, even without renderer credit.
+An executable exit request now asks the state owner for quiescent admission. It
+denies held gestures and connected pending edits; an accepted grant seals the
+old host's input boundary before shutdown. The native input thread continues
+until that grant. The existing supervisor recognizes worker-quiescent-v1 and
+waits for the admitted upgrade exit instead of force-closing after five seconds.
+Explicit service shutdown and older verified hosts retain their previous path.
+Disconnected RAM-edit policy remains unchanged. No state wire change was added.
+
+The regression test bootstraps an actually displayed report, starts a contact,
+delivers a late old Presented, verifies current busy/non-reloadable status and
+denied exit, naturally releases the contact, then verifies the accepted grant
+and rejection of later contacts. The full focused direct-host binary passed
+26 tests with local socket access. Supervisor ArtifactBudget and DirectHostContract
+passed 17 tests, including more than five seconds of simulated guarded waiting
+without termination and explicit service shutdown. Focused formatting and
+whitespace checks passed. Fresh independent recheck, ARM build and actual Frame
+performance remain required before activating the corrected overlap candidate.
