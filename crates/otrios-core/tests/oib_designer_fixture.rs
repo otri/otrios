@@ -607,3 +607,49 @@ fn forwarding_nested_override_reset_and_recovery_preserve_authored_labels_and_ap
     assert_eq!(effective(&recovered, 203), Value::Text("Volume".into()));
     assert!(doc.oib_status().unwrap().error.is_none());
 }
+
+#[test]
+fn package_advertises_designer_requirement_and_rejects_its_removal() {
+    use otrios_core::{bundle, canvas};
+    use otrios_interfaces::bundle::{
+        BundleFile, BundleFiles, FILES_FORMAT, FILES_PATH, INFO_PATH, SIGNATURE_PATH,
+    };
+    use sha2::{Digest, Sha256};
+
+    let ui = app::ui(&[]);
+    let bytes = canvas::encode_ui(&ui).unwrap();
+    let entry = otrios_interfaces::canvas::CatalogEntry {
+        app: app::manifest(),
+        path: "test-playground/oib-designer".into(),
+        private: true,
+        ui_hash: Sha256::digest(&bytes).into(),
+    };
+    let mut tree = bundle::pack(&entry, 1, &bytes, None).unwrap();
+    let mut info = bundle::inspect(&tree).unwrap().info;
+    assert!(info.required_features.iter().any(|f| f == FEATURE));
+    info.required_features.retain(|f| f != FEATURE);
+    tree.insert(INFO_PATH.into(), bundle::encode_info(&info).unwrap());
+
+    // Keep the file closure valid so this exercises required-feature admission,
+    // rather than failing earlier on the deliberately edited metadata's digest.
+    let manifest = BundleFiles {
+        format: FILES_FORMAT.into(),
+        files: tree
+            .iter()
+            .filter(|(path, _)| !matches!(path.as_str(), FILES_PATH | SIGNATURE_PATH))
+            .map(|(path, bytes)| BundleFile {
+                path: path.clone(),
+                bytes: bytes.len() as u64,
+                sha256: Sha256::digest(bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect(),
+            })
+            .collect(),
+    };
+    tree.insert(FILES_PATH.into(), flexbuffers::to_vec(&manifest).unwrap());
+    assert_eq!(
+        bundle::inspect(&tree).unwrap_err(),
+        "Missing required OIB designer feature"
+    );
+}

@@ -177,6 +177,9 @@ pub fn pack(
     }
     if canvas::oib::seed(&ui).is_some() {
         required_features.push(otrios_interfaces::oib::FEATURE.into());
+        if canvas::oib::seed(&ui).is_some_and(|s| s.designer.is_some()) {
+            required_features.push(otrios_interfaces::oib::designer::FEATURE.into());
+        }
         if canvas::oib::seed(&ui)
             .is_some_and(|s| s.cells.iter().any(|c| c.authored_override.is_some()))
         {

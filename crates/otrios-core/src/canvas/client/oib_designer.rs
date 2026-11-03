@@ -757,8 +757,12 @@ impl Mount {
                 &designer.selection,
                 &self.doc.oib_active()?,
             )?;
+            // Dynamic occurrence cells carry the signed prototype's choices.
+            // Their IDs are absent from the unexpanded seed; reuse the runtime
+            // expansion rather than deriving a second factory/path lookup here.
+            let expanded = super::super::oib::instances::expanded_seed(seed, &allocations)?;
             designer.rebuild(
-                seed,
+                &expanded,
                 objects,
                 &properties,
                 &self.doc.oib_conflicts(),

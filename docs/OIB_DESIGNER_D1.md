@@ -263,6 +263,17 @@ finished release. Only then is D1 ready for final review and any requested PR.
   0/1000 toggle fields with boolean semantics, and explicit Edit/Test interaction.
   Fixture estimates require measured admission before activation. Implementation
   remains pending contract freeze.
+- Fixture implementation `58cad103` integrated as `260296e`; local designer client
+  `ffe83735` integrated as `09c9eed`. Their authoring/contract-shim harnesses are
+  limited evidence, not integrated acceptance. The parent combined Canvas check
+  currently fails because the runtime query/adapter APIs have not landed; the
+  former Nonzero exhaustive-match blocker is fixed by the client lane.
+- Parent source review added package feature discovery and a removal-rejection
+  test, and reused runtime-expanded cells for dynamic inspector choices. Review
+  also identified a resource concern: full expanded hierarchy chrome plus app
+  scene must fit the combined scene/control ceilings; scrolling must not require
+  materializing every row into the presented scene. Focused implementation/test
+  follow-up is assigned before integrated acceptance.
 - Runtime tests, process acceptance, deployment and live acceptance: not run.
 
 Update this record at integration gates with actual commits, commands and results.
