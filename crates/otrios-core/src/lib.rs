@@ -126,3 +126,6 @@ pub mod collection;
 
 #[cfg(feature = "dashboard")]
 mod flex_guard;
+
+#[cfg(all(test, feature = "canvas"))]
+mod test_support;

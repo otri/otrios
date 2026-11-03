@@ -30,6 +30,12 @@ Native signed/runtime hashes match, state is confirmed, input is idle and pendin
 commands are zero. The existing 90-degree rotation, calibrated touch device and
 RGB565 scanout remain in use.
 
+After live acceptance, private release-control promotion verified that Mac and
+Frame pointers matched and pinned the resumed Git-backed watcher to
+`a52477cc01a4f4e5ec18be53aa4d836ea84273b5`. The source was remotely reachable
+before resumption. Recovery code and previous release-control files are retained
+in the private runtime independently of this worktree's temporary build outputs.
+
 ## Focused live evidence
 
 The public browser loaded the deployed app and rendered the shared Rust/Wasm
@@ -88,6 +94,12 @@ dependencies, app binding/rendered-source mismatch, and a factory missing from
 the signed document instance list. Parent fixed all three with regressions. A
 fresh final review at the accepted implementation reports no findings and adds
 two independent closure/converse tests. No production edits were made by reviewers.
+
+Main subsequently advanced with a test-only fixture correction. It merged
+cleanly into the handoff branch; 11 bundle tests and five durable app-import
+tests pass with `--features canvas,signed-bundles`. These changes are confined
+to test code, including a `cfg(test)` helper, and do not alter the accepted
+deployed runtime. The watcher retains the exact live-qualified source pin.
 
 The full `scripts/check.sh` campaign was not repeated; focused checks and live
 acceptance were used. No Linux shared-memory IPC or separately spawned client
