@@ -9,7 +9,17 @@ use otrios_interfaces::{canvas::*, layout::Value};
 
 fn setup() -> (Ui, Document) {
     assert_eq!(app::manifest().id, "live-ui");
-    let ui = app::ui(&[]);
+    setup_ui(app::ui(&[]))
+}
+fn setup_stacked() -> (Ui, Document) {
+    // Retain the previous wide-track input and signed-default upgrade cases.
+    let ui = decode_ui(
+        &lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-v24-ui.lz4")).unwrap(),
+    )
+    .unwrap();
+    setup_ui(ui)
+}
+fn setup_ui(ui: Ui) -> (Ui, Document) {
     let mut doc = Document::new(ui.state_schema.clone(), "oib:test").unwrap();
     assert!(doc.configure_oib(&ui).unwrap());
     (ui, doc)
@@ -53,9 +63,138 @@ fn compact_changes() -> Vec<(u64, Option<Value>)> {
 }
 
 #[test]
+fn compact_defaults_survive_remove_add_restore_and_reset() {
+    use otrios_interfaces::scene::TouchResponder;
+    let ui = app::ui(&[]);
+    let mut doc = Document::new(ui.state_schema.clone(), "oib:test").unwrap();
+    doc.configure_oib(&ui).unwrap();
+    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
+        .unwrap();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    let epoch = client.epoch();
+    let check = |client: &Client, count, pitch| {
+        let scene = client.scene().unwrap();
+        let tracks: Vec<_> = scene
+            .controls()
+            .into_iter()
+            .filter(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
+            .collect();
+        assert_eq!(tracks.len(), count);
+        for (row, track) in tracks.iter().enumerate() {
+            assert_eq!(track.node.frame.width, 288.);
+            assert_eq!(track.node.frame.height, 48.);
+            assert_eq!(track.origin, [192., 140. + row as f32 * pitch]);
+        }
+    };
+    check(&client, 2, 80.);
+    // A later shared design edit still wins over the new signed defaults.
+    admin.edit_oib(&[(112, Some(Value::Number(96.)))]).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    for id in [20, 30] {
+        admin.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    admin
+        .instantiate_oib(10, Some("replacement".into()))
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    check(&client, 1, 96.);
+    admin.restore_oib(false).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    check(&client, 2, 96.);
+    admin.restore_oib(true).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    check(&client, 2, 80.);
+    admin.remove_oib(20).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin
+        .instantiate_oib(10, Some("after-reset".into()))
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    check(&client, 2, 80.);
+    assert_eq!(client.epoch(), epoch);
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
+}
+
+#[test]
+fn signed_compact_default_upgrade_retains_edits_history_and_recovery() {
+    use sha2::{Digest, Sha256};
+    let (old, mut doc) = setup_stacked();
+    let new = app::ui(&[]);
+    let previous_hash = Sha256::digest(encode_ui(&old).unwrap()).to_vec();
+    assert!(
+        oib::seed(&new)
+            .unwrap()
+            .instance_surface
+            .as_ref()
+            .unwrap()
+            .layout
+            .as_ref()
+            .unwrap()
+            .previous_ui_sha256
+            .contains(&previous_hash)
+    );
+    let (mut admin, mut sa) = adapter(&old, &mut doc, 2, true);
+    admin.edit_oib(&compact_changes()).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin.instantiate_oib(10, Some("retained".into())).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    admin.remove_oib(20).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    doc.set_typed(&[(2, Value::Number(632.))]).unwrap();
+    let saved = doc.save().unwrap();
+    let before = doc.clone();
+    assert!(doc.configure_oib(&new).unwrap());
+    for branch in [1, 2] {
+        assert_eq!(
+            doc.oib_values(branch).unwrap(),
+            before.oib_values(branch).unwrap()
+        );
+        assert_eq!(
+            doc.oib_live(branch).unwrap(),
+            before.oib_live(branch).unwrap()
+        );
+    }
+    assert_eq!(
+        doc.oib_allocations().unwrap(),
+        before.oib_allocations().unwrap()
+    );
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(632.));
+    let mut recovered = Document::load(old.state_schema.clone(), "oib:test", &saved).unwrap();
+    recovered
+        .replay(&doc.journal_delta(&before).unwrap())
+        .unwrap();
+    assert!(!recovered.configure_oib(&new).unwrap());
+    assert_eq!(recovered.root_hash(), doc.root_hash());
+    let mut unlisted = new.clone();
+    if let Some(Presentation::Oib(seed)) = &mut unlisted.presentation {
+        seed.instance_surface
+            .as_mut()
+            .unwrap()
+            .layout
+            .as_mut()
+            .unwrap()
+            .previous_ui_sha256
+            .retain(|h| h != &previous_hash);
+    }
+    assert!(before.clone().configure_oib(&unlisted).is_err());
+    let mut changed_label = new.clone();
+    if let Some(Presentation::Oib(seed)) = &mut changed_label.presentation {
+        seed.cells[0].default = Value::Text("Unrelated contract change".into());
+    }
+    assert!(before.clone().configure_oib(&changed_label).is_err());
+}
+
+#[test]
 fn restore_authored_bindings_works_after_history_exhaustion_and_keeps_design() {
     use std::collections::BTreeSet;
-    let (ui, mut doc) = setup();
+    let (ui, mut doc) = setup_stacked();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
     admin.edit_oib(&compact_changes()).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
@@ -622,7 +761,7 @@ fn pump_client(client: &mut Client, doc: &mut Document, session: &mut Session) {
 #[test]
 fn shared_scene_edits_keep_mount_identity_and_defer_geometry_until_slider_release() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase, Primitive, TouchResponder};
-    let (ui, mut doc) = setup();
+    let (ui, mut doc) = setup_stacked();
     let (mut a, mut sa) = mounted_client(&ui, &mut doc);
     let (mut b, mut sb) = mounted_client(&ui, &mut doc);
     let epoch = a.epoch();
@@ -1328,6 +1467,11 @@ fn structural_activation_waits_for_a_held_slider_and_preserves_local_inspection(
 fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
     let (ui, mut doc) = setup();
     let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
+    // Three compact rows fit without scrolling; make content overflow explicitly.
+    editor
+        .edit_oib(&[(112, Some(Value::Number(216.)))])
+        .unwrap();
+    sync(&mut doc, &mut se, &mut editor);
     editor.instantiate_oib(10, Some("gain".into())).unwrap();
     sync(&mut doc, &mut se, &mut editor);
     let (mut client, mut session) = mounted_client(&ui, &mut doc);
@@ -1510,14 +1654,16 @@ fn sparse_layout_events_are_versioned_and_keep_the_host_reservation() {
         root.children.iter_mut().any(|c| control(c, value))
     }
     let (mut ui, _) = setup();
+    // The first factory control is the optional heading; admit it for this check.
+    let values = std::collections::BTreeMap::from([(113, Some(Value::Boolean(true)))]);
     let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
     assert!(control(&mut blueprint.templates[0].root, 200));
     ui.layout = Layout::encode(&blueprint).unwrap();
-    assert!(oib::compile(&ui, &Default::default()).is_err());
+    assert!(oib::compile(&ui, &values).is_err());
     blueprint.schema = otrios_interfaces::layout::SPARSE_EVENTS_FORMAT.into();
     ui.layout = Layout::encode(&blueprint).unwrap();
-    oib::compile(&ui, &Default::default()).unwrap();
+    oib::compile(&ui, &values).unwrap();
     assert!(control(&mut blueprint.templates[0].root, 255));
     ui.layout = Layout::encode(&blueprint).unwrap();
-    assert!(oib::compile(&ui, &Default::default()).is_err());
+    assert!(oib::compile(&ui, &values).is_err());
 }

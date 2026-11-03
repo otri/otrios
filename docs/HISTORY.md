@@ -11,6 +11,9 @@ placement, dimensions, visibility and row pitch through bounded property batches
 allocating new identities and can separately reset UI defaults. The
 [Frame/Wasm record](experiments/live-slider-layout-2026-11-03.md) records the
 accepted compact design, live spacing edit, protocol v24 and both recovery controls.
+The [compact-default follow-up](experiments/compact-slider-defaults-2026-11-03.md)
+makes the approved 80 px compact rows the authored reusable component default,
+including after remove/add, Restore and Reset UI defaults.
 
 [OIB O2](rfcs/0030-live-oib-instances.md) adds bounded live creation, duplication
 and removal of named reusable instances through shared UI/code operations. Its

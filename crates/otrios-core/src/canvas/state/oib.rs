@@ -805,7 +805,7 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
                 a.id == b.id
                     && a.owner == b.owner
                     && a.name == b.name
-                    && a.default == b.default
+                    && (a.default == b.default || compatible_geometry_default(a, b))
                     && a.choices == b.choices
                     && a.inherit == b.inherit
             })
@@ -842,6 +842,34 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
             && a.choices == b.choices
             && a.inherit == b.inherit
     })
+}
+/// An explicitly allowlisted signed presentation may revise component geometry
+/// defaults. Retained register values remain untouched until an owner resets
+/// them; changing defaults never rebases shared edits or instance history.
+fn compatible_geometry_default(
+    old: &otrios_interfaces::oib::Cell,
+    new: &otrios_interfaces::oib::Cell,
+) -> bool {
+    use otrios_interfaces::oib::Property;
+    let geometry = |cell: &otrios_interfaces::oib::Cell| {
+        cell.inherit.is_none()
+            && !cell.targets.is_empty()
+            && cell.targets.iter().all(|t| {
+                matches!(
+                    t.property,
+                    Property::X
+                        | Property::Y
+                        | Property::Width
+                        | Property::Height
+                        | Property::FrameWidth
+                        | Property::OffsetY
+                        | Property::Visible
+                )
+            })
+    };
+    geometry(old)
+        && geometry(new)
+        && std::mem::discriminant(&old.default) == std::mem::discriminant(&new.default)
 }
 fn instance_name(name: &str) -> bool {
     !name.is_empty()

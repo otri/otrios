@@ -39,6 +39,11 @@ deactivated and their history retained. **Reset UI defaults** also restores sign
 component defaults and clears instance overrides; it preserves current slider
 values. Both operations reuse original objects without consuming allocation slots.
 See [restoration](rfcs/0032-oib-restoration.md) for causality and compatibility.
+The signed component defaults now use the approved compact row: 128 px label,
+288 px track, 76 px percentage column and 80 px row pitch. Added sliders inherit
+the shared component geometry. Restore keeps later design edits; Reset UI defaults
+returns to this compact design. The signed default update retains existing
+property registers, allocations and app values until an owner explicitly resets.
 
 - **Change** cycles through suggestions authored by the app for label, accent,
   width or spacing. Component edits affect both instances unless overridden.

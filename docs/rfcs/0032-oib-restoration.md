@@ -26,7 +26,9 @@ conflict/removal behavior; this is not a generic transaction or state rollback.
 Only admitted Space Admins can issue restoration. UI controls, `Client` and
 `StateAdapter::restore_oib(defaults)`, and Wasm host `oib_restore(defaults)` use the
 same operation. **Restore sliders** preserves the live design. **Reset UI defaults**
-restores the entire signed UI default, including the original stacked geometry.
+restores the entire signed UI default. The initial delivery used stacked geometry;
+the [compact-default follow-up](../experiments/compact-slider-defaults-2026-11-03.md)
+promotes the approved compact layout with 80 px row pitch to the signed default.
 Geometry activation continues to wait for held gestures. Local inspection falls
 back to an available original when its previous target is deactivated.
 

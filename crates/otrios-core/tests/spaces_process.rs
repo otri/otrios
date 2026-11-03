@@ -6706,7 +6706,7 @@ fn oib_instances_recover_unknown_outcomes_and_retained_removals_across_authority
     flush(&mut admin, &mut recovered);
     let (mut observer, mut view, _) = open(&rig, &space, &ui, 'b', 0);
     settle(&mut observer, &mut view);
-    while view.oib_property_text(104) != "label y: 0 (default)" {
+    while view.oib_property_text(104) != "label y: 10 (default)" {
         if let ServerMessage::Sync { bytes, .. } = read(&mut observer) {
             view.receive(&bytes).unwrap();
             flush(&mut observer, &mut view);
@@ -6720,10 +6720,10 @@ fn oib_instances_recover_unknown_outcomes_and_retained_removals_across_authority
     final_state.restore_pending(&recovered).unwrap();
     settle(&mut admin, &mut final_state);
     assert_eq!(final_state.value(1).unwrap(), 632);
-    assert_eq!(final_state.oib_property_text(104), "label y: 0 (default)");
+    assert_eq!(final_state.oib_property_text(104), "label y: 10 (default)");
     assert_eq!(
         final_state.oib_property_text(113),
-        "heading visible: true (default)"
+        "heading visible: false (default)"
     );
     assert_eq!(final_state.oib_instances().unwrap().len(), all.len());
 }

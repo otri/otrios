@@ -105,16 +105,16 @@ pub fn description() -> Ui {
         }
     }
     for (id, name, default) in [
-        (104, "label y", Value::Number(0.)),
-        (105, "label width", Value::Number(360.)),
-        (106, "track x", Value::Number(0.)),
-        (107, "track y", Value::Number(64.)),
-        (108, "track width", Value::Number(520.)),
-        (109, "percentage y", Value::Number(0.)),
-        (110, "percentage width", Value::Number(104.)),
-        (111, "content y", Value::Number(48.)),
-        (112, "row pitch", Value::Number(216.)),
-        (113, "heading visible", Value::Boolean(true)),
+        (104, "label y", Value::Number(10.)),
+        (105, "label width", Value::Number(128.)),
+        (106, "track x", Value::Number(144.)),
+        (107, "track y", Value::Number(0.)),
+        (108, "track width", Value::Number(288.)),
+        (109, "percentage y", Value::Number(10.)),
+        (110, "percentage width", Value::Number(76.)),
+        (111, "content y", Value::Number(0.)),
+        (112, "row pitch", Value::Number(80.)),
+        (113, "heading visible", Value::Boolean(false)),
     ] {
         cells.push(Cell {
             id,
@@ -279,6 +279,7 @@ pub fn description() -> Ui {
     .with_oib_instances(NamedOibSurface {
         layout: Some(LayoutSurface {
             previous_ui_sha256: [
+                "c25ff9811d3c1744b78a01f769aca73bc5e81090083987144595c826adb54db2",
                 "f810f69342264e7778aeaee97646bbaf8fe8182fb4acfd8fcd110a49e58ce8ce",
                 "22fa4203073790b9d1f5c16663a8ea4445760641dbe6274aaee5276490698f7f",
                 "886b642a9b6c651ad8b4e43a53812a98862c6a6be272b09cb32319f13c06f7d8",

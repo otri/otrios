@@ -72,6 +72,12 @@ allocations, tombstones and app values remain retained. The original exact O1
 upgrade and identical-seed signed presentation updates also remain supported.
 This is a bounded explicit migration, not general seed rebasing.
 
+The [compact-default follow-up](../experiments/compact-slider-defaults-2026-11-03.md)
+also permits same-type default changes for component cells that target geometry
+only, under the same exact predecessor hash allowlist. Existing register values
+are preserved; only explicit Reset adopts revised defaults. Text, color,
+inheritance, identity and suggestions still cannot change through this path.
+
 ## Required live acceptance
 
 Deploy and verify the layout-capable signed host/component while retaining the
