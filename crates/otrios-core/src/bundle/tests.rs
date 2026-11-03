@@ -7,7 +7,7 @@ fn fixture(code: Option<&[u8]>) -> BundleTree {
         format: "otrios-canvas-v2".into(),
         ui_ref: "app:sample/ui/main-v1".into(),
         title: "Sample".into(),
-        layout: vec![],
+        layout: crate::test_support::empty_layout(),
         state_schema: StateSchema {
             id: "sample-state-v1".into(),
             fields: vec![],
@@ -113,7 +113,7 @@ fn reproducible_identity_and_exact_closure_with_private_classification() {
     // Pinned interoperability vector for the complete fixed fixture, not merely a round trip.
     assert_eq!(
         result.digest,
-        "66df587db07f61fd40d17ac50896eb76f63240a098e499b1f47937eea67b1bdb"
+        "0d6515e3f47c5a9d6334e27a64b27fb36a94882315ce5384710319d6eb20d639"
     );
     let mut changed = tree.clone();
     change_info(&mut changed, |info| info.revision += 1);
@@ -398,11 +398,11 @@ fn signed_snapshot_requires_external_trust_and_survives_source_mutation() {
     );
     assert_eq!(
         hex(&hash(&signing_payload(&digest, &public).unwrap())),
-        "0996b55102ecccf252a59417edb7e3eb4bcf340e5e1170491df7b0a1111112dc"
+        "f757a51ed024c0a67d6e5b4cf4c213e9d31d68d400803d5b0fca762cf82c972b"
     );
     assert_eq!(
         hex(signature.as_ref()),
-        "2860dcb0eacf89cb91064e5670a1e4e0cbf9f0016e072f600f8e63fc4fa49a1ff2437980bada9b642d7e04bb7fe97246878dd2a73cca5521c0384f1f6e7c5f0d"
+        "90c6a3af7374ea17273da56337161ba450d59b5e47b7a49fc25b852c3843b8cb60fa84666048f91af5bae71b95a5d68cfe11c974663439d7717c9ab3841f0602"
     );
     attach_signature(&mut tree, &public, signature.as_ref()).unwrap();
     assert_eq!(inspect(&tree).unwrap().digest, digest);
