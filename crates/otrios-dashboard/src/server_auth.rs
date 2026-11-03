@@ -6,11 +6,14 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashMap, time::Instant};
 const COOKIE: &str = "__Host-otrios_monitoring";
 const MAX_SESSIONS: usize = 128;
+// Browsers cap persistent cookie lifetimes; renew on authenticated status checks.
+const COOKIE_SECONDS: u64 = 400 * 24 * 60 * 60;
+#[path = "server_auth_store.rs"]
+mod store;
 pub struct Sessions {
     users: HashMap<String, Login>,
     native: HashMap<String, String>,
-    ttl: Duration,
-    sessions: Mutex<HashMap<String, (String, Instant)>>,
+    sessions: Mutex<store::Store>,
     attempts: Mutex<(Instant, u32)>,
     verifier: Arc<Semaphore>,
     operators: otrios_core::transfers::HostPolicy,
@@ -26,6 +29,14 @@ impl Sessions {
         &self,
         username: &str,
         password: &str,
+    ) -> Result<(String, String), StatusCode> {
+        self.authenticate_replacing(username, password, None).await
+    }
+    async fn authenticate_replacing(
+        &self,
+        username: &str,
+        password: &str,
+        old: Option<&str>,
     ) -> Result<(String, String), StatusCode> {
         if username.len() > 320 || password.len() > 1024 || password.is_empty() {
             return Err(StatusCode::UNAUTHORIZED);
@@ -53,6 +64,7 @@ impl Sessions {
             .ok_or(StatusCode::UNAUTHORIZED)?
             .hash
             .clone();
+        let credential = digest(&hash);
         let password = password.to_owned();
         let verified = tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -74,21 +86,38 @@ impl Sessions {
             .collect::<String>();
         let key = digest(&token);
         let mut sessions = self.sessions.lock().await;
-        let now = Instant::now();
-        sessions.retain(|_, (_, expires)| *expires > now);
-        if sessions.len() >= MAX_SESSIONS {
+
+        let mut rows = sessions.rows.clone();
+        if let Some(old) = old {
+            rows.remove(old);
+        }
+        if rows.len() >= MAX_SESSIONS {
             return Err(StatusCode::SERVICE_UNAVAILABLE);
         }
-        sessions.insert(key.clone(), (identity, now + self.ttl));
+        rows.insert(
+            key.clone(),
+            store::Session {
+                username: username.into(),
+                identity,
+                credential,
+            },
+        );
+        sessions.commit(rows)?;
         Ok((token, key))
     }
-    pub(super) async fn revoke(&self, key: &str) {
-        self.sessions.lock().await.remove(key);
+    pub(super) async fn revoke(&self, key: &str) -> Result<(), StatusCode> {
+        let mut sessions = self.sessions.lock().await;
+        let mut rows = sessions.rows.clone();
+        rows.remove(key);
+        sessions.commit(rows)
     }
     pub fn load(
         path: &Path,
-        ttl: Duration,
+        sessions_path: &Path,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        if std::path::absolute(path)? == std::path::absolute(sessions_path)? {
+            return Err("Session state must be separate from credentials".into());
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -189,11 +218,11 @@ impl Sessions {
             return Err("Host operator must name a configured identity".into());
         }
         let operators = otrios_core::transfers::HostPolicy::new(operators)?;
+        let sessions = store::Store::open(sessions_path, &users)?;
         Ok(Self {
             users,
             native,
-            ttl,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(sessions),
             attempts: Mutex::new((Instant::now(), 0)),
             verifier: Arc::new(Semaphore::new(1)),
             operators,
@@ -206,10 +235,11 @@ impl Sessions {
         if let Some(identity) = self.native.get(key) {
             return Some(identity.clone());
         }
-        let mut sessions = self.sessions.lock().await;
-        let now = Instant::now();
-        sessions.retain(|_, (_, expires)| *expires > now);
-        sessions.get(key).map(|(identity, _)| identity.clone())
+        let sessions = self.sessions.lock().await;
+        sessions
+            .rows
+            .get(key)
+            .map(|session| session.identity.clone())
     }
     pub(super) async fn valid(&self, key: &str) -> bool {
         self.principal(key).await.is_some()
@@ -283,12 +313,26 @@ fn mutation(app: &App, headers: &HeaderMap) -> bool {
             .get("x-otrios-request")
             .is_some_and(|v| v == "session")
 }
+fn set_cookie(result: &mut Response, token: &str) {
+    result.headers_mut().insert(
+        header::SET_COOKIE,
+        format!(
+            "{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={COOKIE_SECONDS}"
+        )
+        .parse()
+        .unwrap(),
+    );
+}
 pub async fn session(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let Some(auth) = &app.auth else {
         return denied();
     };
     if auth.key(&headers).await.is_some() {
-        response(StatusCode::OK, json!({"monitoring":true}))
+        let mut result = response(StatusCode::OK, json!({"monitoring":true}));
+        if let Some(token) = cookie(&headers) {
+            set_cookie(&mut result, &token);
+        }
+        result
     } else {
         denied()
     }
@@ -317,7 +361,11 @@ pub async fn login(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes
     else {
         return denied();
     };
-    let (token, _) = match auth.authenticate(username, password).await {
+    let old = cookie(&headers).map(|token| digest(&token));
+    let (token, _) = match auth
+        .authenticate_replacing(username, password, old.as_deref())
+        .await
+    {
         Ok(value) => value,
         Err(StatusCode::TOO_MANY_REQUESTS) => {
             return response(
@@ -328,19 +376,8 @@ pub async fn login(State(app): State<Arc<App>>, headers: HeaderMap, bytes: Bytes
         Err(StatusCode::UNAUTHORIZED) => return denied(),
         Err(_) => return failure(StatusCode::SERVICE_UNAVAILABLE, "Session unavailable"),
     };
-    if let Some(old) = cookie(&headers) {
-        auth.revoke(&digest(&old)).await;
-    }
     let mut result = response(StatusCode::OK, json!({"monitoring":true}));
-    result.headers_mut().insert(
-        header::SET_COOKIE,
-        format!(
-            "{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={}",
-            auth.ttl.as_secs()
-        )
-        .parse()
-        .unwrap(),
-    );
+    set_cookie(&mut result, &token);
     result
 }
 pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
@@ -349,8 +386,12 @@ pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
     }
     if let Some(auth) = &app.auth
         && let Some(token) = cookie(&headers)
+        && auth.revoke(&digest(&token)).await.is_err()
     {
-        auth.sessions.lock().await.remove(&digest(&token));
+        return failure(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Could not finish signing out",
+        );
     }
     let mut result = response(StatusCode::OK, json!({"monitoring":false}));
     result.headers_mut().insert(
@@ -399,7 +440,7 @@ mod identity_tests {
             .unwrap()
             .write_all(value.to_string().as_bytes())
             .unwrap();
-        let sessions = Sessions::load(&path, Duration::from_secs(60)).unwrap();
+        let sessions = Sessions::load(&path, &path.with_extension("sessions.json")).unwrap();
         (path, sessions)
     }
     #[tokio::test]
@@ -445,11 +486,11 @@ mod identity_tests {
         let (path, _) = config(json!({"version":1,"users":[],"native":[]}));
         let invalid = json!({"version":1,"users":[],"operators":["unconfigured"],"native":[]});
         fs::write(&path, invalid.to_string()).unwrap();
-        assert!(Sessions::load(&path, Duration::from_secs(60)).is_err());
+        assert!(Sessions::load(&path, &path.with_extension("sessions.json")).is_err());
         fs::remove_file(path).unwrap();
     }
     #[tokio::test]
-    async fn two_logins_have_distinct_expiring_and_revocable_identities() {
+    async fn two_logins_have_distinct_durable_and_revocable_identities() {
         use argon2::{PasswordHasher, password_hash::SaltString};
         let hash = Argon2::default()
             .hash_password(
@@ -466,7 +507,7 @@ mod identity_tests {
             .authenticate("alice-login", "test-only-password")
             .await
             .unwrap();
-        let (_, bob) = sessions
+        let (bob_token, bob) = sessions
             .authenticate("bob-login", "test-only-password")
             .await
             .unwrap();
@@ -478,11 +519,131 @@ mod identity_tests {
                 .await
                 .is_err()
         );
-        sessions.revoke(&alice).await;
+        let saved = fs::read_to_string(path.with_extension("sessions.json")).unwrap();
+        assert!(!saved.contains(&bob_token));
+        assert!(!saved.contains("test-only-password"));
+        assert!(
+            Sessions::load(&path, &path.with_extension("sessions.json")).is_err(),
+            "one authority owns the session store"
+        );
+        sessions.revoke(&alice).await.unwrap();
         assert!(sessions.principal(&alice).await.is_none());
         assert!(sessions.principal(&bob).await.is_some());
-        sessions.sessions.lock().await.get_mut(&bob).unwrap().1 = Instant::now();
-        assert!(sessions.principal(&bob).await.is_none());
-        fs::remove_file(path).unwrap();
+        drop(sessions);
+        let sessions = Sessions::load(&path, &path.with_extension("sessions.json")).unwrap();
+        assert!(sessions.principal(&alice).await.is_none());
+        assert_eq!(sessions.principal(&bob).await.as_deref(), Some("bob"));
+        drop(sessions);
+        let mut credentials: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        credentials["users"][1]["identity"] = json!("changed-bob");
+        fs::write(&path, credentials.to_string()).unwrap();
+        let sessions = Sessions::load(&path, &path.with_extension("sessions.json")).unwrap();
+        assert!(
+            sessions.principal(&bob).await.is_none(),
+            "an old token cannot become a different identity"
+        );
+        drop(sessions);
+        fs::write(path.with_extension("sessions.json"), b"corrupted").unwrap();
+        assert!(Sessions::load(&path, &path.with_extension("sessions.json")).is_err());
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(path.with_extension("sessions.json")).unwrap();
+        fs::remove_file(path.with_extension("sessions.sessions.lock")).unwrap();
+    }
+    #[tokio::test]
+    async fn durable_write_failure_never_reports_success_or_keeps_ram_grants() {
+        let (path, sessions) = config(json!({"version":1,"users":[],"native":[]}));
+        let session_path = path.with_extension("sessions.json");
+        let key = digest("test-only-session");
+        {
+            let mut store = sessions.sessions.lock().await;
+            let mut rows = std::collections::BTreeMap::new();
+            rows.insert(
+                key.clone(),
+                store::Session {
+                    username: "test".into(),
+                    identity: "test".into(),
+                    credential: digest("test-verifier"),
+                },
+            );
+            store.commit(rows).unwrap();
+        }
+        assert_eq!(sessions.principal(&key).await.as_deref(), Some("test"));
+        fs::remove_file(&session_path).unwrap();
+        // A directory at the destination forces the atomic rename to fail,
+        // without relying on permissions that root could bypass.
+        fs::create_dir(&session_path).unwrap();
+        assert_eq!(
+            sessions.revoke(&key).await,
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        );
+        assert!(sessions.principal(&key).await.is_none());
+        fs::remove_dir(&session_path).unwrap();
+        assert_eq!(
+            sessions.revoke(&key).await,
+            Err(StatusCode::SERVICE_UNAVAILABLE),
+            "uncertain storage stays fenced until restart"
+        );
+        drop(sessions);
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(path.with_extension("sessions.sessions.lock")).unwrap();
+    }
+    #[tokio::test]
+    async fn session_capacity_never_evicts_an_existing_browser_and_rotation_reuses_its_slot() {
+        use argon2::{PasswordHasher, password_hash::SaltString};
+        let hash = Argon2::default()
+            .hash_password(
+                b"test-only-password",
+                &SaltString::encode_b64(b"capacity-test-only").unwrap(),
+            )
+            .unwrap()
+            .to_string();
+        let (path, sessions) = config(json!({"username":"alice","password_hash":hash}));
+        let old = digest("existing-browser");
+        {
+            let mut store = sessions.sessions.lock().await;
+            let mut rows = std::collections::BTreeMap::new();
+            for index in 0..MAX_SESSIONS - 1 {
+                rows.insert(
+                    digest(&format!("browser-{index}")),
+                    store::Session {
+                        username: "alice".into(),
+                        identity: "alice".into(),
+                        credential: digest(&hash),
+                    },
+                );
+            }
+            rows.insert(
+                old.clone(),
+                store::Session {
+                    username: "alice".into(),
+                    identity: "alice".into(),
+                    credential: digest(&hash),
+                },
+            );
+            store.commit(rows).unwrap();
+        }
+        assert_eq!(
+            sessions
+                .authenticate("alice", "test-only-password")
+                .await
+                .unwrap_err(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(sessions.principal(&old).await.is_some());
+        let (_, replacement) = sessions
+            .authenticate_replacing("alice", "test-only-password", Some(&old))
+            .await
+            .unwrap();
+        assert!(sessions.principal(&old).await.is_none());
+        assert!(sessions.principal(&replacement).await.is_some());
+        drop(sessions);
+        let sessions = Sessions::load(&path, &path.with_extension("sessions.json")).unwrap();
+        assert_eq!(sessions.sessions.lock().await.rows.len(), MAX_SESSIONS);
+        assert!(sessions.principal(&old).await.is_none());
+        assert!(sessions.principal(&replacement).await.is_some());
+        drop(sessions);
+        fs::remove_file(&path).unwrap();
+        fs::remove_file(path.with_extension("sessions.json")).unwrap();
+        fs::remove_file(path.with_extension("sessions.sessions.lock")).unwrap();
     }
 }

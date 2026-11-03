@@ -30,7 +30,7 @@ test('late login is followed by serialized cookie revocation and cannot restore 
   const login=h.session.login('user','secret');await Promise.resolve();const logout=h.session.logout();finish(reply(true));await Promise.all([login,logout]);
   assert.deepEqual(h.calls.map(c=>c.method),['POST','DELETE']);assert.equal(h.session.authenticated,false);
 });
-test('an expired server session notifies its owner to revoke the private mount',async()=>{
+test('a revoked server session notifies its owner to revoke the private mount',async()=>{
   let authorized=true;const h=harness(async()=>reply(authorized,authorized?200:401));
   await h.session.refresh();authorized=false;await h.session.refresh();assert.equal(h.session.authenticated,false);assert.deepEqual(h.states.at(-1),{authenticated:false});
 });
