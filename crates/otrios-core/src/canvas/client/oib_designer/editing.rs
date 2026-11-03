@@ -2,6 +2,7 @@
 //! Direct tooling fields and their shared core input route. Raw drafts stay local.
 use super::super::oib_property_editor::{EditResult, Part};
 use super::*;
+use crate::canvas::oib::document::{PropertyRegisterView, PropertySources, SourceRole};
 use crate::dashboard::{
     font::Font,
     keyboard::{KEY_COUNT, Keyboard},
@@ -46,6 +47,9 @@ pub(super) fn inspector(
     editable: bool,
     revision: u64,
     notice: Option<&str>,
+    details: Option<&PropertySources>,
+    registers: &[PropertyRegisterView],
+    seed: &otrios_interfaces::oib::Seed,
 ) -> Result<(Vec<SceneNode>, f32)> {
     // Clean fields outside this selection are disposable. Dirty/invalid fields
     // are never silently evicted and retain their original full address.
@@ -105,8 +109,20 @@ pub(super) fn inspector(
         y += 56.;
     }
     for p in properties {
-        nodes.push(label(b, y, &p.descriptor.label, WHITE)?);
-        y += 36.;
+        let mut heading = label(b, y + 8., &p.descriptor.label, WHITE)?;
+        heading.frame.width = 208.;
+        nodes.push(heading);
+        if let Some(address) = &p.address {
+            nodes.push(b.focus_button(
+                216.,
+                y,
+                104.,
+                "Info",
+                LocalAction::Details(address.clone()),
+            )?);
+        }
+        y += 56.;
+        property_context(b, &mut nodes, &mut y, p, details, registers, seed, editable)?;
         let allowed = editable && !p.cell.is_some_and(|c| conflicts.contains(&c));
         let pending = status.contains("Saving")
             && p.address
@@ -281,6 +297,130 @@ pub(super) fn inspector(
     Ok((nodes, y))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn property_context(
+    b: &mut Builder,
+    nodes: &mut Vec<SceneNode>,
+    y: &mut f32,
+    property: &PropertyInfo,
+    details: Option<&PropertySources>,
+    registers: &[PropertyRegisterView],
+    seed: &otrios_interfaces::oib::Seed,
+    editable: bool,
+) -> Result<()> {
+    if let Some(trace) = details.filter(|d| property.address.as_ref() == Some(&d.address)) {
+        nodes.push(label(
+            b,
+            *y,
+            if trace.overridden {
+                "Live override at occurrence"
+            } else {
+                "Inherited source"
+            },
+            MUTED,
+        )?);
+        *y += 40.;
+        if let Some(value) = &trace.inherited {
+            nodes.push(label(
+                b,
+                *y,
+                &format!("Reset reveals {}", value_label(value)),
+                MUTED,
+            )?);
+            *y += 40.;
+        }
+        if trace.binding.is_some() {
+            nodes.push(label(b, *y, "App binding - read only", MUTED)?);
+            *y += 40.;
+        }
+        if let Some(source) = &trace.immediate_source {
+            nodes.push(b.focus_button(
+                0.,
+                *y,
+                320.,
+                "Go to outer property",
+                LocalAction::Source(source.clone()),
+            )?);
+            *y += 56.;
+        }
+        if let Some(source) = &trace.terminal_shared {
+            let name = if let PropertyAddress::Definition { definition, .. } = source {
+                seed.designer
+                    .as_ref()
+                    .and_then(|d| d.definitions.iter().find(|d| d.id == *definition))
+                    .map_or("shared", |d| d.name.as_str())
+            } else {
+                "shared"
+            };
+            nodes.push(b.focus_button(
+                0.,
+                *y,
+                320.,
+                &format!("Source: {name}"),
+                LocalAction::Source(source.clone()),
+            )?);
+            *y += 56.;
+        }
+        if trace
+            .hops
+            .iter()
+            .any(|h| !h.masked && matches!(h.role, SourceRole::AuthoredLiteral(_)))
+        {
+            nodes.push(label(b, *y, "Authored assignment", MUTED)?);
+            *y += 40.;
+        }
+        let masked = trace.hops.iter().filter(|h| h.masked).count();
+        if masked > 0 {
+            nodes.push(label(
+                b,
+                *y,
+                &format!("{masked} masked source layers"),
+                MUTED,
+            )?);
+            *y += 40.;
+        }
+    }
+    if editable
+        && let Some(view) = registers
+            .iter()
+            .find(|v| property.address.as_ref() == Some(&v.address))
+    {
+        nodes.push(label(b, *y, "Choose a conflict value", ACCENT)?);
+        *y += 40.;
+        for value in &view.alternatives {
+            let raw = value
+                .as_ref()
+                .map_or_else(|| "inherited".into(), value_label);
+            let short: String = raw
+                .chars()
+                .scan(0, |n, c| {
+                    *n += c.len_utf8();
+                    (*n <= 64).then_some(c)
+                })
+                .collect();
+            nodes.push(b.focus_button(
+                0.,
+                *y,
+                320.,
+                &format!("Choose {short}"),
+                LocalAction::Choose(Box::new(view.clone()), value.clone()),
+            )?);
+            *y += 56.;
+        }
+        if matches!(view.address, PropertyAddress::Occurrence { .. }) {
+            nodes.push(b.focus_button(
+                0.,
+                *y,
+                320.,
+                "Reset override",
+                LocalAction::Write(view.address.clone(), None),
+            )?);
+            *y += 56.;
+        }
+    }
+    Ok(())
+}
+
 impl Designer {
     pub(in crate::canvas::client) fn keyboard_key(&self, id: u32) -> Option<u16> {
         self.editor_focused().then(|| keyboard_key(id)).flatten()
@@ -439,6 +579,81 @@ fn repaint(m: &mut Mount) -> Result<()> {
     Ok(())
 }
 impl Client {
+    pub(in crate::canvas::client) fn designer_details(
+        &mut self,
+        address: &PropertyAddress,
+    ) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let trace = crate::canvas::oib::document::property_sources(
+            seed,
+            &m.doc.oib_allocations()?,
+            address,
+            &m.doc.oib_active()?,
+        )?;
+        let d = m.designer.as_mut().ok_or("Missing designer")?;
+        d.details = if d.details.as_ref().is_some_and(|d| &d.address == address) {
+            None
+        } else {
+            Some(trace)
+        };
+        repaint(m)?;
+        Ok(true)
+    }
+    pub(in crate::canvas::client) fn designer_go_source(
+        &mut self,
+        address: &PropertyAddress,
+    ) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        self.designer_blur_focused()?;
+        self.inspect_oib_selection(selection(address))?;
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let trace = crate::canvas::oib::document::property_sources(
+            seed,
+            &m.doc.oib_allocations()?,
+            address,
+            &m.doc.oib_active()?,
+        )?;
+        let d = m.designer.as_mut().ok_or("Missing designer")?;
+        d.details = Some(trace);
+        d.layers_open = false;
+        repaint(m)?;
+        Ok(true)
+    }
+    pub(in crate::canvas::client) fn designer_choose_property(
+        &mut self,
+        view: &PropertyRegisterView,
+        value: Option<Value>,
+    ) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
+            return Ok(false);
+        }
+        let result = m.doc.choose_oib_property(view, value);
+        let accepted = result.as_ref().is_ok_and(|v| *v);
+        let d = m.designer.as_mut().ok_or("Missing designer")?;
+        if accepted {
+            d.drafts.cancel(&view.address);
+        }
+        d.editor_notice = match result {
+            Err(_) => Some("Choices changed - inspect again".into()),
+            Ok(false) => Some("Waiting for confirmation".into()),
+            Ok(true) => None,
+        };
+        d.revision = None;
+        m.refresh()?;
+        repaint(m)?;
+        Ok(accepted)
+    }
     pub(in crate::canvas::client) fn designer_preview_color(
         &mut self,
         address: &PropertyAddress,

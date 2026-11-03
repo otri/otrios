@@ -148,3 +148,32 @@ Editor integration checks (in-process only):
 - `cargo clippy -p otrios-core --features canvas --lib --locked --offline -- -D warnings`:
   passed after fixing one collapsible-if diagnostic.
 - Scoped formatting and whitespace checks pass. No deployment occurred.
+
+
+Source/conflict/browser integration:
+
+- Typed source and guarded conflict APIs integrated as `87b008f`; bounded native
+  presentation logs integrated as `50286b0`; browser cancellation/traversal as
+  `f6b7aea`. Native log enablement and actual Frame timing remain pending.
+- Inspector Info follows the controlling forwarded property (shared panel cell
+  100 rather than masked slider 101), exposes authored inheritance and keeps
+  read-only app bindings protected. Explicit conflict choices retain a Merkle
+  register version and reject stale alternatives. Reset remains a separate causal
+  clear action. Fused wrappers remain inspectable through Inspect reference.
+- Captured designer pan moves reuse pinned layout geometry; Down and tap-release
+  continue using the visible scene. Managed Back uses the Focus header hit area,
+  avoiding the generic breadcrumb's overlap with Layers. Browser panel key traps
+  yield Escape/Tab to the admitted text bridge.
+- Actual focused checks: 23 designer tests passed before the managed Back test;
+  all 57 tests across fixture/runtime/hierarchy/property-editor/property-source
+  suites passed. The managed Back pointer regression separately passed. The
+  browser text/worker suite passed 33 tests; app.js module syntax passed.
+- New source-navigation and concurrent conflict-choice UI tests passed through
+  local adapters. One initial conflict test incorrectly reused the compiled
+  expanded Ui as a fresh signed seed; it now uses the original signed fixture.
+  No authority-process or live acceptance claim follows from these local tests.
+
+The existing production pin advanced to `03e5aab` while this branch was being
+implemented. That completed persistent-session work must be included before the
+next signed build so the deployed Safari login persistence is preserved. No
+production config or deployment was changed during this inspection.

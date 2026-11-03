@@ -109,6 +109,24 @@ pub(super) fn project(
         )];
         button.primitive = Primitive::Canvas { clip: true };
         header.push(button);
+    } else if let Some(control) = back_action {
+        let mut button = canvas(
+            CHROME + 12,
+            Rect::new(16., 8., 48., 48.),
+            vec![text(
+                CHROME + 5,
+                Rect::new(14., 14., 28., 28.),
+                "<",
+                2,
+                WHITE,
+            )],
+        );
+        button.responder = Some(TouchResponder::Activate(Action::AppEvent(control)));
+        button.semantics = Some(SwitchSemantics {
+            label: "Back to OTriOS".into(),
+            checked: false,
+        });
+        header.push(button);
     }
     let dock = canvas(
         CHROME + 6,

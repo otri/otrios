@@ -1686,3 +1686,206 @@ fn frame_focus_software_keyboard_routes_shared_input_and_preserves_held_geometry
     assert!(!client.keyboard_visible());
     assert!(!client.editing());
 }
+
+fn activate_inspector_action(client: &mut Client, action: &LocalAction) -> bool {
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let id = *d.actions.iter().find(|(_, a)| *a == action).unwrap().0;
+    let y = d
+        .panels
+        .last()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|n| n.id == id)
+        .unwrap()
+        .frame
+        .y;
+    fixture_scroll_to(client, 1, y - 8.);
+    client.designer_activate(id).unwrap().unwrap()
+}
+#[test]
+fn frame_focus_source_navigation_targets_controlling_shared_property() {
+    let mut client = mounted_six_panel_fixture(true);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let root = client.active.as_ref().unwrap().doc.oib_root();
+    let at = editor_address(1);
+    assert!(activate_inspector_action(
+        &mut client,
+        &LocalAction::Details(at)
+    ));
+    let shared = PropertyAddress::Definition {
+        definition: DefinitionId(10),
+        node: NodeId(1),
+        property: PropertyId(1),
+    };
+    assert!(activate_inspector_action(
+        &mut client,
+        &LocalAction::Source(shared.clone())
+    ));
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(
+        d.selection,
+        Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(1)
+        }
+    );
+    assert_eq!(d.details.as_ref().unwrap().terminal_shared, Some(shared));
+    assert_eq!(d.tree_scope, HierarchyScope::Components);
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+}
+fn issue_editor_write(adapter: &mut StateAdapter) -> Vec<u8> {
+    while let Some(bytes) = adapter.generate().unwrap() {
+        if matches!(
+            crate::canvas::decode_state_request(&bytes).unwrap(),
+            otrios_interfaces::canvas::StateRequest::OibWrite { .. }
+        ) {
+            return bytes;
+        }
+    }
+    panic!("missing OIB write");
+}
+#[test]
+fn frame_focus_conflict_choice_is_explicit_and_stale_choice_cannot_resolve_new_state() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let ui = designer_fixture::ui(&[]);
+    let mut other = StateAdapter::for_ui(&ui, "designer-mount", &[], [2; 16]).unwrap();
+    let (mut other_session, _) = authority.open_session(&[2; 16], 0).unwrap();
+    other_session.set_oib_editable(true);
+    other_session
+        .set_selection(StateSelection::from_ui(&ui).unwrap())
+        .unwrap();
+    other
+        .receive(&authority.generate(&mut other_session).unwrap().unwrap())
+        .unwrap();
+    fixture_sync(&mut authority, &mut other_session, &mut other);
+    let at = editor_address(3);
+    assert!(
+        client
+            .designer_action(LocalAction::Write(
+                at.clone(),
+                Some(Value::Text("Sound".into()))
+            ))
+            .unwrap()
+    );
+    let a = issue_editor_write(&mut client.active.as_mut().unwrap().doc);
+    assert!(other.edit_oib_property(&at, None).unwrap());
+    let b = issue_editor_write(&mut other);
+    authority.receive(&mut session, &a).unwrap();
+    authority.receive(&mut other_session, &b).unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let view = d
+        .registers
+        .iter()
+        .find(|v| v.address == at)
+        .unwrap()
+        .clone();
+    assert!(view.alternatives.contains(&None));
+    assert!(
+        view.alternatives
+            .contains(&Some(Value::Text("Sound".into())))
+    );
+    let choice = LocalAction::Choose(Box::new(view.clone()), Some(Value::Text("Sound".into())));
+    assert!(activate_inspector_action(&mut client, &choice));
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_conflicts()
+            .is_empty()
+    );
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&203],
+        Some(Value::Text("Sound".into()))
+    );
+    let root = client.active.as_ref().unwrap().doc.oib_root();
+    assert!(
+        !client
+            .designer_action(LocalAction::Choose(Box::new(view), None))
+            .unwrap()
+    );
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), root);
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn frame_focus_managed_back_does_not_cover_layers_button() {
+    let mut client = mounted_six_panel_fixture(true);
+    let m = client.active.as_mut().unwrap();
+    m.quit_control = Some(255);
+    m.invalidate();
+    let scene = client.scene().unwrap();
+    let hit = scene.hit_path([120., 24.]);
+    assert!(
+        hit.iter()
+            .any(|p| p.node.id == super::super::oib_focus_layout::LAYERS)
+    );
+    let back = scene
+        .controls()
+        .into_iter()
+        .find(|c| c.node.semantics.as_ref().unwrap().label == "Back to OTriOS")
+        .unwrap();
+    assert_eq!([back.node.frame.width, back.node.frame.height], [48., 48.]);
+    let epoch = client.epoch();
+    for phase in [PointerPhase::Down, PointerPhase::Up] {
+        assert!(
+            client
+                .pointer_at(
+                    epoch,
+                    PointerEvent {
+                        id: 9,
+                        phase,
+                        position: [120., 24.]
+                    },
+                    1
+                )
+                .unwrap()
+        );
+    }
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .layers_open
+    );
+}

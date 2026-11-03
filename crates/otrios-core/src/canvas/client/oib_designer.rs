@@ -38,6 +38,12 @@ enum LocalAction {
     PickColor(PropertyAddress, [u8; 4]),
     Opacity(PropertyAddress, u8),
     DraftBool(PropertyAddress, bool),
+    Details(PropertyAddress),
+    Source(PropertyAddress),
+    Choose(
+        Box<super::super::oib::document::PropertyRegisterView>,
+        Option<Value>,
+    ),
     TreeExpand(HierarchyKey),
     TreeScope(HierarchyScope),
     Expand(Selection),
@@ -73,6 +79,8 @@ pub(super) struct Designer {
     properties: Vec<PropertyInfo>,
     editor_notice: Option<String>,
     editor_revision: u64,
+    details: Option<super::super::oib::document::PropertySources>,
+    registers: Vec<super::super::oib::document::PropertyRegisterView>,
     mode: DesignerMode,
     pending_mode: Option<DesignerMode>,
     pending_viewport: Option<[f32; 2]>,
@@ -102,6 +110,8 @@ impl Clone for Designer {
             properties: self.properties.clone(),
             editor_notice: self.editor_notice.clone(),
             editor_revision: self.editor_revision,
+            details: self.details.clone(),
+            registers: self.registers.clone(),
             mode: self.mode,
             pending_mode: self.pending_mode,
             pending_viewport: self.pending_viewport,
@@ -154,6 +164,8 @@ impl Designer {
             properties: vec![],
             editor_notice: None,
             editor_revision: 0,
+            details: None,
+            registers: vec![],
             mode: DesignerMode::Edit,
             pending_mode: None,
             pending_viewport: None,
@@ -298,6 +310,9 @@ impl Designer {
                 editable,
                 self.editor_revision,
                 self.editor_notice.as_deref(),
+                self.details.as_ref(),
+                &self.registers,
+                seed,
             )?
         } else {
             inspector(
@@ -324,6 +339,22 @@ impl Designer {
                 selected.name,
                 class.map_or("signed class", |c| c.name.as_str())
             );
+        }
+        if self.focus_layout
+            && let Some(wrapper) = self
+                .tree
+                .iter()
+                .find(|r| r.selection.as_ref() == Some(&self.selection))
+                .and_then(|r| r.reference_wrapper.clone())
+        {
+            inspector.0.push(builder.focus_button(
+                0.,
+                inspector.1 + 16.,
+                320.,
+                "Inspect reference",
+                LocalAction::Select(Selection::Object(wrapper)),
+            )?);
+            inspector.1 += 72.;
         }
         // Without a hierarchy surface retain a local mode switch in inspector.
         let mut nodes = inspector.0;
@@ -689,9 +720,9 @@ fn focus_hierarchy(
             0.,
             140.,
             if scope == HierarchyScope::Components {
-                "Parts *"
+                "Components *"
             } else {
-                "Parts"
+                "Components"
             },
             LocalAction::TreeScope(HierarchyScope::Components),
         )?,
@@ -1121,6 +1152,22 @@ impl Mount {
                 &designer.selection,
                 &self.doc.oib_active()?,
             )?;
+            let conflicts = self.doc.oib_conflicts();
+            designer.registers = properties
+                .iter()
+                .filter(|p| p.cell.is_some_and(|c| conflicts.contains(&c)))
+                .filter_map(|p| p.address.as_ref())
+                .map(|a| self.doc.oib_property_register(a))
+                .collect::<Result<_>>()?;
+            if let Some(address) = designer.details.as_ref().map(|d| d.address.clone()) {
+                designer.details = super::super::oib::document::property_sources(
+                    seed,
+                    &allocations,
+                    &address,
+                    &self.doc.oib_active()?,
+                )
+                .ok();
+            }
             // Dynamic occurrence cells carry the signed prototype's choices.
             // Their IDs are absent from the unexpanded seed; reuse the runtime
             // expansion rather than deriving a second factory/path lookup here.
@@ -1206,6 +1253,9 @@ impl Client {
     }
     fn designer_action(&mut self, action: LocalAction) -> Result<bool> {
         match action {
+            LocalAction::Details(address) => self.designer_details(&address),
+            LocalAction::Source(address) => self.designer_go_source(&address),
+            LocalAction::Choose(view, value) => self.designer_choose_property(&view, value),
             LocalAction::PickColor(address, color) => {
                 self.designer_preview_color(&address, Some(color), None, None)
             }
@@ -1284,7 +1334,17 @@ impl Client {
                 if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
                     return Ok(false);
                 }
+                let reset = value.is_none();
                 let changed = m.doc.edit_oib_property(&address, value)?;
+                if changed
+                    && reset
+                    && let Some(d) = &mut m.designer
+                {
+                    d.drafts.cancel(&address);
+                    if !d.editor_focused() {
+                        m.keyboard.hide();
+                    }
+                }
                 if changed {
                     m.refresh()?;
                     m.invalidate_presentation();
@@ -1368,7 +1428,23 @@ impl Client {
         if event.phase == PointerPhase::Down && self.input_busy() {
             return Ok(Some(false));
         }
-        let scene = self.scene()?;
+        // Once captured, Scroll uses its pinned Down geometry for Move/Cancel
+        // and non-tap release. Do not rebuild the presented/culling scene merely
+        // to advance input before the renderer has credit for another frame.
+        let captured_pan = m
+            .designer
+            .as_ref()
+            .and_then(|d| d.capture.as_ref())
+            .is_some_and(|c| {
+                event.phase == PointerPhase::Move
+                    || event.phase == PointerPhase::Cancel
+                    || (event.phase == PointerPhase::Up && c.moving)
+            });
+        let scene = if captured_pan {
+            cached_layout(m)?
+        } else {
+            self.scene()?
+        };
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let mut designer = m.designer.take().ok_or("Missing designer")?;
         let result = (|| -> Result<(Option<bool>, Option<LocalAction>)> {

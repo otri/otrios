@@ -4764,11 +4764,12 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
         && designer.focus_layout()
     {
         let seed = super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
-        let back =
+        let back = m.quit_control.or_else(|| {
             m.ui.handlers
                 .iter()
                 .find(|h| matches!(h.operation, Operation::Back))
-                .map(|h| h.control);
+                .map(|h| h.control)
+        });
         oib_focus_layout::project(
             &scene,
             seed,
@@ -4971,6 +4972,7 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     }
     if let Some(control) = m.quit_control
         && m.chat.is_none()
+        && !m.designer.as_ref().is_some_and(|d| d.focus_layout())
     {
         host_map::present_breadcrumb(&mut root, m, control);
     }
