@@ -284,6 +284,11 @@ python3 scripts/activate-dashboard-release.py --help
 Staging writes `build/staged-release.json` without advancing the live pointer or
 source marker. It is an artifact-building step, not a requirement for an isolated
 acceptance campaign. Deploy the signed candidate and perform focused live checks.
+For concurrent worktrees, use a separate `runtime` build/staging directory and
+set `builder_container` to a dedicated Docker builder name; omission retains
+`otrios-dashboard-live-builder`. Keep the existing publisher identity and strict
+Frame SSH pin. Do not share a writable source tree, Cargo target, Docker `/src`,
+or activation pointer with another in-flight build.
 For storage or protocol cutovers, retain the matching compatible server and agents;
 a browser may need a launcher-root visit after an incompatible rollback.
 

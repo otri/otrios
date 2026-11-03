@@ -521,7 +521,7 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     assert_eq!(
         heads,
         [408., 416.]
-            .map(|n| flexbuffers::to_vec(&Value::Number(n)).unwrap())
+            .map(|n| flexbuffers::to_vec(Value::Number(n)).unwrap())
             .into_iter()
             .collect(),
         "exactly two unresolved causal alternatives"

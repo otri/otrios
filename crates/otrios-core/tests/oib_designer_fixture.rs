@@ -673,3 +673,18 @@ fn embedded_designer_decoder_rejects_explicit_null_for_omitted_metadata() {
         "Noncanonical OIB designer UI bytes"
     );
 }
+
+#[test]
+fn slider_value_binding_must_match_the_control_mutation_field() {
+    let mut ui = app::ui(&[]);
+    let slider = ui
+        .handlers
+        .iter_mut()
+        .find(|h| h.kind == otrios_interfaces::canvas::GestureKind::Slider && h.fields == [1])
+        .unwrap();
+    slider.fields = vec![2];
+    assert_eq!(
+        oib::validate(&ui).unwrap_err(),
+        "OIB control and property binding use different app fields"
+    );
+}

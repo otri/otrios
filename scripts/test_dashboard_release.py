@@ -9,6 +9,24 @@ publisher=module('publisher','publish-dashboard.py');agent=module('frame_agent',
 activation=module('activation','activate-dashboard-release.py')
 OPENSSL=os.environ.get('OTRIOS_TEST_OPENSSL','/opt/homebrew/opt/openssl@3/bin/openssl' if pathlib.Path('/opt/homebrew/opt/openssl@3/bin/openssl').exists() else 'openssl')
 class FrozenSources(unittest.TestCase):
+    def test_concurrent_worktree_build_uses_its_configured_container(self):
+        from unittest.mock import patch
+        watcher=module('watcher_isolated','watch-dashboard.py')
+        for configured in [None,'otrios-oib-designer-d1-builder']:
+            with self.subTest(container=configured),tempfile.TemporaryDirectory() as tmp:
+                root=pathlib.Path(tmp);repo=root/'repo';runtime=root/'runtime'
+                repo.mkdir();runtime.mkdir();commands=[]
+                expected=configured or 'otrios-dashboard-live-builder'
+                config={'repo':str(repo),'runtime':str(runtime),'build_env':{}}
+                if configured:config['builder_container']=configured
+                def run(args,**kwargs):
+                    commands.append(args)
+                    if args[:2]==['docker','create']:raise RuntimeError('stop before builder activation')
+                with patch.object(watcher,'inputs',return_value=[]),patch.object(watcher,'fingerprint',return_value='frozen'),patch.object(watcher,'run',side_effect=run),patch.object(watcher.subprocess,'run',return_value=subprocess.CompletedProcess([],1,stdout='')) as probe:
+                    with self.assertRaisesRegex(RuntimeError,'stop before builder activation'):
+                        watcher.rebuild(config,'frozen',activate=False)
+                self.assertEqual(probe.call_args.args[0],['docker','inspect','--format','{{.State.Running}}',expected])
+                self.assertEqual(commands[-1][:4],['docker','create','--name',expected])
     def test_runtime_json_fixtures_are_frozen_and_fingerprinted(self):
         watcher=module('watcher','watch-dashboard.py')
         with tempfile.TemporaryDirectory() as tmp:

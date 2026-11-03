@@ -1198,3 +1198,68 @@ fn inspector_exposed_rows_precede_base_to_derived_group_order() {
     );
     assert_eq!(rows[1].cell, None);
 }
+
+#[test]
+fn document_relationships_cannot_outlive_a_removable_factory_owner() {
+    let mut owned = fixture();
+    seed_mut(&mut owned).designer.as_mut().unwrap().instances[1].owner =
+        Owner::Instance(InstanceId(20));
+    assert_eq!(
+        oib::validate(&owned).unwrap_err(),
+        "D1 document ownership cannot depend on a removable factory root"
+    );
+
+    let mut attached = fixture();
+    seed_mut(&mut attached).designer.as_mut().unwrap().instances[1].visual_parent =
+        Some(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![],
+            node: NodeId(1),
+        });
+    assert_eq!(
+        oib::validate(&attached).unwrap_err(),
+        "D1 document attachment cannot depend on a removable factory root"
+    );
+
+    let mut fixed_owner = fixture();
+    seed_mut(&mut fixed_owner)
+        .designer
+        .as_mut()
+        .unwrap()
+        .instances[0]
+        .owner = Owner::Instance(InstanceId(40));
+    oib::validate(&fixed_owner).unwrap();
+}
+
+#[test]
+fn declared_toggle_source_must_match_checked_expression_and_mutation_field() {
+    let mut wrong_field = toggle_fixture();
+    seed_mut(&mut wrong_field)
+        .designer
+        .as_mut()
+        .unwrap()
+        .instances[0]
+        .assignments
+        .last_mut()
+        .unwrap()
+        .source = AssignmentSource::AppBinding(Binding::Local(2));
+    assert_eq!(
+        oib::validate(&wrong_field).unwrap_err(),
+        "OIB control and property binding use different app fields"
+    );
+
+    // Matching field/type alone is insufficient: the checked expression must
+    // use the exact signed selector, even if another selector reads that field.
+    wrong_field.selectors[1].field = 1;
+    assert_eq!(
+        oib::validate(&wrong_field).unwrap_err(),
+        "OIB checked expression does not match its declared binding"
+    );
+
+    let mut wrong_action = toggle_fixture();
+    wrong_action.handlers[0].fields = vec![2];
+    assert_eq!(
+        oib::validate(&wrong_action).unwrap_err(),
+        "OIB control and property binding use different app fields"
+    );
+}

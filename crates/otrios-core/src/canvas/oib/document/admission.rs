@@ -527,6 +527,10 @@ pub fn validate(seed: &Seed) -> Result<()> {
         let owner_class = match root.owner {
             Owner::Document => doc.class,
             Owner::Instance(id) => {
+                require(
+                    !factories.contains(&id),
+                    "D1 document ownership cannot depend on a removable factory root",
+                )?;
                 let owner = instance(doc, id)?;
                 let def = definition(doc, owner.definition)?;
                 path_node(doc, def.id, &[], def.root)?.1.class
@@ -550,6 +554,10 @@ pub fn validate(seed: &Seed) -> Result<()> {
             owner = instance(doc, id)?.owner;
         }
         if let Some(parent) = &root.visual_parent {
+            require(
+                !factories.contains(&parent.instance),
+                "D1 document attachment cannot depend on a removable factory root",
+            )?;
             let parent_instance = instance(doc, parent.instance)?;
             let parent_node = path_node(
                 doc,
@@ -790,6 +798,57 @@ fn binding_type(ui: &Ui, binding: Binding) -> Result<ValueType> {
         _ => Err("Unsupported OIB app binding projection".into()),
     }
 }
+fn validate_bound_control(
+    ui: &Ui,
+    layout: &TemplateNode,
+    kind: ClassKind,
+    binding: Binding,
+) -> Result<()> {
+    let Binding::Local(local) = binding;
+    let selector = ui
+        .selectors
+        .iter()
+        .find(|s| s.local == local)
+        .ok_or("OIB binding has no signed selector")?;
+    let Some(otrios_interfaces::layout::Responder::AppEvent { control, drag }) = layout.responder
+    else {
+        return Err("OIB bound control has no admitted responder".into());
+    };
+    let handler = ui
+        .handlers
+        .iter()
+        .find(|h| h.control == control)
+        .ok_or("OIB bound control has no admitted handler")?;
+    require(
+        handler.fields.as_slice() == [selector.field],
+        "OIB control and property binding use different app fields",
+    )?;
+    match kind {
+        ClassKind::O2DToggle => {
+            require(
+                layout
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.checked == Expr::State(binding)),
+                "OIB checked expression does not match its declared binding",
+            )?;
+            require(
+                !drag
+                    && handler.kind == GestureKind::Activate
+                    && handler.operation == Operation::Toggle
+                    && selector.projection == Projection::Nonzero,
+                "Unsupported OIB toggle binding implementation",
+            )
+        }
+        ClassKind::O2DSlider => require(
+            drag && handler.kind == GestureKind::Slider
+                && handler.operation == Operation::Set
+                && selector.projection == Projection::Identity,
+            "Unsupported OIB slider value binding implementation",
+        ),
+        _ => Err("Unsupported OIB app binding endpoint".into()),
+    }
+}
 pub fn validate_layout(ui: &Ui) -> Result<()> {
     let seed = super::super::seed(ui).ok_or("Missing OIB seed")?;
     let doc = metadata(seed)?;
@@ -961,11 +1020,38 @@ pub fn validate_layout(ui: &Ui) -> Result<()> {
     }
     for root in &doc.instances {
         let graph = sources(doc, root)?;
-        for (path, source) in &graph {
-            if let Source::Bound(binding) = source {
+        for path in graph.keys() {
+            let Some(binding) = bound_source(&graph, path, &mut BTreeSet::new())? else {
+                continue;
+            };
+            require(
+                binding_type(ui, binding)? == property(doc, root.definition, path)?.value_type,
+                "OIB app binding type mismatch",
+            )?;
+            let (_, object) = path_node(doc, root.definition, &path.references, path.node)?;
+            let kind = class(doc, object.class)?.implementation;
+            if matches!(kind, ClassKind::O2DToggle | ClassKind::O2DSlider) {
+                let address = ObjectAddress {
+                    instance: root.id,
+                    references: path.references.clone(),
+                    node: path.node,
+                };
+                let id = doc
+                    .mappings
+                    .objects
+                    .iter()
+                    .find(|m| m.address == address)
+                    .and_then(|m| m.layout_node)
+                    .ok_or("Missing bound OIB control mapping")?;
+                validate_bound_control(ui, layout_node(&blueprint, id)?, kind, binding)?;
+            } else {
+                // Exposed sources may forward through containers, but every
+                // terminal binding must reach a supported, verified control.
                 require(
-                    binding_type(ui, *binding)? == property(doc, root.definition, path)?.value_type,
-                    "OIB app binding type mismatch",
+                    graph
+                        .values()
+                        .any(|s| matches!(s, Source::Forward(from) if from == path)),
+                    "Unsupported OIB app binding endpoint",
                 )?;
             }
         }

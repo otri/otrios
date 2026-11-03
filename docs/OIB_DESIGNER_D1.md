@@ -313,4 +313,39 @@ Oib seed payload (transparent serialization) and fixed the findings without lint
 suppression. `cargo clippy -p otrios-core --features canvas --lib --locked --offline -- -D warnings`
 then passed; the runtime/fixture regression rerun also passed.
 
+## Independent review and authority-process evidence
+
+The first independent review of `8e27c4b` found two P2 objections: a document
+instance could depend on a removable factory owner, and an AppBinding could name
+a same-typed source different from the control's rendered checked/input source.
+Parent added admission restrictions and regressions: D1 document ownership and
+visual attachment depend only on fixed instances; verified toggle endpoints use
+the exact checked selector and mutation field, and slider values use Identity
+against their slider handler field. Exposed container sources may forward into
+these verified endpoints. No fixture defaults or state schema changed.
+
+After correction, the actual runtime suite passes 16 tests and fixture suite
+nine tests; strict core-library Clippy passes. Workspace/all-target Clippy with
+the repository's server/canvas/host-sync/Merkle feature set also passes after one
+test-only needless-borrow fix. Independent re-check and the parent process rerun
+are pending.
+
+Process test commit `f2aee84` integrated as `2401867`. The delegate ran all three
+`spaces_process d1::` cases with an explicitly built real dashboard-server:
+three passed, none skipped, in 96.54 seconds. Its server SHA-256 was
+`456ea8923cc60de6c67d73072035120f520a7e8fef8dc262f3917fce66190a80`.
+Coverage includes roles, distinct real app fields/another preserved collection,
+forwarding/reset, conflicts, kill/restart, lost-reply receipts, 24 reclamation
+cycles, retired operations and resident capacity. Clients are in-process
+adapters crossing the real authority process boundary; this is not Linux
+shared-memory IPC or separately spawned client evidence.
+
+The existing shared builder/watcher remains active. The isolated release builder
+uses its own staging/runtime directory and Docker container via the optional
+`builder_container` setting, retaining the default for existing configurations.
+Two FrozenSources workflow tests pass, including verification that a configured
+container is used before any builder activation. No live pointer or watcher
+configuration has been changed. Signed release and Frame/Web acceptance remain
+outstanding.
+
 Update this record at integration gates with actual commits, commands and results.

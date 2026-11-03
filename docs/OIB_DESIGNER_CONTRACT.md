@@ -61,6 +61,10 @@ its optional visual parent. The presented root has no visual parent. Sibling
 `order` controls paint order and is unique for that parent. Document ownership and
 all connections stay signed in D1; existing admitted root lifecycle is the only
 structural mutation. Document, definition and node names are labels, not keys.
+Document-instance ownership and visual attachments may depend only on fixed
+document instances, never removable factory roots. Inherited nodes within one
+allocated root retain their shared lifetime. D2 must define dependency-aware
+removal before lifting this restriction.
 
 `SlotDescriptor` declares a signed host path, accepted classes/subclasses,
 cardinality and an assertion about existing layout (Absolute or ExistingFlow).
@@ -178,6 +182,13 @@ can turn it into a literal source. The application's already admitted control
 behavior can still change app values. Forwarding a bound source stays read-only.
 Binding properties need no UI override cell; an attempted override is rejected,
 not accepted then ignored. Source connections are not live-editable in D1.
+D1 bound endpoints are the implemented slider value and toggle checked state.
+Admission checks the slider's raw Identity source against its slider handler's
+field, and the toggle's exact checked expression plus Nonzero source against its
+toggle handler's field. Container-exposed bindings may forward to these verified
+endpoints. Other terminal binding implementations are rejected until their
+render/control correspondence is specified; matching value types alone is not
+source verification.
 
 `Selection` and `DesignerMode` deliberately do not derive Serialize/Deserialize.
 Selection covers Document, Definition, DefinitionNode and Object (full occurrence,
