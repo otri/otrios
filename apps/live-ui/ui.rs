@@ -137,6 +137,7 @@ pub fn description() -> Ui {
         });
     }
     let seed = Seed {
+        designer: None,
         format: FORMAT.into(),
         main_oib: 1,
         main_class: "otrios.declarative-v1".into(),

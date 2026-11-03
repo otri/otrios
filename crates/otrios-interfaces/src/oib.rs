@@ -3,7 +3,7 @@
 use crate::layout::Value;
 use serde::{Deserialize, Serialize};
 
-/// Additive RFC 0035 D1 proposal; not attached to the v26 seed or state wire.
+/// RFC 0035 D1 signed metadata and stable occurrence/property identities.
 pub mod designer;
 
 pub const FORMAT: &str = "otrios-oib-v1";
@@ -23,6 +23,9 @@ pub const MAX_BYTES: usize = 64 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct Seed {
     pub format: String,
+    /// Signed D1 hierarchy/inspector metadata. Absence preserves legacy bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub designer: Option<designer::Document>,
     pub main_oib: u64,
     /// O1 uses the existing declarative event interpreter; no guest imports.
     pub main_class: String,

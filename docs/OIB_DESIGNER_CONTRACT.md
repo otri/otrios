@@ -1,16 +1,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB designer D1 contract proposal
 
-Date: 2026-11-03. Status: **additive proposal for parent contract-freeze review**.
+Date: 2026-11-03. Status: **D1 contract frozen for implementation; acceptance pending**.
 Implements declarations for [RFC 0035 D1](rfcs/0035-oib-component-designer.md),
-subject to the [execution plan](OIB_DESIGNER_D1.md). No D1 runtime admission,
-state protocol, package feature, migration, deployment or acceptance is activated.
+subject to the [execution plan](OIB_DESIGNER_D1.md). Parent reviewed the additive
+proposal and both runtime/designer mappings before selecting this attachment.
+Runtime implementation and live acceptance remain pending.
 
 The declarations are in `otrios_interfaces::oib::designer`; the existing SDK's
 `oib` feature/reexport exposes them without a new SDK dependency or API wrapper.
-`Seed`, `Cell`, `Target`, `Allocation`, their serializers, v26 state and the stable
-opening release-control v1 envelope are unchanged. Parent owns any future signed
-attachment, required package feature and coordinated state-protocol change.
+`Seed.designer` is an optional signed attachment requiring
+`otrios-oib-designer-v1`. Absence omits the field and preserves legacy canonical
+seed bytes. `Cell`, `Target` and `Allocation` retain their existing encodings.
+The next release uses state protocol v27, coordinated across hosts/publisher;
+release-control v1 is unchanged. This is not a claim that v27 is deployed.
 
 ## Signed metadata and existing implementation
 
@@ -23,11 +26,11 @@ root is a view definition containing an existing layout container. This avoids a
 second independent mutable object/layout/value store.
 
 `ClassDescriptor.implementation` names only OIBObject, OIBDocument, O2DView,
-O2DShape, O2DText, O2DButton, O2DToggle or O2DSlider contracts already implemented
-and admitted by the host. A descriptor is data, never class code, an import, or a
+O2DPanel, O2DShape, O2DText, O2DButton, O2DToggle or O2DSlider contracts selected
+for D1 host admission. A descriptor is data, never class code, an import, or a
 grant. Base classes and child rules must agree with that registry; new executable
-behavior cannot be declared by metadata. Panel and LabeledSlider are composed
-definitions using those implementations. No O2DLabel, text-area/editor, measured
+behavior cannot be declared by metadata. O2DPanel reuses view/surface/scroll
+machinery; LabeledSlider is a composed definition. No O2DLabel, text-area/editor, measured
 content, typography, image or O3D capability is added.
 
 Class property IDs are stable across the admitted ancestry. Property descriptors
@@ -277,24 +280,73 @@ cargo test -p otrios-interfaces --features layout --locked --offline
 python3 crates/otrios-interfaces/contract-checks/check-designer-codec.py
 ```
 
-## Integration decisions still required
+## Frozen root model and implementation handoff
 
-Parent must freeze/adjust these declarations with the runtime/UI reports, implement
+Parent reviewed these declarations with the runtime/UI reports. Implement
 the explicit key lowering and outside-in source resolver, and qualify rejection,
 capture/lifecycle/restart behavior. New `apps/oib-designer` uses a separate companion
 app/collection with its own signed volume, brightness and toggle fields. Existing
 Live UI app, v26 schema, seeds and data remain unchanged; this proposal authorizes
 no migration or seed/schema mutation. Do not activate by simply deserializing this
-Document on the old flat runtime. Required feature/envelope/version selection,
-both host codecs, full fixture budgets and live acceptance remain parent-owned.
+Document on the old flat runtime. Host/publisher v27 declarations and the required
+feature gate are integration-owned. Full fixture budgets and live acceptance
+remain unqualified.
 
-One deliberate modeling tension needs parent review: this minimal proposal makes
-all document objects definition-backed, including the presented view container.
-If the planned three definitions are exclusively SettingsPanel, LabeledSlider and
-Toggle, a separate plain presentation shell requires a fourth small definition,
-or a revised direct-object/root record before freeze. It is not hidden in the
-three-definition budget. A fixed shell without editable properties need not add
-causal cells, but its objects/layout/depth/bytes still count. Likewise, parent must
-decide how fixed document shell objects coexist with O2's allocated root tables;
-this contract does not grant a seventh allocated root. No claim is made that the
-proposed fixture already fits these records and all existing limits.
+The fixture uses four definitions: presentation shell, SettingsPanel,
+LabeledSlider and LabeledToggle. The shell is a fixed document instance containing
+the nonvisual configuration node. It has no RootCellMapping, allocation record
+or live override cells. Its objects/layout/depth/bytes still count. Only the panel
+factories appear in Seed.instances/instance_surface and RootCellMapping; their
+initial document instances attach visually to the shell. A dynamically created
+panel retains the signed prototype's parent attachment while receiving fresh
+identity and local derived ordering. The shell is never a seventh allocated root.
+
+`Document.hierarchy_viewport` optionally names an existing signed layout node for
+local designer hierarchy chrome. Seed's inspector/preview surfaces remain the
+other two tooling panels. Ordinary application documents can omit hierarchy
+chrome. Generated hierarchy/inspector rows are local runtime UI, not extra signed
+component occurrences or per-resident property records.
+
+These choices resolve the proposal's root-model objection without a second direct
+object schema. No claim is made that the complete fixture already fits every
+byte/node/control/cell limit; measure before activation.
+
+## Runtime/client implementation boundary
+
+The runtime implementation owns `canvas::oib::document` and these integration
+queries. They are ordinary covered Rust APIs, not new wire records:
+
+```text
+objects(seed: &Seed, allocations: &[Allocation]) -> Result<Vec<ObjectInfo>>
+properties(seed: &Seed, allocations: &[Allocation], selection: &Selection,
+           values: &BTreeMap<u64, Option<Value>>) -> Result<Vec<PropertyInfo>>
+cell_for_address(seed: &Seed, allocations: &[Allocation],
+                 address: &PropertyAddress) -> Result<u64>
+
+ObjectInfo {
+  selection: Selection, name: String, class: ClassId,
+  depth: u16, layout_node: Option<u16>
+}
+PropertyInfo {
+  address: Option<PropertyAddress>, cell: Option<u64>,
+  descriptor: PropertyDescriptor, value: Option<Value>, inherited: Option<Value>,
+  origin: String, source: String, overridden: bool
+}
+```
+
+`objects` returns local hierarchy rows in semantic order, including document,
+fixed/nonvisual objects, live occurrence expansion, and definitions. Definition
+rows and nonvisual objects do not imply a canvas hit/outline. `properties`
+returns only the selected scope's class/component properties and effective
+source diagnostics. The caller supplies active or unconflicted draft values;
+conflicted alternatives and publication status remain in the existing state
+adapter. A missing `cell` is read-only, including app-bound sources; a missing
+`value` permits source-only display where app content must be queried separately.
+The client never resolves forwarding or computes causal IDs independently.
+
+The client implementation owns local hierarchy/inspector generation, selection,
+scroll, Edit/Test interception, and occurrence hit routing in `client.rs`,
+`client/host_panel.rs`, and a dedicated `client/oib_designer.rs`. It uses these
+queries and existing state-adapter property operations. Any required query API
+adjustment is coordinated by the parent before both owners diverge. The app
+author owns signed fixture/metadata and named-to-compiled-node mappings only.

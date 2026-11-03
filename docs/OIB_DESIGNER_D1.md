@@ -130,10 +130,35 @@ Parent decisions after the runtime mapping:
 
 ### G2: runtime and designer implementation
 
-After G1, launch runtime and app/inspector implementation on the same reviewed
-contract commit with explicit file ownership. Partition any shared core inspector
-or input files before edits begin. Parent resolves API questions and reviews each
-completed commit before integration. Keep follow-ups small and scoped to D1.
+G1 decision: the additive contract from `96fcbf3` was reviewed and integrated as
+`16fbf4b`, followed by parent attachment/root decisions. `Seed.designer` carries
+the signed metadata, with required feature `otrios-oib-designer-v1` and coordinated
+state protocol v27 for the next release. Legacy seeds omit the field. Live
+release-control remains v1. This is implementation scope, not deployed acceptance.
+
+Use four definitions: fixed presentation shell, SettingsPanel, LabeledSlider and
+LabeledToggle. A nonvisual configuration node belongs to the shell. The fixed
+shell instance is not an O2 allocation/factory and has no occurrence cells; panel
+roots are the only allocated factories. This resolves the three-definition budget
+estimate without increasing any ceiling.
+
+After G1, launch three implementation lanes on the same reviewed contract commit:
+
+- Runtime owns `canvas/oib.rs`, `canvas/oib/*`, `canvas/state/oib.rs`,
+  `canvas/state/oib/*`, runtime resolver tests, and explicit toggle/projection
+  admission. It supplies the query boundary in the contract note.
+- Fixture/authoring owns new `apps/oib-designer`, Test Playground registration,
+  and `tools/canvas/authoring.rs`. It does not change existing Live UI data/schema.
+- Local designer client owns `canvas/client.rs`, `canvas/client/host_panel.rs`,
+  new `canvas/client/oib_designer.rs`, and dedicated client/input tests. It consumes
+  runtime query results rather than adding another graph/source resolver.
+
+Parent owns interface/protocol/package activation, host exports, process-test
+integration, release staging and live acceptance. Runtime and client lanes must
+not edit each other's files. The contract note freezes their Rust query boundary;
+dependency compilation can complete after both commits integrate. Parent resolves
+API questions and reviews each completed commit before cherry-pick. Keep follow-ups
+small and scoped to D1.
 
 Use the smallest end-to-end vertical slice first: select a nested occurrence,
 edit a definition accent, override one occurrence, reset to authored/forwarded
@@ -181,7 +206,13 @@ finished release. Only then is D1 ready for final review and any requested PR.
 - RFC baseline and execution plan: prepared; local documentation checks recorded
   in the parent handoff when committed.
 - Contracts: additive descriptor implementation delegated; parent contract freeze
-  pending its result and both mapping reports.
+  review completed after both mapping reports; attachment/root decisions recorded
+  above. Contract/codec checks passed in the delegate; parent integration checks
+  are recorded separately. Runtime activation is not yet accepted.
+- Parent focused checks after attachment/root adjustments: interfaces/layout and
+  SDK/oib checks passed on Rust 1.90.0; three interfaces tests passed;
+  `node scripts/test-dashboard-session.mjs` passed 15 tests and
+  `node scripts/test-ui-update.mjs` passed four tests. `git diff --check` passed.
 - Runtime mapping completed read-only: existing causal publication and rendering
   can be reused; property-rank IDs, toggle admission, full-ancestry selection and
   forwarding need focused changes. No runtime implementation accepted yet.

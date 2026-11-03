@@ -404,6 +404,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-layout-v1"
                     | "otrios-oib-restore-v1"
                     | "otrios-oib-authored-defaults-v1"
+                    | "otrios-oib-designer-v1"
                     | "otrios-layout-v5"
             )
         })
@@ -411,6 +412,11 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
         return Err("Unsupported required bundle feature".into());
     }
     let ui = canvas::decode_ui(get(UI_PATH)?)?;
+    if canvas::oib::seed(&ui).is_some_and(|s| s.designer.is_some())
+        && !features.contains(otrios_interfaces::oib::designer::FEATURE)
+    {
+        return Err("Missing required OIB designer feature".into());
+    }
     if canvas::oib::seed(&ui).is_some_and(|s| s.cells.iter().any(|c| c.authored_override.is_some()))
         && !features.contains(otrios_interfaces::oib::AUTHORED_DEFAULTS_FEATURE)
     {

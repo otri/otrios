@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! RFC 0035 D1 signed authoring metadata and stable identity proposal.
 //!
-//! These records are deliberately separate from [`super::Seed`]. They neither
-//! activate a package feature nor change the existing state/control encoding.
+//! [`super::Seed::designer`] carries these signed records under the required D1
+//! package feature. An absent attachment preserves legacy canonical seed bytes.
 //! See `docs/OIB_DESIGNER_CONTRACT.md` for canonicalization, lowering, bounds and
 //! rejection requirements. Admission/resolution belong in the covered runtime.
 use crate::layout::{Binding, Value, ValueType};
 use serde::{Deserialize, Serialize};
 
+pub const FEATURE: &str = "otrios-oib-designer-v1";
 pub const MAX_DEFINITIONS: usize = 16;
 pub const MAX_AUTHORED_OBJECTS: usize = 64;
 pub const MAX_CLASS_DESCRIPTORS: usize = 16;
@@ -103,6 +104,10 @@ pub struct Document {
     pub name: String,
     pub class: ClassId,
     pub presented_root: InstanceId,
+    /// Optional tooling viewport in the existing layout. Ordinary application
+    /// documents can omit designer chrome; inspector/preview use Seed surfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hierarchy_viewport: Option<u16>,
     pub classes: Vec<ClassDescriptor>,
     pub definitions: Vec<ComponentDefinition>,
     pub instances: Vec<ComponentInstance>,
@@ -115,6 +120,7 @@ pub enum ClassKind {
     OIBObject,
     OIBDocument,
     O2DView,
+    O2DPanel,
     O2DShape,
     O2DText,
     O2DButton,
