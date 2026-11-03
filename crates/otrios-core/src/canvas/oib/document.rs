@@ -7,8 +7,12 @@ use otrios_interfaces::oib::designer::Document;
 use otrios_interfaces::oib::designer::*;
 mod admission;
 mod hierarchy;
+mod sources;
 pub use admission::{compatible_mappings, validate, validate_layout};
 pub use hierarchy::{HierarchyKey, HierarchyRow, HierarchyScope, hierarchy};
+pub use sources::{
+    AuthoredOrigin, PropertyRegisterView, PropertySources, SourceHop, SourceRole, property_sources,
+};
 
 #[derive(Clone, Debug)]
 pub struct ObjectInfo {
