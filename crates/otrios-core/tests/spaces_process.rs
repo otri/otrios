@@ -6471,6 +6471,8 @@ fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
 
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
+#[path = "spaces_process/d1.rs"]
+mod d1;
 #[path = "../../../apps/live-ui/app.rs"]
 mod live_oib_app;
 
