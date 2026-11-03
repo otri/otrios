@@ -81,6 +81,8 @@ pub(super) struct Designer {
     editor_revision: u64,
     details: Option<super::super::oib::document::PropertySources>,
     registers: Vec<super::super::oib::document::PropertyRegisterView>,
+    pending_source: Option<PropertyAddress>,
+    pending_selection: Option<Selection>,
     mode: DesignerMode,
     pending_mode: Option<DesignerMode>,
     pending_viewport: Option<[f32; 2]>,
@@ -112,6 +114,8 @@ impl Clone for Designer {
             editor_revision: self.editor_revision,
             details: self.details.clone(),
             registers: self.registers.clone(),
+            pending_source: self.pending_source.clone(),
+            pending_selection: self.pending_selection.clone(),
             mode: self.mode,
             pending_mode: self.pending_mode,
             pending_viewport: self.pending_viewport,
@@ -166,6 +170,8 @@ impl Designer {
             editor_revision: 0,
             details: None,
             registers: vec![],
+            pending_source: None,
+            pending_selection: None,
             mode: DesignerMode::Edit,
             pending_mode: None,
             pending_viewport: None,
@@ -1076,6 +1082,33 @@ impl Mount {
             let seed = super::super::oib::seed(&self.ui).ok_or("Missing designer seed")?;
             let allocations = self.doc.oib_allocations()?;
             let objects = super::super::oib::document::objects(seed, &allocations)?;
+            if let Some(target) = designer.pending_selection.take() {
+                if objects.iter().any(|o| o.selection == target) {
+                    designer.select(target);
+                    designer.details = None;
+                    designer.editor_notice = None;
+                } else {
+                    designer.editor_notice = Some("Selection is no longer available".into());
+                }
+            }
+            if let Some(address) = designer.pending_source.take() {
+                let target = editing::selection(&address);
+                let trace = super::super::oib::document::property_sources(
+                    seed,
+                    &allocations,
+                    &address,
+                    &self.doc.oib_active()?,
+                );
+                if objects.iter().any(|o| o.selection == target) && trace.is_ok() {
+                    designer.select(target);
+                    designer.details = Some(trace?);
+                    designer.layers_open = false;
+                    designer.editor_notice = None;
+                } else {
+                    designer.editor_notice = Some("Source is no longer available".into());
+                }
+            }
+
             if designer.focus_layout {
                 let live = self
                     .doc
@@ -1268,10 +1301,7 @@ impl Client {
             LocalAction::FocusField(id) => self.designer_focus_field(id),
             LocalAction::Apply(address) => self.designer_commit_property(&address, false),
             LocalAction::Discard(address) => self.designer_discard_property(&address),
-            LocalAction::Select(selection) => {
-                self.designer_blur_focused()?;
-                self.inspect_oib_selection(selection)
-            }
+            LocalAction::Select(selection) => self.designer_select_after_blur(selection),
             LocalAction::TreeScope(scope) => {
                 if self.input_busy() {
                     return Ok(false);

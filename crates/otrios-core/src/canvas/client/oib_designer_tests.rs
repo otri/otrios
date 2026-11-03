@@ -1889,3 +1889,198 @@ fn frame_focus_managed_back_does_not_cover_layers_button() {
             .layers_open
     );
 }
+
+#[test]
+fn frame_focus_tab_reveals_below_fold_fields_without_admitting_stale_ids() {
+    let mut client = mounted_six_panel_fixture(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let hex = focus_property(&mut client, 1);
+    let tab = client
+        .scene()
+        .unwrap()
+        .controls()
+        .into_iter()
+        .find(|c| c.node.responder == Some(TouchResponder::Activate(Action::KeyboardKey(11))))
+        .unwrap()
+        .node
+        .id;
+    assert_eq!(client.designer_activate(tab).unwrap(), Some(true));
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .focused()
+            .unwrap()
+            .part,
+        super::super::oib_property_editor::Part::Opacity
+    );
+    assert_eq!(client.designer_activate(tab).unwrap(), Some(true));
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    // Traversal follows signed order and wraps back to the Layout field.
+    assert_eq!(d.drafts.focused().unwrap().address, editor_address(3));
+    assert_eq!(client.designer_activate(tab).unwrap(), Some(true));
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(d.drafts.focused().unwrap().address, editor_address(2));
+    let width = d.drafts.draft(&editor_address(2)).unwrap().fields[0].id;
+    assert!(
+        client
+            .text_inputs()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == width && i.focused)
+    );
+    fixture_scroll_to(&mut client, 1, f32::MAX);
+    assert_eq!(client.designer_activate(hex).unwrap(), Some(false));
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .focused()
+            .unwrap()
+            .address,
+        editor_address(2)
+    );
+}
+#[test]
+fn frame_focus_source_navigation_waits_for_focused_edit_confirmation() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let id = focus_property(&mut client, 1);
+    let epoch = client.epoch();
+    client
+        .edit_text_input(
+            epoch,
+            id,
+            &Edit::Replace {
+                text: "#123456".into(),
+                cursor: 7,
+                anchor: 7,
+                selection_only: false,
+            },
+        )
+        .unwrap();
+    activate_inspector_action(&mut client, &LocalAction::Details(editor_address(1)));
+    let shared = PropertyAddress::Definition {
+        definition: DefinitionId(10),
+        node: NodeId(1),
+        property: PropertyId(1),
+    };
+    assert!(
+        !activate_inspector_action(&mut client, &LocalAction::Source(shared.clone())),
+        "navigation is pending, not reported complete"
+    );
+    assert!(client.active.as_ref().unwrap().doc.oib_saving());
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .pending_source,
+        Some(shared)
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert_eq!(
+        d.selection,
+        Selection::DefinitionNode {
+            definition: DefinitionId(10),
+            node: NodeId(1)
+        }
+    );
+    assert!(d.pending_source.is_none());
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&201],
+        Some(Value::Color([0x12, 0x34, 0x56, 255]))
+    );
+}
+
+#[test]
+fn frame_focus_hierarchy_selection_after_valid_blur_waits_for_confirmation() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let id = focus_property(&mut client, 3);
+    let epoch = client.epoch();
+    client
+        .edit_text_input(
+            epoch,
+            id,
+            &Edit::Replace {
+                text: "Sound".into(),
+                cursor: 5,
+                anchor: 5,
+                selection_only: false,
+            },
+        )
+        .unwrap();
+    let target = Selection::Object(ObjectAddress {
+        instance: InstanceId(30),
+        references: vec![NodeId(7)],
+        node: NodeId(1),
+    });
+    assert!(
+        !client
+            .designer_action(LocalAction::Select(target.clone()))
+            .unwrap()
+    );
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .pending_selection,
+        Some(target.clone())
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        target
+    );
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&203],
+        Some(Value::Text("Sound".into()))
+    );
+}

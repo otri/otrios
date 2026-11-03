@@ -177,3 +177,32 @@ The existing production pin advanced to `03e5aab` while this branch was being
 implemented. That completed persistent-session work must be included before the
 next signed build so the deployed Safari login persistence is preserved. No
 production config or deployment was changed during this inspection.
+
+
+Independent review and follow-up (still no live acceptance):
+
+- Native review at `cfadb7b` found no correctness findings. It passed 24 designer,
+  5 retained-text and 8 native worker/input/telemetry host tests. Linux renderer
+  execution and real timing remain separate gates.
+- UI review found two P2 issues: Tab rejected below-fold fields, and Go to source
+  silently stayed put after blur queued a write. Parent fixes reveal only a
+  currently admitted field before trusted keyboard traversal, retain public
+  stale/offscreen-ID rejection, and defer source or hierarchy navigation until
+  confirmation. Deferred targets are revalidated before selection. Unavailable
+  draft selections show a notice and retain an explicit discard action.
+- `cargo test -p otrios-core --features canvas --lib frame_focus --locked --offline -- --nocapture`:
+  11 passed, including the two review regressions and hierarchy navigation after
+  a valid blur. One initial assertion assumed the wrong signed field order; the
+  final test follows Accent/Opacity/Label and wraps back to Width, then explicitly
+  scrolls an old field offscreen before testing activation rejection.
+- The first staging attempt at frozen `cfadb7b` failed because the new offline
+  Docker builder had no flexbuffers registry entry. Public registry cache was
+  copied read-only from the earlier builder into the isolated container. Retried
+  ARMv7 compilation passed for dashboard-direct/server/monitoring/bootstrap,
+  canvas-bundle and oib_instance_probe. That compile predates the review fixes;
+  the final candidate must rebuild from their committed source.
+- A code-only rollback kit at ignored target/frame-focus/release/rollback-code
+  verifies signed release f6202770 and retains authority SHA-256
+  5ab9daf0acf87097c68ad044186262dddac2e3563c9115dd271182f60d129364,
+  matching the actual Frame. It preserves persistent sessions. No app state or
+  identity material was copied; the full backup/inventory script was not used.

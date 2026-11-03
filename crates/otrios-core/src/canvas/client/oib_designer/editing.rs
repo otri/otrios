@@ -10,7 +10,7 @@ use crate::dashboard::{
 use otrios_interfaces::keyboard::TextInput;
 const KEY_BASE: u32 = 2_695_000_000;
 
-fn selection(address: &PropertyAddress) -> Selection {
+pub(super) fn selection(address: &PropertyAddress) -> Selection {
     match address {
         PropertyAddress::Definition {
             definition, node, ..
@@ -105,6 +105,14 @@ pub(super) fn inspector(
             320.,
             "Unapplied edit - inspect",
             LocalAction::Select(selection(&address)),
+        )?);
+        y += 56.;
+        nodes.push(b.focus_button(
+            0.,
+            y,
+            320.,
+            "Discard unapplied edit",
+            LocalAction::Discard(address),
         )?);
         y += 56.;
     }
@@ -603,6 +611,34 @@ impl Client {
         repaint(m)?;
         Ok(true)
     }
+    pub(in crate::canvas::client) fn designer_select_after_blur(
+        &mut self,
+        selection: Selection,
+    ) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        self.designer_blur_focused()?;
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        let blocked = m.oib_activation_blocked();
+        let d = m.designer.as_mut().ok_or("Missing designer")?;
+        if !d.objects.iter().any(|o| o.selection == selection) {
+            d.editor_notice = Some("Selection is no longer available".into());
+            d.revision = None;
+            repaint(m)?;
+            return Ok(false);
+        }
+        d.pending_source = None;
+        if blocked && d.selection != selection {
+            d.pending_selection = Some(selection);
+            d.editor_notice = Some("Selection opens after confirmation".into());
+            d.revision = None;
+            repaint(m)?;
+            return Ok(false);
+        }
+        d.pending_selection = None;
+        self.inspect_oib_selection(selection)
+    }
     pub(in crate::canvas::client) fn designer_go_source(
         &mut self,
         address: &PropertyAddress,
@@ -611,7 +647,30 @@ impl Client {
             return Ok(false);
         }
         self.designer_blur_focused()?;
-        self.inspect_oib_selection(selection(address))?;
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.oib_activation_blocked() {
+            let d = m.designer.as_mut().ok_or("Missing designer")?;
+            d.pending_source = Some(address.clone());
+            d.pending_selection = None;
+            d.editor_notice = Some("Source opens after confirmation".into());
+            d.revision = None;
+            repaint(m)?;
+            return Ok(false);
+        }
+        if let Some(d) = self.active.as_mut().and_then(|m| m.designer.as_mut()) {
+            d.pending_source = None;
+            d.pending_selection = None;
+        }
+        let target = selection(address);
+        self.inspect_oib_selection(target.clone())?;
+        if self
+            .active
+            .as_ref()
+            .and_then(|m| m.designer.as_ref())
+            .is_none_or(|d| d.selection != target)
+        {
+            return Ok(false);
+        }
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
         let trace = crate::canvas::oib::document::property_sources(
@@ -682,6 +741,47 @@ impl Client {
         repaint(m)?;
         Ok(true)
     }
+    // Trusted keyboard traversal may reveal only a current field with a live
+    // typed action. Public activation retains its separate visible-ID guard.
+    fn reveal_editor_field(&mut self, id: u32) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        let Some(m) = self.active.as_mut() else {
+            return Ok(false);
+        };
+        let layout = cached_layout(m)?;
+        let d = m.designer.as_mut().ok_or("Missing designer")?;
+        if d.actions.get(&id) != Some(&LocalAction::FocusField(id)) {
+            return Ok(false);
+        }
+        let Some(panel) = d.panels.last_mut() else {
+            return Ok(false);
+        };
+        let Some(field) = panel.nodes.iter().find(|n| n.id == id) else {
+            return Ok(false);
+        };
+        let path = layout
+            .path(u32::from(panel.viewport))
+            .ok_or("Missing inspector viewport")?;
+        let height = path
+            .last()
+            .ok_or("Missing inspector frame")?
+            .node
+            .frame
+            .height;
+        let offset = panel.scroll.info().offset[1];
+        let next = if field.frame.y < offset {
+            field.frame.y
+        } else if field.frame.y + field.frame.height > offset + height {
+            field.frame.y + field.frame.height - height
+        } else {
+            offset
+        };
+        panel.scroll.set_offset([0., next]);
+        m.invalidate_presentation();
+        Ok(true)
+    }
     pub(in crate::canvas::client) fn designer_focus_field(&mut self, id: u32) -> Result<bool> {
         if self.input_busy() {
             return Ok(false);
@@ -726,6 +826,7 @@ impl Client {
         d.layers_open = false;
         m.keyboard.focus();
         repaint(m)?;
+        self.reveal_editor_field(id)?;
         Ok(true)
     }
     pub(in crate::canvas::client) fn designer_commit_property(
@@ -876,6 +977,9 @@ impl Client {
                     fields[(i + if backward { fields.len() - 1 } else { 1 }) % fields.len()]
                 });
                 if let Some(next) = next {
+                    if !self.reveal_editor_field(next)? {
+                        return Ok(Some(false));
+                    }
                     self.designer_focus_field(next).map(Some)
                 } else {
                     Ok(Some(false))
