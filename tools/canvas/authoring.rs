@@ -73,6 +73,10 @@ impl StateField {
     pub fn value(self) -> ValueExpr {
         ValueExpr::State(self, Projection::Identity)
     }
+    /// Boolean semantics for a normalized numeric toggle field.
+    pub fn nonzero(self) -> ValueExpr {
+        ValueExpr::State(self, Projection::Nonzero)
+    }
     pub fn format_number(self, prefix: &str, suffix: &str, scale: f32, offset: f32) -> ValueExpr {
         self.formatted(prefix, suffix, scale, offset, 2)
     }
@@ -355,7 +359,7 @@ pub struct Element {
     paint: Paint,
     children: Vec<Element>,
     label: Option<String>,
-    checked: bool,
+    checked: ValueExpr,
     interaction: Option<Interaction>,
     resize: Option<[AxisResize; 2]>,
     frame_size: [f32; 2],
@@ -370,7 +374,7 @@ impl Element {
             paint,
             children: vec![],
             label: None,
-            checked: false,
+            checked: ValueExpr::Literal(no()),
             interaction: None,
             resize: None,
             frame_size: [frame[2], frame[3]],
@@ -393,6 +397,11 @@ impl Element {
     }
     /// Current checked state of an interactive selection control.
     pub fn semantic_checked(mut self, checked: bool) -> Self {
+        self.checked = ValueExpr::Literal(if checked { yes() } else { no() });
+        self
+    }
+    /// Dynamic checked semantics; the selector must produce a Boolean.
+    pub fn semantic_checked_value(mut self, checked: ValueExpr) -> Self {
         self.checked = checked;
         self
     }
@@ -834,6 +843,19 @@ pub struct NamedOibTarget {
     pub scale: f32,
     pub offset: f32,
 }
+/// Resolve an expanded signed object's paint/layout node after normal compilation.
+/// None is explicit for nonvisual objects; names never become object identities.
+pub struct NamedOibObject {
+    pub address: otrios_interfaces::oib::designer::ObjectAddress,
+    pub node: Option<String>,
+}
+/// A signed app connection to the compiler-interned local selector. This helper
+/// authors metadata only; field admission and evaluation remain in the runtime.
+pub struct NamedOibAppBinding {
+    pub instance: otrios_interfaces::oib::designer::InstanceId,
+    pub target: otrios_interfaces::oib::designer::PropertyPath,
+    pub value: ValueExpr,
+}
 pub struct NamedOibPrototype {
     pub instance: u64,
     pub preview: String,
@@ -851,6 +873,9 @@ pub struct NamedOibSurface {
 pub struct AppUi {
     oib: Option<(otrios_interfaces::oib::Seed, String, Vec<NamedOibTarget>)>,
     oib_surface: Option<NamedOibSurface>,
+    oib_objects: Vec<NamedOibObject>,
+    oib_hierarchy: Option<String>,
+    oib_bindings: Vec<NamedOibAppBinding>,
     id: String,
     title: String,
     breadcrumbs: Vec<(String, String)>,
@@ -869,6 +894,9 @@ impl AppUi {
         Self {
             oib: None,
             oib_surface: None,
+            oib_objects: vec![],
+            oib_hierarchy: None,
+            oib_bindings: vec![],
             id: id.into(),
             title: title.into(),
             breadcrumbs: vec![],
@@ -894,6 +922,19 @@ impl AppUi {
     }
     pub fn with_oib_instances(mut self, surface: NamedOibSurface) -> Self {
         self.oib_surface = Some(surface);
+        self
+    }
+    /// Resolve mappings into the attached signed Document, using authored keys.
+    pub fn with_oib_designer_objects(mut self, objects: Vec<NamedOibObject>) -> Self {
+        self.oib_objects = objects;
+        self
+    }
+    pub fn with_oib_designer_hierarchy(mut self, viewport: &str) -> Self {
+        self.oib_hierarchy = Some(viewport.into());
+        self
+    }
+    pub fn with_oib_designer_bindings(mut self, bindings: Vec<NamedOibAppBinding>) -> Self {
+        self.oib_bindings = bindings;
         self
     }
     pub fn with_composition(mut self, wide: Arrangement, tall: Arrangement) -> Self {
@@ -949,6 +990,13 @@ impl AppUi {
         self
     }
     pub fn build(self, heading: &str, mut children: Vec<Element>) -> Ui {
+        assert!(
+            self.oib.is_some()
+                || (self.oib_objects.is_empty()
+                    && self.oib_hierarchy.is_none()
+                    && self.oib_bindings.is_empty()),
+            "designer helpers require a signed OIB attachment"
+        );
         let mut body = vec![
             rounded_rect(BG).frame(SCREEN).pin_edges(0.),
             breadcrumb_header(heading, &self.breadcrumbs).key("$heading"),
@@ -1049,6 +1097,73 @@ impl AppUi {
                         scale: target.scale,
                         offset: target.offset,
                     });
+            }
+            if !self.oib_objects.is_empty()
+                || self.oib_hierarchy.is_some()
+                || !self.oib_bindings.is_empty()
+            {
+                let document = seed.designer.as_mut().expect("signed designer document");
+                if !self.oib_objects.is_empty() {
+                    assert!(
+                        document.mappings.objects.is_empty(),
+                        "use one object mapping source"
+                    );
+                    document.mappings.objects = self
+                        .oib_objects
+                        .into_iter()
+                        .map(|object| otrios_interfaces::oib::designer::ObjectMapping {
+                            address: object.address,
+                            layout_node: object.node.map(|key| {
+                                *compiler
+                                    .named_nodes
+                                    .get(&key)
+                                    .expect("designer object node")
+                            }),
+                        })
+                        .collect();
+                    document
+                        .mappings
+                        .objects
+                        .sort_by(|a, b| a.address.cmp(&b.address));
+                }
+                if let Some(key) = self.oib_hierarchy {
+                    assert!(
+                        document.hierarchy_viewport.is_none(),
+                        "one hierarchy viewport source"
+                    );
+                    document.hierarchy_viewport = Some(
+                        *compiler
+                            .named_nodes
+                            .get(&key)
+                            .expect("designer hierarchy viewport"),
+                    );
+                }
+                for binding in self.oib_bindings {
+                    let Expr::State(local) = compiler.value(binding.value) else {
+                        panic!("designer app binding requires a state selector");
+                    };
+                    let instance = document
+                        .instances
+                        .iter_mut()
+                        .find(|i| i.id == binding.instance)
+                        .expect("designer binding instance");
+                    assert!(
+                        !instance
+                            .assignments
+                            .iter()
+                            .any(|a| a.target == binding.target),
+                        "one signed assignment per path"
+                    );
+                    instance
+                        .assignments
+                        .push(otrios_interfaces::oib::designer::Assignment {
+                            target: binding.target,
+                            source: otrios_interfaces::oib::designer::AssignmentSource::AppBinding(
+                                local,
+                            ),
+                        });
+                    instance.assignments.sort_by(|a, b| a.target.cmp(&b.target));
+                }
             }
             Some(Presentation::Oib(seed))
         } else if let Some((key, source, scale, color)) = self.text_document {
@@ -1293,7 +1408,7 @@ impl Compiler {
                 label: Expr::Literal(Value::Text(
                     n.label.expect("interactive element needs a semantic label"),
                 )),
-                checked: if n.checked { yes() } else { no() },
+                checked: self.value(n.checked),
             })
         } else {
             None
