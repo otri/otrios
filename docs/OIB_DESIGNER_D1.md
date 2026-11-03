@@ -1,7 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB designer D1 execution plan
 
-Date: 2026-11-03. Status: **in progress; acceptance not yet run**.
+Date: 2026-11-03. Status: **implemented and live-qualified**.
+
+The [qualification record](experiments/oib-designer-d1-2026-11-03.md) records
+the accepted signed release and focused evidence. Earlier gate notes below are
+implementation history, not the final acceptance status.
 
 Implements only D1 of [RFC 0035](rfcs/0035-oib-component-designer.md).
 The integration branch is `feat/oib-designer-d1`, based on
@@ -241,7 +245,7 @@ Keep unperformed physical/browser checks explicitly pending. Code rollback never
 restores old application data. Complete readiness/health acceptance once for the
 finished release. Only then is D1 ready for final review and any requested PR.
 
-## Current evidence
+## Integration evidence before live acceptance
 
 - Isolation: parent moved to the dedicated integration worktree; original
   checkout changes were read and snapshotted without modification.
@@ -366,3 +370,27 @@ typed selection, Edit/Test mode, viewport, semantic activation and pointer input
 for focused companion-app acceptance; its legacy Live UI defaults are retained.
 
 Update this record at integration gates with actual commits, commands and results.
+
+## Final acceptance
+
+Final independent re-check of `59b2707` reports no findings. The final runtime
+suite passes 17 tests, fixture suite nine, and core-library strict Clippy passes.
+The reviewer additionally checked valid empty-cell factories, fixed instances,
+both mapping-closure directions, unchanged state after rejection and successful
+subsequent compilation. All three review objections are resolved.
+
+Signed release `541cabed97efe0f9df23dd81e6b01b39cd5816b0243d9c00afb29f20ccdd6992`
+is deployed on the existing authority, Frame direct host and public Web origin.
+Both outer release and all inner app bundles passed publisher/closure verification.
+The companion is attached to Experiments through the existing Admin management
+path. No existing collection was migrated or reset.
+
+Focused acceptance proved shared/nested propagation, scoped override and causal
+reset, nonvisual inspection, Edit/Test routing, whole-view padding activation,
+release-outside cancellation and held-slider publication deferral. Frame and
+browser retained the authored labels and 40%/70% values. The authority restart
+recovered revision six; Frame retained its renderer PID and browser retained its
+local selection and scrolling. Wide and portrait browser rendering were checked.
+The compatible signed v27 recovery kit remains available; activation of that
+rollback was not repeated. Exact evidence and remaining scope limits are in the
+qualification record.

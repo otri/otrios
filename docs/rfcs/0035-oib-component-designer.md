@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0035: OIB component designer and composable 2D controls
 
-Date: 2026-11-03. Status: **D1 implementation in progress; later stages proposed**.
+Date: 2026-11-03. Status: **D1 implemented and live-qualified; later stages proposed**.
 
 The [D1 execution plan](../OIB_DESIGNER_D1.md) records the concrete milestone,
-isolated worktree roles, integration gates and required acceptance. No D1 runtime
-or live acceptance is claimed yet.
+isolated worktree roles, integration gates and acceptance.
+The [D1 qualification record](../experiments/oib-designer-d1-2026-11-03.md)
+records the signed deployment, focused Frame/browser checks and limitations.
 
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.

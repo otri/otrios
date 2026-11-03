@@ -1,0 +1,300 @@
+{
+  "source": "59b2707e43e9f8bb07d82fe976e3e34d93557a0b",
+  "release": "541cabed97efe0f9df23dd81e6b01b39cd5816b0243d9c00afb29f20ccdd6992",
+  "protocol": "otrios-canvas-sync-v27",
+  "server_sha256": "f2367e9ea6c5b5f16d69b94eccbcf474374de71d9ce3a3a869b842728d6da187",
+  "format": "otrios-oib-designer-d1-acceptance-v1",
+  "native": {
+    "passed": true,
+    "release": "541cabed97efe0f9df23dd81e6b01b39cd5816b0243d9c00afb29f20ccdd6992",
+    "pid": 11051,
+    "epoch": 3,
+    "records": [
+      {
+        "case": "baseline",
+        "generation": 4,
+        "shown": 4,
+        "checked": {
+          "Audio enabled": true,
+          "Display enabled": false
+        },
+        "percentages": [
+          "40%",
+          "70%"
+        ],
+        "properties": {
+          "100": "panel accent: #DAA520 (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #DAA520 (inherited)",
+          "201": "slider accent: #DAA520 (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Volume (authored)",
+          "204": "toggle accent: #DAA520 (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #DAA520 (inherited)",
+          "301": "slider accent: #DAA520 (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #DAA520 (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        }
+      },
+      {
+        "case": "edit_padding_select_does_not_activate",
+        "generation": 4,
+        "shown": 4,
+        "checked": {
+          "Audio enabled": true,
+          "Display enabled": false
+        },
+        "percentages": [
+          "40%",
+          "70%"
+        ],
+        "properties": {
+          "100": "panel accent: #DAA520 (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #DAA520 (inherited)",
+          "201": "slider accent: #DAA520 (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Volume (authored)",
+          "204": "toggle accent: #DAA520 (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #DAA520 (inherited)",
+          "301": "slider accent: #DAA520 (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #DAA520 (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        }
+      },
+      {
+        "case": "test_button_empty_padding_activates",
+        "generation": 4,
+        "shown": 4,
+        "checked": {
+          "Audio enabled": false,
+          "Display enabled": false
+        },
+        "percentages": [
+          "40%",
+          "70%"
+        ],
+        "properties": {
+          "100": "panel accent: #DAA520 (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #DAA520 (inherited)",
+          "201": "slider accent: #DAA520 (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Volume (authored)",
+          "204": "toggle accent: #DAA520 (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #DAA520 (inherited)",
+          "301": "slider accent: #DAA520 (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #DAA520 (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        }
+      },
+      {
+        "case": "test_toggle_empty_padding_activates",
+        "generation": 4,
+        "shown": 4,
+        "checked": {
+          "Audio enabled": true,
+          "Display enabled": false
+        },
+        "percentages": [
+          "40%",
+          "70%"
+        ],
+        "properties": {
+          "100": "panel accent: #DAA520 (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #DAA520 (inherited)",
+          "201": "slider accent: #DAA520 (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Volume (authored)",
+          "204": "toggle accent: #DAA520 (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #DAA520 (inherited)",
+          "301": "slider accent: #DAA520 (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #DAA520 (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        }
+      },
+      {
+        "case": "release_outside_cancels",
+        "generation": 4,
+        "shown": 4,
+        "checked": {
+          "Audio enabled": true,
+          "Display enabled": false
+        },
+        "percentages": [
+          "40%",
+          "70%"
+        ],
+        "properties": {
+          "100": "panel accent: #DAA520 (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #DAA520 (inherited)",
+          "201": "slider accent: #DAA520 (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Volume (authored)",
+          "204": "toggle accent: #DAA520 (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #DAA520 (inherited)",
+          "301": "slider accent: #DAA520 (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #DAA520 (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        }
+      },
+      {
+        "case": "held_slider_pins_presented_graph",
+        "old_generation": 4,
+        "authority_generation": 5,
+        "native_shown": 4
+      },
+      {
+        "case": "final_defaults_and_bindings",
+        "generation": 6,
+        "shown": 6,
+        "checked": {
+          "Audio enabled": true,
+          "Display enabled": false
+        },
+        "percentages": [
+          "40%",
+          "70%"
+        ],
+        "properties": {
+          "100": "panel accent: #5588FF (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #5588FF (inherited)",
+          "201": "slider accent: #5588FF (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Volume (authored)",
+          "204": "toggle accent: #5588FF (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #5588FF (inherited)",
+          "301": "slider accent: #5588FF (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #5588FF (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        }
+      }
+    ],
+    "calibrated_software_input": true,
+    "human_touch_claim": false
+  },
+  "web": {
+    "propagation": {
+      "epoch": "2",
+      "inspector": "Selected properties. Configuration : OIBObject. Live \u00b7 revision 3 \u00b7 2 instances \u00b7 4 slots available / active 3 / shown 3. Instance #40 / node #2. Path: local root. Signed identity / no editable properties",
+      "oib": {
+        "active_generation": 3,
+        "available_instance_slots": 4,
+        "conflicts": [],
+        "instances": [
+          {
+            "active": true,
+            "component": 10,
+            "id": 20,
+            "name": "Audio",
+            "prototype": 20
+          },
+          {
+            "active": true,
+            "component": 10,
+            "id": 30,
+            "name": "Display",
+            "prototype": 30
+          }
+        ],
+        "presented_generation": 3,
+        "properties": {
+          "100": "panel accent: #DAA520 (default)",
+          "101": "slider accent: #5588FF (default)",
+          "102": "slider width: 440 (default)",
+          "103": "slider label: Level (default)",
+          "104": "toggle accent: #5588FF (default)",
+          "105": "toggle label: Enabled (default)",
+          "200": "panel accent: #DAA520 (inherited)",
+          "201": "slider accent: #DAA520 (inherited)",
+          "202": "slider width: 440 (inherited)",
+          "203": "slider label: Sound (override)",
+          "204": "toggle accent: #DAA520 (inherited)",
+          "205": "toggle label: Enabled (inherited)",
+          "300": "panel accent: #DAA520 (inherited)",
+          "301": "slider accent: #DAA520 (inherited)",
+          "302": "slider width: 440 (inherited)",
+          "303": "slider label: Brightness (authored)",
+          "304": "toggle accent: #DAA520 (inherited)",
+          "305": "toggle label: Enabled (inherited)"
+        },
+        "selected_instance": 20,
+        "status": "Live \u00b7 revision 3 \u00b7 2 instances \u00b7 4 slots available"
+      },
+      "percentages": [
+        "40%",
+        "70%"
+      ],
+      "release": "541cabed97efe0f9df23dd81e6b01b39cd5816b0243d9c00afb29f20ccdd6992"
+    },
+    "portrait": {
+      "epoch": "5",
+      "generation": 6,
+      "height": 1280,
+      "hierarchy": "Hierarchy.         Knob.     Toggle reference. -.       Toggle. -.         Indicator.         Label.     Text button. -.       Button surface.       Button title.   Panel. -.     Background.     Title.     Slider reference. -. ",
+      "inspector": "Selected properties. Accent: #5588ffff . authored / forwarded / inherited. Inherit: #5588ffff. Read only / signed connection. Component. Label: Brightness . authored / literal / inherited. Inherit: Brightness. Read only / signed connection. Connections. Value: bound/source only . authored / bound / inherited",
+      "release": "541cabed97efe0f9df23dd81e6b01b39cd5816b0243d9c00afb29f20ccdd6992",
+      "width": 800
+    }
+  },
+  "recovery_release": "44f01574b84bf784b78f0ce7968ecc5d328572d92940d411f97ab80fa62a4a6a",
+  "recovery_source": "8e27c4b57741d0bc10b8af8d00f87325e9b91c72",
+  "review_head": "59b2707e43e9f8bb07d82fe976e3e34d93557a0b",
+  "review_findings_remaining": 0,
+  "state_protocol": "otrios-canvas-sync-v27",
+  "release_control_version": 1,
+  "data_restored": false,
+  "new_services": false,
+  "new_identities": false,
+  "limits": [
+    "Calibrated software evdev input; no human touch claim",
+    "Browser guest used read-only shared state and local hierarchy/inspector controls; writes used the admitted Admin loopback API",
+    "Known compatible signed v27 code rollback retained; rollback activation not repeated",
+    "No Linux shared-memory IPC claim"
+  ]
+}
