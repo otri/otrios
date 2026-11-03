@@ -136,7 +136,7 @@ pub(super) enum Input {
     CanvasCancel(u32),
     #[cfg(test)]
     Back,
-    #[cfg(test)]
+    // Renderer consumed the immutable snapshot; this is not a display ack.
     RenderReady(u64),
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
@@ -700,15 +700,19 @@ pub(super) fn state_worker(
                 }
                 #[cfg(test)]
                 Input::Back => dirty |= client.back()?,
-                #[cfg(test)]
                 Input::RenderReady(serial) => {
-                    demand.presented(serial);
+                    let accepted = demand.release_capacity(serial);
+                    pan.record(|| {
+                        serde_json::json!({"event":"capacity_release","serial":serial,
+                        "source":"render_ready","accepted":accepted,
+                        "released_us":bench_telemetry::process_us(Instant::now()),"dirty":dirty})
+                    });
                 }
                 Input::Presented(frame, renderer, display) => {
                     let credit_started = pan.start();
                     let accepted = demand.presented(frame.serial);
-                    pan.record(|| serde_json::json!({"event":"credit","serial":frame.serial,
-                        "credit_us":credit_started.map(bench_telemetry::process_us),"accepted":accepted,
+                    pan.record(|| serde_json::json!({"event":"presented","serial":frame.serial,
+                        "handled_us":credit_started.map(bench_telemetry::process_us),"capacity_released":accepted,
                         "input":frame.local_input.map(|i| i.json()),"dirty":dirty}));
                     if let Some((id, at)) = frame.remote_sample
                         && id > measured_sample
@@ -726,7 +730,7 @@ pub(super) fn state_worker(
                     }
                     if let Some(began) = credit_started {
                         let ended = Instant::now();
-                        pan.record(|| serde_json::json!({"event":"credit_handled","serial":frame.serial,
+                        pan.record(|| serde_json::json!({"event":"presented_handled","serial":frame.serial,
                             "started_us":bench_telemetry::process_us(began),
                             "ended_us":bench_telemetry::process_us(ended),"ready_file":o.ready_file.is_some()}));
                     }
@@ -1654,10 +1658,20 @@ mod tests {
                 .find(|r| r["event"] == "produced" && r["local_update"] == true)
                 .unwrap();
             assert_eq!(made["input"]["sequence"], 3);
-            let credits: Vec<_> = rows.iter().filter(|r| r["event"] == "credit").collect();
-            assert_eq!(credits[0]["accepted"], false);
-            assert_eq!(credits[1]["accepted"], true);
-            assert_eq!(credits[2]["accepted"], false);
+            let presents: Vec<_> = rows.iter().filter(|r| r["event"] == "presented").collect();
+            assert_eq!(presents.len(), 4);
+            assert_eq!(presents[0]["capacity_released"], false);
+            assert_eq!(presents[1]["capacity_released"], true);
+            assert_eq!(presents[2]["capacity_released"], false);
+            assert_eq!(presents[3]["capacity_released"], false);
+            let releases: Vec<_> = rows
+                .iter()
+                .filter(|r| r["event"] == "capacity_release")
+                .collect();
+            assert_eq!(releases.len(), 2);
+            assert_eq!(releases[0]["source"], "render_ready");
+            assert_eq!(releases[0]["accepted"], true);
+            assert_eq!(releases[1]["accepted"], false);
             assert!(
                 rows.iter().all(|r| r["event"] != "present"),
                 "Worker credit must never invent display completion"
@@ -1725,6 +1739,101 @@ mod tests {
         assert_eq!(next.serial, first.serial + 1);
         tx.send(Input::Presented(Box::new(first), "test".into(), display))
             .unwrap();
+        tx.send(Input::Back).unwrap();
+        tx.send(Input::RenderReady(next.serial)).unwrap();
+        let third = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(third.screen, "launcher");
+        tx.send(Input::RenderReady(next.serial)).unwrap();
+        tx.send(Input::Presented(Box::new(next), "test".into(), display))
+            .unwrap();
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
+    #[test]
+    fn early_capacity_keeps_display_identity_and_bounds_the_queued_successor() {
+        use otrios_interfaces::scene::PointerPhase;
+        let fixture = fixture();
+        let ready = fixture.root.join("ready.json");
+        fs::write(&ready, "not presented").unwrap();
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("three-d-lab".into()),
+            ready_file: Some(ready.to_string_lossy().into()),
+            ..Options::default()
+        };
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let held_mesh = first.paint.base.mesh.clone();
+        let held_vertices = held_mesh.vertices.clone();
+        tx.send(Input::CanvasPointer(
+            first.epoch,
+            PointerEvent {
+                id: 9,
+                phase: PointerPhase::Down,
+                position: [128., 400.],
+            },
+            Instant::now(),
+        ))
+        .unwrap();
+        tx.send(Input::RenderReady(first.serial)).unwrap();
+        // Leave the successor unread while the held frame is still presenting.
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(fs::read_to_string(&ready).unwrap(), "not presented");
+        let second = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(second.serial, first.serial + 1);
+        assert!(second.input_busy);
+        assert!(!first.input_busy);
+        assert_eq!(first.paint.base.mesh.vertices, held_vertices);
+        assert!(Arc::ptr_eq(&first.paint.base.mesh, &held_mesh));
+
+        tx.send(Input::CanvasPointer(
+            first.epoch,
+            PointerEvent {
+                id: 9,
+                phase: PointerPhase::Up,
+                position: [2000., 400.],
+            },
+            Instant::now(),
+        ))
+        .unwrap();
+        tx.send(Input::Back).unwrap();
+        let display = DisplayInfo {
+            video: "completed-test",
+            rotation: 90,
+            output: [800, 1280],
+            touch_calibrated: true,
+            touch_devices: 1,
+            format: "test-format",
+            color_bits: [8, 8, 8, 0],
+            stride: 3200,
+        };
+        for _ in 0..3 {
+            tx.send(Input::RenderReady(first.serial)).unwrap();
+            tx.send(Input::Presented(
+                Box::new(first.clone()),
+                "completed-test-renderer".into(),
+                display,
+            ))
+            .unwrap();
+        }
+        assert!(fr.recv_timeout(Duration::from_millis(100)).is_err());
+        let report: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&ready).unwrap()).unwrap();
+        assert_eq!(report["screen"], first.screen);
+        assert_eq!(report["input_busy"], false);
+        assert_eq!(report["video"], "completed-test");
+        assert_eq!(report["renderer"], "completed-test-renderer");
+        assert_eq!(report["output"], serde_json::json!([800, 1280]));
+
+        tx.send(Input::RenderReady(second.serial)).unwrap();
+        let third = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(third.serial, second.serial + 1);
+        assert_eq!(third.screen, "launcher");
+        assert!(!third.input_busy);
+        // Capacity alone cannot publish even a completed navigation/gesture.
+        assert_eq!(fs::read_to_string(&ready).unwrap(), report.to_string());
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
     }
@@ -2113,8 +2222,9 @@ mod tests {
         actions.send(ServerAction::Disconnect).unwrap();
         actions.send(ServerAction::Count(0)).unwrap();
         wait(1);
-        // Keep the display's only credit occupied. Wire revocation must still
-        // invalidate this handed-off frame before a replacement can be built.
+        // Model a presenting frame plus the single queued successor. Wire
+        // revocation must invalidate both without waiting for either display
+        // completion or another capacity release.
         actions.send(ServerAction::Count(500)).unwrap();
         let mut held = loop {
             let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
@@ -2124,6 +2234,15 @@ mod tests {
             tx.send(Input::RenderReady(frame.serial)).unwrap();
         };
         assert!(!held.paint.base.mesh.vertices.is_empty());
+        tx.send(Input::RenderReady(held.serial)).unwrap();
+        actions.send(ServerAction::Count(600)).unwrap();
+        let mut queued = loop {
+            let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+            if frame.intent.count == 39 && frame.state_confirmed {
+                break frame;
+            }
+            tx.send(Input::RenderReady(frame.serial)).unwrap();
+        };
         if uninstall {
             let result = std::process::Command::new("python3")
                 .arg(concat!(
@@ -2152,11 +2271,14 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
         assert!(matches!(fr.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(!queued.access.load(Ordering::Acquire));
+        assert!(queued.redact_if_revoked());
+        assert!(queued.ui_ref.is_empty() && queued.paint.base.mesh.vertices.is_empty());
         assert!(held.redact_if_revoked());
         assert!(held.ui_ref.is_empty() && held.paint.base.mesh.vertices.is_empty());
         assert!(held.paint.document.is_none() && held.paint.overlay.is_none());
         assert!(!held.redact_if_revoked());
-        tx.send(Input::RenderReady(held.serial)).unwrap();
+        tx.send(Input::RenderReady(queued.serial)).unwrap();
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
         stop.store(true, Ordering::Release);

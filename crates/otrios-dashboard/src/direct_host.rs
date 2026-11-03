@@ -158,6 +158,7 @@ pub(super) fn run() -> Result<(), String> {
     let mut document_gpu = document_gpu::Cache::default();
     let mut drawn = 0;
     let mut acked = 0;
+    let mut capacity_released = 0;
     let mut dirty = true;
     let mut compose = Vec::new();
     let mut present = Vec::new();
@@ -425,6 +426,20 @@ pub(super) fn run() -> Result<(), String> {
                     let draw_call_started = pan.start();
                     display.draw_slots(surface.projection_for(f.paint.viewport), &slots)?;
                     let draw_submitted = pan.start();
+                    // Only CPU composition may overlap the blocking present.
+                    // The worker shares immutable Arc snapshots; this thread
+                    // retains all GPU ownership and the held frame (including
+                    // capture/input/display identity) until present completes.
+                    // One release per serial admits at most one queued successor
+                    // into the single-slot frame channel, even on redraws.
+                    if capacity_released != f.serial {
+                        send(Input::RenderReady(f.serial))?;
+                        capacity_released = f.serial;
+                        pan.record(|| {
+                            serde_json::json!({"event":"renderer_capacity_release",
+                            "serial":f.serial,"released_us":process_us(Instant::now())})
+                        });
+                    }
                     if drawn >= capture_after
                         && !f.ui_ref.is_empty()
                         && let Some(path) = capture.take()

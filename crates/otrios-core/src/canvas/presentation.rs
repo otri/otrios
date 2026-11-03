@@ -132,8 +132,8 @@ impl Composer {
     }
 }
 
-/// One outstanding immutable frame. Dirty requests coalesce before composition,
-/// not after allocating and packing a frame that the renderer cannot consume.
+/// One outstanding immutable frame awaiting renderer consumption. Dirty requests
+/// coalesce before allocating and packing a frame the renderer cannot consume.
 #[derive(Default)]
 pub struct Demand {
     dirty: bool,
@@ -153,13 +153,19 @@ impl Demand {
         self.dirty = false;
         Some(self.serial)
     }
-    /// Stale/duplicate acknowledgements cannot grant another frame's capacity.
-    pub fn presented(&mut self, serial: u64) -> bool {
+    /// Release capacity once the renderer consumes this immutable frame. This
+    /// does not acknowledge display completion. Stale/duplicate releases cannot
+    /// grant another frame's capacity.
+    pub fn release_capacity(&mut self, serial: u64) -> bool {
         if self.in_flight != Some(serial) {
             return false;
         }
         self.in_flight = None;
         true
+    }
+    /// Compatibility for hosts that consume a frame only at completed present.
+    pub fn presented(&mut self, serial: u64) -> bool {
+        self.release_capacity(serial)
     }
 }
 
@@ -183,5 +189,23 @@ mod tests {
         assert!(!demand.presented(first));
         assert!(demand.presented(last));
         assert_eq!(demand.begin(), None);
+    }
+    #[test]
+    fn consumed_frame_allows_one_successor_before_late_present() {
+        let mut demand = Demand::default();
+        demand.request();
+        let first = demand.begin().unwrap();
+        demand.request();
+        assert!(demand.release_capacity(first));
+        let second = demand.begin().unwrap();
+        for _ in 0..1000 {
+            demand.request();
+            assert!(!demand.release_capacity(first));
+            assert!(!demand.presented(first));
+            assert_eq!(demand.begin(), None);
+        }
+        assert!(demand.release_capacity(second));
+        assert!(demand.begin().is_some());
+        assert!(!demand.presented(second));
     }
 }
