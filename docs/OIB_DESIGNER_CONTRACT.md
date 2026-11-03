@@ -344,6 +344,13 @@ adapter. A missing `cell` is read-only, including app-bound sources; a missing
 `value` permits source-only display where app content must be queried separately.
 The client never resolves forwarding or computes causal IDs independently.
 
+For normalized numeric toggle fields, `Projection::Nonzero` supplies a Boolean
+local selector value. Runtime selector validation/evaluation and OIB sample
+compilation must support it. Authoring supplies `StateField::nonzero()` and
+`Element::semantic_checked_value(ValueExpr)`; existing static checked helpers
+retain their meaning. This avoids a static checked semantic or overwriting the
+numeric slider fields to simulate a toggle. The projection is part of v27.
+
 The client implementation owns local hierarchy/inspector generation, selection,
 scroll, Edit/Test interception, and occurrence hit routing in `client.rs`,
 `client/host_panel.rs`, and a dedicated `client/oib_designer.rs`. It uses these

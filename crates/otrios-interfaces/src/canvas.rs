@@ -27,6 +27,8 @@ pub enum Projection {
     },
     /// Preserve the declared typed value for text, booleans, colors and bounded series.
     Identity,
+    /// Boolean semantics for existing normalized numeric toggle fields.
+    Nonzero,
     NumberText {
         prefix: String,
         suffix: String,
