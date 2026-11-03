@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
 use super::*;
-use crate::canvas::oib::document::{ObjectInfo, PropertyInfo};
+use crate::canvas::oib::document::{
+    HierarchyKey, HierarchyRow, HierarchyScope, ObjectInfo, PropertyInfo,
+};
 use crate::dashboard::components::{ACCENT, CARD, MUTED, WHITE, background, canvas, text};
 use otrios_interfaces::{
     oib::designer::{DesignerMode, PropertyAddress, PropertyEditor, Selection},
@@ -27,6 +29,9 @@ const WINDOW_STEP: f32 = 4. * ROW;
 #[derive(Clone, Debug, PartialEq)]
 enum LocalAction {
     Select(Selection),
+    Layers,
+    TreeExpand(HierarchyKey),
+    TreeScope(HierarchyScope),
     Expand(Selection),
     Mode(DesignerMode),
     Write(PropertyAddress, Option<Value>),
@@ -49,6 +54,13 @@ struct Panel {
 }
 pub(super) struct Designer {
     selection: Selection,
+    focus_layout: bool,
+    layers_open: bool,
+    tree: Vec<HierarchyRow>,
+    tree_scope: HierarchyScope,
+    tree_closed: Vec<HierarchyKey>,
+    tree_initialized: Vec<HierarchyScope>,
+    reveal_selection: bool,
     mode: DesignerMode,
     pending_mode: Option<DesignerMode>,
     pending_viewport: Option<[f32; 2]>,
@@ -67,6 +79,13 @@ impl Clone for Designer {
     fn clone(&self) -> Self {
         Self {
             selection: self.selection.clone(),
+            focus_layout: self.focus_layout,
+            layers_open: self.layers_open,
+            tree: self.tree.clone(),
+            tree_scope: self.tree_scope,
+            tree_closed: self.tree_closed.clone(),
+            tree_initialized: self.tree_initialized.clone(),
+            reveal_selection: self.reveal_selection,
             mode: self.mode,
             pending_mode: self.pending_mode,
             pending_viewport: self.pending_viewport,
@@ -108,6 +127,13 @@ impl Designer {
         }
         Some(Self {
             selection: Selection::Document(metadata.id),
+            focus_layout: seed.instance_surface.is_some() && metadata.hierarchy_viewport.is_some(),
+            layers_open: false,
+            tree: vec![],
+            tree_scope: HierarchyScope::Composition,
+            tree_closed: vec![],
+            tree_initialized: vec![],
+            reveal_selection: false,
             mode: DesignerMode::Edit,
             pending_mode: None,
             pending_viewport: None,
@@ -119,6 +145,19 @@ impl Designer {
             capture: None,
             revision: None,
         })
+    }
+    pub(super) fn focus_layout(&self) -> bool {
+        self.focus_layout
+    }
+    pub(super) fn layers_open(&self) -> bool {
+        self.layers_open
+    }
+    fn local_action(&self, id: u32) -> Option<LocalAction> {
+        if self.focus_layout && id == super::oib_focus_layout::LAYERS {
+            Some(LocalAction::Layers)
+        } else {
+            self.actions.get(&id).cloned()
+        }
     }
     pub(super) fn root_selection(&self, instance: u64) -> Option<Selection> {
         self.objects.iter().find(|o| matches!(&o.selection,Selection::Object(a) if a.instance.0 == instance && a.references.is_empty())).map(|o| o.selection.clone())
@@ -160,6 +199,15 @@ impl Designer {
         if self.selection == selection {
             return false;
         }
+        if self.focus_layout {
+            self.tree_scope = match &selection {
+                Selection::Definition(_) | Selection::DefinitionNode { .. } => {
+                    HierarchyScope::Components
+                }
+                _ => HierarchyScope::Composition,
+            };
+            self.reveal_selection = true;
+        }
         self.selection = selection;
         self.revision = None;
         if let Some(panel) = self.panels.last_mut() {
@@ -198,13 +246,24 @@ impl Designer {
         }
         let mut builder = Builder::at(self.next_id);
         let hierarchy = if self.panels.len() == 2 {
-            Some(hierarchy(
-                &mut builder,
-                &objects,
-                &self.selection,
-                &self.collapsed,
-                self.mode,
-            )?)
+            Some(if self.focus_layout {
+                focus_hierarchy(
+                    &mut builder,
+                    &self.tree,
+                    &self.selection,
+                    &self.tree_closed,
+                    self.tree_scope,
+                    self.mode,
+                )?
+            } else {
+                hierarchy(
+                    &mut builder,
+                    &objects,
+                    &self.selection,
+                    &self.collapsed,
+                    self.mode,
+                )?
+            })
         } else {
             None
         };
@@ -277,6 +336,17 @@ impl Designer {
         for panel in &self.panels {
             let node =
                 find_node(root, u32::from(panel.viewport)).ok_or("Missing designer viewport")?;
+            if self.focus_layout
+                && !self.layers_open
+                && self
+                    .panels
+                    .first()
+                    .is_some_and(|p| p.viewport == panel.viewport)
+            {
+                node.children.clear();
+                node.responder = None;
+                continue;
+            }
             let offset = panel.scroll.info().offset[1];
             let top = (offset / WINDOW_STEP).floor() * WINDOW_STEP;
             let bottom = ((offset + node.frame.height) / WINDOW_STEP).ceil() * WINDOW_STEP;
@@ -373,11 +443,18 @@ impl Designer {
             .controls()
             .iter()
             .any(|p| p.node.id == id)
-            .then(|| self.actions.get(&id).cloned())
+            .then(|| self.local_action(id))
             .flatten()
     }
     fn tap_action(&self, capture: &Capture, scene: &Scene, point: [f32; 2]) -> Option<LocalAction> {
         if capture.panel.is_none() {
+            if capture.action == Some(LocalAction::Layers) {
+                return scene
+                    .hit_path(point)
+                    .iter()
+                    .any(|p| p.node.id == super::oib_focus_layout::LAYERS)
+                    .then_some(LocalAction::Layers);
+            }
             return capture.action.clone();
         }
         let hit = scene.hit_path(point);
@@ -437,6 +514,24 @@ impl Builder {
             1,
             color,
         ))
+    }
+    fn focus_button(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+    ) -> Result<SceneNode> {
+        let mut row = self.button(x, y, width, label, action)?;
+        row.frame.height = 52.;
+        row.children[0].frame.height = 52.;
+        let title = &mut row.children[1];
+        title.frame = Rect::new(8., 16., (width - 16.).max(1.), 28.);
+        if let Primitive::Text { scale, .. } = &mut title.primitive {
+            *scale = 2;
+        }
+        Ok(row)
     }
     fn button(
         &mut self,
@@ -529,6 +624,119 @@ fn hierarchy(
         if closed {
             hidden_below = Some(object.depth);
         }
+    }
+    if y > MAX_CONTENT {
+        return Err("Full designer hierarchy exceeds coordinate budget".into());
+    }
+    Ok((nodes, y))
+}
+fn focus_hierarchy(
+    b: &mut Builder,
+    tree: &[HierarchyRow],
+    selected: &Selection,
+    collapsed: &[HierarchyKey],
+    scope: HierarchyScope,
+    mode: DesignerMode,
+) -> Result<(Vec<SceneNode>, f32)> {
+    let mut nodes = vec![
+        b.focus_button(
+            0.,
+            0.,
+            140.,
+            if scope == HierarchyScope::Composition {
+                "Layers *"
+            } else {
+                "Layers"
+            },
+            LocalAction::TreeScope(HierarchyScope::Composition),
+        )?,
+        b.focus_button(
+            148.,
+            0.,
+            140.,
+            if scope == HierarchyScope::Components {
+                "Parts *"
+            } else {
+                "Parts"
+            },
+            LocalAction::TreeScope(HierarchyScope::Components),
+        )?,
+        b.focus_button(
+            0.,
+            56.,
+            288.,
+            &format!("Mode: {mode:?}"),
+            LocalAction::Mode(if mode == DesignerMode::Edit {
+                DesignerMode::Test
+            } else {
+                DesignerMode::Edit
+            }),
+        )?,
+    ];
+    let mut y = 116.;
+    for row in tree {
+        let mut parent = row.parent.as_ref();
+        let mut depth = 0;
+        let mut hidden = false;
+        while let Some(key) = parent {
+            hidden |= collapsed.contains(key);
+            depth += 1;
+            parent = tree
+                .iter()
+                .find(|r| &r.key == key)
+                .and_then(|r| r.parent.as_ref());
+        }
+        if hidden {
+            continue;
+        }
+        let indent = (depth as f32 * 16.).min(112.);
+        let children = tree.iter().any(|r| r.parent.as_ref() == Some(&row.key));
+        let mut node = if let Some(selection) = &row.selection {
+            b.focus_button(
+                0.,
+                y,
+                288.,
+                &row.name,
+                LocalAction::Select(selection.clone()),
+            )?
+        } else {
+            let label = text(
+                b.id()?,
+                Rect::new(indent + 48., 16., (232. - indent).max(1.), 28.),
+                &row.name,
+                2,
+                MUTED,
+            );
+            canvas(
+                b.id()?,
+                Rect::new(0., y, 288., 52.),
+                vec![background(b.id()?, 288., 52., CARD, 0.), label],
+            )
+        };
+        if let Some(label) = node.children.get_mut(1) {
+            label.frame.x = indent + 48.;
+            label.frame.width = (232. - indent).max(1.);
+        }
+        if row.selection.as_ref() == Some(selected)
+            && let Primitive::Superellipse { color, .. } = &mut node.children[0].primitive
+        {
+            *color = [49, 66, 96, 255];
+        }
+        if children {
+            node.children.push(b.focus_button(
+                indent,
+                0.,
+                48.,
+                if collapsed.contains(&row.key) {
+                    ">"
+                } else {
+                    "v"
+                },
+                LocalAction::TreeExpand(row.key.clone()),
+            )?);
+        }
+        nodes.push(node);
+        y += 56.;
     }
     if y > MAX_CONTENT {
         return Err("Full designer hierarchy exceeds coordinate budget".into());
@@ -803,6 +1011,67 @@ impl Mount {
             let seed = super::super::oib::seed(&self.ui).ok_or("Missing designer seed")?;
             let allocations = self.doc.oib_allocations()?;
             let objects = super::super::oib::document::objects(seed, &allocations)?;
+            if designer.focus_layout {
+                let live = self
+                    .doc
+                    .oib_instances()?
+                    .into_iter()
+                    .filter(|i| i.active)
+                    .map(|i| i.id)
+                    .collect();
+                let tree = super::super::oib::document::hierarchy(
+                    seed,
+                    &allocations,
+                    &live,
+                    designer.tree_scope,
+                )?;
+                if !designer.tree_initialized.contains(&designer.tree_scope) {
+                    let mut first_panel = true;
+                    for row in &tree {
+                        let close = match &row.selection {
+                            Some(Selection::Object(a)) if row.component.is_some() => {
+                                if !a.references.is_empty() {
+                                    true
+                                } else if a.instance
+                                    == seed
+                                        .designer
+                                        .as_ref()
+                                        .ok_or("Missing designer metadata")?
+                                        .presented_root
+                                {
+                                    false
+                                } else {
+                                    let close = !first_panel;
+                                    first_panel = false;
+                                    close
+                                }
+                            }
+                            Some(Selection::Definition(_)) => true,
+                            _ => false,
+                        };
+                        if close {
+                            designer.tree_closed.push(row.key.clone());
+                        }
+                    }
+                    designer.tree_initialized.push(designer.tree_scope);
+                }
+                if designer.reveal_selection {
+                    let mut parent = tree
+                        .iter()
+                        .find(|r| r.selection.as_ref() == Some(&designer.selection))
+                        .and_then(|r| r.parent.clone());
+                    while let Some(key) = parent {
+                        designer.tree_closed.retain(|c| c != &key);
+                        parent = tree
+                            .iter()
+                            .find(|r| r.key == key)
+                            .and_then(|r| r.parent.clone());
+                    }
+                    designer.reveal_selection = false;
+                }
+                designer.tree = tree;
+            }
+
             if !objects.iter().any(|o| o.selection == designer.selection) {
                 designer.select(Selection::Document(
                     seed.designer
@@ -903,6 +1172,44 @@ impl Client {
     fn designer_action(&mut self, action: LocalAction) -> Result<bool> {
         match action {
             LocalAction::Select(selection) => self.inspect_oib_selection(selection),
+            LocalAction::TreeScope(scope) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.tree_scope = scope;
+                d.revision = None;
+                d.panels[0].scroll.set_offset([0., 0.]);
+                m.refresh_designer()?;
+                Ok(true)
+            }
+            LocalAction::TreeExpand(key) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                if let Some(index) = d.tree_closed.iter().position(|k| k == &key) {
+                    d.tree_closed.remove(index);
+                } else {
+                    d.tree_closed.push(key);
+                }
+                d.revision = None;
+                m.refresh_designer()?;
+                Ok(true)
+            }
+            LocalAction::Layers => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.layers_open = !d.layers_open;
+                d.invalidate_bounds();
+                m.invalidate();
+                Ok(true)
+            }
             LocalAction::Mode(mode) => self.set_oib_designer_mode(mode),
             LocalAction::Expand(selection) => {
                 if self.input_busy() {
@@ -968,7 +1275,7 @@ impl Client {
         let Some(d) = &m.designer else {
             return Ok(None);
         };
-        if (FIRST..END).contains(&id) {
+        if (FIRST..END).contains(&id) || id == super::oib_focus_layout::LAYERS {
             let action = d.semantic_action(self.scene()?.as_ref(), id);
             return action.map_or(Ok(Some(false)), |a| self.designer_action(a).map(Some));
         }
@@ -1010,7 +1317,17 @@ impl Client {
                 let action = hit
                     .iter()
                     .rev()
-                    .find_map(|p| designer.actions.get(&p.node.id).cloned());
+                    .find_map(|p| designer.local_action(p.node.id));
+                if action == Some(LocalAction::Layers) {
+                    designer.capture = Some(Capture {
+                        pointer: event.id,
+                        start: event.position,
+                        moving: false,
+                        action,
+                        panel: None,
+                    });
+                    return Ok((Some(true), None));
+                }
                 let mut panel_index = None;
                 for (index, panel) in designer.panels.iter_mut().enumerate() {
                     if admits_viewport(&scene, &hit, u32::from(panel.viewport), event.position)

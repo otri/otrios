@@ -813,7 +813,7 @@ fn fixture_sync(
     }
     panic!("designer fixture sync did not settle");
 }
-fn mounted_six_panel_fixture() -> Client {
+fn mounted_six_panel_fixture(focus: bool) -> Client {
     assert!(
         designer_fixture::manifest()
             .dependencies
@@ -856,6 +856,9 @@ fn mounted_six_panel_fixture() -> Client {
     }
     assert_eq!(mount.doc.oib_allocations().unwrap().len(), 6);
     let instance = mount.doc.oib_allocations().unwrap().last().unwrap().id;
+    mount.designer.as_mut().unwrap().focus_layout = focus;
+    mount.designer.as_mut().unwrap().revision = None;
+    mount.invalidate();
     let mut client = Client {
         active: Some(mount),
         ..Client::default()
@@ -883,7 +886,9 @@ fn mounted_six_panel_fixture() -> Client {
         "selected slider has its real multi-property inspector"
     );
     assert_eq!(m.designer.as_ref().unwrap().objects.len(), 121);
-    assert!(m.designer.as_ref().unwrap().actions.len() > 128);
+    if !focus {
+        assert!(m.designer.as_ref().unwrap().actions.len() > 128);
+    }
     client
 }
 fn fixture_scroll_to(client: &mut Client, panel: usize, offset: f32) {
@@ -917,7 +922,7 @@ fn fixture_scroll_to(client: &mut Client, panel: usize, offset: f32) {
 }
 #[test]
 fn actual_six_panel_mount_scrolls_all_rows_and_selected_inspector_within_combined_budgets() {
-    let mut client = mounted_six_panel_fixture();
+    let mut client = mounted_six_panel_fixture(false);
     let selected = client
         .active
         .as_ref()
@@ -1024,7 +1029,7 @@ fn actual_six_panel_mount_scrolls_all_rows_and_selected_inspector_within_combine
 #[test]
 fn actual_fixture_clipped_taps_offscreen_activation_and_pan_reuse() {
     use crate::dashboard::retained_text::TextPresentation;
-    let mut client = mounted_six_panel_fixture();
+    let mut client = mounted_six_panel_fixture(false);
     fixture_scroll_to(&mut client, 0, 100.);
     let scene = client.scene().unwrap();
     let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
@@ -1234,4 +1239,164 @@ fn nonzero_selector_evaluates_numeric_state_and_rejects_other_types() {
             assert!(mount.is_err());
         }
     }
+}
+
+#[test]
+fn frame_focus_drawer_geometry_hits_and_release_outside_are_local() {
+    let mut client = mounted_six_panel_fixture(true);
+    let m = client.active.as_ref().unwrap();
+    let root_before = m.doc.oib_root();
+    let fields_before = [1, 2, 3, 4].map(|f| m.read(f).unwrap());
+    let seed = crate::canvas::oib::seed(&m.ui).unwrap();
+    let hierarchy = u32::from(seed.designer.as_ref().unwrap().hierarchy_viewport.unwrap());
+    let inspector = u32::from(seed.inspector_viewport);
+    let preview = u32::from(seed.instance_surface.as_ref().unwrap().preview_viewport);
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        client.set_viewport(viewport).unwrap();
+        let closed = client.scene().unwrap();
+        let panel = closed.path(inspector).unwrap();
+        let panel = panel.last().unwrap();
+        assert_eq!(panel.node.frame.width, 320.);
+        assert!(panel.origin[0] > viewport[0] / 2.);
+        let canvas = closed.path(preview).unwrap();
+        assert_eq!(canvas.last().unwrap().origin, [16., 80.]);
+        assert!(!closed.controls().iter().any(|c| {
+            closed
+                .path(c.node.id)
+                .unwrap()
+                .iter()
+                .any(|p| p.node.id == hierarchy)
+        }));
+        assert!(
+            client
+                .designer_activate(super::super::oib_focus_layout::LAYERS)
+                .unwrap()
+                .unwrap()
+        );
+        let opened = client.scene().unwrap();
+        let layer = opened.path(hierarchy).unwrap();
+        assert_eq!(layer.last().unwrap().origin, [16., 128.]);
+        let hit = opened.hit_path([200., 400.]);
+        assert!(
+            !hit.iter().any(|n| n.node.id == preview),
+            "drawer barrier covers preview"
+        );
+        assert!(
+            client
+                .designer_activate(super::super::oib_focus_layout::LAYERS)
+                .unwrap()
+                .unwrap()
+        );
+    }
+    for (phase, position) in [
+        (PointerPhase::Down, [120., 24.]),
+        (PointerPhase::Up, [600., 24.]),
+    ] {
+        assert_eq!(
+            client
+                .designer_pointer(
+                    PointerEvent {
+                        id: 777,
+                        phase,
+                        position
+                    },
+                    100
+                )
+                .unwrap(),
+            Some(true)
+        );
+    }
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .layers_open
+    );
+    let m = client.active.as_ref().unwrap();
+    assert_eq!(m.doc.oib_root(), root_before);
+    assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields_before);
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .generate()
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn frame_focus_tree_disclosure_and_full_expansion_stay_bounded() {
+    let mut client = mounted_six_panel_fixture(true);
+    client
+        .inspect_oib_selection(Selection::Document(DocumentId(1)))
+        .unwrap();
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert!(d.tree.iter().any(|r| r.name == "Audio"));
+    assert!(d.tree.iter().any(|r| r.name == "Display"));
+    assert!(d.tree_closed.iter().any(|key| matches!(key, HierarchyKey::Selection(Selection::Object(a)) if !a.references.is_empty())));
+    assert!(
+        d.tree
+            .iter()
+            .all(|r| !matches!(r.selection, Some(Selection::Definition(_))))
+    );
+    for row in &d.tree {
+        if let Some(parent) = &row.parent {
+            assert!(d.tree.iter().any(|r| &r.key == parent));
+        }
+    }
+    client
+        .designer_activate(super::super::oib_focus_layout::LAYERS)
+        .unwrap();
+    {
+        let m = client.active.as_mut().unwrap();
+        let d = m.designer.as_mut().unwrap();
+        d.tree_closed.clear();
+        d.revision = None;
+        m.refresh_designer().unwrap();
+    }
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        client.set_viewport(viewport).unwrap();
+        client.tick(1, 0).unwrap();
+        for panel in 0..2 {
+            let limit = client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .panels[panel]
+                .scroll
+                .info()
+                .limit[1];
+            for offset in (0..=(limit / 51.).ceil() as u32).map(|i| i as f32 * 51.) {
+                fixture_scroll_to(&mut client, panel, offset);
+                let scene = client.scene().unwrap();
+                assert!(count_nodes(scene.root()) <= 512);
+                assert!(scene.controls().len() <= 128);
+            }
+            fixture_scroll_to(&mut client, panel, 0.);
+        }
+    }
+    client
+        .designer_action(LocalAction::TreeScope(HierarchyScope::Components))
+        .unwrap();
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert!(
+        d.tree
+            .iter()
+            .any(|r| matches!(r.selection, Some(Selection::Definition(_))))
+    );
+    assert!(
+        d.tree
+            .iter()
+            .all(|r| !matches!(r.selection, Some(Selection::Object(_))))
+    );
 }

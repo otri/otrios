@@ -8,6 +8,7 @@ mod host_moves;
 mod host_panel;
 mod host_transfers;
 mod oib_designer;
+mod oib_focus_layout;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -4724,6 +4725,19 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
     }
     let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
     let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
+    let scene = if let Some(designer) = &m.designer
+        && designer.focus_layout()
+    {
+        let seed = super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let back =
+            m.ui.handlers
+                .iter()
+                .find(|h| matches!(h.operation, Operation::Back))
+                .map(|h| h.control);
+        oib_focus_layout::project(&scene, seed, back, designer.layers_open())?
+    } else {
+        scene
+    };
     if let Some(chat) = &m.chat {
         chat.scene(&scene, m.viewport, m.keyboard.visible)
     } else {
@@ -4749,10 +4763,12 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             m.preview_scroll.as_ref().map(|s| s.node()),
             &format!(
                 "{} / active {} / shown {}{}",
-                m.doc.oib_status_text(),
-                m.doc.oib_generation().unwrap_or(0),
+                m.oib_view
+                    .as_ref()
+                    .map_or("Live UI unavailable", |v| v.info.status.as_str()),
+                m.oib_view.as_ref().map_or(0, |v| v.info.active_generation),
                 m.oib_generation.unwrap_or(0),
-                if m.doc.oib_generation() != m.oib_generation {
+                if m.oib_view.as_ref().map(|v| v.info.active_generation) != m.oib_generation {
                     " / activation pending"
                 } else {
                     ""

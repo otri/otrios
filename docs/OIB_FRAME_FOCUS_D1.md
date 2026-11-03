@@ -102,7 +102,32 @@ scope changes return to the parent before crossing an ownership boundary.
 
 ## Evidence
 
-Goal created and required project documents read. New implementation branch
-created in the parent tool-managed worktree. No runtime changes, new builds or
-deployments have occurred for this milestone yet. Update this section with actual
+Goal created and required project documents read. The parent owns the feature
+branch and integration. Hierarchy query commit `146453e` and local property-draft
+engine commit `1d70a50` are integrated from isolated lanes.
+
+The first parent slice projects the existing signed preview into a physical-size
+properties dock and Layers drawer, uses explicit hierarchy parents and default
+component disclosure, separates the Components tree, and reads cached OIB status
+while painting. It preserves signed app geometry, bindings, state and metadata.
+The draft engine is not yet wired to the inspector or keyboard.
+
+Actual parent checks with Rust 1.90, local Cargo/target directories and locked
+offline dependencies:
+
+- `cargo check -p otrios-core --features canvas --lib --locked --offline`: passed.
+- `cargo test -p otrios-core --features canvas --lib oib_designer --locked --offline -- --nocapture`:
+  17 passed before the second Frame Focus regression was added. Legacy three-pane
+  tests explicitly exercise the compatibility presentation; they are not Frame
+  Focus usability acceptance.
+- `cargo test -p otrios-core --features canvas --lib frame_focus --locked --offline -- --nocapture`:
+  2 passed, with real six-root fixtures, landscape/portrait dock/drawer geometry,
+  hidden semantics, modal coverage, release-outside cancellation, full expansion
+  scroll budgets, separate Components, and unchanged app fields/OIB root.
+- Scoped `rustfmt` and `git diff --check`: passed.
+
+These are in-process checks. Source/conflict navigation, integrated practical
+editing, software keyboard, native presentation measurement, independent review,
+signed deployment and real Frame/Web acceptance remain incomplete. No release
+was deployed for this slice. Update this section with actual
 commands, source/release identities, measurements, review results and limits.
