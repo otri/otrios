@@ -276,4 +276,26 @@ finished release. Only then is D1 ready for final review and any requested PR.
   follow-up is assigned before integrated acceptance.
 - Runtime tests, process acceptance, deployment and live acceptance: not run.
 
+## First combined runtime checks
+
+Runtime commit `4c3de315` integrated as `44facf5`. Parent wired the embedded D1
+UI decoder to validate signed metadata and require canonical reencoding, with an
+explicit-null rejection regression. The first fixture run caught two O2DShape
+objects authored through container-producing surface helpers; these now use
+actual rounded-rectangle primitives. The validator was retained.
+
+Actual integrated commands on Rust 1.90.0 with worktree-local target output:
+
+- `cargo test -p otrios-core --features canvas --test oib_designer_runtime --locked --offline -- --nocapture`: 14 passed.
+- `cargo test -p otrios-core --features canvas --lib oib_designer --locked --offline -- --nocapture`: 10 passed against the actual runtime query/adapter implementations.
+- `cargo test -p otrios-core --features canvas --test oib_designer_fixture --locked --offline -- --nocapture`: eight passed after the shape correction, including canonical decoding and package feature-removal rejection.
+
+Updated measured fixture: combined seed 10,001 bytes, layout 21,403 bytes, 62
+initial nodes/depth six. Six live roots using the highest renderer slot produce
+a 41,175-byte layout with 125 nodes/depth six, 18 handlers and eight selectors.
+These are app-layout figures; combined local chrome qualification is still a
+separate pending check. Checkpoint recovery is in-process evidence. Authority
+process recovery, independent final review, signed deployment and Frame/Web
+acceptance remain unperformed.
+
 Update this record at integration gates with actual commits, commands and results.

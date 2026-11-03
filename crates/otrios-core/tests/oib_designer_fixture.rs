@@ -267,6 +267,7 @@ fn canonical_metadata_and_sparse_aliases_do_not_use_names_or_vector_rank() {
 fn signed_bindings_and_checked_semantics_use_distinct_numeric_fields() {
     let ui = app::ui(&[]);
     let old = live_ui::ui(&[]);
+    assert_eq!(live_ui::manifest().id, "live-ui");
     assert_eq!(old.state_schema.id, "live-ui-state-v1");
     assert_eq!(old.state_schema.fields.len(), 2);
     assert_eq!(ui.state_schema.id, "oib-designer-state-v1");
@@ -622,7 +623,7 @@ fn package_advertises_designer_requirement_and_rejects_its_removal() {
         app: app::manifest(),
         path: "test-playground/oib-designer".into(),
         private: true,
-        ui_hash: Sha256::digest(&bytes).into(),
+        ui_hash: Sha256::digest(&bytes).to_vec(),
     };
     let mut tree = bundle::pack(&entry, 1, &bytes, None).unwrap();
     let mut info = bundle::inspect(&tree).unwrap().info;
@@ -651,5 +652,24 @@ fn package_advertises_designer_requirement_and_rejects_its_removal() {
     assert_eq!(
         bundle::inspect(&tree).unwrap_err(),
         "Missing required OIB designer feature"
+    );
+}
+
+#[test]
+fn embedded_designer_decoder_rejects_explicit_null_for_omitted_metadata() {
+    let mut ui = app::ui(&[]);
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        panic!("OIB fixture")
+    };
+    seed.designer.as_mut().unwrap().hierarchy_viewport = None;
+    let canonical = otrios_core::canvas::encode_ui(&ui).unwrap();
+    assert_eq!(otrios_core::canvas::decode_ui(&canonical).unwrap(), ui);
+    let mut alternative = serde_json::to_value(&ui).unwrap();
+    alternative["presentation"]["Oib"]["designer"]["hierarchy_viewport"] = serde_json::Value::Null;
+    let bytes = flexbuffers::to_vec(&alternative).unwrap();
+    assert_eq!(flexbuffers::from_slice::<Ui>(&bytes).unwrap(), ui);
+    assert_eq!(
+        otrios_core::canvas::decode_ui(&bytes).unwrap_err(),
+        "Noncanonical OIB designer UI bytes"
     );
 }

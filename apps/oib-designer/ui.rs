@@ -598,7 +598,8 @@ fn panel(name: &str, value: StateField, enabled: StateField, y: f32) -> Element 
     let button = component(
         [184., 48.],
         vec![
-            surface(BLUE, 10.)
+            rounded_rect(BLUE)
+                .corner_radius(10.0.into())
                 .pin_edges(0.)
                 .key(&format!("{name}-button-surface")),
             text("Toggle power")
@@ -618,7 +619,8 @@ fn panel(name: &str, value: StateField, enabled: StateField, y: f32) -> Element 
     component(
         [520., 280.],
         vec![
-            surface(CARD, 12.)
+            rounded_rect(CARD)
+                .corner_radius(12.0.into())
                 .pin_edges(0.)
                 .key(&format!("{name}-background")),
             text(name)
