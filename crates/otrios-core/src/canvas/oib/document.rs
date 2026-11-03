@@ -6,7 +6,9 @@ use otrios_interfaces::layout::{Binding, ValueType};
 use otrios_interfaces::oib::designer::Document;
 use otrios_interfaces::oib::designer::*;
 mod admission;
+mod hierarchy;
 pub use admission::{compatible_mappings, validate, validate_layout};
+pub use hierarchy::{HierarchyKey, HierarchyRow, HierarchyScope, hierarchy};
 
 #[derive(Clone, Debug)]
 pub struct ObjectInfo {
