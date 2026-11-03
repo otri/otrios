@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
 mod editing;
+mod style;
 use super::oib_property_editor::PropertyDrafts;
 use super::*;
 use crate::canvas::oib::document::{
@@ -10,7 +11,18 @@ use crate::dashboard::components::{ACCENT, CARD, MUTED, WHITE, background, canva
 use otrios_interfaces::{
     oib::designer::{DesignerMode, PropertyAddress, PropertyEditor, Selection},
     scene::{Primitive, Rect, SwitchSemantics},
+    theme::{BG, LINE},
 };
+
+pub(super) fn outlined_surface(
+    ids: [u32; 3],
+    width: f32,
+    height: f32,
+    fill: [u8; 4],
+    radius: f32,
+) -> SceneNode {
+    style::surface(ids, width, height, fill, radius)
+}
 
 // Separate from u16 authored nodes, keyboard, ink and host chrome namespaces.
 const FIRST: u32 = 2_700_000_000;
@@ -457,20 +469,21 @@ impl Designer {
             node.responder = None;
             // The signed viewport sets the real available width. Rows occupy it
             // completely, including padding/corners, without covering siblings.
-            fn fit(nodes: &mut [SceneNode], width: f32) {
+            fn fit(nodes: &mut [SceneNode], width: f32) -> Result<()> {
                 for n in nodes {
                     if matches!(n.primitive, Primitive::Canvas { .. })
                         && n.frame.x == 0.
                         && matches!(n.frame.width, 240. | 288. | 320.)
                     {
-                        n.frame.width = width;
                         if let Some(bg) = n.children.first_mut() {
-                            bg.frame.width = width;
+                            style::resize_surface(bg, width, bg.frame.height)?;
                         }
+                        n.frame.width = width;
                     }
                 }
+                Ok(())
             }
-            fit(&mut node.children, node.frame.width);
+            fit(&mut node.children, node.frame.width)?;
             panel.scroll.present(root);
             host_panel::present_panel(root, u32::from(panel.viewport));
         }
@@ -604,9 +617,30 @@ impl Builder {
         label: &str,
         action: LocalAction,
     ) -> Result<SceneNode> {
-        let mut row = self.button(x, y, width, label, action)?;
+        self.focus_control(x, y, width, label, action, true)
+    }
+    fn focus_row(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+    ) -> Result<SceneNode> {
+        self.focus_control(x, y, width, label, action, false)
+    }
+    fn focus_control(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+        outlined: bool,
+    ) -> Result<SceneNode> {
+        let mut row = self.button_style(x, y, width, label, action, outlined)?;
         row.frame.height = 52.;
-        row.children[0].frame.height = 52.;
+        style::resize_surface(&mut row.children[0], width, 52.)?;
         let title = &mut row.children[1];
         title.frame = Rect::new(8., 16., (width - 16.).max(1.), 28.);
         if let Primitive::Text { scale, .. } = &mut title.primitive {
@@ -622,9 +656,24 @@ impl Builder {
         label: &str,
         action: LocalAction,
     ) -> Result<SceneNode> {
+        self.button_style(x, y, width, label, action, true)
+    }
+    fn button_style(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+        outlined: bool,
+    ) -> Result<SceneNode> {
         let id = self.id()?;
-        let mut bg = background(self.id()?, width, 32., CARD, 4.);
-        bg.responder = Some(TouchResponder::Bubble);
+        let mut bg = if outlined {
+            style::surface([self.id()?, self.id()?, self.id()?], width, 32., CARD, 12.)
+        } else {
+            background(self.id()?, width, 32., CARD, 4.)
+        };
+        bg.responder = Some(TouchResponder::PassThrough);
         let label_node = self.label(8., 8., label, WHITE)?;
         let mut node = canvas(id, Rect::new(x, y, width, 32.), vec![bg, label_node]);
         // One local sentinel gives whole-rectangle hit/semantic behavior. The
@@ -724,22 +773,14 @@ fn focus_hierarchy(
             0.,
             0.,
             140.,
-            if scope == HierarchyScope::Composition {
-                "Layers *"
-            } else {
-                "Layers"
-            },
+            "Layers",
             LocalAction::TreeScope(HierarchyScope::Composition),
         )?,
         b.focus_button(
             148.,
             0.,
             140.,
-            if scope == HierarchyScope::Components {
-                "Components *"
-            } else {
-                "Components"
-            },
+            "Components",
             LocalAction::TreeScope(HierarchyScope::Components),
         )?,
         b.focus_button(
@@ -754,6 +795,14 @@ fn focus_hierarchy(
             }),
         )?,
     ];
+    let active_scope = usize::from(scope == HierarchyScope::Components);
+    style::set_surface_fill(&mut nodes[active_scope].children[0], LINE)?;
+    if let Primitive::Text { color, .. } = &mut nodes[active_scope].children[1].primitive {
+        *color = ACCENT;
+    }
+    if let Some(semantics) = &mut nodes[active_scope].semantics {
+        semantics.checked = true;
+    }
     let mut y = 116.;
     for row in tree {
         let mut parent = row.parent.as_ref();
@@ -773,7 +822,7 @@ fn focus_hierarchy(
         let indent = (depth as f32 * 16.).min(112.);
         let children = tree.iter().any(|r| r.parent.as_ref() == Some(&row.key));
         let mut node = if let Some(selection) = &row.selection {
-            b.focus_button(
+            b.focus_row(
                 0.,
                 y,
                 288.,
@@ -798,13 +847,15 @@ fn focus_hierarchy(
             label.frame.x = indent + 48.;
             label.frame.width = (232. - indent).max(1.);
         }
-        if row.selection.as_ref() == Some(selected)
-            && let Primitive::Superellipse { color, .. } = &mut node.children[0].primitive
-        {
-            *color = [49, 66, 96, 255];
+        let selected_row = row.selection.as_ref() == Some(selected);
+        if selected_row {
+            style::set_surface_fill(&mut node.children[0], LINE)?;
+            if let Primitive::Text { color, .. } = &mut node.children[1].primitive {
+                *color = ACCENT;
+            }
         }
         if children {
-            node.children.push(b.focus_button(
+            let mut disclosure = b.focus_row(
                 indent,
                 0.,
                 48.,
@@ -814,7 +865,14 @@ fn focus_hierarchy(
                     "v"
                 },
                 LocalAction::TreeExpand(row.key.clone()),
-            )?);
+            )?;
+            if selected_row {
+                style::set_surface_fill(&mut disclosure.children[0], LINE)?;
+                if let Primitive::Text { color, .. } = &mut disclosure.children[1].primitive {
+                    *color = ACCENT;
+                }
+            }
+            node.children.push(disclosure);
         }
         nodes.push(node);
         y += 56.;

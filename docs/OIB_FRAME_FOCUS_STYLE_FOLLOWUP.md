@@ -73,3 +73,32 @@ and parent whole-view hits. Keep implementation within core.
    direct entry/reset and the outlined/flat input boundaries. Measure the changed
    hierarchy/inspector paint path on Frame if added outline runs affect workload;
    do not substitute ready-file reports for actual presentation timing.
+
+## Integration evidence before signed staging
+
+The isolated helper commit `662c2a7` was reviewed and integrated as `525dc95`.
+Its five real Scene/input tests passed with both dashboard-only and Canvas
+features. Parent integration uses outlined form controls/cards/keys, flat tree
+rows, LINE/BRASS selection without asterisks, BG workspace/fields and shared
+scale-3 headings. Keyboard paint layers reuse each key canvas to avoid an
+unnecessary wrapper per key. Existing key/control IDs and whole-view hits remain.
+
+- 28 Designer tests passed after surface integration; strict core library Clippy
+  passed. A subsequent focused six-root keyboard-plus-both-panes regression passed
+  in landscape and portrait, with all 38 keys admitted and no OIB writes.
+- The new regression sampled joint window edges; maximum scenes were 391 nodes /
+  57 controls and 415 / 72, below unchanged 512 / 128 limits. Existing real
+  six-root scroll checks also passed; no cache/coordinate limit was raised.
+- Nine fixture tests and five surface tests passed.
+- A temporary LGPL compatibility probe captured the old UI before the specimen
+  caption changed from scale 1 to 2. It confirmed exact Seed bytes, selectors,
+  handlers and schema equality, then upgraded a retained document containing
+  numeric/text/RGBA overrides and a duplicated panel. Active/draft values,
+  allocations, presence and four app values were preserved. The probe passed and
+  its temporary source was removed; its old canonical UI remains under ignored
+  target/frame-focus for reproduction. No production migration was broadened.
+
+Independent integrated review, signed staging/deployment, final fixture capture
+and changed-paint-path Frame timing remain pending for this styling follow-up.
+The earlier performance qualification continues to describe its exact prior
+release; it is not claimed as measurement of the new outlined paint workload.

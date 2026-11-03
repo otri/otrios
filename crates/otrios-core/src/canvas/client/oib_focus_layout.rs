@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Local tooling geometry. Authored preview geometry and stable IDs are retained.
+use super::oib_designer::outlined_surface;
 use crate::dashboard::{
-    components::{CARD, MUTED, WHITE, background, canvas, text},
+    components::{ACCENT, CARD, WHITE, background, canvas, text},
     scene::Scene,
 };
 use otrios_interfaces::{
     oib::Seed,
     scene::{Action, Primitive, Rect, SceneNode, SwitchSemantics, TouchResponder},
+    theme::{BG, HEADER_FONT_SCALE, LINE},
 };
 
 // Below the monotonically allocated designer controls and above authored u16 IDs.
@@ -71,13 +73,22 @@ pub(super) fn project(
     let mut layers = canvas(
         LAYERS,
         Rect::new(80., 8., 128., 48.),
-        vec![text(
-            CHROME + 2,
-            Rect::new(12., 14., 112., 28.),
-            "Layers",
-            2,
-            WHITE,
-        )],
+        vec![
+            outlined_surface(
+                [CHROME + 16, CHROME + 17, CHROME + 18],
+                128.,
+                48.,
+                if open { LINE } else { CARD },
+                12.,
+            ),
+            text(
+                CHROME + 2,
+                Rect::new(12., 14., 112., 28.),
+                "Layers",
+                2,
+                if open { ACCENT } else { WHITE },
+            ),
+        ],
     );
     layers.responder = Some(TouchResponder::Activate(Action::KeyboardKey(u16::MAX)));
     layers.semantics = Some(SwitchSemantics {
@@ -85,13 +96,13 @@ pub(super) fn project(
         checked: open,
     });
     let mut header = vec![
-        background(CHROME + 3, width, HEADER, CARD, 0.),
+        background(CHROME + 3, width, HEADER, BG, 0.),
         layers,
         text(
             CHROME + 4,
-            Rect::new(232., 22., (width - 248.).max(1.), 28.),
+            Rect::new(232., 12., (width - 248.).max(1.), 40.),
             "OIB Designer",
-            2,
+            HEADER_FONT_SCALE,
             WHITE,
         ),
     ];
@@ -100,26 +111,20 @@ pub(super) fn project(
         // geometry/decoration changes. The authority still admits the action.
         let mut button = original.clone();
         button.frame = Rect::new(16., 8., 48., 48.);
-        button.children = vec![text(
-            CHROME + 5,
-            Rect::new(14., 14., 28., 28.),
-            "<",
-            2,
-            WHITE,
-        )];
+        button.children = vec![
+            outlined_surface([CHROME + 23, CHROME + 24, CHROME + 25], 48., 48., CARD, 12.),
+            text(CHROME + 5, Rect::new(14., 14., 28., 28.), "<", 2, WHITE),
+        ];
         button.primitive = Primitive::Canvas { clip: true };
         header.push(button);
     } else if let Some(control) = back_action {
         let mut button = canvas(
             CHROME + 12,
             Rect::new(16., 8., 48., 48.),
-            vec![text(
-                CHROME + 5,
-                Rect::new(14., 14., 28., 28.),
-                "<",
-                2,
-                WHITE,
-            )],
+            vec![
+                outlined_surface([CHROME + 23, CHROME + 24, CHROME + 25], 48., 48., CARD, 12.),
+                text(CHROME + 5, Rect::new(14., 14., 28., 28.), "<", 2, WHITE),
+            ],
         );
         button.responder = Some(TouchResponder::Activate(Action::AppEvent(control)));
         button.semantics = Some(SwitchSemantics {
@@ -132,12 +137,18 @@ pub(super) fn project(
         CHROME + 6,
         Rect::new(width - dock - 16., HEADER + 16., dock, body_height),
         vec![
-            background(CHROME + 7, dock, body_height, CARD, 12.),
+            outlined_surface(
+                [CHROME + 7, CHROME + 14, CHROME + 15],
+                dock,
+                body_height,
+                CARD,
+                12.,
+            ),
             text(
                 CHROME + 8,
-                Rect::new(16., 16., dock - 32., 28.),
+                Rect::new(16., 12., dock - 32., 40.),
                 "Properties",
-                2,
+                HEADER_FONT_SCALE,
                 WHITE,
             ),
             inspector,
@@ -152,19 +163,31 @@ pub(super) fn project(
             (height - HEADER).max(1.),
         ),
         vec![
-            background(CHROME + 10, DRAWER, (height - HEADER).max(1.), CARD, 0.),
+            outlined_surface(
+                [CHROME + 10, CHROME + 21, CHROME + 22],
+                DRAWER,
+                (height - HEADER).max(1.),
+                CARD,
+                0.,
+            ),
             text(
                 CHROME + 11,
-                Rect::new(16., 20., DRAWER - 32., 28.),
+                Rect::new(16., 12., DRAWER - 32., 40.),
                 "Layers",
-                2,
-                MUTED,
+                HEADER_FONT_SCALE,
+                WHITE,
             ),
             hierarchy,
         ],
     );
     drawer.responder = Some(TouchResponder::Consume);
-    let mut root = canvas(scene.root().id, scene.root().frame, vec![preview, dock]);
+    let mut backdrop = background(CHROME + 13, width, scene.root().frame.height, BG, 0.);
+    backdrop.responder = Some(TouchResponder::PassThrough);
+    let mut root = canvas(
+        scene.root().id,
+        scene.root().frame,
+        vec![backdrop, preview, dock],
+    );
     root.children.extend(header);
     root.children.push(drawer);
     Scene::new(root)

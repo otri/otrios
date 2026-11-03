@@ -2192,3 +2192,71 @@ fn frame_focus_split_buttons_and_color_swatches_keep_their_declared_widths() {
         72.
     );
 }
+
+#[test]
+fn frame_focus_outlined_keyboard_and_both_panes_keep_combined_limits() {
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        let mut client = mounted_six_panel_fixture(true);
+        client.set_viewport(viewport).unwrap();
+        client
+            .inspect_oib_selection(Selection::Object(ObjectAddress {
+                instance: InstanceId(20),
+                references: vec![NodeId(7)],
+                node: NodeId(1),
+            }))
+            .unwrap();
+        client.designer_action(LocalAction::Layers).unwrap();
+        {
+            let m = client.active.as_mut().unwrap();
+            let d = m.designer.as_mut().unwrap();
+            d.tree_closed.clear();
+            d.revision = None;
+            m.refresh_designer().unwrap();
+        }
+        let before = client.active.as_ref().unwrap().doc.oib_root();
+        let mut maximum_nodes = 0;
+        let mut maximum_controls = 0;
+        for property in [2, 1, 3] {
+            let field = focus_property(&mut client, property);
+            assert!(client.keyboard_visible());
+            let limits: Vec<_> = client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .panels
+                .iter()
+                .map(|p| p.scroll.info().limit[1])
+                .collect();
+            for first in [0., 151., 303., 305., 607., limits[0]] {
+                for second in [0., 151., 303., 305., 607., limits[1]] {
+                    fixture_scroll_to(&mut client, 0, first);
+                    fixture_scroll_to(&mut client, 1, second);
+                    let scene = client
+                        .scene()
+                        .expect("outlined panes plus keyboard admit together");
+                    maximum_nodes = maximum_nodes.max(count_nodes(scene.root()));
+                    maximum_controls = maximum_controls.max(scene.controls().len());
+                    assert!(count_nodes(scene.root()) <= 512);
+                    assert!(scene.controls().len() <= 128);
+                    assert_eq!(
+                        scene
+                            .controls()
+                            .iter()
+                            .filter(|c| matches!(c.node.responder,
+                        Some(TouchResponder::Activate(Action::KeyboardKey(key))) if key < 38))
+                            .count(),
+                        38
+                    );
+                }
+            }
+            client.cancel_text_input(client.epoch(), field).unwrap();
+        }
+        assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), before);
+        eprintln!(
+            "outlined six-root keyboard {viewport:?}: {maximum_nodes} nodes/{maximum_controls} controls"
+        );
+    }
+}

@@ -169,9 +169,7 @@ pub(super) fn inspector(
             let mut input = b.focus_button(0., y, 320., "", LocalAction::FocusField(field.id))?;
             // Match the browser editor surface so native values are visibly
             // editable instead of blending into the properties panel.
-            if let Primitive::Superellipse { color, .. } = &mut input.children[0].primitive {
-                *color = [23, 27, 32, 255];
-            }
+            style::set_surface_fill(&mut input.children[0], BG)?;
             b.actions.remove(&input.id);
             input.id = field.id;
             input.semantics = Some(SwitchSemantics {
@@ -212,11 +210,7 @@ pub(super) fn inspector(
                     "",
                     LocalAction::PickColor(address.clone(), color),
                 )?;
-                if let Primitive::Superellipse { color: fill, .. } =
-                    &mut swatch.children[0].primitive
-                {
-                    *fill = color;
-                }
+                style::set_surface_fill(&mut swatch.children[0], color)?;
                 swatch.semantics = Some(SwitchSemantics {
                     label: format!("Choose {}", value_label(&Value::Color(color))),
                     checked: color == current,
@@ -526,25 +520,25 @@ impl Designer {
             };
             let w = width / f32::from(columns);
             let id = KEY_BASE + 1 + u32::from(key) * 3;
-            let mut node = canvas(
-                id,
-                Rect::new(
-                    f32::from(col) * w + 4.,
-                    8. + f32::from(row) * 56.,
-                    w - 8.,
-                    52.,
-                ),
-                vec![
-                    background(id + 1, w - 8., 52., [44, 49, 58, 255], 6.),
-                    text(
-                        id + 2,
-                        Rect::new(8., 16., (w - 24.).max(1.), 28.),
-                        &keyboard.label(key),
-                        2,
-                        WHITE,
-                    ),
-                ],
+            let pressed = keyboard.pressed(key) || keyboard.feedback_key() == Some(key);
+            // Reuse the key's control canvas for the two paint layers rather
+            // than adding a decorative wrapper per key to the combined scene.
+            let mut node = style::surface(
+                [id, id + 1, KEY_BASE + 300 + u32::from(key)],
+                w - 8.,
+                52.,
+                if pressed { LINE } else { CARD },
+                12.,
             );
+            node.frame.x = f32::from(col) * w + 4.;
+            node.frame.y = 8. + f32::from(row) * 56.;
+            node.children.push(text(
+                id + 2,
+                Rect::new(8., 16., (w - 24.).max(1.), 28.),
+                &keyboard.label(key),
+                2,
+                if pressed { ACCENT } else { WHITE },
+            ));
             node.responder = Some(TouchResponder::Activate(Action::KeyboardKey(key)));
             node.semantics = Some(SwitchSemantics {
                 label: keyboard.label(key),

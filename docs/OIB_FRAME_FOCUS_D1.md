@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer Frame Focus milestone
 
-Date: 2026-11-04. Status: **active; visual acceptance pending**.
+Date: 2026-11-04. Status: **active; shared-style follow-up in progress**.
 Branch: `feat/oib-frame-focus`, from approved design baseline `d904e49`.
 Design: [OIB Designer usability](OIB_DESIGNER_USABILITY.md).
 
@@ -160,12 +160,15 @@ confirmed and idle. No new service was installed.
 
 ## Outstanding acceptance
 
-- Live visual readability has not been independently viewed: automatic approval
-  review rejected live canvas pixel export because it might contain private
-  application content without explicit export authorization. No workaround was
-  used. Fixture-only capture approval or direct user visual feedback is pending.
-- Public signed-out browser presentation correctly exposes read-only properties.
-  Authenticated browser direct-editor acceptance remains unproven; host/wasm and
-  input-bridge tests do not substitute for that live path.
+- The user explicitly authorized fixture-only captures. Actual Frame and browser
+  fixture images were inspected; the larger type and hierarchy indentation are
+  readable. User feedback requests shared button outlines, theme and typography;
+  the [styling follow-up](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) is in progress.
+- The user signed into the shared preview. Actual browser typing/Enter produced
+  Sound on Frame at generation 29; Reset recovered authored Volume at 30; Escape
+  canceled a replacement without a write; Tab committed exact width 377.5 and
+  focused Accent hex; Shift-Tab returned to Width. Enter restored 320 at generation
+  32. Native status text rounds fractional widths; the browser field retained the
+  exact 377.5 value. Repeat a focused smoke check after the styling cutover.
 - No PR is open for this milestone. Do not mark the goal complete or open a ready
   PR until the remaining scoped acceptance and release-control work is finished.
