@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Frame Focus shared-style follow-up
 
-2026-11-04. Active, following user feedback after live visual acceptance became
+2026-11-04. Completed and qualified on the existing Frame/Web environment.
+This follow-up implements user feedback after live visual acceptance became
 available. Preserve the approved Frame Focus layout, direct editing and scrolling.
 
 ## Concrete styling contract
@@ -203,3 +204,76 @@ passed 17 tests, including more than five seconds of simulated guarded waiting
 without termination and explicit service shutdown. Focused formatting and
 whitespace checks passed. Fresh independent recheck, ARM build and actual Frame
 performance remain required before activating the corrected overlap candidate.
+
+
+## Final qualification
+
+Qualified implementation and watcher source pin:
+`c1ebfe180a2bd6d3c45c8e0e7fb035c8d10b188c`. Signed release:
+`52f0395bdbe5b437b53509181a42b180d9e391b591592fc5f8b3c4d61bb77249`.
+The final documentation-only commit has identical build inputs. ARM and wasm
+builds, publisher signature and complete signed app closure verified. Authority
+and native pointers, v27 negotiation, health, calibrated rotated RGB565 output
+and the existing monitoring/tunnel services passed.
+
+Independent upgrade-guard recheck found no actionable findings. It passed 26
+direct-host, 17 supervisor and 2 presentation tests, plus the exact stale-report
+repro, full successor queue retries, live safety refresh, input sealing and a
+loopback connected-unconfirmed-edit test. Legacy startup, replacement failure,
+rollback/retry and explicit shutdown paths retained their expected behavior.
+
+Actual six-root Frame tests retained 30 offered samples/s for 30 seconds, with a
+separate cold gesture. Results use unique input serials joined to actual renderer
+present returns; DRM timestamps remain a separate clock. Early capacity releases
+are not treated as display completion. Both gestures retained generation 65 and
+released input, with zero dropped timing rows.
+
+| Outlined final workload | Updates/s | p95 interval | Maximum interval | Result |
+| --- | ---: | ---: | ---: | --- |
+| Hierarchy | 28.3313 | 35.359 ms | 52.890 ms | Passed |
+| Selected slider inspector | 28.3648 | 35.360 ms | 37.183 ms | Passed |
+
+The unchanged gate is at least 28 updates/s, p95 at most 50 ms and no gesture gap
+over 100 ms. Sample-to-return p95 was 92.782/94.546 ms; this change recovers update
+throughput and is not claimed as a latency improvement. The pipeline overlaps
+CPU composition with the display wait while keeping one queued immutable
+successor. Prior blending/binding-only results remain recorded as failures.
+
+An initial overlap profiling setup assumed current confirmation implied a drawn
+fixture. It was discarded before the gesture and corrected to wait for both the
+actual displayed identity and current confirmation. No invalid run is included
+in the passing counts. Each controller removed its telemetry drop-in and restored
+the normal service. Broad repository preflight and unrelated platform matrices
+were intentionally not repeated. These tests do not establish Linux shared-memory
+IPC or unperformed human-touch acceptance.
+
+Focused live completion checks:
+
+- The final fixture-only Frame capture was checked for correct palette, outlines,
+  readable labels/fields and painter ordering. The signed-in preview remained
+  authenticated. Browser Enter confirmed Sound at generation 70; its visible
+  Reset override control restored authored Volume at generation 71. A synthetic
+  canvas wheel event was used because the preview tool's generic scroll did not
+  drive the canvas; the actual admitted wheel handler and visible Reset hit were
+  exercised. Earlier direct typing/Escape/Tab checks remain documented separately.
+- On actual Frame, requesting executable exit during a local hierarchy pan kept
+  the process alive through a 6.5-second held contact, beyond the former timeout.
+  It exited only after natural release; the ordinary signed host remounted.
+- Only temporary roots 65554–65557 were removed. Audio 20 and Display 30 remain,
+  app values [440,700,1000,0], width 320 explicit override, inherited Audio slider
+  accent, authored Volume and the pre-existing explicit Display toggle accent
+  are preserved. Final generation 71 has no conflicts. No collection or identity
+  was reset.
+
+[Bounded final timing, input-gate and restoration evidence](experiments/data/oib-frame-focus-2026-11-04/)
+is committed. Raw timing logs and approved fixture captures stay under ignored
+`target/frame-focus/release`.
+
+The existing watcher is resumed at the exact pushed source pin above. Mac/Frame
+pointers match the qualified release, original persistent build environment and
+publisher remain, and source fingerprints match without another build. Previous
+release-control files are preserved privately under the date-first record
+`2026-11-04-frame-focus-qualified-style`. The previously verified compatible
+code-only rollback `f6202770` remains available; rollback activation was not
+repeated. Temporary Frame probe/capture/telemetry directories and service overrides
+were removed. The normal host is confirmed and idle with no pending commands.

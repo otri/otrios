@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer Frame Focus milestone
 
-Date: 2026-11-04. Status: **active; shared-style follow-up in progress**.
+Date: 2026-11-04. Status: **completed; Frame/Web qualification and release automation restored**.
 Branch: `feat/oib-frame-focus`, from approved design baseline `d904e49`.
 Design: [OIB Designer usability](OIB_DESIGNER_USABILITY.md).
 
@@ -94,7 +94,7 @@ covered landscape/portrait, legacy/Focus, selected multi-property inspector,
 viewport coverage, offscreen/stale actions, captures and held mesh immutability.
 Those checks are in-process evidence, distinct from the hardware results below.
 
-## Signed deployment and actual Frame acceptance
+## Earlier signed window qualification
 
 Implementation source: `e8a33bb2430cbf0e0a51fc7e53200d919a9012c0`.
 Signed release:
@@ -158,17 +158,30 @@ release-control files were preserved privately under the date-first record
 and service environment overrides were removed. The normal native service is
 confirmed and idle. No new service was installed.
 
-## Outstanding acceptance
+## Final shared-style completion
 
-- The user explicitly authorized fixture-only captures. Actual Frame and browser
-  fixture images were inspected; the larger type and hierarchy indentation are
-  readable. User feedback requests shared button outlines, theme and typography;
-  the [styling follow-up](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) is in progress.
-- The user signed into the shared preview. Actual browser typing/Enter produced
-  Sound on Frame at generation 29; Reset recovered authored Volume at 30; Escape
-  canceled a replacement without a write; Tab committed exact width 377.5 and
-  focused Accent hex; Shift-Tab returned to Width. Enter restored 320 at generation
-  32. Native status text rounds fractional widths; the browser field retained the
-  exact 377.5 value. Repeat a focused smoke check after the styling cutover.
-- No PR is open for this milestone. Do not mark the goal complete or open a ready
-  PR until the remaining scoped acceptance and release-control work is finished.
+The [shared-style follow-up](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) is complete. It
+adds the established outlined surfaces, theme and typography, preserves flat
+hierarchy navigation and uses practical typed editors. Independent review caught
+and verified fixes for drawer gutters and stale upgrade authorization.
+
+Final source/watcher pin `c1ebfe180a2bd6d3c45c8e0e7fb035c8d10b188c`, signed
+release `52f0395bdbe5b437b53509181a42b180d9e391b591592fc5f8b3c4d61bb77249`.
+The exact final styled hierarchy and selected inspector pass the unchanged
+28 Hz gate on Frame at 28.3313 and 28.3648 updates/s, both p95 intervals about
+35.36 ms. Producer capacity is distinct from actual display completion; one
+immutable next frame may compose while the current frame waits for presentation.
+Full timing summaries retain measured input latency and failed intermediate runs.
+
+Actual final Frame fixture capture, natural-release exit admission, signed-in
+browser Enter and visible Reset passed. Final generation 71 retains only Audio
+and Display, all four original app values and pre-existing overrides. Existing
+release automation is resumed with the original environment; compatible code
+rollback remains verified. Temporary helpers/telemetry were removed.
+
+The earlier browser acceptance additionally covered Escape cancellation, exact
+fractional width 377.5, below-fold Tab and Shift-Tab; original width 320 was
+restored. The final browser check confirmed Sound/Reset as generations 70/71.
+See the follow-up for actual commands, independent review limits and bounded
+[evidence](experiments/data/oib-frame-focus-2026-11-04/). No broad preflight or
+Linux shared-memory IPC acceptance is claimed. Desktop Studio and D2 remain deferred.
