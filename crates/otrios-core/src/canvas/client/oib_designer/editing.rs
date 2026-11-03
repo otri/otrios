@@ -167,6 +167,11 @@ pub(super) fn inspector(
                 y += 36.;
             }
             let mut input = b.focus_button(0., y, 320., "", LocalAction::FocusField(field.id))?;
+            // Match the browser editor surface so native values are visibly
+            // editable instead of blending into the properties panel.
+            if let Primitive::Superellipse { color, .. } = &mut input.children[0].primitive {
+                *color = [23, 27, 32, 255];
+            }
             b.actions.remove(&input.id);
             input.id = field.id;
             input.semantics = Some(SwitchSemantics {
