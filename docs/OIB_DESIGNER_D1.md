@@ -42,9 +42,13 @@ The fixture must fit the existing admitted budgets. Nested inherited occurrences
 are identified by ancestry and count toward expanded node/control/cell limits;
 do not confuse them with separately allocated live instance roots. Select the
 smallest fixture that proves repeated nested reuse. Preserve the existing
-volume/brightness values and factory-specific labels. Choose and document the
-toggle binding/migration path before modifying the app schema; never reset an
-existing collection to make the fixture work.
+Live UI volume/brightness values and factory-specific labels. D1 uses a separate
+`oib-designer` companion app/collection with its own signed numeric/toggle fields;
+the current `live-ui-state-v1` schema and signed factories stay unchanged. This
+avoids reshaping retained slider allocations or migrating the old app schema as
+an incidental requirement. Never reset an existing collection to make the fixture
+work. Data-only design edits and recovery must preserve the new fixture's values
+as well as continued operation of the unchanged Live UI app.
 
 ## Ownership and worktree discipline
 
@@ -53,7 +57,7 @@ existing collection to make the fixture work.
 | Parent orchestrator/integrator | Contract decisions, this plan, reviewed cherry-picks, integration glue, protocol coordination, release and live evidence | Sole integration/deployment owner |
 | Contracts and identity implementer | Minimal public D1 records and SDK exposure; canonical encoding/addressing notes | `crates/otrios-interfaces` OIB contracts, SDK declarations, dedicated contract note |
 | Runtime mapper, then implementer | Identify and implement bounded graph admission/resolution and current-cell lowering | Runtime implementation and tests in `crates/otrios-core`; no permissive runtime copies |
-| Designer/fixture mapper, then implementer | Hierarchy/inspector interactions, signed nested fixture, authoring support and budget accounting | `apps/live-ui`, shared authoring helpers; runtime changes only through assigned integration boundary |
+| Designer/fixture mapper, then implementer | Hierarchy/inspector interactions, signed nested fixture, authoring support and budget accounting | New `apps/oib-designer`, Test Playground registration, shared authoring helpers; existing Live UI retained |
 | Independent reviewer/test role | Concrete integrated diff review and focused process/input/compatibility evidence | New delegate task for each review/re-check; no self-approval |
 
 Every child uses a tool-managed worktree from a committed baseline. Children do
@@ -92,6 +96,27 @@ to signed seeds or live wire state, changing negotiation, and migrating existing
 data are integration decisions. Select the required feature and then-current
 state protocol once that encoding is concrete. Preserve release-control v1.
 Do not lower full ancestry to a collision-prone process hash or renderer slot.
+
+Parent decisions after the runtime mapping:
+
+- Give each admitted root-relative property address an explicit immutable signed
+  cell key. Existing authored cells keep explicit aliases; dynamically allocated
+  roots can retain checked ID/64-key arithmetic. Descriptor order, names and
+  traversal never assign identity. Reject duplicate keys, collisions and exhaustion.
+- Keep one source per property. Literal overrides may mask an admitted forwarding
+  source and clear back to its current value. App-bound value properties cannot
+  be disconnected by writing a literal UI override. Explicit reset and resolving
+  a conflict to an explicit literal are distinct operations.
+- Keep v26 Live UI definitions, schema and collection usable unchanged; introduce
+  D1 in its own companion app. Preserve canonical old seed bytes when optional
+  D1 metadata is absent. General retained-graph/schema migration remains deferred.
+- Apply the narrowest limit at every layer, including existing template depth 12
+  and instance depth 8; scene depth 16 does not override those limits.
+- Extend factory admission/remapping for signed, field-checked toggle actions;
+  the existing Set-only assumption is insufficient for this fixture.
+- New real authority-process tests must set `OTRIOS_SPACES_SERVER` explicitly and
+  use distinct volume/brightness fields. A silently skipped process test is not
+  recovery evidence.
 
 ### G2: runtime and designer implementation
 
@@ -145,7 +170,12 @@ finished release. Only then is D1 ready for final review and any requested PR.
   checkout changes were read and snapshotted without modification.
 - RFC baseline and execution plan: prepared; local documentation checks recorded
   in the parent handoff when committed.
-- Contracts/runtime/designer implementation: pending delegation and review.
+- Contracts: additive descriptor implementation delegated; parent contract freeze
+  pending its result and both mapping reports.
+- Runtime mapping completed read-only: existing causal publication and rendering
+  can be reused; property-rank IDs, toggle admission, full-ancestry selection and
+  forwarding need focused changes. No runtime implementation accepted yet.
+- Designer/fixture mapping delegated; implementation pending contract freeze.
 - Runtime tests, process acceptance, deployment and live acceptance: not run.
 
 Update this record at integration gates with actual commits, commands and results.
