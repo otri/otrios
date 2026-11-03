@@ -10,8 +10,20 @@ use otrios_interfaces::{
 
 // Separate from u16 authored nodes, keyboard, ink and host chrome namespaces.
 const FIRST: u32 = 2_700_000_000;
+const END: u32 = 2_800_000_000;
 const ROW: f32 = 38.;
 const MAX_CONTENT: f32 = 8192.;
+// Local retained geometry, NOT the 512-node/128-control presented scene budget.
+// Two coordinate-bounded panels can retain more rows than one scene can admit.
+// A hierarchy row uses at most six nodes/two actions per 38px; an inspector
+// button uses three nodes/one action per 38px (labels use one per 28px).
+// Together their 8192px caps fit below these defensive cache ceilings.
+const MAX_CACHED_NODES: usize = 2048;
+const MAX_CACHED_ACTIONS: usize = 768;
+// Align culling to four-row slabs. Placement-only pans reuse retained GPU
+// geometry until either viewport edge crosses a slab boundary. Crossing one
+// changes scene topology and necessarily rebuilds the shared paint cache once.
+const WINDOW_STEP: f32 = 4. * ROW;
 #[derive(Clone, Debug, PartialEq)]
 enum LocalAction {
     Select(Selection),
@@ -44,6 +56,9 @@ pub(super) struct Designer {
     objects: Vec<ObjectInfo>,
     panels: Vec<Panel>,
     actions: BTreeMap<u32, LocalAction>,
+    // Never recycle IDs on selection/disclosure/diagnostic rebuilds. A stale
+    // accessibility ID must not acquire a different typed action later.
+    next_id: u32,
     capture: Option<Capture>,
     // Rebuild chrome on diagnostics/selection changes, never on a pan sample.
     revision: Option<(crate::merkle::Hash, bool, String, bool)>,
@@ -58,6 +73,7 @@ impl Clone for Designer {
             collapsed: self.collapsed.clone(),
             panels: self.panels.clone(),
             actions: self.actions.clone(),
+            next_id: self.next_id,
             capture: self.capture.clone(),
             revision: self.revision.clone(),
             objects: self
@@ -99,6 +115,7 @@ impl Designer {
             objects: vec![],
             panels,
             actions: BTreeMap::new(),
+            next_id: FIRST,
             capture: None,
             revision: None,
         })
@@ -173,7 +190,13 @@ impl Designer {
         status: &str,
         editable: bool,
     ) -> Result<()> {
-        let mut builder = Builder::new();
+        // Bound even the hidden/disclosed semantic model, independently from
+        // the retained subtree and presented scene bounds. Runtime admission
+        // supplies a smaller bounded graph; this is a defensive local ceiling.
+        if objects.len() > MAX_CACHED_NODES {
+            return Err("Designer object model budget exceeded".into());
+        }
+        let mut builder = Builder::at(self.next_id);
         let hierarchy = if self.panels.len() == 2 {
             Some(hierarchy(
                 &mut builder,
@@ -240,6 +263,7 @@ impl Designer {
             panel.scroll.set_content([0., panel.content]);
         }
         self.actions = builder.actions;
+        self.next_id = builder.next;
         self.objects = objects;
         Ok(())
     }
@@ -253,7 +277,18 @@ impl Designer {
         for panel in &self.panels {
             let node =
                 find_node(root, u32::from(panel.viewport)).ok_or("Missing designer viewport")?;
-            node.children.clone_from(&panel.nodes);
+            let offset = panel.scroll.info().offset[1];
+            let top = (offset / WINDOW_STEP).floor() * WINDOW_STEP;
+            let bottom = ((offset + node.frame.height) / WINDOW_STEP).ceil() * WINDOW_STEP;
+            // Retained top-level rows contain all their own paint and actions.
+            // Clone only rows intersecting the viewport's aligned window; no
+            // glyph/inspector construction or full-tree clone on a pan sample.
+            node.children = panel
+                .nodes
+                .iter()
+                .filter(|row| row.frame.y < bottom && row.frame.y + row.frame.height > top)
+                .cloned()
+                .collect();
             if Some(panel.viewport) == self.panels.last().map(|p| p.viewport) {
                 let status_y = if self.panels.len() == 1 {
                     ROW + 28.
@@ -331,6 +366,24 @@ impl Designer {
         }
         Ok(())
     }
+    fn semantic_action(&self, scene: &Scene, id: u32) -> Option<LocalAction> {
+        // Cached rows outside the clipped semantic scene are not activatable,
+        // including overscan rows and old IDs retained by accessibility hosts.
+        scene
+            .controls()
+            .iter()
+            .any(|p| p.node.id == id)
+            .then(|| self.actions.get(&id).cloned())
+            .flatten()
+    }
+    fn tap_action(&self, capture: &Capture, scene: &Scene, point: [f32; 2]) -> Option<LocalAction> {
+        if capture.panel.is_none() {
+            return capture.action.clone();
+        }
+        let hit = scene.hit_path(point);
+        let current = hit.iter().rev().find_map(|p| self.actions.get(&p.node.id));
+        capture.action.clone().filter(|a| Some(a) == current)
+    }
 }
 fn find_node(node: &mut SceneNode, id: u32) -> Option<&mut SceneNode> {
     if node.id == id {
@@ -344,19 +397,26 @@ struct Builder {
     actions: BTreeMap<u32, LocalAction>,
 }
 impl Builder {
+    #[cfg(test)]
     fn new() -> Self {
+        Self::at(FIRST)
+    }
+    fn at(next: u32) -> Self {
         Self {
-            next: FIRST,
+            next,
             nodes: 0,
             actions: BTreeMap::new(),
         }
     }
     fn id(&mut self) -> Result<u32> {
         self.nodes += 1;
-        if self.nodes > crate::dashboard::scene::MAX_NODES {
-            return Err("Designer chrome scene budget exceeded".into());
+        if self.nodes > MAX_CACHED_NODES {
+            return Err("Designer retained node budget exceeded".into());
         }
         let id = self.next;
+        if id >= END {
+            return Err("Designer local identity budget exhausted".into());
+        }
         self.next += 1;
         Ok(id)
     }
@@ -398,8 +458,8 @@ impl Builder {
             label: label.into(),
             checked: false,
         });
-        if self.actions.len() >= 128 {
-            return Err("Designer local control budget exceeded".into());
+        if self.actions.len() >= MAX_CACHED_ACTIONS {
+            return Err("Designer retained action budget exceeded".into());
         }
         self.actions.insert(id, action);
         Ok(node)
@@ -908,8 +968,9 @@ impl Client {
         let Some(d) = &m.designer else {
             return Ok(None);
         };
-        if let Some(action) = d.actions.get(&id).cloned() {
-            return self.designer_action(action).map(Some);
+        if (FIRST..END).contains(&id) {
+            let action = d.semantic_action(self.scene()?.as_ref(), id);
+            return action.map_or(Ok(Some(false)), |a| self.designer_action(a).map(Some));
         }
         if d.mode == DesignerMode::Edit
             && let Some(preview) = m.preview_scroll.as_ref()
@@ -1005,16 +1066,7 @@ impl Client {
                 > 8.;
             let tap = event.phase == PointerPhase::Up && !capture.moving;
             let action = if tap {
-                if capture.panel.is_none() {
-                    capture.action.clone()
-                } else {
-                    let hit = scene.hit_path(event.position);
-                    let current = hit
-                        .iter()
-                        .rev()
-                        .find_map(|p| designer.actions.get(&p.node.id));
-                    capture.action.clone().filter(|a| Some(a) == current)
-                }
+                designer.tap_action(&capture, &scene, event.position)
             } else {
                 None
             };

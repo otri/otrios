@@ -4,6 +4,8 @@ use otrios_interfaces::{
     layout::ValueType,
     oib::{Cell, Seed, designer::*},
 };
+#[path = "../../../../../apps/oib-designer/app.rs"]
+mod designer_fixture;
 fn seed() -> Seed {
     Seed {
         format: otrios_interfaces::oib::FORMAT.into(),
@@ -328,8 +330,23 @@ fn outline_passes_through_to_deepest_application_responder() {
 }
 #[test]
 fn oversize_chrome_rejects_without_paging_or_raising_limits() {
+    let rows: Vec<_> = (0..214).map(|n| object(n, 0, None)).collect();
+    let (nodes, content) = hierarchy(
+        &mut Builder::new(),
+        &rows,
+        &Selection::Document(DocumentId(1)),
+        &[],
+        DesignerMode::Edit,
+    )
+    .unwrap();
+    assert_eq!(content, 8170.);
+    assert_eq!(
+        nodes.len(),
+        215,
+        "every coordinate-admitted row is retained"
+    );
     let mut b = Builder::new();
-    let rows: Vec<_> = (0..200).map(|n| object(n, 0, None)).collect();
+    let rows: Vec<_> = (0..215).map(|n| object(n, 0, None)).collect();
     assert!(
         hierarchy(
             &mut b,
@@ -343,6 +360,755 @@ fn oversize_chrome_rejects_without_paging_or_raising_limits() {
     let mut legacy = seed();
     legacy.designer = None;
     assert!(Designer::new(&legacy).is_none());
+}
+
+// Contract-query model of the full fixture: fixed shell/configuration, six
+// panels with all 16 expanded objects each, and all four definitions/18 nodes.
+// This deliberately does not call or replace runtime graph/source resolution.
+fn six_panel_objects() -> Vec<ObjectInfo> {
+    let mut rows = vec![ObjectInfo {
+        selection: Selection::Document(DocumentId(1)),
+        name: "Document".into(),
+        class: ClassId(1),
+        depth: 0,
+        layout_node: None,
+    }];
+    for (id, depth) in [(1, 1), (2, 2)] {
+        let mut o = object(id, depth, None);
+        let Selection::Object(a) = &mut o.selection else {
+            panic!()
+        };
+        a.instance = InstanceId(40);
+        a.references.clear();
+        rows.push(o);
+    }
+    for instance in 0..6 {
+        for (reference, node, depth) in [
+            (0, 1, 2),
+            (0, 2, 3),
+            (0, 3, 3),
+            (7, 7, 3),
+            (7, 1, 4),
+            (7, 2, 5),
+            (7, 3, 5),
+            (7, 4, 5),
+            (7, 5, 5),
+            (8, 8, 3),
+            (8, 1, 4),
+            (8, 2, 5),
+            (8, 3, 5),
+            (0, 9, 3),
+            (0, 10, 4),
+            (0, 11, 4),
+        ] {
+            let mut o = object(node, depth, None);
+            let Selection::Object(a) = &mut o.selection else {
+                panic!()
+            };
+            a.instance = InstanceId(0x1_0000 + instance);
+            a.references = if reference != 0 && node != reference {
+                vec![NodeId(reference)]
+            } else {
+                vec![]
+            };
+            rows.push(o);
+        }
+    }
+    for (definition, count) in [(10, 8), (11, 2), (12, 5), (13, 3)] {
+        let mut o = object(1, 1, None);
+        o.selection = Selection::Definition(DefinitionId(definition));
+        o.name = format!("Definition {definition}");
+        rows.push(o);
+        for node in 1..=count {
+            let mut o = object(node, 2, None);
+            o.selection = Selection::DefinitionNode {
+                definition: DefinitionId(definition),
+                node: NodeId(node),
+            };
+            rows.push(o);
+        }
+    }
+    assert_eq!(rows.len(), 121);
+    rows
+}
+fn count_nodes(n: &SceneNode) -> usize {
+    1 + n.children.iter().map(count_nodes).sum::<usize>()
+}
+fn budget_layout(height: f32) -> Scene {
+    // Conservative app reserve, including base app controls: 200 nodes/24
+    // controls exceeds the fixture's 70 initial + four 21-node panel slots and
+    // six panels' 18 controls. Do not measure chrome against an empty app.
+    let mut root = canvas(
+        0,
+        Rect::new(0., 0., 1280., 800.),
+        vec![
+            canvas(10, Rect::new(0., 0., 208., height), vec![]),
+            canvas(11, Rect::new(900., 0., 344., height), vec![]),
+        ],
+    );
+    for id in 100..297 {
+        let mut node = canvas(id, Rect::new(300., 0., 100., 32.), vec![]);
+        if id < 124 {
+            node.responder = Some(TouchResponder::Activate(Action::AppEvent(1)));
+            node.semantics = Some(SwitchSemantics {
+                label: "App control".into(),
+                checked: false,
+            });
+        }
+        root.children.push(node);
+    }
+    let scene = Scene::new(root).unwrap();
+    assert_eq!(count_nodes(scene.root()), 200);
+    assert_eq!(scene.controls().len(), 24);
+    scene
+}
+fn populated_designer(base: &Scene) -> (Seed, Designer) {
+    let mut s = seed();
+    let mut d = Designer::new(&s).unwrap();
+    let rows = six_panel_objects();
+    d.selection = rows[7].selection.clone(); // Nested slider, four properties.
+    let mut properties = vec![];
+    for index in 0..4 {
+        let mut p = property();
+        p.cell = Some(200 + index);
+        p.descriptor.id = PropertyId(index + 1);
+        if let Some(PropertyAddress::Occurrence { path, instance }) = &mut p.address {
+            path.property = p.descriptor.id;
+            *instance = InstanceId(0x1_0000);
+        }
+        s.cells.push(Cell {
+            id: 200 + index,
+            owner: 0x1_0000,
+            name: format!("property {index}"),
+            default: p.descriptor.default.clone(),
+            authored_override: None,
+            inherit: Some(100),
+            targets: vec![],
+            choices: (0..8).map(|n| Value::Color([n, 2, 3, 255])).collect(),
+        });
+        properties.push(p);
+    }
+    d.rebuild(&s, rows, &properties, &[], "Active", true)
+        .unwrap();
+    d.sync(base).unwrap();
+    assert!(
+        d.actions.len() > 128,
+        "full retained action model exceeds scene budget"
+    );
+    assert!(
+        d.panels
+            .iter()
+            .flat_map(|p| &p.nodes)
+            .map(count_nodes)
+            .sum::<usize>()
+            > 512
+    );
+    (s, d)
+}
+fn presented(d: &Designer, base: &Scene) -> Scene {
+    let mut root = base.root().clone();
+    d.present(&mut root, base, None, "Active").unwrap();
+    let scene = Scene::new(root).expect("combined app/chrome scene fits 512 nodes");
+    assert!(scene.controls().len() <= 128);
+    scene
+}
+fn client_for_scene(d: Designer, scene: Scene) -> Client {
+    let ui = crate::authoring::AppUi::new(
+        "designer-input-test",
+        "Designer input test",
+        otrios_interfaces::canvas::StateSchema {
+            id: "designer-input-v1".into(),
+            fields: vec![],
+        },
+    )
+    .build("Designer input test", vec![]);
+    let mut mount = qualify(
+        ui,
+        "designer-input",
+        &[],
+        &VecDeque::new(),
+        &[],
+        Qualification {
+            epoch: 1,
+            private: false,
+            writer: [1; 16],
+        },
+    )
+    .unwrap();
+    mount.designer = Some(d);
+    mount.scene = OnceLock::from(Arc::new(scene));
+    Client {
+        active: Some(mount),
+        ..Client::default()
+    }
+}
+#[test]
+fn full_six_panel_hierarchy_and_inspector_fit_combined_scene_throughout_scroll_range() {
+    for height in [172., 588.] {
+        // Tall and wide fixture panel heights.
+        let base = budget_layout(height);
+        let (_, mut d) = populated_designer(&base);
+        let mut maximum_nodes = 0;
+        let mut maximum_controls = 0;
+        let retained = d.panels.iter().map(|p| p.nodes.clone()).collect::<Vec<_>>();
+        for panel in 0..2 {
+            let limit = d.panels[panel].scroll.info().limit[1];
+            for offset in (0..=(limit / 13.).ceil() as u32).map(|n| n as f32 * 13.) {
+                d.panels[panel].scroll.set_offset([0., offset]);
+                let scene = presented(&d, &base);
+                maximum_nodes = maximum_nodes.max(count_nodes(scene.root()));
+                maximum_controls = maximum_controls.max(scene.controls().len());
+            }
+            d.panels[panel].scroll.set_offset([0., 0.]);
+        }
+        // Top, middle and bottom include occurrence and definition selections.
+        for index in [0, 60, 120] {
+            let selection = d.objects[index].selection.clone();
+            let id = *d
+                .actions
+                .iter()
+                .find(|(_, a)| **a == LocalAction::Select(selection.clone()))
+                .unwrap()
+                .0;
+            let y = d.panels[0]
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap()
+                .frame
+                .y;
+            d.panels[0].scroll.set_offset([0., y]);
+            let scene = presented(&d, &base);
+            let control = scene
+                .controls()
+                .into_iter()
+                .find(|p| p.node.id == id)
+                .unwrap();
+            let point = [
+                control.origin[0] + 200.,
+                control.origin[1] + control.node.frame.height / 2.,
+            ];
+            assert!(scene.hit_path(point).iter().any(|p| p.node.id == id));
+            assert_eq!(
+                d.semantic_action(&scene, id),
+                Some(LocalAction::Select(selection))
+            );
+        }
+        for (panel, before) in d.panels.iter().zip(retained) {
+            assert_eq!(
+                panel.nodes, before,
+                "panning preserves full retained rows/IDs"
+            );
+        }
+        eprintln!(
+            "contract-model panel height {height}: maximum combined {maximum_nodes} nodes/{maximum_controls} controls; retained {} nodes/{} actions",
+            d.panels
+                .iter()
+                .flat_map(|p| &p.nodes)
+                .map(count_nodes)
+                .sum::<usize>(),
+            d.actions.len()
+        );
+    }
+}
+#[test]
+fn virtual_rows_clip_edges_and_reject_offscreen_or_retired_semantic_ids() {
+    let base = budget_layout(588.);
+    let (s, mut d) = populated_designer(&base);
+    let row = d.panels[0].nodes[30].clone();
+    for offset in [row.frame.y + 16., row.frame.y - 588. + 16.] {
+        d.panels[0].scroll.set_offset([0., offset]);
+        let scene = presented(&d, &base);
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|p| p.node.id == row.id)
+            .unwrap();
+        assert_eq!(control.node.frame.height, 16.);
+        let point = [200., control.origin[1] + 0.1];
+        assert!(scene.hit_path(point).iter().any(|p| p.node.id == row.id));
+        assert!(d.semantic_action(&scene, row.id).is_some());
+    }
+    let initial_id = d.panels[0].nodes[0].id;
+    d.panels[0].scroll.set_offset([0., 100.]);
+    let scene = presented(&d, &base);
+    assert!(
+        scene.path(initial_id).is_some(),
+        "offscreen overscan is retained in this slab"
+    );
+    assert_eq!(d.semantic_action(&scene, initial_id), None);
+    let mut client = client_for_scene(d.clone(), scene);
+    assert_eq!(client.designer_activate(initial_id).unwrap(), Some(false));
+    d.panels[0].scroll.set_offset([0., 3000.]);
+    assert!(presented(&d, &base).path(initial_id).is_none());
+    d.rebuild(&s, six_panel_objects(), &[], &[], "Changed", true)
+        .unwrap();
+    d.sync(&base).unwrap();
+    d.panels[0].scroll.set_offset([0., 0.]);
+    let scene = presented(&d, &base);
+    assert!(d.panels[0].nodes[0].id > initial_id);
+    assert_eq!(d.semantic_action(&scene, initial_id), None);
+    let mut client = client_for_scene(d, scene);
+    assert_eq!(client.designer_activate(initial_id).unwrap(), Some(false));
+}
+#[test]
+fn slab_pans_reuse_paint_buffers_and_capture_keeps_typed_action() {
+    use crate::dashboard::retained_text::TextPresentation;
+    let base = budget_layout(588.);
+    let (s, mut d) = populated_designer(&base);
+    let font = crate::dashboard::font::test_font();
+    let mut paint = TextPresentation::default();
+    d.panels[0].scroll.set_offset([0., 40.]);
+    let scene = presented(&d, &base);
+    let id = d.panels[0].nodes[2].id;
+    let action = d.actions[&id].clone();
+    let capture = Capture {
+        pointer: 1,
+        start: [200., 50.],
+        moving: false,
+        action: Some(action.clone()),
+        panel: Some(0),
+    };
+    let mut client = client_for_scene(d.clone(), scene.clone());
+    client.active.as_mut().unwrap().layout_scene = OnceLock::from(Arc::new(base.clone()));
+    for (phase, y, at) in [
+        (PointerPhase::Down, 50., 1),
+        (PointerPhase::Move, -250., 17),
+    ] {
+        assert_eq!(
+            client
+                .designer_pointer(
+                    PointerEvent {
+                        id: 1,
+                        phase,
+                        position: [200., y]
+                    },
+                    at
+                )
+                .unwrap(),
+            Some(true)
+        );
+        let held = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+        assert_eq!(held.capture.as_ref().unwrap().action, Some(action.clone()));
+        assert_eq!(held.panels[0].nodes, d.panels[0].nodes);
+    }
+    assert_eq!(
+        client
+            .designer_pointer(
+                PointerEvent {
+                    id: 1,
+                    phase: PointerPhase::Up,
+                    position: [200., -250.]
+                },
+                33
+            )
+            .unwrap(),
+        Some(true)
+    );
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .busy()
+    );
+    let first = paint.compose(&scene, &font);
+    for offset in [41., 42., 43., 44.] {
+        d.panels[0].scroll.set_offset([0., offset]);
+        let scene = presented(&d, &base);
+        let frame = paint.compose(&scene, &font);
+        assert_eq!(frame.generation, first.generation);
+        assert!(Arc::ptr_eq(&frame.mesh, &first.mesh));
+        assert_eq!(
+            d.tap_action(&capture, &scene, [200., 50.]),
+            Some(action.clone())
+        );
+    }
+    d.panels[0].scroll.set_offset([0., 200.]);
+    let scene = presented(&d, &base);
+    assert_ne!(
+        paint.compose(&scene, &font).generation,
+        first.generation,
+        "crossing a slab boundary rebuilds the bounded presented paint topology"
+    );
+    assert_eq!(d.tap_action(&capture, &scene, [200., 50.]), None);
+    // A rebuild while a capture is held cannot recycle its node ID or action.
+    d.rebuild(
+        &s,
+        six_panel_objects().into_iter().rev().collect(),
+        &[],
+        &[],
+        "Changed",
+        true,
+    )
+    .unwrap();
+    let scene = presented(&d, &base);
+    assert!(!d.actions.contains_key(&id));
+    assert_eq!(capture.action, Some(action));
+    assert_eq!(d.tap_action(&capture, &scene, [200., 50.]), None);
+}
+#[test]
+fn retained_cache_and_local_identity_exhaustion_are_explicit() {
+    let mut b = Builder::new();
+    for _ in 0..MAX_CACHED_NODES {
+        b.id().unwrap();
+    }
+    assert_eq!(
+        b.id().unwrap_err(),
+        "Designer retained node budget exceeded"
+    );
+    let mut b = Builder::new();
+    for id in 0..MAX_CACHED_ACTIONS {
+        b.actions
+            .insert(id as u32, LocalAction::Mode(DesignerMode::Test));
+    }
+    assert_eq!(
+        b.button(0., 0., 240., "Mode", LocalAction::Mode(DesignerMode::Test))
+            .unwrap_err(),
+        "Designer retained action budget exceeded"
+    );
+    assert_eq!(
+        Builder::at(END).id().unwrap_err(),
+        "Designer local identity budget exhausted"
+    );
+    let mut d = Designer::new(&seed()).unwrap();
+    assert_eq!(
+        d.rebuild(
+            &seed(),
+            (0..=MAX_CACHED_NODES)
+                .map(|n| object(n as u64, 0, None))
+                .collect(),
+            &[],
+            &[],
+            "Active",
+            true
+        )
+        .unwrap_err(),
+        "Designer object model budget exceeded"
+    );
+}
+
+fn fixture_sync(
+    doc: &mut crate::canvas::Document,
+    session: &mut Session,
+    adapter: &mut StateAdapter,
+) {
+    for _ in 0..30 {
+        let mut progress = false;
+        while let Some(bytes) = adapter.generate().unwrap() {
+            doc.receive(session, &bytes).unwrap();
+            progress = true;
+        }
+        if let Some(bytes) = doc.generate(session).unwrap() {
+            adapter.receive(&bytes).unwrap();
+            progress = true;
+        }
+        if !progress {
+            assert!(adapter.confirmed());
+            return;
+        }
+    }
+    panic!("designer fixture sync did not settle");
+}
+fn mounted_six_panel_fixture() -> Client {
+    assert!(
+        designer_fixture::manifest()
+            .dependencies
+            .contains(&FEATURE.into())
+    );
+    let ui = designer_fixture::ui(&[]);
+    let mut authority =
+        crate::canvas::Document::new(ui.state_schema.clone(), "designer-mount").unwrap();
+    authority.configure_oib(&ui).unwrap();
+    let (mut session, _) = authority.open_session(&[1; 16], 0).unwrap();
+    session.set_oib_editable(true);
+    session
+        .set_selection(StateSelection::from_ui(&ui).unwrap())
+        .unwrap();
+    let mut mount = qualify(
+        ui,
+        "designer-mount",
+        &[],
+        &VecDeque::new(),
+        &[],
+        Qualification {
+            epoch: 1,
+            private: false,
+            writer: [1; 16],
+        },
+    )
+    .unwrap();
+    mount
+        .doc
+        .receive(&authority.generate(&mut session).unwrap().unwrap())
+        .unwrap();
+    fixture_sync(&mut authority, &mut session, &mut mount.doc);
+    mount.refresh().unwrap();
+    for _ in 0..4 {
+        assert!(mount.doc.instantiate_oib(10, None).unwrap());
+        fixture_sync(&mut authority, &mut session, &mut mount.doc);
+        mount
+            .refresh()
+            .expect("real fixture plus local chrome admits each new root");
+    }
+    assert_eq!(mount.doc.oib_allocations().unwrap().len(), 6);
+    let instance = mount.doc.oib_allocations().unwrap().last().unwrap().id;
+    let mut client = Client {
+        active: Some(mount),
+        ..Client::default()
+    };
+    assert!(
+        client
+            .inspect_oib_selection(Selection::Object(ObjectAddress {
+                instance: InstanceId(instance),
+                references: vec![NodeId(7)],
+                node: NodeId(1),
+            }))
+            .unwrap()
+    );
+    let m = client.active.as_ref().unwrap();
+    let properties = crate::canvas::oib::document::properties(
+        crate::canvas::oib::seed(&m.ui).unwrap(),
+        &m.doc.oib_allocations().unwrap(),
+        &m.designer.as_ref().unwrap().selection,
+        &m.doc.oib_active().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        properties.len(),
+        4,
+        "selected slider has its real multi-property inspector"
+    );
+    assert_eq!(m.designer.as_ref().unwrap().objects.len(), 121);
+    assert!(m.designer.as_ref().unwrap().actions.len() > 128);
+    client
+}
+fn fixture_scroll_to(client: &mut Client, panel: usize, offset: f32) {
+    let scene = client.scene().unwrap();
+    let viewport = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .panels[panel]
+        .viewport;
+    let path = scene.path(u32::from(viewport)).unwrap();
+    let p = path.last().unwrap();
+    let point = [p.origin[0] + 10., p.origin[1] + 10.];
+    let current = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .panels[panel]
+        .scroll
+        .info()
+        .offset[1];
+    client
+        .scroll_at(client.epoch(), offset - current, point)
+        .unwrap();
+}
+#[test]
+fn actual_six_panel_mount_scrolls_all_rows_and_selected_inspector_within_combined_budgets() {
+    let mut client = mounted_six_panel_fixture();
+    let selected = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+        .clone();
+    for viewport in [[1280., 800.], [800., 1280.]] {
+        let mut maximum_nodes = 0;
+        let mut maximum_controls = 0;
+        client.set_viewport(viewport).unwrap();
+        client.tick(1, 0).unwrap();
+        client.inspect_oib_selection(selected.clone()).unwrap();
+        let m = client.active.as_ref().unwrap();
+        let base = resolve_layout(m).unwrap();
+        let base_nodes = count_nodes(base.root());
+        assert!(base_nodes > 100, "actual six-panel app budget is included");
+        let d = m.designer.as_ref().unwrap();
+        let cached_nodes = d
+            .panels
+            .iter()
+            .flat_map(|p| &p.nodes)
+            .map(count_nodes)
+            .sum::<usize>();
+        assert!(
+            base_nodes + cached_nodes > 512,
+            "the uncullled combined scene would overflow"
+        );
+        for panel in 0..2 {
+            let limit = client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .panels[panel]
+                .scroll
+                .info()
+                .limit[1];
+            for offset in (0..=(limit / 19.).ceil() as u32).map(|n| n as f32 * 19.) {
+                fixture_scroll_to(&mut client, panel, offset);
+                let scene = client.scene().expect("real app/chrome Scene::new succeeds");
+                maximum_nodes = maximum_nodes.max(count_nodes(scene.root()));
+                maximum_controls = maximum_controls.max(scene.controls().len());
+                assert!(count_nodes(scene.root()) <= 512 && scene.controls().len() <= 128);
+            }
+            fixture_scroll_to(&mut client, panel, 0.);
+        }
+        // Real activation refreshes the selected inspector and invalidates old
+        // local IDs, so resolve each next row from the current retained model.
+        for index in [0, 60, 120] {
+            let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+            let selection = d.objects[index].selection.clone();
+            let id = *d
+                .actions
+                .iter()
+                .find(|(_, a)| **a == LocalAction::Select(selection.clone()))
+                .unwrap()
+                .0;
+            let y = d.panels[0]
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap()
+                .frame
+                .y;
+            fixture_scroll_to(&mut client, 0, y);
+            let scene = client.scene().unwrap();
+            let control = scene
+                .controls()
+                .into_iter()
+                .find(|p| p.node.id == id)
+                .unwrap();
+            let point = [
+                control.origin[0] + control.node.frame.width - 0.1,
+                control.origin[1] + control.node.frame.height / 2.,
+            ];
+            assert!(scene.hit_path(point).iter().any(|p| p.node.id == id));
+            assert!(client.activate(client.epoch(), id).unwrap());
+            assert_eq!(
+                client
+                    .active
+                    .as_ref()
+                    .unwrap()
+                    .designer
+                    .as_ref()
+                    .unwrap()
+                    .selection,
+                selection
+            );
+            assert!(
+                !client.activate(client.epoch(), id).unwrap(),
+                "retired semantic IDs cannot retarget"
+            );
+        }
+        eprintln!(
+            "real six-panel viewport {viewport:?}: base {base_nodes} + retained {cached_nodes} nodes; maximum combined {maximum_nodes} nodes/{maximum_controls} controls"
+        );
+    }
+}
+#[test]
+fn actual_fixture_clipped_taps_offscreen_activation_and_pan_reuse() {
+    use crate::dashboard::retained_text::TextPresentation;
+    let mut client = mounted_six_panel_fixture();
+    fixture_scroll_to(&mut client, 0, 100.);
+    let scene = client.scene().unwrap();
+    let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    let mode_id = d.panels[0].nodes[0].id;
+    assert!(scene.path(mode_id).is_some()); // Retained overscan, clipped semantics.
+    assert!(!client.activate(client.epoch(), mode_id).unwrap());
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .mode,
+        DesignerMode::Edit
+    );
+    let font = crate::dashboard::font::test_font();
+    let mut paint = TextPresentation::default();
+    fixture_scroll_to(&mut client, 0, 40.);
+    let first = paint.compose(client.scene().unwrap().as_ref(), &font);
+    for offset in [41., 42., 43., 44.] {
+        fixture_scroll_to(&mut client, 0, offset);
+        let next = paint.compose(client.scene().unwrap().as_ref(), &font);
+        assert_eq!(first.generation, next.generation);
+        assert!(Arc::ptr_eq(&first.mesh, &next.mesh));
+    }
+    for edge in [0, 1] {
+        let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+        let row = d.panels[0].nodes[30].clone();
+        let selection = match &d.actions[&row.id] {
+            LocalAction::Select(s) => s.clone(),
+            _ => panic!(),
+        };
+        let scene = client.scene().unwrap();
+        let path = scene.path(u32::from(d.panels[0].viewport)).unwrap();
+        let height = path.last().unwrap().node.frame.height;
+        fixture_scroll_to(
+            &mut client,
+            0,
+            if edge == 0 {
+                row.frame.y + 16.
+            } else {
+                row.frame.y - height + 16.
+            },
+        );
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|p| p.node.id == row.id)
+            .unwrap();
+        assert_eq!(control.node.frame.height, 16.);
+        let point = [
+            control.origin[0] + control.node.frame.width - 0.1,
+            control.origin[1] + 0.1,
+        ];
+        for (phase, at) in [(PointerPhase::Down, 1), (PointerPhase::Up, 2)] {
+            assert_eq!(
+                client
+                    .designer_pointer(
+                        PointerEvent {
+                            id: 1,
+                            phase,
+                            position: point
+                        },
+                        at
+                    )
+                    .unwrap(),
+                Some(true)
+            );
+        }
+        assert_eq!(
+            client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .selection,
+            selection
+        );
+    }
 }
 
 #[test]
