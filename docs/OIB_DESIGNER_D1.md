@@ -123,10 +123,10 @@ Parent decisions after the runtime mapping:
 - Start with admitted boolean choices, bounded numeric suggestions/steps, color
   palettes, and text suggestions. General free-text inspector editing requires a
   deliberate adapter and is not implied by an existing text-input demo.
-- Target three reusable definitions and roughly 20 shared plus six occurrence
-  cells per resident panel. This is a design estimate: six roots would use 56
-  cells, while ten populated residents would exceed 64. Admission must check the
-  complete resident closure before allocation; do not raise ceilings silently.
+- The narrowed fixture targets six shared plus six occurrence cells per resident
+  panel: 42 at six roots, 66 at ten residents. These remain design counts until
+  runtime admission measures the fixture. Admission must check the complete
+  resident closure before allocation; do not raise the 64-cell ceiling silently.
 
 ### G2: runtime and designer implementation
 
@@ -152,6 +152,32 @@ After G1, launch three implementation lanes on the same reviewed contract commit
 - Local designer client owns `canvas/client.rs`, `canvas/client/host_panel.rs`,
   new `canvas/client/oib_designer.rs`, and dedicated client/input tests. It consumes
   runtime query results rather than adding another graph/source resolver.
+
+The fixture lane exclusively owns new
+`crates/otrios-core/tests/oib_designer_fixture.rs` (LGPL-3.0-only). Runtime and
+client test lanes use separate files. Counterpart-dependent checks must be
+reported as pending until the integrated code actually runs them.
+
+The fixture's fixed shell is instance 40/definition 11; panel definition 10 has
+Audio instance 20 and Display instance 30. Slider and Toggle are definitions 12
+and 13. The six root-relative paths use these immutable keys:
+
+| References / node / property | Explicit key | Audio / Display initial alias |
+| --- | --- | --- |
+| `[] / 1 / accent(1)` | 2 | 200 / 300 |
+| `[7] / 1 / accent(1)` | 9 | 201 / 301 |
+| `[7] / 1 / width(2)` | 17 | 202 / 302 |
+| `[7] / 1 / label(3)` | 28 | 203 / 303 |
+| `[8] / 1 / accent(1)` | 41 | 204 / 304 |
+| `[8] / 1 / label(3)` | 55 | 205 / 305 |
+
+Panel accent forwards to the referenced component roots. Ancestor cell targets
+paint property-free text/shape descendants without redundant mutable leaf cells.
+Slider value property 4 and toggle checked property 5 are read-only app bindings
+using Identity and Nonzero respectively. Named tooling viewports are
+`hierarchy-scroll`, `preview-scroll` (shell root), and `inspector-scroll`.
+Per-factory inspector nodes are empty placeholders for existing factory machinery;
+the client generates the actual selected inspector locally.
 
 Parent owns interface/protocol/package activation, host exports, process-test
 integration, release staging and live acceptance. Runtime and client lanes must

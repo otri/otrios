@@ -212,8 +212,8 @@ choices (at most 8) and every fallback/assignment must satisfy the descriptor.
 No implicit empty-name/default generation or unsupported value coercion is allowed.
 
 Retain six live allocated roots and ten resident descriptors. Cell capacity is
-independent: the proposed companion envelope of 20 shared +6 occurrence cells
-per root uses 56 at six live roots but **80 at ten residents**. Preflight the union
+independent: the narrowed companion envelope of six shared +six occurrence cells
+per root uses 42 at six live roots but **66 at ten residents**. Preflight the union
 of draft/active resident roots, causal/receipt retention and the proposed new root
 before allocating an identity or mutating state. Reclaim only when existing rules
 permit; otherwise reject capacity. Ten descriptors never promise ten full roots'
