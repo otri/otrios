@@ -727,7 +727,17 @@ fn slab_pans_reuse_paint_buffers_and_capture_keeps_typed_action() {
             Some(action.clone())
         );
     }
-    d.panels[0].scroll.set_offset([0., 200.]);
+    // Passing the previous 152-unit boundary now retains the same geometry;
+    // visibility checks still reject a captured action that has scrolled away.
+    for offset in [160., 200.] {
+        d.panels[0].scroll.set_offset([0., offset]);
+        let scene = presented(&d, &base);
+        let frame = paint.compose(&scene, &font);
+        assert_eq!(frame.generation, first.generation);
+        assert!(Arc::ptr_eq(&frame.mesh, &first.mesh));
+        assert_eq!(d.tap_action(&capture, &scene, [200., 50.]), None);
+    }
+    d.panels[0].scroll.set_offset([0., WINDOW_STEP + 48.]);
     let scene = presented(&d, &base);
     assert_ne!(
         paint.compose(&scene, &font).generation,

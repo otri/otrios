@@ -206,3 +206,52 @@ Independent review and follow-up (still no live acceptance):
   5ab9daf0acf87097c68ad044186262dddac2e3563c9115dd271182f60d129364,
   matching the actual Frame. It preserves persistent sessions. No app state or
   identity material was copied; the full backup/inventory script was not used.
+
+### Reviewed final control geometry and live acceptance in progress
+
+- `441519b` preserves the declared widths of split scope/Apply buttons and color
+  swatches when fitting a retained row to the properties dock. Full rows still
+  fill their panel. Parent focused Frame Focus tests: 12 passed. Fresh independent
+  review: no findings; 28 Designer tests and a temporary row-edge/non-overlap
+  geometry probe passed. The synthetic narrow-panel probe is clipping evidence,
+  not admission or physical-device acceptance.
+- The final staged release is
+  `cfbb8ea458bb8a200a98a9b3328a707368522c6453e41d1b9365e44b71b6b4aa`,
+  built from frozen `441519b6dee2fc52b6074ec74072f95154c4434b`.
+  Signature and complete signed app closure verified before activation.
+- A bounded loopback observer, using the Frame's existing Space and native
+  credentials only on Frame, confirmed the two-root fixture at generation 13
+  with app values `[440, 700, 1000, 0]`. Existing overrides are retained. This is
+  the baseline for the temporary six-root performance fixture; it does not prove
+  scroll performance or direct-editor usability.
+- Public signed-out browser presentation correctly exposes read-only properties.
+  Authenticated browser editor acceptance remains unproven. Live pixel export
+  was rejected by automatic approval review and has not been bypassed; visual
+  capture awaits explicit authorization. DOM geometry and native timing remain
+  independently available.
+
+### Actual Frame timing and bounded-window follow-up
+
+The signed `cfbb8ea4` release passed live health, matching native/web release,
+v27 negotiation, calibrated touch and RGB565 output checks. Four temporary named
+duplicates established six roots at generation 17; app values stayed
+`[440, 700, 1000, 0]`. A 30-second hierarchy pan offered 901 samples at 30 Hz
+through the real calibrated Frame device and normal native service. Timing logs
+flushed orderly with zero dropped rows; the temporary service environment was
+removed and the normal service restored. This is actual renderer/DRM evidence.
+
+The first trial produced 837 unique input-associated local updates in 30.000337s
+(27.90/s), with p95 presentation-return interval 35.411ms. The largest interval
+including release was 105.895ms; warmed move intervals peaked at 53.014ms.
+Sample-to-return p95 was 65.245ms. This does **not** pass the release gate.
+Boundary rebuilds took roughly 10ms composition and uploaded a new overlay mesh,
+compared with roughly 3.6ms composition for placement-only frames.
+
+The follow-up doubles bounded retained-window slabs from 152 to 304 units,
+reducing topology rebuild frequency while keeping the same presented node/control
+ceilings. All 28 Designer tests passed, including real six-root scroll-budget
+coverage. Hardware timing for this follow-up remains pending. The initial manual
+profiling harness failed because stopping the service removes its runtime path
+and release supervisor socket; it produced no valid performance result. The
+successful trial instead used a temporary environment override on the existing
+service and preserved its release supervisor. No new service was installed.

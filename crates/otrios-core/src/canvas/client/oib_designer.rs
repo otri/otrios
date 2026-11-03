@@ -24,10 +24,12 @@ const MAX_CONTENT: f32 = 8192.;
 // Together their 8192px caps fit below these defensive cache ceilings.
 const MAX_CACHED_NODES: usize = 2048;
 const MAX_CACHED_ACTIONS: usize = 768;
-// Align culling to four-row slabs. Placement-only pans reuse retained GPU
+// Align culling to eight-row slabs. Frame timing shows topology rebuilds at
+// four-row boundaries can miss a display period during a 30 Hz pan. Keep
+// bounded overscan to amortize that work without raising scene ceilings. Placement-only pans reuse retained GPU
 // geometry until either viewport edge crosses a slab boundary. Crossing one
 // changes scene topology and necessarily rebuilds the shared paint cache once.
-const WINDOW_STEP: f32 = 4. * ROW;
+const WINDOW_STEP: f32 = 8. * ROW;
 #[derive(Clone, Debug, PartialEq)]
 enum LocalAction {
     Select(Selection),
