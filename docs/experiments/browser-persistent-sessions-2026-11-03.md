@@ -82,6 +82,13 @@ the same cookie returned 401 after another restart. Its session file was mode
 600. The temporary process/configuration was removed; this did not add a
 production account or touch production app state.
 
-Safari needs one fresh sign-in because the preceding volatile session had
-already been lost. Real-account Safari refresh/restart acceptance is pending the
-user's sign-in; the isolated ARM process results above do not claim that step.
+After the user's one-time sign-in, real-account Safari acceptance passed.
+The refreshed OTriOS page retained Profile and the authorized Operations/Monitoring
+entries. The production authority was then restarted and recovered with a new
+process ID; its private session snapshot remained byte-for-byte unchanged.
+Safari reconnected, and another full page refresh retained the authenticated UI.
+Opening `/auth/session` in Safari returned `{"monitoring":true}` using its own
+retained cookie. The diagnostic tab was closed and the original OTriOS tab was
+restored, still signed in. No password or cookie value was inspected or copied.
+The real browser was left signed in; durable Sign Out was already exercised in
+the isolated ARM acceptance and real-process regression tests above.
