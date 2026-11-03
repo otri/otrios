@@ -190,14 +190,14 @@ fn retired_residents_are_hidden_and_reused_slots_keep_new_identity() {
     };
     let old_rows = hierarchy(
         &seed,
-        &[old.clone()],
+        std::slice::from_ref(&old),
         &BTreeSet::from([old.id]),
         HierarchyScope::Composition,
     )
     .unwrap();
     let rows = hierarchy(
         &seed,
-        &[old.clone()],
+        std::slice::from_ref(&old),
         &BTreeSet::new(),
         HierarchyScope::Composition,
     )
@@ -210,7 +210,7 @@ fn retired_residents_are_hidden_and_reused_slots_keep_new_identity() {
     assert!(find(&rows, &address(40, &[], 1)).selection.is_some());
     let rows = hierarchy(
         &seed,
-        &[new.clone()],
+        std::slice::from_ref(&new),
         &BTreeSet::from([new.id]),
         HierarchyScope::Composition,
     )
