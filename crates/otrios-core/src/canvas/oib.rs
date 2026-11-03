@@ -139,6 +139,12 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             return Err("Invalid OIB cell identity".into());
         }
         validate_value(cell, &cell.default)?;
+        if let Some(value) = &cell.authored_override {
+            if cell.inherit.is_none() {
+                return Err("Only instances have authored overrides".into());
+            }
+            validate_value(cell, value)?;
+        }
         if cell.choices.len() > 8 {
             return Err("OIB inspector choice limit".into());
         }
@@ -249,6 +255,9 @@ pub fn effective(seed: &Seed, values: &BTreeMap<u64, Option<Value>>, id: u64) ->
         .find(|c| c.id == id)
         .ok_or("Unknown OIB cell")?;
     if let Some(Some(value)) = values.get(&id) {
+        return Ok(value.clone());
+    }
+    if let Some(value) = &cell.authored_override {
         return Ok(value.clone());
     }
     if let Some(parent) = cell.inherit {

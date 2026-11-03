@@ -87,11 +87,20 @@ pub fn description() -> Ui {
                 owner,
                 name: name.into(),
                 default,
+                authored_override: match (owner, offset) {
+                    (20, 0) => Some(Value::Text("Volume".into())),
+                    (30, 0) => Some(Value::Text("Brightness".into())),
+                    _ => None,
+                },
                 choices: match offset {
-                    0 => ["Level", "Volume", "Sound"]
-                        .iter()
-                        .map(|v| Value::Text((*v).into()))
-                        .collect(),
+                    0 => match owner {
+                        20 => ["Volume", "Sound", "Level"],
+                        30 => ["Brightness", "Light", "Level"],
+                        _ => ["Level", "Volume", "Sound"],
+                    }
+                    .iter()
+                    .map(|v| Value::Text((*v).into()))
+                    .collect(),
                     1 => [BLUE, [218, 165, 32, 255], [255, 136, 85, 255]]
                         .into_iter()
                         .map(Value::Color)
@@ -121,6 +130,7 @@ pub fn description() -> Ui {
             owner: 10,
             name: name.into(),
             default,
+            authored_override: None,
             choices: vec![],
             inherit: None,
             targets: vec![],
@@ -279,6 +289,7 @@ pub fn description() -> Ui {
     .with_oib_instances(NamedOibSurface {
         layout: Some(LayoutSurface {
             previous_ui_sha256: [
+                "b202dc66dfea4e987448e7c6ae100d1cad0bf703d1a6c7d127953719250801d0",
                 "c25ff9811d3c1744b78a01f769aca73bc5e81090083987144595c826adb54db2",
                 "f810f69342264e7778aeaee97646bbaf8fe8182fb4acfd8fcd110a49e58ce8ce",
                 "22fa4203073790b9d1f5c16663a8ea4445760641dbe6274aaee5276490698f7f",

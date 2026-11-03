@@ -766,7 +766,12 @@ impl StateAdapter {
             .ok_or("Unknown OIB cell")?;
         let value = match action {
             InspectorAction::Clear => None,
-            InspectorAction::Resolve => Some(cell.default.clone()),
+            InspectorAction::Resolve => Some(
+                cell.authored_override
+                    .as_ref()
+                    .unwrap_or(&cell.default)
+                    .clone(),
+            ),
             InspectorAction::Cycle => {
                 let active = self.doc.oib_values(2)?;
                 let current = super::super::oib::effective(seed, &active, id)?;
@@ -805,6 +810,8 @@ fn property_text(
         "default"
     } else if values[&cell.id].is_some() {
         "override"
+    } else if cell.authored_override.is_some() {
+        "authored"
     } else {
         "inherited"
     };
@@ -849,7 +856,8 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
                     && a.owner == b.owner
                     && a.name == b.name
                     && (a.default == b.default || compatible_geometry_default(a, b))
-                    && a.choices == b.choices
+                    && (a.choices == b.choices || a.inherit.is_some())
+                    && (a.authored_override == b.authored_override || a.inherit.is_some())
                     && a.inherit == b.inherit
             })
         });
@@ -883,6 +891,7 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
             && a.name == b.name
             && a.default == b.default
             && a.choices == b.choices
+            && a.authored_override == b.authored_override
             && a.inherit == b.inherit
     })
 }

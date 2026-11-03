@@ -38,7 +38,7 @@ unactivated new instance, such as a concurrent duplicate-name conflict.
 
 **Restore sliders** brings back the authored Volume/Brightness pair and bindings,
 while keeping the live component design and overrides on surviving objects.
-Deleted objects are recreated with fresh IDs and inherited properties; extras
+Deleted objects are recreated with fresh IDs and their authored defaults; extras
 are removed and reclaimed. **Reset UI defaults** also restores signed
 component defaults and clears instance overrides; it preserves current slider
 values. These operations preserve surviving authored objects and reclaim unused slots.
@@ -52,10 +52,13 @@ property registers, allocations and app values until an owner explicitly resets.
 - **Change** cycles through suggestions authored by the app for label, accent,
   width or spacing. Component edits affect both instances unless overridden.
 - Changing an instance property sets its override. **Reset** clears the override
-  causally and restores inheritance. The inspector identifies inherited values
-  and explicit overrides.
+  causally and restores its app-authored value when declared, otherwise component
+  inheritance. Volume/Brightness labels have separate authored defaults; their
+  style properties still inherit. The inspector identifies authored, inherited
+  and explicit live overrides.
 - **Default** explicitly writes the signed seed default, observing all retained
-  alternatives. It can resolve a same-property conflict. The typed client API can
+  alternatives (using the authored instance value where present). It can resolve
+  a same-property conflict. The typed client API can
   also resolve to another chosen value.
 
 Space Admins edit UI; Members and admitted visitors receive the active result.
@@ -128,7 +131,7 @@ causally clears an instance override. Only one issued OIB batch is retained per
 writer; wait for confirmation before submitting another. A batch has at most
 16 distinct cells. Observed leaf snapshots are captured before issuing it.
 
-Property writes use tag 37 in state protocol **v25** (introduced in v21): u64 writer sequence followed
+Property writes use tag 37 in state protocol **v26** (introduced in v21): u64 writer sequence followed
 by a bounded blob containing the canonical FlexBuffers vector of `Change` values.
 Tag 38 carries one bounded canonical InstanceOperation under the same writer
 sequence/receipt contract. Allocation, draft/active changes and receipt are

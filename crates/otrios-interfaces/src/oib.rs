@@ -8,6 +8,7 @@ pub const FEATURE: &str = "otrios-oib-v1";
 pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
 pub const LAYOUT_FEATURE: &str = "otrios-oib-layout-v1";
 pub const RESTORE_FEATURE: &str = "otrios-oib-restore-v1";
+pub const AUTHORED_DEFAULTS_FEATURE: &str = "otrios-oib-authored-defaults-v1";
 /// Resident draft/active objects, independent of lifetime creation count.
 pub const MAX_ALLOCATIONS: usize = 10;
 pub const MAX_LIVE_INSTANCES: usize = 6;
@@ -122,6 +123,10 @@ pub struct Cell {
     pub owner: u64,
     pub name: String,
     pub default: Value,
+    /// App-authored instance override, revealed when a live override is cleared.
+    /// Shared component properties still apply where this is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_override: Option<Value>,
     /// App-authored inspector suggestions; the typed API also accepts other valid values.
     pub choices: Vec<Value>,
     /// An instance cell inherits this component cell until overridden.

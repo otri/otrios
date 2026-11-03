@@ -42,3 +42,4 @@ Numbers 0005 and 0006 each identify two distinct RFCs; use the full title when r
 | [RFC 0031: Live OIB component geometry](0031-live-oib-component-geometry.md) | Live compact design and spacing edits qualified on Frame and the deployed Wasm client |
 | [RFC 0032: Restore authored OIB instances and UI defaults](0032-oib-restoration.md) | Restore/default controls qualified on Frame and the deployed Wasm client; original bindings restored |
 | [RFC 0033: Reclaim deleted OIB instances](0033-oib-instance-reclamation.md) | Fresh IDs, reusable renderer slots and removal of unused OIB references |
+| [RFC 0034: Authored instance defaults](0034-oib-authored-instance-defaults.md) | Per-factory label defaults and inspector choices, independent of shared styling |

@@ -86,6 +86,184 @@ fn compact_changes() -> Vec<(u64, Option<Value>)> {
 }
 
 #[test]
+fn restored_brightness_inspector_resets_and_cycles_its_own_authored_label() {
+    use otrios_interfaces::{
+        oib::InspectorAction,
+        scene::{PointerEvent, PointerPhase},
+    };
+    let (ui, mut doc) = setup();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
+    admin
+        .edit_oib(&[(100, Some(Value::Text("Volume".into())))])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    for id in [20, 30] {
+        admin.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    admin.restore_oib(false).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let allocations = doc.oib_allocations().unwrap();
+    let volume = allocations.iter().find(|a| a.prototype == 20).unwrap().id;
+    let brightness = allocations.iter().find(|a| a.prototype == 30).unwrap().id;
+    assert!(volume > 30 && brightness > 30);
+    let seed = oib::seed(&ui).unwrap();
+    let vcell = oib::instances::cell_id(seed, &allocations, volume, 100).unwrap();
+    let bcell = oib::instances::cell_id(seed, &allocations, brightness, 100).unwrap();
+    admin
+        .edit_oib(&[
+            (vcell, Some(Value::Text("My Volume".into()))),
+            (bcell, Some(Value::Text("My Brightness".into()))),
+        ])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    client.inspect_oib(brightness).unwrap();
+    for (caption, expected) in [
+        ("Instance: brightness Label reset", "Brightness"),
+        ("Instance: brightness Label change", "Light"),
+        (
+            "Instance: brightness Label resolve to default",
+            "Brightness",
+        ),
+    ] {
+        let scene = client.scene().unwrap();
+        let control = scene
+            .controls()
+            .into_iter()
+            .find(|p| {
+                p.node
+                    .semantics
+                    .as_ref()
+                    .is_some_and(|s| s.label == caption)
+            })
+            .unwrap();
+        let position = [
+            control.origin[0] + control.node.frame.width * control.scale / 2.,
+            control.origin[1] + control.node.frame.height * control.scale / 2.,
+        ];
+        for phase in [PointerPhase::Down, PointerPhase::Up] {
+            client
+                .pointer_at(
+                    client.epoch(),
+                    PointerEvent {
+                        id: 84,
+                        phase,
+                        position,
+                    },
+                    300,
+                )
+                .unwrap();
+        }
+        pump_client(&mut client, &mut doc, &mut session);
+        let expanded = oib::instances::expanded_seed(seed, &allocations).unwrap();
+        assert_eq!(
+            oib::effective(&expanded, &doc.oib_values(2).unwrap(), bcell).unwrap(),
+            Value::Text(expected.into())
+        );
+        assert_eq!(
+            doc.oib_values(2).unwrap()[&vcell],
+            Some(Value::Text("My Volume".into()))
+        );
+        assert_eq!(
+            client.resource_usage().oib.unwrap().selected_instance,
+            Some(brightness)
+        );
+    }
+    sync(&mut doc, &mut sa, &mut admin);
+    admin
+        .oib_inspector_action(bcell, InspectorAction::Clear)
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert_eq!(
+        admin.oib_property_text(bcell),
+        "label: Brightness (authored)"
+    );
+    admin.restore_oib(true).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert_eq!(admin.oib_property_text(vcell), "label: Volume (authored)");
+    assert_eq!(
+        admin.oib_property_text(bcell),
+        "label: Brightness (authored)"
+    );
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(400.));
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(700.));
+    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(80.)));
+    let (resolved, _) = doc.oib_compiled(2).unwrap();
+    assert_eq!(
+        resolved
+            .handlers
+            .iter()
+            .filter(|h| h.kind == GestureKind::Slider)
+            .map(|h| h.fields.clone())
+            .collect::<Vec<_>>(),
+        vec![vec![1], vec![2]]
+    );
+}
+
+#[test]
+fn authored_label_upgrade_preserves_existing_values_and_explicit_overrides() {
+    use sha2::{Digest, Sha256};
+    let encoded =
+        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-v25-ui.lz4")).unwrap();
+    let old = decode_ui(&encoded).unwrap();
+    assert_eq!(
+        encode_ui(&old).unwrap(),
+        encoded,
+        "optional field preserves old canonical bytes"
+    );
+    let new = app::ui(&[]);
+    assert!(
+        oib::seed(&new)
+            .unwrap()
+            .instance_surface
+            .as_ref()
+            .unwrap()
+            .layout
+            .as_ref()
+            .unwrap()
+            .previous_ui_sha256
+            .contains(&Sha256::digest(&encoded).to_vec())
+    );
+    let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
+    doc.configure_oib(&old).unwrap();
+    let (mut admin, mut sa) = adapter(&old, &mut doc, 1, true);
+    admin
+        .edit_oib(&[
+            (100, Some(Value::Text("Volume".into()))),
+            (200, Some(Value::Text("Custom volume".into()))),
+        ])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
+        .unwrap();
+    let before = doc.clone();
+    let saved = doc.save().unwrap();
+    doc.configure_oib(&new).unwrap();
+    assert_eq!(doc.oib_values(2).unwrap(), before.oib_values(2).unwrap());
+    assert_eq!(
+        doc.oib_allocations().unwrap(),
+        before.oib_allocations().unwrap()
+    );
+    assert_eq!(
+        oib::effective(oib::seed(&new).unwrap(), &doc.oib_values(2).unwrap(), 200).unwrap(),
+        Value::Text("Custom volume".into())
+    );
+    assert_eq!(
+        oib::effective(oib::seed(&new).unwrap(), &doc.oib_values(2).unwrap(), 300).unwrap(),
+        Value::Text("Brightness".into())
+    );
+    let mut recovered = Document::load(old.state_schema.clone(), "oib:test", &saved).unwrap();
+    recovered
+        .replay(&doc.journal_delta(&before).unwrap())
+        .unwrap();
+    assert!(!recovered.configure_oib(&new).unwrap());
+    assert_eq!(recovered.root_hash(), doc.root_hash());
+    assert_eq!(recovered.typed_value(1).unwrap(), Value::Number(610.));
+    assert_eq!(recovered.typed_value(2).unwrap(), Value::Number(570.));
+}
+
+#[test]
 fn compact_defaults_survive_remove_add_restore_and_reset() {
     use otrios_interfaces::scene::TouchResponder;
     let ui = app::ui(&[]);

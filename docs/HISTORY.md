@@ -5,6 +5,10 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Authored instance defaults](rfcs/0034-oib-authored-instance-defaults.md) keep
+Volume/Brightness label defaults and suggestions separate while sharing styling.
+Reset and restoration now retain the correct binding-specific label.
+
 [OIB reclamation](rfcs/0033-oib-instance-reclamation.md) separates fresh object
 identities from reusable renderer slots and removes deleted properties, presence
 and descriptors. The previous ten-creation lifetime budget is retired; current
