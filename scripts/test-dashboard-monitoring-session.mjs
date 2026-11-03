@@ -34,6 +34,19 @@ test('an expired server session notifies its owner to revoke the private mount',
   let authorized=true;const h=harness(async()=>reply(authorized,authorized?200:401));
   await h.session.refresh();authorized=false;await h.session.refresh();assert.equal(h.session.authenticated,false);assert.deepEqual(h.states.at(-1),{authenticated:false});
 });
+test('temporary status failures cannot turn a confirmed login into a sign-out',async()=>{
+  for(const status of [429,500,502,503,504]){
+    let failure=false;const h=harness(async()=>failure?reply(false,status):reply(true));
+    await h.session.refresh();failure=true;
+    await assert.rejects(h.session.refresh(),/temporarily unavailable/);
+    assert.equal(h.session.authenticated,true);assert.deepEqual(h.states,[{authenticated:true}]);
+  }
+});
+test('unavailable status does not grant an anonymous session access',async()=>{
+  const h=harness(async()=>reply(false,503));
+  await assert.rejects(h.session.refresh(),/temporarily unavailable/);
+  assert.equal(h.session.authenticated,false);assert.deepEqual(h.states,[]);
+});
 test('a delayed session body cannot restore access after logout',async()=>{
   let finish;const h=harness(async(_,options)=>options.method?reply(false):({ok:true,json:()=>new Promise(resolve=>finish=resolve)}));
   const refresh=h.session.refresh();await Promise.resolve();await h.session.logout();finish({monitoring:true});await refresh;assert.equal(h.session.authenticated,false);
