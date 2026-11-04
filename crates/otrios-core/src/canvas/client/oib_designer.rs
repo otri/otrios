@@ -1451,7 +1451,7 @@ impl Mount {
                     _ => None,
                 };
                 for (prototype, name) in self.doc.oib_canvas_factories().unwrap_or_default() {
-                    if self.doc.oib_info()?.available_instance_slots > 0 {
+                    if self.doc.oib_available_slots_for(prototype) > 0 {
                         designer.structure_tools.push((
                             format!("Insert {name}"),
                             InstanceOperation::Insert {

@@ -280,6 +280,42 @@ oib_designer_hierarchy --test oib_designer_fixture --locked --offline` passed al
 This changes tests and documentation only; the qualified deployed runtime is
 unchanged.
 
+The next CI run passed the complete native GLES2/Wasm host job and reached a
+separate D1 process regression: generic slot availability charged every factory
+the smallest factory's property cost. With 60 resident cells, Power fits but a
+six-cell SettingsPanel does not. Insert, Instantiate and Duplicate now preflight
+the requested signed factory; palette entries use that same capacity. Authority
+admission and its unchanged 64-cell limit still independently reject overflow.
+
+Additional actual checks for that correction:
+
+- A freshly built `dashboard-server` supplied through `OTRIOS_SPACES_SERVER`
+  passed `cargo test -p otrios-core --features canvas --test spaces_process
+  d1::d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_observed_resolution
+  --locked --offline -- --exact --nocapture` (one passed, 23.43s). The test retains
+  the original exact-root authority rejection and restart assertions, checks
+  factory-specific client rejection without queuing an intent, and admits the
+  smaller Power factory without publishing it.
+- The 15 designer fixture, 11 hierarchy and 10 `desktop_studio_` tests passed.
+  Core library Clippy with `canvas,merkle` and `-D warnings`, formatting and
+  whitespace checks passed.
+- Signed ARM/Wasm build, deployment and Frame readiness passed for
+  `1339deccac7c1c0a42538cae75cd8f0d700e9b65606af48f0e2d485a9349f252`.
+  A current ARM Client probe inserted Power 65563 at generation 109 and removed
+  it at 110, preserving the generation-108 baseline's exact original order,
+  property displays and app values. The temporary helper was removed.
+- The signed Wasm artifact instantiated in Node, admitted the verified catalog
+  and generated its OIB mount request; three asset SHA-256 checks passed. This
+  is an artifact smoke check, not browser DOM/GPU acceptance. A separate public
+  HTTPS artifact fetch returned HTTP 403 and is not counted as passing. The first
+  ARM probe used the public socket without its required Origin and was rejected;
+  the completed probe used the existing trusted loopback socket and native
+  identity. Neither rejection published an app edit.
+
+The [factory preflight evidence](experiments/data/oib-studio-d2-2026-11-04/factory-preflight.json)
+records the focused results. State stays v28 and release control v1; existing
+compatible signed code rollback remains available during review.
+
 ## Next goal: design-agnostic OIB and Components dogfooding
 
 After this active goal is qualified, make OIB independent of any particular app

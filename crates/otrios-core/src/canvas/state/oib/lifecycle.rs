@@ -423,6 +423,12 @@ impl Document {
 
 impl StateAdapter {
     pub(super) fn oib_available_slots(&self) -> usize {
+        self.oib_slots(None)
+    }
+    pub(in crate::canvas) fn oib_available_slots_for(&self, prototype: u64) -> usize {
+        self.oib_slots(Some(prototype))
+    }
+    fn oib_slots(&self, prototype: Option<u64>) -> usize {
         let Ok(allocations) = self.doc.oib_allocations() else {
             return 0;
         };
@@ -448,6 +454,7 @@ impl StateAdapter {
                     .mappings
                     .roots
                     .iter()
+                    .filter(|t| prototype.is_none_or(|p| t.prototype.0 == p))
                     .map(|t| t.cells.len())
                     .filter(|n| *n > 0)
                     .min()

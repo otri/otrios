@@ -765,6 +765,16 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
         !a.state.duplicate_oib(20, None).unwrap(),
         "client cell-union preflight"
     );
+    assert!(
+        !a.state.instantiate_oib(10, None).unwrap(),
+        "component factory preflight must charge six panel cells"
+    );
+    assert_eq!(
+        a.state.insert_oib(30, None).unwrap_err(),
+        "Resolve the UI draft before changing structure",
+        "canvas insertion still requires a resolved draft"
+    );
+    assert!(a.state.confirmed(), "rejection queues no local intent");
     // Exercise the authority preflight too, bypassing only the adapter's local
     // availability UI. The requested root is still a signed admitted factory.
     assert!(
@@ -796,6 +806,12 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
         nine.root_hash(),
         "rejection cannot consume identity or mutate draft"
     );
+    // Power has a smaller property closure and still fits this resident union.
+    // Check availability without publishing another root. Opening the peer
+    // follows the exact-root assertion because it registers a fresh writer.
+    let mut small = f.open('a', 54, 0);
+    assert!(small.state.instantiate_oib(13, None).unwrap());
+    drop(small);
     c.observe(&a);
     c.edit(&[(102, Some(Value::Number(400.)))]);
     let reclaimed = f.durable(&collection);

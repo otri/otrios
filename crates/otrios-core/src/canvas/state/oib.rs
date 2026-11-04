@@ -1408,8 +1408,8 @@ impl StateAdapter {
                 // local host error. Current-generation actions still preflight.
                 if *generation == self.doc.oib_status()?.generation {
                     self.doc.oib_validate_structure(&operation)?;
-                    if matches!(&operation, InstanceOperation::Insert { .. })
-                        && self.oib_available_slots() == 0
+                    if let InstanceOperation::Insert { prototype, .. } = &operation
+                        && self.oib_available_slots_for(*prototype) == 0
                     {
                         return Ok(false);
                     }
@@ -1420,7 +1420,16 @@ impl StateAdapter {
                 if !seed.components.iter().any(|c| c.id == *component) {
                     return Err("Unknown OIB component".into());
                 }
-                if self.oib_available_slots() == 0 {
+                let prototype = self
+                    .doc
+                    .oib_binding()?
+                    .seed
+                    .instances
+                    .iter()
+                    .find(|i| i.component == Some(*component))
+                    .ok_or("Undeclared component factory")?
+                    .id;
+                if self.oib_available_slots_for(prototype) == 0 {
                     return Ok(false);
                 }
                 if let Some(name) = name
@@ -1433,7 +1442,14 @@ impl StateAdapter {
                 if !self.doc.oib_live(2)?.contains(instance) {
                     return Err("Source instance is not active".into());
                 }
-                if self.oib_available_slots() == 0 {
+                let prototype = self
+                    .doc
+                    .oib_allocations()?
+                    .iter()
+                    .find(|a| a.id == *instance)
+                    .ok_or("Unknown source instance")?
+                    .prototype;
+                if self.oib_available_slots_for(prototype) == 0 {
                     return Ok(false);
                 }
                 if let Some(name) = name
