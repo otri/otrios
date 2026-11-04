@@ -121,13 +121,33 @@ pub(super) fn inspector(
         heading.frame.width = 208.;
         nodes.push(heading);
         if let Some(address) = &p.address {
-            nodes.push(b.focus_button(
+            let expanded = details.is_some_and(|d| &d.address == address);
+            let mut info = b.focus_button(
                 216.,
                 y,
                 104.,
-                "Info",
+                if expanded { "v Info" } else { "> Info" },
                 LocalAction::Details(address.clone()),
-            )?);
+            )?;
+            if let Some(semantics) = &mut info.semantics {
+                semantics.label = if expanded {
+                    "Hide property info"
+                } else {
+                    "Show property info"
+                }
+                .into();
+                semantics.checked = expanded;
+            }
+            if expanded {
+                super::style::set_surface_fill(
+                    &mut info.children[0],
+                    otrios_interfaces::theme::LINE,
+                )?;
+                if let Primitive::Text { color, .. } = &mut info.children[1].primitive {
+                    *color = ACCENT;
+                }
+            }
+            nodes.push(info);
         }
         y += 56.;
         property_context(b, &mut nodes, &mut y, p, details, registers, seed, editable)?;

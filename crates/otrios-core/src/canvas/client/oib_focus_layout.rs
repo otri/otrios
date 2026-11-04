@@ -18,6 +18,7 @@ pub(super) const RESIZE_LEFT: u32 = 2_690_000_031;
 pub(super) const RESIZE_RIGHT: u32 = 2_690_000_032;
 const CHROME: u32 = 2_690_000_000;
 pub(super) const PROPERTIES_TITLE: u32 = CHROME + 8;
+pub(super) const PROPERTIES_ACTIONS: u32 = CHROME + 40;
 pub(super) const HEADER: f32 = 64.;
 pub(super) const DOCK: f32 = 352.;
 pub(super) const DRAWER: f32 = 320.;
@@ -87,6 +88,7 @@ pub(super) fn project(
     open: bool,
     keyboard: bool,
     studio: Studio,
+    management: bool,
 ) -> Result<Scene, String> {
     let doc = seed.designer.as_ref().ok_or("Missing designer metadata")?;
     let hierarchy = doc.hierarchy_viewport.ok_or("Missing hierarchy viewport")?;
@@ -122,7 +124,13 @@ pub(super) fn project(
         canvas_width,
         body_height,
     );
-    inspector.frame = Rect::new(16., 56., (dock - 32.).max(1.), (body_height - 72.).max(1.));
+    let inspector_top = if management { 120. } else { 56. };
+    inspector.frame = Rect::new(
+        16.,
+        inspector_top,
+        (dock - 32.).max(1.),
+        (body_height - inspector_top - 16.).max(1.),
+    );
     let hierarchy_width = if studio.enabled { left } else { DRAWER };
     hierarchy.frame = Rect::new(
         16.,
@@ -241,7 +249,7 @@ pub(super) fn project(
         });
         header.push(button);
     }
-    let dock = canvas(
+    let mut dock = canvas(
         CHROME + 6,
         Rect::new(width - dock - 16., HEADER + 16., dock, body_height),
         vec![
@@ -262,6 +270,13 @@ pub(super) fn project(
             inspector,
         ],
     );
+    if management {
+        dock.children.push(canvas(
+            PROPERTIES_ACTIONS,
+            Rect::new(16., 56., (dock.frame.width - 32.).max(1.), 52.),
+            vec![],
+        ));
+    }
     let mut drawer = canvas(
         CHROME + 9,
         Rect::new(

@@ -23,7 +23,9 @@ names and paint order are labels and ordering, never identity inputs.
 
 [Desktop Studio and bounded authoring](../../docs/OIB_DESKTOP_STUDIO_D2.md)
 now add persistent resizable panels, an insert palette and live reorder within the
-presented canvas. A palette-only Power factory (prototype 50 / definition 13)
+presented canvas. Persistent Edit/Delete controls manage the selected canvas
+component, including one selected through an internal part. Inspector Info
+controls show their expanded/collapsed state. A palette-only Power factory (prototype 50 / definition 13)
 reuses the toggle definition, with an admitted `audio-enabled` binding. It is not
 an initial resident. Insertion gives it a fresh ID; its accent/label use relative
 keys 41/55 and source aliases 400/401. Existing Audio/Display bindings and values

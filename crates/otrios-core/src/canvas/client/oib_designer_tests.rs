@@ -2988,3 +2988,687 @@ fn desktop_studio_structural_rejection_stays_visible_above_scrolled_properties()
     assert_ne!(authority.oib_allocations().unwrap(), accepted_order);
     assert!(client.confirmed());
 }
+
+fn studio_scene_control(client: &Client, label: &str) -> (u32, [f32; 2]) {
+    let scene = client.scene().unwrap();
+    let control = scene
+        .controls()
+        .into_iter()
+        .find(|p| p.node.semantics.as_ref().is_some_and(|s| s.label == label))
+        .unwrap_or_else(|| panic!("Missing visible Studio control {label}"));
+    (
+        control.node.id,
+        [
+            control.origin[0] + control.node.frame.width / 2.,
+            control.origin[1] + control.node.frame.height / 2.,
+        ],
+    )
+}
+
+#[test]
+fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_safely() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    let temporary: Vec<_> = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.id > 0xffff)
+        .map(|i| i.id)
+        .collect();
+    for id in temporary {
+        assert!(client.remove_oib(id).unwrap());
+        settle_editor(&mut client, &mut authority, &mut session);
+    }
+    assert!(
+        client
+            .active
+            .as_mut()
+            .unwrap()
+            .doc
+            .edit_oib_property(&editor_address(3), Some(Value::Text("Sound".into())))
+            .unwrap()
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
+    let original = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_property_register(&editor_address(3))
+        .unwrap();
+    activate_studio_tool(&mut client, "Insert component...");
+    activate_studio_tool(&mut client, "Insert Power");
+    settle_editor(&mut client, &mut authority, &mut session);
+    let power = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.component == 13)
+        .unwrap();
+    let descendant = Selection::Object(ObjectAddress {
+        instance: InstanceId(power.id),
+        references: vec![],
+        node: NodeId(3),
+    });
+    let layout_node = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .objects
+        .iter()
+        .find(|o| o.selection == descendant)
+        .unwrap()
+        .layout_node
+        .unwrap();
+    let scene = client.scene().unwrap();
+    let path = scene.path(u32::from(layout_node)).unwrap();
+    let object = path.last().unwrap();
+    let point = [object.origin[0] + 8., object.origin[1] + 16.];
+    for phase in [PointerPhase::Down, PointerPhase::Up] {
+        assert!(
+            client
+                .pointer_at(
+                    client.epoch(),
+                    PointerEvent {
+                        id: 71,
+                        phase,
+                        position: point
+                    },
+                    1
+                )
+                .unwrap()
+        );
+    }
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        descendant
+    );
+    let (edit, _) = studio_scene_control(&client, "Edit component");
+    assert!(client.activate(client.epoch(), edit).unwrap());
+    let root = Selection::Object(ObjectAddress {
+        instance: InstanceId(power.id),
+        references: vec![],
+        node: NodeId(1),
+    });
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .selection,
+        root
+    );
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .panels[1]
+            .scroll
+            .info()
+            .offset[1],
+        0.
+    );
+    let label = PropertyAddress::Occurrence {
+        instance: InstanceId(power.id),
+        path: PropertyPath {
+            references: vec![],
+            node: NodeId(1),
+            property: PropertyId(3),
+        },
+    };
+    let (field, y) = {
+        let m = client.active.as_mut().unwrap();
+        m.font = Some(Arc::new(crate::dashboard::font::test_font()));
+        let d = m.designer.as_ref().unwrap();
+        let field = d.drafts.draft(&label).unwrap().fields[0].id;
+        (
+            field,
+            d.panels[1]
+                .nodes
+                .iter()
+                .find(|n| n.id == field)
+                .unwrap()
+                .frame
+                .y,
+        )
+    };
+    fixture_scroll_to(&mut client, 1, y - 8.);
+    assert!(client.activate(client.epoch(), field).unwrap());
+    fixture_scroll_to(&mut client, 1, y - 8.);
+    assert!(
+        client
+            .edit_text_input(
+                client.epoch(),
+                field,
+                &Edit::Replace {
+                    text: "Main power".into(),
+                    cursor: 10,
+                    anchor: 10,
+                    selection_only: false
+                }
+            )
+            .unwrap()
+    );
+    assert!(
+        client
+            .edit_text_input(client.epoch(), field, &Edit::Enter)
+            .unwrap()
+    );
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_property_register(&label)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Main power".into()))]
+    );
+    let (delete, point) = studio_scene_control(&client, "Delete component");
+    let generation = client.active.as_ref().unwrap().doc.oib_generation();
+    assert!(
+        client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 72,
+                    phase: PointerPhase::Down,
+                    position: point
+                },
+                2
+            )
+            .unwrap()
+    );
+    assert!(
+        !client.activate(client.epoch(), delete).unwrap(),
+        "capture prevents competing semantic delete"
+    );
+    assert!(
+        !client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 73,
+                    phase: PointerPhase::Up,
+                    position: point
+                },
+                3
+            )
+            .unwrap()
+    );
+    assert!(
+        client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 72,
+                    phase: PointerPhase::Cancel,
+                    position: point
+                },
+                4
+            )
+            .unwrap()
+    );
+    assert!(!client.input_busy());
+    assert_eq!(
+        client.active.as_ref().unwrap().doc.oib_generation(),
+        generation
+    );
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == power.id && i.active)
+    );
+    assert!(client.activate(client.epoch(), delete).unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == power.id)
+    );
+    assert!(client.active.as_ref().unwrap().designer.as_ref().unwrap().drafts.drafts().iter().all(|d| !matches!(&d.address, PropertyAddress::Occurrence { instance, .. } if instance.0 == power.id)));
+    // A new resident may reuse the renderer slot, but neither a former delete
+    // action nor its typed occurrence target may acquire the new identity.
+    let palette_open = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .palette_open;
+    if !palette_open {
+        activate_studio_tool(&mut client, "Insert component...");
+    }
+    activate_studio_tool(&mut client, "Insert Power");
+    settle_editor(&mut client, &mut authority, &mut session);
+    let replacement = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.component == 13)
+        .unwrap();
+    assert!(replacement.id > power.id);
+    activate_studio_root(&mut client, replacement.id);
+    assert!(!client.activate(client.epoch(), delete).unwrap());
+    activate_studio_root(&mut client, 20);
+    assert!(!client.activate(client.epoch(), delete).unwrap());
+    let m = client.active.as_ref().unwrap();
+    assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
+    assert_eq!(
+        m.doc.oib_property_register(&editor_address(3)).unwrap(),
+        original
+    );
+    assert!(
+        m.doc
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == replacement.id && i.active)
+    );
+    assert!(client.confirmed());
+}
+
+#[test]
+fn desktop_studio_component_management_respects_test_readonly_and_fixed_ownership() {
+    let mut client = mounted_six_panel_fixture(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    let has_delete = |c: &Client| {
+        c.scene().unwrap().controls().iter().any(|p| {
+            p.node
+                .semantics
+                .as_ref()
+                .is_some_and(|s| s.label == "Delete component")
+        })
+    };
+    for selection in [
+        Selection::Document(DocumentId(1)),
+        Selection::Definition(DefinitionId(13)),
+        Selection::Object(ObjectAddress {
+            instance: InstanceId(40),
+            references: vec![],
+            node: NodeId(1),
+        }),
+    ] {
+        client.inspect_oib_selection(selection).unwrap();
+        assert!(!has_delete(&client));
+    }
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(2),
+        }))
+        .unwrap();
+    assert!(
+        has_delete(&client),
+        "resident descendants have management actions"
+    );
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    assert!(!has_delete(&client));
+    client.set_oib_designer_mode(DesignerMode::Edit).unwrap();
+    assert!(has_delete(&client));
+    {
+        let m = client.active.as_mut().unwrap();
+        m.binding = Some(otrios_interfaces::canvas::MountBinding {
+            version: 1,
+            actor: [1; 32],
+            collection: "designer-mount".into(),
+            editable: true,
+            ui_editable: false,
+            comments: false,
+            moderate: false,
+        });
+        m.refresh_designer().unwrap();
+        m.invalidate();
+    }
+    assert!(!has_delete(&client));
+}
+
+#[test]
+fn desktop_studio_info_disclosure_has_visible_open_closed_state() {
+    let mut client = mounted_six_panel_fixture(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let before = client.active.as_ref().unwrap().doc.oib_root();
+    let address = editor_address(3);
+    for expanded in [false, true] {
+        let (id, y) = {
+            let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+            let row = d.panels[1]
+                .nodes
+                .iter()
+                .find(|n| d.actions.get(&n.id) == Some(&LocalAction::Details(address.clone())))
+                .unwrap();
+            (row.id, row.frame.y)
+        };
+        fixture_scroll_to(&mut client, 1, y - 8.);
+        let scene = client.scene().unwrap();
+        let path = scene.path(id).unwrap();
+        let button = path.last().unwrap().node;
+        let semantics = button.semantics.as_ref().unwrap();
+        assert_eq!(
+            semantics.label,
+            if expanded {
+                "Hide property info"
+            } else {
+                "Show property info"
+            }
+        );
+        assert_eq!(semantics.checked, expanded);
+        assert!(
+            matches!(&button.children[1].primitive, Primitive::Text { value, color, .. } if value == if expanded { "v Info" } else { "> Info" } && *color == if expanded { ACCENT } else { WHITE })
+        );
+        assert!(client.activate(client.epoch(), id).unwrap());
+        assert_eq!(
+            client
+                .active
+                .as_ref()
+                .unwrap()
+                .designer
+                .as_ref()
+                .unwrap()
+                .details
+                .as_ref()
+                .is_some_and(|d| d.address == address),
+            !expanded
+        );
+    }
+    assert_eq!(client.active.as_ref().unwrap().doc.oib_root(), before);
+}
+
+#[test]
+fn desktop_studio_delete_release_after_remote_removal_keeps_replacement_safe() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    let target = match &client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .selection
+    {
+        Selection::Object(a) => a.instance.0,
+        _ => panic!("fixture selects a resident descendant"),
+    };
+    let (delete, point) = studio_scene_control(&client, "Delete component");
+    let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
+    assert!(
+        client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 81,
+                    phase: PointerPhase::Down,
+                    position: point
+                },
+                1
+            )
+            .unwrap()
+    );
+    assert!(client.input_busy());
+
+    let ui = designer_fixture::ui(&[]);
+    let mut rival = StateAdapter::for_ui(&ui, "designer-mount", &[], [2; 16]).unwrap();
+    let (mut rival_session, _) = authority.open_session(&[2; 16], 0).unwrap();
+    rival_session.set_oib_editable(true);
+    rival_session
+        .set_selection(StateSelection::from_ui(&ui).unwrap())
+        .unwrap();
+    rival
+        .receive(&authority.generate(&mut rival_session).unwrap().unwrap())
+        .unwrap();
+    fixture_sync(&mut authority, &mut rival_session, &mut rival);
+    assert!(rival.remove_oib(target).unwrap());
+    fixture_sync(&mut authority, &mut rival_session, &mut rival);
+    assert!(rival.insert_oib(50, None).unwrap());
+    fixture_sync(&mut authority, &mut rival_session, &mut rival);
+    let replacement = rival
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.component == 13)
+        .unwrap();
+    assert_ne!(replacement.id, target);
+    let accepted_order = authority.oib_allocations().unwrap();
+    let accepted_generation = authority.oib_status().unwrap().generation;
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(client.input_busy());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == replacement.id && i.active)
+    );
+    // The old scene/control stays captured while its target disappears and its
+    // reusable renderer slot can already belong to a different stable identity.
+    assert!(
+        client
+            .pointer_at(
+                client.epoch(),
+                PointerEvent {
+                    id: 81,
+                    phase: PointerPhase::Up,
+                    position: point
+                },
+                2
+            )
+            .is_ok()
+    );
+    assert!(!client.input_busy());
+    assert!(!client.keyboard_visible());
+    assert!(client.confirmed());
+    assert_eq!(authority.oib_allocations().unwrap(), accepted_order);
+    assert_eq!(
+        authority.oib_status().unwrap().generation,
+        accepted_generation
+    );
+    let m = client.active.as_ref().unwrap();
+    let d = m.designer.as_ref().unwrap();
+    assert!(!matches!(&d.selection, Selection::Object(a) if a.instance.0 == target));
+    assert!(d.drafts.drafts().iter().all(|draft| !matches!(&draft.address, PropertyAddress::Occurrence { instance, .. } if instance.0 == target)));
+    assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
+    assert!(!client.activate(client.epoch(), delete).unwrap());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.id == replacement.id && i.active)
+    );
+}
+
+#[test]
+fn desktop_studio_delete_discards_own_dirty_draft_and_retains_unrelated_draft() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(20),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let fields = [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap());
+    let audio_register = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_property_register(&editor_address(2))
+        .unwrap();
+    let audio_field = focus_property(&mut client, 2);
+    assert!(
+        client
+            .edit_text_input(
+                client.epoch(),
+                audio_field,
+                &Edit::Replace {
+                    text: "oops".into(),
+                    cursor: 4,
+                    anchor: 4,
+                    selection_only: false
+                }
+            )
+            .unwrap()
+    );
+    assert!(client.blur_text_input(client.epoch(), audio_field).unwrap());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .draft(&editor_address(2))
+            .unwrap()
+            .dirty
+    );
+    client
+        .inspect_oib_selection(Selection::Object(ObjectAddress {
+            instance: InstanceId(30),
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+        }))
+        .unwrap();
+    let display = PropertyAddress::Occurrence {
+        instance: InstanceId(30),
+        path: PropertyPath {
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+            property: PropertyId(3),
+        },
+    };
+    let (field, y) = {
+        let d = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+        let field = d.drafts.draft(&display).unwrap().fields[0].id;
+        (
+            field,
+            d.panels[1]
+                .nodes
+                .iter()
+                .find(|n| n.id == field)
+                .unwrap()
+                .frame
+                .y,
+        )
+    };
+    fixture_scroll_to(&mut client, 1, y - 8.);
+    assert!(client.activate(client.epoch(), field).unwrap());
+    fixture_scroll_to(&mut client, 1, y - 8.);
+    assert!(
+        client
+            .edit_text_input(
+                client.epoch(),
+                field,
+                &Edit::Replace {
+                    text: "Discard display".into(),
+                    cursor: 15,
+                    anchor: 15,
+                    selection_only: false
+                }
+            )
+            .unwrap()
+    );
+    let generation = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_generation()
+        .unwrap();
+    let (delete, _) = studio_scene_control(&client, "Delete component");
+    assert!(client.activate(client.epoch(), delete).unwrap());
+    assert!(!client.keyboard_visible());
+    settle_editor(&mut client, &mut authority, &mut session);
+    let m = client.active.as_ref().unwrap();
+    assert_eq!(m.doc.oib_generation(), Some(generation + 1));
+    assert!(!m.doc.oib_instances().unwrap().iter().any(|i| i.id == 30));
+    assert!(m.designer.as_ref().unwrap().drafts.drafts().iter().all(|draft| !matches!(&draft.address, PropertyAddress::Occurrence { instance, .. } if instance.0 == 30)));
+    let audio = m
+        .designer
+        .as_ref()
+        .unwrap()
+        .drafts
+        .draft(&editor_address(2))
+        .unwrap();
+    assert!(audio.dirty);
+    assert_eq!(audio.fields[0].buffer().text(), "oops");
+    assert!(audio.error.is_some());
+    assert_eq!(
+        m.doc.oib_property_register(&editor_address(2)).unwrap(),
+        audio_register
+    );
+    assert_eq!([1, 2, 3, 4].map(|f| m.read(f).unwrap()), fields);
+    assert!(client.confirmed());
+    assert!(!client.input_busy());
+}

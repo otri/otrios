@@ -4784,6 +4784,7 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
             designer.layers_open(),
             m.keyboard.visible,
             designer.studio,
+            designer.management_visible(),
         )?
     } else {
         scene
