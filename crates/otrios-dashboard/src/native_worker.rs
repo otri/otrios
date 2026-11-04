@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 #[path = "bench_telemetry.rs"]
-mod bench_telemetry;
+pub(super) mod bench_telemetry;
 #[cfg(unix)]
 #[path = "native_worker/local_apps.rs"]
 mod local_apps;
@@ -63,6 +63,8 @@ pub(super) struct Frame {
     pub(super) updates: u64,
     pub(super) received_updates: u64,
     pub(super) remote_sample: Option<(u64, Instant)>,
+    pub(super) local_input: Option<bench_telemetry::LocalInput>,
+    pub(super) local_update: bool,
     pub(super) serial: u64,
     pub(super) epoch: u32,
     pub(super) motion_kind: Option<bool>,
@@ -103,6 +105,8 @@ impl Frame {
             updates: 0,
             received_updates: 0,
             remote_sample: None,
+            local_input: None,
+            local_update: false,
             serial,
             epoch: 0,
             motion_kind: None,
@@ -132,8 +136,9 @@ pub(super) enum Input {
     CanvasCancel(u32),
     #[cfg(test)]
     Back,
-    #[cfg(test)]
+    // Renderer consumed the immutable snapshot; this is not a display ack.
     RenderReady(u64),
+    PrepareReload(mpsc::SyncSender<bool>),
     Presented(Box<Frame>, String, DisplayInfo),
     Stop,
 }
@@ -588,12 +593,19 @@ pub(super) fn state_worker(
     let mut remote_sample = None;
     let mut measured_sample = 0;
     let mut bench_present = bench_telemetry::Recorder::from_env()?;
+    let mut pan = bench_telemetry::PanRecorder::from_env("worker")?;
+    let mut local_input = None;
+    let mut local_sequence = 0_u64;
+    let mut local_update = false;
     let mut sync_to_present_ms = None;
     let mut last_status = None;
     let mut last_online = false;
     let mut composer = Composer::default();
     let mut display_access = Arc::new(AtomicBool::new(true));
     let mut stopping: Option<Instant> = None;
+    let mut reload_committed = false;
+    let mut ready_report: Option<serde_json::Value> = None;
+    let mut ready_dirty = false;
     let mut next_stall = Instant::now() + Duration::from_secs(1);
     let mut stress_epoch = None;
     loop {
@@ -630,26 +642,98 @@ pub(super) fn state_worker(
                 Input::Stop => {
                     stopping.get_or_insert_with(Instant::now);
                 }
+                Input::PrepareReload(reply) => {
+                    let online = o.url.is_none()
+                        || (epoch.is_some_and(|id| connection.load(Ordering::Acquire) == id)
+                            && stream_ready.load(Ordering::Acquire));
+                    let safe = !client.input_busy() && (!online || client.reload_ready());
+                    // Commit at the state owner's input boundary. Contacts
+                    // arriving after this grant must not start a new gesture.
+                    reload_committed |= safe;
+                    let _ = reply.try_send(safe);
+                }
                 Input::CanvasPointer(generation, e, sampled) => {
+                    if reload_committed {
+                        continue;
+                    }
                     let at = sampled
                         .checked_duration_since(started)
                         .unwrap_or_default()
                         .as_millis() as u64;
-                    dirty |= client.pointer_at(generation, e, at)?;
+                    let began = pan.start();
+                    let changed = client.pointer_at(generation, e, at)?;
+                    dirty |= changed;
+                    if let Some(began) = began {
+                        local_sequence += 1;
+                        let mark = bench_telemetry::LocalInput {
+                            sequence: local_sequence,
+                            epoch: generation,
+                            sampled: Some(sampled),
+                            phase: match e.phase {
+                                otrios_interfaces::scene::PointerPhase::Down => "down",
+                                otrios_interfaces::scene::PointerPhase::Move => "move",
+                                otrios_interfaces::scene::PointerPhase::Up => "up",
+                                otrios_interfaces::scene::PointerPhase::Cancel => "cancel",
+                            },
+                        };
+                        local_input = Some(mark);
+                        local_update |= changed;
+                        let ended = Instant::now();
+                        pan.record(|| {
+                            serde_json::json!({"event":"processed","input":mark.json(),
+                            "dequeued_us":bench_telemetry::process_us(began),
+                            "sample_age_us":began.saturating_duration_since(sampled).as_micros(),
+                            "ended_us":bench_telemetry::process_us(ended),"changed":changed,
+                            "client_epoch":client.epoch(),"pointer":e.id})
+                        });
+                    }
                 }
                 Input::CanvasCancel(generation) => {
-                    if generation == client.epoch() {
-                        dirty |= client.cancel()?;
+                    if reload_committed {
+                        continue;
+                    }
+                    let began = pan.start();
+                    let changed = if generation == client.epoch() {
+                        client.cancel()?
+                    } else {
+                        false
+                    };
+                    dirty |= changed;
+                    if let Some(began) = began {
+                        local_sequence += 1;
+                        let mark = bench_telemetry::LocalInput {
+                            sequence: local_sequence,
+                            epoch: generation,
+                            sampled: None,
+                            phase: "route_cancel",
+                        };
+                        local_input = Some(mark);
+                        local_update |= changed;
+                        let ended = Instant::now();
+                        pan.record(|| {
+                            serde_json::json!({"event":"processed","input":mark.json(),
+                            "dequeued_us":bench_telemetry::process_us(began),
+                            "ended_us":bench_telemetry::process_us(ended),"changed":changed,
+                            "sample_unavailable":true,"client_epoch":client.epoch()})
+                        });
                     }
                 }
                 #[cfg(test)]
                 Input::Back => dirty |= client.back()?,
-                #[cfg(test)]
                 Input::RenderReady(serial) => {
-                    demand.presented(serial);
+                    let accepted = demand.release_capacity(serial);
+                    pan.record(|| {
+                        serde_json::json!({"event":"capacity_release","serial":serial,
+                        "source":"render_ready","accepted":accepted,
+                        "released_us":bench_telemetry::process_us(Instant::now()),"dirty":dirty})
+                    });
                 }
                 Input::Presented(frame, renderer, display) => {
-                    demand.presented(frame.serial);
+                    let credit_started = pan.start();
+                    let accepted = demand.presented(frame.serial);
+                    pan.record(|| serde_json::json!({"event":"presented","serial":frame.serial,
+                        "handled_us":credit_started.map(bench_telemetry::process_us),"capacity_released":accepted,
+                        "input":frame.local_input.map(|i| i.json()),"dirty":dirty}));
                     if let Some((id, at)) = frame.remote_sample
                         && id > measured_sample
                     {
@@ -657,12 +741,16 @@ pub(super) fn state_worker(
                         bench_present.presented(id, at, frame.intent.count)?;
                         sync_to_present_ms = Some(at.elapsed().as_secs_f64() * 1000.);
                     }
-                    if let Some(path) = &o.ready_file {
+                    if o.ready_file.is_some() {
                         let info = serde_json::json!({"scanout_format":display.format,"color_bits":display.color_bits,"stride":display.stride,"video":display.video,"rotation":display.rotation,"output":display.output,"touch_calibrated":display.touch_calibrated,"touch_devices":display.touch_devices,"motion":{"playing":frame.intent.playing,"speed":frame.intent.speed,"count":frame.intent.count},"pid":std::process::id(),"snapshot":frame.snapshot,"renderer":renderer,"stream_ready":frame.online,"state_confirmed":frame.state_confirmed,"reload_ready":frame.reload_ready,"sync_to_present_ms":sync_to_present_ms,"pending_commands":frame.pending_commands,"runtime_resources":frame.resources,"input_busy":frame.input_busy,"screen":frame.screen,"keyboard_visible":frame.keyboard,"layout":frame.layout,"ui_ref":frame.ui_ref,"state_ref":frame.state_ref,"epoch":frame.epoch,"release":frame.ui_release,"runtime_release":std::env::var("OTRIOS_RELEASE_ID").unwrap_or_default(),"ui_updates":true,"ui_release":frame.ui_release});
-                        let tmp = format!("{path}.tmp");
-                        fs::write(&tmp, info.to_string())
-                            .and_then(|_| fs::rename(tmp, path))
-                            .map_err(|e| e.to_string())?;
+                        ready_report = Some(info);
+                        ready_dirty = true;
+                    }
+                    if let Some(began) = credit_started {
+                        let ended = Instant::now();
+                        pan.record(|| serde_json::json!({"event":"presented_handled","serial":frame.serial,
+                            "started_us":bench_telemetry::process_us(began),
+                            "ended_us":bench_telemetry::process_us(ended),"ready_file":o.ready_file.is_some()}));
                     }
                 }
             }
@@ -857,7 +945,17 @@ pub(super) fn state_worker(
                 }
             }
         }
-        dirty |= client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        let tick_started = pan.start();
+        let tick_changed = client.tick(now, otrios_core::dashboard::clock::wall_time_seconds())?;
+        dirty |= tick_changed;
+        if let Some(began) = tick_started.filter(|_| tick_changed || local_update) {
+            let ended = Instant::now();
+            pan.record(|| {
+                serde_json::json!({"event":"tick","started_us":bench_telemetry::process_us(began),
+                "ended_us":bench_telemetry::process_us(ended),"changed":tick_changed,
+                "input":local_input.map(|i| i.json())})
+            });
+        }
         if client.take_collection_revoked() {
             revoke_display(&mut display_access, &mut composer);
         }
@@ -975,6 +1073,37 @@ pub(super) fn state_worker(
         );
         dirty |= last_status != Some(status);
         last_status = Some(status);
+        if let (Some(path), Some(report)) = (&o.ready_file, ready_report.as_mut()) {
+            // Display identity stays at the last completed present. These
+            // authorization fields instead describe the state owner now,
+            // including changes received without any new renderer credit.
+            for (key, value) in [
+                ("upgrade_guard", serde_json::json!("worker-quiescent-v1")),
+                ("input_busy", serde_json::json!(client.input_busy())),
+                ("stream_ready", serde_json::json!(online)),
+                ("state_confirmed", serde_json::json!(confirmed)),
+                (
+                    "reload_ready",
+                    serde_json::json!(reload_ready && !reload_committed),
+                ),
+                (
+                    "pending_commands",
+                    serde_json::json!(client.pending_count()),
+                ),
+            ] {
+                if report[key] != value {
+                    report[key] = value;
+                    ready_dirty = true;
+                }
+            }
+            if ready_dirty {
+                let tmp = format!("{path}.tmp");
+                fs::write(&tmp, report.to_string())
+                    .and_then(|_| fs::rename(tmp, path))
+                    .map_err(|e| e.to_string())?;
+                ready_dirty = false;
+            }
+        }
         if stopping.is_some_and(|at| confirmed || at.elapsed() >= Duration::from_secs(3)) {
             return Ok(());
         }
@@ -983,6 +1112,7 @@ pub(super) fn state_worker(
             dirty = false;
         }
         if let Some(serial) = demand.begin() {
+            let frame_started = pan.start();
             if client.ui_ref().is_empty() {
                 let mut frame = Frame::blank(serial, online);
                 frame.access = display_access.clone();
@@ -993,7 +1123,9 @@ pub(super) fn state_worker(
                     .map_err(|e| format!("Render credit violated: {e}"))?;
                 composer.clear();
             } else {
+                let compose_started = pan.start();
                 let paint = composer.compose(&mut client, &font)?.clone();
+                let compose_ended = pan.start();
                 let motion = client.motion_intent()?;
                 let mut intent = motion.map(|v| v.1).unwrap_or_default();
                 if o.objects > 0 {
@@ -1021,12 +1153,26 @@ pub(super) fn state_worker(
                     updates,
                     received_updates,
                     remote_sample,
+                    local_input,
+                    local_update,
                     serial,
                     epoch: client.epoch(),
                     motion_kind: motion.map(|v| v.0),
                     state_ref,
                     ui_ref,
                 };
+                if let (Some(began), Some(ended)) = (compose_started, compose_ended) {
+                    let produced = Instant::now();
+                    pan.record(|| serde_json::json!({"event":"produced","serial":serial,
+                        "epoch":frame.epoch,"input":local_input.map(|i| i.json()),"local_update":local_update,
+                        "serial_created_us":frame_started.map(bench_telemetry::process_us),
+                        "compose_started_us":bench_telemetry::process_us(began),
+                        "compose_ended_us":bench_telemetry::process_us(ended),
+                        "produced_us":bench_telemetry::process_us(produced),
+                        "content_revision":frame.paint.revisions.content,
+                        "placement_revision":frame.paint.revisions.placement}));
+                }
+                local_update = false;
                 frames
                     .try_send(frame)
                     .map_err(|e| format!("Render credit violated: {e}"))?;
@@ -1524,6 +1670,305 @@ mod tests {
         tx.send(Input::RenderReady(frame.serial)).unwrap();
         frame
     }
+    // Re-exec keeps env opt-in isolated from parallel tests without unsafe set_var.
+    #[test]
+    fn local_pan_trace_preserves_samples_and_exact_credit() {
+        const CHILD: &str = "OTRIOS_PAN_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let root =
+                std::env::temp_dir().join(format!("otrios-pan-worker-{}", std::process::id()));
+            fs::create_dir_all(&root).unwrap();
+            let prefix = root.join("trace");
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "native_worker::tests::local_pan_trace_preserves_samples_and_exact_credit",
+                ])
+                .env(CHILD, "1")
+                .env("OTRIOS_NATIVE_PAN_LOG", &prefix)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let rows: Vec<serde_json::Value> = fs::read_to_string(root.join("trace.worker.jsonl"))
+                .unwrap()
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            assert_eq!(rows.last().unwrap()["dropped"], 0);
+            let processed: Vec<_> = rows.iter().filter(|r| r["event"] == "processed").collect();
+            assert_eq!(processed.len(), 3);
+            for (n, phase) in ["down", "move", "up"].iter().enumerate() {
+                assert_eq!(processed[n]["input"]["sequence"], n + 1);
+                assert_eq!(processed[n]["input"]["phase"], *phase);
+                assert!(processed[n]["sample_age_us"].as_u64().unwrap() >= 100_000);
+            }
+            let made = rows
+                .iter()
+                .find(|r| r["event"] == "produced" && r["local_update"] == true)
+                .unwrap();
+            assert_eq!(made["input"]["sequence"], 3);
+            let presents: Vec<_> = rows.iter().filter(|r| r["event"] == "presented").collect();
+            assert_eq!(presents.len(), 4);
+            assert_eq!(presents[0]["capacity_released"], false);
+            assert_eq!(presents[1]["capacity_released"], true);
+            assert_eq!(presents[2]["capacity_released"], false);
+            assert_eq!(presents[3]["capacity_released"], false);
+            let releases: Vec<_> = rows
+                .iter()
+                .filter(|r| r["event"] == "capacity_release")
+                .collect();
+            assert_eq!(releases.len(), 2);
+            assert_eq!(releases[0]["source"], "render_ready");
+            assert_eq!(releases[0]["accepted"], true);
+            assert_eq!(releases[1]["accepted"], false);
+            assert!(
+                rows.iter().all(|r| r["event"] != "present"),
+                "Worker credit must never invent display completion"
+            );
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        let fixture = fixture();
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let apps = fixture.root.to_string_lossy().into_owned();
+        let worker = thread::spawn(move || {
+            state_worker(
+                Options {
+                    apps: Some(apps),
+                    screen: Some("three-d-lab".into()),
+                    ..Options::default()
+                },
+                rx,
+                ft,
+            )
+        });
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let sampled = Instant::now() - Duration::from_millis(100);
+        for (phase, x) in [
+            (otrios_interfaces::scene::PointerPhase::Down, 128.),
+            (otrios_interfaces::scene::PointerPhase::Move, 640.),
+            (otrios_interfaces::scene::PointerPhase::Up, 2000.),
+        ] {
+            tx.send(Input::CanvasPointer(
+                first.epoch,
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position: [x, 400.],
+                },
+                sampled,
+            ))
+            .unwrap();
+        }
+        let display = DisplayInfo {
+            video: "test",
+            rotation: 0,
+            output: [1280, 800],
+            touch_calibrated: false,
+            touch_devices: 0,
+            format: "test",
+            color_bits: [8, 8, 8, 8],
+            stride: 5120,
+        };
+        let mut stale = first.clone();
+        stale.serial += 1;
+        tx.send(Input::Presented(Box::new(stale), "test".into(), display))
+            .unwrap();
+        assert!(fr.recv_timeout(Duration::from_millis(100)).is_err());
+        tx.send(Input::Presented(
+            Box::new(first.clone()),
+            "test".into(),
+            display,
+        ))
+        .unwrap();
+        let next = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(next.local_input.unwrap().sampled, Some(sampled));
+        assert!(next.local_update);
+        assert_eq!(next.serial, first.serial + 1);
+        tx.send(Input::Presented(Box::new(first), "test".into(), display))
+            .unwrap();
+        tx.send(Input::Back).unwrap();
+        tx.send(Input::RenderReady(next.serial)).unwrap();
+        let third = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(third.screen, "launcher");
+        tx.send(Input::RenderReady(next.serial)).unwrap();
+        tx.send(Input::Presented(Box::new(next), "test".into(), display))
+            .unwrap();
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
+    #[test]
+    fn reload_admission_uses_current_state_and_seals_the_input_boundary() {
+        use otrios_interfaces::scene::PointerPhase;
+        let fixture = fixture();
+        let ready = fixture.root.join("reload-ready.json");
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("three-d-lab".into()),
+            ready_file: Some(ready.to_string_lossy().into()),
+            ..Options::default()
+        };
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let display = DisplayInfo {
+            video: "completed-test",
+            rotation: 90,
+            output: [800, 1280],
+            touch_calibrated: true,
+            touch_devices: 1,
+            format: "test-format",
+            color_bits: [8, 8, 8, 0],
+            stride: 3200,
+        };
+        let presented = || Input::Presented(Box::new(first.clone()), "test".into(), display);
+        let report = |busy: bool| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                if let Ok(bytes) = fs::read(&ready) {
+                    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                    if value["input_busy"] == busy {
+                        return value;
+                    }
+                }
+                assert!(Instant::now() < deadline, "current readiness deadline");
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        tx.send(presented()).unwrap();
+        assert_eq!(report(false)["reload_ready"], true);
+        let pointer = |phase, position| {
+            Input::CanvasPointer(
+                first.epoch,
+                PointerEvent {
+                    id: 9,
+                    phase,
+                    position,
+                },
+                Instant::now(),
+            )
+        };
+        tx.send(pointer(PointerPhase::Down, [128., 400.])).unwrap();
+        let (reply, answer) = mpsc::sync_channel(1);
+        tx.send(Input::PrepareReload(reply)).unwrap();
+        assert!(!answer.recv_timeout(Duration::from_secs(3)).unwrap());
+        let busy = report(true);
+        assert_eq!(busy["reload_ready"], false);
+        assert_eq!(busy["screen"], first.screen);
+        let second = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(second.input_busy);
+        // A delayed display acknowledgement must not restore old idle flags.
+        tx.send(presented()).unwrap();
+        let (reply, answer) = mpsc::sync_channel(1);
+        tx.send(Input::PrepareReload(reply)).unwrap();
+        assert!(!answer.recv_timeout(Duration::from_secs(3)).unwrap());
+        assert_eq!(report(true)["reload_ready"], false);
+        tx.send(pointer(PointerPhase::Up, [2000., 400.])).unwrap();
+        let (reply, answer) = mpsc::sync_channel(1);
+        tx.send(Input::PrepareReload(reply)).unwrap();
+        assert!(answer.recv_timeout(Duration::from_secs(3)).unwrap());
+        // A contact queued after the grant is outside the admitted old host.
+        tx.send(pointer(PointerPhase::Down, [128., 400.])).unwrap();
+        tx.send(Input::RenderReady(second.serial)).unwrap();
+        let next = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(!next.input_busy);
+        let idle = report(false);
+        assert_eq!(idle["reload_ready"], false);
+        assert_eq!(idle["upgrade_guard"], "worker-quiescent-v1");
+        assert_eq!(idle["screen"], first.screen);
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
+    #[test]
+    fn early_capacity_keeps_display_identity_and_bounds_the_queued_successor() {
+        use otrios_interfaces::scene::PointerPhase;
+        let fixture = fixture();
+        let ready = fixture.root.join("ready.json");
+        fs::write(&ready, "not presented").unwrap();
+        let (tx, rx) = mpsc::sync_channel(128);
+        let (ft, fr) = mpsc::sync_channel(1);
+        let options = Options {
+            apps: Some(fixture.root.to_string_lossy().into()),
+            screen: Some("three-d-lab".into()),
+            ready_file: Some(ready.to_string_lossy().into()),
+            ..Options::default()
+        };
+        let worker = thread::spawn(move || state_worker(options, rx, ft));
+        let first = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        let held_mesh = first.paint.base.mesh.clone();
+        let held_vertices = held_mesh.vertices.clone();
+        tx.send(Input::CanvasPointer(
+            first.epoch,
+            PointerEvent {
+                id: 9,
+                phase: PointerPhase::Down,
+                position: [128., 400.],
+            },
+            Instant::now(),
+        ))
+        .unwrap();
+        tx.send(Input::RenderReady(first.serial)).unwrap();
+        // Leave the successor unread while the held frame is still presenting.
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(fs::read_to_string(&ready).unwrap(), "not presented");
+        let second = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(second.serial, first.serial + 1);
+        assert!(second.input_busy);
+        assert!(!first.input_busy);
+        assert_eq!(first.paint.base.mesh.vertices, held_vertices);
+        assert!(Arc::ptr_eq(&first.paint.base.mesh, &held_mesh));
+
+        tx.send(Input::CanvasPointer(
+            first.epoch,
+            PointerEvent {
+                id: 9,
+                phase: PointerPhase::Up,
+                position: [2000., 400.],
+            },
+            Instant::now(),
+        ))
+        .unwrap();
+        tx.send(Input::Back).unwrap();
+        let display = DisplayInfo {
+            video: "completed-test",
+            rotation: 90,
+            output: [800, 1280],
+            touch_calibrated: true,
+            touch_devices: 1,
+            format: "test-format",
+            color_bits: [8, 8, 8, 0],
+            stride: 3200,
+        };
+        for _ in 0..3 {
+            tx.send(Input::RenderReady(first.serial)).unwrap();
+            tx.send(Input::Presented(
+                Box::new(first.clone()),
+                "completed-test-renderer".into(),
+                display,
+            ))
+            .unwrap();
+        }
+        assert!(fr.recv_timeout(Duration::from_millis(100)).is_err());
+        let report: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&ready).unwrap()).unwrap();
+        assert_eq!(report["screen"], first.screen);
+        assert_eq!(report["input_busy"], false);
+        assert_eq!(report["video"], "completed-test");
+        assert_eq!(report["renderer"], "completed-test-renderer");
+        assert_eq!(report["output"], serde_json::json!([800, 1280]));
+
+        tx.send(Input::RenderReady(second.serial)).unwrap();
+        let third = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(third.serial, second.serial + 1);
+        assert_eq!(third.screen, "launcher");
+        assert!(!third.input_busy);
+        // Capacity alone cannot publish even a completed navigation/gesture.
+        assert_eq!(fs::read_to_string(&ready).unwrap(), report.to_string());
+        tx.send(Input::Stop).unwrap();
+        worker.join().unwrap().unwrap();
+    }
     #[test]
     fn renderer_credit_defers_composition_but_not_navigation() {
         let fixture = fixture();
@@ -1909,8 +2354,9 @@ mod tests {
         actions.send(ServerAction::Disconnect).unwrap();
         actions.send(ServerAction::Count(0)).unwrap();
         wait(1);
-        // Keep the display's only credit occupied. Wire revocation must still
-        // invalidate this handed-off frame before a replacement can be built.
+        // Model a presenting frame plus the single queued successor. Wire
+        // revocation must invalidate both without waiting for either display
+        // completion or another capacity release.
         actions.send(ServerAction::Count(500)).unwrap();
         let mut held = loop {
             let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
@@ -1920,6 +2366,15 @@ mod tests {
             tx.send(Input::RenderReady(frame.serial)).unwrap();
         };
         assert!(!held.paint.base.mesh.vertices.is_empty());
+        tx.send(Input::RenderReady(held.serial)).unwrap();
+        actions.send(ServerAction::Count(600)).unwrap();
+        let mut queued = loop {
+            let frame = fr.recv_timeout(Duration::from_secs(3)).unwrap();
+            if frame.intent.count == 39 && frame.state_confirmed {
+                break frame;
+            }
+            tx.send(Input::RenderReady(frame.serial)).unwrap();
+        };
         if uninstall {
             let result = std::process::Command::new("python3")
                 .arg(concat!(
@@ -1948,11 +2403,14 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
         assert!(matches!(fr.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(!queued.access.load(Ordering::Acquire));
+        assert!(queued.redact_if_revoked());
+        assert!(queued.ui_ref.is_empty() && queued.paint.base.mesh.vertices.is_empty());
         assert!(held.redact_if_revoked());
         assert!(held.ui_ref.is_empty() && held.paint.base.mesh.vertices.is_empty());
         assert!(held.paint.document.is_none() && held.paint.overlay.is_none());
         assert!(!held.redact_if_revoked());
-        tx.send(Input::RenderReady(held.serial)).unwrap();
+        tx.send(Input::RenderReady(queued.serial)).unwrap();
         tx.send(Input::Stop).unwrap();
         worker.join().unwrap().unwrap();
         stop.store(true, Ordering::Release);

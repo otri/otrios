@@ -7,6 +7,9 @@ The [D1 execution plan](../OIB_DESIGNER_D1.md) records the concrete milestone,
 isolated worktree roles, integration gates and acceptance.
 The [D1 qualification record](../experiments/oib-designer-d1-2026-11-03.md)
 records the signed deployment, focused Frame/browser checks and limitations.
+The [usability proposal](../OIB_DESIGNER_USABILITY.md) follows the initial D1
+delivery with readable tooling, a clearer composition tree, practical property
+editors and explicit Frame responsiveness gates. It remains a design proposal.
 
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.

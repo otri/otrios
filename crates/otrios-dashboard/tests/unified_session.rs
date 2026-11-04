@@ -382,7 +382,7 @@ fn code_and_hello_survive_failed_state_recovery_and_obsolete_codecs() {
 
 #[test]
 fn ink_subscriptions_follow_peer_admission_and_release_their_slots() {
-    let room = common::room(false, 60);
+    let room = common::room(false);
     let mut peers = Vec::new();
     for _ in 0..24 {
         let mut peer = socket(&room.public, "/session");

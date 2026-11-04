@@ -1,12 +1,28 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! Device-local D1 tooling. All identity/source resolution stays in oib::document.
+mod editing;
+mod style;
+use super::oib_property_editor::PropertyDrafts;
 use super::*;
-use crate::canvas::oib::document::{ObjectInfo, PropertyInfo};
+use crate::canvas::oib::document::{
+    HierarchyKey, HierarchyRow, HierarchyScope, ObjectInfo, PropertyInfo,
+};
 use crate::dashboard::components::{ACCENT, CARD, MUTED, WHITE, background, canvas, text};
 use otrios_interfaces::{
     oib::designer::{DesignerMode, PropertyAddress, PropertyEditor, Selection},
     scene::{Primitive, Rect, SwitchSemantics},
+    theme::{BG, LINE},
 };
+
+pub(super) fn outlined_surface(
+    ids: [u32; 3],
+    width: f32,
+    height: f32,
+    fill: [u8; 4],
+    radius: f32,
+) -> SceneNode {
+    style::surface(ids, width, height, fill, radius)
+}
 
 // Separate from u16 authored nodes, keyboard, ink and host chrome namespaces.
 const FIRST: u32 = 2_700_000_000;
@@ -20,13 +36,30 @@ const MAX_CONTENT: f32 = 8192.;
 // Together their 8192px caps fit below these defensive cache ceilings.
 const MAX_CACHED_NODES: usize = 2048;
 const MAX_CACHED_ACTIONS: usize = 768;
-// Align culling to four-row slabs. Placement-only pans reuse retained GPU
+// Align culling to eight-row slabs. Frame timing shows topology rebuilds at
+// four-row boundaries can miss a display period during a 30 Hz pan. Keep
+// bounded overscan to amortize that work without raising scene ceilings. Placement-only pans reuse retained GPU
 // geometry until either viewport edge crosses a slab boundary. Crossing one
 // changes scene topology and necessarily rebuilds the shared paint cache once.
-const WINDOW_STEP: f32 = 4. * ROW;
+const WINDOW_STEP: f32 = 8. * ROW;
 #[derive(Clone, Debug, PartialEq)]
 enum LocalAction {
     Select(Selection),
+    Layers,
+    FocusField(u32),
+    Apply(PropertyAddress),
+    Discard(PropertyAddress),
+    PickColor(PropertyAddress, [u8; 4]),
+    Opacity(PropertyAddress, u8),
+    DraftBool(PropertyAddress, bool),
+    Details(PropertyAddress),
+    Source(PropertyAddress),
+    Choose(
+        Box<super::super::oib::document::PropertyRegisterView>,
+        Option<Value>,
+    ),
+    TreeExpand(HierarchyKey),
+    TreeScope(HierarchyScope),
     Expand(Selection),
     Mode(DesignerMode),
     Write(PropertyAddress, Option<Value>),
@@ -49,6 +82,21 @@ struct Panel {
 }
 pub(super) struct Designer {
     selection: Selection,
+    focus_layout: bool,
+    layers_open: bool,
+    tree: Vec<HierarchyRow>,
+    tree_scope: HierarchyScope,
+    tree_closed: Vec<HierarchyKey>,
+    tree_initialized: Vec<HierarchyScope>,
+    reveal_selection: bool,
+    drafts: PropertyDrafts,
+    properties: Vec<PropertyInfo>,
+    editor_notice: Option<String>,
+    editor_revision: u64,
+    details: Option<super::super::oib::document::PropertySources>,
+    registers: Vec<super::super::oib::document::PropertyRegisterView>,
+    pending_source: Option<PropertyAddress>,
+    pending_selection: Option<Selection>,
     mode: DesignerMode,
     pending_mode: Option<DesignerMode>,
     pending_viewport: Option<[f32; 2]>,
@@ -67,6 +115,21 @@ impl Clone for Designer {
     fn clone(&self) -> Self {
         Self {
             selection: self.selection.clone(),
+            focus_layout: self.focus_layout,
+            layers_open: self.layers_open,
+            tree: self.tree.clone(),
+            tree_scope: self.tree_scope,
+            tree_closed: self.tree_closed.clone(),
+            tree_initialized: self.tree_initialized.clone(),
+            reveal_selection: self.reveal_selection,
+            drafts: self.drafts.clone(),
+            properties: self.properties.clone(),
+            editor_notice: self.editor_notice.clone(),
+            editor_revision: self.editor_revision,
+            details: self.details.clone(),
+            registers: self.registers.clone(),
+            pending_source: self.pending_source.clone(),
+            pending_selection: self.pending_selection.clone(),
             mode: self.mode,
             pending_mode: self.pending_mode,
             pending_viewport: self.pending_viewport,
@@ -108,6 +171,21 @@ impl Designer {
         }
         Some(Self {
             selection: Selection::Document(metadata.id),
+            focus_layout: seed.instance_surface.is_some() && metadata.hierarchy_viewport.is_some(),
+            layers_open: false,
+            tree: vec![],
+            tree_scope: HierarchyScope::Composition,
+            tree_closed: vec![],
+            tree_initialized: vec![],
+            reveal_selection: false,
+            drafts: PropertyDrafts::new(2_800_000_000, 2_900_000_000 - 1),
+            properties: vec![],
+            editor_notice: None,
+            editor_revision: 0,
+            details: None,
+            registers: vec![],
+            pending_source: None,
+            pending_selection: None,
             mode: DesignerMode::Edit,
             pending_mode: None,
             pending_viewport: None,
@@ -119,6 +197,19 @@ impl Designer {
             capture: None,
             revision: None,
         })
+    }
+    pub(super) fn focus_layout(&self) -> bool {
+        self.focus_layout
+    }
+    pub(super) fn layers_open(&self) -> bool {
+        self.layers_open
+    }
+    fn local_action(&self, id: u32) -> Option<LocalAction> {
+        if self.focus_layout && id == super::oib_focus_layout::LAYERS {
+            Some(LocalAction::Layers)
+        } else {
+            self.actions.get(&id).cloned()
+        }
     }
     pub(super) fn root_selection(&self, instance: u64) -> Option<Selection> {
         self.objects.iter().find(|o| matches!(&o.selection,Selection::Object(a) if a.instance.0 == instance && a.references.is_empty())).map(|o| o.selection.clone())
@@ -160,6 +251,15 @@ impl Designer {
         if self.selection == selection {
             return false;
         }
+        if self.focus_layout {
+            self.tree_scope = match &selection {
+                Selection::Definition(_) | Selection::DefinitionNode { .. } => {
+                    HierarchyScope::Components
+                }
+                _ => HierarchyScope::Composition,
+            };
+            self.reveal_selection = true;
+        }
         self.selection = selection;
         self.revision = None;
         if let Some(panel) = self.panels.last_mut() {
@@ -198,25 +298,53 @@ impl Designer {
         }
         let mut builder = Builder::at(self.next_id);
         let hierarchy = if self.panels.len() == 2 {
-            Some(hierarchy(
-                &mut builder,
-                &objects,
-                &self.selection,
-                &self.collapsed,
-                self.mode,
-            )?)
+            Some(if self.focus_layout {
+                focus_hierarchy(
+                    &mut builder,
+                    &self.tree,
+                    &self.selection,
+                    &self.tree_closed,
+                    self.tree_scope,
+                    self.mode,
+                )?
+            } else {
+                hierarchy(
+                    &mut builder,
+                    &objects,
+                    &self.selection,
+                    &self.collapsed,
+                    self.mode,
+                )?
+            })
         } else {
             None
         };
-        let mut inspector = inspector(
-            &mut builder,
-            seed,
-            &self.selection,
-            properties,
-            conflicts,
-            status,
-            editable,
-        )?;
+        self.properties = properties.to_vec();
+        let mut inspector = if self.focus_layout {
+            editing::inspector(
+                &mut builder,
+                &mut self.drafts,
+                properties,
+                conflicts,
+                status,
+                editable,
+                self.editor_revision,
+                self.editor_notice.as_deref(),
+                self.details.as_ref(),
+                &self.registers,
+                seed,
+            )?
+        } else {
+            inspector(
+                &mut builder,
+                seed,
+                &self.selection,
+                properties,
+                conflicts,
+                status,
+                editable,
+            )?
+        };
 
         if let Some(selected) = objects.iter().find(|o| o.selection == self.selection)
             && let Some(title) = inspector.0.first_mut()
@@ -231,6 +359,22 @@ impl Designer {
                 selected.name,
                 class.map_or("signed class", |c| c.name.as_str())
             );
+        }
+        if self.focus_layout
+            && let Some(wrapper) = self
+                .tree
+                .iter()
+                .find(|r| r.selection.as_ref() == Some(&self.selection))
+                .and_then(|r| r.reference_wrapper.clone())
+        {
+            inspector.0.push(builder.focus_button(
+                0.,
+                inspector.1 + 16.,
+                320.,
+                "Inspect reference",
+                LocalAction::Select(Selection::Object(wrapper)),
+            )?);
+            inspector.1 += 72.;
         }
         // Without a hierarchy surface retain a local mode switch in inspector.
         let mut nodes = inspector.0;
@@ -277,9 +421,25 @@ impl Designer {
         for panel in &self.panels {
             let node =
                 find_node(root, u32::from(panel.viewport)).ok_or("Missing designer viewport")?;
+            if self.focus_layout
+                && !self.layers_open
+                && self
+                    .panels
+                    .first()
+                    .is_some_and(|p| p.viewport == panel.viewport)
+            {
+                node.children.clear();
+                node.responder = None;
+                continue;
+            }
             let offset = panel.scroll.info().offset[1];
             let top = (offset / WINDOW_STEP).floor() * WINDOW_STEP;
-            let bottom = ((offset + node.frame.height) / WINDOW_STEP).ceil() * WINDOW_STEP;
+            // Anchor both edges to the same slab. Letting the lower edge
+            // advance independently changes topology halfway through a slab.
+            // This fixed span equals the previous maximum aligned span, so it
+            // adds no worst-case overscan or scene budget.
+            let span = (node.frame.height / WINDOW_STEP).ceil() + 1.;
+            let bottom = top + span * WINDOW_STEP;
             // Retained top-level rows contain all their own paint and actions.
             // Clone only rows intersecting the viewport's aligned window; no
             // glyph/inspector construction or full-tree clone on a pan sample.
@@ -309,17 +469,21 @@ impl Designer {
             node.responder = None;
             // The signed viewport sets the real available width. Rows occupy it
             // completely, including padding/corners, without covering siblings.
-            fn fit(nodes: &mut [SceneNode], width: f32) {
+            fn fit(nodes: &mut [SceneNode], width: f32) -> Result<()> {
                 for n in nodes {
-                    if matches!(n.primitive, Primitive::Canvas { .. }) && n.frame.x == 0. {
-                        n.frame.width = width;
+                    if matches!(n.primitive, Primitive::Canvas { .. })
+                        && n.frame.x == 0.
+                        && matches!(n.frame.width, 240. | 288. | 320.)
+                    {
                         if let Some(bg) = n.children.first_mut() {
-                            bg.frame.width = width;
+                            style::resize_surface(bg, width, bg.frame.height)?;
                         }
+                        n.frame.width = width;
                     }
                 }
+                Ok(())
             }
-            fit(&mut node.children, node.frame.width);
+            fit(&mut node.children, node.frame.width)?;
             panel.scroll.present(root);
             host_panel::present_panel(root, u32::from(panel.viewport));
         }
@@ -373,11 +537,18 @@ impl Designer {
             .controls()
             .iter()
             .any(|p| p.node.id == id)
-            .then(|| self.actions.get(&id).cloned())
+            .then(|| self.local_action(id))
             .flatten()
     }
     fn tap_action(&self, capture: &Capture, scene: &Scene, point: [f32; 2]) -> Option<LocalAction> {
         if capture.panel.is_none() {
+            if capture.action == Some(LocalAction::Layers) {
+                return scene
+                    .hit_path(point)
+                    .iter()
+                    .any(|p| p.node.id == super::oib_focus_layout::LAYERS)
+                    .then_some(LocalAction::Layers);
+            }
             return capture.action.clone();
         }
         let hit = scene.hit_path(point);
@@ -438,6 +609,45 @@ impl Builder {
             color,
         ))
     }
+    fn focus_button(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+    ) -> Result<SceneNode> {
+        self.focus_control(x, y, width, label, action, true)
+    }
+    fn focus_row(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+    ) -> Result<SceneNode> {
+        self.focus_control(x, y, width, label, action, false)
+    }
+    fn focus_control(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+        outlined: bool,
+    ) -> Result<SceneNode> {
+        let mut row = self.button_style(x, y, width, label, action, outlined)?;
+        row.frame.height = 52.;
+        style::resize_surface(&mut row.children[0], width, 52.)?;
+        let title = &mut row.children[1];
+        title.frame = Rect::new(8., 16., (width - 16.).max(1.), 28.);
+        if let Primitive::Text { scale, .. } = &mut title.primitive {
+            *scale = 2;
+        }
+        Ok(row)
+    }
     fn button(
         &mut self,
         x: f32,
@@ -446,9 +656,24 @@ impl Builder {
         label: &str,
         action: LocalAction,
     ) -> Result<SceneNode> {
+        self.button_style(x, y, width, label, action, true)
+    }
+    fn button_style(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        label: &str,
+        action: LocalAction,
+        outlined: bool,
+    ) -> Result<SceneNode> {
         let id = self.id()?;
-        let mut bg = background(self.id()?, width, 32., CARD, 4.);
-        bg.responder = Some(TouchResponder::Bubble);
+        let mut bg = if outlined {
+            style::surface([self.id()?, self.id()?, self.id()?], width, 32., CARD, 12.)
+        } else {
+            background(self.id()?, width, 32., CARD, 4.)
+        };
+        bg.responder = Some(TouchResponder::PassThrough);
         let label_node = self.label(8., 8., label, WHITE)?;
         let mut node = canvas(id, Rect::new(x, y, width, 32.), vec![bg, label_node]);
         // One local sentinel gives whole-rectangle hit/semantic behavior. The
@@ -529,6 +754,128 @@ fn hierarchy(
         if closed {
             hidden_below = Some(object.depth);
         }
+    }
+    if y > MAX_CONTENT {
+        return Err("Full designer hierarchy exceeds coordinate budget".into());
+    }
+    Ok((nodes, y))
+}
+fn focus_hierarchy(
+    b: &mut Builder,
+    tree: &[HierarchyRow],
+    selected: &Selection,
+    collapsed: &[HierarchyKey],
+    scope: HierarchyScope,
+    mode: DesignerMode,
+) -> Result<(Vec<SceneNode>, f32)> {
+    let mut nodes = vec![
+        b.focus_button(
+            0.,
+            0.,
+            140.,
+            "Layers",
+            LocalAction::TreeScope(HierarchyScope::Composition),
+        )?,
+        b.focus_button(
+            148.,
+            0.,
+            140.,
+            "Components",
+            LocalAction::TreeScope(HierarchyScope::Components),
+        )?,
+        b.focus_button(
+            0.,
+            56.,
+            288.,
+            &format!("Mode: {mode:?}"),
+            LocalAction::Mode(if mode == DesignerMode::Edit {
+                DesignerMode::Test
+            } else {
+                DesignerMode::Edit
+            }),
+        )?,
+    ];
+    let active_scope = usize::from(scope == HierarchyScope::Components);
+    style::set_surface_fill(&mut nodes[active_scope].children[0], LINE)?;
+    if let Primitive::Text { color, .. } = &mut nodes[active_scope].children[1].primitive {
+        *color = ACCENT;
+    }
+    if let Some(semantics) = &mut nodes[active_scope].semantics {
+        semantics.checked = true;
+    }
+    let mut y = 116.;
+    for row in tree {
+        let mut parent = row.parent.as_ref();
+        let mut depth = 0;
+        let mut hidden = false;
+        while let Some(key) = parent {
+            hidden |= collapsed.contains(key);
+            depth += 1;
+            parent = tree
+                .iter()
+                .find(|r| &r.key == key)
+                .and_then(|r| r.parent.as_ref());
+        }
+        if hidden {
+            continue;
+        }
+        let indent = (depth as f32 * 16.).min(112.);
+        let children = tree.iter().any(|r| r.parent.as_ref() == Some(&row.key));
+        let mut node = if let Some(selection) = &row.selection {
+            b.focus_row(
+                0.,
+                y,
+                288.,
+                &row.name,
+                LocalAction::Select(selection.clone()),
+            )?
+        } else {
+            let label = text(
+                b.id()?,
+                Rect::new(indent + 48., 16., (232. - indent).max(1.), 28.),
+                &row.name,
+                2,
+                MUTED,
+            );
+            canvas(
+                b.id()?,
+                Rect::new(0., y, 288., 52.),
+                vec![background(b.id()?, 288., 52., CARD, 0.), label],
+            )
+        };
+        if let Some(label) = node.children.get_mut(1) {
+            label.frame.x = indent + 48.;
+            label.frame.width = (232. - indent).max(1.);
+        }
+        let selected_row = row.selection.as_ref() == Some(selected);
+        if selected_row {
+            style::set_surface_fill(&mut node.children[0], LINE)?;
+            if let Primitive::Text { color, .. } = &mut node.children[1].primitive {
+                *color = ACCENT;
+            }
+        }
+        if children {
+            let mut disclosure = b.focus_row(
+                indent,
+                0.,
+                48.,
+                if collapsed.contains(&row.key) {
+                    ">"
+                } else {
+                    "v"
+                },
+                LocalAction::TreeExpand(row.key.clone()),
+            )?;
+            if selected_row {
+                style::set_surface_fill(&mut disclosure.children[0], LINE)?;
+                if let Primitive::Text { color, .. } = &mut disclosure.children[1].primitive {
+                    *color = ACCENT;
+                }
+            }
+            node.children.push(disclosure);
+        }
+        nodes.push(node);
+        y += 56.;
     }
     if y > MAX_CONTENT {
         return Err("Full designer hierarchy exceeds coordinate budget".into());
@@ -803,6 +1150,94 @@ impl Mount {
             let seed = super::super::oib::seed(&self.ui).ok_or("Missing designer seed")?;
             let allocations = self.doc.oib_allocations()?;
             let objects = super::super::oib::document::objects(seed, &allocations)?;
+            if let Some(target) = designer.pending_selection.take() {
+                if objects.iter().any(|o| o.selection == target) {
+                    designer.select(target);
+                    designer.details = None;
+                    designer.editor_notice = None;
+                } else {
+                    designer.editor_notice = Some("Selection is no longer available".into());
+                }
+            }
+            if let Some(address) = designer.pending_source.take() {
+                let target = editing::selection(&address);
+                let trace = super::super::oib::document::property_sources(
+                    seed,
+                    &allocations,
+                    &address,
+                    &self.doc.oib_active()?,
+                );
+                if objects.iter().any(|o| o.selection == target) && trace.is_ok() {
+                    designer.select(target);
+                    designer.details = Some(trace?);
+                    designer.layers_open = false;
+                    designer.editor_notice = None;
+                } else {
+                    designer.editor_notice = Some("Source is no longer available".into());
+                }
+            }
+
+            if designer.focus_layout {
+                let live = self
+                    .doc
+                    .oib_instances()?
+                    .into_iter()
+                    .filter(|i| i.active)
+                    .map(|i| i.id)
+                    .collect();
+                let tree = super::super::oib::document::hierarchy(
+                    seed,
+                    &allocations,
+                    &live,
+                    designer.tree_scope,
+                )?;
+                if !designer.tree_initialized.contains(&designer.tree_scope) {
+                    let mut first_panel = true;
+                    for row in &tree {
+                        let close = match &row.selection {
+                            Some(Selection::Object(a)) if row.component.is_some() => {
+                                if !a.references.is_empty() {
+                                    true
+                                } else if a.instance
+                                    == seed
+                                        .designer
+                                        .as_ref()
+                                        .ok_or("Missing designer metadata")?
+                                        .presented_root
+                                {
+                                    false
+                                } else {
+                                    let close = !first_panel;
+                                    first_panel = false;
+                                    close
+                                }
+                            }
+                            Some(Selection::Definition(_)) => true,
+                            _ => false,
+                        };
+                        if close {
+                            designer.tree_closed.push(row.key.clone());
+                        }
+                    }
+                    designer.tree_initialized.push(designer.tree_scope);
+                }
+                if designer.reveal_selection {
+                    let mut parent = tree
+                        .iter()
+                        .find(|r| r.selection.as_ref() == Some(&designer.selection))
+                        .and_then(|r| r.parent.clone());
+                    while let Some(key) = parent {
+                        designer.tree_closed.retain(|c| c != &key);
+                        parent = tree
+                            .iter()
+                            .find(|r| r.key == key)
+                            .and_then(|r| r.parent.clone());
+                    }
+                    designer.reveal_selection = false;
+                }
+                designer.tree = tree;
+            }
+
             if !objects.iter().any(|o| o.selection == designer.selection) {
                 designer.select(Selection::Document(
                     seed.designer
@@ -811,12 +1246,29 @@ impl Mount {
                         .id,
                 ));
             }
+            designer.editor_revision = self.doc.oib_generation().unwrap_or(0);
             let properties = super::super::oib::document::properties(
                 seed,
                 &allocations,
                 &designer.selection,
                 &self.doc.oib_active()?,
             )?;
+            let conflicts = self.doc.oib_conflicts();
+            designer.registers = properties
+                .iter()
+                .filter(|p| p.cell.is_some_and(|c| conflicts.contains(&c)))
+                .filter_map(|p| p.address.as_ref())
+                .map(|a| self.doc.oib_property_register(a))
+                .collect::<Result<_>>()?;
+            if let Some(address) = designer.details.as_ref().map(|d| d.address.clone()) {
+                designer.details = super::super::oib::document::property_sources(
+                    seed,
+                    &allocations,
+                    &address,
+                    &self.doc.oib_active()?,
+                )
+                .ok();
+            }
             // Dynamic occurrence cells carry the signed prototype's choices.
             // Their IDs are absent from the unexpanded seed; reuse the runtime
             // expansion rather than deriving a second factory/path lookup here.
@@ -902,7 +1354,60 @@ impl Client {
     }
     fn designer_action(&mut self, action: LocalAction) -> Result<bool> {
         match action {
-            LocalAction::Select(selection) => self.inspect_oib_selection(selection),
+            LocalAction::Details(address) => self.designer_details(&address),
+            LocalAction::Source(address) => self.designer_go_source(&address),
+            LocalAction::Choose(view, value) => self.designer_choose_property(&view, value),
+            LocalAction::PickColor(address, color) => {
+                self.designer_preview_color(&address, Some(color), None, None)
+            }
+            LocalAction::Opacity(address, opacity) => {
+                self.designer_preview_color(&address, None, Some(opacity), None)
+            }
+            LocalAction::DraftBool(address, value) => {
+                self.designer_preview_color(&address, None, None, Some(value))
+            }
+            LocalAction::FocusField(id) => self.designer_focus_field(id),
+            LocalAction::Apply(address) => self.designer_commit_property(&address, false),
+            LocalAction::Discard(address) => self.designer_discard_property(&address),
+            LocalAction::Select(selection) => self.designer_select_after_blur(selection),
+            LocalAction::TreeScope(scope) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.tree_scope = scope;
+                d.revision = None;
+                d.panels[0].scroll.set_offset([0., 0.]);
+                m.refresh_designer()?;
+                Ok(true)
+            }
+            LocalAction::TreeExpand(key) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                if let Some(index) = d.tree_closed.iter().position(|k| k == &key) {
+                    d.tree_closed.remove(index);
+                } else {
+                    d.tree_closed.push(key);
+                }
+                d.revision = None;
+                m.refresh_designer()?;
+                Ok(true)
+            }
+            LocalAction::Layers => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.layers_open = !d.layers_open;
+                d.invalidate_bounds();
+                m.invalidate();
+                Ok(true)
+            }
             LocalAction::Mode(mode) => self.set_oib_designer_mode(mode),
             LocalAction::Expand(selection) => {
                 if self.input_busy() {
@@ -927,7 +1432,17 @@ impl Client {
                 if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
                     return Ok(false);
                 }
+                let reset = value.is_none();
                 let changed = m.doc.edit_oib_property(&address, value)?;
+                if changed
+                    && reset
+                    && let Some(d) = &mut m.designer
+                {
+                    d.drafts.cancel(&address);
+                    if !d.editor_focused() {
+                        m.keyboard.hide();
+                    }
+                }
                 if changed {
                     m.refresh()?;
                     m.invalidate_presentation();
@@ -968,7 +1483,19 @@ impl Client {
         let Some(d) = &m.designer else {
             return Ok(None);
         };
-        if (FIRST..END).contains(&id) {
+        if let Some(key) = d.keyboard_key(id) {
+            if !self.scene()?.controls().iter().any(|c| c.node.id == id) {
+                return Ok(Some(false));
+            }
+            let m = self.active.as_mut().ok_or("No Canvas")?;
+            let edit = m.keyboard.press(key);
+            m.invalidate();
+            if let Some(edit) = edit {
+                return self.hardware_edit(&edit).map(Some);
+            }
+            return Ok(Some(true));
+        }
+        if (FIRST..2_900_000_000).contains(&id) || id == super::oib_focus_layout::LAYERS {
             let action = d.semantic_action(self.scene()?.as_ref(), id);
             return action.map_or(Ok(Some(false)), |a| self.designer_action(a).map(Some));
         }
@@ -999,7 +1526,23 @@ impl Client {
         if event.phase == PointerPhase::Down && self.input_busy() {
             return Ok(Some(false));
         }
-        let scene = self.scene()?;
+        // Once captured, Scroll uses its pinned Down geometry for Move/Cancel
+        // and non-tap release. Do not rebuild the presented/culling scene merely
+        // to advance input before the renderer has credit for another frame.
+        let captured_pan = m
+            .designer
+            .as_ref()
+            .and_then(|d| d.capture.as_ref())
+            .is_some_and(|c| {
+                event.phase == PointerPhase::Move
+                    || event.phase == PointerPhase::Cancel
+                    || (event.phase == PointerPhase::Up && c.moving)
+            });
+        let scene = if captured_pan {
+            cached_layout(m)?
+        } else {
+            self.scene()?
+        };
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let mut designer = m.designer.take().ok_or("Missing designer")?;
         let result = (|| -> Result<(Option<bool>, Option<LocalAction>)> {
@@ -1010,7 +1553,17 @@ impl Client {
                 let action = hit
                     .iter()
                     .rev()
-                    .find_map(|p| designer.actions.get(&p.node.id).cloned());
+                    .find_map(|p| designer.local_action(p.node.id));
+                if action == Some(LocalAction::Layers) {
+                    designer.capture = Some(Capture {
+                        pointer: event.id,
+                        start: event.position,
+                        moving: false,
+                        action,
+                        panel: None,
+                    });
+                    return Ok((Some(true), None));
+                }
                 let mut panel_index = None;
                 for (index, panel) in designer.panels.iter_mut().enumerate() {
                     if admits_viewport(&scene, &hit, u32::from(panel.viewport), event.position)

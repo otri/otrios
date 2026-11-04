@@ -272,6 +272,33 @@ class ArtifactBudget(unittest.TestCase):
                 self.assertEqual(observer.recv(1),b'!')
             os.mkfifo(root/'unexpected-fifo')
             with self.assertRaisesRegex(ValueError,'Unexpected cache entry type'):agent.trim_cache(root,1000)
+    def test_guarded_executable_upgrade_does_not_force_close_a_busy_host(self):
+        from unittest.mock import patch
+        class Process:
+            def __init__(self):self.waits=[];self.terminated=0;self.killed=0
+            def wait(self,timeout=None):
+                self.waits.append(timeout)
+                if len(self.waits)<=12:raise agent.subprocess.TimeoutExpired('native',timeout)
+                return 0
+            def terminate(self):self.terminated+=1
+            def kill(self):self.killed+=1
+        with tempfile.TemporaryDirectory() as tmp,patch.object(agent,'running',True):
+            host=agent.Host.__new__(agent.Host);root=pathlib.Path(tmp)
+            host.stop=root/'stop';host.ready=root/'ready';host.ui_socket=root/'ui.sock'
+            host.process=Process();host.info=lambda:{'upgrade_guard':'worker-quiescent-v1'}
+            host.close(for_upgrade=True)
+            self.assertEqual(host.process.waits,[.5]*13)
+            self.assertEqual((host.process.terminated,host.process.killed),(0,0))
+            self.assertFalse(host.stop.exists())
+    def test_guarded_host_still_allows_explicit_service_shutdown(self):
+        from unittest.mock import patch,MagicMock
+        with tempfile.TemporaryDirectory() as tmp,patch.object(agent,'running',False):
+            host=agent.Host.__new__(agent.Host);root=pathlib.Path(tmp)
+            host.stop=root/'stop';host.ready=root/'ready';host.ui_socket=root/'ui.sock'
+            host.info=lambda:{'upgrade_guard':'worker-quiescent-v1'}
+            host.process=MagicMock();host.process.wait.side_effect=[agent.subprocess.TimeoutExpired('native',.5),0]
+            host.close(for_upgrade=True)
+            host.process.terminate.assert_called_once()
     def test_reload_waits_for_server_and_finished_gesture(self):
         good={'stream_ready':True,'state_confirmed':True,'pending_commands':0,'input_busy':False}
         self.assertTrue(agent.hot_reload_ready(good))
@@ -297,7 +324,7 @@ class ArtifactBudget(unittest.TestCase):
                     if len(attempts)==1:raise RuntimeError('state authority unavailable')
                     agent.running=False
             def info(self):return {'reload_ready':True,'input_busy':False,'screen':'home'}
-            def close(self):pass
+            def close(self,for_upgrade=False):pass
         class Feed:
             def __init__(self,args,current):self.sent=False;self.process=SimpleNamespace(poll=lambda:None)
             def take(self):

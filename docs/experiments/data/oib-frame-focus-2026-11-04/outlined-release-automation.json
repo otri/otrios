@@ -1,0 +1,16 @@
+{
+  "source_pin": "c1ebfe180a2bd6d3c45c8e0e7fb035c8d10b188c",
+  "release": "52f0395bdbe5b437b53509181a42b180d9e391b591592fc5f8b3c4d61bb77249",
+  "remote_source_loaded": true,
+  "original_build_env_preserved": true,
+  "source_fingerprint_matches": true,
+  "existing_launch_agent_restarted": true,
+  "watcher_resumed": true,
+  "previous_control_files_preserved_privately": true,
+  "control_rollback_tag": "2026-11-04-frame-focus-qualified-style",
+  "temporary_frame_helpers_removed": true,
+  "normal_host_confirmed_idle": true,
+  "pending_commands": 0,
+  "final_generation": 71,
+  "rollback_activation_repeated": false
+}

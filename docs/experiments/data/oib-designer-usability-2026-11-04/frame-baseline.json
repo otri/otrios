@@ -1,0 +1,12 @@
+{
+  "release": "f62027700e7d8a05a6791866231d22a7ea230f3324079e6e853a250f0dfee8ef",
+  "gesture": "three-second hierarchy pan",
+  "offered_samples_hz": 30,
+  "duration_seconds": 3.001,
+  "observed_presented_readiness_reports": 4,
+  "observed_reports_per_second": 1.33,
+  "report_gap_p95_ms": 1283.0,
+  "report_gap_max_ms": 1283.0,
+  "shared_generation_unchanged": true,
+  "label": "Readiness-report cadence proxy, not independent scanout FPS or GPU profiling"
+}

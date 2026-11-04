@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 //! OIB shares the app checkpoint, journal, receipts and publication root.
+use super::super::oib::document::PropertyRegisterView;
 use super::*;
 use otrios_interfaces::oib::{
     Allocation, Change, InspectorAction, InstanceAction, InstanceOperation, MAX_ALLOCATIONS,
@@ -1355,5 +1356,58 @@ impl StateAdapter {
             address,
         )?;
         self.edit_oib(&[(id, value)])
+    }
+}
+
+impl StateAdapter {
+    pub fn oib_property_register(
+        &self,
+        address: &otrios_interfaces::oib::designer::PropertyAddress,
+    ) -> Result<PropertyRegisterView> {
+        let seed = self.doc.oib_binding()?.seed;
+        let cell = super::super::oib::document::cell_for_address(
+            &seed,
+            &self.doc.oib_allocations()?,
+            address,
+        )?;
+        let leaf = self.doc.tree.subtree(&cell_path(1, cell)).map_err(err)?;
+        let register = leaf.register().ok_or("Missing OIB property register")?;
+        let mut alternatives = Vec::new();
+        for (_, _, data) in register.values() {
+            let value = data.map(decode::<Value>).transpose()?;
+            if !alternatives.contains(&value) {
+                alternatives.push(value);
+            }
+        }
+        Ok(PropertyRegisterView {
+            address: address.clone(),
+            cell,
+            version: leaf.hash(),
+            alternatives,
+        })
+    }
+
+    /// Enqueue a choice only from this exact observed draft version. A stale
+    /// view must be refreshed; no unseen alternative is implicitly resolved.
+    /// True means queued, not authority acceptance or active publication.
+    pub fn choose_oib_property(
+        &mut self,
+        view: &PropertyRegisterView,
+        value: Option<Value>,
+    ) -> Result<bool> {
+        if self.read_only || !self.confirmed() {
+            return Ok(false);
+        }
+        let current = self.oib_property_register(&view.address)?;
+        if current.cell != view.cell || current.version != view.version {
+            return Err("OIB property register changed; refresh choices".into());
+        }
+        if !current.alternatives.contains(&value) {
+            return Err("Value is not an observed OIB property alternative".into());
+        }
+        // No replica mutation occurs between the version check and edit_oib's
+        // capture of the observed register. Existing type/binding/write guards
+        // and authority-side validation remain in force.
+        self.edit_oib(&[(current.cell, value)])
     }
 }
