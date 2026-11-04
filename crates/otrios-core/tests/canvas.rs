@@ -35,8 +35,16 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
         } else {
             &[]
         };
+        let ui = factory(bytes);
+        let frame_focus = oib::seed(&ui).is_some_and(|seed| {
+            seed.instance_surface.is_some()
+                && seed
+                    .designer
+                    .as_ref()
+                    .is_some_and(|d| d.hierarchy_viewport.is_some())
+        });
         let mut c = Client::default();
-        activate(&mut c, factory(bytes), "themed-demo", bytes.to_vec());
+        activate(&mut c, ui, "themed-demo", bytes.to_vec());
         let wide = c.scene().unwrap();
         let identities = |scene: &otrios_core::dashboard::scene::Scene| {
             scene
@@ -105,8 +113,12 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
                     app.id
                 );
             }
-            let header = &scene.root().children[1];
-            for node in &header.children {
+            let header_nodes = if frame_focus {
+                &scene.root().children
+            } else {
+                &scene.root().children[1].children
+            };
+            for node in header_nodes {
                 if let Primitive::Text { value, scale, .. } = &node.primitive {
                     assert!(
                         font.text_width(value, *scale as f32) <= node.frame.width + 0.1,
@@ -116,33 +128,49 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
                 }
             }
         }
-        for (label, destination) in [
-            ("OTriOS", "app:home/ui"),
-            ("Test Playground", "app:test-playground/ui"),
-        ] {
-            if label == "Test Playground" && app.id == "test-playground" {
-                continue;
-            }
-            let owner = tall
-                .controls()
-                .into_iter()
-                .find(|p| p.node.semantics.as_ref().unwrap().label == label)
-                .unwrap();
-            let Some(otrios_interfaces::scene::TouchResponder::Activate(Action::AppNavigate(
-                action,
-            ))) = owner.node.responder
-            else {
-                panic!("breadcrumb destination")
-            };
-            let ui = factory(bytes);
-            assert_eq!(
-                ui.navigation
+        if frame_focus {
+            let controls = tall.controls();
+            assert!(
+                controls
                     .iter()
-                    .find(|n| n.action == action)
-                    .unwrap()
-                    .ui_ref,
-                destination
+                    .any(|p| p.node.semantics.as_ref().unwrap().label == "Layers")
             );
+            // Frame Focus replaces visible breadcrumbs with local Layers.
+            // Its scoped exit is supplied by the managed host, while this
+            // standalone fixture retains the signed navigation declarations.
+            let ui = factory(bytes);
+            for destination in ["app:home/ui", "app:test-playground/ui"] {
+                assert!(ui.navigation.iter().any(|n| n.ui_ref == destination));
+            }
+        } else {
+            for (label, destination) in [
+                ("OTriOS", "app:home/ui"),
+                ("Test Playground", "app:test-playground/ui"),
+            ] {
+                if label == "Test Playground" && app.id == "test-playground" {
+                    continue;
+                }
+                let owner = tall
+                    .controls()
+                    .into_iter()
+                    .find(|p| p.node.semantics.as_ref().unwrap().label == label)
+                    .unwrap();
+                let Some(otrios_interfaces::scene::TouchResponder::Activate(Action::AppNavigate(
+                    action,
+                ))) = owner.node.responder
+                else {
+                    panic!("breadcrumb destination")
+                };
+                let ui = factory(bytes);
+                assert_eq!(
+                    ui.navigation
+                        .iter()
+                        .find(|n| n.action == action)
+                        .unwrap()
+                        .ui_ref,
+                    destination
+                );
+            }
         }
         if let Some(bounds) = c.motion_viewport().unwrap() {
             assert!(

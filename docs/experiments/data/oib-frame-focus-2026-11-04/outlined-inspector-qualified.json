@@ -1,0 +1,31 @@
+{
+  "release": "52f0395bdbe5b437b53509181a42b180d9e391b591592fc5f8b3c4d61bb77249",
+  "trial": "inspector-guarded-overlap-v2",
+  "seconds": 29.966748,
+  "device_move_samples": 900,
+  "unique_move_updates": 850,
+  "updates_per_second": 28.364772847557568,
+  "return_intervals": {
+    "n": 849,
+    "p95_ms": 35.36,
+    "max_ms": 37.183
+  },
+  "sample_to_return": {
+    "n": 850,
+    "p95_ms": 94.546,
+    "max_ms": 98.456
+  },
+  "boundary_gaps_ms": [
+    43.063,
+    0.0
+  ],
+  "drm_flip_intervals": {
+    "n": 849,
+    "p95_ms": 35.312,
+    "max_ms": 35.366
+  },
+  "topology_rebuilds": 15,
+  "pass": true,
+  "logs_dropped": 0,
+  "service_restored": true
+}

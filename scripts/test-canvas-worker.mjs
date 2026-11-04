@@ -268,3 +268,25 @@ test('initial anonymous auth status preserves admitted public Space data; actual
   vm.runInContext('applyAuthenticationStatus({authenticated:true});applyAuthenticationStatus({authenticated:false})',context);
   assert.equal(cleared,1);assert.equal(navigated,1);assert(messages.some(m=>m.type==='clear-private'));
 });
+
+test('thin text transport forwards identity, cancellation and Tab direction and acknowledges rejected old fields',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  const calls=[],messages=[],fake={tick:()=>false,take_sign_out:()=>false,epoch:()=>7,begin_frame:()=>null,
+    replace_text_input:(...args)=>{calls.push(['replace',...args]);return false;},
+    scroll_text_input:(...args)=>{calls.push(['scroll',...args]);return false;},
+    cancel_text_input:(...args)=>{calls.push(['cancel',...args]);return false;},
+    text_input_key:(...args)=>{calls.push(['key',...args]);return false;},
+    blur_text_input:(...args)=>{calls.push(['blur',...args]);return false;}};
+  const context=workerContext({fake,performance:{now:()=>100},postMessage:m=>messages.push(m)});
+  vm.runInContext(source,context);vm.runInContext('app=fake',context);
+  const commands=[
+    {type:'text-input',text:'377.5',cursor:5,anchor:5},
+    {type:'text-tab',backward:true},{type:'text-tab',backward:false},
+    {type:'text-cancel'},{type:'text-enter'},{type:'text-blur'},
+  ];
+  for(const [i,command] of commands.entries())await context.onmessage({data:{epoch:6,id:42,inputRevision:i+1,...command}});
+  assert.deepEqual(calls,[['replace',6,42,'377.5',5,5,false],['scroll',6,42,0],
+    ['key',6,42,'BackTab'],['key',6,42,'Tab'],['cancel',6,42],['key',6,42,'Enter'],['blur',6,42]]);
+  assert.equal(vm.runInContext('inputRevision',context),6,'even rejected retired identities advance the acknowledgement');
+  assert.equal(messages.filter(m=>m.type==='command-ack').length,6);assert(!messages.some(m=>m.type==='error'));
+});

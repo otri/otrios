@@ -1,0 +1,194 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<nav id="oib-study-variants" aria-label="Design presentation" hidden><button type="button" data-show="desktop" aria-pressed="true">Desktop Studio</button><button type="button" data-show="frame" aria-pressed="false">Frame Focus</button></nav>
+<div id="oib-usability-concept" class="viz-carousel" aria-label="OIB Designer interaction proposals">
+  <section data-variant="Desktop Studio" aria-label="Desktop Studio" data-profile="desktop"><div class="oib-study"><p>Loading design study…</p></div></section>
+  <section data-variant="Frame Focus" aria-label="Frame Focus" data-profile="frame" hidden><div class="oib-study"><p>Loading design study…</p></div></section>
+</div>
+<style>
+#oib-study-variants {display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+#oib-study-variants[hidden] {display:none}
+#oib-study-variants button {font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:6px;padding:8px 12px;cursor:pointer}
+#oib-study-variants button[aria-pressed="true"] {font-weight:500;text-decoration:underline;text-underline-offset:5px}
+#oib-usability-concept {color-scheme:light dark}
+#oib-usability-concept .oib-study {
+ --oib-bg:light-dark(#f3f5f7,#171b20);--oib-panel:light-dark(#ffffff,#24292f);--oib-text:light-dark(#20262d,#f0f2f5);
+ --oib-muted:light-dark(#53606d,#b7c0ca);--oib-line:light-dark(#d5dbe2,#424b57);--oib-field:light-dark(#f5f7fa,#303741);
+ --oib-select:light-dark(#eee8ff,#3b315a);--oib-focus:light-dark(#6940c6,#c2a7ff);--oib-error:light-dark(#a12828,#ffb3ad);
+ --oib-size:16px;--oib-small:14px;--oib-row:44px;
+ font:400 var(--oib-size)/1.45 system-ui,-apple-system,sans-serif;color:var(--oib-text);background:var(--oib-bg);
+ border:1px solid var(--oib-line);border-radius:12px;overflow:hidden;min-width:0;
+}
+#oib-usability-concept [data-profile="frame"] .oib-study {--oib-size:20px;--oib-small:16px;--oib-row:52px}
+#oib-usability-concept .oib-study * {box-sizing:border-box}
+#oib-usability-concept .oib-study button,#oib-usability-concept .oib-study input {font:inherit;color:inherit}
+#oib-usability-concept .oib-study button {background:transparent;border:1px solid transparent;border-radius:6px;padding:7px 10px;min-height:36px;cursor:pointer}
+#oib-usability-concept .oib-study button:hover {background:var(--oib-field)}
+#oib-usability-concept .oib-study button:focus-visible,#oib-usability-concept .oib-study input:focus-visible {outline:2px solid var(--oib-focus);outline-offset:2px}
+#oib-usability-concept .oib-study button[aria-pressed="true"] {background:var(--oib-select);color:var(--oib-text)}
+#oib-usability-concept .oib-study button:disabled {opacity:.6;cursor:default}
+#oib-usability-concept .oib-bar {display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 96px 12px 14px;background:var(--oib-panel);border-bottom:1px solid var(--oib-line)}
+#oib-usability-concept .oib-title {font-weight:500;flex:1;min-width:120px}
+#oib-usability-concept .oib-modes {display:flex;gap:2px;border:1px solid var(--oib-line);border-radius:8px;padding:2px}
+#oib-usability-concept .oib-small {font-size:var(--oib-small);color:var(--oib-muted)}
+#oib-usability-concept .oib-workspace {display:grid;grid-template-columns:260px minmax(160px,1fr) 292px;position:relative;height:620px;min-width:0}
+#oib-usability-concept [data-profile="frame"] .oib-workspace {grid-template-columns:minmax(180px,1fr) 352px}
+#oib-usability-concept .oib-pane {background:var(--oib-panel);min-width:0;overflow:auto;scrollbar-gutter:stable}
+#oib-usability-concept .oib-layers {border-right:1px solid var(--oib-line)}
+#oib-usability-concept .oib-inspector {border-left:1px solid var(--oib-line)}
+#oib-usability-concept .oib-pane-head {padding:14px 16px;font-weight:500;border-bottom:1px solid var(--oib-line)}
+#oib-usability-concept .oib-tabs {display:flex;gap:2px;padding:8px}
+#oib-usability-concept .oib-tree {padding:6px 4px 20px}
+#oib-usability-concept .oib-tree-row {display:flex;align-items:center;min-height:var(--oib-row);padding-left:calc(4px + var(--depth)*14px);border-radius:6px}
+#oib-usability-concept .oib-tree-row.selected {background:var(--oib-select)}
+#oib-usability-concept .oib-tree-row .oib-disclose {flex:0 0 30px;padding:0;width:30px;min-height:var(--oib-row)}
+#oib-usability-concept .oib-tree-row .oib-node {display:flex;gap:8px;text-align:left;min-width:0;flex:1;padding:5px 4px;min-height:var(--oib-row)}
+#oib-usability-concept .oib-node span:last-child {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#oib-usability-concept .oib-kind {flex:0 0 16px;color:var(--oib-focus)}
+#oib-usability-concept .oib-group {padding:18px 14px 6px;font-size:var(--oib-small);color:var(--oib-muted)}
+#oib-usability-concept .oib-canvas {padding:16px;min-width:0;overflow:auto;background:var(--oib-bg)}
+#oib-usability-concept .oib-canvas-head {display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px}
+#oib-usability-concept .oib-component {max-width:520px;margin:0 auto 20px;background:var(--oib-panel);border:2px solid transparent;border-radius:16px;padding:18px 16px 16px;border-top-color:var(--shared-color);box-shadow:0 1px 3px #00000012}
+#oib-usability-concept .oib-component.is-current {border-color:var(--oib-focus)}
+#oib-usability-concept .oib-component h3 {font:500 1.1em/1.3 system-ui;margin:0 0 18px}
+#oib-usability-concept .oib-level {padding:10px 6px;border:1px solid transparent;border-radius:7px;min-width:0}
+#oib-usability-concept .oib-level.selected {border-color:var(--oib-focus)}
+#oib-usability-concept .oib-value {display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;overflow-wrap:anywhere}
+#oib-usability-concept .oib-level input[type="range"] {width:100%;accent-color:var(--level-color);height:28px}
+#oib-usability-concept .oib-level input[type="range"] {appearance:none;background:transparent}
+#oib-usability-concept .oib-level input[type="range"]::-webkit-slider-runnable-track {height:8px;border-radius:4px;background:var(--oib-line)}
+#oib-usability-concept .oib-level input[type="range"]::-webkit-slider-thumb {appearance:none;width:22px;height:22px;border-radius:50%;background:var(--level-color);margin-top:-7px}
+#oib-usability-concept .oib-level input[type="range"]::-moz-range-track {height:8px;border-radius:4px;background:var(--oib-line)}
+#oib-usability-concept .oib-level input[type="range"]::-moz-range-thumb {width:22px;height:22px;border:0;border-radius:50%;background:var(--level-color)}
+#oib-usability-concept .oib-power {display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px}
+#oib-usability-concept .oib-power label {display:flex;gap:8px;align-items:center;min-height:40px;flex:1}
+#oib-usability-concept .oib-power input {width:20px;height:20px;accent-color:var(--level-color)}
+#oib-usability-concept .oib-power button {border-color:var(--oib-line)}
+#oib-usability-concept .oib-selection {padding:16px;border-bottom:1px solid var(--oib-line)}
+#oib-usability-concept .oib-selection strong {font-weight:500;display:block}
+#oib-usability-concept .oib-fields {padding:0 16px 20px}
+#oib-usability-concept .oib-fields h4 {font:500 1em/1.4 system-ui;margin:20px 0 10px}
+#oib-usability-concept .oib-field {margin-bottom:18px}
+#oib-usability-concept .oib-field-top {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+#oib-usability-concept .oib-badge {font-size:var(--oib-small);color:var(--oib-focus)}
+#oib-usability-concept .oib-input-line {display:flex;align-items:center;gap:7px;min-width:0}
+#oib-usability-concept .oib-study input[type="text"],#oib-usability-concept .oib-study input[type="number"] {background:var(--oib-field);border:1px solid var(--oib-line);border-radius:6px;padding:9px;min-width:0;width:100%}
+#oib-usability-concept .oib-study input[aria-invalid="true"] {border-color:var(--oib-error)}
+#oib-usability-concept .oib-study input[type="color"] {background:var(--oib-panel);border:1px solid var(--oib-line);border-radius:6px;width:42px;height:42px;padding:3px;flex:0 0 42px}
+#oib-usability-concept .oib-unit {font-size:var(--oib-small);color:var(--oib-muted)}
+#oib-usability-concept .oib-reset {flex:0 0 36px;min-height:40px!important;font-size:1.1em!important}
+#oib-usability-concept .oib-error {color:var(--oib-error);font-size:var(--oib-small);margin-top:5px;min-height:0}
+#oib-usability-concept .oib-source {padding:0!important;color:var(--oib-focus)!important;text-align:left;font-size:var(--oib-small)!important}
+#oib-usability-concept .oib-fields details {border-top:1px solid var(--oib-line);margin-top:18px;padding-top:12px;font-size:var(--oib-small)}
+#oib-usability-concept .oib-fields summary {cursor:pointer;min-height:32px}
+#oib-usability-concept .oib-footer {padding:9px 16px;font-size:var(--oib-small);color:var(--oib-muted);border-top:1px solid var(--oib-line);background:var(--oib-panel)}
+#oib-usability-concept .oib-scrim {position:absolute;inset:0 352px 0 0;background:#00000033;z-index:3;border:0;border-radius:0}
+#oib-usability-concept .oib-drawer {position:absolute;inset:0 auto 0 0;width:min(320px,100%);z-index:4;box-shadow:8px 0 20px #00000022}
+#oib-usability-concept [data-profile="frame"] .oib-study button {min-height:48px}
+#oib-usability-concept [data-profile="frame"] .oib-tree-row {padding-left:calc(4px + var(--depth)*18px)}
+#oib-usability-concept [data-profile="frame"] .oib-power label {min-height:48px}
+#oib-usability-concept [data-profile="frame"] .oib-reset {flex-basis:48px;min-height:48px!important}
+#oib-usability-concept [data-profile="frame"] input[type="color"] {width:48px;height:48px;flex-basis:48px}
+@media(min-width:641px) and (max-width:860px){#oib-usability-concept [data-profile="desktop"] .oib-workspace {grid-template-columns:240px minmax(150px,1fr) 276px}}
+@media(pointer:coarse){#oib-usability-concept .oib-study button {min-height:44px}}
+@media(max-width:640px){
+ #oib-usability-concept .oib-workspace,#oib-usability-concept [data-profile="frame"] .oib-workspace {display:flex;flex-direction:column;height:auto}
+ #oib-usability-concept .oib-pane,#oib-usability-concept .oib-canvas {overflow:visible}
+ #oib-usability-concept .oib-bar {padding-right:16px}
+ #oib-usability-concept .oib-drawer {position:relative;inset:auto;width:100%}
+ #oib-usability-concept .oib-scrim {display:none}
+ #oib-usability-concept .oib-layers,#oib-usability-concept .oib-inspector {border:0;border-top:1px solid var(--oib-line)}
+}
+</style>
+<script>
+(()=>{
+ const root=document.getElementById('oib-usability-concept');
+ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const makeState=()=>({selected:'audio.level',shared:'#5588ff',sharedOpacity:100,mode:'design',tab:'composition',layers:false,open:['document','canvas','audio'],overrides:{audio:{},display:{}},drafts:{},values:{audio:40,display:70},enabled:{audio:true,display:false},notice:'All changes saved'});
+ const initial=window.openai?.widgetState?.privateContent?.oibStudy;
+ const studies=[];let testing=false;
+ function save(){if(testing)return;const data=Object.fromEntries(studies.map(a=>[a.profile,a.state]));window.openai?.setWidgetState?.({modelContent:{oibStudy:Object.fromEntries(studies.map(a=>[a.profile,{selection:a.state.selected,sharedAccent:a.state.shared,overrides:a.state.overrides}]))},privateContent:{oibStudy:data}})?.catch(()=>{});}
+ const baseLabel=id=>id==='audio'?'Volume':'Brightness';
+ const title=id=>id==='audio'?'Audio':'Display';
+ const fieldValue=(s,id,key)=>s.overrides[id][key]??(key==='label'?baseLabel(id):key==='width'?440:key==='opacity'?s.sharedOpacity:s.shared);
+ const isOverride=(s,id,key)=>Object.prototype.hasOwnProperty.call(s.overrides[id],key);
+ function validWidth(v){return v.trim()!==''&&Number.isFinite(Number(v))&&Number(v)>=320&&Number(v)<=440;}
+ function row(a,id,name,depth,kind,children=''){
+  const open=a.state.open.includes(id),selected=a.state.selected===id;
+  return `<div class="oib-tree-row ${selected?'selected':''}" style="--depth:${depth}">${children?`<button type="button" class="oib-disclose" data-expand="${id}" aria-label="${open?'Collapse':'Expand'} ${esc(name)}" aria-expanded="${open}">${open?'▾':'▸'}</button>`:'<span style="width:30px;flex:0 0 30px"></span>'}<button type="button" class="oib-node" ${id==='objects'?'data-expand="objects"':'data-select="'+id+'"'} aria-label="${id==='objects'?'Expand':'Select'} ${esc(name)}"><span class="oib-kind" aria-hidden="true">${kind}</span><span>${esc(name)}</span></button></div>${open?children:''}`;
+ }
+ function tree(a){
+  const s=a.state;
+  if(s.tab==='components')return `<div class="oib-tree">${row(a,'shared','SettingsPanel',0,'◇')}${row(a,'slider-definition','LabeledSlider',0,'◇')}${row(a,'toggle-definition','LabeledToggle',0,'◇')}</div>`;
+  let panels='';for(const id of ['audio','display']){
+   const inside=row(a,id+'.level','Level control',3,'◇',row(a,id+'.label','Label',4,'T')+row(a,id+'.track','Track',4,'▭'))+row(a,id+'.power','Power control',3,'◇')+row(a,id+'.button','Toggle power',3,'▭');
+   panels+=row(a,id,title(id),2,'◇',inside);
+  }
+  return `<div class="oib-tree">${row(a,'document','SettingsDocument',0,'▤',row(a,'canvas','Canvas',1,'▧',panels)+row(a,'objects','Objects',1,'○',row(a,'configuration','Configuration',2,'○')))}</div>`;
+ }
+ function layers(a,drawer=false){return `<aside class="oib-pane oib-layers ${drawer?'oib-drawer':''}" aria-label="Hierarchy"><div class="oib-pane-head">Hierarchy</div><div class="oib-tabs"><button type="button" data-tab="composition" aria-pressed="${a.state.tab==='composition'}">Composition</button><button type="button" data-tab="components" aria-pressed="${a.state.tab==='components'}">Components</button></div>${tree(a)}</aside>`;}
+ function preview(a,id){
+  const s=a.state,color=fieldValue(s,id,'color')+Math.round(fieldValue(s,id,'opacity')*255/100).toString(16).padStart(2,'0'),width=fieldValue(s,id,'width'),selected=s.selected===id,level=s.selected===id+'.level';
+  return `<section class="oib-component ${selected||s.selected==='shared'?'is-current':''}" style="--shared-color:${s.shared}${Math.round(s.sharedOpacity*255/100).toString(16).padStart(2,'0')};--level-color:${color}" data-canvas-select="${id}"><h3>${title(id)}</h3><div class="oib-level ${level?'selected':''}" data-canvas-select="${id}.level" style="width:${width/440*100}%"><div class="oib-value"><span>${esc(fieldValue(s,id,'label'))}</span><span>${s.values[id]}%</span></div><input aria-label="Test ${title(id)} value" type="range" min="0" max="100" value="${s.values[id]}" data-value="${id}" ${s.mode==='design'?'disabled':''}></div><div class="oib-power"><label><input type="checkbox" data-power="${id}" ${s.enabled[id]?'checked':''} ${s.mode==='design'?'disabled':''}>Enabled</label><button type="button" data-toggle-power="${id}" ${s.mode==='design'?'disabled':''}>Toggle power</button></div></section>`;
+ }
+ function reset(s,id,key){return isOverride(s,id,key)?`<button type="button" class="oib-reset" data-reset="${key}" aria-label="Reset ${key} to inherited value">↶</button>`:'<span style="width:36px;flex:0 0 36px"></span>';}
+ function badge(s,id,key){return isOverride(s,id,key)?'Override':key==='label'?'Authored':'Inherited';}
+ function colorField(s,id,shared=false,profile='desktop'){const v=shared?s.shared:fieldValue(s,id,'color');const opacity=shared?s.sharedOpacity:fieldValue(s,id,'opacity');return `<div class="oib-field"><div class="oib-field-top"><label for="${profile}-${id}-hex-${shared}">Accent</label><span class="oib-badge">${shared?'Shared':badge(s,id,'color')}</span></div><div class="oib-input-line"><input type="color" aria-label="Choose accent color" data-color-picker value="${v}"><input type="text" id="${profile}-${id}-hex-${shared}" data-edit="color" maxlength="7" value="${v.toUpperCase()}" aria-label="Accent hex color" spellcheck="false">${shared?'':reset(s,id,'color')}</div><div class="oib-error" role="alert" data-error="color"></div><div class="oib-input-line" style="margin-top:10px"><label for="${profile}-opacity" class="oib-unit">Opacity</label><input id="${profile}-opacity" type="number" step="any" min="0" max="100" data-edit="opacity" aria-label="Opacity" value="${opacity}"><span class="oib-unit">%</span></div><div class="oib-error" role="alert" data-error="opacity"></div>${shared?'':'<button type="button" class="oib-source" data-source>From SettingsPanel → Accent</button>'}</div>`;}
+ function inspector(a){
+  const s=a.state,id=s.selected.startsWith('display')?'display':'audio',level=s.selected===id+'.level',panel=s.selected===id,shared=s.selected==='shared';
+  let name=shared?'SettingsPanel':s.selected==='configuration'?'Configuration':level?`${title(id)} / Level control`:panel?title(id):s.selected==='slider-definition'?'LabeledSlider':s.selected==='toggle-definition'?'LabeledToggle':s.selected==='document'?'SettingsDocument':s.selected==='canvas'?'Canvas':'Selected internal object';
+  let type=shared?'Shared component source · 2 panels':level?'LabeledSlider · instance':panel?'SettingsPanel · instance':s.selected==='configuration'?'OIBObject · nonvisual':'Signed structure';
+  let fields='';
+  if(level)fields=`<h4>Component</h4><div class="oib-field"><div class="oib-field-top"><label for="${a.profile}-label">Label</label><span class="oib-badge">${badge(s,id,'label')}</span></div><div class="oib-input-line"><input type="text" id="${a.profile}-label" data-edit="label" maxlength="96" value="${esc(fieldValue(s,id,'label'))}" aria-label="Label text">${reset(s,id,'label')}</div><div class="oib-error" role="alert" data-error="label"></div></div><h4>Layout</h4><div class="oib-field"><div class="oib-field-top"><label for="${a.profile}-width">Width</label><span class="oib-badge">${badge(s,id,'width')}</span></div><div class="oib-input-line"><input type="number" step="any" inputmode="decimal" id="${a.profile}-width" data-edit="width" value="${fieldValue(s,id,'width')}" aria-label="Width"><span class="oib-unit">px</span>${reset(s,id,'width')}</div><div class="oib-small">320–440 px</div><div class="oib-error" role="alert" data-error="width"></div></div><h4>Appearance</h4>${colorField(s,id,false,a.profile)}<details><summary>Connections</summary><p>Value → ${id==='audio'?'volume':'brightness'}<br>Signed app binding · read only</p></details><details><summary>Source details</summary><p>SettingsPanel → Level control → Label<br>Reset returns to ${baseLabel(id)}.</p></details>`;
+  else if(shared)fields=`<h4>Appearance</h4>${colorField(s,id,true,a.profile)}<button type="button" data-select="audio.level">Back to Audio / Level control</button>`;
+  else if(panel)fields=`<h4>Component</h4><button type="button" data-select="${id}.level">◇ Level control</button><h4>Appearance</h4><div class="oib-small">Accent comes from SettingsPanel.</div><button type="button" class="oib-source" data-source>Edit shared source</button>`;
+  else if(s.selected==='configuration')fields='<h4>Object</h4><p>Configuration</p><div class="oib-small">Nonvisual object. No layout properties.</div>';
+  else if(s.selected.endsWith('-definition'))fields='<h4>Definition</h4><p>Accent is forwarded from SettingsPanel in this composition.</p><button type="button" class="oib-source" data-source>Go to active shared source</button>';
+  else fields='<h4>Identity</h4><p>Signed document structure</p><div class="oib-small">Choose a component to edit its properties.</div>';
+  return `<aside class="oib-pane oib-inspector" aria-label="Properties"><div class="oib-pane-head">Properties</div><div class="oib-selection"><strong>${name}</strong><span class="oib-small">${type}</span></div><div class="oib-fields">${fields}</div></aside>`;
+ }
+ function render(a){
+  const s=a.state,isFrame=a.profile==='frame';
+  a.el.innerHTML=`<header class="oib-bar">${isFrame?`<button type="button" data-layers aria-expanded="${s.layers}">Layers</button>`:''}<div class="oib-title">SettingsDocument</div><div class="oib-modes" aria-label="Canvas mode"><button type="button" data-mode="design" aria-pressed="${s.mode==='design'}">Design</button><button type="button" data-mode="test" aria-pressed="${s.mode==='test'}">Test</button></div></header><div class="oib-workspace">${isFrame?'':layers(a)}<main class="oib-canvas" aria-label="Component canvas"><div class="oib-canvas-head"><span class="oib-small">Canvas</span><span class="oib-small">Fit</span></div>${preview(a,'audio')}${preview(a,'display')}</main>${inspector(a)}${isFrame&&s.layers?'<button type="button" class="oib-scrim" aria-label="Close hierarchy" data-layers></button>'+layers(a,true):''}</div><footer class="oib-footer" role="status">${esc(s.notice)}${Object.keys(s.drafts).length?' · '+Object.keys(s.drafts).length+' unapplied edit(s)':''} · Local design study</footer>`;
+  a.el.querySelectorAll('[data-select]').forEach(b=>b.onclick=()=>select(a,b.dataset.select));
+  a.el.querySelectorAll('[data-expand]').forEach(b=>b.onclick=()=>{const k=b.dataset.expand;s.open=s.open.includes(k)?s.open.filter(v=>v!==k):[...s.open,k];render(a);save();});
+  a.el.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{s.tab=b.dataset.tab;render(a);save();});
+  a.el.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{s.mode=b.dataset.mode;render(a);save();});
+  a.el.querySelectorAll('[data-layers]').forEach(b=>b.onclick=()=>{s.layers=!s.layers;render(a);save();});
+  a.el.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>select(a,'shared'));
+  a.el.querySelectorAll('[data-canvas-select]').forEach(b=>b.onclick=e=>{if(s.mode==='design'){e.stopPropagation();select(a,b.dataset.canvasSelect);}});
+  a.el.querySelectorAll('[data-edit]').forEach(input=>{const draft=s.drafts[s.selected+'|'+input.dataset.edit];if(draft){input.value=draft.raw;input.setAttribute('aria-invalid','true');a.el.querySelector('[data-error="'+input.dataset.edit+'"]').textContent=draft.error;}input.onchange=()=>commit(a,input);input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();commit(a,input);}if(e.key==='Escape'){delete s.drafts[s.selected+'|'+input.dataset.edit];s.notice='Edit cancelled';render(a);save();}};});
+  a.el.querySelectorAll('[data-reset]').forEach(b=>b.onclick=()=>{const id=s.selected.startsWith('display')?'display':'audio';delete s.overrides[id][b.dataset.reset];delete s.drafts[s.selected+'|'+b.dataset.reset];if(b.dataset.reset==='color'){delete s.overrides[id].opacity;delete s.drafts[s.selected+'|opacity'];}s.notice='Override cleared · inherited value restored';render(a);save();});
+  a.el.querySelectorAll('[data-color-picker]').forEach(input=>input.onchange=()=>{const text=a.el.querySelector('[data-edit="color"]');text.value=input.value;commit(a,text);});
+  a.el.querySelectorAll('[data-value]').forEach(input=>input.onchange=()=>{s.values[input.dataset.value]=Number(input.value);s.notice='Test value changed';render(a);save();});
+  a.el.querySelectorAll('[data-power]').forEach(input=>input.onchange=()=>{s.enabled[input.dataset.power]=input.checked;render(a);save();});
+  a.el.querySelectorAll('[data-toggle-power]').forEach(b=>b.onclick=()=>{s.enabled[b.dataset.togglePower]=!s.enabled[b.dataset.togglePower];render(a);save();});
+ }
+ function select(a,id){a.state.selected=id;if(id==='shared'||id.endsWith('-definition'))a.state.tab='components';else a.state.tab='composition';if(id.startsWith('audio.')||id.startsWith('display.'))a.state.open=[...new Set([...a.state.open,'document','canvas',id.split('.')[0]])];if(a.profile==='frame')a.state.layers=false;a.state.notice='Selection changed';render(a);save();}
+ function commit(a,input){
+  const s=a.state,k=input.dataset.edit,id=s.selected.startsWith('display')?'display':'audio';let value=input.value,error='';
+  if(k==='width'){if(!validWidth(value))error='Enter a number from 320 to 440.';else value=Number(value);}
+  if(k==='opacity'){if(value.trim()===''||!Number.isFinite(Number(value))||Number(value)<0||Number(value)>100)error='Enter opacity from 0 to 100.';else value=Number(value);}
+  if(k==='label'&&(!value.length||new TextEncoder().encode(value).length>96))error='Use 1–96 UTF-8 bytes.';
+  if(k==='color'){if(!/^#[a-f\d]{6}$/i.test(value))error='Use a six-digit hex color, such as #5588FF.';else value=value.toLowerCase();}
+  if(error){const draftKey=s.selected+'|'+k;if(Object.keys(s.drafts).length>=16&&!s.drafts[draftKey])delete s.drafts[Object.keys(s.drafts)[0]];s.drafts[draftKey]={raw:input.value.slice(0,256),error};input.setAttribute('aria-invalid','true');a.el.querySelector(`[data-error="${k}"]`).textContent=error;s.notice='Unapplied edit';a.el.querySelector('.oib-footer').textContent='Unapplied edit · Local design study';save();return;}
+  delete s.drafts[s.selected+'|'+k];
+  if(s.selected==='shared'){if(k==='opacity')s.sharedOpacity=value;else s.shared=value;}else{if(k==='opacity')s.overrides[id].color=fieldValue(s,id,'color');s.overrides[id][k]=value;}
+  s.notice=s.selected==='shared'?'Shared source updated · 2 panels':'Instance override applied';render(a);save();
+ }
+ root.querySelectorAll('[data-profile]').forEach(section=>{const profile=section.dataset.profile,a={profile,el:section.querySelector('.oib-study'),state:makeState()};if(initial?.[profile]?.overrides)a.state={...a.state,...initial[profile]};studies.push(a);render(a);
+  if(globalThis.Tweak){const style={textSize:profile==='frame'?20:16,rowHeight:profile==='frame'?52:44};const tweak=new Tweak({container:a.el,onChange:()=>{a.el.style.setProperty('--oib-size',style.textSize+'px');a.el.style.setProperty('--oib-row',style.rowHeight+'px');}});tweak.addSlider(style,'textSize',{label:'Tooling text',min:16,max:22,step:1,unit:'px'});tweak.addSlider(style,'rowHeight',{label:'Hierarchy row',min:44,max:60,step:2,unit:'px'});}
+ });
+ // Small local interaction checks; restore the user's initial view afterwards.
+ testing=true;const a=studies[0],saved=JSON.parse(JSON.stringify(a.state));a.state=makeState();render(a);
+ let input=a.el.querySelector('[data-edit="label"]');input.value='Sound';input.dispatchEvent(new Event('change'));console.assert(a.state.overrides.audio.label==='Sound'&&a.el.querySelector('.oib-value').textContent.includes('Sound'),'Label entry updates only its instance');
+ a.el.querySelector('[data-reset="label"]').click();console.assert(!isOverride(a.state,'audio','label')&&fieldValue(a.state,'audio','label')==='Volume','Reset reveals authored label');
+ input=a.el.querySelector('[data-edit="label"]');input.value='Volume';input.dispatchEvent(new Event('change'));console.assert(isOverride(a.state,'audio','label'),'Equal-value assignments remain explicit overrides');a.el.querySelector('[data-reset="label"]').click();
+  input=a.el.querySelector('[data-edit="width"]');input.value='356';input.dispatchEvent(new Event('change'));console.assert(a.state.overrides.audio.width===356,'Non-preset width is editable');
+ input=a.el.querySelector('[data-edit="width"]');input.value='900';input.dispatchEvent(new Event('change'));console.assert(a.state.overrides.audio.width===356&&input.getAttribute('aria-invalid')==='true','Invalid width does not apply');
+ input=a.el.querySelector('[data-edit="opacity"]');input.value='45';input.dispatchEvent(new Event('change'));console.assert(a.state.overrides.audio.opacity===45&&isOverride(a.state,'audio','color'),'Opacity is part of a color override');console.assert(a.el.querySelector('[data-edit="width"]').value==='900'&&a.state.overrides.audio.width===356,'Invalid raw edit stays attached to its field');a.el.querySelector('[data-reset="width"]').click();a.el.querySelector('[data-reset="color"]').click();console.assert(!isOverride(a.state,'audio','opacity')&&!isOverride(a.state,'audio','color'),'Color reset clears RGB and opacity');
+  select(a,'shared');input=a.el.querySelector('[data-edit="color"]');input.value='#ff8855';input.dispatchEvent(new Event('change'));console.assert(fieldValue(a.state,'audio','color')==='#ff8855'&&fieldValue(a.state,'display','color')==='#ff8855','Shared source propagates to both nested instances');
+  a.state=saved;render(a);testing=false;
+ if(!globalThis.Tweak){const nav=document.getElementById('oib-study-variants');nav.hidden=false;nav.querySelectorAll('[data-show]').forEach(b=>b.setAttribute('aria-pressed',String(!root.querySelector('[data-profile="'+b.dataset.show+'"]').hidden)));nav.querySelectorAll('[data-show]').forEach(b=>b.onclick=()=>{for(const section of root.querySelectorAll('[data-profile]'))section.hidden=section.dataset.profile!==b.dataset.show;nav.querySelectorAll('[data-show]').forEach(v=>v.setAttribute('aria-pressed',String(v===b)));});}
+  window.addEventListener('openai:set_globals',e=>{const restored=e.detail?.globals?.widgetState?.privateContent?.oibStudy;if(restored)for(const a of studies)if(restored[a.profile]?.overrides){a.state={...makeState(),...restored[a.profile]};render(a);}});
+})();
+</script>

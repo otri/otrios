@@ -1,0 +1,31 @@
+{
+  "release": "52f0395bdbe5b437b53509181a42b180d9e391b591592fc5f8b3c4d61bb77249",
+  "trial": "hierarchy-guarded-overlap-v2",
+  "seconds": 29.966866,
+  "device_move_samples": 900,
+  "unique_move_updates": 849,
+  "updates_per_second": 28.33129096649613,
+  "return_intervals": {
+    "n": 848,
+    "p95_ms": 35.359,
+    "max_ms": 52.89
+  },
+  "sample_to_return": {
+    "n": 849,
+    "p95_ms": 92.782,
+    "max_ms": 95.386
+  },
+  "boundary_gaps_ms": [
+    46.453,
+    0.0
+  ],
+  "drm_flip_intervals": {
+    "n": 848,
+    "p95_ms": 35.312,
+    "max_ms": 52.964
+  },
+  "topology_rebuilds": 15,
+  "pass": true,
+  "logs_dropped": 0,
+  "service_restored": true
+}
