@@ -185,13 +185,7 @@ pub(super) fn project(
         // surface pass-through and put a full-area input shield behind it.
         // The square drawer surface completely covers this opaque fill. An
         // invisible alpha-zero shield would enable mesh-wide native blending.
-        let mut barrier = background(
-            CHROME + 26,
-            DRAWER,
-            (height - HEADER).max(1.),
-            CARD,
-            0.,
-        );
+        let mut barrier = background(CHROME + 26, DRAWER, (height - HEADER).max(1.), CARD, 0.);
         barrier.responder = Some(TouchResponder::Consume);
         drawer.children.insert(0, barrier);
     }
