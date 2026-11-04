@@ -98,10 +98,10 @@ pub fn fixture(root: &std::path::Path) -> (Vec<u8>, StateSchema) {
     std::fs::write(root.join("catalog.flex"), &bytes).unwrap();
     (bytes, schema)
 }
-pub fn room(auth: bool, seconds: u64) -> Room {
-    room_with_collection(auth, seconds, None)
+pub fn room(auth: bool) -> Room {
+    room_with_collection(auth, None)
 }
-pub fn room_with_collection(auth: bool, seconds: u64, records: Option<u32>) -> Room {
+pub fn room_with_collection(auth: bool, records: Option<u32>) -> Room {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
         "otrios-app-test-{}-{}-{}",
@@ -159,12 +159,7 @@ pub fn room_with_collection(auth: bool, seconds: u64, records: Option<u32>) -> R
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
-        command.args([
-            "--auth-file",
-            path.to_str().unwrap(),
-            "--session-seconds",
-            &seconds.to_string(),
-        ]);
+        command.args(["--auth-file", path.to_str().unwrap()]);
     }
     let mut child = command.stdout(Stdio::piped()).spawn().unwrap();
     let mut output = BufReader::new(child.stdout.take().unwrap());

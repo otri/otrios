@@ -9,7 +9,9 @@ it does not import another app's document or executable instance.
 apps/
   home/                         # Brass Relay, Test Playground and Monitoring
   brass-relay/                  # Shared lounge; local composer and room channel
-  test-playground/              # Seven demo destinations and editable card order
+  test-playground/              # Demo destinations and editable card order
+  live-ui/                      # Existing isolated OIB slider companion
+  oib-designer/                 # Signed D1 nested settings companion
   component-playground/         # Controls, bounded Wasm reducer, ephemeral trails
   layout-lab/                   # Reusable components and five-minute signal
   layout-document/              # Bounded reflowed document reader
@@ -227,6 +229,13 @@ AxisResize::Springs { leading: true, length: false, trailing: true }, vertical:
 AxisResize::Fixed })`. Named fields preserve the relationship without a numeric
 bitmask in authored UI code. With 20/80 design margins, these two margin springs
 share added width in a 1:4 ratio; `.center_x()` expresses exact centering instead.
+
+The [OIB Designer D1 sample](oib-designer/README.md) is a separate companion
+collection linked from Test Playground. It uses signed Shell/SettingsPanel/
+LabeledSlider/LabeledToggle definitions, separate slider and enable fields, and
+empty tooling viewports for core-generated local hierarchy and selected inspector.
+It requires `otrios-oib-designer-v1`; runtime/host activation is an integration gate.
+Its schema does not replace `live-ui-state-v1`.
 
 ## Independent UI updates
 

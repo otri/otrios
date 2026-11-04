@@ -212,12 +212,17 @@ impl CanvasApp {
         )
     }
     pub fn text_input_key(&mut self, epoch: u32, id: u32, key: &str) -> Result<bool, String> {
-        if key == "Enter" {
-            self.inner
-                .edit_text_input(epoch, id, &otrios_interfaces::keyboard::Edit::Enter)
-        } else {
-            Ok(false)
-        }
+        use otrios_interfaces::keyboard::Edit;
+        let edit = match key {
+            "Enter" => Edit::Enter,
+            "Tab" => Edit::Tab { backward: false },
+            "BackTab" => Edit::Tab { backward: true },
+            _ => return Ok(false),
+        };
+        self.inner.edit_text_input(epoch, id, &edit)
+    }
+    pub fn cancel_text_input(&mut self, epoch: u32, id: u32) -> Result<bool, String> {
+        self.inner.cancel_text_input(epoch, id)
     }
     pub fn blur_text_input(&mut self, epoch: u32, id: u32) -> Result<bool, String> {
         self.inner.blur_text_input(epoch, id)

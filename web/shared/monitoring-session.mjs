@@ -13,6 +13,9 @@ export class MonitoringSession {
     const epoch=this.epoch,version=++this.refreshVersion;
     const response=await this.fetcher('/auth/session',{credentials:'same-origin',cache:'no-store'});
     if(epoch!==this.epoch||version!==this.refreshVersion)return;
+    // A proxy/server outage is not an authoritative revocation. Keep the last
+    // confirmed status; protected data remains independently checked by authority.
+    if(!response.ok&&response.status!==401)throw Error('Sign-in status is temporarily unavailable.');
     const authenticated=response.ok&&(await response.json()).monitoring===true;
     if(epoch!==this.epoch||version!==this.refreshVersion)return;
     this.authenticated=authenticated;this.status();

@@ -723,7 +723,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .to_string();
     let mut public_bind = None;
     let mut auth_file = None;
-    let mut session_seconds = 8 * 60 * 60;
+    let mut sessions_file = None;
     let mut trusted_peers = 64;
     let mut public_peers = 32;
     let mut state_file: Option<PathBuf> = None;
@@ -749,7 +749,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--collection-fixture"=>collection_fixture=Some(PathBuf::from(args.next().ok_or("Missing collection fixture file")?)),
         "--apps"=>source=PathBuf::from(args.next().ok_or("Missing app source directory")?),
         "--auth-file"=>auth_file=Some(PathBuf::from(args.next().ok_or("Missing auth file")?)),
-        "--session-seconds"=>session_seconds=args.next().ok_or("Missing session duration")?.parse::<u64>()?,
+        "--sessions-file"=>sessions_file=Some(PathBuf::from(args.next().ok_or("Missing sessions file")?)),
         "--trusted-peers"=>trusted_peers=args.next().ok_or("Missing trusted peer limit")?.parse::<usize>()?,
         "--public-peers"=>public_peers=args.next().ok_or("Missing public peer limit")?.parse::<usize>()?,
         "--public-bind"=>public_bind=Some(args.next().ok_or("Missing public bind")?),
@@ -761,7 +761,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "--collector-binding"=>collector_binding=Some(PathBuf::from(args.next().ok_or("Missing collector binding")?)),
         "--web-dir"=>web=PathBuf::from(args.next().ok_or("Missing web directory")?),
         "--origin"=>origins.push(args.next().ok_or("Missing origin")?),
-        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--session-seconds SECONDS] [--trusted-peers COUNT] [--public-peers COUNT] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--presentation-file FILE] [--collection-fixture FILE] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
+        _=>return Err("Usage: dashboard-server [--bind ADDRESS] [--public-bind LOOPBACK_ADDRESS] [--auth-file PRIVATE_JSON] [--sessions-file PRIVATE_JSON] [--trusted-peers COUNT] [--public-peers COUNT] [--state LEGACY_FILENAME_PREFIX] [--app-state DIRECTORY] [--presentation-file FILE] [--collection-fixture FILE] [--apps DIRECTORY] [--releases DIRECTORY] [--web-dir DIRECTORY] [--origin HTTPS_ORIGIN]".into())
     }
     }
     if !bind.parse::<std::net::SocketAddr>()?.ip().is_loopback() {
@@ -839,11 +839,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .map(|p| p.with_extension("presentation.flex"))
     });
     let release = read_release(&releases).unwrap_or_else(|| json!({"id":"development"}));
-    if !(1..=86400).contains(&session_seconds) {
-        return Err("Session duration must be between 1 and 86400 seconds".into());
-    }
     let auth = auth_file.and_then(|p| {
-        match auth::Sessions::load(&p, Duration::from_secs(session_seconds)) {
+        let sessions = sessions_file.unwrap_or_else(|| {
+            app_state
+                .as_ref()
+                .unwrap_or(&p)
+                .with_extension("sessions.json")
+        });
+        match auth::Sessions::load(&p, &sessions) {
             Ok(a) => Some(Arc::new(a)),
             Err(e) => {
                 eprintln!("Monitoring auth unavailable (closed): {e}");

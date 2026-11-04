@@ -65,10 +65,23 @@ impl Document {
             return Err("OIB identity counter exhausted".into());
         }
         let name = name.unwrap_or_else(|| format!("instance-{id}"));
-        if !instance_name(&name) {
+        if !admitted_instance_name(&seed, &name) {
             return Err(
                 "Instance names use 1–64 ASCII letters, digits, hyphens or underscores".into(),
             );
+        }
+        if seed.designer.is_some() {
+            let mut resident = allocations.to_vec();
+            resident.push(Allocation {
+                id,
+                name: name.clone(),
+                component: source.component.ok_or("Missing component")?,
+                prototype,
+                slot,
+            });
+            // Check the complete draft/active resident union before advancing the
+            // monotonic identity, including each occurrence's entire key table.
+            super::super::super::oib::instances::expanded_seed(&seed, &resident)?;
         }
         self.change(
             &[],
@@ -114,6 +127,9 @@ impl Document {
 
     pub(super) fn oib_restore_residents(&mut self, defaults: bool, writer: Actor) -> Result<()> {
         let seed = self.oib_binding()?.seed;
+        if seed.designer.is_some() {
+            return self.oib_restore_designer(defaults, writer);
+        }
         let previous = self.oib_allocations()?;
         let live = self.oib_live(1)?;
         let mut allocations: Vec<_> = seed
@@ -174,6 +190,58 @@ impl Document {
         self.oib_reclaim()
     }
 
+    /// Retain the union until the coherent new graph activates. In particular,
+    /// restoring a deleted factory cannot borrow cells/slots still pinned by the
+    /// current active graph or consume an identity on capacity failure.
+    fn oib_restore_designer(&mut self, defaults: bool, writer: Actor) -> Result<()> {
+        let seed = self.oib_binding()?.seed;
+        let mut resident = self.oib_allocations()?;
+        let live = self.oib_live(1)?;
+        let mut desired = BTreeSet::new();
+        for factory in &seed.instances {
+            if let Some(existing) = resident
+                .iter()
+                .filter(|a| live.contains(&a.id) && a.prototype == factory.id)
+                .min_by_key(|a| (a.id != factory.id, a.id))
+            {
+                desired.insert(existing.id);
+            } else {
+                let new = self.oib_allocate(&resident, factory.id, Some(factory.name.clone()))?;
+                desired.insert(new.id);
+                resident.push(new);
+            }
+        }
+        let resolved = super::super::super::oib::instances::expanded_seed(&seed, &resident)?;
+        let mut edits = vec![Edit {
+            path: vec![4, 4],
+            schema: self.extra_schema(4, 4),
+            value: Some(bytes(&resident)?),
+        }];
+        for a in &resident {
+            edits.push(Edit {
+                path: cell_path(5, a.id),
+                schema: self.oib_instance_schema(a.id),
+                value: desired.contains(&a.id).then(|| bytes(&true)).transpose()?,
+            });
+        }
+        for cell in &resolved.cells {
+            let wanted = cell.inherit.is_none() || desired.contains(&cell.owner);
+            if (defaults && wanted) || self.tree.subtree(&cell_path(1, cell.id)).is_err() {
+                edits.push(Edit {
+                    path: cell_path(1, cell.id),
+                    schema: self.oib_cell_schema(cell.id),
+                    value: if cell.inherit.is_some() {
+                        None
+                    } else {
+                        Some(bytes(&cell.default)?)
+                    },
+                });
+            }
+        }
+        self.tree = self.tree.edit(writer, &edits).map_err(err)?.0;
+        Ok(())
+    }
+
     /// Drop only objects absent from both draft and active graphs. Projection
     /// preserves the exact causal registers of survivors and pins old snapshots.
     /// A scalar high-water mark replaces an ever-growing retired-ID table.
@@ -222,6 +290,7 @@ impl Document {
         let seed = self.oib_binding()?.seed;
         let allocations = self.oib_allocations()?;
         let next = self.oib_next_id()?;
+        super::super::super::oib::instances::expanded_seed(&seed, &allocations)?;
         let mut slots = BTreeSet::new();
         let mut ids = BTreeSet::new();
         if !(FIRST_ID..=MAX_ID).contains(&next) || allocations.len() > MAX_ALLOCATIONS {
@@ -232,7 +301,7 @@ impl Document {
                 .instances
                 .iter()
                 .any(|s| s.id == a.id && s.id == a.prototype && s.name == a.name);
-            if !instance_name(&a.name)
+            if !admitted_instance_name(&seed, &a.name)
                 || !ids.insert(a.id)
                 || (!original
                     && (!slots.insert(a.slot)
@@ -338,8 +407,35 @@ impl StateAdapter {
             MAX_ALLOCATIONS.saturating_sub(b.seed.instances.len())
         });
         let dynamic_used = allocations.iter().filter(|a| a.id != a.prototype).count();
+        let cell_capacity = self.doc.oib_binding().map_or(0, |b| {
+            if let Some(d) = &b.seed.designer {
+                let used = d.mappings.definitions.len()
+                    + allocations
+                        .iter()
+                        .map(|a| {
+                            d.mappings
+                                .roots
+                                .iter()
+                                .find(|t| t.prototype.0 == a.prototype)
+                                .map_or(64, |t| t.cells.len())
+                        })
+                        .sum::<usize>();
+                let per_root = d
+                    .mappings
+                    .roots
+                    .iter()
+                    .map(|t| t.cells.len())
+                    .filter(|n| *n > 0)
+                    .min()
+                    .unwrap_or(64);
+                otrios_interfaces::oib::MAX_CELLS.saturating_sub(used) / per_root
+            } else {
+                MAX_ALLOCATIONS
+            }
+        });
         MAX_ALLOCATIONS
             .saturating_sub(allocations.len())
+            .min(cell_capacity)
             .min(dynamic_capacity.saturating_sub(dynamic_used))
             .min(
                 otrios_interfaces::oib::MAX_LIVE_INSTANCES.saturating_sub(

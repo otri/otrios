@@ -1,6 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Live OIB UI
 
+[RFC 0035](rfcs/0035-oib-component-designer.md) proposes the next component
+designer: explicit document/object classes, nested references and overrides,
+modular inspectors, and composable 2D controls. It is a staged design, not current
+functionality. Bitmap/vector image import remains deferred.
+
 OIB O1 implements the property-editing slice of
 [RFC 0029](rfcs/0029-live-oib-ui.md). Its original qualification is recorded on
 [browser and Frame](experiments/live-oib-2026-11-02.md).

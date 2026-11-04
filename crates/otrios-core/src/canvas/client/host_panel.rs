@@ -27,7 +27,7 @@ impl Client {
         if self
             .active
             .as_ref()
-            .is_none_or(|m| m.panel_scroll.is_none())
+            .is_none_or(|m| m.panel_scroll.is_none() || m.designer.is_some())
         {
             return Ok(None);
         }
@@ -211,6 +211,11 @@ impl Client {
             || self.input_busy()
         {
             return Ok(false);
+        }
+        if !self.host_active
+            && let Some(changed) = self.designer_scroll_at(delta, position)?
+        {
+            return Ok(changed);
         }
         if !self.host_active
             && let Some(m) = &mut self.active

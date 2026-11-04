@@ -28,6 +28,11 @@ releases are pinned. Cache failure falls back to resource delivery rather than
 making app state durable locally. Browser HTTP/JIT caches and metadata, GPU glyph
 textures and process heap are separate from these application payload budgets.
 
+The browser retains only its opaque login cookie for authentication; the host
+stores the corresponding revocable session digest durably, separately from app
+data and releases. This does not make any client document or private view durable.
+See [persistent sign-in](PUBLIC_ACCESS.md#monitoring-sessions).
+
 Authenticated/private/API/state/ink responses bypass the public browser artifact
 cache. Public release assets bind their size and digest in the release manifest;
 content-addressed blobs verify SHA-256. Native execution also verifies the pinned

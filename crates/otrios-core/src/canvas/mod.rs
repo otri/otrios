@@ -122,7 +122,24 @@ macro_rules! codec {
         }
     };
 }
-codec!(encode_ui, decode_ui, Ui);
+pub fn encode_ui(value: &Ui) -> Result<Vec<u8>> {
+    let bytes = flexbuffers::to_vec(value).map_err(err)?;
+    check(&bytes)?;
+    Ok(bytes)
+}
+pub fn decode_ui(bytes: &[u8]) -> Result<Ui> {
+    check(bytes)?;
+    let ui: Ui = flexbuffers::from_slice(bytes).map_err(err)?;
+    if let Some(seed) = oib::seed(&ui)
+        && seed.designer.is_some()
+    {
+        oib::validate_seed(seed)?;
+        if flexbuffers::to_vec(&ui).map_err(err)? != bytes {
+            return Err("Noncanonical OIB designer UI bytes".into());
+        }
+    }
+    Ok(ui)
+}
 codec!(encode_app, decode_app, App);
 codec!(encode_catalog, decode_catalog, Catalog);
 codec!(encode_schema, decode_schema, StateSchema);

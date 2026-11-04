@@ -709,7 +709,7 @@ fn socket_auth(address: &str, space: &str, token: Option<char>, cookie: Option<&
     if let MaybeTlsStream::Plain(t) = socket.get_mut() {
         t.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     }
-    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v26","state":true}).to_string().into())).unwrap();
+    socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v27","state":true}).to_string().into())).unwrap();
     loop {
         if let Message::Text(text) = socket.read().unwrap() {
             let event: Json = serde_json::from_str(&text).unwrap();
@@ -907,7 +907,7 @@ fn latest_decisions_survive_old_primary_restore_and_missing_storage_cannot_becom
         if let MaybeTlsStream::Plain(tcp) = socket.get_mut() {
             tcp.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         }
-        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v26","state":true}).to_string().into())).unwrap();
+        socket.send(Message::Text(json!({"type":"hello","version":1,"release":null,"state_protocol":"otrios-canvas-sync-v27","state":true}).to_string().into())).unwrap();
         let Message::Text(reply) = socket.read().unwrap() else {
             panic!("release hello remains independent of recovery");
         };
@@ -5860,7 +5860,7 @@ fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, Strin
             assets.insert(path.clone(), entry);
         }
     }
-    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v26","assets":assets,"authority":authority}).to_string().into_bytes();
+    let manifest = json!({"format":"otrios-release-v1","bundle_abi":"otrios-app-bundle-v1","state_schema":"otrios-canvas-merkle-state-v1","sync_protocol":"otrios-canvas-sync-v27","assets":assets,"authority":authority}).to_string().into_bytes();
     let release = canvas::hex(&canvas::hash(&manifest));
     let root = rig.root.join("releases").join(&release);
     fs::create_dir_all(&root).unwrap();
@@ -5887,7 +5887,7 @@ fn signed_code_fixture(rig: &mut Rig) -> (otrios_core::bundle::BundleTree, Strin
         root.join("manifest.sig"),
     )
     .unwrap();
-    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v26"}).to_string()).unwrap();
+    fs::write(rig.root.join("releases/current.json"), json!({"id":release,"web_entry":format!("/releases/{release}/web/index.html"),"sync_protocol":"otrios-canvas-sync-v27"}).to_string()).unwrap();
     (tree, digest, release)
 }
 fn public_get(address: &str, path: &str) -> (u16, String, Vec<u8>) {
@@ -6325,7 +6325,8 @@ fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
     let package = rig.root.join("apps/counter/package/ui.flex");
     let mut ui = canvas::decode_ui(&fs::read(&package).unwrap()).unwrap();
     ui.format = "otrios-canvas-v8".into();
-    ui.presentation = Some(Presentation::Oib(Seed {
+    ui.presentation = Some(Presentation::Oib(Box::new(Seed {
+        designer: None,
         instance_surface: None,
         format: FORMAT.into(),
         main_oib: 1,
@@ -6352,7 +6353,7 @@ fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
         }],
         inspector_viewport: 0,
         inspector_content: [500., 500.],
-    }));
+    })));
     let bytes = canvas::encode_ui(&ui).unwrap();
     fs::write(&package, &bytes).unwrap();
     let mut catalog = canvas::decode_catalog(&rig.catalog).unwrap();
@@ -6470,6 +6471,8 @@ fn oib_admin_edits_replicate_and_recover_without_granting_members_ui_writes() {
 
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
+#[path = "spaces_process/d1.rs"]
+mod d1;
 #[path = "../../../apps/live-ui/app.rs"]
 mod live_oib_app;
 

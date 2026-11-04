@@ -45,7 +45,7 @@ def rebuild(config,wanted,activate=True,checks=False):
         if checks:
             run([config['node'],'--test','scripts/test-dashboard-session.mjs','scripts/test-dashboard-monitoring-session.mjs','scripts/test-dashboard-artifact-cache.mjs','scripts/test_gpu_scene.mjs','scripts/test-app-catalog.mjs','scripts/test-canvas-worker.mjs','scripts/test-app-transfers.mjs','scripts/test-document-transfer.mjs','scripts/test-touch-input.mjs','scripts/test-text-input.mjs','scripts/test-viewport.mjs'],cwd=source)
         for script in ['web/canvas/app.js','web/canvas/state-worker.js','web/shared/session.mjs','web/shared/monitoring-session.mjs','web/shared/artifact-cache-worker.js','web/shared/artifact-cache.mjs']:run([config['node'],'--input-type=module','--check'],stdin=open(source/script),cwd=source)
-    name='otrios-dashboard-live-builder'
+    name=config.get('builder_container','otrios-dashboard-live-builder')
     probe=subprocess.run(['docker','inspect','--format','{{.State.Running}}',name],capture_output=True,text=True)
     if probe.returncode:
         run(['docker','create','--name',name,'otrios-dashboard-armv7:rust1.90','sleep','infinity'])

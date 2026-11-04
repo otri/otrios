@@ -1,0 +1,21 @@
+{
+  "confirmed": true,
+  "app_values": [
+    440,
+    700,
+    1000,
+    0
+  ],
+  "active_roots": [
+    20,
+    30
+  ],
+  "generation": 28,
+  "original_authored_and_explicit_overrides_restored": true,
+  "temporary_roots_removed": [
+    65538,
+    65539,
+    65540,
+    65541
+  ]
+}

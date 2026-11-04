@@ -347,16 +347,23 @@ int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count)
     free(m->ems);m->ems=ems;m->cached_generation=0;m->alpha_valid=0;return 0;
 }
 void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }
-static void draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count) {
-    if(!count)return;
-    glUseProgram(d->program);glUniformMatrix3fv(d->transform,1,GL_FALSE,projection);
+// Binding state belongs to one draw_slot invocation, never to the GL context.
+// Text paths use 1 (analytic) and 2 (cached); geometry has its own sentinel.
+enum { DRAW_UNBOUND=0, DRAW_GEOMETRY=3 };
+static int draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count,int bound) {
+    if(!count)return bound;
+    if(bound!=DRAW_GEOMETRY){
+    glUseProgram(d->program);
     if(m->opaque)glDisable(GL_BLEND);else glEnable(GL_BLEND);
     glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);
     for(int i=2;i<5;i++)glDisableVertexAttribArray((GLuint)i);
     glBindBuffer(GL_ARRAY_BUFFER,m->vbo);
     glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(struct vertex),(void*)offsetof(struct vertex,x));
     glVertexAttribPointer(1,4,GL_UNSIGNED_BYTE,GL_TRUE,sizeof(struct vertex),(void*)offsetof(struct vertex,rgba));
+    }
+    glUniformMatrix3fv(d->transform,1,GL_FALSE,projection);
     glDrawArrays(GL_TRIANGLES,first,count);
+    return DRAW_GEOMETRY;
 }
 static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projection,uint32_t first,uint32_t count,int cached,int rebind) {
     if(!count)return;
@@ -409,12 +416,15 @@ static int draw_text(ot_display *d,struct text_mesh *m,const float *projection,u
 }
 static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
     struct text_mesh *text=&d->text[slot];
-    if(!text->draw_words){draw_geometry(d,&d->meshes[slot],projection,0,d->meshes[slot].count);return;}
-    int text_bound=0,scissoring=0,has_clip=0;
+    if(!text->draw_words){draw_geometry(d,&d->meshes[slot],projection,0,d->meshes[slot].count,DRAW_UNBOUND);return;}
+    // Cache preparation may have changed every binding. Within this slot only
+    // the draw helpers change program/blend/buffer/attribute state; scissoring
+    // and skipped runs do not invalidate it. Switching draw kind forces a rebind.
+    int bound=DRAW_UNBOUND,scissoring=0,has_clip=0;
     float last_clip[4]={0};int x0=0,y0=0,x1=0,y1=0;
     for(size_t i=0;i<text->draw_words;i+=3) {
         uint32_t *r=text->draws+i;
-        if(r[0]==0 && (!text->views || text->views[i/3*8+1]==0)){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2]);text_bound=0;}
+        if(r[0]==0 && (!text->views || text->views[i/3*8+1]==0)){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}bound=draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2],bound);}
         else if(text->views){
             const float *v=text->views+i/3*8;if(v[1]==0 || v[6]<=v[4] || v[7]<=v[5])continue;
             if(!has_clip || memcmp(last_clip,v+4,sizeof(last_clip))){
@@ -433,9 +443,9 @@ static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
             float moved[9];memcpy(moved,projection,sizeof(moved));
             moved[6]+=projection[0]*v[2]+projection[3]*v[3];moved[7]+=projection[1]*v[2]+projection[4]*v[3];
             if(!scissoring){glEnable(GL_SCISSOR_TEST);scissoring=1;}
-            if(r[0]==0){draw_geometry(d,&d->meshes[slot],moved,(GLint)v[0],(GLsizei)v[1]);text_bound=0;}
-            else text_bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],text_bound);
-        }else{text_bound=draw_text(d,text,projection,r[1],r[2],text_bound);}
+            if(r[0]==0){bound=draw_geometry(d,&d->meshes[slot],moved,(GLint)v[0],(GLsizei)v[1],bound);}
+            else bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],bound);
+        }else{bound=draw_text(d,text,projection,r[1],r[2],bound);}
     }
     if(scissoring)glDisable(GL_SCISSOR_TEST);
 }

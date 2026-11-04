@@ -82,7 +82,7 @@ fn quiet(s: &mut Socket) {
 
 #[test]
 fn shared_session_qualifies_large_sparse_windows_coalesces_slow_readers_and_recovers() {
-    let room = room_with_collection(false, 60, Some(65_536));
+    let room = room_with_collection(false, Some(65_536));
     let mut anchored = socket(&room.public, None);
     if let tungstenite::stream::MaybeTlsStream::Plain(stream) = anchored.get_mut() {
         stream
@@ -269,7 +269,7 @@ fn shared_session_qualifies_large_sparse_windows_coalesces_slow_readers_and_reco
 
 #[test]
 fn authority_restart_rejects_an_old_epoch_cursor_after_a_new_hello() {
-    let mut room = room_with_collection(false, 60, Some(256));
+    let mut room = room_with_collection(false, Some(256));
     let mut first = socket(&room.public, None);
     let old = select(&mut first, 1, plan(Anchor::Tail, vec![1]));
     room.child.kill().unwrap();
@@ -326,7 +326,7 @@ fn authority_restart_rejects_an_old_epoch_cursor_after_a_new_hello() {
 
 #[test]
 fn private_collection_is_revoked_while_an_offer_is_unacknowledged_and_socket_stays_usable() {
-    let room = room_with_collection(true, 1, Some(256));
+    let room = room_with_collection(true, Some(256));
     let secret = cookie(&room);
     let mut s = socket(&room.public, Some(&secret));
     let offer = select(&mut s, 1, plan(Anchor::Tail, vec![1, 2]));
@@ -336,6 +336,21 @@ fn private_collection_is_revoked_while_an_offer_is_unacknowledged_and_socket_sta
         .unwrap();
     replica.apply(&offer).unwrap();
     assert!(replica.window().is_some());
+    assert_eq!(
+        request(
+            &room.public,
+            "DELETE",
+            "/auth/session",
+            &[
+                ("Cookie", &secret),
+                ("Origin", ORIGIN),
+                ("X-OTriOS-Request", "session")
+            ],
+            &[]
+        )
+        .0,
+        200
+    );
     match event(&mut s) {
         Event::Revoked {
             epoch,

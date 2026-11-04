@@ -7,6 +7,7 @@ use otrios_interfaces::{
     oib::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
+pub mod document;
 pub mod instances;
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -80,7 +81,8 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             || !ids.insert(object.id)
             || object.name.is_empty()
             || object.name.len() > 64
-            || !names.insert(object.name.as_str())
+            || (seed.designer.is_none() && !names.insert(object.name.as_str()))
+            || (seed.designer.is_some() && object.name.contains('\0'))
         {
             return Err("Invalid OIB component identity".into());
         }
@@ -95,7 +97,8 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             || !ids.insert(object.id)
             || object.name.is_empty()
             || object.name.len() > 64
-            || !names.insert(object.name.as_str())
+            || (seed.designer.is_none() && !names.insert(object.name.as_str()))
+            || (seed.designer.is_some() && object.name.contains('\0'))
         {
             return Err("Invalid OIB instance identity".into());
         }
@@ -133,7 +136,7 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             || cell.owner == seed.main_oib
             || cell.name.is_empty()
             || cell.name.len() > 64
-            || !properties.insert((cell.owner, cell.name.as_str()))
+            || (seed.designer.is_none() && !properties.insert((cell.owner, cell.name.as_str())))
             || cell.targets.len() > 16
         {
             return Err("Invalid OIB cell identity".into());
@@ -163,8 +166,8 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
                 .find(|i| i.id == cell.owner)
                 .ok_or("Only instances inherit")?;
             if base.inherit.is_some()
-                || Some(base.owner) != owner.component
-                || base.name != cell.name
+                || (seed.designer.is_none()
+                    && (Some(base.owner) != owner.component || base.name != cell.name))
                 || std::mem::discriminant(&base.default) != std::mem::discriminant(&cell.default)
             {
                 return Err("Invalid OIB inheritance".into());
@@ -175,14 +178,15 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
         for target in &cell.targets {
             if !target.scale.is_finite()
                 || !target.offset.is_finite()
-                || !targets.insert((
-                    target.node,
-                    if target.property == Property::FrameWidth {
-                        Property::Width as u8
-                    } else {
-                        target.property as u8
-                    },
-                ))
+                || (seed.designer.is_none()
+                    && !targets.insert((
+                        target.node,
+                        if target.property == Property::FrameWidth {
+                            Property::Width as u8
+                        } else {
+                            target.property as u8
+                        },
+                    )))
             {
                 return Err("Duplicated or nonfinite OIB target".into());
             }
@@ -216,6 +220,9 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
     }) {
         return Err("Geometry targets require an OIB layout surface".into());
     }
+    if seed.designer.is_some() {
+        document::validate(seed)?;
+    }
     Ok(())
 }
 pub fn validate(ui: &Ui) -> Result<()> {
@@ -224,6 +231,9 @@ pub fn validate(ui: &Ui) -> Result<()> {
         return Err("O1 uses a declarative main class".into());
     }
     validate_seed(seed)?;
+    if seed.designer.is_some() {
+        document::validate_layout(ui)?;
+    }
     let layout = compile(ui, &BTreeMap::new())?;
     let blueprint = layout.blueprint();
     let mut found = blueprint.clone();
@@ -249,6 +259,9 @@ pub fn validate(ui: &Ui) -> Result<()> {
     Ok(())
 }
 pub fn effective(seed: &Seed, values: &BTreeMap<u64, Option<Value>>, id: u64) -> Result<Value> {
+    if seed.designer.is_some() {
+        return document::effective(seed, values, id);
+    }
     let cell = seed
         .cells
         .iter()
@@ -276,10 +289,14 @@ pub fn effective(seed: &Seed, values: &BTreeMap<u64, Option<Value>>, id: u64) ->
 pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout> {
     let seed = seed(ui).ok_or("Missing OIB seed")?;
     let mut blueprint: Blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
+    let outputs = document::output_cells(seed)?;
     for cell in &seed.cells {
         let value = effective(seed, values, cell.id)?;
         validate_value(cell, &value)?;
         for target in &cell.targets {
+            if outputs.get(&document::output_key(target)) != Some(&cell.id) {
+                continue;
+            }
             let node = blueprint
                 .templates
                 .iter_mut()
@@ -334,11 +351,10 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
         }
     }
     for cell in &seed.cells {
-        for target in cell
-            .targets
-            .iter()
-            .filter(|t| t.property == Property::OffsetY)
-        {
+        for target in cell.targets.iter().filter(|t| {
+            t.property == Property::OffsetY
+                && outputs.get(&document::output_key(t)) == Some(&cell.id)
+        }) {
             let Value::Number(value) = effective(seed, values, cell.id)? else {
                 return Err("OIB offset needs a number".into());
             };
@@ -371,6 +387,20 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
                 _ => return Err("OIB numeric selector needs a numeric field".into()),
             },
             Projection::Identity => field.ok_or("OIB selector needs a field")?.default.clone(),
+            Projection::Nonzero => match field.map(|f| &f.default) {
+                Some(Value::Number(n)) => Value::Boolean(*n != 0.),
+                _ => return Err("OIB nonzero selector needs a numeric field".into()),
+            },
+            Projection::ChooseText { zero, nonzero } => match field.map(|f| &f.default) {
+                Some(Value::Number(n)) => {
+                    Value::Text(if *n == 0. { zero } else { nonzero }.clone())
+                }
+                _ => return Err("OIB toggle selector needs a numeric field".into()),
+            },
+            Projection::ChooseColor { zero, nonzero } => match field.map(|f| &f.default) {
+                Some(Value::Number(n)) => Value::Color(if *n == 0. { *zero } else { *nonzero }),
+                _ => return Err("OIB toggle selector needs a numeric field".into()),
+            },
             _ => return Err("Unsupported O1 selector projection".into()),
         };
         slots.insert(selector.local, value);

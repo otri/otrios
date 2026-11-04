@@ -7,6 +7,9 @@ mod host_map;
 mod host_moves;
 mod host_panel;
 mod host_transfers;
+mod oib_designer;
+mod oib_focus_layout;
+mod oib_property_editor;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
@@ -45,6 +48,7 @@ struct Mount {
     oib_generation: Option<u64>,
     oib_view: Option<OibView>,
     oib_selected: Option<u64>,
+    designer: Option<oib_designer::Designer>,
     doc: StateAdapter,
     behavior: Option<Behavior>,
     input: InputRouter,
@@ -1424,6 +1428,13 @@ impl Client {
         {
             let scene = self.scene()?;
             if let Some(owner) = scene.controls().into_iter().find(|owner| {
+                if m.designer
+                    .as_ref()
+                    .and_then(|d| d.keyboard_key(owner.node.id))
+                    == Some(key)
+                {
+                    return true;
+                }
                 let Some(TouchResponder::Activate(Action::AppEvent(control))) =
                     owner.node.responder
                 else {
@@ -1493,6 +1504,16 @@ impl Client {
             self.viewport = Some(viewport);
             self.host.drag = None;
             self.build_host(true)?;
+            return Ok(true);
+        }
+        if let Some(m) = &mut self.active
+            && m.designer.is_some()
+            && m.oib_activation_blocked()
+        {
+            if let Some(designer) = &mut m.designer {
+                designer.defer_viewport(viewport);
+            }
+            self.viewport = Some(viewport);
             return Ok(true);
         }
         if let Some(m) = &mut self.active
@@ -1760,7 +1781,10 @@ impl Client {
     pub fn input_busy(&self) -> bool {
         self.host.drag.is_some()
             || self.active.as_ref().is_some_and(|m| {
-                m.input.active()
+                m.designer
+                    .as_ref()
+                    .is_some_and(oib_designer::Designer::busy)
+                    || m.input.active()
                     || m.keyboard_pointer.is_some()
                     || m.order_drag.is_some()
                     || m.text_views.values().any(TextViewport::active)
@@ -2710,6 +2734,14 @@ impl Client {
     }
     /// Select an inspector locally; this never emits an authoritative operation.
     pub fn inspect_oib(&mut self, instance: u64) -> Result<bool> {
+        if let Some(selection) = self
+            .active
+            .as_ref()
+            .and_then(|m| m.designer.as_ref())
+            .and_then(|d| d.root_selection(instance))
+        {
+            return self.inspect_oib_selection(selection);
+        }
         if self.input_busy() {
             return Ok(false);
         }
@@ -2852,6 +2884,17 @@ impl Client {
                         action: otrios_interfaces::oib::InstanceAction::Inspect,
                         ..
                     }
+            )
+        {
+            return Ok(false);
+        }
+        if self.active.as_ref().is_some_and(|m| m.designer_editing())
+            && !matches!(
+                h.operation,
+                Operation::Oib { .. }
+                    | Operation::OibInstance { .. }
+                    | Operation::Back
+                    | Operation::SignOut
             )
         {
             return Ok(false);
@@ -3028,6 +3071,11 @@ impl Client {
             return Ok(false);
         }
         if !self.host_active
+            && let Some(changed) = self.designer_pointer(event, at)?
+        {
+            return Ok(changed);
+        }
+        if !self.host_active
             && let Some(changed) = self.oib_preview_pointer(epoch, event, at)?
         {
             return Ok(changed);
@@ -3103,6 +3151,13 @@ impl Client {
             .iter()
             .rev()
             .find_map(|node| {
+                if let Some(key) = m
+                    .designer
+                    .as_ref()
+                    .and_then(|d| d.keyboard_key(node.node.id))
+                {
+                    return Some(key);
+                }
                 let Some(TouchResponder::Activate(Action::AppEvent(control))) = node.node.responder
                 else {
                     return None;
@@ -3215,6 +3270,11 @@ impl Client {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
+        if !self.host_active
+            && let Some(changed) = self.designer_activate(id)?
+        {
+            return Ok(changed);
+        }
         if !self.host_active && self.order_draggable(id) {
             return Ok(false);
         }
@@ -3312,7 +3372,9 @@ impl Client {
     }
     pub fn editing(&self) -> bool {
         self.active.as_ref().is_some_and(|m| {
-            m.focus.is_some() || m.chat.as_ref().is_some_and(super::chat::Client::editing)
+            m.focus.is_some()
+                || m.designer.as_ref().is_some_and(|d| d.editor_focused())
+                || m.chat.as_ref().is_some_and(super::chat::Client::editing)
         })
     }
     /// Native browser fields mirror only visible, editable controls in this
@@ -3326,7 +3388,10 @@ impl Client {
         };
         let scene = self.scene()?;
         let frames = editor_frames(m, &scene);
-        let mut inputs = vec![];
+        let mut inputs = m
+            .designer
+            .as_ref()
+            .map_or_else(Vec::new, |d| d.editor_inputs(&scene, font));
         for owner in scene.controls() {
             let Some(TouchResponder::Activate(Action::AppEvent(control))) = owner.node.responder
             else {
@@ -3387,6 +3452,9 @@ impl Client {
         if epoch != self.epoch() || !self.text_inputs()?.iter().any(|i| i.id == id && i.focused) {
             return Ok(false);
         }
+        if let Some(changed) = self.designer_blur_input(id)? {
+            return Ok(changed);
+        }
         self.commit_host_label()?;
         let m = self.active.as_mut().ok_or("No Canvas")?;
         m.focus = None;
@@ -3446,6 +3514,9 @@ impl Client {
         }
         if self.requested.as_ref().is_some_and(|r| !r.reconnecting) || self.active.is_none() {
             return Ok(false);
+        }
+        if let Some(changed) = self.designer_edit(edit)? {
+            return Ok(changed);
         }
         if matches!(edit, Edit::Enter) {
             self.commit_host_label()?;
@@ -3537,6 +3608,9 @@ impl Client {
         }
         self.host.drag = None;
         if let Some(m) = &mut self.active {
+            if let Some(designer) = &mut m.designer {
+                designer.cancel();
+            }
             if let Some(scroll) = &mut m.preview_scroll {
                 scroll.cancel();
             }
@@ -3566,6 +3640,15 @@ impl Client {
         Ok(false)
     }
     pub fn back(&mut self) -> Result<bool> {
+        if !self.host_active
+            && let Some(address) = self
+                .active
+                .as_ref()
+                .and_then(|m| m.designer.as_ref())
+                .and_then(|d| d.focused_property())
+        {
+            return self.designer_discard_property(&address);
+        }
         if self.host_active {
             if self.host.pane == super::host_ui::Pane::Transfer {
                 return self.host_transfer_action(super::host_ui::HostAction::TransferCancel);
@@ -3704,6 +3787,9 @@ impl Client {
         m.sync_panel_scroll()?;
         if let Some(s) = &mut m.preview_scroll {
             scrolled |= s.tick(now);
+        }
+        if let Some(designer) = &mut m.designer {
+            scrolled |= designer.tick(now);
         }
         if let Some(s) = &mut m.panel_scroll {
             scrolled |= s.tick(now);
@@ -3925,6 +4011,9 @@ impl Mount {
             chat.prepare(self.viewport, self.keyboard.visible, self.font.clone());
         }
         self.layout_scene.take();
+        if let Some(designer) = &mut self.designer {
+            designer.invalidate_bounds();
+        }
         if let Some(scroll) = &mut self.panel_scroll {
             scroll.bounds_dirty = true;
         }
@@ -3941,6 +4030,12 @@ impl Mount {
         self.scene.take();
     }
     fn sync_panel_scroll(&mut self) -> Result<()> {
+        if self.designer.is_some() {
+            let scene = cached_layout(self)?;
+            if let Some(designer) = &mut self.designer {
+                designer.sync(&scene)?;
+            }
+        }
         if self.preview_scroll.as_ref().is_some_and(|s| s.bounds_dirty) {
             let scene = cached_layout(self)?;
             self.preview_scroll
@@ -3992,6 +4087,7 @@ impl Mount {
             self.invalidate();
             oib_changed = true;
         }
+        oib_changed |= self.refresh_designer()?;
         for (id, editor) in &mut self.editors {
             if let Value::Text(text) = self.doc.typed_value(*id)?
                 && editor.text() != text
@@ -4008,7 +4104,15 @@ impl Mount {
         Ok(true)
     }
     fn oib_activation_blocked(&self) -> bool {
-        self.input.active()
+        self.designer
+            .as_ref()
+            .is_some_and(oib_designer::Designer::busy)
+            || self.input.active()
+            || (self.designer.is_some()
+                && (self.keyboard_pointer.is_some()
+                    || self.order_drag.is_some()
+                    || self.text_views.values().any(TextViewport::active)
+                    || (self.keyboard.visible && self.focus.is_some())))
             || self.panel_scroll.as_ref().is_some_and(|s| s.touching())
             || self.preview_scroll.as_ref().is_some_and(|s| s.touching())
             || !self.doc.confirmed()
@@ -4102,6 +4206,9 @@ fn qualify(
     for s in &ui.selectors {
         if !locals.insert(s.local)
             || match s.projection {
+                Projection::Nonzero => {
+                    !field(s.field).is_some_and(|f| matches!(f.default, Value::Number(_)))
+                }
                 Projection::OibStatus => s.field != 0 || super::oib::seed(&ui).is_none(),
                 Projection::OibCell { cell } => {
                     s.field != 0
@@ -4478,6 +4585,7 @@ fn qualify(
         map_drag: None,
         epoch,
         viewport: [1280., 800.],
+        designer: super::oib::seed(&ui).and_then(oib_designer::Designer::new),
         ui,
         layout,
         oib_generation: None,
@@ -4535,6 +4643,7 @@ fn qualify(
         m.oib_generation = m.doc.oib_generation();
         m.refresh_oib_view()?;
     }
+    m.refresh_designer()?;
     m.visible = selected_values(&m)?;
     m.sync_panel_scroll()?;
     resolve_scene(&m)?;
@@ -4599,6 +4708,7 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
                         v
                     }
                 }
+                Projection::Nonzero => Value::Boolean(number()? != 0.),
                 Projection::Number { scale, offset } => Value::Number(number()? * scale + offset),
                 Projection::Percent => Value::Text(format!("{}%", (number()? / 10.).round())),
                 Projection::EnabledText => {
@@ -4650,6 +4760,26 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
     }
     let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
     let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
+    let scene = if let Some(designer) = &m.designer
+        && designer.focus_layout()
+    {
+        let seed = super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let back = m.quit_control.or_else(|| {
+            m.ui.handlers
+                .iter()
+                .find(|h| matches!(h.operation, Operation::Back))
+                .map(|h| h.control)
+        });
+        oib_focus_layout::project(
+            &scene,
+            seed,
+            back,
+            designer.layers_open(),
+            m.keyboard.visible,
+        )?
+    } else {
+        scene
+    };
     if let Some(chat) = &m.chat {
         chat.scene(&scene, m.viewport, m.keyboard.visible)
     } else {
@@ -4668,6 +4798,30 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
             .insert(root.children.len().min(1), backdrop.clone());
     }
     present_text_views(m, scene, &mut root);
+    if let Some(designer) = &m.designer {
+        designer.present(
+            &mut root,
+            scene,
+            m.preview_scroll.as_ref().map(|s| s.node()),
+            &format!(
+                "{} / active {} / shown {}{}",
+                m.oib_view
+                    .as_ref()
+                    .map_or("Live UI unavailable", |v| v.info.status.as_str()),
+                m.oib_view.as_ref().map_or(0, |v| v.info.active_generation),
+                m.oib_generation.unwrap_or(0),
+                if m.oib_view.as_ref().map(|v| v.info.active_generation) != m.oib_generation {
+                    " / activation pending"
+                } else {
+                    ""
+                }
+            ),
+        )?;
+        if let Some(font) = &m.font {
+            designer.present_editor_fields(&mut root, font);
+        }
+        designer.present_editor_keyboard(&mut root, &m.keyboard)?;
+    }
     if let Some(scroll) = &m.text_scroll {
         scroll.present(&mut root);
     }
@@ -4679,7 +4833,9 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
         scroll.present(&mut root);
         host_panel::present_panel(&mut root, scroll.node());
     }
-    if let Some(scroll) = &m.panel_scroll {
+    if m.designer.is_none()
+        && let Some(scroll) = &m.panel_scroll
+    {
         scroll.present(&mut root);
         host_panel::present_panel(&mut root, scroll.node());
     }
@@ -4816,10 +4972,15 @@ fn present_scene(m: &Mount, scene: &Scene) -> Result<Scene> {
     }
     if let Some(control) = m.quit_control
         && m.chat.is_none()
+        && !m.designer.as_ref().is_some_and(|d| d.focus_layout())
     {
         host_map::present_breadcrumb(&mut root, m, control);
     }
-    Scene::new(root)
+    let scene = Scene::new(root)?;
+    if m.designer.is_some() && scene.controls().len() > 128 {
+        return Err("Designer combined control budget exceeded".into());
+    }
+    Ok(scene)
 }
 fn order_items(m: &Mount) -> &[OrderItem] {
     if let Some(Presentation::Reorder { items }) = &m.ui.presentation {

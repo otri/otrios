@@ -9,7 +9,7 @@ fn large_mounts_compress_and_small_mounts_keep_the_existing_raw_wire() {
     use otrios_core::dashboard::layout::Layout;
     use otrios_interfaces::layout::Instance;
     use tungstenite::Message;
-    let mut room = room(false, 28800);
+    let mut room = room(false);
     let path = room.root.join("apps/demo/package/ui.flex");
     let mut ui = canvas::decode_ui(&std::fs::read(&path).unwrap()).unwrap();
     let mut layout = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
@@ -58,7 +58,7 @@ fn large_mounts_compress_and_small_mounts_keep_the_existing_raw_wire() {
 }
 #[test]
 fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
-    let room = room(false, 28800);
+    let room = room(false);
     for path in [
         "/stream",
         "/demo/stream",
@@ -109,7 +109,7 @@ fn retired_global_writer_and_scope_forgery_cannot_mutate_app_roots() {
 }
 #[test]
 fn public_app_mount_is_atomic_and_accepted_edits_are_persisted_separately() {
-    let room = room(false, 28800);
+    let room = room(false);
     let mut s = socket(&room.public, None);
     mount(&mut s, &room, "demo", 1);
     let ServerMessage::Mounted {
@@ -140,7 +140,7 @@ fn public_app_mount_is_atomic_and_accepted_edits_are_persisted_separately() {
 }
 #[test]
 fn immutable_authority_payloads_have_no_static_download_route() {
-    let room = room(false, 28800);
+    let room = room(false);
     for path in [
         "/authority/apps/monitoring/ui.flex",
         "/apps/monitoring/ui.flex",
@@ -194,7 +194,7 @@ fn persisted_edit(
 }
 #[test]
 fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
-    let room = room(false, 28800);
+    let room = room(false);
     let mut s = socket(&room.public, None);
     mount(&mut s, &room, "demo", 1);
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
@@ -243,7 +243,7 @@ fn canceled_and_rejected_candidates_keep_the_previous_lease_writable() {
 }
 #[test]
 fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_files() {
-    let mut room = room(false, 28800);
+    let mut room = room(false);
     let mut s = socket(&room.public, None);
     mount(&mut s, &room, "demo", 1);
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
@@ -337,7 +337,7 @@ fn accepting_a_new_state_reference_switches_subscription_and_preserves_both_file
 
 #[test]
 fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
-    let mut room = room(false, 28800);
+    let mut room = room(false);
     let mut s = socket(&room.public, None);
     mount(&mut s, &room, "demo", 1);
     let ServerMessage::Mounted { state, .. } = read_epoch(&mut s, 1) else {
@@ -420,7 +420,7 @@ fn journal_failure_never_acknowledges_and_pending_intent_survives_restart() {
 
 #[test]
 fn packed_mounts_confirm_durable_edits_for_independent_writers() {
-    let room = room(false, 28800);
+    let room = room(false);
     for writer_id in [11, 12] {
         let mut socket = socket(&room.public, None);
         send(
@@ -462,7 +462,7 @@ fn packed_mounts_confirm_durable_edits_for_independent_writers() {
 
 #[test]
 fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
-    let room = room(false, 28800);
+    let room = room(false);
     let checkpoint = state_file(&room, "monitoring");
     let journal = checkpoint.with_extension("merkle.log");
     let before = std::fs::read(&checkpoint).unwrap();
@@ -503,7 +503,7 @@ fn read_only_monitoring_subscriptions_leave_checkpoint_and_journal_unchanged() {
 
 #[test]
 fn ui_cache_hint_omits_only_matching_public_ui_and_never_grants_access() {
-    let room = room(false, 28800);
+    let room = room(false);
     let catalog = canvas::decode_catalog(&room.catalog).unwrap();
     let mut socket = socket(&room.public, None);
     for (epoch, id, known, omitted) in [
@@ -548,7 +548,7 @@ fn ui_cache_hint_omits_only_matching_public_ui_and_never_grants_access() {
 
 #[test]
 fn authorized_private_mounts_ignore_even_matching_ui_cache_hints() {
-    let room = room(false, 28800);
+    let room = room(false);
     let catalog = canvas::decode_catalog(&room.catalog).unwrap();
     let entry = catalog
         .apps
