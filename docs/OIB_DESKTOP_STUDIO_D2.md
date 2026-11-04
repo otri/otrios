@@ -271,6 +271,15 @@ health, RGB565/rotation/calibrated touch and existing services pass the combined
 readiness check. The user accepted this follow-up and authorized PR closure and
 the next phase.
 
+CI follow-up: the two metadata-only fixed-component hierarchy fixtures reused
+instance 50, now reserved by the Power palette prototype. They now choose an
+unused instance ID while retaining the visual-parent, ownership and fused-wrapper
+assertions. `cargo test -p otrios-core --features canvas,merkle --test
+oib_designer_hierarchy --test oib_designer_fixture --locked --offline` passed all
+11 hierarchy and 15 fixture checks; formatting and whitespace checks passed.
+This changes tests and documentation only; the qualified deployed runtime is
+unchanged.
+
 ## Next goal: design-agnostic OIB and Components dogfooding
 
 After this active goal is qualified, make OIB independent of any particular app
