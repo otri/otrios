@@ -8,6 +8,7 @@ use otrios_interfaces::oib::{
 };
 use std::collections::BTreeSet;
 mod lifecycle;
+mod structure;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,11 +88,11 @@ impl Document {
             value: Some(encoded),
         }];
         {
-            for cell in seed
-                .cells
-                .iter()
-                .filter(|c| !previous_cells.contains(&c.id))
-            {
+            for cell in seed.cells.iter().filter(|c| {
+                !previous_cells.contains(&c.id)
+                    && (c.inherit.is_none()
+                        || !super::super::oib::instances::palette_only(seed, c.owner))
+            }) {
                 let value = if cell.inherit.is_some() {
                     None
                 } else {
@@ -858,7 +859,19 @@ fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
             .map(|c| c.id)
             .collect::<BTreeSet<_>>()
             == new.seed.components.iter().map(|c| c.id).collect()
-        && old.seed.instances == new.seed.instances
+        && old
+            .seed
+            .instances
+            .iter()
+            .all(|a| new.seed.instances.contains(a))
+        && new
+            .seed
+            .instances
+            .iter()
+            .filter(|b| !old.seed.instances.contains(b))
+            .all(|b| super::super::oib::instances::palette_only(&new.seed, b.id))
+        && super::super::oib::instances::initial_allocations(&old.seed)
+            == super::super::oib::instances::initial_allocations(&new.seed)
         && old.seed.cells.iter().all(|a| {
             new.seed.cells.iter().any(|b| {
                 a.id == b.id
@@ -1089,6 +1102,15 @@ impl Document {
         writer: Actor,
         operation: &InstanceOperation,
     ) -> Result<()> {
+        if matches!(
+            operation,
+            InstanceOperation::Insert { .. } | InstanceOperation::Reorder { .. }
+        ) {
+            return self.oib_structure_write(writer, operation);
+        }
+        self.oib_instance_apply(writer, operation)
+    }
+    fn oib_instance_apply(&mut self, writer: Actor, operation: &InstanceOperation) -> Result<()> {
         let ui = self.oib_ui()?.clone();
         let seed = super::super::oib::seed(&ui).ok_or("Missing OIB seed")?;
         if seed.instance_surface.is_none() {
@@ -1097,6 +1119,36 @@ impl Document {
         let mut candidate = self.clone();
         let mut allocations = self.oib_allocations()?;
         match operation {
+            InstanceOperation::Reorder {
+                instance, before, ..
+            } => {
+                let index = allocations
+                    .iter()
+                    .position(|a| a.id == *instance)
+                    .ok_or("Unknown canvas child")?;
+                let moved = allocations.remove(index);
+                let index = before
+                    .map(|id| {
+                        allocations
+                            .iter()
+                            .position(|a| a.id == id)
+                            .ok_or("Unknown destination sibling")
+                    })
+                    .transpose()?
+                    .unwrap_or(allocations.len());
+                allocations.insert(index, moved);
+                if allocations == self.oib_allocations()? {
+                    return Ok(());
+                }
+                candidate.change(
+                    &[],
+                    vec![Edit {
+                        path: vec![4, 4],
+                        schema: self.extra_schema(4, 4),
+                        value: Some(bytes(&allocations)?),
+                    }],
+                )?;
+            }
             InstanceOperation::Restore { defaults } => {
                 candidate.oib_restore_residents(*defaults, writer)?;
                 if candidate.oib_compiled(1).is_err() {
@@ -1127,11 +1179,26 @@ impl Document {
                     )
                     .map_err(err)?;
             }
-            InstanceOperation::Instantiate { .. } | InstanceOperation::Duplicate { .. } => {
+            InstanceOperation::Instantiate { .. }
+            | InstanceOperation::Duplicate { .. }
+            | InstanceOperation::Insert { .. } => {
                 if allocations.len() >= MAX_ALLOCATIONS {
                     return Err("OIB retained identity capacity exhausted".into());
                 }
                 let (component, prototype, source, name) = match operation {
+                    InstanceOperation::Insert { prototype, .. } => {
+                        let source = seed
+                            .instances
+                            .iter()
+                            .find(|i| i.id == *prototype)
+                            .ok_or("Undeclared signed factory")?;
+                        (
+                            source.component.ok_or("Missing factory component")?,
+                            *prototype,
+                            None,
+                            &None,
+                        )
+                    }
                     InstanceOperation::Instantiate { component, name } => {
                         let prototype = seed
                             .instances
@@ -1159,7 +1226,18 @@ impl Document {
                 let new = candidate.oib_allocate(&allocations, prototype, name.clone())?;
                 debug_assert_eq!(new.component, component);
                 let id = new.id;
-                allocations.push(new);
+                let index = if let InstanceOperation::Insert {
+                    before: Some(id), ..
+                } = operation
+                {
+                    allocations
+                        .iter()
+                        .position(|a| a.id == *id)
+                        .ok_or("Unknown destination sibling")?
+                } else {
+                    allocations.len()
+                };
+                allocations.insert(index, new);
                 let expanded = super::super::oib::instances::expanded_seed(seed, &allocations)?;
                 let values = self.oib_values(2)?;
                 let mut edits = vec![Edit {
@@ -1223,6 +1301,13 @@ impl Document {
     }
 }
 impl StateAdapter {
+    /// Canonical signed factory metadata, before resident expansion removes
+    /// palette templates or replaces prototype IDs with allocated identities.
+    pub(in crate::canvas) fn oib_authoring_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
+        Ok(super::super::oib::seed(self.doc.oib_ui()?)
+            .ok_or("Missing OIB seed")?
+            .clone())
+    }
     pub fn restore_oib(&mut self, defaults: bool) -> Result<bool> {
         self.edit_oib_instance(InstanceOperation::Restore { defaults })
     }
@@ -1243,6 +1328,54 @@ impl StateAdapter {
     }
     pub fn instantiate_oib(&mut self, component: u64, name: Option<String>) -> Result<bool> {
         self.edit_oib_instance(InstanceOperation::Instantiate { component, name })
+    }
+    /// Original signed factories, including their distinct authored bindings.
+    /// An empty list means this document does not admit single-canvas authoring.
+    pub fn oib_canvas_factories(&self) -> Result<Vec<(u64, String)>> {
+        let seed = self.doc.oib_binding()?.seed;
+        let Some(first) = seed.instances.first() else {
+            return Ok(vec![]);
+        };
+        let operation = InstanceOperation::Insert {
+            prototype: first.id,
+            before: None,
+            generation: self.doc.oib_status()?.generation,
+        };
+        if self.doc.oib_validate_structure(&operation).is_err() {
+            return Ok(vec![]);
+        }
+        Ok(seed
+            .instances
+            .iter()
+            .map(|i| (i.id, i.name.clone()))
+            .collect())
+    }
+    /// Submit an explicitly captured generation; never silently rebase a move.
+    pub fn edit_oib_structure(&mut self, operation: InstanceOperation) -> Result<bool> {
+        if !matches!(
+            operation,
+            InstanceOperation::Insert { .. } | InstanceOperation::Reorder { .. }
+        ) {
+            return Err("Expected a canvas structure operation".into());
+        }
+        self.edit_oib_instance(operation)
+    }
+    pub fn insert_oib(&mut self, prototype: u64, before: Option<u64>) -> Result<bool> {
+        self.edit_oib_instance(InstanceOperation::Insert {
+            prototype,
+            before,
+            generation: self.doc.oib_status()?.generation,
+        })
+    }
+    pub fn reorder_oib(&mut self, instance: u64, before: Option<u64>) -> Result<bool> {
+        if before == Some(instance) {
+            return Ok(false);
+        }
+        self.edit_oib_instance(InstanceOperation::Reorder {
+            instance,
+            before,
+            generation: self.doc.oib_status()?.generation,
+        })
     }
     pub fn duplicate_oib(&mut self, instance: u64, name: Option<String>) -> Result<bool> {
         self.edit_oib_instance(InstanceOperation::Duplicate { instance, name })
@@ -1266,12 +1399,37 @@ impl StateAdapter {
             return Err("OIB instance surface unavailable".into());
         }
         match &operation {
+            InstanceOperation::Insert { generation, .. }
+            | InstanceOperation::Reorder { generation, .. } => {
+                // Captured actions retain their observed generation even if a
+                // remote publication reached this replica before release. Send
+                // stale actions unchanged so the authority durably rejects and
+                // acknowledges them instead of turning a normal race into a
+                // local host error. Current-generation actions still preflight.
+                if *generation == self.doc.oib_status()?.generation {
+                    self.doc.oib_validate_structure(&operation)?;
+                    if let InstanceOperation::Insert { prototype, .. } = &operation
+                        && self.oib_available_slots_for(*prototype) == 0
+                    {
+                        return Ok(false);
+                    }
+                }
+            }
             InstanceOperation::Restore { .. } => {}
             InstanceOperation::Instantiate { component, name } => {
                 if !seed.components.iter().any(|c| c.id == *component) {
                     return Err("Unknown OIB component".into());
                 }
-                if self.oib_available_slots() == 0 {
+                let prototype = self
+                    .doc
+                    .oib_binding()?
+                    .seed
+                    .instances
+                    .iter()
+                    .find(|i| i.component == Some(*component))
+                    .ok_or("Undeclared component factory")?
+                    .id;
+                if self.oib_available_slots_for(prototype) == 0 {
                     return Ok(false);
                 }
                 if let Some(name) = name
@@ -1284,7 +1442,14 @@ impl StateAdapter {
                 if !self.doc.oib_live(2)?.contains(instance) {
                     return Err("Source instance is not active".into());
                 }
-                if self.oib_available_slots() == 0 {
+                let prototype = self
+                    .doc
+                    .oib_allocations()?
+                    .iter()
+                    .find(|a| a.id == *instance)
+                    .ok_or("Unknown source instance")?
+                    .prototype;
+                if self.oib_available_slots_for(prototype) == 0 {
                     return Ok(false);
                 }
                 if let Some(name) = name

@@ -407,12 +407,14 @@ fn fixture() -> Ui {
                 prototypes: vec![
                     contract::Prototype {
                         instance: 20,
+                        palette_only: false,
                         preview_root: 10,
                         inspector_root: 30,
                         nodes: vec![10, 11, 12, 13, 14, 15, 16, 30],
                     },
                     contract::Prototype {
                         instance: 30,
+                        palette_only: false,
                         preview_root: 20,
                         inspector_root: 31,
                         nodes: vec![20, 21, 22, 23, 24, 25, 26, 31],
@@ -1299,6 +1301,7 @@ fn factories_require_signed_document_membership_before_state_changes() {
         .prototypes
         .push(contract::Prototype {
             instance: 50,
+            palette_only: false,
             preview_root: 32,
             inspector_root: 33,
             nodes: vec![32, 33],

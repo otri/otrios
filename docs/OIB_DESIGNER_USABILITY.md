@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer usability proposal
 
-Date: 2026-11-04. Status: **Frame Focus implemented and live-qualified; Desktop Studio deferred**.
+Date: 2026-11-04. Status: **Frame Focus and Desktop Studio implemented and live-qualified**.
 
 The [Frame Focus milestone](OIB_FRAME_FOCUS_D1.md) and
 [shared-style qualification](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) record delivered
 behavior, signed Frame/Web acceptance and measured scrolling. This document
-preserves the original findings, baseline and design targets; its Desktop Studio
-presentation and later authoring features remain proposals.
+preserves the original findings, baseline and design targets. The
+[Studio and bounded D2 milestone](OIB_DESKTOP_STUDIO_D2.md) records Desktop Studio
+and single-canvas insertion/reordering; broader authoring remains proposed.
 
 This follow-up to [RFC 0035](rfcs/0035-oib-component-designer.md) addresses the
 user's four findings: unreadable tooling text, placeholder property editing,
@@ -269,3 +270,7 @@ The companion [interactive design study](designs/oib-designer-usability.html)
 compares Desktop Studio and Frame Focus. It is local, illustrative HTML, not the
 shared Rust renderer or a shipped runtime feature. Its property edits, collapse,
 selection, reset, source navigation and mode changes do not contact live services.
+
+The active [Desktop Studio and bounded D2 plan](OIB_DESKTOP_STUDIO_D2.md) defines
+the current completion boundary and records design-agnostic Components dogfooding
+as the next goal.

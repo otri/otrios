@@ -439,6 +439,18 @@ fn document() -> Document {
         })
         .collect();
     instances.push(ComponentInstance {
+        id: InstanceId(50),
+        name: "Power".into(),
+        definition: DefinitionId(13),
+        owner: Owner::Document,
+        visual_parent: Some(address(40, &[], 1)),
+        order: 2,
+        assignments: vec![Assignment {
+            target: path(&[], 1, 3),
+            source: AssignmentSource::Literal(Value::Text("Power".into())),
+        }],
+    });
+    instances.push(ComponentInstance {
         id: InstanceId(40),
         name: "Shell".into(),
         definition: DefinitionId(11),
@@ -447,6 +459,7 @@ fn document() -> Document {
         order: 0,
         assignments: vec![],
     });
+    instances.sort_by_key(|i| i.id);
     Document {
         id: DocumentId(1),
         name: "Settings designer".into(),
@@ -472,6 +485,21 @@ fn document() -> Document {
                         })
                         .collect(),
                 })
+                .chain([RootCellMapping {
+                    prototype: InstanceId(50),
+                    cells: vec![
+                        RootCellKey {
+                            path: path(&[], 1, 1),
+                            key: 41,
+                            initial_cell: 400,
+                        },
+                        RootCellKey {
+                            path: path(&[], 1, 3),
+                            key: 55,
+                            initial_cell: 401,
+                        },
+                    ],
+                }])
                 .collect(),
         },
     }
@@ -497,6 +525,25 @@ fn seed() -> Seed {
             });
         }
     }
+    for (id, shared, name, default) in [
+        (400, 104, "toggle accent", Value::Color(BLUE)),
+        (401, 105, "toggle label", Value::Text("Enabled".into())),
+    ] {
+        cells.push(Cell {
+            id,
+            owner: 50,
+            name: name.into(),
+            default,
+            authored_override: (id == 401).then(|| Value::Text("Power".into())),
+            choices: if id == 400 {
+                vec![Value::Color(BLUE), Value::Color(GOLD), Value::Color(ORANGE)]
+            } else {
+                vec![Value::Text("Power".into()), Value::Text("Enabled".into())]
+            },
+            inherit: Some(shared),
+            targets: vec![],
+        });
+    }
     Seed {
         format: oib::FORMAT.into(),
         designer: Some(document()),
@@ -515,12 +562,12 @@ fn seed() -> Seed {
             component: None,
         })
         .collect(),
-        instances: [(20, "Audio"), (30, "Display")]
+        instances: [(20, "Audio"), (30, "Display"), (50, "Power")]
             .into_iter()
             .map(|(id, name)| Object {
                 id,
                 name: name.into(),
-                component: Some(10),
+                component: Some(if id == 50 { 13 } else { 10 }),
             })
             .collect(),
         cells,
@@ -638,6 +685,26 @@ fn panel(name: &str, value: StateField, enabled: StateField, y: f32) -> Element 
     .frame([0., y, 520., 280.])
     .key(&format!("{name}-panel"))
 }
+fn power() -> Element {
+    component(
+        [264., 64.],
+        vec![
+            circle(BLUE)
+                .frame([4., 12., 32., 32.])
+                .visible(AUDIO_ENABLED.nonzero())
+                .key("Power-indicator"),
+            text("Power")
+                .font_scale(2.)
+                .frame([48., 12., 216., 32.])
+                .key("Power-label"),
+        ],
+    )
+    .frame([0., 560., 264., 64.])
+    .key("Power-toggle")
+    .semantic_label("Power / audio enabled")
+    .semantic_checked_value(AUDIO_ENABLED.nonzero())
+    .on_press(Event::toggle(AUDIO_ENABLED))
+}
 fn tooling_panel(key: &str, title: &str, size: [f32; 2], children: Vec<Element>) -> Element {
     component(
         size,
@@ -725,6 +792,40 @@ pub fn description() -> Ui {
             value: enabled.nonzero(),
         });
     }
+    targets.extend([
+        NamedOibTarget {
+            cell: 400,
+            node: "Power-indicator".into(),
+            property: Property::Color,
+            scale: 1.,
+            offset: 0.,
+        },
+        NamedOibTarget {
+            cell: 401,
+            node: "Power-label".into(),
+            property: Property::Text,
+            scale: 1.,
+            offset: 0.,
+        },
+        NamedOibTarget {
+            cell: 401,
+            node: "Power-toggle".into(),
+            property: Property::SemanticLabel,
+            scale: 1.,
+            offset: 0.,
+        },
+    ]);
+    for (node, name) in [(1, "toggle"), (2, "indicator"), (3, "label")] {
+        objects.push(NamedOibObject {
+            address: address(50, &[], node),
+            node: Some(format!("Power-{name}")),
+        });
+    }
+    bindings.push(NamedOibAppBinding {
+        instance: InstanceId(50),
+        target: path(&[], 1, 5),
+        value: AUDIO_ENABLED.nonzero(),
+    });
     let wide = row(
         24.,
         vec![
@@ -769,16 +870,27 @@ pub fn description() -> Ui {
         .with_oib_designer_bindings(bindings)
         .with_oib_instances(NamedOibSurface {
             layout: None,
-            previous_ui_sha256: vec![0; 32],
+            // Exact signed D1 predecessor; app bindings/keys survive this append.
+            previous_ui_sha256: [
+                0x71, 0xd0, 0x11, 0x78, 0x2e, 0xf2, 0x30, 0xe3, 0x20, 0x56, 0x83, 0x40, 0xfe, 0xf4,
+                0x53, 0x5c, 0xa8, 0x91, 0xf8, 0x0d, 0x8e, 0xfc, 0x67, 0x3a, 0xf4, 0x52, 0x1b, 0x14,
+                0x44, 0x67, 0x3c, 0xd8,
+            ]
+            .to_vec(),
             preview: "preview-scroll".into(),
             preview_stride: 280.,
             inspector_start: 1.,
             inspector_stride: 1.,
-            prototypes: [(20, "Audio"), (30, "Display")]
+            prototypes: [(20, "Audio"), (30, "Display"), (50, "Power")]
                 .into_iter()
                 .map(|(instance, name)| NamedOibPrototype {
+                    palette_only: instance == 50,
                     instance,
-                    preview: format!("{name}-panel"),
+                    preview: if instance == 50 {
+                        "Power-toggle".into()
+                    } else {
+                        format!("{name}-panel")
+                    },
                     inspector: format!("{name}-inspector-placeholder"),
                 })
                 .collect(),
@@ -795,6 +907,7 @@ pub fn description() -> Ui {
                     vec![
                         panel("Audio", VOLUME, AUDIO_ENABLED, 0.),
                         panel("Display", BRIGHTNESS, DISPLAY_ENABLED, 280.),
+                        power(),
                     ],
                 )
                 .frame([288., 120., 568., 656.]),
@@ -809,6 +922,9 @@ pub fn description() -> Ui {
                         canvas(vec![])
                             .frame([0., 1., 1., 1.])
                             .key("Display-inspector-placeholder"),
+                        canvas(vec![])
+                            .frame([0., 2., 1., 1.])
+                            .key("Power-inspector-placeholder"),
                     ],
                 )
                 .frame([880., 120., 376., 656.]),

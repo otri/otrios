@@ -31,7 +31,7 @@ fn address(instance: u64, references: &[u64], node: u64) -> Selection {
 fn find<'a>(rows: &'a [HierarchyRow], selection: &Selection) -> &'a HierarchyRow {
     rows.iter()
         .find(|r| r.selection.as_ref() == Some(selection))
-        .unwrap()
+        .unwrap_or_else(|| panic!("missing hierarchy selection: {selection:?}"))
 }
 fn query(seed: &Seed) -> Vec<HierarchyRow> {
     let allocations = instances::initial_allocations(seed);
@@ -310,6 +310,7 @@ fn repeated_nested_references_keep_ancestry_and_fuse_each_boundary() {
 fn visual_parent_is_independent_of_owner_and_nonvisual_chains_stay_under_objects() {
     let mut seed = seed();
     let doc = seed.designer.as_mut().unwrap();
+    let fixed_id = doc.instances.iter().map(|i| i.id.0).max().unwrap() + 1;
     let panel = doc
         .definitions
         .iter_mut()
@@ -350,7 +351,7 @@ fn visual_parent_is_independent_of_owner_and_nonvisual_chains_stay_under_objects
         slots: vec![],
     });
     doc.instances.push(ComponentInstance {
-        id: InstanceId(50),
+        id: InstanceId(fixed_id),
         name: "Fixed configuration".into(),
         definition: DefinitionId(14),
         owner: Owner::Instance(InstanceId(40)),
@@ -360,7 +361,7 @@ fn visual_parent_is_independent_of_owner_and_nonvisual_chains_stay_under_objects
     });
     doc.mappings.objects.push(ObjectMapping {
         address: ObjectAddress {
-            instance: InstanceId(50),
+            instance: InstanceId(fixed_id),
             references: vec![],
             node: NodeId(1),
         },
@@ -378,7 +379,7 @@ fn visual_parent_is_independent_of_owner_and_nonvisual_chains_stay_under_objects
         find(&rows, &address(40, &[], 3)).parent,
         Some(HierarchyKey::Selection(address(40, &[], 2)))
     );
-    let fixed = find(&rows, &address(50, &[], 1));
+    let fixed = find(&rows, &address(fixed_id, &[], 1));
     assert_eq!(fixed.parent, Some(HierarchyKey::Objects(DocumentId(1))));
     assert_eq!(fixed.owner, Some(address(40, &[], 1)));
     assert_eq!(fixed.name, "Fixed configuration");
@@ -489,6 +490,7 @@ fn visual_attachment_to_wrapper_uses_fused_parent_key() {
     // Metadata-only attachment fixture with a fixed component boundary in Shell.
     let mut seed = seed();
     let doc = seed.designer.as_mut().unwrap();
+    let fixed_id = doc.instances.iter().map(|i| i.id.0).max().unwrap() + 1;
     let mut leaf = doc
         .definitions
         .iter()
@@ -524,7 +526,7 @@ fn visual_attachment_to_wrapper_uses_fused_parent_key() {
         slots: vec![],
     });
     doc.instances.push(ComponentInstance {
-        id: InstanceId(50),
+        id: InstanceId(fixed_id),
         name: "Attached shape".into(),
         definition: DefinitionId(14),
         owner: Owner::Document,
@@ -539,7 +541,7 @@ fn visual_attachment_to_wrapper_uses_fused_parent_key() {
     for (instance, references, node, layout_node) in [
         (40, vec![], 3, 60000),
         (40, vec![NodeId(3)], 1, 60001),
-        (50, vec![], 1, 60002),
+        (fixed_id, vec![], 1, 60002),
     ] {
         doc.mappings.objects.push(ObjectMapping {
             address: ObjectAddress {
@@ -553,7 +555,7 @@ fn visual_attachment_to_wrapper_uses_fused_parent_key() {
     let rows = query(&seed);
     closure(&rows);
     assert_eq!(
-        find(&rows, &address(50, &[], 1)).parent,
+        find(&rows, &address(fixed_id, &[], 1)).parent,
         Some(HierarchyKey::Selection(address(40, &[3], 1)))
     );
 }

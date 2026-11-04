@@ -1,0 +1,184 @@
+{
+  "passed": true,
+  "release": "e2102140ca214eaacf4ecc17a6acccc5d094f686bb5bd186da98ae32e8bcdf70",
+  "state_protocol": "otrios-canvas-sync-v28",
+  "wire_format_changed": false,
+  "tests": {
+    "studio_focused": 8,
+    "stale_delete_and_dirty_drafts": 2,
+    "frame_focus_combined_budget": 1,
+    "core_clippy_warnings_denied": true
+  },
+  "joint_pane_maximum": {
+    "nodes": 495,
+    "controls": 93,
+    "node_limit": 512,
+    "control_limit": 128
+  },
+  "browser": {
+    "info": {
+      "generation": 100,
+      "managementVisible": true,
+      "openArrow": true,
+      "semanticHide": true
+    },
+    "typed": {
+      "committed": false,
+      "deleteY": 136,
+      "generation": 101,
+      "raw": "Studio CRUD QA"
+    },
+    "edit": {
+      "delete": true,
+      "deleteY": 136,
+      "generation": 102,
+      "label": "toggle label: Studio CRUD QA (override)",
+      "status": "Live \u00b7 revision 102 \u00b7 5 instances \u00b7 1 slots available"
+    }
+  },
+  "user_component_preserved": 65560,
+  "qualification_instances_deleted": [
+    65561,
+    65562
+  ],
+  "initial_order": [
+    65560,
+    20,
+    30
+  ],
+  "initial_generation": 99,
+  "frame_calibration_unchanged": true,
+  "final_readiness": {
+    "passed": true,
+    "release": "e2102140ca214eaacf4ecc17a6acccc5d094f686bb5bd186da98ae32e8bcdf70",
+    "state_protocol": "otrios-canvas-sync-v28",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:oib-designer/ui",
+      "release": "e2102140ca214eaacf4ecc17a6acccc5d094f686bb5bd186da98ae32e8bcdf70",
+      "runtime_release": "e2102140ca214eaacf4ecc17a6acccc5d094f686bb5bd186da98ae32e8bcdf70",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 9.43
+  },
+  "after-browser-insert": {
+    "generation": 100,
+    "order": [
+      65560,
+      20,
+      30,
+      65561
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true
+  },
+  "after-frame-insert": {
+    "generation": 101,
+    "order": [
+      65560,
+      20,
+      30,
+      65561,
+      65562
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true
+  },
+  "browser-info-open": {
+    "generation": 100,
+    "order": [
+      65560,
+      20,
+      30,
+      65561
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true
+  },
+  "browser-edit-confirmed": {
+    "generation": 102,
+    "order": [
+      65560,
+      20,
+      30,
+      65561,
+      65562
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true,
+    "qualification_label": "toggle label: Studio CRUD QA (override)"
+  },
+  "browser-delete-confirmed": {
+    "generation": 103,
+    "order": [
+      65560,
+      20,
+      30,
+      65562
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true
+  },
+  "native-draft-local": {
+    "generation": 103,
+    "order": [
+      65560,
+      20,
+      30,
+      65562
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true
+  },
+  "native-edit-confirmed": {
+    "generation": 104,
+    "order": [
+      65560,
+      20,
+      30,
+      65562
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true,
+    "qualification_label": "toggle label: Powerq (override)"
+  },
+  "final": {
+    "generation": 105,
+    "order": [
+      65560,
+      20,
+      30
+    ],
+    "existing_properties_preserved": true,
+    "app_values_preserved": true
+  }
+}

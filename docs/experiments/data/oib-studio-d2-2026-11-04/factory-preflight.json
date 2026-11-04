@@ -1,0 +1,90 @@
+{
+  "scope": "Factory-specific client preflight after PR 49 CI failure",
+  "process_test": {
+    "command": "OTRIOS_SPACES_SERVER=<fresh dashboard-server> cargo test -p otrios-core --features canvas --test spaces_process d1::d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_observed_resolution --locked --offline -- --exact --nocapture",
+    "passed": 1,
+    "seconds": 23.43,
+    "real_authority_process": true,
+    "linux_shared_memory_ipc": false
+  },
+  "focused_tests": {
+    "designer_fixture": 15,
+    "hierarchy": 11,
+    "desktop_studio": 10
+  },
+  "core_lib_clippy_canvas_merkle_warnings_denied": true,
+  "format_and_whitespace": true,
+  "live": {
+    "passed": true,
+    "release": "1339deccac7c1c0a42538cae75cd8f0d700e9b65606af48f0e2d485a9349f252",
+    "api_insert_remove": true,
+    "original_order_preserved": true,
+    "original_property_displays_preserved": true,
+    "app_values_preserved": true,
+    "confirmed": true,
+    "generations": [
+      108,
+      109,
+      110
+    ],
+    "qualification_instance": 65563,
+    "browser_dom_interaction": false
+  },
+  "wasm_artifact_smoke": {
+    "passed": true,
+    "signed_assets_sha256_verified": 3,
+    "actual_wasm_instantiated": true,
+    "catalog_admitted": true,
+    "mount_request_generated": true,
+    "browser_dom_interaction": false,
+    "release": "1339deccac7c1c0a42538cae75cd8f0d700e9b65606af48f0e2d485a9349f252"
+  },
+  "readiness": {
+    "passed": true,
+    "release": "1339deccac7c1c0a42538cae75cd8f0d700e9b65606af48f0e2d485a9349f252",
+    "state_protocol": "otrios-canvas-sync-v28",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:oib-designer/ui",
+      "release": "1339deccac7c1c0a42538cae75cd8f0d700e9b65606af48f0e2d485a9349f252",
+      "runtime_release": "1339deccac7c1c0a42538cae75cd8f0d700e9b65606af48f0e2d485a9349f252",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 13.499
+  },
+  "limitations": [
+    "Public HTTPS artifact fetch returned HTTP 403; not counted as passing.",
+    "Initial ARM probe public socket rejected missing Origin; no app edit published. Completed probe used trusted loopback and existing native identity.",
+    "No repeated browser DOM/GPU campaign or Linux shared-memory IPC claim."
+  ],
+  "compatible_rollback_available": true
+}

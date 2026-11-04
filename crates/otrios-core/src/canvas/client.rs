@@ -191,6 +191,7 @@ pub struct ResourceUsage {
 }
 #[derive(Default)]
 pub struct Client {
+    designer_studio: oib_focus_layout::Studio,
     transfer_caps: super::host_ui::transfers::Capabilities,
     transfer_task: Option<otrios_interfaces::transfers::TransferTask>,
     next_transfer: u32,
@@ -2709,6 +2710,11 @@ impl Client {
         if let Some(chat) = &mut candidate.chat {
             chat.managed(candidate.quit_control);
         }
+        if let Some(d) = &mut candidate.designer {
+            d.studio = self.designer_studio;
+            d.invalidate_bounds();
+            candidate.invalidate();
+        }
         self.active = Some(candidate);
         self.host_active = false;
         self.host_actions.clear();
@@ -3610,6 +3616,7 @@ impl Client {
         if let Some(m) = &mut self.active {
             if let Some(designer) = &mut m.designer {
                 designer.cancel();
+                self.designer_studio = designer.studio;
             }
             if let Some(scroll) = &mut m.preview_scroll {
                 scroll.cancel();
@@ -4776,6 +4783,8 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
             back,
             designer.layers_open(),
             m.keyboard.visible,
+            designer.studio,
+            designer.management_visible(),
         )?
     } else {
         scene

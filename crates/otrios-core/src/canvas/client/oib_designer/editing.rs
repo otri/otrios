@@ -121,13 +121,33 @@ pub(super) fn inspector(
         heading.frame.width = 208.;
         nodes.push(heading);
         if let Some(address) = &p.address {
-            nodes.push(b.focus_button(
+            let expanded = details.is_some_and(|d| &d.address == address);
+            let mut info = b.focus_button(
                 216.,
                 y,
                 104.,
-                "Info",
+                if expanded { "v Info" } else { "> Info" },
                 LocalAction::Details(address.clone()),
-            )?);
+            )?;
+            if let Some(semantics) = &mut info.semantics {
+                semantics.label = if expanded {
+                    "Hide property info"
+                } else {
+                    "Show property info"
+                }
+                .into();
+                semantics.checked = expanded;
+            }
+            if expanded {
+                super::style::set_surface_fill(
+                    &mut info.children[0],
+                    otrios_interfaces::theme::LINE,
+                )?;
+                if let Primitive::Text { color, .. } = &mut info.children[1].primitive {
+                    *color = ACCENT;
+                }
+            }
+            nodes.push(info);
         }
         y += 56.;
         property_context(b, &mut nodes, &mut y, p, details, registers, seed, editable)?;
@@ -563,7 +583,8 @@ pub(in crate::canvas::client) fn keyboard_key(id: u32) -> Option<u16> {
 fn repaint(m: &mut Mount) -> Result<()> {
     let mut d = m.designer.take().ok_or("Missing designer")?;
     let result = (|| {
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let properties = d.properties.clone();
         let objects = d.objects.clone();
         let status = m.oib_view.as_ref().map_or("", |v| v.info.status.as_str());
@@ -594,7 +615,8 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let trace = crate::canvas::oib::document::property_sources(
             seed,
             &m.doc.oib_allocations()?,
@@ -671,7 +693,8 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let trace = crate::canvas::oib::document::property_sources(
             seed,
             &m.doc.oib_allocations()?,
@@ -840,7 +863,8 @@ impl Client {
         if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
             return Ok(false);
         }
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let fresh = super::super::super::oib::document::properties(
             seed,
             &m.doc.oib_allocations()?,

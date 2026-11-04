@@ -461,11 +461,12 @@ pub(super) fn expanded_metadata(seed: &Seed, allocations: &[Allocation]) -> Resu
     doc.mappings
         .objects
         .retain(|o| !factories.contains(&o.address.instance));
-    for allocation in allocations {
+    for (order, allocation) in allocations.iter().enumerate() {
         let prototype = InstanceId(allocation.prototype);
         let mut root = instance(original, prototype)?.clone();
         root.id = InstanceId(allocation.id);
         root.name = allocation.name.clone();
+        root.order = u16::try_from(order).map_err(err)?;
         doc.instances.push(root);
         let mut table = original
             .mappings

@@ -31,8 +31,11 @@ signed document/class model, linked nested components and stable property
 addresses. Its [Frame Focus editor](docs/OIB_FRAME_FOCUS_D1.md) adds readable
 Layers navigation, typed property drafts, source-aware Reset and retained
 scrolling, qualified on Frame and the signed-in browser. The
-[component designer RFC](docs/rfcs/0035-oib-component-designer.md) separates this
-delivered scope from later structural authoring, rich text, images and XR.
+[component designer RFC](docs/rfcs/0035-oib-component-designer.md) separates delivered
+scope from later authoring. [Desktop Studio and bounded D2](docs/OIB_DESKTOP_STUDIO_D2.md)
+add persistent resizable panels and insertion/reordering of signed factories in
+one admitted canvas. Nested slot/definition/connection authoring, rich text,
+complete UI transfers, images and XR remain deferred.
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 

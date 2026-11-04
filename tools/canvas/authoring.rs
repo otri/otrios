@@ -858,6 +858,7 @@ pub struct NamedOibAppBinding {
 }
 pub struct NamedOibPrototype {
     pub instance: u64,
+    pub palette_only: bool,
     pub preview: String,
     pub inspector: String,
 }
@@ -1055,6 +1056,7 @@ impl AppUi {
                         nodes.sort_unstable();
                         otrios_interfaces::oib::Prototype {
                             instance: p.instance,
+                            palette_only: p.palette_only,
                             preview_root,
                             inspector_root,
                             nodes,

@@ -46,6 +46,12 @@ const WINDOW_STEP: f32 = 8. * ROW;
 enum LocalAction {
     Select(Selection),
     Layers,
+    Profile,
+    Resize(usize),
+    Palette,
+    EditComponent(Selection),
+    DeleteComponent(u64),
+    Structure(otrios_interfaces::oib::InstanceOperation),
     FocusField(u32),
     Apply(PropertyAddress),
     Discard(PropertyAddress),
@@ -66,6 +72,11 @@ enum LocalAction {
     Resolve(PropertyAddress),
 }
 #[derive(Clone)]
+struct ManagedComponent {
+    instance: u64,
+    root: Selection,
+}
+#[derive(Clone)]
 struct Capture {
     pointer: u32,
     start: [f32; 2],
@@ -84,6 +95,12 @@ pub(super) struct Designer {
     selection: Selection,
     focus_layout: bool,
     layers_open: bool,
+    pub(super) studio: super::oib_focus_layout::Studio,
+    resize_origin: Option<[f32; 2]>,
+    palette_open: bool,
+    management: Option<ManagedComponent>,
+    management_nodes: Vec<SceneNode>,
+    structure_tools: Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
     tree: Vec<HierarchyRow>,
     tree_scope: HierarchyScope,
     tree_closed: Vec<HierarchyKey>,
@@ -117,6 +134,12 @@ impl Clone for Designer {
             selection: self.selection.clone(),
             focus_layout: self.focus_layout,
             layers_open: self.layers_open,
+            studio: self.studio,
+            resize_origin: self.resize_origin,
+            palette_open: self.palette_open,
+            management: self.management.clone(),
+            management_nodes: self.management_nodes.clone(),
+            structure_tools: self.structure_tools.clone(),
             tree: self.tree.clone(),
             tree_scope: self.tree_scope,
             tree_closed: self.tree_closed.clone(),
@@ -173,6 +196,12 @@ impl Designer {
             selection: Selection::Document(metadata.id),
             focus_layout: seed.instance_surface.is_some() && metadata.hierarchy_viewport.is_some(),
             layers_open: false,
+            studio: Default::default(),
+            resize_origin: None,
+            palette_open: false,
+            management: None,
+            management_nodes: vec![],
+            structure_tools: vec![],
             tree: vec![],
             tree_scope: HierarchyScope::Composition,
             tree_closed: vec![],
@@ -201,12 +230,23 @@ impl Designer {
     pub(super) fn focus_layout(&self) -> bool {
         self.focus_layout
     }
+    pub(super) fn management_visible(&self) -> bool {
+        self.focus_layout && self.management.is_some()
+    }
     pub(super) fn layers_open(&self) -> bool {
         self.layers_open
     }
     fn local_action(&self, id: u32) -> Option<LocalAction> {
-        if self.focus_layout && id == super::oib_focus_layout::LAYERS {
+        use super::oib_focus_layout::{LAYERS, PROFILE, RESIZE_LEFT, RESIZE_RIGHT};
+        if self.focus_layout && id == PROFILE {
+            Some(LocalAction::Profile)
+        } else if self.focus_layout && id == LAYERS && !self.studio.enabled {
             Some(LocalAction::Layers)
+        } else if self.focus_layout
+            && self.studio.enabled
+            && [RESIZE_LEFT, RESIZE_RIGHT].contains(&id)
+        {
+            Some(LocalAction::Resize(usize::from(id == RESIZE_RIGHT)))
         } else {
             self.actions.get(&id).cloned()
         }
@@ -224,6 +264,9 @@ impl Designer {
         self.pending_viewport = Some(viewport);
     }
     pub(super) fn cancel(&mut self) {
+        if let Some(widths) = self.resize_origin.take() {
+            self.studio.widths = widths;
+        }
         self.capture = None;
         for panel in &mut self.panels {
             panel.scroll.cancel();
@@ -297,6 +340,33 @@ impl Designer {
             return Err("Designer object model budget exceeded".into());
         }
         let mut builder = Builder::at(self.next_id);
+        self.management_nodes.clear();
+        if let Some(target) = &self.management {
+            let mut edit = builder.focus_button(
+                0.,
+                0.,
+                156.,
+                "Edit",
+                LocalAction::EditComponent(target.root.clone()),
+            )?;
+            edit.semantics
+                .as_mut()
+                .ok_or("Missing Edit semantics")?
+                .label = "Edit component".into();
+            let mut delete = builder.focus_button(
+                164.,
+                0.,
+                156.,
+                "Delete",
+                LocalAction::DeleteComponent(target.instance),
+            )?;
+            delete
+                .semantics
+                .as_mut()
+                .ok_or("Missing Delete semantics")?
+                .label = "Delete component".into();
+            self.management_nodes = vec![edit, delete];
+        }
         let hierarchy = if self.panels.len() == 2 {
             Some(if self.focus_layout {
                 focus_hierarchy(
@@ -306,6 +376,10 @@ impl Designer {
                     &self.tree_closed,
                     self.tree_scope,
                     self.mode,
+                    AuthoringTools {
+                        operations: &self.structure_tools,
+                        open: self.palette_open,
+                    },
                 )?
             } else {
                 hierarchy(
@@ -418,11 +492,37 @@ impl Designer {
         preview: Option<u32>,
         status: &str,
     ) -> Result<()> {
+        // Structural rejection must remain visible even while the detailed
+        // inspector notice is scrolled out of view. Reuse persistent chrome;
+        // this adds no scene nodes, input targets or shared state.
+        if let Some(title) = find_node(root, super::oib_focus_layout::PROPERTIES_TITLE)
+            && let Primitive::Text { value, color, .. } = &mut title.primitive
+        {
+            let rejected = status.contains("Structure rejected:");
+            *value = if rejected {
+                "Change rejected"
+            } else {
+                "Properties"
+            }
+            .into();
+            *color = if rejected { ACCENT } else { WHITE };
+        }
+        if let Some(toolbar) = find_node(root, super::oib_focus_layout::PROPERTIES_ACTIONS) {
+            toolbar.children = self.management_nodes.clone();
+            let width = ((toolbar.frame.width - 8.) / 2.).max(1.);
+            for (index, node) in toolbar.children.iter_mut().enumerate() {
+                node.frame.x = index as f32 * (width + 8.);
+                node.frame.width = width;
+                style::resize_surface(&mut node.children[0], width, 52.)?;
+                node.children[1].frame.width = (width - 16.).max(1.);
+            }
+        }
         for panel in &self.panels {
             let node =
                 find_node(root, u32::from(panel.viewport)).ok_or("Missing designer viewport")?;
             if self.focus_layout
                 && !self.layers_open
+                && !self.studio.enabled
                 && self
                     .panels
                     .first()
@@ -433,13 +533,20 @@ impl Designer {
                 continue;
             }
             let offset = panel.scroll.info().offset[1];
-            let top = (offset / WINDOW_STEP).floor() * WINDOW_STEP;
+            // Studio keeps both panes visible, including over a software
+            // keyboard. Smaller slabs keep their combined overscan bounded.
+            let window_step = if self.studio.enabled {
+                2. * ROW
+            } else {
+                WINDOW_STEP
+            };
+            let top = (offset / window_step).floor() * window_step;
             // Anchor both edges to the same slab. Letting the lower edge
             // advance independently changes topology halfway through a slab.
             // This fixed span equals the previous maximum aligned span, so it
             // adds no worst-case overscan or scene budget.
-            let span = (node.frame.height / WINDOW_STEP).ceil() + 1.;
-            let bottom = top + span * WINDOW_STEP;
+            let span = (node.frame.height / window_step).ceil() + 1.;
+            let bottom = top + span * window_step;
             // Retained top-level rows contain all their own paint and actions.
             // Clone only rows intersecting the viewport's aligned window; no
             // glyph/inspector construction or full-tree clone on a pan sample.
@@ -542,12 +649,21 @@ impl Designer {
     }
     fn tap_action(&self, capture: &Capture, scene: &Scene, point: [f32; 2]) -> Option<LocalAction> {
         if capture.panel.is_none() {
-            if capture.action == Some(LocalAction::Layers) {
+            if matches!(
+                capture.action,
+                Some(
+                    LocalAction::Layers
+                        | LocalAction::Profile
+                        | LocalAction::EditComponent(_)
+                        | LocalAction::DeleteComponent(_)
+                )
+            ) {
                 return scene
                     .hit_path(point)
                     .iter()
-                    .any(|p| p.node.id == super::oib_focus_layout::LAYERS)
-                    .then_some(LocalAction::Layers);
+                    .any(|p| self.local_action(p.node.id) == capture.action)
+                    .then(|| capture.action.clone())
+                    .flatten();
             }
             return capture.action.clone();
         }
@@ -760,6 +876,10 @@ fn hierarchy(
     }
     Ok((nodes, y))
 }
+struct AuthoringTools<'a> {
+    operations: &'a [(String, otrios_interfaces::oib::InstanceOperation)],
+    open: bool,
+}
 fn focus_hierarchy(
     b: &mut Builder,
     tree: &[HierarchyRow],
@@ -767,7 +887,12 @@ fn focus_hierarchy(
     collapsed: &[HierarchyKey],
     scope: HierarchyScope,
     mode: DesignerMode,
+    tools: AuthoringTools<'_>,
 ) -> Result<(Vec<SceneNode>, f32)> {
+    let AuthoringTools {
+        operations: structure,
+        open: palette_open,
+    } = tools;
     let mut nodes = vec![
         b.focus_button(
             0.,
@@ -804,6 +929,47 @@ fn focus_hierarchy(
         semantics.checked = true;
     }
     let mut y = 116.;
+    if mode == DesignerMode::Edit && !structure.is_empty() {
+        let mut palette = b.focus_button(
+            0.,
+            y,
+            288.,
+            if palette_open {
+                "Close insert palette"
+            } else {
+                "Insert component..."
+            },
+            LocalAction::Palette,
+        )?;
+        if let Some(semantics) = &mut palette.semantics {
+            semantics.checked = palette_open;
+        }
+        if palette_open {
+            style::set_surface_fill(&mut palette.children[0], LINE)?;
+            if let Primitive::Text { color, .. } = &mut palette.children[1].primitive {
+                *color = ACCENT;
+            }
+        }
+        nodes.push(palette);
+        y += 56.;
+        for (label, operation) in structure {
+            if matches!(
+                operation,
+                otrios_interfaces::oib::InstanceOperation::Insert { .. }
+            ) && !palette_open
+            {
+                continue;
+            }
+            nodes.push(b.focus_button(
+                0.,
+                y,
+                288.,
+                label,
+                LocalAction::Structure(operation.clone()),
+            )?);
+            y += 56.;
+        }
+    }
     for row in tree {
         let mut parent = row.parent.as_ref();
         let mut depth = 0;
@@ -1124,6 +1290,7 @@ impl Mount {
         let mut designer = self.designer.take().ok_or("Missing designer")?;
         let mut previous = None;
         let previous_viewport = self.viewport;
+        let previous_management = designer.management_visible();
         let result = (|| {
             let mut changed = false;
             if !blocked && let Some(mode) = designer.pending_mode {
@@ -1141,13 +1308,23 @@ impl Mount {
             }
             let root = self.doc.oib_root().ok_or("Missing designer state")?;
             let status = self.doc.oib_status_text();
+            if status.contains("Structure rejected:") {
+                designer.editor_notice = Some(status.clone());
+            } else if designer
+                .editor_notice
+                .as_ref()
+                .is_some_and(|s| s.contains("Structure rejected:"))
+            {
+                designer.editor_notice = None;
+            }
             let editable = self.binding.as_ref().is_none_or(|b| b.ui_editable);
             let revision = (root, self.doc.confirmed(), status.clone(), editable);
             if designer.revision.as_ref() == Some(&revision) {
                 return Ok(changed);
             }
             previous.get_or_insert_with(|| designer.clone());
-            let seed = super::super::oib::seed(&self.ui).ok_or("Missing designer seed")?;
+            let authoring_seed = self.doc.oib_authoring_seed()?;
+            let seed = &authoring_seed;
             let allocations = self.doc.oib_allocations()?;
             let objects = super::super::oib::document::objects(seed, &allocations)?;
             if let Some(target) = designer.pending_selection.take() {
@@ -1247,6 +1424,69 @@ impl Mount {
                 ));
             }
             designer.editor_revision = self.doc.oib_generation().unwrap_or(0);
+            designer.structure_tools.clear();
+            designer.management = None;
+            if editable && designer.mode == DesignerMode::Edit
+                && let Selection::Object(address) = &designer.selection
+                && let Some(allocation) = allocations.iter().find(|a| a.id == address.instance.0)
+                && self.doc.oib_canvas_factories()?.iter().any(|(id, _)| *id == allocation.prototype)
+                && let Some(root) = objects.iter().find(|o| matches!(&o.selection, Selection::Object(a) if a.instance == address.instance && a.references.is_empty()))
+            {
+                designer.management = Some(ManagedComponent { instance: allocation.id, root: root.selection.clone() });
+            }
+            if editable && self.doc.confirmed() && designer.mode == DesignerMode::Edit {
+                use otrios_interfaces::oib::InstanceOperation;
+                let generation = designer.editor_revision;
+                let roots: Vec<_> = self
+                    .doc
+                    .oib_instances()?
+                    .into_iter()
+                    .filter(|i| i.active)
+                    .collect();
+                let selected = match &designer.selection {
+                    Selection::Object(a) if a.references.is_empty() => roots.iter().position(|i| {
+                        i.id == a.instance.0
+                            && designer.root_selection(i.id).as_ref() == Some(&designer.selection)
+                    }),
+                    _ => None,
+                };
+                for (prototype, name) in self.doc.oib_canvas_factories().unwrap_or_default() {
+                    if self.doc.oib_available_slots_for(prototype) > 0 {
+                        designer.structure_tools.push((
+                            format!("Insert {name}"),
+                            InstanceOperation::Insert {
+                                prototype,
+                                before: selected.map(|index| roots[index].id),
+                                generation,
+                            },
+                        ));
+                    }
+                }
+                if let Some(index) = selected {
+                    let instance = roots[index].id;
+                    if index > 0 {
+                        designer.structure_tools.push((
+                            "Move earlier".into(),
+                            InstanceOperation::Reorder {
+                                instance,
+                                before: Some(roots[index - 1].id),
+                                generation,
+                            },
+                        ));
+                    }
+                    if index + 1 < roots.len() {
+                        designer.structure_tools.push((
+                            "Move later".into(),
+                            InstanceOperation::Reorder {
+                                instance,
+                                before: roots.get(index + 2).map(|i| i.id),
+                                generation,
+                            },
+                        ));
+                    }
+                }
+            }
+
             let properties = super::super::oib::document::properties(
                 seed,
                 &allocations,
@@ -1304,7 +1544,12 @@ impl Mount {
             self.designer = Some(previous);
         }
         if result.as_ref().is_ok_and(|changed| *changed) {
-            if self.viewport != previous_viewport {
+            if self.viewport != previous_viewport
+                || self
+                    .designer
+                    .as_ref()
+                    .is_some_and(|d| d.management_visible() != previous_management)
+            {
                 self.invalidate();
             } else {
                 self.invalidate_presentation();
@@ -1337,6 +1582,124 @@ impl Client {
         }
         Ok(changed)
     }
+    pub fn insert_oib(&mut self, prototype: u64, before: Option<u64>) -> Result<bool> {
+        let generation = self
+            .active
+            .as_ref()
+            .ok_or("No Canvas")?
+            .doc
+            .oib_generation()
+            .ok_or("Missing OIB generation")?;
+        self.edit_oib_structure(otrios_interfaces::oib::InstanceOperation::Insert {
+            prototype,
+            before,
+            generation,
+        })
+    }
+    pub fn reorder_oib(&mut self, instance: u64, before: Option<u64>) -> Result<bool> {
+        if before == Some(instance) {
+            return Ok(false);
+        }
+        let generation = self
+            .active
+            .as_ref()
+            .ok_or("No Canvas")?
+            .doc
+            .oib_generation()
+            .ok_or("Missing OIB generation")?;
+        self.edit_oib_structure(otrios_interfaces::oib::InstanceOperation::Reorder {
+            instance,
+            before,
+            generation,
+        })
+    }
+    fn edit_oib_structure(
+        &mut self,
+        operation: otrios_interfaces::oib::InstanceOperation,
+    ) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable)
+            || m.oib_activation_blocked()
+            || m.designer.as_ref().is_some_and(|d| {
+                d.mode != DesignerMode::Edit
+                    || d.editor_focused()
+                    || d.drafts.drafts().iter().any(|draft| draft.dirty)
+            })
+        {
+            return Ok(false);
+        }
+        let changed = m.doc.edit_oib_structure(operation)?;
+        if changed {
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
+    fn designer_delete_component(&mut self, instance: u64) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        let m = self.active.as_mut().ok_or("No Canvas")?;
+        if m.binding.as_ref().is_some_and(|b| !b.ui_editable)
+            || m.oib_activation_blocked()
+            || !m.designer.as_ref().is_some_and(|d| {
+                d.mode == DesignerMode::Edit
+                    && d.management
+                        .as_ref()
+                        .is_some_and(|t| t.instance == instance)
+            })
+        {
+            return Ok(false);
+        }
+        let live = m
+            .doc
+            .oib_instances()?
+            .iter()
+            .any(|i| i.id == instance && i.active);
+        let changed = live && m.doc.remove_oib(instance)?;
+        if changed || !live {
+            let d = m.designer.as_mut().ok_or("Missing designer")?;
+            // Deleting this occurrence discards only its own unpublished editor
+            // buffers. Other occurrences' dirty drafts and confirmed data survive.
+            let removed: Vec<_> = d.drafts.drafts().iter().filter(|draft| matches!(&draft.address, PropertyAddress::Occurrence { instance: id, .. } if id.0 == instance)).map(|draft| draft.address.clone()).collect();
+            for address in removed {
+                d.drafts.cancel(&address);
+            }
+            if !d.editor_focused() {
+                m.keyboard.hide();
+            }
+            d.details = None;
+            d.pending_source = None;
+            d.pending_selection = None;
+            m.refresh()?;
+            m.invalidate();
+        }
+        Ok(changed)
+    }
+    /// Device-local presentation only; never creates a shared UI edit.
+    pub fn set_oib_designer_studio(&mut self, enabled: bool) -> Result<bool> {
+        if self.input_busy() {
+            return Ok(false);
+        }
+        if self.active.as_ref().is_some_and(|m| {
+            m.oib_activation_blocked() || m.designer.as_ref().is_some_and(|d| d.editor_focused())
+        }) {
+            return Ok(false);
+        }
+        let changed = self.designer_studio.enabled != enabled;
+        self.designer_studio.enabled = enabled;
+        if let Some(m) = &mut self.active {
+            if let Some(d) = &mut m.designer {
+                d.studio = self.designer_studio;
+                d.invalidate_bounds();
+            }
+            m.invalidate();
+        }
+        Ok(changed)
+    }
     /// Queue a local mode switch while any gesture/edit owns the current graph.
     pub fn set_oib_designer_mode(&mut self, mode: DesignerMode) -> Result<bool> {
         let busy = self.input_busy();
@@ -1354,6 +1717,21 @@ impl Client {
     }
     fn designer_action(&mut self, action: LocalAction) -> Result<bool> {
         match action {
+            LocalAction::EditComponent(selection) => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                self.designer_select_after_blur(selection)?;
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                if let Some(d) = &mut m.designer
+                    && let Some(panel) = d.panels.last_mut()
+                {
+                    panel.scroll.set_offset([0., 0.]);
+                }
+                m.invalidate_presentation();
+                Ok(true)
+            }
+            LocalAction::DeleteComponent(instance) => self.designer_delete_component(instance),
             LocalAction::Details(address) => self.designer_details(&address),
             LocalAction::Source(address) => self.designer_go_source(&address),
             LocalAction::Choose(view, value) => self.designer_choose_property(&view, value),
@@ -1397,6 +1775,20 @@ impl Client {
                 m.refresh_designer()?;
                 Ok(true)
             }
+            LocalAction::Palette => {
+                if self.input_busy() {
+                    return Ok(false);
+                }
+                let m = self.active.as_mut().ok_or("No Canvas")?;
+                let d = m.designer.as_mut().ok_or("Missing designer")?;
+                d.palette_open = !d.palette_open;
+                d.revision = None;
+                m.refresh_designer()?;
+                Ok(true)
+            }
+            LocalAction::Structure(operation) => self.edit_oib_structure(operation),
+            LocalAction::Profile => self.set_oib_designer_studio(!self.designer_studio.enabled),
+            LocalAction::Resize(_) => Ok(false), // Pointer drag owns resize; activation alone does not.
             LocalAction::Layers => {
                 if self.input_busy() {
                     return Ok(false);
@@ -1457,7 +1849,8 @@ impl Client {
                 if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
                     return Ok(false);
                 }
-                let seed = super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+                let authoring_seed = m.doc.oib_authoring_seed()?;
+                let seed = &authoring_seed;
                 let cell = super::super::oib::document::cell_for_address(
                     seed,
                     &m.doc.oib_allocations()?,
@@ -1495,7 +1888,7 @@ impl Client {
             }
             return Ok(Some(true));
         }
-        if (FIRST..2_900_000_000).contains(&id) || id == super::oib_focus_layout::LAYERS {
+        if (FIRST..2_900_000_000).contains(&id) || d.local_action(id).is_some() {
             let action = d.semantic_action(self.scene()?.as_ref(), id);
             return action.map_or(Ok(Some(false)), |a| self.designer_action(a).map(Some));
         }
@@ -1554,7 +1947,19 @@ impl Client {
                     .iter()
                     .rev()
                     .find_map(|p| designer.local_action(p.node.id));
-                if action == Some(LocalAction::Layers) {
+                if matches!(
+                    action,
+                    Some(
+                        LocalAction::Layers
+                            | LocalAction::Profile
+                            | LocalAction::Resize(_)
+                            | LocalAction::EditComponent(_)
+                            | LocalAction::DeleteComponent(_)
+                    )
+                ) {
+                    if matches!(action, Some(LocalAction::Resize(_))) {
+                        designer.resize_origin = Some(designer.studio.widths);
+                    }
                     designer.capture = Some(Capture {
                         pointer: event.id,
                         start: event.position,
@@ -1613,6 +2018,30 @@ impl Client {
                 designer.capture = Some(capture);
                 return Ok((Some(false), None));
             }
+            if let Some(LocalAction::Resize(side)) = capture.action {
+                let origin = designer.resize_origin.ok_or("Missing resize origin")?;
+                if event.phase == PointerPhase::Cancel {
+                    designer.studio.widths = origin;
+                } else {
+                    let dx = event.position[0] - capture.start[0];
+                    if dx.is_finite() {
+                        let other = 1 - side;
+                        let lower = [320., 352.][side];
+                        let upper = [480.0_f32, 560.][side]
+                            .min((m.viewport[0] - 208. - origin[other]).max(lower));
+                        designer.studio.widths[side] =
+                            (origin[side] + if side == 0 { dx } else { -dx }).clamp(lower, upper);
+                    }
+                }
+                if matches!(event.phase, PointerPhase::Up | PointerPhase::Cancel) {
+                    designer.resize_origin = None;
+                } else {
+                    designer.capture = Some(capture);
+                }
+                designer.invalidate_bounds();
+                m.invalidate();
+                return Ok((Some(true), None));
+            }
             capture.moving |= (event.position[0] - capture.start[0])
                 .abs()
                 .max((event.position[1] - capture.start[1]).abs())
@@ -1639,6 +2068,7 @@ impl Client {
             }
             Ok((Some(true), action))
         })();
+        self.designer_studio = designer.studio;
         m.designer = Some(designer);
         let (handled, action) = result?;
         if handled.is_some() {
