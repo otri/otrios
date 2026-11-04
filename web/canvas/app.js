@@ -184,6 +184,8 @@ try{
   const panelFocusables=()=>[...controlsLayer.querySelectorAll('button:not([disabled]):not([tabindex="-1"])'),...document.querySelectorAll('.canvas-editor')].filter(e=>!e.hidden&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0);
   window.addEventListener('keydown',e=>{
     if(!panelWasOpen||graphicsLost||e.isComposing)return;
+    // The admitted text bridge owns Escape/Tab and core-directed field focus.
+    if(e.target.closest?.('.canvas-editor'))return;
     if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();command({type:'back'},e);return;}
     if((e.key==='Tab')||(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)&&e.target.matches('#controls button'))){const items=panelFocusables();if(items.length){e.preventDefault();e.stopImmediatePropagation();const at=items.indexOf(document.activeElement),back=e.shiftKey||['ArrowUp','ArrowLeft'].includes(e.key);items[(at+(back?-1:1)+items.length)%items.length].focus({preventScroll:true});}}
   },{capture:true});

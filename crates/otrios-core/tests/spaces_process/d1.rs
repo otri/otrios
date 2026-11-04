@@ -13,6 +13,121 @@ mod app;
 const STATE: &str = "app:oib-designer/state";
 const VALUES: [(u16, u16); 4] = [(1, 481), (2, 729), (3, 0), (4, 1000)];
 
+const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn loopback_stream(socket: &mut Socket) -> &mut TcpStream {
+    let MaybeTlsStream::Plain(stream) = socket.get_mut() else {
+        panic!("D1 fixtures require loopback TCP");
+    };
+    stream
+}
+
+fn read_before(
+    socket: &mut Socket,
+    deadline: Instant,
+) -> Result<ServerMessage, tungstenite::Error> {
+    let previous_timeout = loopback_stream(socket).read_timeout()?;
+    let response = (|| loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "D1 observation deadline",
+            )
+            .into());
+        }
+        loopback_stream(socket).set_read_timeout(Some(remaining))?;
+        match socket.read() {
+            Ok(Message::Binary(bytes)) => {
+                return Ok(canvas::decode_server(bytes.strip_prefix(&[1]).unwrap()).unwrap());
+            }
+            Ok(Message::Ping(_)) => socket.flush()?,
+            Ok(_) => (),
+            Err(tungstenite::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+    })();
+    loopback_stream(socket).set_read_timeout(previous_timeout)?;
+    response
+}
+
+#[track_caller]
+fn read_d1(socket: &mut Socket) -> ServerMessage {
+    read_before(socket, Instant::now() + OBSERVATION_TIMEOUT)
+        .expect("D1 response before observation deadline")
+}
+
+#[test]
+fn d1_reader_uses_observation_deadline_and_restores_socket_timeout() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_millis(5)))
+        .unwrap();
+    let configured_timeout = stream.read_timeout().unwrap();
+    let mut socket = tungstenite::WebSocket::from_raw_socket(
+        MaybeTlsStream::Plain(stream),
+        tungstenite::protocol::Role::Client,
+        None,
+    );
+    let (peer, _) = listener.accept().unwrap();
+    let (start, begin) = std::sync::mpsc::sync_channel(1);
+    let sender = std::thread::spawn(move || {
+        let mut peer = tungstenite::WebSocket::from_raw_socket(
+            peer,
+            tungstenite::protocol::Role::Server,
+            None,
+        );
+        begin.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        let mut bytes = vec![1];
+        bytes.extend(canvas::encode_server(&ServerMessage::Activated { epoch: 17 }).unwrap());
+        peer.send(Message::Binary(bytes.into())).unwrap();
+    });
+    start.send(()).unwrap();
+    assert!(matches!(
+        read_before(&mut socket, Instant::now() + OBSERVATION_TIMEOUT).unwrap(),
+        ServerMessage::Activated { epoch: 17 }
+    ));
+    assert_eq!(
+        loopback_stream(&mut socket).read_timeout().unwrap(),
+        configured_timeout
+    );
+    sender.join().unwrap();
+}
+
+#[test]
+fn d1_reader_still_rejects_a_missing_response_at_the_deadline() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let configured_timeout = stream.read_timeout().unwrap();
+    let mut socket = tungstenite::WebSocket::from_raw_socket(
+        MaybeTlsStream::Plain(stream),
+        tungstenite::protocol::Role::Client,
+        None,
+    );
+    let (_peer, _) = listener.accept().unwrap();
+    let deadline = Instant::now() + Duration::from_millis(40);
+    assert!(
+        matches!(read_before(&mut socket, deadline), Err(tungstenite::Error::Io(error)) if error.kind() == std::io::ErrorKind::TimedOut)
+    );
+    assert!(Instant::now() >= deadline);
+    assert_eq!(
+        loopback_stream(&mut socket).read_timeout().unwrap(),
+        configured_timeout
+    );
+}
+
 struct Fixture {
     rig: Rig,
     space: String,
@@ -109,7 +224,7 @@ impl Fixture {
                 collection: None,
             },
         );
-        let response = read(&mut socket);
+        let response = read_d1(&mut socket);
         let ServerMessage::Mounted {
             state,
             ui,
@@ -126,7 +241,7 @@ impl Fixture {
         let state = StateAdapter::for_ui(&self.ui, STATE, &state, [writer; 16]).unwrap();
         send(&mut socket, ClientMessage::AcceptMount { epoch: 1 });
         assert!(matches!(
-            read(&mut socket),
+            read_d1(&mut socket),
             ServerMessage::Activated { epoch: 1 }
         ));
         let mut peer = Peer {
@@ -220,14 +335,16 @@ impl Peer {
         }
         panic!("D1 outgoing sync did not quiesce");
     }
+    #[track_caller]
     fn until(&mut self, predicate: impl Fn(&StateAdapter) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + OBSERVATION_TIMEOUT;
         for _ in 0..256 {
             if predicate(&self.state) {
                 return;
             }
             assert!(Instant::now() < deadline, "D1 observation deadline");
-            let message = read(&mut self.socket);
+            let message = read_before(&mut self.socket, deadline)
+                .expect("D1 response before observation deadline");
             match message {
                 ServerMessage::Sync { bytes, .. } => {
                     self.state.receive(&bytes).unwrap();
@@ -238,6 +355,7 @@ impl Peer {
         }
         panic!("D1 observation message bound");
     }
+    #[track_caller]
     fn settle(&mut self) {
         self.flush();
         self.until(StateAdapter::confirmed);
@@ -360,7 +478,7 @@ fn d1_shared_sources_permissions_and_kill_restart_preserve_four_fields_and_other
     assert!(a.state.edit_oib(&[(100, Some(gold.clone()))]).unwrap());
     let denied = a.issue();
     b.send(denied.clone());
-    let denial = read(&mut b.socket);
+    let denial = read_d1(&mut b.socket);
     assert!(
         matches!(denial, ServerMessage::Error { ref message, .. } if message.contains("Space Admin")),
         "{denial:?}"
@@ -647,7 +765,7 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
         })
         .unwrap(),
     );
-    let response = read(&mut a.socket);
+    let response = read_d1(&mut a.socket);
     let ServerMessage::Error { message, .. } = response else {
         panic!("tenth resident: {response:?}");
     };

@@ -29,7 +29,7 @@ fn ink_socket(address: &str, path: &str, origin: &str) -> Socket {
 
 #[test]
 fn anonymous_clients_get_public_apps_but_no_private_ui_state_or_view() {
-    let room = room(false, 28800);
+    let room = room(false);
     view(&room);
     for path in [
         "/presentation",
@@ -68,7 +68,7 @@ fn anonymous_clients_get_public_apps_but_no_private_ui_state_or_view() {
 }
 #[test]
 fn monitoring_signin_and_logout_revoke_existing_app_lease() {
-    let room = room(true, 28800);
+    let room = room(true);
     let expected = view(&room);
     let cookie = cookie(&room);
     let mut s = socket(&room.public, Some(&cookie));
@@ -135,41 +135,105 @@ fn monitoring_signin_and_logout_revoke_existing_app_lease() {
         ServerMessage::Mounted { epoch: 2, .. }
     ));
 }
+fn restart_authority(room: &mut Room) {
+    room.child.kill().unwrap();
+    room.child.wait().unwrap();
+    room.child = std::process::Command::new(env!("CARGO_BIN_EXE_dashboard-server"))
+        .args([
+            "--bind",
+            &room.private,
+            "--public-bind",
+            &room.public,
+            "--apps",
+            room.root.join("apps").to_str().unwrap(),
+            "--state",
+            room.root.join("state.merkle").to_str().unwrap(),
+            "--auth-file",
+            room.root.join("auth.json").to_str().unwrap(),
+            "--origin",
+            ORIGIN,
+        ])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if TcpStream::connect(&room.public).is_ok()
+            && request(&room.public, "GET", "/health", &[], &[]).0 == 200
+        {
+            break;
+        }
+        assert!(room.child.try_wait().unwrap().is_none(), "authority exited");
+        assert!(Instant::now() < deadline, "authority restart timeout");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 #[test]
-fn rotated_and_expired_sessions_revoke_private_bytes_without_writing_state() {
-    let room = room(true, 2);
+fn browser_sessions_survive_refresh_and_process_restarts_until_explicit_signout() {
+    let mut room = room(true);
     view(&room);
     let before = std::fs::read(state_file(&room, "demo")).unwrap();
-    let old = cookie(&room);
-    assert_eq!(login(&room, Some(&old)).0, 200);
-    assert_eq!(
+    let first = cookie(&room);
+    let second = cookie(&room);
+    let status = |room: &Room, token: &str| {
         request(
             &room.public,
             "GET",
             "/auth/session",
-            &[("Cookie", &old)],
+            &[("Cookie", token)],
+            &[],
+        )
+        .0
+    };
+    for _ in 0..3 {
+        let (code, _, headers) = response(
+            &room.public,
+            "GET",
+            "/auth/session",
+            &[("Cookie", &first)],
+            &[],
+        );
+        assert_eq!(code, 200);
+        assert!(headers.contains("Max-Age=34560000"));
+        assert!(headers.contains("HttpOnly; SameSite=Strict"));
+    }
+    restart_authority(&mut room);
+    assert_eq!(status(&room, &first), 200);
+    assert_eq!(status(&room, &second), 200);
+    // The retained cookie also still opens a protected app on a new socket.
+    let mut s = socket(&room.public, Some(&first));
+    mount(&mut s, &room, "monitoring", 1);
+    assert!(matches!(read(&mut s), ServerMessage::Mounted { .. }));
+    drop(s);
+    assert_eq!(
+        request(
+            &room.public,
+            "DELETE",
+            "/auth/session",
+            &[
+                ("Cookie", &first),
+                ("Origin", ORIGIN),
+                ("X-OTriOS-Request", "session")
+            ],
             &[]
         )
         .0,
-        401
+        200
     );
-    let cookie = cookie(&room);
-    let mut s = socket(&room.public, Some(&cookie));
-    mount(&mut s, &room, "monitoring", 1);
-    assert!(matches!(read(&mut s), ServerMessage::Mounted { .. }));
-    accept(&mut s, 1);
-    loop {
-        if let ServerMessage::AccessRequired { epoch: 1 } = read(&mut s) {
-            break;
-        }
-    }
+    restart_authority(&mut room);
+    assert_eq!(status(&room, &first), 401);
+    assert_eq!(status(&room, &second), 200);
+    // Login rotation is durable too; a replaced cookie never regains access.
+    assert_eq!(login(&room, Some(&second)).0, 200);
+    restart_authority(&mut room);
+    assert_eq!(status(&room, &second), 401);
     assert_eq!(std::fs::read(state_file(&room, "demo")).unwrap(), before);
 }
 
 #[test]
 fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers() {
     use otrios_interfaces::ink::{self, Point};
-    let room = room(false, 28800);
+    let room = room(false);
     let private = view(&room);
     let state = std::fs::read(state_file(&room, "demo")).ok();
     let mut bad = format!("ws://{}/session", room.public)
@@ -258,8 +322,8 @@ fn public_and_native_ink_share_only_ephemeral_points_with_server_assigned_peers(
 }
 
 #[test]
-fn private_candidate_expiry_preserves_the_previous_public_activation() {
-    let room = room(true, 2);
+fn private_candidate_revocation_preserves_the_previous_public_activation() {
+    let room = room(true);
     view(&room);
     let cookie = cookie(&room);
     let mut s = socket(&room.public, Some(&cookie));
@@ -275,7 +339,23 @@ fn private_candidate_expiry_preserves_the_previous_public_activation() {
         read(&mut s),
         ServerMessage::Mounted { epoch: 2, .. }
     ));
-    // No private Sync or View may be sent before acceptance, including at expiry.
+    // Explicit revocation replaces the former time-based expiry trigger.
+    assert_eq!(
+        request(
+            &room.public,
+            "DELETE",
+            "/auth/session",
+            &[
+                ("Cookie", &cookie),
+                ("Origin", ORIGIN),
+                ("X-OTriOS-Request", "session")
+            ],
+            &[]
+        )
+        .0,
+        200
+    );
+    // No private Sync or View may be sent before acceptance, even at revocation.
     assert!(matches!(
         read(&mut s),
         ServerMessage::AccessRequired { epoch: 2 }

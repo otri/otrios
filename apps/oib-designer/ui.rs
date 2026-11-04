@@ -603,8 +603,8 @@ fn panel(name: &str, value: StateField, enabled: StateField, y: f32) -> Element 
                 .pin_edges(0.)
                 .key(&format!("{name}-button-surface")),
             text("Toggle power")
-                .font_scale(1.)
-                .frame([16., 12., 152., 24.])
+                .font_scale(2.)
+                .frame([16., 10., 152., 28.])
                 .key(&format!("{name}-button-title")),
         ],
     )

@@ -35,8 +35,16 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
         } else {
             &[]
         };
+        let ui = factory(bytes);
+        let frame_focus = oib::seed(&ui).is_some_and(|seed| {
+            seed.instance_surface.is_some()
+                && seed
+                    .designer
+                    .as_ref()
+                    .is_some_and(|d| d.hierarchy_viewport.is_some())
+        });
         let mut c = Client::default();
-        activate(&mut c, factory(bytes), "themed-demo", bytes.to_vec());
+        activate(&mut c, ui, "themed-demo", bytes.to_vec());
         let wide = c.scene().unwrap();
         let identities = |scene: &otrios_core::dashboard::scene::Scene| {
             scene
@@ -105,8 +113,12 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
                     app.id
                 );
             }
-            let header = &scene.root().children[1];
-            for node in &header.children {
+            let header_nodes = if frame_focus {
+                &scene.root().children
+            } else {
+                &scene.root().children[1].children
+            };
+            for node in header_nodes {
                 if let Primitive::Text { value, scale, .. } = &node.primitive {
                     assert!(
                         font.text_width(value, *scale as f32) <= node.frame.width + 0.1,
@@ -116,33 +128,49 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
                 }
             }
         }
-        for (label, destination) in [
-            ("OTriOS", "app:home/ui"),
-            ("Test Playground", "app:test-playground/ui"),
-        ] {
-            if label == "Test Playground" && app.id == "test-playground" {
-                continue;
-            }
-            let owner = tall
-                .controls()
-                .into_iter()
-                .find(|p| p.node.semantics.as_ref().unwrap().label == label)
-                .unwrap();
-            let Some(otrios_interfaces::scene::TouchResponder::Activate(Action::AppNavigate(
-                action,
-            ))) = owner.node.responder
-            else {
-                panic!("breadcrumb destination")
-            };
-            let ui = factory(bytes);
-            assert_eq!(
-                ui.navigation
+        if frame_focus {
+            let controls = tall.controls();
+            assert!(
+                controls
                     .iter()
-                    .find(|n| n.action == action)
-                    .unwrap()
-                    .ui_ref,
-                destination
+                    .any(|p| p.node.semantics.as_ref().unwrap().label == "Layers")
             );
+            // Frame Focus replaces visible breadcrumbs with local Layers.
+            // Its scoped exit is supplied by the managed host, while this
+            // standalone fixture retains the signed navigation declarations.
+            let ui = factory(bytes);
+            for destination in ["app:home/ui", "app:test-playground/ui"] {
+                assert!(ui.navigation.iter().any(|n| n.ui_ref == destination));
+            }
+        } else {
+            for (label, destination) in [
+                ("OTriOS", "app:home/ui"),
+                ("Test Playground", "app:test-playground/ui"),
+            ] {
+                if label == "Test Playground" && app.id == "test-playground" {
+                    continue;
+                }
+                let owner = tall
+                    .controls()
+                    .into_iter()
+                    .find(|p| p.node.semantics.as_ref().unwrap().label == label)
+                    .unwrap();
+                let Some(otrios_interfaces::scene::TouchResponder::Activate(Action::AppNavigate(
+                    action,
+                ))) = owner.node.responder
+                else {
+                    panic!("breadcrumb destination")
+                };
+                let ui = factory(bytes);
+                assert_eq!(
+                    ui.navigation
+                        .iter()
+                        .find(|n| n.action == action)
+                        .unwrap()
+                        .ui_ref,
+                    destination
+                );
+            }
         }
         if let Some(bounds) = c.motion_viewport().unwrap() {
             assert!(
@@ -348,6 +376,15 @@ fn activate_snapshot(
     private: bool,
     state_bytes: Vec<u8>,
 ) {
+    // D1 defers local reflow while OIB state is unconfirmed. Model the live
+    // mount's authoritative seed instead of leaving that fixture half-open.
+    let mut authority = if state_bytes.is_empty() && oib::seed(&ui).is_some() {
+        let mut document = Document::new(ui.state_schema.clone(), state).unwrap();
+        document.configure_oib(&ui).unwrap();
+        Some(document)
+    } else {
+        None
+    };
     let bytes = encode_ui(&ui).unwrap();
     let id = ui
         .ui_ref
@@ -380,10 +417,23 @@ fn activate_snapshot(
     )
     .unwrap();
     c.open(&ui.ui_ref, state);
-    let ClientMessage::Mount { epoch, .. } =
+    let ClientMessage::Mount { epoch, writer, .. } =
         decode_client(&c.outgoing().unwrap().unwrap()).unwrap()
     else {
         panic!("missingmount")
+    };
+    let mut session = authority.as_mut().map(|document| {
+        let (mut session, _) = document.open_session(&writer, 0).unwrap();
+        session.set_oib_editable(true);
+        session
+            .set_selection(StateSelection::from_ui(&ui).unwrap())
+            .unwrap();
+        session
+    });
+    let state_bytes = if let (Some(document), Some(session)) = (&authority, &mut session) {
+        document.generate(session).unwrap().unwrap()
+    } else {
+        state_bytes
     };
     c.receive(
         &encode_server(&ServerMessage::Mounted {
@@ -402,6 +452,9 @@ fn activate_snapshot(
     assert!(
         matches!(decode_client(&c.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:e} if e==epoch)
     );
+    if let (Some(document), Some(session)) = (&mut authority, &mut session) {
+        pump(c, document, session);
+    }
 }
 fn pump(c: &mut Client, authority: &mut Document, session: &mut Session) {
     for step in 0..20 {
@@ -3551,7 +3604,7 @@ fn shipped_apps_include_the_retained_text_and_document_subscreens() {
     .into_iter()
     .flat_map(|screens| screens())
     .collect();
-    assert_eq!(screens.len(), 11);
+    assert_eq!(screens.len(), 12);
     assert_eq!(
         screens
             .iter()

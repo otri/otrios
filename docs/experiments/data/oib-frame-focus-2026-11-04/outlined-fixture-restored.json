@@ -1,0 +1,26 @@
+{
+  "release": "52f0395bdbe5b437b53509181a42b180d9e391b591592fc5f8b3c4d61bb77249",
+  "source": "c1ebfe180a2bd6d3c45c8e0e7fb035c8d10b188c",
+  "generation": 71,
+  "active_roots": [
+    20,
+    30
+  ],
+  "app_values": [
+    440,
+    700,
+    1000,
+    0
+  ],
+  "preserved_properties": {
+    "201": "slider accent: #5588FF (inherited)",
+    "202": "slider width: 320 (override)",
+    "203": "slider label: Volume (authored)",
+    "304": "toggle accent: #5588FF (override)"
+  },
+  "browser_enter_generation": 70,
+  "browser_reset_generation": 71,
+  "fixture_only_visual_capture_generation": 69,
+  "conflicts": [],
+  "normal_host_restored": true
+}

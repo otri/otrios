@@ -429,7 +429,8 @@ native tokens are random 256-bit lowercase hex credentials whose SHA-256 digests
 are provisioned in this file. Never put plaintext tokens in a bundle, registry,
 release, command-line argument or evidence report.
 
-Browser sessions retain their authenticated identity until expiry or logout.
+Browser sessions retain their authenticated identity across reloads and authority
+restarts until explicit logout (or account/credential revocation).
 Native requests use an Authorization Bearer header; native credentials remain
 valid until removed from configuration and the authority restarted. Space
 membership is checked independently and can be revoked without changing a

@@ -7,13 +7,13 @@ export function selection(input){
 }
 export function canReconcile(localRevision,frameRevision,composing){return !composing&&frameRevision>=localRevision;}
 export class TextInputs {
-  constructor(layer,send){this.layer=layer;this.send=send;this.fields=new Map();this.revision=0;new ResizeObserver(()=>this.resize()).observe(layer);document.addEventListener('selectionchange',()=>{for(const s of this.fields.values())if(s.input===document.activeElement)this.commit(s);});}
+  constructor(layer,send){this.layer=layer;this.send=send;this.fields=new Map();this.revision=0;this.focusedKey=null;this.frameRevision=0;this.frameSerial=null;new ResizeObserver(()=>this.resize()).observe(layer);document.addEventListener('selectionchange',()=>{for(const s of this.fields.values())if(s.input===document.activeElement)this.commit(s);});}
   resize(){for(const s of this.fields.values())s.input.style.transform=`scale(${this.layer.getBoundingClientRect().width/s.extent[0]})`;}
   get composing(){return [...this.fields.values()].some(s=>s.composing);}
-  clear(){for(const s of this.fields.values()){if(s.composing)this.emit(s,'text-composition',{active:false});s.composing=false;s.removed=true;s.input.value='';s.input.remove();}this.fields.clear();}
+  clear(){for(const s of this.fields.values()){if(s.composing)this.emit(s,'text-composition',{active:false});s.composing=false;s.removed=true;s.input.value='';s.input.remove();}this.fields.clear();this.focusedKey=null;}
   emit(s,type,extra={}){s.revision=++this.revision;this.send({type,epoch:s.epoch,id:s.id,inputRevision:s.revision,...extra});}
   commit(s){
-    if(s.removed||s.composing)return;
+    if(s.removed||s.suspended||s.composing)return;
     const value=s.input.value,range=selection(s.input),snapshot=JSON.stringify([value,range.cursor,range.anchor]);
     if(snapshot===s.sent)return;
     const selectionOnly=value===s.value;s.value=value;s.sent=snapshot;this.emit(s,'text-input',{text:value,selectionOnly,scroll:s.input.scrollTop,...range});
@@ -28,28 +28,47 @@ export class TextInputs {
     input.maxLength=d.max_bytes;
     if(d.multiline)input.placeholder='Message...';
     input.enterKeyHint=d.multiline?'send':'done';input.setAttribute('autocapitalize',d.secret?'none':'sentences');
-    input.addEventListener('focus',()=>{this.emit(s,'text-focus');s.sent=null;});
+    input.addEventListener('focus',()=>{if(s.removed||this.syncingFocus)return;if(s.suspended){input.blur();return;}this.emit(s,'text-focus');s.sent=null;});
     input.addEventListener('input',e=>{if(!e.isComposing)this.commit(s);});
-    input.addEventListener('scroll',()=>{if(!s.removed&&!s.composing&&document.activeElement===input)this.emit(s,'text-scroll',{scroll:input.scrollTop});});
+    input.addEventListener('scroll',()=>{if(!s.removed&&!s.suspended&&!s.composing&&document.activeElement===input)this.emit(s,'text-scroll',{scroll:input.scrollTop});});
     input.addEventListener('select',()=>{if(document.activeElement===input)this.commit(s);});
-    input.addEventListener('compositionstart',()=>{s.composing=true;this.emit(s,'text-composition',{active:true});});
+    input.addEventListener('compositionstart',()=>{if(s.removed||s.suspended)return;s.composing=true;this.emit(s,'text-composition',{active:true});});
     input.addEventListener('compositionend',()=>this.finishComposition(s));
-    input.addEventListener('blur',()=>{if(s.removed)return;this.finishComposition(s);this.commit(s);this.emit(s,'text-blur');});
-    const enter=()=>{this.commit(s);this.emit(s,'text-enter');if(!d.multiline)input.blur();};
+    input.addEventListener('blur',()=>{if(s.removed||s.suspended||this.syncingFocus)return;this.finishComposition(s);this.commit(s);this.emit(s,'text-blur');});
+    const enter=()=>{if(s.removed||s.suspended)return;this.commit(s);this.emit(s,'text-enter');if(!d.multiline){s.suspended=true;input.blur();}};
     input.addEventListener('keydown',e=>{
+      if(e.key==='Escape')e.stopPropagation();
       if(e.isComposing||s.composing||e.keyCode===229)return;
-      if(e.key==='Escape'){e.preventDefault();input.blur();return;}
+      if(e.key==='Escape'){
+        e.preventDefault();
+        if(s.removed||s.suspended||performance.now()-s.ended<=50)return;
+        // No raw snapshot or blur follows cancellation, including queued DOM events.
+        s.suspended=true;this.emit(s,'text-cancel');input.blur();return;
+      }
+      if(s.removed||s.suspended)return;
+      if(e.key==='Tab'){
+        e.preventDefault();e.stopPropagation();this.commit(s);
+        this.emit(s,'text-tab',{backward:!!e.shiftKey});return;
+      }
       s.allowLineBreak=e.key==='Enter'&&e.shiftKey;
-      if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(performance.now()-s.ended>50)enter();}
+      if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();s.enterHandled=true;if(performance.now()-s.ended>50)enter();}
     });
     input.addEventListener('beforeinput',e=>{
-      if(['insertParagraph','insertLineBreak'].includes(e.inputType)&&!e.isComposing&&!s.composing&&!s.allowLineBreak){e.preventDefault();if(performance.now()-s.ended>50)enter();}
+      if(['insertParagraph','insertLineBreak'].includes(e.inputType)&&!e.isComposing&&!s.composing&&!s.allowLineBreak){e.preventDefault();if(!s.enterHandled&&performance.now()-s.ended>50)enter();}
     });
-    input.addEventListener('keyup',()=>{s.allowLineBreak=false;});
+    input.addEventListener('keyup',()=>{s.allowLineBreak=false;s.enterHandled=false;});
     this.layer.append(input);return s;
   }
   accept(frame){
     if(!frame.inputs)return;
+    if(frame.serial!==undefined&&this.frameSerial!==null&&frame.serial<=this.frameSerial)return;
+    // Capture native edits before comparing revisions. Ignore an entire stale
+    // projection: its membership and focus are just as stale as its text.
+    for(const s of this.fields.values())if(s.input===document.activeElement)this.commit(s);
+    const revision=frame.inputRevision||0;
+    if(revision<this.revision||revision<this.frameRevision)return;
+    this.frameRevision=revision;if(frame.serial!==undefined)this.frameSerial=frame.serial;
+    const active=[...this.fields.values()].find(s=>s.input===document.activeElement);
     const wanted=new Set(frame.inputs.map(d=>`${frame.epoch}:${d.id}`));
     for(const [key,s] of this.fields)if(!wanted.has(key)){if(s.composing)this.emit(s,'text-composition',{active:false});s.composing=false;s.removed=true;s.input.value='';s.input.remove();this.fields.delete(key);}
     const labels=new Map(frame.controls.map(c=>[c.id,c.label]));
@@ -65,15 +84,24 @@ export class TextInputs {
       input.style.padding=[d.inset[1],d.inset[2],d.inset[3],d.inset[0]].map(v=>`${v}px`).join(' ');
       input.style.transform=`scale(${this.layer.getBoundingClientRect().width/frame.extent[0]})`;
       input.disabled=!!frame.authRequired;
-      // Native selection/default edits can precede their queued select/input
-      // event. Capture them before an older worker frame can move the caret.
-      if(document.activeElement===input)this.commit(s);
       if(canReconcile(s.revision,frame.inputRevision||0,s.composing)){
         if(input.value!==d.value)input.value=d.value;
         const start=Math.min(d.cursor,d.anchor),end=Math.max(d.cursor,d.anchor),direction=d.cursor<d.anchor?'backward':'forward';
         if(input.selectionStart!==start||input.selectionEnd!==end||input.selectionDirection!==direction)input.setSelectionRange(start,end,direction);
-        s.value=input.value;s.sent=JSON.stringify([input.value,d.cursor,d.anchor]);
+        s.value=input.value;s.sent=JSON.stringify([input.value,d.cursor,d.anchor]);s.suspended=false;
       }
+    }
+    const desired=frame.inputs.find(d=>d.focused);
+    const key=desired?`${frame.epoch}:${desired.id}`:null;
+    // Never autofocus the initial projection or steal focus from outside the
+    // editors. Core traversal chooses the next admitted field, not DOM order.
+    if(!this.composing&&revision>=this.revision){
+      const next=this.fields.get(key);
+      if(key!==this.focusedKey&&active&&active.epoch===frame.epoch&&next&&!next.input.disabled&&document.activeElement===active.input){
+        this.syncingFocus=true;
+        try{next.input.focus({preventScroll:true});}finally{this.syncingFocus=false;}
+      }
+      this.focusedKey=key;
     }
   }
 }

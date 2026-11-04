@@ -8,7 +8,7 @@
 | Public routes and private Monitoring | [Public access](PUBLIC_ACCESS.md), [Monitoring](MONITORING.md) |
 | Runtime ownership and resource limits | [Modern app pattern](MODERN_APP_PATTERN.md), [resource budgets](ARCHITECTURE-RESOURCES.md), [client storage](CLIENT_STORAGE.md) |
 | Scene, layout and input contracts | [Scene tree](SCENE_TREE.md), [binary layout](BINARY_LAYOUT.md), [Home and input](HOME_AND_INPUT.md) |
-| Live UI editing and reusable components | [OIB property editing](OIB.md), [OIB design and milestones](rfcs/0029-live-oib-ui.md), [component designer](rfcs/0035-oib-component-designer.md), [D1 qualification](experiments/oib-designer-d1-2026-11-03.md) |
+| Live UI editing and reusable components | [OIB property editing](OIB.md), [OIB design and milestones](rfcs/0029-live-oib-ui.md), [component designer](rfcs/0035-oib-component-designer.md), [D1 qualification](experiments/oib-designer-d1-2026-11-03.md), [designer usability proposal](OIB_DESIGNER_USABILITY.md) |
 | Linux object-model research backlog | [PoC plan](POC.md), [architecture](ARCHITECTURE.md) |
 | Design decisions and status | [RFC index](rfcs/README.md) |
 | Standalone app bundles and native Wasm compilation plan | [Bundle RFC](rfcs/0025-standalone-app-bundles.md), [compilation RFC](rfcs/0026-target-wasm-compilation.md) |
