@@ -1,16 +1,23 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer usability proposal
 
-Date: 2026-11-04. Status: **design proposal, not implemented**.
+Date: 2026-11-04. Status: **Frame Focus implemented and live-qualified; Desktop Studio deferred**.
+
+The [Frame Focus milestone](OIB_FRAME_FOCUS_D1.md) and
+[shared-style qualification](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) record delivered
+behavior, signed Frame/Web acceptance and measured scrolling. This document
+preserves the original findings, baseline and design targets; its Desktop Studio
+presentation and later authoring features remain proposals.
 
 This follow-up to [RFC 0035](rfcs/0035-oib-component-designer.md) addresses the
 user's four findings: unreadable tooling text, placeholder property editing,
 unusable Frame scrolling, and an overexpanded, confusing hierarchy. It preserves
 D1's signed graph, stable identities, causal registers and existing application
-bindings. It does not authorize D2 structure editing. No runtime or live release
-changes are part of this design pass.
+bindings. It does not authorize D2 structure editing. The original design pass
+made no runtime or live release changes; the linked milestone records subsequent
+implementation and acceptance.
 
-## Findings from the current implementation
+## Findings from the initial D1 implementation
 
 - `Builder::label` uses text scale 1. The font contract defines this as an
   eight-logical-unit capital height, not a 16px UI font. A taller row alone will

@@ -1,10 +1,43 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Live OIB UI
 
-[RFC 0035](rfcs/0035-oib-component-designer.md) proposes the next component
-designer: explicit document/object classes, nested references and overrides,
-modular inspectors, and composable 2D controls. It is a staged design, not current
-functionality. Bitmap/vector image import remains deferred.
+[RFC 0035 D1](rfcs/0035-oib-component-designer.md) is implemented in the separate
+**OIB Designer** companion app. It adds a signed document/class/property model,
+linked nested component references, stable full ancestry addresses and authored,
+forwarded and live override sources. The original **Live UI** app retains its
+own schema, bindings and values.
+
+## OIB Designer and Frame Focus
+
+Open **Test Playground → OIB Designer** in the selected Space. Two linked
+SettingsPanel instances, Audio and Display, share nested slider/toggle definitions.
+Their app values and signed connections remain independent of UI property edits.
+Space Admins edit the shared design; other admitted participants receive the
+confirmed active result.
+
+The [Frame Focus editor](OIB_FRAME_FOCUS_D1.md) provides a canvas, a properties
+dock and a modal **Layers** drawer. Composition follows visual parents, fuses
+reference wrappers and starts with reusable component boundaries collapsed.
+**Components** shows the separate definition tree; nonvisual objects remain
+selectable through the hierarchy. Selection, disclosure, scrolling and Edit/Test
+mode are device-local. Edit selects preview objects; Test invokes their confirmed
+app actions.
+
+Text, constrained finite numbers, hex color and opacity use bounded local drafts.
+Apply, Enter or blur submits a valid draft; Escape cancels it, and Tab reveals the
+next admitted field. Typing does not publish per keystroke. Source details explain
+inheritance and masking. **Reset override** causally clears an occurrence override
+to reveal its current authored or forwarded source. Conflict choices use guarded
+register alternatives. Signed app bindings are read-only to literal UI edits.
+
+The [D1 record](experiments/oib-designer-d1-2026-11-03.md) and
+[Frame Focus styling and performance record](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md)
+contain actual signed Frame/Web acceptance and its limits. Current state protocol
+is **v27**; release discovery remains control v1 on the shared WebSocket.
+Desktop Studio, arbitrary structure/connection editing, content measurement,
+rich typography, bitmap/vector image import and O3D/XR remain deferred.
+
+## Original Live UI app
 
 OIB O1 implements the property-editing slice of
 [RFC 0029](rfcs/0029-live-oib-ui.md). Its original qualification is recorded on
@@ -136,7 +169,7 @@ causally clears an instance override. Only one issued OIB batch is retained per
 writer; wait for confirmation before submitting another. A batch has at most
 16 distinct cells. Observed leaf snapshots are captured before issuing it.
 
-Property writes use tag 37 in state protocol **v26** (introduced in v21): u64 writer sequence followed
+Property writes use tag 37 in state protocol **v27** (introduced in v21): u64 writer sequence followed
 by a bounded blob containing the canonical FlexBuffers vector of `Change` values.
 Tag 38 carries one bounded canonical InstanceOperation under the same writer
 sequence/receipt contract. Allocation, draft/active changes and receipt are

@@ -7,9 +7,11 @@ The [D1 execution plan](../OIB_DESIGNER_D1.md) records the concrete milestone,
 isolated worktree roles, integration gates and acceptance.
 The [D1 qualification record](../experiments/oib-designer-d1-2026-11-03.md)
 records the signed deployment, focused Frame/browser checks and limitations.
-The [usability proposal](../OIB_DESIGNER_USABILITY.md) follows the initial D1
-delivery with readable tooling, a clearer composition tree, practical property
-editors and explicit Frame responsiveness gates. It remains a design proposal.
+The [usability design](../OIB_DESIGNER_USABILITY.md) led to the completed
+[Frame Focus editor](../OIB_FRAME_FOCUS_D1.md): readable tooling, a composition
+tree, typed property drafts and measured Frame scrolling. Its
+[shared-style qualification](../OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) records final
+Frame/Web acceptance. Desktop Studio and the later RFC stages remain deferred.
 
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.
@@ -70,7 +72,9 @@ The implementation already provides shared component properties, authored
 instance defaults, live overrides and causal clears, instance lifecycle,
 geometry mappings, durable receipts, conflict diagnostics, and validated active
 publication. These features are the starting point, not new acceptance claims.
-The current state protocol is v26; this proposal assigns no successor number.
+D1 shipped state protocol v27 and the required `otrios-oib-designer-v1` package
+feature, preserving release-control v1. Its separate OIB Designer companion
+retains the original Live UI app's schema, signed factories and values.
 
 The shared UI runtime has parent-local frames, pins and springs, row/column/wrap
 composition, rounded surfaces, circles, paths and triangle geometry, admitted
@@ -490,9 +494,10 @@ Later stages must specify additional source-byte, span/paragraph, path-point,
 layout-work, and cache limits before implementation. Viewport clipping alone
 does not bound document parsing or component expansion work.
 
-The first format implementation needs a required package feature, canonical
-encoding and reference vectors. Bump the then-current state protocol whenever
-its wire format changes, with matching browser/native/server identifiers. Preserve
+D1 supplies the required package feature, canonical encoding and reference
+vectors; the [contract](../OIB_DESIGNER_CONTRACT.md) records its attachment and
+stable cell lowering. Bump the then-current state protocol whenever its wire
+format changes, with matching browser/native/server identifiers. Preserve
 release-control v1, the shared WebSocket, and opening current-release hello on
 every reconnect. Obsolete state decoding must not block release discovery.
 

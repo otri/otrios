@@ -26,6 +26,14 @@ executable class/outlet APIs remain later work. Declared
 through live CRDT batches; restore/default controls recover the original bindings
 without resetting app values.
 
+[OIB Designer](apps/oib-designer/README.md) extends that foundation with an explicit
+signed document/class model, linked nested components and stable property
+addresses. Its [Frame Focus editor](docs/OIB_FRAME_FOCUS_D1.md) adds readable
+Layers navigation, typed property drafts, source-aware Reset and retained
+scrolling, qualified on Frame and the signed-in browser. The
+[component designer RFC](docs/rfcs/0035-oib-component-designer.md) separates this
+delivered scope from later structural authoring, rich text, images and XR.
+
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
 ## Build and check

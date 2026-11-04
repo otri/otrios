@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-# OIB designer D1 contract proposal
+# OIB designer D1 contract
 
-Date: 2026-11-03. Status: **D1 contract frozen for implementation; acceptance pending**.
-Implements declarations for [RFC 0035 D1](rfcs/0035-oib-component-designer.md),
-subject to the [execution plan](OIB_DESIGNER_D1.md). Parent reviewed the additive
-proposal and both runtime/designer mappings before selecting this attachment.
-Runtime implementation and live acceptance remain pending.
+Date: 2026-11-03. Updated: 2026-11-04. Status: **implemented and live-qualified**.
+Implements declarations for [RFC 0035 D1](rfcs/0035-oib-component-designer.md).
+The [execution plan](OIB_DESIGNER_D1.md),
+[D1 qualification](experiments/oib-designer-d1-2026-11-03.md) and
+[Frame Focus milestone](OIB_FRAME_FOCUS_D1.md) record implementation, subsequent
+editor work and actual acceptance. The contract and handoff details below retain
+the signed D1 scope; later authoring stages remain deferred.
 
 The declarations are in `otrios_interfaces::oib::designer`; the existing SDK's
 `oib` feature/reexport exposes them without a new SDK dependency or API wrapper.
@@ -14,8 +16,8 @@ The declarations are in `otrios_interfaces::oib::designer`; the existing SDK's
 seed bytes. `Cell`, `Target` and `Allocation` retain their existing encodings.
 `Presentation::Oib` boxes the Seed in Rust to keep the presentation enum bounded;
 Serde's transparent Box handling leaves the existing encoded Oib payload intact.
-The next release uses state protocol v27, coordinated across hosts/publisher;
-release-control v1 is unchanged. This is not a claim that v27 is deployed.
+Deployed browser/native/server hosts and publisher use state protocol v27;
+release-control v1 is unchanged.
 
 ## Signed metadata and existing implementation
 
@@ -41,8 +43,10 @@ units, numeric constraints, source policy and inspector section/editor. Only
 Number/Boolean/Text/Color are admitted for D1; Series and TimedSeries remain
 rejected even though the reused Value enum can decode them. Inspector editors are
 ReadOnly, Toggle, NumberSuggestions, Palette and TextSuggestions. Suggestions use
-existing `Cell.choices`; numeric bounds/positive step are signed. An arbitrary
-free-text or connection form and Presentation::Editor composition are not assumed.
+existing `Cell.choices`; numeric bounds/positive step are signed. Frame Focus adds
+bounded local text, finite-number, hex-color and opacity drafts
+for these admitted property types without changing the signed descriptors.
+Connection editing and Presentation::Editor composition remain deferred.
 Do not expose an editor the host cannot implement.
 
 `DefinitionNode` separates ownership from ordered visual children. A reference
@@ -122,9 +126,9 @@ Exact occurrence lowering, using existing O2 constants and checked u64 arithmeti
 
 Example: prototype 20, path `[7,9]/3/1`, key 5, alias 200 maps the initial root to
 cell 200. A fresh root 65536 maps it to 16777221; root 65537 maps it to 16777285.
-Renaming/reordering that path does not change key 5. The existing implementation
-of `instances::cell_id` uses `seed.cells` vector rank instead; integration must
-replace that lookup for D1 and must not apply it to these records unchanged.
+Renaming/reordering that path does not change key 5. The D1 implementation uses
+this explicit mapping. Legacy seeds without designer
+metadata retain their original lowering; vector rank never supplies D1 identity.
 
 Validate path uniqueness and key uniqueness per factory, key <64, factory coverage,
 nonzero aliases, and global uniqueness of all static definition/initial aliases.
@@ -170,9 +174,9 @@ literal/forwarded source. An inner live override can mask outer forwarding witho
 writing back to it. Reject multiple assignment/forwarding edges to one target,
 unresolved paths, incompatible types and forwarding/source cycles. Source chains
 and constraints must be checked before coherent publication, not approximated by
-the existing one-level `effective()`/`Cell.inherit` logic. Existing owner/name
-inheritance validation also assumes a flat component: repeated nested names and
-terminal definitions owned by another component need D1 runtime admission work.
+the legacy one-level `effective()`/`Cell.inherit` logic. D1 admission and resolution
+validate repeated nested names and terminal definition ownership through the
+signed full-path mappings.
 
 An AppBinding reuses `layout::Binding::Local` (the signed selector mapping, not an
 arbitrary app field/action ID). Resolve it only through that app's admitted layout
@@ -295,15 +299,14 @@ python3 crates/otrios-interfaces/contract-checks/check-designer-codec.py
 
 ## Frozen root model and implementation handoff
 
-Parent reviewed these declarations with the runtime/UI reports. Implement
-the explicit key lowering and outside-in source resolver, and qualify rejection,
-capture/lifecycle/restart behavior. New `apps/oib-designer` uses a separate companion
-app/collection with its own signed volume, brightness and toggle fields. Existing
-Live UI app, v26 schema, seeds and data remain unchanged; this proposal authorizes
-no migration or seed/schema mutation. Do not activate by simply deserializing this
-Document on the old flat runtime. Host/publisher v27 declarations and the required
-feature gate are integration-owned. Full fixture budgets and live acceptance
-remain unqualified.
+Parent reviewed these declarations with the runtime/UI reports. The integrated
+runtime implements explicit key lowering and outside-in source resolution;
+focused tests and qualification cover rejection, capture, lifecycle and restart.
+`apps/oib-designer` uses a separate companion app/collection with its own signed
+volume, brightness and toggle fields. The original Live UI schema, signed seeds
+and app data remain unchanged; D1 performs no incidental collection migration.
+The deployed v27 hosts/publisher enforce the required feature gate. Fixture
+budgets and actual live acceptance are recorded in the linked qualification.
 
 The fixture uses four definitions: presentation shell, SettingsPanel,
 LabeledSlider and LabeledToggle. The shell is a fixed document instance containing
@@ -320,9 +323,10 @@ other two tooling panels. Ordinary application documents can omit hierarchy
 chrome. Generated hierarchy/inspector rows are local runtime UI, not extra signed
 component occurrences or per-resident property records.
 
-These choices resolve the proposal's root-model objection without a second direct
-object schema. No claim is made that the complete fixture already fits every
-byte/node/control/cell limit; measure before activation.
+These choices resolve the original root-model objection without a second direct
+object schema. The [sample budget](../apps/oib-designer/README.md) records six
+shared cells plus six per resident root: 42 at six live roots, 60 at nine residents;
+ten residents require 66 and reject against the unchanged 64-cell ceiling.
 
 ## Runtime/client implementation boundary
 
@@ -347,7 +351,12 @@ PropertyInfo {
 }
 ```
 
-`objects` returns local hierarchy rows in semantic order, including document,
+Frame Focus uses the separate typed `hierarchy(seed, allocations, live_ids, scope)`
+projection for Composition/Components navigation: explicit parents, reference
+wrapper fusion and live-root filtering. `objects` remains the flat object query
+for inspection and metadata; it does not define the displayed hierarchy.
+
+`objects` returns object information in semantic order, including document,
 fixed/nonvisual objects, live occurrence expansion, and definitions. Definition
 rows and nonvisual objects do not imply a canvas hit/outline. `properties`
 returns only the selected scope's class/component properties and effective
