@@ -17,6 +17,7 @@ done
 python3 scripts/test-canvas-benchmark-counter.py
 python3 scripts/test-canvas-pipeline-cli.py
 python3 scripts/test-clean-artifacts.py
+python3 scripts/test-maintain-dashboard-builder.py
 
 python3 scripts/test_app_publish.py
 python3 crates/otrios-core/tests/fixtures/verify-portable-data-fixtures.py

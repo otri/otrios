@@ -30,6 +30,13 @@ Read README.md, docs/POC.md, docs/ARCHITECTURE.md, and LICENSE.md before changin
 - Keep signed-release verification and a known compatible code rollback available. This faster loop does not authorize new services, trust roots, identities, privilege changes or unrelated destructive actions.
 - Batch completed review follow-ups into one push to an existing PR. Report what was actually built, deployed and tested, including any checks intentionally deferred; do not present unrun checks as passing.
 
+## Maintenance after acceptance
+
+- Once the user has accepted the work, run `python3 scripts/maintain-dashboard-builder.py` to review disposable builder artifacts, then apply with `--apply` after builds, deployments and app imports have finished.
+- Stop the existing automatic builder before applying, and restore the same builder configuration afterward even if cleanup fails. The script never manages services itself. See [maintenance](docs/MAINTENANCE.md#dashboard-builder-after-acceptance).
+- Accepted-work cleanup retains only the active signed release; a rollback pin is not required after acceptance. During development, continue to keep a compatible rollback available.
+- Close finished worktrees and delete merged task branches when authorized. Keep the original repository on `main`, preserve unfinished work, and remove temporary task captures/source copies once useful evidence is committed. Do not delete signing keys, configuration, app state or toolchains.
+
 ## Release control and client state
 
 - Keep release discovery event driven and independent of CRDT decoding/state recovery. Use one server and a stable opening hello on the shared client WebSocket (RFC 0009); protocol independence does not require separate processes or connections. Preserve the small release-control v1 hello/upgrade envelope as the bootstrap compatibility boundary, including when CRDT protocols change. On every reconnect send the current release hash; publish upgrade events only after the complete signed code replica is active.

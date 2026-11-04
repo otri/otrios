@@ -54,6 +54,48 @@ pointer-aware [frame hosting workflow](FRAME_HOSTING.md#build-and-publication).
 Run the deletion-boundary tests with `python3 scripts/test-clean-artifacts.py`;
 they also run in `bash scripts/check.sh`.
 
+## Dashboard builder after acceptance
+
+Once work is accepted, run the small builder cleanup command with Python 3.11+:
+
+```sh
+python3 scripts/maintain-dashboard-builder.py          # dry run
+python3 scripts/maintain-dashboard-builder.py --apply  # builders must be stopped
+```
+
+The default folder is `~/Library/Application Support/OTriOSDashboard`.
+Use `--runtime /ABS/PATH` for another builder and `--json` for a machine-readable
+report. Review the dry run before applying. Stop the existing automatic watcher
+and other builds/deployments first; restore the same watcher configuration even
+if cleanup fails. The script takes the existing watcher/feed locks, checks for
+build processes and refuses an unresolved local app-import receipt. It does not
+stop services, schedule jobs, build or deploy releases.
+
+The command removes a fixed list: Cargo incremental/dependency/build/fingerprint/
+example caches, release/Wasm target caches, `build/previous-source`, generated
+`build/source-before-*` copies, and `python-cache`. It reuses the existing release
+pruner to remove inactive signed releases. After acceptance only the active
+release needs to remain; no rollback pin, age policy or cache-size threshold is
+involved. During implementation, keep the compatible rollback until acceptance.
+
+Top-level checker/packer/server executables in `build/mac-target/debug`, the
+current build source and source inbox, downloaded dependencies, toolchains,
+signing keys, configuration, state, logs and historical backups are preserved.
+The next build recompiles the cleared caches. Task-specific recordings,
+worktrees and historical backup retirement remain explicit closeout work rather
+than guessed deletion rules.
+
+The command rejects symlink/mount boundaries and changed cache directories before
+removal. A filesystem error may leave an incomplete removal; the report identifies
+it and stops further cleanup. Allocated byte estimates are not a promise of the
+same immediate free-space gain on filesystems with shared blocks.
+
+Run its focused checks with:
+
+```sh
+python3 scripts/test-maintain-dashboard-builder.py
+```
+
 ## Experiment retention
 
 The [experiment index](experiments/README.md) separates current qualification from
