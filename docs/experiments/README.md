@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [Desktop Studio and bounded D2 — 2026-11-04](../OIB_DESKTOP_STUDIO_D2.md):
+  resizable shared tooling, single-canvas insert/reorder, stable overrides,
+  durable rejection/retry, actual Frame/Web authoring and signed rollback.
+
 - [Live OIB UI — 2026-11-02](live-oib-2026-11-02.md): named component properties,
   instance overrides, durable causal edits and live browser/Frame acceptance.
 

@@ -5,6 +5,14 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Desktop Studio and bounded D2](OIB_DESKTOP_STUDIO_D2.md), qualified 2026-11-04,
+adds persistent resizable hierarchy/canvas/properties panels and a signed-factory
+palette with single-canvas insertion/reordering. State v28 preserves original
+instance overrides and app values, durably rejects stale moves, and recovers
+through real authority restart and compatible signed code rollback. The linked
+record defines the remaining D2/D3/D4 and transfer boundary and the next
+Components dogfooding goal.
+
 [Authored instance defaults](rfcs/0034-oib-authored-instance-defaults.md) keep
 Volume/Brightness label defaults and suggestions separate while sharing styling.
 Reset and restoration now retain the correct binding-specific label.

@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-# OIB Designer D1 sample
+# OIB Designer
 
 This separate Test Playground companion owns `app:oib-designer/ui` and
 `app:oib-designer/state`, using `oib-designer-state-v1`. Volume (field 1, initial
@@ -11,7 +11,7 @@ Live UI app, schema, factories and values are unchanged.
 `app.rs` requires `otrios-oib-designer-v1` alongside OIB and instance features.
 The packer signs `Seed.designer` with the rest of the UI; this source does not
 sign, install or deploy a package. Parent integration owns feature discovery and
-the coordinated v27 host/publisher activation. Release control remains v1.
+the coordinated v28 host/publisher activation. Release control remains v1.
 
 The signed document is 1, with fixed Shell definition 11 / instance 40, and its
 nonvisual Configuration node 2. The presented shell root is O2DView node 1.
@@ -20,6 +20,15 @@ It has no factory, allocation, occurrence cells or mutable selection. SettingsPa
 Reference wrapper 7 mounts LabeledSlider 12; wrapper 8 mounts LabeledToggle 13.
 Wrappers and inherited roots map to distinct existing canvases. Definition/node
 names and paint order are labels and ordering, never identity inputs.
+
+[Desktop Studio and bounded authoring](../../docs/OIB_DESKTOP_STUDIO_D2.md)
+now add persistent resizable panels, an insert palette and live reorder within the
+presented canvas. A palette-only Power factory (prototype 50 / definition 13)
+reuses the toggle definition, with an admitted `audio-enabled` binding. It is not
+an initial resident. Insertion gives it a fresh ID; its accent/label use relative
+keys 41/55 and source aliases 400/401. Existing Audio/Display bindings and values
+remain unchanged. Structural edits carry the observed active generation; stale
+requests receive durable rejection receipts and require deliberate retry.
 
 All editable properties are on component roots. Property-free text and shape
 children supply the one actual paint tree; the root cell targets those descendants.
@@ -50,9 +59,12 @@ The named tooling viewports are `hierarchy-scroll`, `preview-scroll` and
 empty in the signed layout; inspector contains only empty 1px factory placeholders
 needed by the existing instance surface. Core generates local hierarchy rows and
 one selected inspector, with local selection, Edit/Test mode and scroll state.
-No app handler or causal cell is allocated per hierarchy row. Wide composition
-places three scrolling panels side by side; portrait composition puts hierarchy
-and inspector over the runtime preview, without resizing authored panel internals.
+No app handler or causal cell is allocated per hierarchy row. The browser defaults
+to Desktop Studio's persistent hierarchy/canvas/properties panels; native Frame
+defaults to Focus's canvas/dock and Layers drawer. An explicit local control
+switches profiles. Sidebar resizing changes tooling geometry, preserving authored
+component internals. Signed wide/portrait layouts supply the admitted viewports;
+the core projects their shared tooling shell.
 
 The focused covered tests live at
 `crates/otrios-core/tests/oib_designer_fixture.rs`. Run after integrating the

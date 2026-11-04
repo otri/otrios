@@ -567,6 +567,11 @@ Required focused evidence:
 
 ### D2: bounded hierarchy authoring
 
+The [Desktop Studio and bounded D2 milestone](../OIB_DESKTOP_STUDIO_D2.md)
+delivers the selected first slice: an existing-factory/Power palette and
+insert/reorder within one admitted canvas. The remaining D2 scope below,
+including slots, nested structure, definition edits and connections, is deferred.
+
 Add the insert/component palette, root/slot placement, owned-child reorder,
 definition structure editing, and explicit source connections within the signed
 edit surface. Specify structural generation checks and repair operations first.

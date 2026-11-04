@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Desktop Studio and bounded canvas authoring
 
-Date: 2026-11-04. Status: implementation in progress.
+Date: 2026-11-04. Status: **completed and qualified on Frame/Web**.
 
 Desktop Studio presents persistent Layers, runtime canvas and Properties using
 Frame Focus's typed hierarchy, drafts, provenance, reset and retained scrolling.
@@ -43,8 +43,8 @@ only and does not expand the current implementation.
 This increment admits insertion and ordering of whole signed factory instances
 in one container: the presented document canvas. It does not admit nested slots,
 reparenting, definition structure mutation, new connections, removal repair or
-arbitrary primitives. The palette names the signed factory and its app binding;
-it is not a list of newly composable D3 controls.
+arbitrary primitives. The palette names the signed factory; the inspector exposes its admitted app
+binding. These are whole components, not newly composable D3 controls.
 
 The container is derived from signed metadata: every admitted factory must be
 owned by the document and visually attached to its presented root node. Each
@@ -70,13 +70,133 @@ Insertion uses a fresh monotonic identity, signed defaults/authored assignments
 and the factory's original app bindings. Existing resource caps still apply.
 
 The opening release-control envelope remains v1. New instance-operation variants
-require state protocol v28 in both browser and native/server codecs. The resident checkpoint shape is unchanged, but the signed palette-only factory
+require state protocol v28 in both browser and native/server codecs. The resident
+checkpoint shape is unchanged, but the signed palette-only factory
 descriptor requires a rollback runtime that understands it. Retain a verified
 compatible runtime baseline; do not treat the preceding v27 binary as compatible
 after this descriptor has been persisted. Code rollback never restores old
 application data.
 
-Qualification and signed release details will be recorded after live acceptance.
+## Implementation and focused validation
+
+Implementation commit: `3689fd1199bb028e5c561a483f921bf6737818a4`.
+The final active signed release is
+`f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae`.
+The final documentation commit has identical build inputs.
+
+Runtime implementation and tests remain LGPL-3.0-only in core. Public contracts,
+app authoring, tooling and documentation remain Apache-2.0. No dependencies,
+unsafe code, service, identity or trust root were added.
+
+Actual focused commands used pinned Rust 1.90.0 with locked offline dependencies:
+
+- `cargo test -p otrios-core --features canvas --lib oib_designer --locked
+  --offline`: 33 passed on the integrated implementation. The final persistent
+  rejection-heading follow-up passed its focused
+  `desktop_studio_structural_rejection` test separately.
+- `cargo test -p otrios-core --features canvas --test oib_designer_fixture
+  --test oib_designer_runtime --locked --offline`: 14 fixture and 17 runtime
+  tests passed. A subsequent focused `d2_captured_stale_client_actions` regression
+  passed for both stale Insert and Reorder after a rival update was received.
+- `cargo test -p otrios-core --features canvas --test oib --locked --offline
+  -- --nocapture`: 35 legacy Live UI tests passed (63.03s).
+- `OTRIOS_SPACES_SERVER=.../dashboard-server cargo test -p otrios-core
+  --features canvas --test spaces_process d2_canvas_order --locked --offline
+  -- --nocapture --test-threads=1`: one actual-authority-process test passed,
+  zero ignored (10.07s on the final runtime). It covers accepted and rejected
+  lost-reply receipts, replay after kill/restart, explicit retry, fresh Power
+  identities, unchanged causal property bytes, app values and a separate app.
+- `cargo test -p otrios-dashboard --features server,canvas,host-sync --test
+  unified_session code_and_hello_survive_failed_state_recovery_and_obsolete_codecs
+  --locked --offline -- --nocapture --test-threads=1`: one passed (1.06s).
+- `node --test scripts/test-dashboard-session.mjs scripts/test-ui-update.mjs
+  scripts/test-text-input.mjs`: 36 passed.
+- Focused strict core-library Clippy, workspace formatting and whitespace checks
+  passed. Browser Wasm, ARMv7 authority/native/helpers and complete signed bundle
+  builds passed. Wasm compilation reported three existing dead-code warnings.
+
+The Studio joint-pane test covers six roots, expanded hierarchy, selected
+multi-property inspector, software keyboard, three viewport sizes and sidebar
+extrema: 300 combinations, maximum 489 nodes / 92 controls under the unchanged
+512 / 128 limits. Studio uses smaller retained overscan slabs; Frame Focus keeps
+its qualified scrolling window. Wrong-pointer release, cancel/global cancel,
+local profile switching, stale semantic IDs and typed palette actions are covered.
+
+Broad `bash scripts/check.sh`, full platform qualification and new Frame pan/FPS
+campaigns were intentionally not repeated. These tests do not establish Linux
+shared-memory IPC.
+
+## Live acceptance and rollback
+
+The existing publisher verified complete outer and app-bundle signatures before
+activation. The first candidate
+`42d419ba6522bf2162348c915f3ccfa298af2532af37182d5327451a86aea62a`
+activated on Frame and the signed-in browser, upgrading v27 through the unchanged
+control-v1 bootstrap. The signed allowlisted palette append preserved all 18
+original property/source displays and actual app values `[289,544,1000,0]`.
+
+Actual signed-in browser controls inserted Power as fresh instance 65558;
+calibrated software evdev contacts on the real Frame inserted instance 65559.
+Frame applied 50% opacity to the first Power occurrence (8-bit alpha 128,
+50.19608%) as generation 82, then its visible Reset restored inheritance at 83.
+Browser typing `Studio power` stayed local at 83 and Enter confirmed the new
+occurrence label at 84. Browser Move earlier and Frame Move later produced 85/86,
+retaining that override and every original property/app value.
+
+A live two-client probe queued one move, committed a rival move first, then sent
+the stale captured intent. Exactly one order published as generation 87; the stale
+intent was durably acknowledged as rejected with no additional generation or
+property change. An actual authority-service restart recovered the accepted order,
+Power label, rejection and app values at 87. Native renderer PID 24389 remained
+running and both hosts reconnected. Deliberate retry then published 88.
+
+The first live check found rejection detail could be offscreen in a scrolled
+inspector. The final follow-up reuses the persistent Properties heading for
+`Change rejected`, without adding scene nodes or input targets. Detailed notice
+and explicit retry remain in the shared editing model.
+
+Real headless Chrome screenshots were inspected after the shared preview snapshot
+API timed out and the computer-use browser was unavailable. A focused
+browser mouse-input check dragged the two sidebar dividers by +60 and -64 units:
+left handle 336→396, right 896→832, with unchanged shared generation 85 and no
+browser exception. Signed-in property and authoring checks used the existing
+browser session; this was not a disposable full qualification campaign.
+
+A compatible signed Focus-default rollback is retained privately at
+`1ae32472ac09fc62ef671d7d096204f1f9ed614634ea1956c4af5a434514424c`,
+with its matching authority, checker and bootstrap. Actual code rollback to this
+release passed Frame readiness and fresh admitted-client checks at generation 88,
+with the inserted instances, `Studio power` override, order, original overrides
+and all app values intact. No application data was backed up, restored or reset.
+
+On the final release, a second live race published generation 89. The signed-in
+browser showed `Change rejected` while the detailed notice remained offscreen;
+the selected `Studio power` value remained intact. Deliberate retry produced 90
+and restored the normal Properties heading. Only temporary instances 65558 and
+65559 were removed, and Audio/Display were returned to their original order.
+Final confirmed generation 93 contains exactly the 18 original property/source
+displays and unchanged `[289,544,1000,0]` app values.
+
+The final combined `scripts/check-frame-release.py --resume-monitoring` check
+passed: native/authority release hashes match, state is confirmed, input is idle,
+pending commands are zero, GLES2/RGB565/rotation/touch calibration are unchanged,
+and authority/native/tunnel/Monitoring services are healthy. The public
+`scripts/test-dashboard-host.py --url https://otrios.otri.ca --public-only`
+smoke check passed 185 checks, including signed code and session negotiation;
+that smoke check does not exercise login. The signed-in authoring checks above
+used the existing browser session.
+
+[Bounded acceptance evidence](experiments/data/oib-studio-d2-2026-11-04/acceptance.json)
+records generation/order/value checks, sidebar geometry, final readiness and the
+actual compatible rollback. It contains only the named public fixture and
+technical release facts. Raw probe scenes and screenshots are temporary local
+artifacts. Temporary Frame helper binaries are removed after qualification.
+
+The existing Git-backed watcher is promoted with
+`scripts/promote-frame-release.py` only after this source is committed and
+remotely reachable. Its original build environment, publisher and service
+configuration are retained; small previous release-control files and the
+compatible signed code baseline remain private. No app data rollback is used.
 
 
 ## Next goal: design-agnostic OIB and Components dogfooding

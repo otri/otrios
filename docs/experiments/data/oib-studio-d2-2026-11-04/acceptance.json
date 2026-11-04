@@ -1,0 +1,359 @@
+{
+  "implementation_commit": "3689fd1199bb028e5c561a483f921bf6737818a4",
+  "final_release": "f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae",
+  "compatible_rollback": "1ae32472ac09fc62ef671d7d096204f1f9ed614634ea1956c4af5a434514424c",
+  "state_protocol": "otrios-canvas-sync-v28",
+  "release_control": 1,
+  "tests": {
+    "designer_final": 33,
+    "persistent_rejection_followup": 1,
+    "runtime_fixture": 15,
+    "designer_runtime": 17,
+    "legacy_oib": 35,
+    "authority_process_d2": 1,
+    "bootstrap": 1,
+    "browser_session_input_update": 36
+  },
+  "studio_resize": {
+    "before": {
+      "generation": 85,
+      "handles": [
+        {
+          "label": "Resize hierarchy",
+          "x": 336,
+          "y": 80
+        },
+        {
+          "label": "Resize properties",
+          "x": 896,
+          "y": 80
+        }
+      ]
+    },
+    "after": {
+      "generation": 85,
+      "handles": [
+        {
+          "label": "Resize hierarchy",
+          "x": 396,
+          "y": 80
+        },
+        {
+          "label": "Resize properties",
+          "x": 832,
+          "y": 80
+        }
+      ]
+    }
+  },
+  "native_contact_checks": {
+    "power_insert": true,
+    "opacity_apply_and_reset": true,
+    "move_later": true,
+    "calibration_unchanged": true
+  },
+  "browser_authoring": {
+    "power_insert": true,
+    "text_buffer_local_before_enter": 83,
+    "text_confirmed_on_enter": 84,
+    "label": "Studio power",
+    "move_earlier": 85
+  },
+  "scaffold_or_linux_ipc_claimed": false,
+  "broad_preflight_run": false,
+  "new_frame_pan_fps_claimed": false,
+  "baseline": {
+    "generation": 79,
+    "status": "Live \u00b7 revision 79 \u00b7 2 instances \u00b7 4 slots available",
+    "order": [
+      20,
+      30
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ]
+  },
+  "native-reorder": {
+    "generation": 86,
+    "status": "Live \u00b7 revision 86 \u00b7 4 instances \u00b7 2 slots available",
+    "order": [
+      20,
+      30,
+      65558,
+      65559
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ]
+  },
+  "structural-race": {
+    "generation": 87,
+    "status": "Draft: Structure rejected: Canvas changed; review order and retry",
+    "order": [
+      30,
+      65558,
+      65559,
+      20
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ]
+  },
+  "after-authority-restart": {
+    "generation": 87,
+    "status": "Draft: Structure rejected: Canvas changed; review order and retry",
+    "order": [
+      30,
+      65558,
+      65559,
+      20
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ]
+  },
+  "deliberate-retry": {
+    "generation": 88,
+    "status": "Live \u00b7 revision 88 \u00b7 4 instances \u00b7 2 slots available",
+    "order": [
+      65558,
+      65559,
+      30,
+      20
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ]
+  },
+  "passed": true,
+  "rejection_heading": {
+    "rejection": {
+      "detailOffscreen": true,
+      "generation": 89,
+      "headingVisible": true,
+      "inspectorLabel": "Studio power",
+      "release": "f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae",
+      "status": "Draft: Structure rejected: Canvas changed; review order and retry"
+    },
+    "retry": {
+      "generation": 90,
+      "headingCleared": true,
+      "propertiesHeading": true,
+      "release": "f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae",
+      "status": "Live \u00b7 revision 90 \u00b7 4 instances \u00b7 2 slots available"
+    }
+  },
+  "final_readiness": {
+    "passed": true,
+    "release": "f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae",
+    "state_protocol": "otrios-canvas-sync-v28",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:oib-designer/ui",
+      "release": "f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae",
+      "runtime_release": "f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 14.87
+  },
+  "compatible_rollback_readiness": {
+    "passed": true,
+    "release": "1ae32472ac09fc62ef671d7d096204f1f9ed614634ea1956c4af5a434514424c",
+    "state_protocol": "otrios-canvas-sync-v28",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:oib-designer/ui",
+      "release": "1ae32472ac09fc62ef671d7d096204f1f9ed614634ea1956c4af5a434514424c",
+      "runtime_release": "1ae32472ac09fc62ef671d7d096204f1f9ed614634ea1956c4af5a434514424c",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active"
+    },
+    "collector_resumed": false,
+    "collector_result": null,
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 5.293
+  },
+  "public_smoke": "PASS 185 checks: public signed code, release/session negotiation, private/admin isolation and anonymous denial (login not tested)",
+  "baseline_properties": {
+    "100": "panel accent: #5588FF (default)",
+    "101": "slider accent: #5588FF (default)",
+    "102": "slider width: 400 (default)",
+    "103": "slider label: Level (default)",
+    "104": "toggle accent: #5588FF (default)",
+    "105": "toggle label: Enabled (default)",
+    "200": "panel accent: #FF5A87 (override)",
+    "201": "slider accent: #FF5A87 (inherited)",
+    "202": "slider width: 400 (inherited)",
+    "203": "slider label: Volume (authored)",
+    "204": "toggle accent: #FF5A87 (inherited)",
+    "205": "toggle label: Enabled (inherited)",
+    "300": "panel accent: #A56EFF (override)",
+    "301": "slider accent: #A56EFF (inherited)",
+    "302": "slider width: 400 (inherited)",
+    "303": "slider label: Brightness (authored)",
+    "304": "toggle accent: #5588FF (override)",
+    "305": "toggle label: Enabled (inherited)"
+  },
+  "compatible-rollback": {
+    "generation": 88,
+    "status": "Live \u00b7 revision 88 \u00b7 4 instances \u00b7 2 slots available",
+    "order": [
+      65558,
+      65559,
+      30,
+      20
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ],
+    "original_properties_preserved": true,
+    "inserted_label": "toggle label: Studio power (override)"
+  },
+  "final-code-recovery": {
+    "generation": 88,
+    "status": "Live \u00b7 revision 88 \u00b7 4 instances \u00b7 2 slots available",
+    "order": [
+      65558,
+      65559,
+      30,
+      20
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ],
+    "original_properties_preserved": true,
+    "inserted_label": "toggle label: Studio power (override)"
+  },
+  "final-heading-race": {
+    "generation": 89,
+    "status": "Draft: Structure rejected: Canvas changed; review order and retry",
+    "order": [
+      30,
+      65558,
+      65559,
+      20
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ],
+    "original_properties_preserved": true,
+    "inserted_label": "toggle label: Studio power (override)"
+  },
+  "final-heading-retry": {
+    "generation": 90,
+    "status": "Live \u00b7 revision 90 \u00b7 4 instances \u00b7 2 slots available",
+    "order": [
+      30,
+      20,
+      65558,
+      65559
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ],
+    "original_properties_preserved": true,
+    "inserted_label": "toggle label: Studio power (override)"
+  },
+  "final-cleanup": {
+    "generation": 93,
+    "status": "Live \u00b7 revision 93 \u00b7 2 instances \u00b7 4 slots available",
+    "order": [
+      20,
+      30
+    ],
+    "app_values": [
+      289,
+      544,
+      1000,
+      0
+    ],
+    "original_properties_preserved": true
+  },
+  "temporary_instance_ids_removed": [
+    65558,
+    65559
+  ],
+  "data_restored": false,
+  "cleanup_restored_original_properties_exactly": true,
+  "authority_sha256": "5795388fd63fbfed6d6133f47490959877f9b3d7549dd89e27afd4a88e9c7394"
+}
