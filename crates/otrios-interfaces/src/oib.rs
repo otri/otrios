@@ -66,6 +66,10 @@ pub struct LayoutSurface {
 #[serde(deny_unknown_fields)]
 pub struct Prototype {
     pub instance: u64,
+    /// Signed palette factory with no initial resident. Inserting always uses
+    /// a fresh allocated identity; restoring defaults does not instantiate it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub palette_only: bool,
     pub preview_root: u16,
     pub inspector_root: u16,
     pub nodes: Vec<u16>,
@@ -85,6 +89,18 @@ pub struct Allocation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum InstanceOperation {
+    /// Whole signed factory into the presented canvas, guarded by active generation.
+    Insert {
+        prototype: u64,
+        before: Option<u64>,
+        generation: u64,
+    },
+    /// Reorder a live root in that same admitted canvas. None appends.
+    Reorder {
+        instance: u64,
+        before: Option<u64>,
+        generation: u64,
+    },
     /// Restore authored factories/bindings, giving deleted objects fresh IDs.
     /// Optionally reset all UI properties.
     /// This explicit owner command observes current heads at authority acceptance.

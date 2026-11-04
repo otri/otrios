@@ -314,6 +314,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or("Requested title unavailable")?;
         Ok([c.origin[0] + 4., c.origin[1] + 4.])
     };
+    let args: Vec<_> = std::env::args().collect();
+    if let Some(pair) = args.windows(2).find(|pair| pair[0] == "--locate") {
+        println!("{}", json!({"point": point(&pair[1])?}));
+        return Ok(());
+    }
     let start = point("Space: Brass Relay")?;
     let end = point("Space: Household")?;
     let epoch = client.epoch();

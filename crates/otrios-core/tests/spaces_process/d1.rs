@@ -446,7 +446,28 @@ fn assert_bounds(ui: &Ui, doc: &Document) {
             .len()
     );
     let expanded = oib::instances::expanded_seed(seed(ui), &allocations).unwrap();
-    assert_eq!(expanded.cells.len(), 6 + 6 * allocations.len());
+    let expected_cells = seed(ui)
+        .cells
+        .iter()
+        .filter(|c| c.inherit.is_none())
+        .count()
+        + allocations
+            .iter()
+            .map(|a| {
+                seed(ui)
+                    .designer
+                    .as_ref()
+                    .unwrap()
+                    .mappings
+                    .roots
+                    .iter()
+                    .find(|r| r.prototype.0 == a.prototype)
+                    .unwrap()
+                    .cells
+                    .len()
+            })
+            .sum::<usize>();
+    assert_eq!(expanded.cells.len(), expected_cells);
     assert!(expanded.cells.len() <= MAX_CELLS);
     let snapshot = Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
     assert!(snapshot.subtree(&[4, 1]).unwrap().canonical_bytes() <= MAX_BYTES);
@@ -938,6 +959,252 @@ fn d1_lost_reply_receipt_reclamation_and_retired_path_survive_real_authority_res
     assert_eq!(
         f.durable(&collection).oib_allocations().unwrap(),
         before.oib_allocations().unwrap()
+    );
+    f.counter_unchanged();
+}
+
+#[test]
+fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_values() {
+    use otrios_interfaces::oib::InstanceOperation;
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    let mut f = Fixture::start(&binary);
+    let mut a = f.open('a', 71, 0);
+    let mut b = f.open('a', 72, 0);
+    let mut observer = f.open('a', 73, 0);
+    assert!(a.binding.ui_editable && b.binding.ui_editable);
+    assert!(a.state.set(&VALUES).unwrap());
+    a.settle();
+    a.edit(&[
+        (203, Some(Value::Text("Audio custom label".into()))),
+        (304, Some(Value::Color([119, 51, 204, 255]))),
+    ]);
+    b.observe(&a);
+    observer.observe(&a);
+    let collection = a.binding.collection.clone();
+    let original = f.durable(&collection);
+    let original_tree = Snapshot::from_bytes(&original.save().unwrap()).unwrap();
+    let original_allocations = original.oib_allocations().unwrap();
+    let generation = a.state.oib_generation().unwrap();
+    let ids = |state: &StateAdapter| -> Vec<u64> {
+        state
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .map(|i| i.id)
+            .collect()
+    };
+    assert_eq!(ids(&a.state), vec![20, 30]);
+
+    // Capture both requests before either authority edit. The first writer loses
+    // its reply; the second deliberately submits the now-stale generation.
+    assert!(a.state.reorder_oib(30, Some(20)).unwrap());
+    let accepted = a.issue();
+    assert!(
+        b.state
+            .edit_oib_structure(InstanceOperation::Insert {
+                prototype: 30,
+                before: Some(20),
+                generation,
+            })
+            .unwrap()
+    );
+    let rejected = b.issue();
+    a.send(accepted.clone());
+    observer.until(|s| s.oib_generation() == Some(generation + 1) && ids(s) == vec![30, 20]);
+    b.send(rejected.clone());
+    observer.until(|s| s.oib_status_text().contains("Structure rejected"));
+    assert!(
+        !a.state.confirmed() && !b.state.confirmed(),
+        "both reply losses are intentional"
+    );
+    let before_kill = f.durable(&collection);
+    assert_eq!(before_kill.oib_status().unwrap().generation, generation + 1);
+    assert_eq!(
+        before_kill.oib_values(2).unwrap(),
+        original.oib_values(2).unwrap()
+    );
+    assert_eq!(
+        before_kill.oib_allocations().unwrap(),
+        vec![
+            original_allocations[1].clone(),
+            original_allocations[0].clone()
+        ]
+    );
+    let a_actor = a.binding.actor;
+    let b_actor = b.binding.actor;
+    let pending_a = a.state;
+    let pending_b = b.state;
+    drop(a.socket);
+    drop(b.socket);
+    drop(observer);
+    f.rig.stop(); // Real authority process kill, including both durable receipts.
+    assert_eq!(f.durable(&collection).root_hash(), before_kill.root_hash());
+    f.rig.restart(&binary, true, true);
+    let mut a = f.open('a', 71, pending_a.resume_sequence());
+    let mut b = f.open('a', 72, pending_b.resume_sequence());
+    assert_eq!(a.binding.actor, a_actor);
+    assert_eq!(b.binding.actor, b_actor);
+    a.state.restore_pending(&pending_a).unwrap();
+    b.state.restore_pending(&pending_b).unwrap();
+    a.settle();
+    b.settle();
+    assert_eq!(ids(&a.state), vec![30, 20]);
+    assert_eq!(ids(&b.state), vec![30, 20]);
+    assert_eq!(a.state.oib_generation(), Some(generation + 1));
+    assert_eq!(b.state.oib_generation(), Some(generation + 1));
+    assert!(b.state.oib_status_text().contains("Structure rejected"));
+    // Exact explicit replays after recovery remain idempotent. A subsequent
+    // ordinary edit also proves neither stale receipt stranded its writer.
+    a.send(accepted);
+    b.send(rejected);
+    assert!(b.state.set(&[(1, VALUES[0].1 + 1)]).unwrap());
+    b.settle();
+    assert!(b.state.set(&VALUES).unwrap());
+    b.settle();
+    assert_eq!(ids(&b.state), vec![30, 20]);
+
+    // Deliberate rebase uses the fresh confirmed order. Exact Display prototype
+    // preserves its Brightness authored assignment, rather than selecting Audio
+    // because both factories happen to share the SettingsPanel definition.
+    assert!(b.state.insert_oib(30, Some(20)).unwrap());
+    b.settle();
+    let inserted = b
+        .state
+        .oib_instances()
+        .unwrap()
+        .iter()
+        .find(|i| i.id != 20 && i.id != 30)
+        .unwrap()
+        .clone();
+    assert_eq!(inserted.id, 0x1_0002, "stale insert consumed no identity");
+    assert_eq!(inserted.prototype, 30);
+    assert_eq!(ids(&b.state), vec![30, inserted.id, 20]);
+    a.observe(&b);
+    assert!(a.state.reorder_oib(20, Some(30)).unwrap());
+    a.settle();
+    b.observe(&a);
+    assert_eq!(ids(&a.state), vec![20, 30, inserted.id]);
+    assert!(
+        !a.state
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|i| i.prototype == 50),
+        "Power starts in the palette only"
+    );
+    assert!(a.state.insert_oib(50, Some(30)).unwrap());
+    a.settle();
+    b.observe(&a);
+    let power = a
+        .state
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.prototype == 50)
+        .unwrap();
+    assert_eq!(power.id, inserted.id + 1);
+    let expected_order = vec![20, power.id, 30, inserted.id];
+    assert_eq!(ids(&a.state), expected_order);
+    let completed = f.durable(&collection);
+    let completed_tree = Snapshot::from_bytes(&completed.save().unwrap()).unwrap();
+    for branch in [1, 2] {
+        for cell in original.oib_values(branch).unwrap().keys() {
+            let mut path = vec![4, branch];
+            path.extend((0..13).rev().map(|i| (*cell >> (i * 5)) & 31));
+            assert_eq!(
+                completed_tree.subtree(&path).unwrap().to_bytes().unwrap(),
+                original_tree.subtree(&path).unwrap().to_bytes().unwrap(),
+                "surviving causal property register {branch}/{cell}"
+            );
+        }
+    }
+    let label = oib::document::cell_for_address(
+        seed(&f.ui),
+        &completed.oib_allocations().unwrap(),
+        &address(inserted.id, &[7], 3),
+    )
+    .unwrap();
+    assert_eq!(
+        effective(&f.ui, &completed, label),
+        Value::Text("Brightness".into())
+    );
+    let power_label = oib::document::cell_for_address(
+        seed(&f.ui),
+        &completed.oib_allocations().unwrap(),
+        &address(power.id, &[], 3),
+    )
+    .unwrap();
+    assert_eq!(
+        effective(&f.ui, &completed, power_label),
+        Value::Text("Power".into())
+    );
+    let expanded =
+        oib::instances::expanded_seed(seed(&f.ui), &completed.oib_allocations().unwrap()).unwrap();
+    let power_node = expanded
+        .designer
+        .as_ref()
+        .unwrap()
+        .mappings
+        .objects
+        .iter()
+        .find(|m| {
+            m.address.instance.0 == power.id
+                && m.address.references.is_empty()
+                && m.address.node == NodeId(1)
+        })
+        .unwrap()
+        .layout_node
+        .unwrap();
+    let (compiled, layout) = completed.oib_compiled(2).unwrap();
+    fn find_node(
+        root: &otrios_interfaces::layout::TemplateNode,
+        id: u16,
+    ) -> Option<&otrios_interfaces::layout::TemplateNode> {
+        if root.id == id {
+            Some(root)
+        } else {
+            root.children.iter().find_map(|n| find_node(n, id))
+        }
+    }
+    let node = layout
+        .blueprint()
+        .templates
+        .iter()
+        .find_map(|t| find_node(&t.root, power_node))
+        .unwrap();
+    let Some(otrios_interfaces::layout::Responder::AppEvent { control, .. }) = &node.responder
+    else {
+        panic!("Power has its signed toggle responder")
+    };
+    let handler = compiled
+        .handlers
+        .iter()
+        .find(|h| h.control == *control)
+        .unwrap();
+    assert!(matches!(handler.operation, Operation::Toggle));
+    assert_eq!(
+        handler.fields,
+        vec![3],
+        "Power keeps its signed audio-enabled binding"
+    );
+    assert_values(&a.state);
+    assert_values(&b.state);
+    assert!(
+        completed.oib_status().unwrap().error.is_none(),
+        "successful rebase clears rejection"
+    );
+    drop(a);
+    drop(b);
+    f.rig.stop();
+    f.rig.restart(&binary, true, true);
+    let a = f.open('a', 71, 0);
+    assert_eq!(ids(&a.state), expected_order);
+    assert_values(&a.state);
+    assert_eq!(
+        a.state.oib_active().unwrap(),
+        completed.oib_values(2).unwrap()
     );
     f.counter_unchanged();
 }

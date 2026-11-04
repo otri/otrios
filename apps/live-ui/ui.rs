@@ -320,6 +320,7 @@ pub fn description() -> Ui {
         prototypes: [(20, "volume"), (30, "brightness")]
             .into_iter()
             .map(|(instance, name)| NamedOibPrototype {
+                palette_only: false,
                 instance,
                 preview: format!("{name}-preview"),
                 inspector: format!("{name}-inspector"),

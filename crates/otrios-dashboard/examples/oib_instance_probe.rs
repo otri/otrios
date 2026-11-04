@@ -59,6 +59,68 @@ fn settle(
         }
     }
 }
+fn connect(
+    endpoint: &str,
+) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> {
+    let mut upgrade = endpoint.into_client_request()?;
+    if let Ok(token) = std::env::var("OTRIOS_PROBE_TOKEN") {
+        upgrade
+            .headers_mut()
+            .insert("Authorization", format!("Bearer {token}").parse()?);
+    }
+    let (mut socket, _) = tungstenite::connect(upgrade)?;
+    if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
+        stream.set_read_timeout(Some(Duration::from_millis(100)))?;
+    }
+    session_client::negotiate(&mut socket)?;
+    Ok(socket)
+}
+fn probe_client(catalog: &[u8], request: &Value) -> Result<Client, Box<dyn std::error::Error>> {
+    let mut client = Client::default();
+    client.set_font(Arc::new(otrios_core::dashboard::font::Font::from_zstd(
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+    )?));
+    client.admit_catalog(catalog)?;
+    client.open(
+        request["ui_ref"].as_str().unwrap_or("app:live-ui/ui"),
+        request["state_ref"].as_str().unwrap_or("app:live-ui/state"),
+    );
+    Ok(client)
+}
+fn state_controls(client: &Client) -> Result<Value, Box<dyn std::error::Error>> {
+    fn find<'a>(
+        node: &'a otrios_interfaces::scene::SceneNode,
+        label: &str,
+    ) -> Option<&'a otrios_interfaces::scene::SceneNode> {
+        if node.semantics.as_ref().is_some_and(|s| s.label == label) {
+            Some(node)
+        } else {
+            node.children.iter().find_map(|n| find(n, label))
+        }
+    }
+    let scene = client.scene()?;
+    let mut values = serde_json::Map::new();
+    for (label, field) in [
+        ("Volume", 1),
+        ("Brightness", 2),
+        ("Audio enabled", 3),
+        ("Display enabled", 4),
+    ] {
+        let control = find(scene.root(), label);
+        values.insert(
+            label.into(),
+            json!({
+                "normalized": client.value(field).ok(),
+                "node": control.map(|c| c.id),
+                "checked": control.and_then(|c| c.semantics.as_ref()).map(|s| s.checked),
+                "control_percent": control.and_then(|c| client.control_value(c.id).ok().flatten()),
+            }),
+        );
+    }
+    Ok(Value::Object(values))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let endpoint = args.get(1).ok_or("Loopback session endpoint required")?;
@@ -78,32 +140,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if steps.len() > 16 {
         return Err("OIB probe step limit".into());
     }
-    let mut upgrade = endpoint.as_str().into_client_request()?;
-    if let Ok(token) = std::env::var("OTRIOS_PROBE_TOKEN") {
-        upgrade
-            .headers_mut()
-            .insert("Authorization", format!("Bearer {token}").parse()?);
-    }
-    let (mut socket, _) = tungstenite::connect(upgrade)?;
-    if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
-        stream.set_read_timeout(Some(Duration::from_millis(100)))?;
-    }
-    session_client::negotiate(&mut socket)?;
-    let mut client = Client::default();
-    client.set_font(Arc::new(otrios_core::dashboard::font::Font::from_zstd(
-        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
-        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
-    )?));
-    client.admit_catalog(&catalog)?;
-    client.open(
-        request["ui_ref"].as_str().unwrap_or("app:live-ui/ui"),
-        request["state_ref"].as_str().unwrap_or("app:live-ui/state"),
-    );
+    let mut socket = connect(endpoint)?;
+    let mut client = probe_client(&catalog, &request)?;
     let start = Instant::now();
     settle(&mut client, &mut socket, start)?;
     println!(
         "{}",
-        json!({"phase":"mounted","epoch":client.epoch(),"oib":client.resource_usage().oib,"scene":client.scene()?.root()})
+        json!({"phase":"mounted","epoch":client.epoch(),"oib":client.resource_usage().oib,"state_controls":state_controls(&client)?,"scene":client.scene()?.root()})
     );
     for step in steps {
         let id = step["id"].as_u64().unwrap_or(10);
@@ -111,6 +154,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let changed = match step["op"].as_str().ok_or("Operation required")? {
             "restore" => client.restore_oib(step["defaults"].as_bool().unwrap_or(false))?,
             "add" => client.instantiate_oib(id, name)?,
+            "studio" => {
+                client.set_oib_designer_studio(step["enabled"].as_bool().unwrap_or(true))?
+            }
+            "insert" => client.insert_oib(
+                step["prototype"].as_u64().unwrap_or(id),
+                step["before"].as_u64(),
+            )?,
+            "reorder" => client.reorder_oib(id, step["before"].as_u64())?,
+            "race-reorder" => {
+                let other_id = step["other_id"]
+                    .as_u64()
+                    .ok_or("Rival component required")?;
+                let mut rival_socket = connect(endpoint)?;
+                let mut rival = probe_client(&catalog, &request)?;
+                settle(&mut rival, &mut rival_socket, start)?;
+                let generation = client
+                    .resource_usage()
+                    .oib
+                    .ok_or("Main OIB state required")?
+                    .active_generation;
+                if rival
+                    .resource_usage()
+                    .oib
+                    .as_ref()
+                    .is_none_or(|o| o.active_generation != generation)
+                {
+                    return Err("Race clients must start at the same confirmed generation".into());
+                }
+                // Queue the captured-generation main intent without sending it.
+                // The rival then commits first through an independent session.
+                if !client.reorder_oib(id, step["before"].as_u64())? {
+                    return Err("Main reorder was not queued".into());
+                }
+                if !rival.reorder_oib(other_id, step["other_before"].as_u64())? {
+                    return Err("Rival reorder was not queued".into());
+                }
+                settle(&mut rival, &mut rival_socket, start)?;
+                if rival
+                    .resource_usage()
+                    .oib
+                    .as_ref()
+                    .is_none_or(|o| o.active_generation <= generation)
+                {
+                    return Err("Rival reorder must change the confirmed order".into());
+                }
+                let _ = rival_socket.close(None);
+                // The ordinary end-step settle sends the older main request and
+                // records its durable rejection; a later reorder deliberately rebases.
+                true
+            }
             "duplicate" => client.duplicate_oib(id, name)?,
             "remove" => client.remove_oib(id)?,
             "inspect" => client.inspect_oib(id)?,
@@ -182,7 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let usage = client.resource_usage();
         println!(
             "{}",
-            json!({"phase":"step","step":step,"changed":changed,"epoch":client.epoch(),"oib":usage.oib,"confirmed":client.confirmed(),"input_busy":client.input_busy(),"elapsed_ms":start.elapsed().as_millis(),"scene":client.scene()?.root()})
+            json!({"phase":"step","step":step,"changed":changed,"epoch":client.epoch(),"oib":usage.oib,"confirmed":client.confirmed(),"input_busy":client.input_busy(),"elapsed_ms":start.elapsed().as_millis(),"state_controls":state_controls(&client)?,"scene":client.scene()?.root()})
         );
     }
     let _ = socket.close(None);

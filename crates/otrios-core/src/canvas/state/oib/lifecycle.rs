@@ -53,7 +53,8 @@ impl Document {
             .iter()
             .find(|i| i.id == prototype)
             .ok_or("Undeclared OIB factory")?;
-        let slot = (0..(MAX_ALLOCATIONS - seed.instances.len()) as u16)
+        let slot = (0
+            ..(MAX_ALLOCATIONS - super::super::super::oib::instances::initial_count(&seed)) as u16)
             .find(|s| {
                 allocations
                     .iter()
@@ -198,7 +199,11 @@ impl Document {
         let mut resident = self.oib_allocations()?;
         let live = self.oib_live(1)?;
         let mut desired = BTreeSet::new();
-        for factory in &seed.instances {
+        for factory in seed
+            .instances
+            .iter()
+            .filter(|i| !super::super::super::oib::instances::palette_only(&seed, i.id))
+        {
             if let Some(existing) = resident
                 .iter()
                 .filter(|a| live.contains(&a.id) && a.prototype == factory.id)
@@ -211,6 +216,20 @@ impl Document {
                 resident.push(new);
             }
         }
+        // Restore returns the authored residents to signed canvas order. Keep
+        // the active/draft union's other descriptors until activation reclaims
+        // them, without ever changing a resident slot or occurrence identity.
+        let initial = super::super::super::oib::instances::initial_allocations(&seed);
+        resident.sort_by_key(|a| {
+            if desired.contains(&a.id) {
+                initial
+                    .iter()
+                    .position(|i| i.prototype == a.prototype)
+                    .unwrap_or(usize::MAX)
+            } else {
+                usize::MAX
+            }
+        });
         let resolved = super::super::super::oib::instances::expanded_seed(&seed, &resident)?;
         let mut edits = vec![Edit {
             path: vec![4, 4],
@@ -297,15 +316,19 @@ impl Document {
             return Err("Invalid OIB resident allocator".into());
         }
         for a in &allocations {
-            let original = seed
-                .instances
-                .iter()
-                .any(|s| s.id == a.id && s.id == a.prototype && s.name == a.name);
+            let original = seed.instances.iter().any(|s| {
+                s.id == a.id
+                    && s.id == a.prototype
+                    && s.name == a.name
+                    && !super::super::super::oib::instances::palette_only(&seed, s.id)
+            });
             if !admitted_instance_name(&seed, &a.name)
                 || !ids.insert(a.id)
                 || (!original
                     && (!slots.insert(a.slot)
-                        || usize::from(a.slot) >= MAX_ALLOCATIONS - seed.instances.len()))
+                        || usize::from(a.slot)
+                            >= MAX_ALLOCATIONS
+                                - super::super::super::oib::instances::initial_count(&seed)))
                 || (!original && !(FIRST_ID..next).contains(&a.id))
                 || !seed
                     .instances
@@ -404,7 +427,8 @@ impl StateAdapter {
             return 0;
         };
         let dynamic_capacity = self.doc.oib_binding().map_or(0, |b| {
-            MAX_ALLOCATIONS.saturating_sub(b.seed.instances.len())
+            MAX_ALLOCATIONS
+                .saturating_sub(super::super::super::oib::instances::initial_count(&b.seed))
         });
         let dynamic_used = allocations.iter().filter(|a| a.id != a.prototype).count();
         let cell_capacity = self.doc.oib_binding().map_or(0, |b| {

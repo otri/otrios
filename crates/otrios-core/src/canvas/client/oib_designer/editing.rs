@@ -563,7 +563,8 @@ pub(in crate::canvas::client) fn keyboard_key(id: u32) -> Option<u16> {
 fn repaint(m: &mut Mount) -> Result<()> {
     let mut d = m.designer.take().ok_or("Missing designer")?;
     let result = (|| {
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let properties = d.properties.clone();
         let objects = d.objects.clone();
         let status = m.oib_view.as_ref().map_or("", |v| v.info.status.as_str());
@@ -594,7 +595,8 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let trace = crate::canvas::oib::document::property_sources(
             seed,
             &m.doc.oib_allocations()?,
@@ -671,7 +673,8 @@ impl Client {
             return Ok(false);
         }
         let m = self.active.as_mut().ok_or("No Canvas")?;
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let trace = crate::canvas::oib::document::property_sources(
             seed,
             &m.doc.oib_allocations()?,
@@ -840,7 +843,8 @@ impl Client {
         if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
             return Ok(false);
         }
-        let seed = super::super::super::oib::seed(&m.ui).ok_or("Missing designer seed")?;
+        let authoring_seed = m.doc.oib_authoring_seed()?;
+        let seed = &authoring_seed;
         let fresh = super::super::super::oib::document::properties(
             seed,
             &m.doc.oib_allocations()?,

@@ -105,6 +105,7 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
     }
     if let Some(surface) = &seed.instance_surface
         && (surface.previous_ui_sha256.len() != 32
+            || (seed.designer.is_none() && surface.prototypes.iter().any(|p| p.palette_only))
             || surface.prototypes.len() != seed.instances.len()
             || seed.instances.len() > MAX_ALLOCATIONS
             || seed.instances.len() > MAX_LIVE_INSTANCES

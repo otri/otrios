@@ -4,9 +4,11 @@ use super::*;
 use otrios_interfaces::layout::{Binding as LocalBinding, Responder};
 
 pub fn initial_allocations(seed: &Seed) -> Vec<Allocation> {
-    seed.instances
+    let mut allocations: Vec<_> = seed
+        .instances
         .iter()
         .enumerate()
+        .filter(|(_, i)| !palette_only(seed, i.id))
         .map(|(slot, i)| Allocation {
             id: i.id,
             name: i.name.clone(),
@@ -14,7 +16,29 @@ pub fn initial_allocations(seed: &Seed) -> Vec<Allocation> {
             prototype: i.id,
             slot: slot as u16,
         })
-        .collect()
+        .collect();
+    if let Some(doc) = &seed.designer {
+        allocations.sort_by_key(|a| {
+            doc.instances
+                .iter()
+                .find(|i| i.id.0 == a.prototype)
+                .map_or(u16::MAX, |i| i.order)
+        });
+    }
+    allocations
+}
+pub(in crate::canvas) fn palette_only(seed: &Seed, prototype: u64) -> bool {
+    seed.instance_surface.as_ref().is_some_and(|s| {
+        s.prototypes
+            .iter()
+            .any(|p| p.instance == prototype && p.palette_only)
+    })
+}
+pub(in crate::canvas) fn initial_count(seed: &Seed) -> usize {
+    seed.instances
+        .iter()
+        .filter(|i| !palette_only(seed, i.id))
+        .count()
 }
 pub fn cell_id(seed: &Seed, allocations: &[Allocation], owner: u64, property: u64) -> Result<u64> {
     if seed.designer.is_some() {
@@ -263,24 +287,8 @@ pub fn expand(
     let Some(surface) = &seed.instance_surface else {
         return Ok(ui.clone());
     };
-    let ordered;
-    let allocations = if let Some(doc) = &seed.designer {
-        let mut roots = allocations.to_vec();
-        roots.sort_by_key(|a| {
-            if a.id == a.prototype {
-                doc.instances
-                    .iter()
-                    .find(|i| i.id.0 == a.prototype)
-                    .map_or(u64::MAX, |i| u64::from(i.order))
-            } else {
-                a.id
-            }
-        });
-        ordered = roots;
-        ordered.as_slice()
-    } else {
-        allocations
-    };
+    // The authority's resident roster is the canvas order. Authored ordering is
+    // applied once by initial_allocations, never reapplied over a live move.
     let pitch = if let Some(layout) = &surface.layout {
         let Value::Number(pitch) = effective(seed, values, layout.preview_pitch_cell)? else {
             return Err("Row pitch must be numeric".into());

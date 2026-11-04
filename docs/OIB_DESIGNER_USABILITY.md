@@ -269,3 +269,7 @@ The companion [interactive design study](designs/oib-designer-usability.html)
 compares Desktop Studio and Frame Focus. It is local, illustrative HTML, not the
 shared Rust renderer or a shipped runtime feature. Its property edits, collapse,
 selection, reset, source navigation and mode changes do not contact live services.
+
+The active [Desktop Studio and bounded D2 plan](OIB_DESKTOP_STUDIO_D2.md) defines
+the current completion boundary and records design-agnostic Components dogfooding
+as the next goal.
