@@ -1898,3 +1898,135 @@ fn l1_compatible_library_baseline_upgrade_restart_and_rollback_preserve_collecti
     );
     fixture.counter_unchanged();
 }
+
+#[test]
+fn l1_slow_state_adapter_receives_latest_coalesced_library_after_held_a_state_offer() {
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    // Real sockets/authority with synthetic already-verified dependency bodies;
+    // signed publication and host deployment are independently qualified.
+    let original = library_fixture::admit(&library_fixture::imported());
+    let second = library_fixture::admit(&library_fixture::update(&original, |graph| {
+        graph
+            .definitions
+            .iter_mut()
+            .find(|definition| definition.id == DefinitionId(13))
+            .unwrap()
+            .nodes[0]
+            .defaults
+            .iter_mut()
+            .find(|default| default.property == PropertyId(3))
+            .unwrap()
+            .value = Value::Text("Intermediate library".into());
+    }));
+    let mut third = library_fixture::update(&second, |graph| {
+        graph
+            .definitions
+            .iter_mut()
+            .find(|definition| definition.id == DefinitionId(13))
+            .unwrap()
+            .nodes[0]
+            .defaults
+            .iter_mut()
+            .find(|default| default.property == PropertyId(3))
+            .unwrap()
+            .value = Value::Text("Coalesced latest library".into());
+    });
+    let source = library_fixture::seed_mut(&mut third);
+    source.resolved_libraries[0].revision = [3; 32];
+    source
+        .graph
+        .as_mut()
+        .unwrap()
+        .imports
+        .as_mut()
+        .unwrap()
+        .locks[0]
+        .revision = [3; 32];
+    let third = library_fixture::admit(&third);
+    let mut fixture = Fixture::start_ui(&binary, original);
+    let mut admin = fixture.open('a', 221, 0);
+    let mut slow = fixture.open('a', 222, 0);
+    let generation = slow.state.oib_structural_generation().unwrap();
+    let collection = slow.binding.collection.clone();
+    let epoch = fixture.durable(&collection).oib_epoch().unwrap();
+    assert!(admin.state.set(&[(1, 521)]).unwrap());
+    admin.settle();
+    let ServerMessage::Sync { bytes: held, .. } = read_d1(&mut slow.socket) else {
+        panic!("ordinary A-state offer")
+    };
+    // Do not deliver or ACK the already offered A snapshot until both revisions
+    // and their ordinary writes have reached the actual authority.
+    fn hot_ui(fixture: &mut Fixture, ui: &Ui) {
+        let bytes = canvas::encode_ui(ui).unwrap();
+        fs::write(
+            fixture.rig.root.join("apps/oib-designer/package/ui.flex"),
+            &bytes,
+        )
+        .unwrap();
+        let mut catalog = canvas::decode_catalog(&fixture.rig.catalog).unwrap();
+        catalog
+            .apps
+            .iter_mut()
+            .find(|entry| entry.app.id == "oib-designer")
+            .unwrap()
+            .ui_hash = canvas::hash(&bytes);
+        fixture.rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+        fs::write(
+            fixture.rig.root.join("apps/catalog.flex"),
+            &fixture.rig.catalog,
+        )
+        .unwrap();
+        fixture.ui = ui.clone();
+    }
+    hot_ui(&mut fixture, &second);
+    let mut intermediate = fixture.open('a', 223, 0);
+    assert!(intermediate.state.set(&[(2, 729)]).unwrap());
+    intermediate.settle();
+    let width = PropertyAddress::Definition {
+        definition: DefinitionId(12),
+        node: NodeId(1),
+        property: PropertyId(2),
+    };
+    intermediate.edit_addresses(&[(width.clone(), Some(Value::Number(360.)))]);
+    drop(intermediate);
+    hot_ui(&mut fixture, &third);
+    let mut latest = fixture.open('a', 224, 0);
+    assert!(latest.state.set(&[(3, 0)]).unwrap());
+    latest.settle();
+    assert_eq!(
+        latest.state.oib_structural_generation(),
+        Some(generation + 2)
+    );
+    slow.state.receive(&held).unwrap();
+    assert_eq!(
+        slow.state.oib_structural_generation(),
+        Some(generation),
+        "held offer pins the complete old baseline"
+    );
+    slow.flush();
+    slow.until(|state| state.oib_structural_generation() == Some(generation + 2));
+    assert_eq!(slow.state.value(1).unwrap(), 521);
+    assert_eq!(slow.state.value(2).unwrap(), 729);
+    assert_eq!(slow.state.value(3).unwrap(), 0);
+    assert_eq!(
+        slow.state
+            .oib_property_register(&width)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Number(360.))]
+    );
+    let label = slow
+        .state
+        .oib_property_register(&address(30, &[8], 3))
+        .unwrap()
+        .cell;
+    assert!(
+        slow.state
+            .oib_property_text(label)
+            .contains("Coalesced latest library")
+    );
+    assert_eq!(fixture.durable(&collection).oib_epoch().unwrap(), epoch);
+    fixture.counter_unchanged();
+}

@@ -462,3 +462,237 @@ fn malformed_adoption_metadata_in_a_full_checkpoint_is_rejected_before_recovery(
         assert!(error.contains("baseline adoption"), "{error}");
     }
 }
+
+fn third_revision(ui: &Ui) -> Ui {
+    let mut next = fixture::update(ui, |graph| {
+        graph
+            .definitions
+            .iter_mut()
+            .find(|definition| definition.id == DefinitionId(13))
+            .unwrap()
+            .nodes[0]
+            .defaults
+            .iter_mut()
+            .find(|default| default.property == PropertyId(3))
+            .unwrap()
+            .value = Value::Text("Latest coalesced library".into());
+    });
+    let source = fixture::seed_mut(&mut next);
+    source.resolved_libraries[0].revision = [3; 32];
+    source
+        .graph
+        .as_mut()
+        .unwrap()
+        .imports
+        .as_mut()
+        .unwrap()
+        .locks[0]
+        .revision = [3; 32];
+    fixture::admit(&next)
+}
+
+#[test]
+fn live_state_adapter_accepts_two_coalesced_adoptions_and_ordinary_writes() {
+    let (ui, mut authority) = setup();
+    let (mut slow, mut session) = client(&ui, &mut authority, 90);
+    let epoch = authority.oib_epoch().unwrap();
+    let initial_generation = authority.oib_baseline().unwrap().0;
+    let journal_base = authority.clone();
+    let mut previous = journal_base.clone();
+    let mut records = Vec::new();
+    slow.edit_oib_property(&definition(2), Some(Value::Number(420.)))
+        .unwrap();
+    let pending = slow.generate().unwrap().unwrap();
+    let second = styled(&ui);
+    let (generation, lock) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&second, generation, lock)
+        .unwrap();
+    records.push(authority.journal_delta(&previous).unwrap());
+    previous = authority.clone();
+    authority.set(&[(1, 711)]).unwrap();
+    records.push(authority.journal_delta(&previous).unwrap());
+    previous = authority.clone();
+    authority.receive(&mut session, &pending).unwrap();
+    records.push(authority.journal_delta(&previous).unwrap());
+    previous = authority.clone();
+    let third = third_revision(&second);
+    let (generation, lock) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&third, generation, lock)
+        .unwrap();
+    records.push(authority.journal_delta(&previous).unwrap());
+    let combined = authority.journal_delta(&journal_base).unwrap();
+    let mut strict = journal_base.clone();
+    assert!(
+        strict.replay(&combined).is_err(),
+        "a live snapshot jump is not a valid atomic authority adoption journal entry"
+    );
+    assert_eq!(strict.root_hash(), journal_base.root_hash());
+    for record in &records {
+        strict.replay(record).unwrap();
+    }
+    assert_eq!(
+        strict.root_hash(),
+        authority.root_hash(),
+        "individual durable records retain strict replay semantics"
+    );
+    let latest = authority.generate(&mut session).unwrap().unwrap();
+    slow.receive(&latest)
+        .expect("trusted live snapshot may coalesce multiple adoptions and ordinary edits");
+    assert!(slow.confirmed());
+    assert_eq!(slow.value(1).unwrap(), 711);
+    assert_eq!(
+        slow.oib_structural_generation(),
+        Some(initial_generation + 2)
+    );
+    assert_eq!(
+        slow.oib_property_register(&definition(2))
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Number(420.))]
+    );
+    let label = slow
+        .oib_property_register(&occurrence(30, &[8], 3))
+        .unwrap()
+        .cell;
+    assert!(
+        slow.oib_property_text(label)
+            .contains("Latest coalesced library")
+    );
+    slow.edit_oib_property(&definition(2), Some(Value::Number(400.)))
+        .unwrap();
+    let captured = loop {
+        let next = slow.generate().unwrap().unwrap();
+        if let StateRequest::OibWrite { epoch, .. } = canvas::decode_state_request(&next).unwrap() {
+            break epoch;
+        }
+        authority.receive(&mut session, &next).unwrap();
+    };
+    assert_eq!(captured, epoch);
+}
+
+#[test]
+fn live_state_adapter_accepts_adoption_with_its_pending_receipt_and_property_update() {
+    let (ui, mut authority) = setup();
+    let (mut slow, mut session) = client(&ui, &mut authority, 91);
+    slow.edit_oib_property(&definition(2), Some(Value::Number(360.)))
+        .unwrap();
+    let pending = slow.generate().unwrap().unwrap();
+    let second = styled(&ui);
+    let (generation, lock) = authority.oib_baseline().unwrap();
+    authority
+        .adopt_oib_baseline(&second, generation, lock)
+        .unwrap();
+    authority.set(&[(2, 643)]).unwrap();
+    authority.receive(&mut session, &pending).unwrap();
+    slow.receive(&authority.generate(&mut session).unwrap().unwrap())
+        .expect("live adoption and confirmed receipt can share one projected snapshot");
+    assert!(slow.confirmed());
+    assert_eq!(slow.value(2).unwrap(), 643);
+    assert_eq!(
+        slow.oib_property_register(&definition(2))
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Number(360.))]
+    );
+    let label = slow
+        .oib_property_register(&occurrence(30, &[8], 3))
+        .unwrap()
+        .cell;
+    assert!(slow.oib_property_text(label).contains("New toggle default"));
+}
+
+#[test]
+fn live_state_adapter_rejects_stale_missing_and_malformed_last_adoption_witnesses() {
+    use otrios_core::merkle::Authority;
+    use otrios_interfaces::canvas::StateResponse;
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Adoption {
+        format: String,
+        generation: u64,
+        previous: [u8; 32],
+    }
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Binding {
+        format: String,
+        identity_floor: u64,
+        adoption: Option<Adoption>,
+        seed: Seed,
+        admission: Vec<u8>,
+        ui_hash: Vec<u8>,
+        ui_ref: String,
+    }
+    let (ui, mut old) = setup();
+    let (mut session, _) = old.open_session(&[92; 16], 0).unwrap();
+    session.set_oib_editable(true);
+    // Capture a client already past structural generation one, so a stale
+    // positive witness is distinguishable from the initial transition.
+    let request = canvas::encode_state_request(&StateRequest::OibInstance {
+        epoch: old.oib_epoch().unwrap(),
+        sequence: 1,
+        operation: EditBatch::reorder(
+            old.oib_status().unwrap().structural_generation,
+            30,
+            Some(20),
+        ),
+    })
+    .unwrap();
+    old.receive(&mut session, &request).unwrap();
+    let base = tree(&old);
+    let mut updated = old.clone();
+    let (generation, lock) = updated.oib_baseline().unwrap();
+    updated
+        .adopt_oib_baseline(&styled(&ui), generation, lock)
+        .unwrap();
+    let target = tree(&updated);
+    let leaf = target.subtree(&[4, 0]).unwrap();
+    let bytes = leaf.register().unwrap().values().next().unwrap().2.unwrap();
+    for fault in 0..4 {
+        let mut binding: Binding = flexbuffers::from_slice(bytes).unwrap();
+        match fault {
+            0 => binding.adoption = None,
+            1 => binding.adoption.as_mut().unwrap().format = "unsupported-witness-v99".into(),
+            2 => binding.adoption.as_mut().unwrap().generation = 1,
+            _ => binding.adoption.as_mut().unwrap().previous = updated.oib_baseline().unwrap().1,
+        }
+        let forged = target
+            .edit(
+                [97; 16],
+                &[Edit {
+                    path: vec![4, 0],
+                    schema: leaf.register().unwrap().schema(),
+                    value: Some(flexbuffers::to_vec(&binding).unwrap()),
+                }],
+            )
+            .unwrap()
+            .0;
+        let mut publisher = Authority::new(991, base.clone());
+        let mut subscription = publisher.subscribe(&[vec![]], vec![]).unwrap();
+        let initial = publisher.offer(&mut subscription).unwrap().unwrap();
+        let mount = canvas::encode_state_response(&StateResponse::Mount {
+            authority: initial.cursor.epoch,
+            lease: initial.cursor.lease,
+            frame: initial.bytes().to_vec(),
+        })
+        .unwrap();
+        let mut state = StateAdapter::for_ui(&ui, "l1:adoption", &mount, [92; 16]).unwrap();
+        subscription
+            .acknowledge(initial.cursor, initial.root)
+            .unwrap();
+        publisher.publish(base.hash(), forged).unwrap();
+        let offer = publisher.offer(&mut subscription).unwrap().unwrap();
+        let update = canvas::encode_state_response(&StateResponse::Update {
+            frame: offer.bytes().to_vec(),
+        })
+        .unwrap();
+        assert!(
+            state.receive(&update).is_err(),
+            "malformed live witness {fault} accepted"
+        );
+        assert_eq!(
+            state.oib_structural_generation(),
+            Some(old.oib_status().unwrap().structural_generation)
+        );
+    }
+}

@@ -249,12 +249,50 @@ impl Document {
         {
             return Err("OIB semantic admission or allocator floor changed".into());
         }
+        let old_status: Status = decode(&payload(before, &[4, 3])?)?;
+        let new_status: Status = decode(&payload(after, &[4, 3])?)?;
+        if self.oib_projection {
+            // A trusted live lease sends coalesced complete snapshots, not an
+            // operation journal. Its predecessor can be an unseen intermediate
+            // baseline, and ordinary writes can share this publication.
+            validate_metadata(&old, Some(&old_status))?;
+            validate_metadata(&new, Some(&new_status))?;
+            if new_status.structural_generation < old_status.structural_generation
+                || new_status.generation < old_status.generation
+            {
+                return Err("Live OIB baseline generation moved backwards".into());
+            }
+            let changed_source = !same_source(&old, &new);
+            let changed_witness = bytes(&old.adoption)? != bytes(&new.adoption)?;
+            if changed_source {
+                super::super::super::oib::imports::compatible(&old.seed, &new.seed)?;
+            }
+            if changed_source || changed_witness {
+                let adoption = new
+                    .adoption
+                    .as_ref()
+                    .ok_or("Changed OIB baseline requires an adoption witness")?;
+                if adoption.generation < old_status.structural_generation
+                    || new_status.structural_generation <= old_status.structural_generation
+                    || new_status.generation <= old_status.generation
+                    || adoption.previous == digest(&new)?
+                {
+                    return Err("Invalid or stale live OIB baseline adoption witness".into());
+                }
+            }
+            // Normal source, address/type, causal-register, active-root and
+            // complete candidate-UI checks still execute in validate_oib.
+            return Ok(true);
+        }
         if same_source(&old, &new) {
+            if bytes(&old.adoption)? != bytes(&new.adoption)? {
+                return Err(
+                    "Chrome configuration cannot rewrite baseline adoption evidence".into(),
+                );
+            }
             return Ok(true);
         }
         super::super::super::oib::imports::compatible(&old.seed, &new.seed)?;
-        let old_status: Status = decode(&payload(before, &[4, 3])?)?;
-        let new_status: Status = decode(&payload(after, &[4, 3])?)?;
         let adoption = new
             .adoption
             .as_ref()
