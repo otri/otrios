@@ -20,21 +20,29 @@ pub struct TextPresentation {
     styles: Arc<Vec<f32>>,
     paints: Arc<Vec<f32>>,
     admitted: BTreeSet<u32>,
+    primitives: BTreeMap<u32, Arc<CachedPrimitive>>,
+    chunks: Vec<CachedChunk>,
+    next_resource: u64,
     em_cache: Vec<(u32, f32)>,
     generation: u32,
 }
+#[derive(Clone)]
 struct Run {
     draw: usize,
     id: u32,
     geometry: bool,
-    right: Vec<f32>,
-    left: Vec<f32>,
+    right: Arc<Vec<f32>>,
+    left: Arc<Vec<f32>>,
     top: f32,
     bottom: f32,
 }
 #[derive(Clone, Default)]
 pub struct TextFrame {
     pub mesh: Arc<Mesh>,
+    /// Independent immutable resources in painter order. Empty with nonempty
+    /// `mesh` selects the bounded legacy fallback. The compatibility mesh above
+    /// remains available to document/reflow hosts and exporters.
+    pub chunks: Vec<TextChunk>,
     /// Eight floats per draw: visible first/count, translation xy, clip l/t/r/b.
     /// Zero geometry entries retain fixed UI placement; nonzero triangle ranges
     /// opt into the same translation/clip contract. No vertices change on scrolling.
@@ -46,6 +54,40 @@ pub struct TextFrame {
     pub paints: Arc<Vec<f32>>,
     pub generation: u32,
 }
+/// One bounded immutable geometry resource. Versions are local to a presentation
+/// owner; hosts namespace them by layer and reset epoch, never as content hashes.
+pub struct TextResource {
+    pub version: u64,
+    pub mesh: Arc<Mesh>,
+    pub styles: Arc<Vec<f32>>,
+}
+#[derive(Clone)]
+pub struct TextChunk {
+    pub resource: Arc<TextResource>,
+    /// The same eight floats per draw, with resource-local vertex ranges.
+    pub views: Vec<f32>,
+    pub paints: Arc<Vec<f32>>,
+}
+/// Fixed consecutive grouping bounds host resources without changing paint order.
+/// At most 512 scene nodes admit at most 32 resources per presentation layer.
+const DRAWS_PER_CHUNK: usize = 16;
+pub const MAX_TEXT_CHUNKS: usize = super::scene::MAX_NODES.div_ceil(DRAWS_PER_CHUNK);
+/// Shared base/overlay host resource budget. Documents use their separate
+/// existing budget and select the compatibility presentation path.
+pub const MAX_TEXT_RESOURCE_BYTES: usize = 16 * 1024 * 1024;
+struct CachedPrimitive {
+    key: SceneNode,
+    factor: f32,
+    mesh: Arc<Mesh>,
+    run: Option<Run>,
+    style: f32,
+}
+struct CachedChunk {
+    sources: Vec<Arc<CachedPrimitive>>,
+    resource: Arc<TextResource>,
+    paints: Arc<Vec<f32>>,
+}
+
 impl TextFrame {
     /// Materialize per-draw tint for legacy mesh exporters. Production hosts
     /// consume `paints` directly and retain the original immutable mesh.
@@ -150,109 +192,57 @@ impl TextPresentation {
             || self.font != font.hash()
             || !admission.visible.is_subset(&self.admitted)
         {
-            // Recycle CPU storage only after every immutable frame snapshot has
-            // been released. Held snapshots keep their buffers and bytes intact.
-            let mut mesh = Arc::get_mut(&mut self.mesh)
-                .map(std::mem::take)
-                .unwrap_or_default();
-            mesh.vertices.clear();
-            mesh.glyph_vertices.clear();
-            mesh.draws.clear();
-            let mut runs = Vec::new();
-            // Oversized documents retain the existing visible-only bounded path.
-            // Input fields are limited to 256 bytes; normal strips fit comfortably.
+            // Per-primitive resources survive unrelated label/status edits. A
+            // compatibility mesh is assembled by copying only; tessellation and
+            // glyph shaping run solely for changed/new admitted primitives.
+            if self.font != font.hash() {
+                self.primitives.clear();
+            }
+            let mut mesh = Mesh::default();
+            let mut styles = Vec::new();
+            self.runs.clear();
             let mut retain = glyphs <= 16384;
             if retain {
-                mesh.glyph_vertices.reserve(glyphs * 64);
-                let mut paint = RetainedPaint {
-                    runs: &mut runs,
-                    admitted: &admission.near,
-                };
                 #[cfg(feature = "canvas")]
-                let mesh_profile = crate::canvas::profiling::span("render.retained.mesh.paint");
-                mesh.paint(
-                    scene.root(),
-                    [0., 0.],
+                let _mesh_profile = crate::canvas::profiling::span("render.retained.mesh.paint");
+                let mut ordered = PrimitiveCollection::default();
+                retain = collect_primitives(
+                    &key,
                     1.,
-                    Clip {
-                        left: 0.,
-                        top: 0.,
-                        right: extent[0],
-                        bottom: extent[1],
-                    },
-                    Some(font),
-                    Some(&mut paint),
+                    &admission.near,
+                    font,
+                    &positions,
+                    &self.primitives,
+                    &mut ordered,
                 );
-                #[cfg(feature = "canvas")]
-                drop(mesh_profile);
-                // Native retained-view ranges admit at most 65,536 vertices.
-                // Large admitted scenes keep the existing clipped, fixed-
-                // placement path instead of producing out-of-contract views.
-                retain = mesh.vertices.len() / 6 <= 65536;
+                let mut primitives = BTreeMap::new();
+                let mut drawn = Vec::new();
+                for primitive in ordered.entries {
+                    primitives.insert(primitive.key.id, primitive.clone());
+                    if let Some(mut run) = primitive.run.clone() {
+                        run.draw = mesh.draws.len() / 3;
+                        append_mesh(&mut mesh, &primitive.mesh);
+                        self.runs.push(run);
+                        styles.push(primitive.style);
+                        drawn.push(primitive);
+                    }
+                }
+                self.primitives = primitives;
+                // These limits apply to the complete frame, not to each chunk.
+                retain = retain
+                    && mesh.vertices.len() / 6 <= 65536
+                    && mesh.glyph_vertices.len() / 16 <= 65536;
+                if retain {
+                    self.rebuild_chunks(&drawn);
+                }
             }
             if !retain {
                 mesh = super::render_scene_with_font(scene, font);
-                runs.clear();
+                self.runs.clear();
+                self.primitives.clear();
+                self.chunks.clear();
+                styles = vec![0.; mesh.draws.len() / 3];
             }
-            let mut styles = vec![0.; mesh.draws.len() / 3];
-            self.runs = runs
-                .into_iter()
-                .map(|(draw, id)| {
-                    let first = mesh.draws[draw * 3 + 1] as usize;
-                    let count = mesh.draws[draw * 3 + 2] as usize;
-                    if mesh.draws[draw * 3] == 0 {
-                        let mut bounds = [
-                            f32::INFINITY,
-                            f32::INFINITY,
-                            f32::NEG_INFINITY,
-                            f32::NEG_INFINITY,
-                        ];
-                        for v in mesh.vertices[first * 6..(first + count) * 6].chunks_exact(6) {
-                            bounds[0] = bounds[0].min(v[0]);
-                            bounds[1] = bounds[1].min(v[1]);
-                            bounds[2] = bounds[2].max(v[0]);
-                            bounds[3] = bounds[3].max(v[1]);
-                        }
-                        return Run {
-                            draw,
-                            id,
-                            geometry: true,
-                            left: vec![bounds[0]],
-                            right: vec![bounds[2]],
-                            top: bounds[1],
-                            bottom: bounds[3],
-                        };
-                    }
-                    styles[draw] = positions.get(&id).map_or(0., |p| p[6]);
-                    let mut right = Vec::new();
-                    let mut left = Vec::new();
-                    let mut top = f32::INFINITY;
-                    let mut bottom = f32::NEG_INFINITY;
-                    let mut maximum = f32::NEG_INFINITY;
-                    for q in mesh.glyph_vertices[first * 16..(first + count) * 16].chunks_exact(64)
-                    {
-                        maximum = maximum.max(q[16]);
-                        right.push(maximum);
-                        left.push(q[0]);
-                        top = top.min(q[1]);
-                        bottom = bottom.max(q[33]);
-                    }
-                    let mut minimum = f32::INFINITY;
-                    for x in left.iter_mut().rev() {
-                        minimum = minimum.min(*x);
-                        *x = minimum;
-                    }
-                    Run {
-                        draw,
-                        id,
-                        geometry: false,
-                        right,
-                        left,
-                        top,
-                        bottom,
-                    }
-                })
-                .collect();
             self.styles = Arc::new(styles);
             self.admitted = if retain {
                 admission.near
@@ -333,12 +323,36 @@ impl TextPresentation {
         if self.runs.is_empty() {
             views.clear();
         }
+        let mut draw = 0;
+        let chunks = self
+            .chunks
+            .iter_mut()
+            .map(|chunk| {
+                let count = chunk.resource.mesh.draws.len() / 3;
+                let mut local_views = views[draw * 8..(draw + count) * 8].to_vec();
+                for (index, local) in chunk.resource.mesh.draws.chunks_exact(3).enumerate() {
+                    let global = &self.mesh.draws[(draw + index) * 3..(draw + index + 1) * 3];
+                    local_views[index * 8] += local[1] as f32 - global[1] as f32;
+                }
+                let local_paints = &self.paints[draw * 4..(draw + count) * 4];
+                if chunk.paints.as_ref() != local_paints {
+                    chunk.paints = Arc::new(local_paints.to_vec());
+                }
+                draw += count;
+                TextChunk {
+                    resource: chunk.resource.clone(),
+                    views: local_views,
+                    paints: chunk.paints.clone(),
+                }
+            })
+            .collect();
         if let Some(p) = profile {
             p.cull_us = cull_start.unwrap().elapsed().as_micros();
             p.viewport_bytes = views.len() * 4;
         }
         TextFrame {
             mesh: self.mesh.clone(),
+            chunks,
             views,
             generation: self.generation,
             styles: self.styles.clone(),
@@ -346,6 +360,204 @@ impl TextPresentation {
         }
     }
 }
+impl TextPresentation {
+    fn rebuild_chunks(&mut self, drawn: &[Arc<CachedPrimitive>]) {
+        let previous = std::mem::take(&mut self.chunks);
+        self.chunks = drawn
+            .chunks(DRAWS_PER_CHUNK)
+            .map(|sources| {
+                if let Some(old) = previous.iter().find(|old| {
+                    old.sources.len() == sources.len()
+                        && old
+                            .sources
+                            .iter()
+                            .zip(sources)
+                            .all(|(a, b)| Arc::ptr_eq(a, b))
+                }) {
+                    return CachedChunk {
+                        sources: sources.to_vec(),
+                        resource: old.resource.clone(),
+                        paints: old.paints.clone(),
+                    };
+                }
+                let mut mesh = Mesh::default();
+                let mut styles = Vec::new();
+                for primitive in sources {
+                    append_mesh(&mut mesh, &primitive.mesh);
+                    styles.push(primitive.style);
+                }
+                self.next_resource += 1;
+                CachedChunk {
+                    sources: sources.to_vec(),
+                    paints: Arc::default(),
+                    resource: Arc::new(TextResource {
+                        version: self.next_resource,
+                        mesh: Arc::new(mesh),
+                        styles: Arc::new(styles),
+                    }),
+                }
+            })
+            .collect();
+    }
+}
+
+fn append_mesh(target: &mut Mesh, source: &Mesh) {
+    let geometry = (target.vertices.len() / 6) as u32;
+    let glyphs = (target.glyph_vertices.len() / 16) as u32;
+    target.vertices.extend_from_slice(&source.vertices);
+    target
+        .glyph_vertices
+        .extend_from_slice(&source.glyph_vertices);
+    for range in source.draws.chunks_exact(3) {
+        target.draws.extend([
+            range[0],
+            range[1] + if range[0] == 0 { geometry } else { glyphs },
+            range[2],
+        ]);
+    }
+}
+
+#[derive(Default)]
+struct PrimitiveCollection {
+    entries: Vec<Arc<CachedPrimitive>>,
+    geometry: usize,
+    glyphs: usize,
+}
+impl PrimitiveCollection {
+    fn admit(&mut self, primitive: Arc<CachedPrimitive>) -> bool {
+        self.geometry += primitive.mesh.vertices.len() / 6;
+        self.glyphs += primitive.mesh.glyph_vertices.len() / 16;
+        if self.geometry > 65536 || self.glyphs > 65536 {
+            return false;
+        }
+        self.entries.push(primitive);
+        true
+    }
+}
+
+fn collect_primitives(
+    node: &SceneNode,
+    factor: f32,
+    admitted: &BTreeSet<u32>,
+    font: &Font,
+    positions: &BTreeMap<u32, [f32; 7]>,
+    previous: &BTreeMap<u32, Arc<CachedPrimitive>>,
+    ordered: &mut PrimitiveCollection,
+) -> bool {
+    if matches!(
+        node.primitive,
+        Primitive::Canvas { .. } | Primitive::Viewport { .. }
+    ) {
+        let factor = if let Primitive::Viewport { scale } = node.primitive {
+            factor * scale
+        } else {
+            factor
+        };
+        for child in &node.children {
+            if !collect_primitives(child, factor, admitted, font, positions, previous, ordered) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if !admitted.contains(&node.id) {
+        return true;
+    }
+    if let Some(old) = previous.get(&node.id)
+        && old.factor == factor
+        && old.key == *node
+    {
+        return ordered.admit(old.clone());
+    }
+    let mut mesh = Mesh::default();
+    let mut runs = Vec::new();
+    let mut retained = RetainedPaint {
+        runs: &mut runs,
+        admitted,
+    };
+    mesh.paint(
+        node,
+        [0., 0.],
+        factor,
+        Clip {
+            left: -100_000.,
+            top: -100_000.,
+            right: 100_000.,
+            bottom: 100_000.,
+        },
+        Some(font),
+        Some(&mut retained),
+    );
+    let style = if matches!(node.primitive, Primitive::Text { .. }) {
+        positions.get(&node.id).map_or(0., |p| p[6])
+    } else {
+        0.
+    };
+    let run = runs.first().map(|(_, id)| primitive_run(*id, &mesh));
+    ordered.admit(Arc::new(CachedPrimitive {
+        key: node.clone(),
+        factor,
+        mesh: Arc::new(mesh),
+        run,
+        style,
+    }))
+}
+
+fn primitive_run(id: u32, mesh: &Mesh) -> Run {
+    let range = &mesh.draws[..3];
+    let first = range[1] as usize;
+    let count = range[2] as usize;
+    if range[0] == 0 {
+        let mut bounds = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        for vertex in mesh.vertices[first * 6..(first + count) * 6].chunks_exact(6) {
+            bounds[0] = bounds[0].min(vertex[0]);
+            bounds[1] = bounds[1].min(vertex[1]);
+            bounds[2] = bounds[2].max(vertex[0]);
+            bounds[3] = bounds[3].max(vertex[1]);
+        }
+        return Run {
+            draw: 0,
+            id,
+            geometry: true,
+            left: Arc::new(vec![bounds[0]]),
+            right: Arc::new(vec![bounds[2]]),
+            top: bounds[1],
+            bottom: bounds[3],
+        };
+    }
+    let mut right = Vec::new();
+    let mut left = Vec::new();
+    let mut top = f32::INFINITY;
+    let mut bottom = f32::NEG_INFINITY;
+    let mut maximum = f32::NEG_INFINITY;
+    for quad in mesh.glyph_vertices[first * 16..(first + count) * 16].chunks_exact(64) {
+        maximum = maximum.max(quad[16]);
+        right.push(maximum);
+        left.push(quad[0]);
+        top = top.min(quad[1]);
+        bottom = bottom.max(quad[33]);
+    }
+    let mut minimum = f32::INFINITY;
+    for x in left.iter_mut().rev() {
+        minimum = minimum.min(*x);
+        *x = minimum;
+    }
+    Run {
+        draw: 0,
+        id,
+        geometry: false,
+        right: Arc::new(right),
+        left: Arc::new(left),
+        top,
+        bottom,
+    }
+}
+
 struct EmScales<'a> {
     font: &'a Font,
     cache: &'a mut Vec<(u32, f32)>,
@@ -536,7 +748,7 @@ fn normalize(
     }
     // Placement and container clipping are carried by views. In particular,
     // clipping a partially visible button changes its semantic Canvas bounds,
-    // without changing any painted content. Viewport context.scales remain in the key.
+    // without changing any painted content. Viewport scales remain in the key.
     node.frame.x = 0.;
     node.frame.y = 0.;
     if matches!(
@@ -882,6 +1094,166 @@ mod tests {
         assert!(renderer.runs.iter().any(|r| r.id == 2));
     }
 
+    fn chunk_scene(changed: bool, shift: f32, tint: [u8; 4]) -> Scene {
+        Scene::new(canvas(
+            0,
+            Rect::new(0., 0., 500., 300.),
+            (1..=40)
+                .map(|id| {
+                    let frame = Rect::new(
+                        ((id - 1) % 8) as f32 * 55. - shift,
+                        ((id - 1) / 8) as f32 * 45.,
+                        30.,
+                        30.,
+                    );
+                    if id % 2 == 0 {
+                        super::super::components::node(
+                            id,
+                            frame,
+                            Primitive::Superellipse {
+                                radius: 4.,
+                                exponent: 4.,
+                                color: tint,
+                            },
+                        )
+                    } else {
+                        text(
+                            id,
+                            frame,
+                            if changed && id == 19 {
+                                "Changed"
+                            } else {
+                                "ABC"
+                            },
+                            1,
+                            tint,
+                        )
+                    }
+                })
+                .collect(),
+        ))
+        .unwrap()
+    }
+    fn assert_chunk_projection(frame: &TextFrame) {
+        let mut mesh = Mesh::default();
+        let mut styles = Vec::new();
+        let mut paints = Vec::new();
+        let mut draw = 0;
+        for chunk in &frame.chunks {
+            assert!(chunk.resource.mesh.draws.len() / 3 <= DRAWS_PER_CHUNK);
+            let geometry = mesh.vertices.len() / 6;
+            let glyphs = mesh.glyph_vertices.len() / 16;
+            for (index, range) in chunk.resource.mesh.draws.chunks_exact(3).enumerate() {
+                let mut view = chunk.views[index * 8..(index + 1) * 8].to_vec();
+                view[0] += if range[0] == 0 { geometry } else { glyphs } as f32;
+                assert_eq!(view, frame.views[draw * 8..(draw + 1) * 8]);
+                draw += 1;
+            }
+            append_mesh(&mut mesh, &chunk.resource.mesh);
+            styles.extend_from_slice(&chunk.resource.styles);
+            paints.extend_from_slice(&chunk.paints);
+        }
+        assert_eq!(mesh.vertices, frame.mesh.vertices);
+        assert_eq!(mesh.glyph_vertices, frame.mesh.glyph_vertices);
+        assert_eq!(
+            mesh.draws, frame.mesh.draws,
+            "Chunk boundaries preserve exact painter order"
+        );
+        assert_eq!(styles, *frame.styles);
+        assert_eq!(paints, *frame.paints);
+        assert_eq!(draw, frame.mesh.draws.len() / 3);
+    }
+    #[test]
+    fn one_label_change_reuses_other_primitive_geometry_and_chunk_resources() {
+        let font = super::super::font::test_font();
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&chunk_scene(false, 0., WHITE), &font);
+        assert_eq!(first.chunks.len(), 3);
+        let old_primitive = renderer.primitives[&2].clone();
+        let old_label = renderer.primitives[&19].clone();
+        let old_vertices = first.mesh.vertices.clone();
+        let old_glyphs = first.mesh.glyph_vertices.clone();
+        let changed = renderer.compose(&chunk_scene(true, 0., WHITE), &font);
+        assert!(Arc::ptr_eq(&old_primitive, &renderer.primitives[&2]));
+        assert!(!Arc::ptr_eq(&old_label, &renderer.primitives[&19]));
+        assert!(Arc::ptr_eq(
+            &first.chunks[0].resource,
+            &changed.chunks[0].resource
+        ));
+        assert!(!Arc::ptr_eq(
+            &first.chunks[1].resource,
+            &changed.chunks[1].resource
+        ));
+        assert!(Arc::ptr_eq(
+            &first.chunks[2].resource,
+            &changed.chunks[2].resource
+        ));
+        assert!(
+            changed.chunks[1].resource.version
+                > first
+                    .chunks
+                    .iter()
+                    .map(|c| c.resource.version)
+                    .max()
+                    .unwrap()
+        );
+        let cold = TextPresentation::default().compose(&chunk_scene(true, 0., WHITE), &font);
+        assert_eq!(changed.mesh.vertices, cold.mesh.vertices);
+        assert_eq!(changed.mesh.glyph_vertices, cold.mesh.glyph_vertices);
+        assert_eq!(changed.views, cold.views);
+        assert_eq!(first.mesh.vertices, old_vertices);
+        assert_eq!(first.mesh.glyph_vertices, old_glyphs);
+        assert_chunk_projection(&first);
+        assert_chunk_projection(&changed);
+    }
+    #[test]
+    fn chunk_draw_ranges_and_paints_survive_mixed_pans_and_recolors() {
+        let font = super::super::font::test_font();
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&chunk_scene(false, 0., WHITE), &font);
+        let pan = renderer.compose(&chunk_scene(false, 4.25, WHITE), &font);
+        let tint = [37, 111, 193, 129];
+        let recolored = renderer.compose(&chunk_scene(false, 4.25, tint), &font);
+        for ((before, pan), paint) in first.chunks.iter().zip(&pan.chunks).zip(&recolored.chunks) {
+            assert!(Arc::ptr_eq(&before.resource, &pan.resource));
+            assert!(Arc::ptr_eq(&pan.resource, &paint.resource));
+            assert!(Arc::ptr_eq(&before.paints, &pan.paints));
+            assert!(!Arc::ptr_eq(&pan.paints, &paint.paints));
+            assert_eq!(pan.views, paint.views);
+        }
+        assert_chunk_projection(&pan);
+        assert_chunk_projection(&recolored);
+        assert_eq!(
+            first.paints.as_ref(),
+            &WHITE.map(|value| f32::from(value) / 255.).repeat(40),
+            "Held per-draw paints stay immutable"
+        );
+    }
+    #[test]
+    fn font_cache_reset_replaces_resources_without_reusing_live_versions() {
+        let font = super::super::font::test_font();
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&chunk_scene(false, 0., WHITE), &font);
+        // Exercise replacement of a previously admitted font identity; geometry
+        // bytes happen to match, but UV/band ownership must still be replaced.
+        renderer.font = "retired-font-resource".into();
+        let replacement = renderer.compose(&chunk_scene(false, 0., WHITE), &font);
+        for (old, new) in first.chunks.iter().zip(&replacement.chunks) {
+            assert!(!Arc::ptr_eq(&old.resource, &new.resource));
+            assert!(
+                new.resource.version
+                    > first
+                        .chunks
+                        .iter()
+                        .map(|c| c.resource.version)
+                        .max()
+                        .unwrap()
+            );
+        }
+        assert_eq!(first.mesh.glyph_vertices, replacement.mesh.glyph_vertices);
+        assert_chunk_projection(&replacement);
+    }
+
     #[test]
     fn oversized_geometry_keeps_the_bounded_legacy_view_contract() {
         let font = super::super::font::test_font();
@@ -905,6 +1277,10 @@ mod tests {
         let first = renderer.compose(&make(0.), &font);
         assert!(first.mesh.vertices.len() / 6 > 65536);
         assert!(first.views.is_empty());
+        assert!(
+            first.chunks.is_empty(),
+            "Aggregate geometry admission does not multiply per chunk"
+        );
         assert!(first.paints.is_empty());
         assert_eq!(first.baked_mesh().vertices, first.mesh.vertices);
         let moved = renderer.compose(&make(12.), &font);

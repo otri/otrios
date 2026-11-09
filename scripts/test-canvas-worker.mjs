@@ -4,10 +4,12 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import {DocumentTransfer} from '../web/canvas/document-transfer.mjs';
+import {PresentationTransfer} from '../web/canvas/presentation-transfer.mjs';
 function workerContext(fields){
   if(fields.fake){
     const app=fields.fake;
     let dirty=false,inFlight=null,serial=0n;
+    app.presentation_frame??=()=> 'null';
     app.control_is_checkbox??=()=>false;app.text_paints??=()=>new Float32Array();app.overlay_paints??=()=>new Float32Array();
     app.document_chunk_geometry??=()=>new Float32Array();
     app.request_frame??=()=>{dirty=true;};
@@ -19,7 +21,7 @@ function workerContext(fields){
     app.rejected_mount_pending??=()=>false;app.space_managed??=()=>false;app.spaces_outgoing??=()=>null;app.spaces_ui??=()=>false;app.take_sign_in??=()=>false;app.take_space_switch??=()=>null;app.take_chat_upload_request??=()=>null;app.take_chat_download??=()=> 'null';app.send_chat_attachment??=()=>false;
     for(const key of ['overlay_vertices','overlay_glyph_vertices','overlay_styles','overlay_views'])app[key]??=()=>new Float32Array();app.overlay_draws??=()=>new Uint32Array();
   }
-  return vm.createContext({DocumentTransfer,...fields});
+  return vm.createContext({DocumentTransfer,PresentationTransfer,...fields});
 }
 test('managed chat uses the admitted Space actor without guest-cookie provisioning',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
@@ -295,4 +297,27 @@ test('thin text transport forwards identity, cancellation and Tab direction and 
     ['key',6,42,'BackTab'],['key',6,42,'Tab'],['cancel',6,42],['key',6,42,'Enter'],['blur',6,42]]);
   assert.equal(vm.runInContext('inputRevision',context),6,'even rejected retired identities advance the acknowledgement');
   assert.equal(messages.filter(m=>m.type==='command-ack').length,6);assert(!messages.some(m=>m.type==='error'));
+});
+
+test('retained UI chunks obey renderer credit and replay without copying legacy meshes',async()=>{
+  const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  let prepared=0,legacy=0,content=1,epoch=1,chunked=true,versions=['1','2'],reads=[];
+  const d=version=>({version,vertices:3,glyphVertices:0,draws:1,views:[0,3,0,0,0,0,800,600],paints:[1,0,0,1]});
+  const fake={ui_ref:()=> 'app:oib/ui',screen:()=> 'oib-designer',path:()=> 'oib-designer',epoch:()=>1,state_ref:()=> 'state',viewport_size:()=>[1280,800],keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'oib',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
+    prepare_frame(){prepared++;return JSON.stringify({revisions:{content,paint:content,placement:content,semantics:content,effects:1},order:['base','overlay']});},
+    presentation_frame:()=>JSON.stringify(chunked?{epoch:String(epoch),base:versions.map(d),overlay:[d('1')]}:null),
+    presentation_chunk_vertices(layer,id){reads.push([layer,id]);return new Float32Array(18);},presentation_chunk_glyphs:()=>new Float32Array(),presentation_chunk_draws:()=>new Uint32Array([0,0,3]),presentation_chunk_styles:()=>new Float32Array([0]),
+    vertices(){legacy++;return new Float32Array();},glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text_styles:()=>new Float32Array(),text_views:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),text:()=>'',title:()=>'',controls:()=>[]};
+  const messages=[],context=workerContext({fake,postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
+  const first=messages.find(m=>m.type==='frame');assert.equal(first.presentation,'oib');assert.equal(first.uiChunks.upserts.length,3);assert.equal(legacy,0);assert.equal(first.vertices,undefined);
+  versions=['3','2'];content++;vm.runInContext('publish();publish()',context);assert.equal(prepared,1);assert.equal(reads.length,3);
+  await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token,presentationToken:first.uiChunks.token}});
+  const next=messages.filter(m=>m.type==='frame').at(-1);assert.equal(prepared,2);assert.equal(next.uiChunks.upserts.length,1);assert.equal(next.uiChunks.upserts[0].version,'3');assert.equal(legacy,0);
+  await context.onmessage({data:{type:'graphics-lost',generation:1}});epoch++;
+  await context.onmessage({data:{type:'frame-ack',serial:next.serial,documentToken:next.document.token,presentationToken:next.uiChunks.token}});
+  await context.onmessage({data:{type:'document-replay',generation:1}});
+  const replay=messages.filter(m=>m.type==='frame').at(-1);assert.equal(replay.uiChunks.upserts.length,3);assert.notEqual(replay.uiChunks.key,next.uiChunks.key);assert.equal(legacy,0);
+  await context.onmessage({data:{type:'frame-ack',serial:replay.serial,documentToken:replay.document.token,presentationToken:replay.uiChunks.token}});
+  chunked=false;vm.runInContext('publish()',context);
+  const fallback=messages.filter(m=>m.type==='frame').at(-1);assert(!fallback.uiChunks.enabled);assert(fallback.vertices);assert.equal(legacy,1,'switch to document/reflow fallback refreshes compatibility geometry even at same content revision');
 });

@@ -481,6 +481,78 @@ impl CanvasApp {
         )
         .map_err(|e| e.to_string())
     }
+    /// Chunk metadata pins only immutable resources in the prepared frame.
+    /// Documents and reflow keep their existing independently budgeted paths.
+    pub fn presentation_frame(&self) -> Result<String, String> {
+        let frame = self.frame()?;
+        if !frame.chunked() {
+            return Ok("null".into());
+        }
+        let metadata = |f: &otrios_core::dashboard::retained_text::TextFrame| {
+            f.chunks
+                .iter()
+                .map(|chunk| {
+                    serde_json::json!({
+                        "version":chunk.resource.version.to_string(),
+                        "vertices":chunk.resource.mesh.vertices.len()/6,
+                        "glyphVertices":chunk.resource.mesh.glyph_vertices.len()/16,
+                        "draws":chunk.resource.mesh.draws.len()/3,
+                        "views":chunk.views,"paints":chunk.paints.as_ref(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        serde_json::to_string(&serde_json::json!({
+            "epoch":frame.presentation_epoch.to_string(),
+            "base":metadata(&frame.base),
+            "overlay":frame.overlay.as_ref().map_or_else(Vec::new, metadata),
+        }))
+        .map_err(|e| e.to_string())
+    }
+    pub fn presentation_chunk_vertices(
+        &self,
+        layer: &str,
+        version: &str,
+    ) -> Result<Vec<f32>, String> {
+        Ok(self
+            .presentation_chunk(layer, version)?
+            .resource
+            .mesh
+            .vertices
+            .clone())
+    }
+    pub fn presentation_chunk_glyphs(
+        &self,
+        layer: &str,
+        version: &str,
+    ) -> Result<Vec<f32>, String> {
+        Ok(self
+            .presentation_chunk(layer, version)?
+            .resource
+            .mesh
+            .glyph_vertices
+            .clone())
+    }
+    pub fn presentation_chunk_draws(&self, layer: &str, version: &str) -> Result<Vec<u32>, String> {
+        Ok(self
+            .presentation_chunk(layer, version)?
+            .resource
+            .mesh
+            .draws
+            .clone())
+    }
+    pub fn presentation_chunk_styles(
+        &self,
+        layer: &str,
+        version: &str,
+    ) -> Result<Vec<f32>, String> {
+        Ok(self
+            .presentation_chunk(layer, version)?
+            .resource
+            .styles
+            .as_ref()
+            .clone())
+    }
     pub fn effect_vertices(&self) -> Result<Vec<f32>, String> {
         Ok(self.frame()?.effects.as_ref().clone())
     }
@@ -698,6 +770,26 @@ impl CanvasApp {
 }
 
 impl CanvasApp {
+    fn presentation_chunk(
+        &self,
+        layer: &str,
+        version: &str,
+    ) -> Result<&otrios_core::dashboard::retained_text::TextChunk, String> {
+        let frame = self.frame()?;
+        let text = match layer {
+            "base" => Some(&frame.base),
+            "overlay" => frame.overlay.as_ref(),
+            _ => None,
+        }
+        .ok_or("Unknown presentation layer")?;
+        let version = version
+            .parse::<u64>()
+            .map_err(|_| "Invalid presentation resource version")?;
+        text.chunks
+            .iter()
+            .find(|chunk| chunk.resource.version == version)
+            .ok_or_else(|| "Presentation resource is outside the pinned frame".into())
+    }
     fn frame(&self) -> Result<&Frame, String> {
         self.composer
             .frame()

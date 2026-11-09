@@ -22,3 +22,9 @@ test('history and pending interactions stay bounded, and event timestamps suppor
   for(let i=0;i<80;i++)timings.input();assert.equal(timings.pending.size,32);
   for(let i=0;i<40;i++){const t=timings.input();timings.accept({ui:'app',screen:'home',epoch:i,vertices:new Float32Array(),timing:{...t,epoch:i}});timings.presented(timings.drawn(i),i);}assert.equal(timings.snapshot().samples.length,30);
 });
+
+test('chunked navigation completes from admitted resources without legacy vertex transfer',()=>{
+  const {timings,reports,at}=fixture(),t=timings.input();at(10);
+  timings.accept({ui:'app',screen:'designer',epoch:1,uiChunks:{enabled:true,base:[{version:'1'}],overlay:[]},timing:{...t,epoch:1}});
+  const sample=timings.drawn(1);assert(sample);at(20);timings.presented(sample,1);assert.equal(reports.length,1);assert.equal(reports[0].samples[0].totalMs,20);
+});

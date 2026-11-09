@@ -149,10 +149,10 @@ impl Remap<'_> {
 /// caller publishes this only after final class/layout/connection validation.
 pub(super) fn restore(
     seed: &otrios_interfaces::oib::Seed,
+    resolved: &graph::Document,
     source: &DocumentSource,
 ) -> Result<(DocumentSource, Vec<Allocation>)> {
     let signed = seed.graph.as_ref().ok_or("Missing signed baseline")?;
-    let resolved = super::super::super::oib::imports::resolve(seed)?;
     let mut next = source.next_identity;
     let mut map = Remap {
         signed,

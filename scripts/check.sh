@@ -10,7 +10,7 @@ export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$PWD/target/python-cache}"
 python3 scripts/test_dashboard_release.py
 python3 scripts/test_dashboard_direct.py
 python3 scripts/test_frame_hosting.py
-for script in scripts/test-canvas-worker.mjs scripts/test-app-transfers.mjs scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs; do
+for script in scripts/test-canvas-worker.mjs scripts/test-presentation-transfer.mjs scripts/test-app-transfers.mjs scripts/test-dashboard-session.mjs scripts/test-dashboard-monitoring-session.mjs; do
   node "$script"
 done
 

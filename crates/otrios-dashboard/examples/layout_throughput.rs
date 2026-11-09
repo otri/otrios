@@ -194,6 +194,63 @@ fn run(nodes: usize, iterations: usize, font: &Font) -> Result<(), String> {
                     );
                 },
             );
+            if kind == "mixed" {
+                let mut changed = first.root().clone();
+                let text = changed
+                    .children
+                    .iter_mut()
+                    .find_map(|node| {
+                        if let otrios_interfaces::scene::Primitive::Text { value, .. } =
+                            &mut node.primitive
+                        {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or("Missing mixed-case text")?;
+                *text = "Confirmed".into();
+                let changed = Scene::new(changed)?;
+                let mut presentation = TextPresentation::default();
+                let before = presentation.compose(&first, font);
+                let after = presentation.compose(&changed, font);
+                let changed_resources: Vec<_> = after
+                    .chunks
+                    .iter()
+                    .filter(|chunk| {
+                        !before
+                            .chunks
+                            .iter()
+                            .any(|old| std::sync::Arc::ptr_eq(&old.resource, &chunk.resource))
+                    })
+                    .collect();
+                let upload_bytes: usize = changed_resources
+                    .iter()
+                    .map(|chunk| {
+                        (chunk.resource.mesh.vertices.len()
+                            + chunk.resource.mesh.glyph_vertices.len())
+                            * 4
+                    })
+                    .sum();
+                println!(
+                    "{{\"stage\":\"single_label_resources\",\"kind\":{kind:?},\"nodes\":{nodes},\"clipped\":{clipped},\"resources\":{},\"changed_resources\":{},\"changed_vertex_bytes\":{upload_bytes}}}",
+                    after.chunks.len(),
+                    changed_resources.len()
+                );
+                measure(
+                    "retained_single_label_change",
+                    kind,
+                    nodes,
+                    clipped,
+                    iterations,
+                    |index| {
+                        black_box(
+                            presentation
+                                .compose(if index % 2 == 0 { &first } else { &changed }, font),
+                        );
+                    },
+                );
+            }
             let mut retained = TextPresentation::default();
             let mut profile = ComposeProfile::default();
             let frame = retained.compose_profiled(&first, font, &mut profile);

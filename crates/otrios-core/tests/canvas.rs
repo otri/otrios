@@ -4199,6 +4199,8 @@ fn shared_presentation_preserves_existing_geometry_views_and_paint_order() {
         assert_eq!(frame.base.views, reference.views);
         assert_eq!(frame.base.styles, reference.styles);
         assert_eq!(frame.order[0], Layer::Base);
+        assert_ne!(frame.presentation_epoch, 0);
+        assert_eq!(frame.chunked(), frame.document.is_none());
         if let Some(after) = after {
             let overlay = TextPresentation::default().compose(&after, &font);
             let actual = frame.overlay.as_ref().unwrap();
@@ -4215,12 +4217,14 @@ fn shared_presentation_preserves_existing_geometry_views_and_paint_order() {
             assert_eq!(frame.order, vec![Layer::Base]);
         }
         let next = composer.compose(&mut client, &font).unwrap();
+        assert_eq!(next.presentation_epoch, frame.presentation_epoch);
         assert_eq!(next.revisions.content, frame.revisions.content);
         assert_eq!(next.revisions.placement, frame.revisions.placement);
         assert_eq!(next.revisions.semantics, frame.revisions.semantics);
         assert!(Arc::ptr_eq(&next.base.mesh, &frame.base.mesh));
         composer.clear();
         let replay = composer.compose(&mut client, &font).unwrap();
+        assert_ne!(replay.presentation_epoch, frame.presentation_epoch);
         assert_ne!(replay.revisions.content, frame.revisions.content);
         assert_eq!(replay.base.mesh.vertices, frame.base.mesh.vertices);
     }

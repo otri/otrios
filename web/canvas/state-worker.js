@@ -5,10 +5,12 @@ import {validRelease} from './session.mjs';
 import {prepareUiUpdate} from './ui-update.mjs';
 import {MonitoringSession} from './monitoring-session.mjs';
 import {DocumentTransfer} from './document-transfer.mjs';
-const documents=new DocumentTransfer();
+import {PresentationTransfer} from './presentation-transfer.mjs';
+const documents=new DocumentTransfer(),presentation=new PresentationTransfer();
 let timings=false,navigationTiming=null,graphicsPaused=false,graphicsGeneration=0;
 const timingNow=()=>performance.timeOrigin+performance.now();
 let inputRevision=0,lastInputRevision=-1,composition=null;
+let lastChunked=false;
 let viewportRevision=0,lastTextGeneration=0,lastPaint=0,lastPlacement=0,lastSemantics=0,lastEffects=0,pendingGeometry=false;
 let hostUrl,admittedManifest,updateBusy=false;
 let app,monitoring,activeRelease,pendingRelease,discoveredRelease,stopped=false,stateOnline=false;
@@ -40,23 +42,27 @@ function sendFrame(){
   const frame={transferDrop:app.transfer_drop_kind(),inputRevision,serial,order:plan.order,motionViewport:plan.motion,extent:Array.from(app.viewport_size()),viewportRevision,screen:app.screen(),path:"/"+app.path(),epoch:app.epoch(),ui,state:app.state_ref(),keyboard:app.keyboard_visible(),editing:app.editing(),authRequired:app.auth_required(),presentation:app.presentation_kind(),intent:Array.from(app.motion_intent()),updates:app.stress_updates(),resources:JSON.parse(app.resource_stats())};
   if(ui&&revisions.effects!==lastEffects){frame.effects=app.effect_vertices();lastEffects=revisions.effects;}
   documents.update(ui?JSON.parse(app.document_frame()):null,`${frame.ui}:${frame.epoch}`);
+  const chunkMetadata=ui?JSON.parse(app.presentation_frame()):null,chunked=chunkMetadata!==null;
+  presentation.update(chunkMetadata,`${frame.ui}:${frame.epoch}`);
+  if(chunked!==lastChunked){lastTextGeneration=lastPaint=lastPlacement=0;}
   if(frame.authRequired){frame.path="/"+app.pending_path();frame.title=app.title();}
   if(geometry&&ui){
     frame.textGeneration=revisions.content;
-    if(revisions.content!==lastTextGeneration){frame.vertices=app.vertices();frame.glyphVertices=app.glyph_vertices();frame.draws=app.draws();frame.textStyles=app.text_styles();frame.overlayVertices=app.overlay_vertices();frame.overlayGlyphVertices=app.overlay_glyph_vertices();frame.overlayDraws=app.overlay_draws();frame.overlayStyles=app.overlay_styles();}
-    if(revisions.paint!==lastPaint||revisions.content!==lastTextGeneration){frame.textPaints=app.text_paints();frame.overlayPaints=app.overlay_paints();}
-    if(revisions.placement!==lastPlacement||revisions.content!==lastTextGeneration){frame.textViews=app.text_views();frame.overlayViews=app.overlay_views();}
-    if(revisions.semantics!==lastSemantics||inputRevision!==lastInputRevision){frame.reflow=app.reflow_frame();frame.text=app.text();frame.title=app.title();frame.snapshot=frame.state;frame.layout=frame.ui;frame.inputs=JSON.parse(app.text_inputs());frame.controls=Array.from(app.controls(),id=>({id,label:app.label(id),bounds:Array.from(app.bounds(id)),disabled:app.auth_required(),value:app.control_value(id),role:app.control_is_checkbox(id)?'checkbox':Number.isFinite(app.control_value(id))?'slider':'button',checked:app.control_checked(id),draggable:app.control_draggable(id)}));}
-    lastTextGeneration=revisions.content;lastPaint=revisions.paint;lastPlacement=revisions.placement;lastSemantics=revisions.semantics;lastInputRevision=inputRevision;
+    if(!chunked&&revisions.content!==lastTextGeneration){frame.vertices=app.vertices();frame.glyphVertices=app.glyph_vertices();frame.draws=app.draws();frame.textStyles=app.text_styles();frame.overlayVertices=app.overlay_vertices();frame.overlayGlyphVertices=app.overlay_glyph_vertices();frame.overlayDraws=app.overlay_draws();frame.overlayStyles=app.overlay_styles();}
+    if(!chunked&&(revisions.paint!==lastPaint||revisions.content!==lastTextGeneration)){frame.textPaints=app.text_paints();frame.overlayPaints=app.overlay_paints();}
+    if(!chunked&&(revisions.placement!==lastPlacement||revisions.content!==lastTextGeneration)){frame.textViews=app.text_views();frame.overlayViews=app.overlay_views();}
+    if(revisions.semantics!==lastSemantics||inputRevision!==lastInputRevision||chunked!==lastChunked){frame.reflow=app.reflow_frame();frame.text=app.text();frame.title=app.title();frame.snapshot=frame.state;frame.layout=frame.ui;frame.inputs=JSON.parse(app.text_inputs());frame.controls=Array.from(app.controls(),id=>({id,label:app.label(id),bounds:Array.from(app.bounds(id)),disabled:app.auth_required(),value:app.control_value(id),role:app.control_is_checkbox(id)?'checkbox':Number.isFinite(app.control_value(id))?'slider':'button',checked:app.control_checked(id),draggable:app.control_draggable(id)}));}
+    lastTextGeneration=revisions.content;lastPaint=revisions.paint;lastPlacement=revisions.placement;lastSemantics=revisions.semantics;lastInputRevision=inputRevision;lastChunked=chunked;
   }
 
   if(timings){frame.timing=geometry&&frame.ui&&navigationTiming?.epoch===frame.epoch?{...navigationTiming,frameReady:timingNow()}:null;}
   if(frame.timing&&navigationTiming?.id===frame.timing.id)navigationTiming=null;
   frame.graphicsGeneration=graphicsGeneration;frame.document=documents.take(id=>({glyphVertices:app.document_chunk_vertices(id),vertices:app.document_chunk_geometry(id)}));
-  const transfer=[...(frame.textPaints?[frame.textPaints.buffer,frame.overlayPaints.buffer]:[]),...(frame.effects?[frame.effects.buffer]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.flatMap(u=>[u.glyphVertices.buffer,u.vertices.buffer])];
+  frame.uiChunks=presentation.take((layer,id)=>({vertices:app.presentation_chunk_vertices(layer,id),glyphVertices:app.presentation_chunk_glyphs(layer,id),draws:app.presentation_chunk_draws(layer,id),textStyles:app.presentation_chunk_styles(layer,id)}));
+  const transfer=[...frame.uiChunks.upserts.flatMap(u=>[u.vertices.buffer,u.glyphVertices.buffer,u.draws.buffer,u.textStyles.buffer]),...frame.uiChunks.base.flatMap(d=>[d.views.buffer,d.paints.buffer]),...frame.uiChunks.overlay.flatMap(d=>[d.views.buffer,d.paints.buffer]),...(frame.textPaints?[frame.textPaints.buffer,frame.overlayPaints.buffer]:[]),...(frame.effects?[frame.effects.buffer]:[]),...(frame.vertices?[frame.vertices.buffer,frame.glyphVertices.buffer,frame.draws.buffer,frame.textStyles.buffer,frame.overlayVertices.buffer,frame.overlayGlyphVertices.buffer,frame.overlayDraws.buffer,frame.overlayStyles.buffer]:[]),...(frame.textViews?[frame.textViews.buffer,frame.overlayViews.buffer]:[]),...frame.document.upserts.flatMap(u=>[u.glyphVertices.buffer,u.vertices.buffer])];
   postMessage({type:'frame',...frame},transfer);
 }
-function clearPresentation(){chatLogKey='';composition=null;documents.reset();syncInk();lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
+function clearPresentation(){chatLogKey='';composition=null;documents.reset();presentation.reset();lastChunked=false;syncInk();lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;postMessage({type:'clear-private'});}
 async function signOut(){if(signingOut)return;signingOut=true;transportReady=false;dropPrivate();app.set_session_controls(false);publish();const done=await monitoring.logout();signingOut=false;if(done)postMessage({type:'transport-reconnect'});else postMessage({type:'warning',message:'Could not finish signing out. Reload to retry.'});}
 function dropPrivate(){if(!app.private())return;app.clear_private();clearPresentation();}
 function outgoing(){const actor=app.transfer_actor();if(actor!==transferActor){transferActor=actor;postMessage({type:'transfer-reset'});}const task=JSON.parse(app.take_transfer_task());if(task)postMessage({type:'transfer-task',task});if(transportReady)while(stateSends<4){const mountEpoch=timings?app.pending_mount_epoch():0,bytes=app.outgoing();if(!bytes)break;let timing;if(navigationTiming&&mountEpoch&&app.pending_mount_epoch()===0){navigationTiming.epoch=mountEpoch;navigationTiming.mountQueued=timingNow();timing={...navigationTiming};}stateSends++;postMessage({type:'state-send',bytes,epoch:transportEpoch,...(timing?{timing}:{})},[bytes.buffer]);}pumpChat();pumpCollection();pumpSpaces();const download=JSON.parse(app.take_chat_download());if(download){const [asset,data]=download,bytes=Uint8Array.from(data);postMessage({type:'chat-download',epoch:app.epoch(),name:asset.name,bytes},[bytes.buffer]);}}
@@ -120,9 +126,9 @@ onmessage=async({data:m})=>{try{
     if(discoveredRelease)release({release:discoveredRelease});
     setInterval(()=>{try{const now=performance.now(),before=app.stress_updates(),changed=tick(now,Date.now()/1000),stressed=app.stress_tick(now);if(changed||stressed||documents.needsMore)publish();else if(app.stress_updates()!==before)publish(false);const stall=app.stress_stall_ms();if(stall&&now-lastStall>=1000){lastStall=now;const until=performance.now()+stall;while(performance.now()<until){/* Deliberately stall only the app worker. */}}syncInk();if(wantsInk()&&transportReady&&!inkSending){const ink=app.ink_outgoing(now);if(ink.length){inkSending=true;postMessage({type:'ink-send',bytes:ink,epoch:transportEpoch},[ink.buffer]);}}outgoing();}catch(e){error(e);}},8);return;
   }
-  if(m.type==='frame-ack'){if(m.serial!==inFlight||!app.frame_presented(m.serial))return;documents.ack(m.documentToken);inFlight=null;sendFrame();return;}
-  if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;return;}
-  if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
+  if(m.type==='frame-ack'){if(m.serial!==inFlight||!app.frame_presented(m.serial))return;documents.ack(m.documentToken);presentation.ack(m.presentationToken);inFlight=null;sendFrame();return;}
+  if(m.type==='graphics-lost'){graphicsGeneration=m.generation??graphicsGeneration+1;graphicsPaused=true;if(inFlight!==null)app.frame_presented(inFlight);inFlight=null;documents.reset();presentation.reset();lastChunked=false;lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;return;}
+  if(m.type==='document-replay'){if(m.generation!==undefined&&m.generation!==graphicsGeneration)return;graphicsPaused=false;documents.reset();presentation.reset();lastChunked=false;lastTextGeneration=lastPaint=lastPlacement=lastSemantics=lastEffects=0;if(app)publish();return;}
   if(!app)return;
   if(m.type==='transfer-reply'){try{if(app.receive_transfer(m.id,m.reply))publish();}catch{if(app.receive_transfer(m.id,JSON.stringify({type:'failed',message:'The transfer reply was invalid. Close and try again.'})))publish();}outgoing();return;}
   if(m.type==='transport'){

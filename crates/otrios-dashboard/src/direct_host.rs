@@ -9,6 +9,8 @@ use otrios_core::dashboard::{
 use otrios_linux_display::{Display, TouchInput};
 #[path = "document_gpu.rs"]
 mod document_gpu;
+#[path = "ui_gpu.rs"]
+mod ui_gpu;
 use std::{
     fs,
     sync::{
@@ -157,6 +159,7 @@ pub(super) fn run() -> Result<(), String> {
     let mut scroll_meter = otrios_core::canvas::text_scroll::FrameMeter::default();
     let mut scroll_active = false;
     let mut document_gpu = document_gpu::Cache::default();
+    let mut ui_gpu = ui_gpu::Cache::default();
     let mut drawn = 0;
     let mut acked = 0;
     let mut capacity_released = 0;
@@ -235,6 +238,7 @@ pub(super) fn run() -> Result<(), String> {
                     scroll_active = false;
                     hud = u64::MAX;
                     document_gpu.clear(&mut display)?;
+                    ui_gpu.clear(&mut display)?;
                 }
                 model = Some(next);
                 dirty = true;
@@ -245,6 +249,7 @@ pub(super) fn run() -> Result<(), String> {
                     display.retire_slot(slot)?;
                 }
                 document_gpu.clear(&mut display)?;
+                ui_gpu.clear(&mut display)?;
                 retained = None;
                 retained_overlay = None;
                 effect_revision = None;
@@ -285,16 +290,33 @@ pub(super) fn run() -> Result<(), String> {
                 if dirty || animated || flowing {
                     let before = Instant::now();
                     let draw_started = pan.start();
-                    let base_changed = pan.enabled()
+                    let chunked = f.paint.chunked();
+                    let mut base_changed = pan.enabled()
                         && retained
                             .as_ref()
                             .is_none_or(|old| !Arc::ptr_eq(old, &f.paint.base.mesh));
-                    let overlay_changed = pan.enabled()
+                    let mut overlay_changed = pan.enabled()
                         && f.paint.overlay.as_ref().is_some_and(|overlay| {
                             retained_overlay
                                 .as_ref()
                                 .is_none_or(|old| !Arc::ptr_eq(old, &overlay.mesh))
                         });
+                    let chunk_slots = if chunked {
+                        document_gpu.clear(&mut display)?;
+                        let update = ui_gpu.update(&mut display, &f.paint)?;
+                        if pan.enabled() {
+                            vertex_upload_bytes += update.bytes;
+                            upload_calls += update.uploads.iter().sum::<usize>();
+                            base_changed = update.uploads[0] > 0;
+                            overlay_changed = update.uploads[1] > 0;
+                        }
+                        retained = None;
+                        retained_overlay = None;
+                        Some(update.slots)
+                    } else {
+                        ui_gpu.clear(&mut display)?;
+                        None
+                    };
                     if f.paint.reflow.is_some() {
                         let mesh = reflow.mesh(now);
                         display.upload_scene(
@@ -309,9 +331,10 @@ pub(super) fn run() -> Result<(), String> {
                             upload_calls += 1;
                         }
                         retained = None;
-                    } else if retained
-                        .as_ref()
-                        .is_none_or(|old| !Arc::ptr_eq(old, &f.paint.base.mesh))
+                    } else if !chunked
+                        && retained
+                            .as_ref()
+                            .is_none_or(|old| !Arc::ptr_eq(old, &f.paint.base.mesh))
                     {
                         display.upload_scene(
                             0,
@@ -329,7 +352,7 @@ pub(super) fn run() -> Result<(), String> {
                         display.text_styles(0, &f.paint.base.styles)?;
                         retained = Some(f.paint.base.mesh.clone());
                     }
-                    if f.paint.reflow.is_none() {
+                    if !chunked && f.paint.reflow.is_none() {
                         display.text_paints(0, &f.paint.base.paints)?;
                         display.text_views(0, &f.paint.base.views)?;
                     }
@@ -371,7 +394,7 @@ pub(super) fn run() -> Result<(), String> {
                     };
                     let (document_slots, uploading) =
                         document_gpu.update(&mut display, f.paint.document.as_ref())?;
-                    if let Some(overlay) = &f.paint.overlay {
+                    if !chunked && let Some(overlay) = &f.paint.overlay {
                         if retained_overlay
                             .as_ref()
                             .is_none_or(|old| !Arc::ptr_eq(old, &overlay.mesh))
@@ -432,9 +455,21 @@ pub(super) fn run() -> Result<(), String> {
                     for layer in &f.paint.order {
                         use otrios_core::canvas::presentation::Layer;
                         match layer {
-                            Layer::Base => slots.push(0),
+                            Layer::Base => {
+                                if let Some(chunks) = &chunk_slots {
+                                    slots.extend(chunks[0].iter().copied());
+                                } else {
+                                    slots.push(0);
+                                }
+                            }
                             Layer::Document => slots.extend(document_slots.iter().copied()),
-                            Layer::Overlay => slots.push(1),
+                            Layer::Overlay => {
+                                if let Some(chunks) = &chunk_slots {
+                                    slots.extend(chunks[1].iter().copied());
+                                } else {
+                                    slots.push(1);
+                                }
+                            }
                             Layer::Effects => slots.push(2),
                         }
                     }

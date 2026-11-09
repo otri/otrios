@@ -38,6 +38,18 @@ index limit). Larger documents use the existing bounded visible-mesh path.
 Input fields currently admit at most 256 bytes. This does not add persistence,
 change CRDT/state bytes, or change the release-control opening envelope.
 
+## Resource reuse after local content changes
+
+[The subsequent resource cleanup](../experiments/oib-resource-reuse-2026-11-10.md)
+caches normalized primitives independently, grouping up to 16 ordered draws in a
+resource. Editing a label replaces its group while unchanged groups retain their
+GPU buffers. Versions are local identifiers, namespaced by layer and reset epoch;
+they are not content hashes. Font/mount changes, privacy clearing and graphics
+recovery invalidate the appropriate ownership. Aggregate scene/vertex limits
+remain unchanged, with at most 32 resources per layer and a conservative 16 MiB
+combined UI budget. Oversized, document and reflow candidates retain the compatible
+monolithic path. Painter order, clips and semantic input identities remain intact.
+
 ## Coverage sampling
 
 The disposable 1,024² RGBA8 atlas remains bounded at 4 MiB and 4,096 entries.

@@ -187,3 +187,21 @@ test('paint-only updates reuse geometry and coverage, and restore color arrays f
   assert.equal(calls.filter(c=>c[0]==='bufferData').length,0);
   assert.throws(()=>layer.setPaints(new Float32Array(12).fill(NaN)),/Nonfinite/);
 });
+
+test('retained UI chunk updates upload one resource and draw unchanged neighbors in painter order',async()=>{
+  const {PresentationTransfer,PresentationLayers}=await import('../web/canvas/presentation-transfer.mjs');
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),transfer=new PresentationTransfer(),layers=new PresentationLayers(renderer);renderer.setFont(packet());
+  const colors={red:[1,0,0,1],green:[0,1,0,.5],blue:[0,0,1,1],purple:[1,0,1,1]};
+  const d=(version,color,dx=0)=>({version,vertices:6,glyphVertices:4,draws:3,views:[0,3,dx,0,0,0,1280,800,0,4,dx,0,0,0,1280,800,3,3,dx,0,0,0,1280,800],paints:[...color,...color,...color]});
+  const resource=()=>({...frame(),textStyles:new Float32Array([0,24,0])});
+  transfer.update({epoch:'1',base:[d('1',colors.red),d('2',colors.green)],overlay:[d('1',colors.blue)]},'mount');let p=transfer.take(resource);layers.accept(p);transfer.ack(p.token);renderer.prepare([...layers.base,...layers.overlay]);
+  const unchanged=layers.base[1],overlay=layers.overlay[0],prepared=unchanged.preparedDraws;calls.length=0;
+  transfer.update({epoch:'1',base:[d('3',colors.purple,17),d('2',colors.green)],overlay:[d('1',colors.blue)]},'mount');p=transfer.take(resource);layers.accept(p);
+  assert.equal(layers.base[1],unchanged);assert.equal(layers.overlay[0],overlay);assert.equal(calls.filter(c=>c[0]==='bufferData').length,2,'one new geometry/glyph resource');
+  renderer.prepare([...layers.base,...layers.overlay]);assert.equal(unchanged.preparedDraws,prepared);
+  assert.equal(calls.filter(c=>c[0]==='bufferData').length,3,'only new chunk cached UV stream added');
+  calls.length=0;renderer.beginFrame();for(const layer of [...layers.base,...layers.overlay])layer.draw();renderer.endFrame();
+  assert.deepEqual(calls.filter(c=>c[0]==='vertexAttrib4fv').map(c=>Array.from(c[2])),[...Array(3).fill(colors.purple),...Array(3).fill(colors.green),...Array(3).fill(colors.blue)]);
+  assert.equal(calls.filter(c=>c[0]==='drawArrays').length,9);
+  renderer.contextLost();calls.length=0;layers.clear();assert.equal(layers.resources.size,0);assert.equal(calls.filter(c=>c[0]==='deleteBuffer').length,0,'lost handles are never reused or deleted');
+});

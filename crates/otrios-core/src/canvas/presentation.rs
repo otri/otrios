@@ -12,6 +12,8 @@ pub use otrios_interfaces::presentation::{Layer, Revisions};
 
 #[derive(Clone, Default)]
 pub struct Frame {
+    /// Namespace for local resource versions; changes on mount/font reset or clear.
+    pub presentation_epoch: u64,
     pub base: TextFrame,
     pub overlay: Option<TextFrame>,
     pub document: Option<document::Frame>,
@@ -23,6 +25,50 @@ pub struct Frame {
     pub revisions: Revisions,
 }
 
+impl Frame {
+    /// Document/reflow hosts retain their existing ownership path. A resource
+    /// fallback in either UI layer keeps the entire UI on its compatible path.
+    pub fn chunked(&self) -> bool {
+        use crate::dashboard::retained_text::{MAX_TEXT_CHUNKS, MAX_TEXT_RESOURCE_BYTES};
+        if self.document.is_some() || self.reflow.is_some() {
+            return false;
+        }
+        let mut bytes = 0usize;
+        let mut resources = 0usize;
+        for layer in [Some(&self.base), self.overlay.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if layer.chunks.is_empty() && !layer.mesh.draws.is_empty() {
+                return false;
+            }
+            if layer.chunks.len() > MAX_TEXT_CHUNKS {
+                return false;
+            }
+            let mut geometry = 0usize;
+            let mut glyphs = 0usize;
+            let mut draws = 0usize;
+            for chunk in &layer.chunks {
+                let mesh = &chunk.resource.mesh;
+                geometry += mesh.vertices.len() / 6;
+                glyphs += mesh.glyph_vertices.len() / 16;
+                draws += mesh.draws.len() / 3;
+                // Analytic glyphs plus conservative compact-quad/index storage.
+                // Mirrors the Web transfer bound, not a driver allocation claim.
+                bytes = bytes
+                    .saturating_add(mesh.vertices.len() * 4)
+                    .saturating_add(mesh.glyph_vertices.len() * 8)
+                    .saturating_add(mesh.draws.len() / 3 * 16);
+            }
+            if geometry > 65536 || glyphs > 65536 || draws > 4096 {
+                return false;
+            }
+            resources += layer.chunks.len();
+        }
+        resources > 0 && bytes <= MAX_TEXT_RESOURCE_BYTES
+    }
+}
+
 #[derive(Default)]
 pub struct Composer {
     scene: Option<Arc<Scene>>,
@@ -32,6 +78,7 @@ pub struct Composer {
     overlay: TextPresentation,
     frame: Option<Frame>,
     revisions: Revisions,
+    presentation_epoch: u64,
 }
 fn advance(revision: &mut u32) {
     *revision = revision.wrapping_add(1).max(1);
@@ -39,6 +86,7 @@ fn advance(revision: &mut u32) {
 impl Composer {
     /// Forget private resources without reusing their revision numbers.
     pub fn clear(&mut self) {
+        self.presentation_epoch = self.presentation_epoch.wrapping_add(1).max(1);
         self.scene = None;
         self.frame = None;
         self.base = TextPresentation::default();
@@ -57,6 +105,7 @@ impl Composer {
             || self.scene.as_ref().is_none_or(|s| !Arc::ptr_eq(s, &scene));
         let (base, overlay) = if changed {
             if self.epoch != client.epoch() || self.font != font.hash() {
+                self.presentation_epoch = self.presentation_epoch.wrapping_add(1).max(1);
                 self.base = TextPresentation::default();
                 self.overlay = TextPresentation::default();
             }
@@ -128,6 +177,7 @@ impl Composer {
             order.push(Layer::Effects);
         }
         self.frame = Some(Frame {
+            presentation_epoch: self.presentation_epoch,
             base,
             overlay,
             document,
@@ -182,6 +232,40 @@ impl Demand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn combined_ui_resource_budget_falls_back_before_host_transfer() {
+        use crate::dashboard::{
+            Mesh,
+            retained_text::{TextChunk, TextResource},
+        };
+        let resource = Arc::new(TextResource {
+            version: 1,
+            mesh: Arc::new(Mesh {
+                vertices: vec![],
+                glyph_vertices: vec![0.; 65536 * 16],
+                draws: vec![1, 0, 65536],
+            }),
+            styles: Arc::new(vec![1.]),
+        });
+        let layer = TextFrame {
+            chunks: vec![TextChunk {
+                resource,
+                views: vec![0.; 8],
+                paints: Arc::new(vec![1.; 4]),
+            }],
+            ..Default::default()
+        };
+        let mut frame = Frame {
+            base: layer.clone(),
+            ..Default::default()
+        };
+        assert!(frame.chunked());
+        frame.overlay = Some(layer);
+        assert!(
+            !frame.chunked(),
+            "combined glyph resources exceed the host budget although each layer fits"
+        );
+    }
     #[test]
     fn slow_renderer_coalesces_work_and_ignores_stale_credits() {
         let mut demand = Demand::default();

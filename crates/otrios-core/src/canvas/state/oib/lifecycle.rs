@@ -39,7 +39,7 @@ const MAX_ID: u64 = u64::MAX;
 
 impl Document {
     pub(super) fn oib_next_id(&self) -> Result<u64> {
-        Ok(self.oib_source()?.next_identity)
+        Ok(self.oib_source_shared()?.next_identity)
     }
 
     pub(super) fn oib_allocate(
@@ -103,9 +103,8 @@ impl Document {
         address: &otrios_interfaces::oib::designer::PropertyAddress,
     ) -> Result<bool> {
         use otrios_interfaces::oib::{authoring::BaselineIdentity, designer::*};
-        let source = self.oib_source()?;
-        let signed = super::super::super::oib::imports::resolve(&self.oib_binding()?.seed)?;
-        let current = self.oib_authored_seed()?;
+        let source = self.oib_source_shared()?;
+        let current = self.oib_authored_shared()?;
         let current = &current
             .designer
             .as_ref()
@@ -142,6 +141,7 @@ impl Document {
                 if contains(current, *definition, &[], *node) {
                     return Ok(false);
                 }
+                let signed = self.oib_baseline_graph()?;
                 Ok(contains(&signed.definitions, *definition, &[], *node)
                     || allocated(definition.0)
                     || allocated(node.0))
@@ -169,6 +169,7 @@ impl Document {
                         _ => None,
                     })
                     .unwrap_or(definition);
+                let signed = self.oib_baseline_graph()?;
                 Ok(
                     contains(&signed.definitions, original, &path.references, path.node)
                         || allocated(definition.0)
@@ -294,7 +295,7 @@ impl Document {
             .map(|k| vec![k])
             .collect();
         keep.extend([0, 3, 4].map(|k| vec![4, k]));
-        let resolved = self.oib_resolved_seed()?;
+        let resolved = self.oib_resolved_shared()?;
         for cell in &resolved.cells {
             for branch in [1, 2] {
                 keep.push(address::cell_path(&resolved, branch, cell.id)?);
@@ -311,11 +312,13 @@ impl Document {
     }
 
     pub(super) fn validate_resident_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
-        let seed = self.oib_authored_seed()?;
+        let seed = self.oib_authored_shared()?;
         let allocations = self.oib_allocations()?;
         let next = self.oib_next_id()?;
         let first = self.oib_binding()?.identity_floor;
-        super::super::super::oib::instances::expanded_seed(&seed, &allocations)?;
+        // This exact source/binding/UI metadata already qualified the same
+        // expansion; raw descriptor and causal presence checks below still run.
+        self.oib_resolved_shared()?;
         let mut slots = BTreeSet::new();
         let mut ids = BTreeSet::new();
         if !(first..=MAX_ID).contains(&next) || allocations.len() > MAX_ALLOCATIONS {
@@ -416,7 +419,7 @@ impl StateAdapter {
         let Ok(allocations) = self.doc.oib_allocations() else {
             return 0;
         };
-        let cell_capacity = self.doc.oib_authored_seed().map_or(0, |seed| {
+        let cell_capacity = self.doc.oib_authored_shared().map_or(0, |seed| {
             if let Some(d) = &seed.designer {
                 let used = d.mappings.definitions.len()
                     + allocations

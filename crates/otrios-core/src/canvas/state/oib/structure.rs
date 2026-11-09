@@ -108,8 +108,9 @@ impl Document {
             if let [DocumentEdit::Restore { defaults }] = batch.operations.as_slice() {
                 if *defaults {
                     let signed = candidate.oib_binding()?;
+                    let resolved = candidate.oib_baseline_graph()?;
                     let (mut restored, desired) =
-                        reset::restore(&signed.seed, &candidate.oib_source()?)?;
+                        reset::restore(&signed.seed, &resolved, &candidate.oib_source()?)?;
                     restored.instances = desired.iter().map(Into::into).collect();
                     let mut edits = vec![candidate.oib_source_edit(|source| *source = restored)?];
                     for allocation in desired {

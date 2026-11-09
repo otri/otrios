@@ -144,14 +144,14 @@ fn baseline<'a>(
 
 impl StateAdapter {
     pub(in crate::canvas) fn oib_next_identity(&self) -> Result<u64> {
-        Ok(self.doc.oib_source()?.next_identity)
+        Ok(self.doc.oib_source_shared()?.next_identity)
     }
 
     pub(in crate::canvas) fn oib_structural_properties(
         &self,
         selected: &Selection,
     ) -> Result<Vec<PropertyInfo>> {
-        let source = self.doc.oib_source()?;
+        let source = self.doc.oib_source_shared()?;
         let binding = self.doc.oib_binding()?;
         let imported = crate::canvas::oib::imports::imported_definitions(&binding.seed);
         if match selected {
@@ -163,8 +163,8 @@ impl StateAdapter {
             // Ordinary shared/occurrence property overrides remain available.
             return Ok(vec![]);
         }
-        let signed = binding.seed.graph.clone().ok_or("Missing signed graph")?;
-        let resolved = crate::canvas::oib::imports::resolve(&binding.seed)?;
+        let signed = binding.seed.graph.as_ref().ok_or("Missing signed graph")?;
+        let resolved = self.doc.oib_baseline_graph()?;
         let mut result = vec![];
         let (definition, selected_node) = match selected {
             Selection::Definition(id) => {
@@ -235,7 +235,7 @@ impl StateAdapter {
                     StructuralProperty::Name,
                     "Object name",
                     Value::Text(current.name.clone()),
-                    baseline(&signed, &source, *definition, *node)
+                    baseline(signed, &source, *definition, *node)
                         .map(|n| Value::Text(n.name.clone())),
                 ));
                 (*definition, *node)
@@ -295,7 +295,7 @@ impl StateAdapter {
                 (StructuralProperty::Visible, "Visible"),
             ] {
                 if let Some(current) = value(visual, property) {
-                    let inherited = baseline(&signed, &source, definition, selected_node)
+                    let inherited = baseline(signed, &source, definition, selected_node)
                         .and_then(|n| n.visual.as_ref())
                         .and_then(|v| value(v, property));
                     result.push(field(
@@ -340,7 +340,7 @@ impl StateAdapter {
         let candidate = supplied
             .or(info.inherited)
             .ok_or("No authored default for this field")?;
-        let source = self.doc.oib_source()?;
+        let source = self.doc.oib_source_shared()?;
         let name = || -> Result<String> {
             match &candidate {
                 Value::Text(value)

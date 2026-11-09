@@ -12,6 +12,8 @@ mod baseline;
 #[cfg(test)]
 mod cache_tests;
 mod hierarchy;
+#[cfg(test)]
+mod imports_cache_tests;
 mod inspector;
 mod lifecycle;
 mod reset;
@@ -46,6 +48,10 @@ pub(super) struct CachedBinding {
     ui: Option<std::sync::Arc<Ui>>,
     binding: std::sync::Arc<Binding>,
     digest: merkle::Hash,
+    // Initialized only from this immutable, admitted binding. Sibling snapshots
+    // hold their own entry Arc even when the shared one-entry MRU is replaced.
+    resolved: std::sync::Mutex<Option<std::sync::Arc<otrios_interfaces::oib::graph::Document>>>,
+    library_bytes: usize,
 }
 
 /// Immutable authored and expanded metadata, independent of property registers.
@@ -260,6 +266,25 @@ impl Document {
     fn oib_binding_digest(&self) -> Result<merkle::Hash> {
         Ok(self.oib_binding_entry()?.digest)
     }
+    fn oib_library_bytes(&self) -> Result<usize> {
+        Ok(self.oib_binding_entry()?.library_bytes)
+    }
+    fn oib_baseline_graph(
+        &self,
+    ) -> Result<std::sync::Arc<otrios_interfaces::oib::graph::Document>> {
+        let binding = self.oib_binding_entry()?;
+        let mut cached = binding.resolved.lock().map_err(err)?;
+        if let Some(graph) = cached.as_ref() {
+            return Ok(graph.clone());
+        }
+        // Admission still checks complete closure, class compatibility, export
+        // contracts and resource limits on every changed binding. Reuse only
+        // the successful pure resolution of those exact immutable inputs.
+        let graph =
+            std::sync::Arc::new(super::super::oib::imports::resolve(&binding.binding.seed)?);
+        *cached = Some(graph.clone());
+        Ok(graph)
+    }
     fn oib_binding_entry(&self) -> Result<std::sync::Arc<CachedBinding>> {
         let leaf = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
         {
@@ -295,12 +320,15 @@ impl Document {
         // new baseline bytes here, rather than once per property delta.
         super::super::oib::validate_seed(&binding.seed)?;
         let digest = baseline::digest(&binding)?;
+        let library_bytes = bytes(&binding.seed.resolved_libraries)?.len();
         let binding = std::sync::Arc::new(binding);
         let cached = std::sync::Arc::new(CachedBinding {
             leaf,
             ui: self.oib_ui.clone(),
             binding,
             digest,
+            resolved: Default::default(),
+            library_bytes,
         });
         *self.oib_binding_cache.lock().map_err(err)? = Some(cached.clone());
         Ok(cached)
@@ -785,7 +813,7 @@ impl Document {
             .filter_map(|kind| tree.subtree(&[4, *kind]).ok())
             .map(|t| t.canonical_bytes())
             .sum::<usize>()
-            .checked_add(bytes(&binding.seed.resolved_libraries)?.len())
+            .checked_add(candidate.oib_library_bytes()?)
             .ok_or("OIB resident byte count overflow")?;
         if total > otrios_interfaces::oib::MAX_BYTES {
             return Err("OIB combined authored/causal byte budget".into());
