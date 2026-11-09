@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0035: OIB component designer and composable 2D controls
 
-Date: 2026-11-03. Status: **D1 implemented and live-qualified; later stages proposed**.
+Date: 2026-11-03. Status: **D1, Frame Focus and bounded D2 implemented and live-qualified; remaining D2 and later stages proposed**.
 
 The [D1 execution plan](../OIB_DESIGNER_D1.md) records the concrete milestone,
 isolated worktree roles, integration gates and acceptance.
@@ -11,7 +11,10 @@ The [usability design](../OIB_DESIGNER_USABILITY.md) led to the completed
 [Frame Focus editor](../OIB_FRAME_FOCUS_D1.md): readable tooling, a composition
 tree, typed property drafts and measured Frame scrolling. Its
 [shared-style qualification](../OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) records final
-Frame/Web acceptance. Desktop Studio and the later RFC stages remain deferred.
+Frame/Web acceptance. [Desktop Studio and bounded D2](../OIB_DESKTOP_STUDIO_D2.md)
+subsequently delivered persistent resizable panels and Insert/Edit/Delete/Reorder
+of whole signed components within one admitted canvas. Nested/slot/definition
+authoring, connection editing and D3/D4 remain deferred.
 
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.
@@ -569,8 +572,9 @@ Required focused evidence:
 
 The [Desktop Studio and bounded D2 milestone](../OIB_DESKTOP_STUDIO_D2.md)
 delivers the selected first slice: an existing-factory/Power palette and
-insert/reorder within one admitted canvas. The remaining D2 scope below,
-including slots, nested structure, definition edits and connections, is deferred.
+Insert/Edit/Delete/Reorder of whole signed components within one admitted canvas.
+The remaining D2 scope below, including slots, nested structure, definition edits
+and connections, is deferred.
 
 Add the insert/component palette, root/slot placement, owned-child reorder,
 definition structure editing, and explicit source connections within the signed

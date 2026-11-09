@@ -7,7 +7,7 @@ linked nested component references, stable full ancestry addresses and authored,
 forwarded and live override sources. The original **Live UI** app retains its
 own schema, bindings and values.
 
-## OIB Designer and Frame Focus
+## OIB Designer, Frame Focus and Desktop Studio
 
 Open **Test Playground → OIB Designer** in the selected Space. Two linked
 SettingsPanel instances, Audio and Display, share nested slider/toggle definitions.
@@ -30,12 +30,23 @@ inheritance and masking. **Reset override** causally clears an occurrence overri
 to reveal its current authored or forwarded source. Conflict choices use guarded
 register alternatives. Signed app bindings are read-only to literal UI edits.
 
-The [D1 record](experiments/oib-designer-d1-2026-11-03.md) and
+[Desktop Studio and bounded D2](OIB_DESKTOP_STUDIO_D2.md) add persistent resizable
+Layers, canvas and Properties panels using the same editing model. The browser
+defaults to Studio and native Frame to Focus; a local profile control switches
+between them. An admitted factory palette provides Audio, Display and Power
+components. Insert/Edit/Delete/Reorder operates on whole component instances
+within the presented canvas. Insert and Reorder carry the observed active
+generation; stale requests receive durable rejection receipts and require a
+deliberate retry. Existing app bindings, values and occurrence overrides survive.
+
+The [D1 record](experiments/oib-designer-d1-2026-11-03.md),
 [Frame Focus styling and performance record](OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md)
+and [Studio qualification](OIB_DESKTOP_STUDIO_D2.md#live-acceptance-and-rollback)
 contain actual signed Frame/Web acceptance and its limits. Current state protocol
-is **v27**; release discovery remains control v1 on the shared WebSocket.
-Desktop Studio, arbitrary structure/connection editing, content measurement,
-rich typography, bitmap/vector image import and O3D/XR remain deferred.
+is **v28**; release discovery remains control v1 on the shared WebSocket.
+Nested/slot/definition authoring, connection editing, complete portable UI data
+transfers, content measurement, rich typography, bitmap/vector image import and
+O3D/XR remain deferred.
 
 ## Original Live UI app
 

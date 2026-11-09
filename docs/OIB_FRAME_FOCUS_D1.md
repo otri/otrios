@@ -184,4 +184,6 @@ fractional width 377.5, below-fold Tab and Shift-Tab; original width 320 was
 restored. The final browser check confirmed Sound/Reset as generations 70/71.
 See the follow-up for actual commands, independent review limits and bounded
 [evidence](experiments/data/oib-frame-focus-2026-11-04/). No broad preflight or
-Linux shared-memory IPC acceptance is claimed. Desktop Studio and D2 remain deferred.
+Linux shared-memory IPC acceptance is claimed. Desktop Studio and bounded D2
+were delivered subsequently; see the [Studio milestone](OIB_DESKTOP_STUDIO_D2.md)
+for current authoring scope and qualification.
