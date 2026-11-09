@@ -5,9 +5,15 @@ use otrios_interfaces::{
     oib::{Cell, Seed, designer::*},
 };
 #[path = "../../../../../apps/oib-designer/app.rs"]
-mod designer_fixture;
+pub(super) mod designer_fixture;
+fn fixture_ui() -> Ui {
+    crate::canvas::decode_ui(&crate::canvas::encode_ui(&designer_fixture::ui(&[])).unwrap())
+        .unwrap()
+}
 fn seed() -> Seed {
     Seed {
+        graph: None,
+        expanded: false,
         format: otrios_interfaces::oib::FORMAT.into(),
         main_oib: 1,
         main_class: "otrios.declarative-v1".into(),
@@ -839,12 +845,18 @@ fn mounted_six_panel_fixture(focus: bool) -> Client {
     mounted_fixture_session(focus).0
 }
 fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Session) {
+    mounted_fixture_session_with_count(focus, 4)
+}
+fn mounted_fixture_session_with_count(
+    focus: bool,
+    extra: usize,
+) -> (Client, crate::canvas::Document, Session) {
     assert!(
         designer_fixture::manifest()
             .dependencies
             .contains(&FEATURE.into())
     );
-    let ui = designer_fixture::ui(&[]);
+    let ui = fixture_ui();
     let mut authority =
         crate::canvas::Document::new(ui.state_schema.clone(), "designer-mount").unwrap();
     authority.configure_oib(&ui).unwrap();
@@ -872,14 +884,14 @@ fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Ses
         .unwrap();
     fixture_sync(&mut authority, &mut session, &mut mount.doc);
     mount.refresh().unwrap();
-    for _ in 0..4 {
+    for _ in 0..extra {
         assert!(mount.doc.instantiate_oib(10, None).unwrap());
         fixture_sync(&mut authority, &mut session, &mut mount.doc);
         mount
             .refresh()
             .expect("real fixture plus local chrome admits each new root");
     }
-    assert_eq!(mount.doc.oib_allocations().unwrap().len(), 6);
+    assert_eq!(mount.doc.oib_allocations().unwrap().len(), 2 + extra);
     let instance = mount.doc.oib_allocations().unwrap().last().unwrap().id;
     mount.designer.as_mut().unwrap().focus_layout = focus;
     mount.designer.as_mut().unwrap().revision = None;
@@ -910,7 +922,9 @@ fn mounted_fixture_session(focus: bool) -> (Client, crate::canvas::Document, Ses
         4,
         "selected slider has its real multi-property inspector"
     );
-    assert_eq!(m.designer.as_ref().unwrap().objects.len(), 121);
+    if extra == 4 {
+        assert_eq!(m.designer.as_ref().unwrap().objects.len(), 128);
+    }
     if !focus {
         assert!(m.designer.as_ref().unwrap().actions.len() > 128);
     }
@@ -1469,8 +1483,37 @@ fn editor_address(property: u64) -> PropertyAddress {
         },
     }
 }
-fn focus_property(client: &mut Client, property: u64) -> u32 {
+fn editor_override(client: &Client, property: u64) -> Option<Value> {
+    let register = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_property_register(&editor_address(property))
+        .unwrap();
+    assert_eq!(register.alternatives.len(), 1);
+    register.alternatives[0].clone()
+}
+fn editor_value(client: &Client, property: u64) -> Value {
+    let state = &client.active.as_ref().unwrap().doc;
     let address = editor_address(property);
+    crate::canvas::oib::document::properties(
+        &state.oib_authoring_seed().unwrap(),
+        &state.oib_allocations().unwrap(),
+        &editing::selection(&address),
+        &state.oib_active().unwrap(),
+    )
+    .unwrap()
+    .into_iter()
+    .find(|field| field.address.as_ref() == Some(&address))
+    .unwrap()
+    .value
+    .unwrap()
+}
+fn focus_property(client: &mut Client, property: u64) -> u32 {
+    focus_address(client, editor_address(property))
+}
+fn focus_address(client: &mut Client, address: PropertyAddress) -> u32 {
     let m = client.active.as_mut().unwrap();
     m.font = Some(Arc::new(crate::dashboard::font::test_font()));
     let d = m.designer.as_ref().unwrap();
@@ -1549,24 +1592,14 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
     assert!(client.edit_text_input(epoch, id, &Edit::Enter).unwrap());
     assert!(client.active.as_ref().unwrap().doc.oib_saving());
     settle_editor(&mut client, &mut authority, &mut session);
-    let m = client.active.as_ref().unwrap();
-    let seed = crate::canvas::oib::seed(&m.ui).unwrap();
-    assert_eq!(
-        crate::canvas::oib::effective(seed, &m.doc.oib_active().unwrap(), 203).unwrap(),
-        Value::Text("Sound".into())
-    );
+    assert_eq!(editor_value(&client, 3), Value::Text("Sound".into()));
     assert!(
         client
             .designer_action(LocalAction::Write(editor_address(3), None))
             .unwrap()
     );
     settle_editor(&mut client, &mut authority, &mut session);
-    let m = client.active.as_ref().unwrap();
-    let seed = crate::canvas::oib::seed(&m.ui).unwrap();
-    assert_eq!(
-        crate::canvas::oib::effective(seed, &m.doc.oib_active().unwrap(), 203).unwrap(),
-        Value::Text("Volume".into())
-    );
+    assert_eq!(editor_value(&client, 3), Value::Text("Volume".into()));
     let id = focus_property(&mut client, 2);
     assert!(
         client
@@ -1584,10 +1617,7 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
     );
     assert!(client.blur_text_input(epoch, id).unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
-    assert_eq!(
-        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&202],
-        Some(Value::Number(377.5))
-    );
+    assert_eq!(editor_override(&client, 2), Some(Value::Number(377.5)));
     assert_eq!(
         [1, 2, 3, 4].map(|f| client.active.as_ref().unwrap().read(f).unwrap()),
         fields
@@ -1659,7 +1689,7 @@ fn frame_focus_invalid_drafts_cancel_and_color_picker_stay_local_until_apply() {
     assert!(client.designer_action(LocalAction::Apply(address)).unwrap());
     settle_editor(&mut client, &mut authority, &mut session);
     assert_eq!(
-        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&201],
+        editor_override(&client, 1),
         Some(Value::Color([12, 34, 56, 128]))
     );
 }
@@ -1826,7 +1856,7 @@ fn frame_focus_conflict_choice_is_explicit_and_stale_choice_cannot_resolve_new_s
             node: NodeId(1),
         }))
         .unwrap();
-    let ui = designer_fixture::ui(&[]);
+    let ui = fixture_ui();
     let mut other = StateAdapter::for_ui(&ui, "designer-mount", &[], [2; 16]).unwrap();
     let (mut other_session, _) = authority.open_session(&[2; 16], 0).unwrap();
     other_session.set_oib_editable(true);
@@ -1877,7 +1907,7 @@ fn frame_focus_conflict_choice_is_explicit_and_stale_choice_cannot_resolve_new_s
             .is_empty()
     );
     assert_eq!(
-        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&203],
+        editor_override(&client, 3),
         Some(Value::Text("Sound".into()))
     );
     let root = client.active.as_ref().unwrap().doc.oib_root();
@@ -2071,7 +2101,7 @@ fn frame_focus_source_navigation_waits_for_focused_edit_confirmation() {
     );
     assert!(d.pending_source.is_none());
     assert_eq!(
-        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&201],
+        editor_override(&client, 1),
         Some(Value::Color([0x12, 0x34, 0x56, 255]))
     );
 }
@@ -2135,7 +2165,7 @@ fn frame_focus_hierarchy_selection_after_valid_blur_waits_for_confirmation() {
         target
     );
     assert_eq!(
-        client.active.as_ref().unwrap().doc.oib_active().unwrap()[&203],
+        editor_override(&client, 3),
         Some(Value::Text("Sound".into()))
     );
 }
@@ -2651,7 +2681,7 @@ fn activate_studio_root(client: &mut Client, instance: u64) {
 
 #[test]
 fn desktop_studio_visible_palette_authors_power_and_reorders_without_retargeting() {
-    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
     client.set_oib_designer_studio(true).unwrap();
     let temporary: Vec<_> = client
@@ -2867,7 +2897,7 @@ fn desktop_studio_visible_palette_authors_power_and_reorders_without_retargeting
 #[test]
 fn desktop_studio_structural_rejection_stays_visible_above_scrolled_properties() {
     use super::super::oib_focus_layout::PROPERTIES_TITLE;
-    use otrios_interfaces::oib::InstanceOperation;
+    use otrios_interfaces::oib::authoring::EditBatch as InstanceOperation;
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client.set_viewport([1280., 800.]).unwrap();
     client.set_oib_designer_studio(true).unwrap();
@@ -2891,15 +2921,11 @@ fn desktop_studio_structural_rejection_stays_visible_above_scrolled_properties()
         .as_ref()
         .unwrap()
         .doc
-        .oib_generation()
+        .oib_structural_generation()
         .unwrap();
-    let stale = InstanceOperation::Reorder {
-        instance: 30,
-        before: Some(20),
-        generation: captured_generation,
-    };
+    let stale = InstanceOperation::reorder(captured_generation, 30, Some(20));
 
-    let ui = designer_fixture::ui(&[]);
+    let ui = fixture_ui();
     let mut rival = StateAdapter::for_ui(&ui, "designer-mount", &[], [2; 16]).unwrap();
     let (mut rival_session, _) = authority.open_session(&[2; 16], 0).unwrap();
     rival_session.set_oib_editable(true);
@@ -3016,7 +3042,7 @@ fn studio_scene_control(client: &Client, label: &str) -> (u32, [f32; 2]) {
 
 #[test]
 fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_safely() {
-    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
     client.set_viewport([1280., 800.]).unwrap();
     client.set_oib_designer_studio(true).unwrap();
     let temporary: Vec<_> = client
@@ -3070,6 +3096,27 @@ fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_
         references: vec![],
         node: NodeId(3),
     });
+    let scene = client.scene().unwrap();
+    let viewport = client
+        .active
+        .as_ref()
+        .unwrap()
+        .preview_scroll
+        .as_ref()
+        .unwrap()
+        .node();
+    let path = scene.path(viewport).unwrap();
+    let preview = path.last().unwrap();
+    client
+        .scroll_at(
+            client.epoch(),
+            10_000.,
+            [
+                preview.origin[0] + preview.node.frame.width * preview.scale / 2.,
+                preview.origin[1] + preview.node.frame.height * preview.scale / 2.,
+            ],
+        )
+        .unwrap();
     let layout_node = client
         .active
         .as_ref()
@@ -3080,13 +3127,18 @@ fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_
         .objects
         .iter()
         .find(|o| o.selection == descendant)
-        .unwrap()
+        .expect("Inserted Power label is an inspectable object")
         .layout_node
-        .unwrap();
+        .expect("Inserted Power label has its compiled renderer mapping");
     let scene = client.scene().unwrap();
-    let path = scene.path(u32::from(layout_node)).unwrap();
+    let path = scene
+        .path(u32::from(layout_node))
+        .expect("Inserted Power label is retained in the presented scene");
     let object = path.last().unwrap();
-    let point = [object.origin[0] + 8., object.origin[1] + 16.];
+    let point = [
+        object.origin[0] + object.node.frame.width * object.scale / 2.,
+        object.origin[1] + object.node.frame.height * object.scale / 2.,
+    ];
     for phase in [PointerPhase::Down, PointerPhase::Up] {
         assert!(
             client
@@ -3474,7 +3526,7 @@ fn desktop_studio_delete_release_after_remote_removal_keeps_replacement_safe() {
     );
     assert!(client.input_busy());
 
-    let ui = designer_fixture::ui(&[]);
+    let ui = fixture_ui();
     let mut rival = StateAdapter::for_ui(&ui, "designer-mount", &[], [2; 16]).unwrap();
     let (mut rival_session, _) = authority.open_session(&[2; 16], 0).unwrap();
     rival_session.set_oib_editable(true);
@@ -3738,7 +3790,7 @@ fn desktop_studio_shared_definition_tools_preserve_instances_values_and_stale_ta
         .unwrap();
     assert_eq!(
         definition.nodes[0].visual_children,
-        [2, 3, 8, 7, 9].map(NodeId)
+        [2, 3, 8, 7, 9, 12].map(NodeId)
     );
     let tree = &client
         .active
@@ -3779,4 +3831,227 @@ fn desktop_studio_shared_definition_tools_preserve_instances_values_and_stale_ta
             .structure_tools
             .is_empty()
     );
+}
+
+#[test]
+fn desktop_studio_design_fields_retain_stale_drafts_and_create_editable_components() {
+    use otrios_interfaces::oib::authoring::{DefinitionBatch, DefinitionEdit};
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    client
+        .inspect_oib_selection(Selection::Definition(DefinitionId(10)))
+        .unwrap();
+    let name = PropertyAddress::Structural {
+        target: StructuralTarget::Definition(DefinitionId(10)),
+        property: StructuralProperty::Name,
+    };
+    let id = focus_address(&mut client, name.clone());
+    let replace = |text: &str| Edit::Replace {
+        text: text.into(),
+        cursor: u32::try_from(text.len()).unwrap(),
+        anchor: u32::try_from(text.len()).unwrap(),
+        selection_only: false,
+    };
+    let epoch = client.epoch();
+    client
+        .edit_text_input(epoch, id, &replace("Local design"))
+        .unwrap();
+    let (mut remote, _) = authority.open_session(&[91; 16], 0).unwrap();
+    remote.set_oib_editable(true);
+    authority
+        .receive(
+            &mut remote,
+            &crate::canvas::encode_state_request(&StateRequest::OibInstance {
+                epoch: authority.oib_epoch().unwrap(),
+                sequence: 1,
+                operation: otrios_interfaces::oib::InstanceOperation::definitions(
+                    DefinitionBatch {
+                        generation: authority.oib_status().unwrap().structural_generation,
+                        operations: vec![DefinitionEdit::RenameDefinition {
+                            definition: DefinitionId(10),
+                            name: "Remote design".into(),
+                        }],
+                    },
+                ),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(!client.designer_commit_property(&name, false).unwrap());
+    let designer = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+    assert!(designer.drafts.draft(&name).unwrap().dirty);
+    assert!(
+        designer
+            .editor_notice
+            .as_ref()
+            .unwrap()
+            .contains("Document changed")
+    );
+    assert!(!client.active.as_ref().unwrap().doc.oib_saving());
+    client.designer_discard_property(&name).unwrap();
+    client.active.as_mut().unwrap().refresh().unwrap();
+
+    let next = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_next_identity()
+        .unwrap();
+    activate_studio_tool(&mut client, "New component");
+    settle_editor(&mut client, &mut authority, &mut session);
+    let definition = DefinitionId(next);
+    let node = NodeId(next + 1);
+    client
+        .inspect_oib_selection(Selection::Definition(definition))
+        .unwrap();
+    let width = PropertyAddress::Structural {
+        target: StructuralTarget::Node { definition, node },
+        property: StructuralProperty::Width,
+    };
+    let id = focus_address(&mut client, width.clone());
+    client.edit_text_input(epoch, id, &replace("400")).unwrap();
+    assert!(client.edit_text_input(epoch, id, &Edit::Enter).unwrap());
+    settle_editor(&mut client, &mut authority, &mut session);
+    let authored = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_authoring_seed()
+        .unwrap();
+    let graph = authored.graph.as_ref().unwrap();
+    assert_eq!(
+        graph
+            .definitions
+            .iter()
+            .find(|d| d.id == definition)
+            .unwrap()
+            .nodes[0]
+            .visual
+            .as_ref()
+            .unwrap()
+            .frame[2],
+        otrios_interfaces::layout::Expr::Literal(Value::Number(400.))
+    );
+    assert!(
+        graph
+            .presets
+            .iter()
+            .filter(|p| p.definition == definition)
+            .all(|p| p.frame.is_none())
+    );
+    assert_eq!(
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        values
+    );
+    assert!(client.scene().unwrap().controls().len() <= 128);
+}
+
+#[test]
+fn desktop_studio_connects_an_unbound_preset_through_visible_source_choices() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session_with_count(true, 0);
+    client.set_viewport([1280., 800.]).unwrap();
+    client.set_oib_designer_studio(true).unwrap();
+    client
+        .inspect_oib_selection(Selection::Definition(DefinitionId(12)))
+        .unwrap();
+    let preset = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_next_identity()
+        .unwrap();
+    let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    activate_studio_tool(&mut client, "New preset");
+    settle_editor(&mut client, &mut authority, &mut session);
+    activate_studio_tool(&mut client, "Insert component...");
+    activate_studio_tool(&mut client, "Insert New preset");
+    settle_editor(&mut client, &mut authority, &mut session);
+    let instance = authority
+        .oib_allocations()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.prototype == preset)
+        .unwrap()
+        .id;
+    client.inspect_oib(instance).unwrap();
+    let address = PropertyAddress::Occurrence {
+        instance: InstanceId(instance),
+        path: PropertyPath {
+            references: vec![],
+            node: NodeId(1),
+            property: PropertyId(4),
+        },
+    };
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .details
+            .is_none()
+    );
+    assert!(activate_inspector_action(
+        &mut client,
+        &LocalAction::Details(address.clone())
+    ));
+    let operation = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .connection_tools
+        .iter()
+        .find(|(target, _)| target == &address)
+        .unwrap()
+        .1
+        .iter()
+        .find(|(label, _)| label == "Bind to volume")
+        .unwrap()
+        .1
+        .clone();
+    let properties = authority.oib_values(1).unwrap();
+    assert!(activate_inspector_action(
+        &mut client,
+        &LocalAction::Structure(operation)
+    ));
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert!(authority.oib_status().unwrap().error.is_none());
+    assert!(
+        client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_property_register(&address)
+            .is_err()
+    );
+    assert_eq!(authority.oib_values(1).unwrap(), properties);
+    assert_eq!(
+        [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap()),
+        values
+    );
+    let info = editing::sources(
+        &client.active.as_ref().unwrap().doc,
+        &client
+            .active
+            .as_ref()
+            .unwrap()
+            .doc
+            .oib_authoring_seed()
+            .unwrap(),
+        &address,
+    )
+    .unwrap();
+    assert!(info.binding.is_some());
 }

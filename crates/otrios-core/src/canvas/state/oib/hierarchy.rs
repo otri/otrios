@@ -11,40 +11,31 @@ impl Document {
         Ok(self.oib_source()?.placements)
     }
 
-    pub(super) fn oib_hierarchy_write(
-        &mut self,
-        writer: Actor,
-        batch: &HierarchyBatch,
-    ) -> Result<()> {
+    pub(super) fn oib_hierarchy_stage(&mut self, operations: &[HierarchyEdit]) -> Result<()> {
         let signed = self.oib_binding()?.seed;
         if signed.designer.is_none() || signed.instance_surface.is_none() {
             return Err("Hierarchy authoring requires signed designer factories".into());
         }
-        let status = self.oib_status()?;
-        if batch.generation != status.generation {
-            return Err("Document changed; review hierarchy and retry".into());
-        }
-        if !status.conflicts.is_empty() || self.oib_draft_root()? != status.source_draft {
-            return Err("Resolve the UI draft before changing hierarchy".into());
-        }
-        if batch.operations.is_empty()
-            || batch.operations.len() > MAX_OPERATIONS
-            || bytes(batch)?.len() > MAX_BATCH_BYTES
-        {
-            return Err("OIB hierarchy batch budget".into());
-        }
-        let original = self.tree.hash();
         let previous = self.oib_placements()?;
         let mut placements = previous.clone();
         let previous_connections = self.oib_connections()?;
         let mut connections = previous_connections.clone();
-        for operation in &batch.operations {
+        for operation in operations {
             match operation {
                 HierarchyEdit::Connect {
                     object,
                     property,
                     source,
                 } => {
+                    // Explicitly removing a connection remains valid after the
+                    // definition phase deleted its endpoint. It never guesses a
+                    // replacement endpoint or silently redirects the source.
+                    if source.is_none() {
+                        connections.retain(|connection| {
+                            connection.object != *object || connection.property != *property
+                        });
+                        continue;
+                    }
                     self.require_owned_root(object.instance)?;
                     let seed = self.oib_authored_seed()?;
                     let metadata = super::super::super::oib::document::expanded_metadata(
@@ -59,27 +50,27 @@ impl Document {
                     if let Some(source) = source {
                         connections.push(
                             super::super::super::oib::document::connections::admitted(
-                                &admission, &metadata, object, *property, *source,
+                                &admission,
+                                &metadata,
+                                object,
+                                *property,
+                                source.clone(),
                             )?,
                         );
                     }
                 }
                 HierarchyEdit::Insert {
                     prototype,
+                    name,
                     destination,
                     before,
                     frame,
                 } => {
                     let id = InstanceId(self.oib_next_id()?);
-                    self.oib_instance_stage(
-                        writer,
-                        &InstanceOperation::Insert {
-                            prototype: prototype.0,
-                            before: None,
-                            generation: batch.generation,
-                        },
-                        false,
-                    )?;
+                    self.oib_instance_stage(&InstanceStage::Insert {
+                        prototype: prototype.0,
+                        name: name.clone(),
+                    })?;
                     put(&mut placements, id, destination.clone(), *frame)?;
                     self.order_owned(id, destination, *before, &placements)?;
                 }
@@ -101,25 +92,46 @@ impl Document {
                     );
                     put(&mut placements, *instance, destination, Some(*frame))?;
                 }
+                HierarchyEdit::Reorder { instance, before } => {
+                    self.require_owned_root(*instance)?;
+                    let destination = super::super::super::oib::document::placement::destination(
+                        &placements,
+                        *instance,
+                    );
+                    self.order_owned(*instance, &destination, *before, &placements)?;
+                }
+                HierarchyEdit::Rename { instance, name } => {
+                    self.require_owned_root(*instance)?;
+                    if !admitted_instance_name(&signed, name) {
+                        return Err("Invalid instance name".into());
+                    }
+                    if self
+                        .oib_source()?
+                        .instances
+                        .iter()
+                        .any(|current| current.id == instance.0 && current.name == *name)
+                    {
+                        continue;
+                    }
+                    let edit = self.oib_source_edit(|source| {
+                        if let Some(current) = source
+                            .instances
+                            .iter_mut()
+                            .find(|current| current.id == instance.0)
+                        {
+                            current.name = name.clone();
+                        }
+                    })?;
+                    self.change(&[], vec![edit])?;
+                }
                 HierarchyEdit::Remove { instance } => {
                     if self.oib_retired_instance(instance.0)? {
                         continue;
                     }
                     self.require_owned_root(*instance)?;
-                    let observed = self
-                        .tree
-                        .subtree(&cell_path(5, instance.0))
-                        .map_err(err)?
-                        .to_bytes()
-                        .map_err(err)?;
-                    self.oib_instance_stage(
-                        writer,
-                        &InstanceOperation::Remove {
-                            instance: instance.0,
-                            observed,
-                        },
-                        false,
-                    )?;
+                    self.oib_instance_stage(&InstanceStage::Remove {
+                        instance: instance.0,
+                    })?;
                     placements.retain(|p| p.instance != *instance);
                     connections.retain(|c| c.object.instance != *instance);
                 }
@@ -156,18 +168,14 @@ impl Document {
                     let mut remap = BTreeMap::new();
                     for source in sources {
                         let fresh = InstanceId(self.oib_next_id()?);
-                        self.oib_instance_stage(
-                            writer,
-                            &InstanceOperation::Duplicate {
-                                instance: source.0,
-                                name: if source == *instance {
-                                    name.clone()
-                                } else {
-                                    None
-                                },
+                        self.oib_instance_stage(&InstanceStage::Duplicate {
+                            instance: source.0,
+                            name: if source == *instance {
+                                name.clone()
+                            } else {
+                                None
                             },
-                            false,
-                        )?;
+                        })?;
                         remap.insert(source, fresh);
                         for old in old_connections
                             .iter()
@@ -205,15 +213,6 @@ impl Document {
                 source.placements = placements;
             })?;
             self.change(&[], vec![edit])?;
-        }
-        if self.tree.hash() != original {
-            self.activate_oib(self.tree.clone())?;
-            let status = self.oib_status()?;
-            if status.error.is_some() || !status.conflicts.is_empty() {
-                return Err(status
-                    .error
-                    .unwrap_or_else(|| "Resolve UI conflicts first".into()));
-            }
         }
         Ok(())
     }
@@ -329,14 +328,23 @@ impl StateAdapter {
             .and_then(|a| {
                 if let otrios_interfaces::oib::designer::AssignmentSource::AppBinding(b) = a.source
                 {
-                    Some(b)
+                    admission
+                        .selectors
+                        .iter()
+                        .find(|selector| {
+                            otrios_interfaces::layout::Binding::Local(selector.local) == b
+                        })
+                        .map(|selector| ConnectionSource {
+                            field: selector.field,
+                            projection: selector.projection.clone(),
+                        })
                 } else {
                     None
                 }
             });
-        let generation = self.doc.oib_status()?.generation;
+        let generation = self.doc.oib_status()?.structural_generation;
         let operation = |source| {
-            InstanceOperation::Hierarchy(HierarchyBatch {
+            InstanceOperation::hierarchy(HierarchyBatch {
                 generation,
                 operations: vec![HierarchyEdit::Connect {
                     object: object.clone(),
@@ -347,7 +355,7 @@ impl StateAdapter {
         };
         let mut result: Vec<_> = choices
             .into_iter()
-            .filter(|(_, source)| Some(*source) != current)
+            .filter(|(_, source)| current.as_ref() != Some(source))
             .map(|(name, source)| (format!("Bind to {name}"), operation(Some(source))))
             .collect();
         if self
@@ -368,7 +376,12 @@ impl StateAdapter {
     }
     pub(in crate::canvas) fn oib_hierarchy_allowed(&self, batch: &HierarchyBatch) -> bool {
         let mut preview = self.doc.clone();
-        preview.oib_hierarchy_write([0; 16], batch).is_ok()
+        preview
+            .oib_structure_write([0; 16], &InstanceOperation::hierarchy(batch.clone()))
+            .is_ok()
+            && preview
+                .oib_status()
+                .is_ok_and(|status| status.error.is_none())
     }
     pub(in crate::canvas) fn oib_placement_properties(
         &self,
@@ -502,6 +515,21 @@ impl StateAdapter {
         property: otrios_interfaces::oib::designer::PlacementProperty,
         value: Option<Value>,
     ) -> Result<bool> {
+        self.edit_oib_placement_property_at(
+            object,
+            property,
+            value,
+            self.doc.oib_status()?.structural_generation,
+        )
+    }
+
+    pub(in crate::canvas) fn edit_oib_placement_property_at(
+        &mut self,
+        object: &otrios_interfaces::oib::designer::ObjectAddress,
+        property: otrios_interfaces::oib::designer::PlacementProperty,
+        value: Option<Value>,
+        generation: u64,
+    ) -> Result<bool> {
         use otrios_interfaces::oib::designer::PlacementProperty;
         let properties = self.oib_placement_properties(object)?;
         let mut frame = [0.; 4];
@@ -521,8 +549,8 @@ impl StateAdapter {
             PlacementProperty::Height => 3,
         };
         frame[index] = value;
-        self.edit_oib_structure(InstanceOperation::Hierarchy(HierarchyBatch {
-            generation: self.doc.oib_status()?.generation,
+        self.edit_oib_structure(InstanceOperation::hierarchy(HierarchyBatch {
+            generation,
             operations: vec![HierarchyEdit::Place {
                 instance: object.instance,
                 frame,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Bounded signed D1 metadata. All source graphs are disposable derivations of
-//! the signed Seed; values remain exclusively in the existing causal cells.
+//! Bounded semantic graph queries and disposable compiler metadata.
+//! Authored definitions live in the canonical graph; values remain causal registers.
 use super::*;
 use otrios_interfaces::layout::{Binding, ValueType};
 use otrios_interfaces::oib::designer::Document;
@@ -59,7 +59,7 @@ fn class(doc: &Document, id: ClassId) -> Result<&ClassDescriptor> {
         .find(|c| c.id == id)
         .ok_or_else(|| "Unknown OIB class".into())
 }
-fn descriptors(doc: &Document, id: ClassId) -> Result<Vec<PropertyDescriptor>> {
+pub(super) fn descriptors(doc: &Document, id: ClassId) -> Result<Vec<PropertyDescriptor>> {
     let mut result = Vec::new();
     let mut current = Some(id);
     let mut seen = BTreeSet::new();
@@ -76,6 +76,50 @@ fn descriptors(doc: &Document, id: ClassId) -> Result<Vec<PropertyDescriptor>> {
         return Err("Duplicate inherited OIB property".into());
     }
     Ok(result)
+}
+pub(super) fn graph_property(
+    seed: &Seed,
+    root: InstanceId,
+    path: &PropertyPath,
+    values: &BTreeMap<u64, Option<Value>>,
+) -> Result<(Option<u64>, Option<Value>, Option<Binding>)> {
+    let doc = metadata(seed)?;
+    let root = instance(doc, root)?;
+    let source = sources(doc, root)?;
+    let binding = bound_source(&source, path, &mut BTreeSet::new())?;
+    let value = if binding.is_some() {
+        None
+    } else {
+        resolve(
+            seed,
+            root,
+            &source,
+            path,
+            values,
+            None,
+            &mut BTreeSet::new(),
+        )?
+    };
+    Ok((occurrence_cell(doc, root.id, path), value, binding))
+}
+pub(super) fn graph_descriptor(
+    seed: &Seed,
+    root: InstanceId,
+    path: &PropertyPath,
+) -> Result<PropertyDescriptor> {
+    let doc = metadata(seed)?;
+    property(doc, instance(doc, root)?.definition, path)
+}
+pub(super) fn graph_authored_literal(
+    seed: &Seed,
+    root: InstanceId,
+    path: &PropertyPath,
+) -> Result<Option<Value>> {
+    let doc = metadata(seed)?;
+    Ok(match sources(doc, instance(doc, root)?)?.get(path) {
+        Some(Source::Literal(value)) => Some(value.clone()),
+        _ => None,
+    })
 }
 fn path_node<'a>(
     doc: &'a Document,
@@ -242,7 +286,7 @@ pub fn cell_for_address(
     }
     let doc = metadata(seed)?;
     match address {
-        PropertyAddress::Placement { .. } => {
+        PropertyAddress::Placement { .. } | PropertyAddress::Structural { .. } => {
             Err("Placement uses structural admission, not a causal property cell".into())
         }
         PropertyAddress::Definition {
@@ -261,8 +305,12 @@ pub fn cell_for_address(
                 .iter()
                 .find(|a| a.id == instance.0)
                 .ok_or("Unknown resident OIB root")?;
-            let root = self::instance(doc, *instance)
-                .or_else(|_| self::instance(doc, InstanceId(allocation.prototype)))?;
+            let mapped = if seed.expanded {
+                *instance
+            } else {
+                InstanceId(allocation.prototype)
+            };
+            let root = self::instance(doc, mapped)?;
             let descriptor = property(doc, root.definition, path)?;
             if !descriptor.policy.live_literal
                 || descriptor.editor == PropertyEditor::ReadOnly
@@ -274,16 +322,10 @@ pub fn cell_for_address(
                 .mappings
                 .roots
                 .iter()
-                .find(|m| m.prototype == *instance)
-                .or_else(|| {
-                    doc.mappings
-                        .roots
-                        .iter()
-                        .find(|m| m.prototype.0 == allocation.prototype)
-                })
+                .find(|m| m.prototype == mapped)
                 .and_then(|m| m.cells.iter().find(|m| m.path == *path))
                 .ok_or("Unmapped OIB occurrence property")?;
-            if root.id == *instance && allocation.id != allocation.prototype {
+            if seed.expanded {
                 Ok(row.initial_cell)
             } else {
                 lower(seed, allocation, row)
@@ -532,6 +574,9 @@ pub(in crate::canvas) fn expanded_metadata(
     allocations: &[Allocation],
 ) -> Result<Document> {
     let original = metadata(seed)?;
+    if seed.expanded {
+        return Ok(original.clone());
+    }
     let factories: BTreeSet<_> = original
         .mappings
         .roots
@@ -571,19 +616,9 @@ pub(in crate::canvas) fn expanded_metadata(
         {
             let mut mapping = mapping.clone();
             mapping.address.instance = InstanceId(allocation.id);
-            if allocation.id != allocation.prototype {
-                mapping.layout_node = mapping
-                    .layout_node
-                    .map(|n| {
-                        super::instances::mapped_node(
-                            seed,
-                            usize::from(allocation.slot),
-                            allocation.prototype,
-                            n,
-                        )
-                    })
-                    .transpose()?;
-            }
+            // Source expansion has no renderer allocation. The graph compiler
+            // attaches actual nodes when materializing the current layout.
+            mapping.layout_node = None;
             doc.mappings.objects.push(mapping);
         }
     }
@@ -592,7 +627,7 @@ pub(in crate::canvas) fn expanded_metadata(
         .sort_by(|a, b| a.address.cmp(&b.address));
     doc.mappings.roots.sort_by_key(|m| m.prototype);
     placement::project_metadata(&mut doc, allocations)?;
-    connections::project_metadata(&mut doc)?;
+    connections::project_metadata(&mut doc, &super::graph::source_selectors(seed)?)?;
     Ok(doc)
 }
 fn walk_objects(
@@ -947,7 +982,7 @@ pub(super) fn output_cells(seed: &Seed) -> Result<BTreeMap<(u16, u8), u64>> {
                 if cell.inherit == Some(old) {
                     result.insert(key, cell.id);
                 } else if previous.inherit != Some(cell.id) {
-                    return Err("Conflicting D1 terminal outputs".into());
+                    return Err("Conflicting OIB terminal outputs".into());
                 }
             } else {
                 result.insert(key, cell.id);
@@ -965,9 +1000,10 @@ pub fn decode_seed(bytes: &[u8]) -> Result<Seed> {
     }
     crate::flex_guard::validate(bytes, 32, 48 * 1024, 24 * 1024)?;
     let seed: Seed = flexbuffers::from_slice(bytes).map_err(err)?;
-    super::validate_seed(&seed)?;
     if flexbuffers::to_vec(&seed).map_err(err)? != bytes {
         return Err("Noncanonical OIB seed bytes".into());
     }
+    let seed = super::graph::materialize_seed(&seed)?;
+    super::validate_seed(&seed)?;
     Ok(seed)
 }

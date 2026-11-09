@@ -32,6 +32,9 @@ pub struct Document {
     oib_authored: std::sync::Arc<std::sync::Mutex<Option<oib::AuthoredUi>>>,
     schema: std::sync::Arc<StateSchema>,
     required_fields: u64,
+    /// Live subscription snapshots may omit private OIB draft branches. This
+    /// trusted construction context is never inferred from checkpoint bytes.
+    oib_projection: bool,
     scope: String,
     actor: Actor,
     tree: Snapshot,
@@ -134,6 +137,7 @@ impl Document {
             oib_ui: None,
             oib_authored: Default::default(),
             required_fields: StateSelection::all(&schema).fields,
+            oib_projection: false,
             schema: schema.into(),
             scope: scope.into(),
             actor,
@@ -172,13 +176,14 @@ impl Document {
     fn from_tree(schema: StateSchema, scope: &str, tree: Snapshot) -> Result<Self> {
         validate_schema(&schema)?;
         let required = StateSelection::all(&schema).fields;
-        Self::from_tree_with_fields(schema, scope, tree, required)
+        Self::from_tree_with_fields(schema, scope, tree, required, false)
     }
     fn from_tree_with_fields(
         schema: StateSchema,
         scope: &str,
         tree: Snapshot,
         required_fields: u64,
+        oib_projection: bool,
     ) -> Result<Self> {
         validate_schema(&schema)?;
         let root: Root = decode(&payload(&tree, &[])?)?;
@@ -195,6 +200,7 @@ impl Document {
             oib_authored: Default::default(),
             field_hashes: std::sync::Arc::new(Self::field_hashes(&schema, scope)?),
             required_fields,
+            oib_projection,
             schema: schema.into(),
             scope: scope.into(),
             actor,
@@ -935,6 +941,8 @@ impl StateAdapter {
         Self::with_selection(schema, scope, data, writer, selection)
     }
     pub fn for_ui(ui: &Ui, scope: &str, data: &[u8], writer: [u8; 16]) -> Result<Self> {
+        let admitted = super::oib::graph::materialize(ui)?;
+        let ui = &admitted;
         let mut result = Self::with_selection(
             ui.state_schema.clone(),
             scope,
@@ -1306,6 +1314,7 @@ impl StateAdapter {
                 &self.doc.scope,
                 tree,
                 self.doc.required_fields,
+                true,
             )?
         } else {
             self.doc.validate_changed(&tree)?;

@@ -144,6 +144,13 @@ pub(super) fn manage_request(
             Ok(policy) => Some(policy),
             Err(_) => return Err(core::Error::Unavailable),
         }
+    } else if let Change::DeleteData {
+        app, remove: false, ..
+    } = &request.change
+    {
+        // Reset can adopt a new installed schema; unavailable apps still allow
+        // owners to discard their old data without inventing an app policy.
+        hub.app_policy(app).ok()
     } else {
         None
     };

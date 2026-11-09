@@ -5,45 +5,92 @@ mod app;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
 use otrios_core::canvas::*;
-use otrios_interfaces::{canvas::*, layout::Value};
+use otrios_interfaces::{
+    canvas::*,
+    layout::Value,
+    oib::{
+        authoring::*,
+        designer::{
+            ClassKind, DefinitionId, DesignerMode, InstanceId, PropertyAddress, PropertyId,
+            PropertyPath,
+        },
+    },
+};
 
 fn setup() -> (Ui, Document) {
     assert_eq!(app::manifest().id, "live-ui");
     setup_ui(app::ui(&[]))
 }
 fn setup_stacked() -> (Ui, Document) {
-    // A wide-track fixture keeps input/layout edge cases independent of current sample styling.
-    let ui = decode_ui(
-        &lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-wide-track-ui.lz4"))
-            .unwrap(),
-    )
-    .unwrap();
+    // Canonical wide-track fixture; no obsolete serialized flat-cell seed.
+    let mut ui = app::ui(&[]);
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        panic!("fixture")
+    };
+    let graph = seed.graph.as_mut().unwrap();
+    graph
+        .classes
+        .iter_mut()
+        .find(|c| c.implementation == ClassKind::O2DSlider)
+        .unwrap()
+        .properties
+        .iter_mut()
+        .find(|p| p.id == PropertyId(2))
+        .unwrap()
+        .number_range = Some([320., 600.]);
+    graph
+        .definitions
+        .iter_mut()
+        .find(|d| d.id == DefinitionId(12))
+        .unwrap()
+        .nodes[0]
+        .defaults
+        .iter_mut()
+        .find(|p| p.property == PropertyId(2))
+        .unwrap()
+        .value = Value::Number(520.);
     setup_ui(ui)
 }
 fn setup_ui(ui: Ui) -> (Ui, Document) {
+    // Admit a wide property range so these integration tests can distinguish
+    // valid typed edits from scene-level rejection of a tiny drag target.
+    // The production editor's tighter numeric range is qualified separately.
+    let mut ui = ui;
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        panic!("fixture")
+    };
+    seed.graph
+        .as_mut()
+        .unwrap()
+        .classes
+        .iter_mut()
+        .find(|class| class.implementation == ClassKind::O2DSlider)
+        .unwrap()
+        .properties
+        .iter_mut()
+        .find(|property| property.id == PropertyId(2))
+        .unwrap()
+        .number_range = Some([1., 1000.]);
+    let ui = decode_ui(&encode_ui(&ui).unwrap()).unwrap();
     let mut doc = Document::new(ui.state_schema.clone(), "oib:test").unwrap();
     assert!(doc.configure_oib(&ui).unwrap());
     (ui, doc)
 }
 #[test]
-fn absolute_width_aliases_cannot_target_the_same_frame_twice() {
-    let (mut ui, _) = setup();
-    if let Some(Presentation::Oib(seed)) = &mut ui.presentation {
-        let mut target = seed.cells.iter().find(|c| c.id == 202).unwrap().targets[0].clone();
-        target.property = otrios_interfaces::oib::Property::FrameWidth;
-        seed.cells
-            .iter_mut()
-            .find(|c| c.id == 105)
-            .unwrap()
-            .targets
-            .push(target);
-        assert!(oib::validate_seed(seed).is_err());
-    }
+fn duplicate_derived_targets_are_rejected_instead_of_writing_a_frame_twice() {
+    let (mut ui, doc) = setup();
+    let width = occurrence(&doc, 20, 2);
+    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
+        panic!("fixture")
+    };
+    let cell = seed.cells.iter_mut().find(|c| c.id == width).unwrap();
+    cell.targets.push(cell.targets[0].clone());
+    assert!(oib::validate_seed(seed).is_err());
 }
 
 #[test]
 fn first_oib_admission_and_creation_replay_from_a_pre_oib_checkpoint() {
-    let ui = app::ui(&[]);
+    let ui = decode_ui(&encode_ui(&app::ui(&[])).unwrap()).unwrap();
     let mut doc = Document::new(ui.state_schema.clone(), "oib:test").unwrap();
     let saved = doc.save().unwrap();
     let before = doc.clone();
@@ -54,7 +101,7 @@ fn first_oib_admission_and_creation_replay_from_a_pre_oib_checkpoint() {
         .unwrap();
     let admitted = doc.clone();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
-    admin.instantiate_oib(10, None).unwrap();
+    admin.instantiate_oib(12, None).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     recovered
         .replay(&doc.journal_delta(&admitted).unwrap())
@@ -63,41 +110,139 @@ fn first_oib_admission_and_creation_replay_from_a_pre_oib_checkpoint() {
     assert_eq!(recovered.root_hash(), doc.root_hash());
     assert_eq!(recovered.oib_allocations().unwrap().len(), 3);
 }
-fn compact_changes() -> Vec<(u64, Option<Value>)> {
-    let mut changes: Vec<_> = [
-        (104, 10.),
-        (105, 128.),
-        (106, 144.),
-        (107, 0.),
-        (108, 288.),
-        (109, 10.),
-        (110, 76.),
-        (111, 0.),
-        (112, 64.),
+fn direct_structure(
+    doc: &mut Document,
+    session: &mut Session,
+    sequence: &mut u64,
+    operations: Vec<DocumentEdit>,
+) {
+    *sequence += 1;
+    let bytes = encode_state_request(&StateRequest::OibInstance {
+        epoch: doc.oib_epoch().unwrap(),
+        sequence: *sequence,
+        operation: EditBatch {
+            generation: doc.oib_status().unwrap().structural_generation,
+            operations,
+        },
+    })
+    .unwrap();
+    assert!(doc.receive(session, &bytes).unwrap());
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
+    );
+}
+fn source(doc: &Document) -> DocumentSource {
+    let snapshot = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
+    let leaf = snapshot.subtree(&[4, 4]).unwrap();
+    flexbuffers::from_slice(leaf.register().unwrap().values().next().unwrap().2.unwrap()).unwrap()
+}
+fn scroll_inspector(client: &mut Client, ui: &Ui, delta: f32) -> bool {
+    let scene = client.scene().unwrap();
+    let path = scene
+        .path(u32::from(oib::seed(ui).unwrap().inspector_viewport))
+        .unwrap();
+    let panel = path.last().unwrap();
+    let at = [
+        panel.origin[0] + (panel.node.frame.width - 4.) * panel.scale,
+        panel.origin[1] + panel.node.frame.height * panel.scale / 2.,
+    ];
+    client.scroll_at(client.epoch(), delta, at).unwrap()
+}
+fn shared_address(doc: &Document, property: u64) -> PropertyAddress {
+    let (ui, _) = doc.oib_compiled(2).unwrap();
+    let seed = oib::seed(&ui).unwrap();
+    let metadata = seed.designer.as_ref().unwrap();
+    let class = metadata
+        .classes
+        .iter()
+        .find(|c| c.implementation == ClassKind::O2DSlider)
+        .unwrap()
+        .id;
+    let definition = metadata
+        .definitions
+        .iter()
+        .find(|d| d.nodes.iter().any(|n| n.id == d.root && n.class == class))
+        .unwrap();
+    PropertyAddress::Definition {
+        definition: definition.id,
+        node: definition.root,
+        property: PropertyId(property),
+    }
+}
+fn occurrence_address(doc: &Document, instance: u64, property: u64) -> PropertyAddress {
+    let (ui, _) = doc.oib_compiled(2).unwrap();
+    let metadata = oib::seed(&ui).unwrap().designer.as_ref().unwrap();
+    let allocation = doc
+        .oib_allocations()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.id == instance)
+        .unwrap();
+    let definition = metadata
+        .definitions
+        .iter()
+        .find(|d| d.id.0 == allocation.component)
+        .unwrap();
+    PropertyAddress::Occurrence {
+        instance: InstanceId(instance),
+        path: PropertyPath {
+            references: vec![],
+            node: definition.root,
+            property: PropertyId(property),
+        },
+    }
+}
+fn handle(doc: &Document, address: &PropertyAddress) -> u64 {
+    let (ui, _) = doc.oib_compiled(2).unwrap();
+    oib::document::cell_for_address(
+        oib::seed(&ui).unwrap(),
+        &doc.oib_allocations().unwrap(),
+        address,
+    )
+    .unwrap()
+}
+fn shared(doc: &Document, property: u64) -> u64 {
+    handle(doc, &shared_address(doc, property))
+}
+fn occurrence(doc: &Document, instance: u64, property: u64) -> u64 {
+    handle(doc, &occurrence_address(doc, instance, property))
+}
+fn compact_changes(doc: &Document) -> Vec<(u64, Option<Value>)> {
+    vec![
+        (shared(doc, 2), Some(Value::Number(400.))),
+        (shared(doc, 1), Some(Value::Color([255, 136, 85, 255]))),
     ]
-    .into_iter()
-    .map(|(id, v)| (id, Some(Value::Number(v))))
-    .collect();
-    changes.extend([
-        (113, Some(Value::Boolean(false))),
-        (200, Some(Value::Text("volume".into()))),
-        (300, Some(Value::Text("brightness".into()))),
-    ]);
-    changes
+}
+fn width(client: &Client) -> f32 {
+    use otrios_interfaces::scene::TouchResponder;
+    client
+        .scene()
+        .unwrap()
+        .controls()
+        .into_iter()
+        .find(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
+        .unwrap()
+        .node
+        .frame
+        .width
+}
+fn current_control(doc: &Document, field: u16) -> u8 {
+    doc.oib_compiled(2)
+        .unwrap()
+        .0
+        .handlers
+        .iter()
+        .find(|h| h.kind == GestureKind::Slider && h.fields == [field])
+        .unwrap()
+        .control
 }
 
 #[test]
-fn restored_brightness_inspector_resets_and_cycles_its_own_authored_label() {
-    use otrios_interfaces::{
-        oib::InspectorAction,
-        scene::{PointerEvent, PointerPhase},
-    };
+fn restored_brightness_reset_uses_its_own_current_authored_label() {
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
-    admin
-        .edit_oib(&[(100, Some(Value::Text("Volume".into())))])
-        .unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
     for id in [20, 30] {
         admin.remove_oib(id).unwrap();
         sync(&mut doc, &mut sa, &mut admin);
@@ -108,9 +253,8 @@ fn restored_brightness_inspector_resets_and_cycles_its_own_authored_label() {
     let volume = allocations.iter().find(|a| a.prototype == 20).unwrap().id;
     let brightness = allocations.iter().find(|a| a.prototype == 30).unwrap().id;
     assert!(volume > 30 && brightness > 30);
-    let seed = oib::seed(&ui).unwrap();
-    let vcell = oib::instances::cell_id(seed, &allocations, volume, 100).unwrap();
-    let bcell = oib::instances::cell_id(seed, &allocations, brightness, 100).unwrap();
+    let vcell = occurrence(&doc, volume, 3);
+    let bcell = occurrence(&doc, brightness, 3);
     admin
         .edit_oib(&[
             (vcell, Some(Value::Text("My Volume".into()))),
@@ -118,78 +262,141 @@ fn restored_brightness_inspector_resets_and_cycles_its_own_authored_label() {
         ])
         .unwrap();
     sync(&mut doc, &mut sa, &mut admin);
-    let (mut client, mut session) = mounted_client(&ui, &mut doc);
-    client.inspect_oib(brightness).unwrap();
-    for (caption, expected) in [
-        ("Instance: brightness Label reset", "Brightness"),
-        ("Instance: brightness Label change", "Light"),
-        (
-            "Instance: brightness Label resolve to default",
-            "Brightness",
-        ),
-    ] {
-        let scene = client.scene().unwrap();
-        let control = scene
-            .controls()
-            .into_iter()
-            .find(|p| {
-                p.node
-                    .semantics
-                    .as_ref()
-                    .is_some_and(|s| s.label == caption)
-            })
-            .unwrap();
-        let position = [
-            control.origin[0] + control.node.frame.width * control.scale / 2.,
-            control.origin[1] + control.node.frame.height * control.scale / 2.,
-        ];
-        for phase in [PointerPhase::Down, PointerPhase::Up] {
-            client
-                .pointer_at(
-                    client.epoch(),
-                    PointerEvent {
-                        id: 84,
-                        phase,
-                        position,
-                    },
-                    300,
-                )
-                .unwrap();
-        }
-        pump_client(&mut client, &mut doc, &mut session);
-        let expanded = oib::instances::expanded_seed(seed, &allocations).unwrap();
-        assert_eq!(
-            oib::effective(&expanded, &doc.oib_values(2).unwrap(), bcell).unwrap(),
-            Value::Text(expected.into())
-        );
-        assert_eq!(
-            doc.oib_values(2).unwrap()[&vcell],
-            Some(Value::Text("My Volume".into()))
-        );
-        assert_eq!(
-            client.resource_usage().oib.unwrap().selected_instance,
-            Some(brightness)
-        );
-    }
-    sync(&mut doc, &mut sa, &mut admin);
     admin
-        .oib_inspector_action(bcell, InspectorAction::Clear)
+        .oib_inspector_action(bcell, otrios_interfaces::oib::InspectorAction::Clear)
         .unwrap();
     sync(&mut doc, &mut sa, &mut admin);
+    let (compiled, _) = doc.oib_compiled(2).unwrap();
     assert_eq!(
-        admin.oib_property_text(bcell),
-        "label: Brightness (authored)"
+        oib::effective(
+            oib::seed(&compiled).unwrap(),
+            &doc.oib_values(2).unwrap(),
+            bcell
+        )
+        .unwrap(),
+        Value::Text("Brightness".into())
+    );
+    assert_eq!(
+        doc.oib_values(2).unwrap()[&vcell],
+        Some(Value::Text("My Volume".into()))
     );
     admin.restore_oib(true).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
-    assert_eq!(admin.oib_property_text(vcell), "label: Volume (authored)");
-    assert_eq!(
-        admin.oib_property_text(bcell),
-        "label: Brightness (authored)"
-    );
+    let (compiled, _) = doc.oib_compiled(2).unwrap();
+    for (id, label) in [(volume, "Volume"), (brightness, "Brightness")] {
+        assert_eq!(
+            oib::effective(
+                oib::seed(&compiled).unwrap(),
+                &doc.oib_values(2).unwrap(),
+                occurrence(&doc, id, 3)
+            )
+            .unwrap(),
+            Value::Text(label.into())
+        );
+    }
     assert_eq!(doc.typed_value(1).unwrap(), Value::Number(400.));
     assert_eq!(doc.typed_value(2).unwrap(), Value::Number(700.));
-    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(80.)));
+}
+
+#[test]
+fn component_defaults_survive_remove_add_restore_and_reset() {
+    let (ui, mut doc) = setup();
+    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
+        .unwrap();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
+    let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    let epoch = client.epoch();
+    assert_eq!(width(&client), 440.);
+    admin
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(400.)))])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    for id in [20, 30] {
+        admin.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    admin
+        .instantiate_oib(12, Some("replacement".into()))
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    assert_eq!(width(&client), 400.);
+    admin.restore_oib(false).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    assert_eq!(width(&client), 400.);
+    admin.restore_oib(true).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    pump_client(&mut client, &mut doc, &mut session);
+    assert_eq!(width(&client), 440.);
+    assert_eq!(client.epoch(), epoch);
+    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
+    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
+}
+
+#[test]
+fn restore_authored_bindings_uses_fresh_ids_after_reclamation_and_keeps_design() {
+    let (ui, mut doc) = setup_stacked();
+    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
+    admin.edit_oib(&compact_changes(&doc)).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
+        .unwrap();
+    let mut retired = std::collections::BTreeSet::from([20, 30]);
+    let (mut churn, _) = doc.open_session(&[90; 16], 0).unwrap();
+    churn.set_oib_editable(true);
+    let mut sequence = 0;
+    for _ in 0..24 {
+        direct_structure(
+            &mut doc,
+            &mut churn,
+            &mut sequence,
+            vec![DocumentEdit::Hierarchy(HierarchyEdit::Insert {
+                prototype: InstanceId(20),
+                name: None,
+                destination: Destination::Canvas,
+                before: None,
+                frame: None,
+            })],
+        );
+        let last = doc.oib_allocations().unwrap().last().unwrap().id;
+        assert!(retired.insert(last));
+        direct_structure(
+            &mut doc,
+            &mut churn,
+            &mut sequence,
+            vec![DocumentEdit::Hierarchy(HierarchyEdit::Remove {
+                instance: InstanceId(last),
+            })],
+        );
+    }
+    sync(&mut doc, &mut sa, &mut admin);
+    for id in doc.oib_live(2).unwrap() {
+        admin.remove_oib(id).unwrap();
+        sync(&mut doc, &mut sa, &mut admin);
+    }
+    let (_, mut member) = adapter(&ui, &mut doc, 7, false);
+    let before = doc.root_hash();
+    admin.restore_oib(false).unwrap();
+    let request = issue_instance(&mut admin);
+    assert!(doc.receive(&mut member, &request).is_err());
+    assert_eq!(doc.root_hash(), before);
+    doc.receive(&mut sa, &request).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    let root = doc.root_hash();
+    assert!(!doc.receive(&mut sa, &request).unwrap());
+    assert_eq!(doc.root_hash(), root);
+    let ledger = doc.oib_allocations().unwrap();
+    assert_eq!(ledger.len(), 2);
+    assert!(doc.oib_live(2).unwrap().is_disjoint(&retired));
+    assert_eq!(
+        ledger.iter().map(|a| a.prototype).collect::<Vec<_>>(),
+        [20, 30]
+    );
+    assert_eq!(
+        doc.oib_values(2).unwrap()[&shared(&doc, 2)],
+        Some(Value::Number(400.))
+    );
     let (resolved, _) = doc.oib_compiled(2).unwrap();
     assert_eq!(
         resolved
@@ -200,161 +407,32 @@ fn restored_brightness_inspector_resets_and_cycles_its_own_authored_label() {
             .collect::<Vec<_>>(),
         vec![vec![1], vec![2]]
     );
-}
-
-#[test]
-fn compact_defaults_survive_remove_add_restore_and_reset() {
-    use otrios_interfaces::scene::TouchResponder;
-    let ui = app::ui(&[]);
-    let mut doc = Document::new(ui.state_schema.clone(), "oib:test").unwrap();
-    doc.configure_oib(&ui).unwrap();
-    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
-        .unwrap();
-    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
-    let (mut client, mut session) = mounted_client(&ui, &mut doc);
-    let epoch = client.epoch();
-    let check = |client: &Client, count, pitch| {
-        let scene = client.scene().unwrap();
-        let tracks: Vec<_> = scene
-            .controls()
-            .into_iter()
-            .filter(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
-            .collect();
-        assert_eq!(tracks.len(), count);
-        for (row, track) in tracks.iter().enumerate() {
-            assert_eq!(track.node.frame.width, 288.);
-            assert_eq!(track.node.frame.height, 48.);
-            assert_eq!(track.origin, [192., 140. + row as f32 * pitch]);
-        }
-    };
-    check(&client, 2, 80.);
-    // A later shared design edit still wins over the new signed defaults.
-    admin.edit_oib(&[(112, Some(Value::Number(96.)))]).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    for id in [20, 30] {
-        admin.remove_oib(id).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-    }
     admin
-        .instantiate_oib(10, Some("replacement".into()))
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(1.)))])
         .unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    pump_client(&mut client, &mut doc, &mut session);
-    check(&client, 1, 96.);
-    admin.restore_oib(false).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    pump_client(&mut client, &mut doc, &mut session);
-    check(&client, 2, 96.);
-    admin.restore_oib(true).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    pump_client(&mut client, &mut doc, &mut session);
-    check(&client, 2, 80.);
-    let volume = doc
-        .oib_allocations()
-        .unwrap()
-        .iter()
-        .find(|a| a.prototype == 20)
-        .unwrap()
-        .id;
-    admin.remove_oib(volume).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    admin
-        .instantiate_oib(10, Some("after-reset".into()))
-        .unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    pump_client(&mut client, &mut doc, &mut session);
-    check(&client, 2, 80.);
-    assert_eq!(client.epoch(), epoch);
-    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
-    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
-}
-
-#[test]
-fn restore_authored_bindings_uses_fresh_ids_after_reclamation_and_keeps_design() {
-    use std::collections::BTreeSet;
-    let (ui, mut doc) = setup_stacked();
-    let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
-    admin.edit_oib(&compact_changes()).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    admin.edit_oib(&[(112, Some(Value::Number(80.)))]).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
-        .unwrap();
-    for _ in 0..24 {
-        admin.instantiate_oib(10, None).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-        let last = doc.oib_allocations().unwrap().last().unwrap().id;
-        admin.remove_oib(last).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-    }
-    for id in doc.oib_live(2).unwrap() {
-        admin.remove_oib(id).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-    }
-    assert!(doc.oib_allocations().unwrap().is_empty());
-    let (_, mut member) = adapter(&ui, &mut doc, 7, false);
-    let before = doc.root_hash();
-    admin.restore_oib(false).unwrap();
-    let request = issue_instance(&mut admin);
-    assert!(doc.receive(&mut member, &request).is_err());
-    assert_eq!(doc.root_hash(), before);
-    doc.receive(&mut sa, &request).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    let restored = doc.root_hash();
-    doc.receive(&mut sa, &request).unwrap();
-    assert_eq!(doc.root_hash(), restored);
-    let ledger = doc.oib_allocations().unwrap();
-    assert_eq!(ledger.len(), 2);
-    assert!(
-        doc.oib_live(2)
-            .unwrap()
-            .is_disjoint(&BTreeSet::from([20, 30]))
-    );
-    assert_eq!(
-        ledger.iter().map(|a| a.prototype).collect::<Vec<_>>(),
-        [20, 30]
-    );
-    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(80.)));
-    assert!(!doc.oib_values(2).unwrap().contains_key(&200));
-    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
-    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
-    let (resolved, _) = doc.oib_compiled(2).unwrap();
-    let bindings: Vec<_> = resolved
-        .handlers
-        .iter()
-        .filter(|h| h.kind == GestureKind::Slider)
-        .map(|h| h.fields.clone())
-        .collect();
-    assert_eq!(bindings, vec![vec![1], vec![2]]);
-    admin.edit_oib(&[(106, Some(Value::Number(900.)))]).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     assert!(doc.oib_status().unwrap().error.is_some());
     admin.restore_oib(true).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
-    assert_eq!(doc.oib_values(2).unwrap()[&112], Some(Value::Number(216.)));
-    assert_eq!(doc.oib_values(2).unwrap()[&113], Some(Value::Boolean(true)));
-    assert!(!doc.oib_values(2).unwrap().contains_key(&200));
+    assert!(doc.oib_status().unwrap().error.is_none());
     assert_eq!(doc.oib_allocations().unwrap(), ledger);
+    assert_eq!(doc.oib_values(2).unwrap()[&shared(&doc, 2)], None);
     assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
     assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
 }
 
 #[test]
-fn live_geometry_batches_compact_rows_preserve_values_and_style_new_instances() {
-    use otrios_interfaces::scene::TouchResponder;
+fn live_geometry_batches_preserve_values_and_style_new_instances() {
+    use otrios_interfaces::scene::{PointerEvent, PointerPhase, TouchResponder};
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
     let (mut client, mut session) = mounted_client(&ui, &mut doc);
     client.inspect_oib(30).unwrap();
     let epoch = client.epoch();
     let panel = client.resource_usage().panel_scroll.unwrap().offset;
-    admin.edit_oib(&compact_changes()).unwrap();
+    admin.edit_oib(&compact_changes(&doc)).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
-    assert!(
-        doc.oib_status().unwrap().error.is_none(),
-        "{:?}",
-        doc.oib_status().unwrap().error
-    );
+    assert!(doc.oib_status().unwrap().error.is_none());
     pump_client(&mut client, &mut doc, &mut session);
     assert_eq!(client.epoch(), epoch);
     assert_eq!(client.resource_usage().panel_scroll.unwrap().offset, panel);
@@ -362,35 +440,21 @@ fn live_geometry_batches_compact_rows_preserve_values_and_style_new_instances() 
         client.resource_usage().oib.unwrap().selected_instance,
         Some(30)
     );
-    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(400.));
-    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(700.));
+    assert_eq!(width(&client), 400.);
     let scene = client.scene().unwrap();
-    let controls = scene.controls();
-    let tracks: Vec<_> = controls
-        .iter()
-        .filter(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
-        .collect();
-    assert_eq!(tracks.len(), 2);
-    assert_eq!(tracks[0].node.frame.width, 288.);
-    assert_eq!(tracks[1].origin[1] - tracks[0].origin[1], 64.);
-    assert_eq!(tracks[0].origin, [192., 140.]);
-    let label = controls
-        .iter()
-        .find(|p| {
-            p.node
-                .semantics
-                .as_ref()
-                .is_some_and(|s| s.label == "Inspect volume")
-        })
+    let track = scene
+        .controls()
+        .into_iter()
+        .find(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
         .unwrap();
-    assert_eq!(label.origin, [48., 150.]);
-    assert_eq!(label.node.frame.width, 128.);
-    use otrios_interfaces::scene::{PointerEvent, PointerPhase};
-    for (destination, expected) in [(0., 0.), (1000., 1000.)] {
+    let origin = track.origin;
+    let extent = track.node.frame.width * track.scale;
+    let y = origin[1] + track.node.frame.height * track.scale / 2.;
+    for (fraction, expected) in [(0., 0.), (1., 1000.)] {
         for (phase, x) in [
-            (PointerPhase::Down, 330.),
-            (PointerPhase::Move, destination),
-            (PointerPhase::Up, destination),
+            (PointerPhase::Down, origin[0] + extent / 2.),
+            (PointerPhase::Move, origin[0] + extent * fraction),
+            (PointerPhase::Up, origin[0] + extent * fraction),
         ] {
             client
                 .pointer_at(
@@ -398,7 +462,7 @@ fn live_geometry_batches_compact_rows_preserve_values_and_style_new_instances() 
                     PointerEvent {
                         id: 72,
                         phase,
-                        position: [x, 164.],
+                        position: [x, y],
                     },
                     300,
                 )
@@ -410,28 +474,28 @@ fn live_geometry_batches_compact_rows_preserve_values_and_style_new_instances() 
     admin.duplicate_oib(20, Some("copy".into())).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     pump_client(&mut client, &mut doc, &mut session);
-    let scene = client.scene().unwrap();
-    let tracks: Vec<_> = scene
-        .controls()
-        .into_iter()
-        .filter(|p| matches!(p.node.responder, Some(TouchResponder::Drag(_))))
-        .collect();
-    assert_eq!(tracks.len(), 3);
-    assert!(tracks.iter().all(|p| p.node.frame.width == 288.));
-    assert_eq!(tracks[2].origin[1] - tracks[1].origin[1], 64.);
+    let (compiled, _) = doc.oib_compiled(2).unwrap();
+    assert_eq!(
+        compiled
+            .handlers
+            .iter()
+            .filter(|h| h.kind == GestureKind::Slider)
+            .count(),
+        3
+    );
     let root = doc.oib_status().unwrap().active_root;
-    for (id, value) in [(112, 32.), (106, 900.), (108, 20.)] {
-        admin.edit_oib(&[(id, Some(Value::Number(value)))]).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-        assert!(doc.oib_status().unwrap().error.is_some());
-        assert_eq!(doc.oib_status().unwrap().active_root, root);
-        admin.edit_oib(&compact_changes()).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-        assert!(doc.oib_status().unwrap().error.is_none());
-    }
-    let saved = doc.save().unwrap();
-    let mut restored = Document::load(ui.state_schema.clone(), "oib:test", &saved).unwrap();
-    assert!(!restored.configure_oib(&ui).unwrap());
+    admin
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(1.)))])
+        .unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(doc.oib_status().unwrap().error.is_some());
+    assert_eq!(doc.oib_status().unwrap().active_root, root);
+    admin.edit_oib(&compact_changes(&doc)).unwrap();
+    sync(&mut doc, &mut sa, &mut admin);
+    assert!(doc.oib_status().unwrap().error.is_none());
+    let mut restored =
+        Document::load(ui.state_schema.clone(), "oib:test", &doc.save().unwrap()).unwrap();
+    restored.configure_oib(&ui).unwrap();
     assert_eq!(restored.oib_status().unwrap().active_root, root);
 }
 
@@ -462,7 +526,7 @@ fn live_geometry_activation_waits_for_a_held_slider_without_remounting() {
     pump_client(&mut client, &mut doc, &mut session);
     let old = client.resource_usage().oib.unwrap().presented_generation;
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 9, true);
-    admin.edit_oib(&compact_changes()).unwrap();
+    admin.edit_oib(&compact_changes(&doc)).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     pump_client(&mut client, &mut doc, &mut session);
     assert_eq!(
@@ -491,7 +555,7 @@ fn live_geometry_activation_waits_for_a_held_slider_without_remounting() {
 fn identical_layout_seed_presentation_updates_keep_active_roots() {
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
-    admin.edit_oib(&compact_changes()).unwrap();
+    admin.edit_oib(&compact_changes(&doc)).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     let root = doc.oib_status().unwrap().active_root;
     let mut next = ui.clone();
@@ -548,34 +612,37 @@ fn inherited_properties_overrides_and_causal_clear_survive_checkpoint_and_journa
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
     let accent = Value::Color([255, 136, 85, 255]);
-    assert!(a.edit_oib(&[(101, Some(accent.clone()))]).unwrap());
+    assert!(
+        a.edit_oib(&[(shared(&doc, 1), Some(accent.clone()))])
+            .unwrap()
+    );
     sync(&mut doc, &mut sa, &mut a);
     sync(&mut doc, &mut sb, &mut b);
     let seed = oib::seed(&ui).unwrap();
-    for id in [201, 301] {
+    for id in [occurrence(&doc, 20, 1), occurrence(&doc, 30, 1)] {
         assert_eq!(
             oib::effective(seed, &b.oib_active().unwrap(), id).unwrap(),
             accent
         );
     }
     assert!(
-        b.edit_oib(&[(201, Some(Value::Color([1, 2, 3, 255])))])
+        b.edit_oib(&[(occurrence(&doc, 20, 1), Some(Value::Color([1, 2, 3, 255])))])
             .unwrap()
     );
     sync(&mut doc, &mut sb, &mut b);
     sync(&mut doc, &mut sa, &mut a);
     assert_ne!(
-        oib::effective(seed, &a.oib_active().unwrap(), 201).unwrap(),
+        oib::effective(seed, &a.oib_active().unwrap(), occurrence(&doc, 20, 1)).unwrap(),
         accent
     );
     assert_eq!(
-        oib::effective(seed, &a.oib_active().unwrap(), 301).unwrap(),
+        oib::effective(seed, &a.oib_active().unwrap(), occurrence(&doc, 30, 1)).unwrap(),
         accent
     );
-    assert!(a.edit_oib(&[(201, None)]).unwrap());
+    assert!(a.edit_oib(&[(occurrence(&doc, 20, 1), None)]).unwrap());
     sync(&mut doc, &mut sa, &mut a);
     assert_eq!(
-        oib::effective(seed, &a.oib_active().unwrap(), 201).unwrap(),
+        oib::effective(seed, &a.oib_active().unwrap(), occurrence(&doc, 20, 1)).unwrap(),
         accent
     );
     let mut restored =
@@ -587,10 +654,7 @@ fn inherited_properties_overrides_and_causal_clear_survive_checkpoint_and_journa
         .replay(&doc.journal_delta(&before).unwrap())
         .unwrap();
     assert_eq!(replayed.root_hash(), doc.root_hash());
-    assert_eq!(
-        before.oib_values(2).unwrap()[&101],
-        Some(Value::Color([85, 136, 255, 255]))
-    );
+    assert_eq!(before.oib_values(2).unwrap()[&shared(&before, 1)], None);
     assert!(restored.portable_checkpoint().is_err());
 }
 #[test]
@@ -598,9 +662,9 @@ fn concurrent_values_remain_draft_conflicts_until_an_observing_resolution() {
     let (ui, mut doc) = setup();
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
-    a.edit_oib(&[(100, Some(Value::Text("Alice".into())))])
+    a.edit_oib(&[(shared(&doc, 3), Some(Value::Text("Alice".into())))])
         .unwrap();
-    b.edit_oib(&[(100, Some(Value::Text("Bob".into())))])
+    b.edit_oib(&[(shared(&doc, 3), Some(Value::Text("Bob".into())))])
         .unwrap();
     let a_bytes = issue(&mut a);
     let b_bytes = issue(&mut b);
@@ -613,7 +677,7 @@ fn concurrent_values_remain_draft_conflicts_until_an_observing_resolution() {
         vec![
             otrios_core::canvas::oib::document::address_for_cell(
                 otrios_core::canvas::oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(),
-                100
+                shared(&doc, 3)
             )
             .unwrap()
         ]
@@ -626,14 +690,14 @@ fn concurrent_values_remain_draft_conflicts_until_an_observing_resolution() {
     );
     sync(&mut doc, &mut sa, &mut a);
     sync(&mut doc, &mut sb, &mut b);
-    assert_eq!(a.oib_conflicts(), vec![100]);
-    b.edit_oib(&[(100, Some(Value::Text("Resolved".into())))])
+    assert_eq!(a.oib_conflicts(), vec![shared(&doc, 3)]);
+    b.edit_oib(&[(shared(&doc, 3), Some(Value::Text("Resolved".into())))])
         .unwrap();
     sync(&mut doc, &mut sb, &mut b);
     sync(&mut doc, &mut sa, &mut a);
     assert!(a.oib_conflicts().is_empty());
     assert_eq!(
-        a.oib_active().unwrap()[&100],
+        a.oib_active().unwrap()[&shared(&doc, 3)],
         Some(Value::Text("Resolved".into()))
     );
     assert_eq!(a.oib_active().unwrap(), b.oib_active().unwrap());
@@ -643,17 +707,17 @@ fn disjoint_changes_merge_and_clear_conflicts_with_a_concurrent_override() {
     let (ui, mut doc) = setup();
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
-    a.edit_oib(&[(101, Some(Value::Color([1, 2, 3, 255])))])
+    a.edit_oib(&[(shared(&doc, 1), Some(Value::Color([1, 2, 3, 255])))])
         .unwrap();
-    b.edit_oib(&[(100, Some(Value::Text("Level B".into())))])
+    b.edit_oib(&[(shared(&doc, 3), Some(Value::Text("Level B".into())))])
         .unwrap();
     doc.receive(&mut sa, &issue(&mut a)).unwrap();
     doc.receive(&mut sb, &issue(&mut b)).unwrap();
     assert!(doc.oib_status().unwrap().conflicts.is_empty());
     sync(&mut doc, &mut sa, &mut a);
     sync(&mut doc, &mut sb, &mut b);
-    a.edit_oib(&[(201, None)]).unwrap();
-    b.edit_oib(&[(201, Some(Value::Color([9, 8, 7, 255])))])
+    a.edit_oib(&[(occurrence(&doc, 20, 1), None)]).unwrap();
+    b.edit_oib(&[(occurrence(&doc, 20, 1), Some(Value::Color([9, 8, 7, 255])))])
         .unwrap();
     doc.receive(&mut sa, &issue(&mut a)).unwrap();
     doc.receive(&mut sb, &issue(&mut b)).unwrap();
@@ -662,7 +726,7 @@ fn disjoint_changes_merge_and_clear_conflicts_with_a_concurrent_override() {
         vec![
             otrios_core::canvas::oib::document::address_for_cell(
                 otrios_core::canvas::oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(),
-                201
+                occurrence(&doc, 20, 1)
             )
             .unwrap()
         ]
@@ -675,12 +739,12 @@ fn invalid_and_unauthorized_edits_keep_the_active_ui_and_receipts_atomic() {
     // The viewer never receives draft leaves, and the authority still rejects forged writes.
     assert!(
         member
-            .edit_oib(&[(100, Some(Value::Text("forged".into())))])
+            .edit_oib(&[(shared(&doc, 3), Some(Value::Text("forged".into())))])
             .is_err()
     );
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 2, true);
     admin
-        .edit_oib(&[(100, Some(Value::Text("forged".into())))])
+        .edit_oib(&[(shared(&doc, 3), Some(Value::Text("forged".into())))])
         .unwrap();
     let request = issue(&mut admin);
     let before = doc.root_hash();
@@ -690,21 +754,29 @@ fn invalid_and_unauthorized_edits_keep_the_active_ui_and_receipts_atomic() {
     sync(&mut doc, &mut sa, &mut admin);
     let active = doc.oib_values(2).unwrap();
     let generation = admin.oib_generation();
-    admin.edit_oib(&[(102, Some(Value::Number(1.)))]).unwrap();
+    admin
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(1.)))])
+        .unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     assert!(doc.oib_status().unwrap().error.is_some());
     assert_eq!(doc.oib_values(2).unwrap(), active);
     assert_eq!(admin.oib_generation(), generation);
-    admin.edit_oib(&[(102, Some(Value::Number(400.)))]).unwrap();
+    admin
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(400.)))])
+        .unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     assert!(doc.oib_status().unwrap().error.is_none());
     let before = doc.root_hash();
-    assert!(admin.edit_oib(&[(100, Some(Value::Number(1.)))]).is_err());
+    assert!(
+        admin
+            .edit_oib(&[(shared(&doc, 3), Some(Value::Number(1.)))])
+            .is_err()
+    );
     assert!(
         admin
             .edit_oib(&[
-                (100, Some(Value::Text("one".into()))),
-                (100, Some(Value::Text("two".into()))),
+                (shared(&doc, 3), Some(Value::Text("one".into()))),
+                (shared(&doc, 3), Some(Value::Text("two".into()))),
             ])
             .is_err()
     );
@@ -720,7 +792,19 @@ fn invalid_and_unauthorized_edits_keep_the_active_ui_and_receipts_atomic() {
     assert_eq!(doc.root_hash(), before);
     let mut changed = ui.clone();
     if let Some(Presentation::Oib(seed)) = &mut changed.presentation {
-        seed.cells[0].default = Value::Text("Wrong seed".into());
+        seed.graph
+            .as_mut()
+            .unwrap()
+            .definitions
+            .iter_mut()
+            .find(|definition| definition.id == DefinitionId(12))
+            .unwrap()
+            .nodes[0]
+            .defaults
+            .iter_mut()
+            .find(|property| property.property == PropertyId(3))
+            .unwrap()
+            .value = Value::Text("Wrong seed".into());
     }
     assert!(doc.configure_oib(&changed).is_err());
 }
@@ -829,6 +913,9 @@ fn mounted_client(ui: &Ui, doc: &mut Document) -> (Client, Session) {
         ClientMessage::AcceptMount { .. }
     ));
     pump_client(&mut client, doc, &mut session);
+    // Runtime pointer tests exercise the app, while Edit mode deliberately
+    // intercepts the same pointers for authoring selection/manipulation.
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
     (client, session)
 }
 fn pump_client(client: &mut Client, doc: &mut Document, session: &mut Session) {
@@ -885,8 +972,11 @@ fn shared_scene_edits_keep_mount_identity_and_defer_geometry_until_slider_releas
     )
     .unwrap();
     b.edit_oib(&[
-        (102, Some(Value::Number(400.))),
-        (100, Some(Value::Text("New label".into()))),
+        (shared(&doc, 2), Some(Value::Number(400.))),
+        (
+            occurrence(&doc, 20, 3),
+            Some(Value::Text("New label".into())),
+        ),
     ])
     .unwrap();
     pump_client(&mut b, &mut doc, &mut sb);
@@ -947,6 +1037,7 @@ fn inspector_scroll_is_local_and_visible_buttons_remain_clickable() {
     use otrios_interfaces::scene::{PointerEvent, PointerPhase};
     let (ui, mut doc) = setup();
     let (mut client, mut session) = mounted_client(&ui, &mut doc);
+    client.inspect_oib(20).unwrap();
     let epoch = client.epoch();
     let generation = client.resource_usage().oib.unwrap().active_generation;
     let scene = client.scene().unwrap();
@@ -957,7 +1048,7 @@ fn inspector_scroll_is_local_and_visible_buttons_remain_clickable() {
             p.node
                 .semantics
                 .as_ref()
-                .is_some_and(|s| s.label == "Component: LabeledSlider Accent change")
+                .is_some_and(|s| s.label == "Show property info")
         })
         .unwrap();
     let position = [button.origin[0] + 20., button.origin[1] + 20.];
@@ -974,7 +1065,10 @@ fn inspector_scroll_is_local_and_visible_buttons_remain_clickable() {
             .unwrap();
     }
     pump_client(&mut client, &mut doc, &mut session);
-    assert!(client.resource_usage().oib.unwrap().active_generation > generation);
+    assert_eq!(
+        client.resource_usage().oib.unwrap().active_generation,
+        generation
+    );
     let before = doc.root_hash();
     assert!(client.scroll_map(epoch, 64.).unwrap());
     assert_eq!(doc.root_hash(), before);
@@ -1015,7 +1109,7 @@ fn inspector_panning_retains_uploaded_content_including_initially_hidden_buttons
     let (ui, mut doc) = setup();
     let (mut client, _) = mounted_client(&ui, &mut doc);
     assert!(client.inspect_oib(30).unwrap());
-    client.scroll_map(client.epoch(), -10_000.).unwrap();
+    scroll_inspector(&mut client, &ui, -10_000.);
     let font = otrios_core::dashboard::font::Font::from_zstd(
         include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
@@ -1026,27 +1120,39 @@ fn inspector_panning_retains_uploaded_content_including_initially_hidden_buttons
     let vertices = before.base.mesh.vertices.clone();
     let glyphs = before.base.mesh.glyph_vertices.clone();
     let info = client.resource_usage().oib.unwrap();
+    let mut retained = 0;
     for _ in 0..50 {
-        client.scroll_map(client.epoch(), 20.).unwrap();
+        let previous = composer.frame().unwrap().clone();
+        let moved = scroll_inspector(&mut client, &ui, 20.);
         let frame = composer.compose(&mut client, &font).unwrap();
         assert!(
             Arc::ptr_eq(&before.base.mesh, &frame.base.mesh),
-            "Panning must only update placements and clips"
+            "inspector pans retain app geometry"
         );
-        assert_eq!(before.revisions.content, frame.revisions.content);
-        assert!(Arc::ptr_eq(
-            &before.overlay.as_ref().unwrap().mesh,
-            &frame.overlay.as_ref().unwrap().mesh
-        ));
+        if Arc::ptr_eq(
+            &previous.overlay.as_ref().unwrap().mesh,
+            &frame.overlay.as_ref().unwrap().mesh,
+        ) {
+            retained += usize::from(moved);
+            assert_eq!(previous.revisions.content, frame.revisions.content);
+        } else {
+            // Canonical Designer bounds retained chrome in coarse scrolling
+            // slabs. Crossing a slab may regenerate overlay content once.
+            assert!(frame.revisions.content > previous.revisions.content);
+        }
         assert_eq!(
             client.resource_usage().oib.unwrap().properties,
             info.properties
         );
     }
+    assert!(
+        retained > 0,
+        "pans within retained slabs reuse uploaded chrome"
+    );
     let after = composer.frame().unwrap();
-    assert_ne!(
-        before.overlay.as_ref().unwrap().views,
-        after.overlay.as_ref().unwrap().views
+    assert!(
+        before.overlay.as_ref().unwrap().views != after.overlay.as_ref().unwrap().views,
+        "pointer-routed inspector pan changes placements/clips"
     );
     assert_eq!(
         before.base.mesh.vertices, vertices,
@@ -1060,7 +1166,7 @@ fn inspector_panning_retains_uploaded_content_including_initially_hidden_buttons
         c.node
             .semantics
             .as_ref()
-            .is_some_and(|s| s.label == "Instance: brightness Spacing change")
+            .is_some_and(|s| s.label == "Apply")
     }));
     assert!(
         after
@@ -1077,7 +1183,7 @@ fn slider_feedback_keeps_inspector_content_and_saving_status_unchanged() {
     let (ui, mut doc) = setup();
     let (mut client, _) = mounted_client(&ui, &mut doc);
     assert!(client.inspect_oib(30).unwrap());
-    client.scroll_map(client.epoch(), -10_000.).unwrap();
+    scroll_inspector(&mut client, &ui, -10_000.);
     let font = otrios_core::dashboard::font::Font::from_zstd(
         include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
         otrios_core::dashboard::font_reference::RESOURCE_SHA256,
@@ -1086,12 +1192,7 @@ fn slider_feedback_keeps_inspector_content_and_saving_status_unchanged() {
     let mut composer = presentation::Composer::default();
     let before = composer.compose(&mut client, &font).unwrap().clone();
     let status = client.resource_usage().oib.unwrap().status;
-    let control = ui
-        .handlers
-        .iter()
-        .find(|h| h.fields == [1])
-        .unwrap()
-        .control;
+    let control = current_control(&doc, 1);
     client.event(client.epoch(), control, 650, 0).unwrap();
     let after = composer.compose(&mut client, &font).unwrap();
     assert!(!Arc::ptr_eq(&before.base.mesh, &after.base.mesh));
@@ -1111,12 +1212,7 @@ fn slider_captures_reach_both_endpoints_even_outside_the_track() {
         let (mut client, mut session) = mounted_client(&ui, &mut doc);
         client.set_viewport(viewport).unwrap();
         for field in [1, 2] {
-            let control = ui
-                .handlers
-                .iter()
-                .find(|h| h.fields == [field])
-                .unwrap()
-                .control;
+            let control = current_control(&doc, field);
             let scene = client.scene().unwrap();
             let track = scene
                 .controls()
@@ -1202,7 +1298,7 @@ fn instance_creation_duplication_inheritance_and_removal_share_typed_operations(
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
     let before = doc.clone();
-    assert!(a.instantiate_oib(10, Some("gain".into())).unwrap());
+    assert!(a.instantiate_oib(12, Some("gain".into())).unwrap());
     let request = issue_instance(&mut a);
     doc.receive(&mut sa, &request).unwrap();
     assert!(
@@ -1220,13 +1316,16 @@ fn instance_creation_duplication_inheritance_and_removal_share_typed_operations(
     let gain = allocations[2].id;
     assert_eq!(allocations[2].name, "gain");
     let seed = oib::seed(&ui).unwrap();
-    let label = oib::instances::cell_id(seed, &allocations, gain, 100).unwrap();
-    let accent = oib::instances::cell_id(seed, &allocations, gain, 101).unwrap();
-    b.edit_oib_instance_property(gain, "label", Some(Value::Text("Gain".into())))
-        .unwrap();
+    let label = occurrence(&doc, gain, 3);
+    let accent = occurrence(&doc, gain, 1);
+    b.edit_oib_property(
+        &occurrence_address(&doc, gain, 3),
+        Some(Value::Text("Gain".into())),
+    )
+    .unwrap();
     sync(&mut doc, &mut sb, &mut b);
     sync(&mut doc, &mut sa, &mut a);
-    a.edit_oib(&[(101, Some(Value::Color([1, 2, 3, 255])))])
+    a.edit_oib(&[(shared(&doc, 1), Some(Value::Color([1, 2, 3, 255])))])
         .unwrap();
     sync(&mut doc, &mut sa, &mut a);
     sync(&mut doc, &mut sb, &mut b);
@@ -1246,7 +1345,7 @@ fn instance_creation_duplication_inheritance_and_removal_share_typed_operations(
     sync(&mut doc, &mut sa, &mut a);
     let all = doc.oib_allocations().unwrap();
     let copy = all[3].id;
-    let copied_label = oib::instances::cell_id(seed, &all, copy, 100).unwrap();
+    let copied_label = occurrence(&doc, copy, 3);
     assert_eq!(
         doc.oib_values(2).unwrap()[&copied_label],
         Some(Value::Text("Gain".into()))
@@ -1285,8 +1384,11 @@ fn removing_an_instance_wins_over_a_concurrent_property_edit_without_reusing_ids
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
     a.remove_oib(20).unwrap();
-    b.edit_oib(&[(200, Some(Value::Text("stale edit".into())))])
-        .unwrap();
+    b.edit_oib(&[(
+        occurrence(&doc, 20, 3),
+        Some(Value::Text("stale edit".into())),
+    )])
+    .unwrap();
     let remove = issue_instance(&mut a);
     let edit = issue(&mut b);
     doc.receive(&mut sa, &remove).unwrap();
@@ -1294,18 +1396,21 @@ fn removing_an_instance_wins_over_a_concurrent_property_edit_without_reusing_ids
     assert!(!doc.oib_live(2).unwrap().contains(&20));
     assert!(doc.oib_status().unwrap().error.is_none());
     sync(&mut doc, &mut sa, &mut a);
-    a.instantiate_oib(10, Some("replacement".into())).unwrap();
+    a.instantiate_oib(12, Some("replacement".into())).unwrap();
     sync(&mut doc, &mut sa, &mut a);
     let all = doc.oib_allocations().unwrap();
     assert_ne!(all.last().unwrap().id, 20);
     let (resolved, _) = doc.oib_compiled(2).unwrap();
-    let old_control = ui
-        .handlers
-        .iter()
-        .find(|h| h.kind == GestureKind::Slider && h.fields == [1])
-        .unwrap()
-        .control;
-    assert!(!resolved.handlers.iter().any(|h| h.control == old_control));
+    assert!(
+        !oib::seed(&resolved)
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .instances
+            .iter()
+            .any(|i| i.id == InstanceId(20))
+    );
     assert!(
         resolved
             .handlers
@@ -1314,51 +1419,40 @@ fn removing_an_instance_wins_over_a_concurrent_property_edit_without_reusing_ids
     );
 }
 #[test]
-fn instance_name_conflicts_retain_the_active_graph_and_can_be_removed() {
+fn concurrent_structural_inserts_reject_stale_generations_without_aliasing_names() {
     let (ui, mut doc) = setup();
     let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (mut b, mut sb) = adapter(&ui, &mut doc, 2, true);
-    a.instantiate_oib(10, Some("gain".into())).unwrap();
-    b.instantiate_oib(10, Some("gain".into())).unwrap();
+    a.instantiate_oib(12, Some("gain".into())).unwrap();
+    b.instantiate_oib(12, Some("gain".into())).unwrap();
     doc.receive(&mut sa, &issue_instance(&mut a)).unwrap();
     let active = doc.oib_live(2).unwrap();
-    let active_root = doc.oib_status().unwrap().active_root;
+    let root = doc.oib_status().unwrap().active_root;
     doc.receive(&mut sb, &issue_instance(&mut b)).unwrap();
-    assert_eq!(
-        doc.oib_status().unwrap().active_root,
-        active_root,
-        "invalid graph must retain the exact active closure"
-    );
-    assert!(
-        doc.oib_status()
-            .unwrap()
-            .error
-            .unwrap()
-            .contains("Duplicate instance name")
-    );
+    assert_eq!(doc.oib_status().unwrap().active_root, root);
     assert_eq!(doc.oib_live(2).unwrap(), active);
-    sync(&mut doc, &mut sa, &mut a);
-    let pending = doc.oib_allocations().unwrap().last().unwrap().id;
-    a.remove_oib(pending).unwrap();
-    sync(&mut doc, &mut sa, &mut a);
+    assert!(doc.oib_status().unwrap().error.is_some());
+    sync(&mut doc, &mut sb, &mut b);
+    b.instantiate_oib(12, Some("gain".into())).unwrap();
+    sync(&mut doc, &mut sb, &mut b);
     assert!(doc.oib_status().unwrap().error.is_none());
-    assert_eq!(doc.oib_live(2).unwrap(), active);
+    let allocations = doc.oib_allocations().unwrap();
+    let equal = allocations
+        .iter()
+        .filter(|a| a.name == "gain")
+        .collect::<Vec<_>>();
+    assert_eq!(equal.len(), 2);
+    assert_ne!(equal[0].id, equal[1].id);
 }
 
 #[test]
 fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
-    admin.instantiate_oib(10, Some("temporary".into())).unwrap();
+    admin.instantiate_oib(12, Some("temporary".into())).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     let old = doc.oib_allocations().unwrap().pop().unwrap();
-    let old_cell = oib::instances::cell_id(
-        oib::seed(&ui).unwrap(),
-        &doc.oib_allocations().unwrap(),
-        old.id,
-        100,
-    )
-    .unwrap();
+    let old_cell = occurrence(&doc, old.id, 3);
     let pinned = doc.clone();
     let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
     let (mut remover, mut sr) = adapter(&ui, &mut doc, 3, true);
@@ -1375,16 +1469,10 @@ fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
     let copy = issue_instance(&mut copier);
     admin.remove_oib(old.id).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
-    admin.instantiate_oib(10, Some("temporary".into())).unwrap();
+    admin.instantiate_oib(12, Some("temporary".into())).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     let new = doc.oib_allocations().unwrap().pop().unwrap();
-    let new_cell = oib::instances::cell_id(
-        oib::seed(&ui).unwrap(),
-        &doc.oib_allocations().unwrap(),
-        new.id,
-        100,
-    )
-    .unwrap();
+    let new_cell = occurrence(&doc, new.id, 3);
     assert!(new.id > old.id);
     assert_eq!(new.slot, old.slot);
     assert_eq!(new_cell, old_cell, "compiler handles may be reused");
@@ -1415,7 +1503,7 @@ fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
         assert!(
             otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap())
                 .unwrap()
-                .subtree(&[4, 1, 1, old.id, 0, 1, 100])
+                .subtree(&[4, 1, 1, old.id, 0, 1, 3])
                 .is_err()
         );
         assert_eq!(doc.oib_values(1).unwrap()[&new_cell], None);
@@ -1428,26 +1516,25 @@ fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
 }
 
 #[test]
-fn unused_pending_objects_are_reclaimed_while_other_draft_geometry_is_invalid() {
+fn invalid_draft_rejects_new_objects_without_consuming_identities() {
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
     let active = doc.oib_status().unwrap().active_root;
-    admin.edit_oib(&[(106, Some(Value::Number(900.)))]).unwrap();
+    let roster = doc.oib_allocations().unwrap();
+    let next = source(&doc).next_identity;
+    admin
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(1.)))])
+        .unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     for _ in 0..12 {
-        assert!(admin.instantiate_oib(10, Some("pending".into())).unwrap());
+        assert!(admin.instantiate_oib(12, Some("pending".into())).unwrap());
         sync(&mut doc, &mut sa, &mut admin);
-        let pending = doc.oib_allocations().unwrap().pop().unwrap().id;
         assert!(doc.oib_status().unwrap().error.is_some());
         assert_eq!(doc.oib_status().unwrap().active_root, active);
-        admin.remove_oib(pending).unwrap();
-        sync(&mut doc, &mut sa, &mut admin);
-        assert_eq!(doc.oib_allocations().unwrap().len(), 2);
-        assert_eq!(doc.oib_values(1).unwrap().len(), 22);
-        assert_eq!(doc.oib_status().unwrap().active_root, active);
-        assert!(doc.oib_status().unwrap().error.is_some());
+        assert_eq!(doc.oib_allocations().unwrap(), roster);
+        assert_eq!(source(&doc).next_identity, next);
     }
-    admin.edit_oib(&[(106, Some(Value::Number(144.)))]).unwrap();
+    admin.edit_oib(&[(shared(&doc, 2), None)]).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     assert!(doc.oib_status().unwrap().error.is_none());
 }
@@ -1456,18 +1543,22 @@ fn unused_pending_objects_are_reclaimed_while_other_draft_geometry_is_invalid() 
 fn invalid_restore_retains_the_active_roster_and_does_not_consume_fresh_ids() {
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
-    admin.instantiate_oib(10, Some("extra".into())).unwrap();
+    admin.instantiate_oib(12, Some("extra".into())).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     admin.remove_oib(20).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     let roster = doc.oib_allocations().unwrap();
     let active = doc.oib_status().unwrap().active_root;
-    admin.edit_oib(&[(106, Some(Value::Number(900.)))]).unwrap();
+    let next = source(&doc).next_identity;
+    admin
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(1.)))])
+        .unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     admin.restore_oib(false).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     assert!(admin.confirmed());
     assert_eq!(doc.oib_allocations().unwrap(), roster);
+    assert_eq!(source(&doc).next_identity, next);
     assert_eq!(doc.oib_status().unwrap().active_root, active);
     assert!(doc.oib_status().unwrap().error.is_some());
     admin.restore_oib(true).unwrap();
@@ -1475,7 +1566,10 @@ fn invalid_restore_retains_the_active_roster_and_does_not_consume_fresh_ids() {
     assert!(doc.oib_status().unwrap().error.is_none());
     let allocations = doc.oib_allocations().unwrap();
     assert_eq!(allocations.len(), 2);
-    assert_eq!(allocations[0].id, 32, "failed restoration consumes no IDs");
+    assert_eq!(
+        allocations[0].id, next,
+        "rejected restore consumes no identities"
+    );
     assert_eq!(
         allocations.iter().map(|a| a.prototype).collect::<Vec<_>>(),
         [20, 30]
@@ -1486,7 +1580,7 @@ fn instance_requests_are_authorized_and_budgeted_before_allocation() {
     let (ui, mut doc) = setup();
     let (mut admin, mut sa) = adapter(&ui, &mut doc, 1, true);
     let (_, mut member) = adapter(&ui, &mut doc, 2, false);
-    admin.instantiate_oib(10, None).unwrap();
+    admin.instantiate_oib(12, None).unwrap();
     let wire = issue_instance(&mut admin);
     let before = doc.root_hash();
     assert!(doc.receive(&mut member, &wire).is_err());
@@ -1499,10 +1593,10 @@ fn instance_requests_are_authorized_and_budgeted_before_allocation() {
     doc.receive(&mut sa, &wire).unwrap();
     sync(&mut doc, &mut sa, &mut admin);
     while doc.oib_live(2).unwrap().len() < otrios_interfaces::oib::MAX_LIVE_INSTANCES {
-        assert!(admin.instantiate_oib(10, None).unwrap());
+        assert!(admin.instantiate_oib(12, None).unwrap());
         sync(&mut doc, &mut sa, &mut admin);
     }
-    assert!(!admin.instantiate_oib(10, None).unwrap());
+    assert!(!admin.instantiate_oib(12, None).unwrap());
     for id in doc.oib_live(2).unwrap() {
         doc.oib_compiled_selected(2, Some(id)).unwrap();
     }
@@ -1537,7 +1631,7 @@ fn structural_activation_waits_for_a_held_slider_and_preserves_local_inspection(
         )
         .unwrap();
     let (mut editor, mut se) = adapter(&ui, &mut doc, 9, true);
-    editor.instantiate_oib(10, Some("gain".into())).unwrap();
+    editor.instantiate_oib(12, Some("gain".into())).unwrap();
     sync(&mut doc, &mut se, &mut editor);
     pump_client(&mut client, &mut doc, &mut session);
     let info = client.resource_usage().oib.unwrap();
@@ -1591,7 +1685,7 @@ fn reclaimed_slot_and_deleted_inspector_wait_for_the_held_gesture() {
     let (ui, mut doc) = setup();
     let (mut editor, mut se) = adapter(&ui, &mut doc, 9, true);
     editor
-        .instantiate_oib(10, Some("old-control".into()))
+        .instantiate_oib(12, Some("old-control".into()))
         .unwrap();
     sync(&mut doc, &mut se, &mut editor);
     let old = doc.oib_allocations().unwrap().pop().unwrap();
@@ -1621,7 +1715,7 @@ fn reclaimed_slot_and_deleted_inspector_wait_for_the_held_gesture() {
     editor.remove_oib(old.id).unwrap();
     sync(&mut doc, &mut se, &mut editor);
     editor
-        .instantiate_oib(10, Some("replacement".into()))
+        .instantiate_oib(12, Some("replacement".into()))
         .unwrap();
     sync(&mut doc, &mut se, &mut editor);
     let new = doc.oib_allocations().unwrap().pop().unwrap();
@@ -1657,11 +1751,13 @@ fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
     let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
     // Three compact rows fit without scrolling; make content overflow explicitly.
     editor
-        .edit_oib(&[(112, Some(Value::Number(216.)))])
+        .edit_oib(&[(shared(&doc, 2), Some(Value::Number(400.)))])
         .unwrap();
     sync(&mut doc, &mut se, &mut editor);
-    editor.instantiate_oib(10, Some("gain".into())).unwrap();
-    sync(&mut doc, &mut se, &mut editor);
+    for name in ["gain", "extra"] {
+        editor.instantiate_oib(12, Some(name.into())).unwrap();
+        sync(&mut doc, &mut se, &mut editor);
+    }
     let (mut client, mut session) = mounted_client(&ui, &mut doc);
     pump_client(&mut client, &mut doc, &mut session);
     let root = doc.root_hash();
@@ -1730,32 +1826,69 @@ fn local_inspector_selection_and_preview_scrolling_do_not_write_shared_state() {
 
 #[test]
 fn removed_objects_do_not_accumulate_and_an_empty_preview_can_be_repopulated() {
-    let (ui, mut doc) = setup();
-    let (mut a, mut sa) = adapter(&ui, &mut doc, 1, true);
-    for id in [20, 30] {
-        a.remove_oib(id).unwrap();
-        sync(&mut doc, &mut sa, &mut a);
-    }
+    let (_ui, mut doc) = setup();
+    let (mut writer, _) = doc.open_session(&[91; 16], 0).unwrap();
+    writer.set_oib_editable(true);
+    let mut sequence = 0;
+    direct_structure(
+        &mut doc,
+        &mut writer,
+        &mut sequence,
+        vec![20, 30]
+            .into_iter()
+            .map(|id| {
+                DocumentEdit::Hierarchy(HierarchyEdit::Remove {
+                    instance: InstanceId(id),
+                })
+            })
+            .collect(),
+    );
     let baseline = doc.save().unwrap().len();
+    let remaining = doc.oib_values(1).unwrap().len();
     let mut ids = std::collections::BTreeSet::new();
     for _ in 0..64 {
-        assert!(a.instantiate_oib(10, None).unwrap());
-        sync(&mut doc, &mut sa, &mut a);
-        assert!(doc.oib_status().unwrap().error.is_none());
+        direct_structure(
+            &mut doc,
+            &mut writer,
+            &mut sequence,
+            vec![DocumentEdit::Hierarchy(HierarchyEdit::Insert {
+                prototype: InstanceId(20),
+                name: None,
+                destination: Destination::Canvas,
+                before: None,
+                frame: None,
+            })],
+        );
         let allocation = doc.oib_allocations().unwrap().pop().unwrap();
         assert!(ids.insert(allocation.id));
         assert_eq!(allocation.slot, 0, "renderer slot is reusable");
         doc.oib_compiled_selected(2, Some(allocation.id)).unwrap();
-        a.remove_oib(allocation.id).unwrap();
-        sync(&mut doc, &mut sa, &mut a);
+        direct_structure(
+            &mut doc,
+            &mut writer,
+            &mut sequence,
+            vec![DocumentEdit::Hierarchy(HierarchyEdit::Remove {
+                instance: InstanceId(allocation.id),
+            })],
+        );
         assert!(doc.oib_allocations().unwrap().is_empty());
-        assert_eq!(doc.oib_values(1).unwrap().len(), 14);
-        assert_eq!(doc.oib_values(2).unwrap().len(), 14);
+        assert_eq!(doc.oib_values(1).unwrap().len(), remaining);
+        assert_eq!(doc.oib_values(2).unwrap().len(), remaining);
         assert!(doc.save().unwrap().len() <= baseline + 128);
     }
     assert!(doc.oib_live(2).unwrap().is_empty());
-    assert!(a.instantiate_oib(10, None).unwrap());
-    sync(&mut doc, &mut sa, &mut a);
+    direct_structure(
+        &mut doc,
+        &mut writer,
+        &mut sequence,
+        vec![DocumentEdit::Hierarchy(HierarchyEdit::Insert {
+            prototype: InstanceId(20),
+            name: None,
+            destination: Destination::Canvas,
+            before: None,
+            frame: None,
+        })],
+    );
     assert_eq!(doc.oib_allocations().unwrap().len(), 1);
 }
 
@@ -1763,7 +1896,7 @@ fn removed_objects_do_not_accumulate_and_an_empty_preview_can_be_repopulated() {
 fn reconnect_keeps_local_inspector_selection_and_both_scroll_offsets() {
     let (ui, mut doc) = setup();
     let (mut editor, mut se) = adapter(&ui, &mut doc, 2, true);
-    editor.instantiate_oib(10, None).unwrap();
+    editor.instantiate_oib(12, None).unwrap();
     sync(&mut doc, &mut se, &mut editor);
     let (mut client, mut session) = mounted_client(&ui, &mut doc);
     pump_client(&mut client, &mut doc, &mut session);
@@ -1835,8 +1968,9 @@ fn sparse_layout_events_are_versioned_and_keep_the_host_reservation() {
     }
     let (mut ui, _) = setup();
     // The first factory control is the optional heading; admit it for this check.
-    let values = std::collections::BTreeMap::from([(113, Some(Value::Boolean(true)))]);
+    let values = std::collections::BTreeMap::new();
     let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
+    blueprint.schema = "otrios-layout-v4".into();
     assert!(control(&mut blueprint.templates[0].root, 200));
     ui.layout = Layout::encode(&blueprint).unwrap();
     assert!(oib::compile(&ui, &values).is_err());

@@ -123,22 +123,23 @@ macro_rules! codec {
     };
 }
 pub fn encode_ui(value: &Ui) -> Result<Vec<u8>> {
-    let bytes = flexbuffers::to_vec(value).map_err(err)?;
+    let source = oib::graph::strip(value)?;
+    let bytes = flexbuffers::to_vec(&source).map_err(err)?;
     check(&bytes)?;
     Ok(bytes)
 }
 pub fn decode_ui(bytes: &[u8]) -> Result<Ui> {
     check(bytes)?;
     let ui: Ui = flexbuffers::from_slice(bytes).map_err(err)?;
-    if let Some(seed) = oib::seed(&ui)
-        && seed.designer.is_some()
-    {
-        oib::validate_seed(seed)?;
+    if let Some(seed) = oib::seed(&ui) {
+        if seed.graph.is_none() {
+            return Err("OIB UI requires a canonical graph".into());
+        }
         if flexbuffers::to_vec(&ui).map_err(err)? != bytes {
-            return Err("Noncanonical OIB designer UI bytes".into());
+            return Err("Noncanonical OIB graph UI bytes".into());
         }
     }
-    Ok(ui)
+    oib::graph::materialize(&ui)
 }
 codec!(encode_app, decode_app, App);
 codec!(encode_catalog, decode_catalog, Catalog);

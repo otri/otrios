@@ -21,6 +21,11 @@ format break with fresh PoC data. The [D2 work record](../OIB_D2_COMPLETION.md)
 separates the unreleased v2 document/protocol foundation from the remaining graph
 compiler, authoring work and live acceptance. No old-data migration is required.
 
+The user also selected independently upgradable component libraries.
+[RFC 0036](0036-upgradable-oib-component-libraries.md) separates signed graph/style
+libraries from stable host mechanisms and a later component Wasm ABI. That loader
+is a separate milestone; D2 prepares the canonical source and semantic boundary.
+
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.
 Preserves [bounded instance lifecycle](0030-live-oib-instances.md),

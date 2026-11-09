@@ -201,7 +201,11 @@ pub fn validate(seed: &Seed) -> Result<()> {
                     .iter()
                     .map(|r| r.cells.len())
                     .sum::<usize>()
-                <= MAX_CELLS,
+                <= if seed.graph.is_some() && !seed.expanded {
+                    MAX_CELLS * (MAX_DEFINITIONS + 1)
+                } else {
+                    MAX_CELLS
+                },
         "Unsupported or oversized OIB designer metadata",
     )?;
     require(
@@ -1062,7 +1066,8 @@ pub fn validate_layout(ui: &Ui) -> Result<()> {
             }
         }
     }
-    // Each signed cell output belongs to its addressed object's visual subtree.
+    // Canonical visual parameters may read any declared property in the same
+    // component occurrence. Legacy derived cells use their object's subtree.
     // Shared definition outputs may cover several occurrences; occurrence outputs
     // must resolve to the exact full path, including every reference boundary.
     let mut outputs: BTreeMap<(u16, u8), u64> = BTreeMap::new();
@@ -1096,10 +1101,19 @@ pub fn validate_layout(ui: &Ui) -> Result<()> {
                         .map(|r| (t, r))
                 })
                 .ok_or("Unmapped OIB output cell")?;
-            let address = ObjectAddress {
-                instance: table.prototype,
-                references: row.path.references.clone(),
-                node: row.path.node,
+            let address = if seed.graph.is_some() {
+                let root = instance(doc, table.prototype)?;
+                ObjectAddress {
+                    instance: table.prototype,
+                    references: vec![],
+                    node: definition(doc, root.definition)?.root,
+                }
+            } else {
+                ObjectAddress {
+                    instance: table.prototype,
+                    references: row.path.references.clone(),
+                    node: row.path.node,
+                }
             };
             if let Some(id) = doc
                 .mappings

@@ -73,13 +73,12 @@ fn resolve_node<'a>(
         a.node,
     )
 }
-fn layout(doc: &Document, a: &ObjectAddress) -> Result<Option<u16>> {
-    doc.mappings
-        .objects
-        .iter()
-        .find(|m| &m.address == a)
-        .map(|m| m.layout_node)
-        .ok_or_else(|| "Missing OIB object mapping".into())
+fn visual(doc: &Document, a: &ObjectAddress) -> Result<bool> {
+    let node = resolve_node(doc, a)?.1;
+    Ok(!matches!(
+        class(doc, node.class)?.implementation,
+        ClassKind::OIBObject | ClassKind::OIBDocument
+    ))
 }
 fn fused(doc: &Document, mut a: ObjectAddress) -> Result<ObjectAddress> {
     while let Some(reference) = &resolve_node(doc, &a)?.1.reference {
@@ -177,7 +176,7 @@ pub fn hierarchy(
                 .mappings
                 .roots
                 .iter()
-                .find(|r| r.prototype.0 == a.prototype)
+                .find(|r| r.prototype.0 == if seed.expanded { a.id } else { a.prototype })
                 .ok_or("Unknown OIB hierarchy factory")?;
             count
                 .checked_add(root.cells.len())
@@ -317,7 +316,7 @@ pub fn hierarchy(
             r.name = root.name.clone();
         }
         let rank;
-        if mapping.layout_node.is_none() {
+        if !visual(&doc, a)? {
             // The real root is owned by its wrapper, but navigation follows
             // the outer wrapper's ownership edge, avoiding a self-parent.
             let boundary_node = resolve_node(&doc, &boundary)?.1;
@@ -329,7 +328,7 @@ pub fn hierarchy(
             let nonvisual_owner = match &navigation_owner {
                 Selection::Object(owner) => {
                     let owner = fused(&doc, owner.clone())?;
-                    (owner != *a && layout(&doc, &owner)?.is_none()).then_some(owner)
+                    (owner != *a && !visual(&doc, &owner)?).then_some(owner)
                 }
                 _ => None,
             };

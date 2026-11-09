@@ -4,7 +4,10 @@ use super::*;
 use otrios_interfaces::{
     canvas::{GestureKind, Operation, Projection},
     layout::Responder,
-    oib::authoring::AppConnection,
+    oib::{
+        authoring::{AppConnection, ConnectionSource},
+        graph::ActionOperation,
+    },
 };
 
 fn endpoint(
@@ -29,57 +32,43 @@ fn endpoint(
     {
         return Err("Only admitted slider-value and toggle-checked endpoints can reconnect".into());
     }
-    if !root
-        .assignments
-        .iter()
-        .any(|a| a.target == path && matches!(a.source, AssignmentSource::AppBinding(_)))
-    {
-        return Err("Reconnection requires a direct signed app binding".into());
-    }
     Ok((path, kind))
 }
 
-fn selector(
-    ui: &Ui,
-    kind: ClassKind,
-    source: Binding,
-) -> Result<&otrios_interfaces::canvas::Selector> {
-    let Binding::Local(local) = source;
-    let selector = ui
-        .selectors
-        .iter()
-        .find(|s| s.local == local)
-        .ok_or("Unknown signed connection selector")?;
+fn selector(ui: &Ui, kind: ClassKind, source: &ConnectionSource) -> Result<Binding> {
     let expected = if kind == ClassKind::O2DSlider {
         Projection::Identity
     } else {
         Projection::Nonzero
     };
-    let effect = ui.handlers.iter().any(|h| {
-        h.fields.as_slice() == [selector.field]
-            && match kind {
-                ClassKind::O2DSlider => {
-                    h.kind == GestureKind::Slider && h.operation == Operation::Set
-                }
-                ClassKind::O2DToggle => {
-                    h.kind == GestureKind::Activate && h.operation == Operation::Toggle
-                }
-                _ => false,
-            }
-    });
-    if !effect
-        || selector.projection != expected
+    let (gesture, effect) = if kind == ClassKind::O2DSlider {
+        (GestureKind::Slider, ActionOperation::Set)
+    } else {
+        (GestureKind::Activate, ActionOperation::Toggle)
+    };
+    let graph = super::super::seed(ui)
+        .and_then(|s| s.graph.as_ref())
+        .ok_or("Missing signed graph grants")?;
+    if source.projection != expected
+        || !graph
+            .grants
+            .iter()
+            .any(|g| g.field == source.field && g.kind == gesture && g.operation == effect)
         || !ui
             .state_schema
             .fields
             .iter()
-            .any(|f| f.id == selector.field && f.writable && matches!(f.default, Value::Number(_)))
+            .any(|f| f.id == source.field && f.writable && matches!(f.default, Value::Number(_)))
     {
         return Err(
             "Connection source is not an admitted writable field of this control type".into(),
         );
     }
-    Ok(selector)
+    ui.selectors
+        .iter()
+        .find(|s| s.field == source.field && s.projection == source.projection)
+        .map(|s| Binding::Local(s.local))
+        .ok_or_else(|| "Missing admitted graph connection selector".into())
 }
 
 pub fn admitted(
@@ -87,15 +76,14 @@ pub fn admitted(
     doc: &Document,
     object: &ObjectAddress,
     property: PropertyId,
-    source: Binding,
+    source: ConnectionSource,
 ) -> Result<AppConnection> {
     let (_, kind) = endpoint(doc, object, property)?;
-    let field = selector(ui, kind, source)?.field;
+    selector(ui, kind, &source)?;
     Ok(AppConnection {
         object: object.clone(),
         property,
         source,
-        field,
     })
 }
 
@@ -104,12 +92,15 @@ pub fn choices(
     doc: &Document,
     object: &ObjectAddress,
     property: PropertyId,
-) -> Result<Vec<(String, Binding)>> {
+) -> Result<Vec<(String, ConnectionSource)>> {
     let (_, kind) = endpoint(doc, object, property)?;
     let mut fields = BTreeMap::new();
     for candidate in &ui.selectors {
-        let binding = Binding::Local(candidate.local);
-        if selector(ui, kind, binding).is_ok() {
+        let source = ConnectionSource {
+            field: candidate.field,
+            projection: candidate.projection.clone(),
+        };
+        if selector(ui, kind, &source).is_ok() {
             let name = &ui
                 .state_schema
                 .fields
@@ -119,13 +110,16 @@ pub fn choices(
                 .name;
             fields
                 .entry(candidate.field)
-                .or_insert_with(|| (name.clone(), binding));
+                .or_insert_with(|| (name.clone(), source));
         }
     }
     Ok(fields.into_values().collect())
 }
 
-pub(super) fn project_metadata(doc: &mut Document) -> Result<()> {
+pub(super) fn project_metadata(
+    doc: &mut Document,
+    selectors: &[otrios_interfaces::canvas::Selector],
+) -> Result<()> {
     let connections = doc.connections.clone();
     if connections.len() > MAX_CELLS
         || connections
@@ -135,21 +129,28 @@ pub(super) fn project_metadata(doc: &mut Document) -> Result<()> {
         return Err("Noncanonical or oversized connection surface".into());
     }
     for connection in connections {
-        if connection.field == 0 {
-            return Err("Connection cannot target a host-local source".into());
-        }
         let (path, _) = endpoint(doc, &connection.object, connection.property)?;
+        let binding = selectors
+            .iter()
+            .find(|s| {
+                s.field == connection.source.field && s.projection == connection.source.projection
+            })
+            .map(|s| Binding::Local(s.local))
+            .ok_or("Unknown typed graph connection")?;
         let root = doc
             .instances
             .iter_mut()
             .find(|i| i.id == connection.object.instance)
             .ok_or("Missing connected root")?;
-        let assignment = root
-            .assignments
-            .iter_mut()
-            .find(|a| a.target == path)
-            .ok_or("Missing connected endpoint")?;
-        assignment.source = AssignmentSource::AppBinding(connection.source);
+        if let Some(assignment) = root.assignments.iter_mut().find(|a| a.target == path) {
+            assignment.source = AssignmentSource::AppBinding(binding);
+        } else {
+            root.assignments.push(Assignment {
+                target: path,
+                source: AssignmentSource::AppBinding(binding),
+            });
+            root.assignments.sort_by(|a, b| a.target.cmp(&b.target));
+        }
     }
     Ok(())
 }
@@ -277,19 +278,13 @@ pub fn project_ui(admission: &Ui, ui: &mut Ui) -> Result<()> {
     }
     let mut blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
     for connection in &doc.connections {
-        let expected = admitted(
+        admitted(
             admission,
             &doc,
             &connection.object,
             connection.property,
-            connection.source,
+            connection.source.clone(),
         )?;
-        if expected.field != connection.field {
-            return Err(
-                "Signed selector/field mapping changed; explicit connection migration required"
-                    .into(),
-            );
-        }
         let (_, kind) = endpoint(&doc, &connection.object, connection.property)?;
         let id = doc
             .mappings
@@ -343,7 +338,7 @@ pub fn project_ui(admission: &Ui, ui: &mut Ui) -> Result<()> {
         let mut refs = BTreeSet::new();
         collect(node, &blocked, &mut refs)?;
         let mut remap = BTreeMap::new();
-        if old != connection.field {
+        if old != connection.source.field {
             for local in refs {
                 let source = ui
                     .selectors
@@ -354,11 +349,9 @@ pub fn project_ui(admission: &Ui, ui: &mut Ui) -> Result<()> {
                 if source.field != old {
                     continue;
                 }
-                let replacement = if let Some(s) = ui
-                    .selectors
-                    .iter()
-                    .find(|s| s.field == connection.field && s.projection == source.projection)
-                {
+                let replacement = if let Some(s) = ui.selectors.iter().find(|s| {
+                    s.field == connection.source.field && s.projection == source.projection
+                }) {
                     s.local
                 } else {
                     if ui.selectors.len() >= 128 {
@@ -374,7 +367,7 @@ pub fn project_ui(admission: &Ui, ui: &mut Ui) -> Result<()> {
                         .ok_or("Connection selector identity exhausted")?;
                     let mut copied = source;
                     copied.local = local;
-                    copied.field = connection.field;
+                    copied.field = connection.source.field;
                     ui.selectors.push(copied);
                     local
                 };
@@ -386,9 +379,9 @@ pub fn project_ui(admission: &Ui, ui: &mut Ui) -> Result<()> {
             node.semantics
                 .as_mut()
                 .ok_or("Toggle connection has no checked semantics")?
-                .checked = Expr::State(connection.source);
+                .checked = Expr::State(selector(admission, kind, &connection.source)?);
         }
-        handler.fields[0] = connection.field;
+        handler.fields[0] = connection.source.field;
     }
     ui.layout = Layout::encode(&blueprint)?;
     Ok(())

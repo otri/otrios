@@ -110,6 +110,10 @@ impl Draft {
                         property: otrios_interfaces::oib::designer::PlacementProperty::X
                             | otrios_interfaces::oib::designer::PlacementProperty::Y,
                         ..
+                    } | PropertyAddress::Structural {
+                        property: otrios_interfaces::oib::designer::StructuralProperty::X
+                            | otrios_interfaces::oib::designer::StructuralProperty::Y,
+                        ..
                     }
                 ) {
                     16000.
@@ -512,7 +516,11 @@ impl PropertyDrafts {
 }
 fn writable(info: &PropertyInfo) -> Result<&PropertyAddress, Error> {
     let address = info.address.as_ref().ok_or(Error::Unavailable)?;
-    if (info.cell.is_none() && !matches!(address, PropertyAddress::Placement { .. }))
+    if (info.cell.is_none()
+        && !matches!(
+            address,
+            PropertyAddress::Placement { .. } | PropertyAddress::Structural { .. }
+        ))
         || info.source == "bound"
         || !info.descriptor.policy.live_literal
     {

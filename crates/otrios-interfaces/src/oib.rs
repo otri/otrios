@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub mod authoring;
 /// RFC 0035 D1 signed metadata and stable occurrence/property identities.
 pub mod designer;
+pub mod graph;
 
 pub const FORMAT: &str = "otrios-oib-v2";
 pub const FEATURE: &str = "otrios-oib-v2";
@@ -25,18 +26,32 @@ pub const MAX_BYTES: usize = 64 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct Seed {
     pub format: String,
-    /// Signed hierarchy/inspector metadata for Designer applications.
+    /// Canonical authored source. Everything below is disposable compiler output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<graph::Document>,
+    /// Disposable projection state; preset IDs and real instance IDs are
+    /// independent domains even when their numeric values coincide.
+    #[serde(skip)]
+    pub expanded: bool,
+    /// Signed hierarchy/inspector metadata for Designer applications.
+    #[serde(skip)]
     pub designer: Option<designer::Document>,
+    #[serde(skip)]
     pub main_oib: u64,
     /// O1 uses the existing declarative event interpreter; no guest imports.
+    #[serde(skip)]
     pub main_class: String,
+    #[serde(skip)]
     pub components: Vec<Object>,
+    #[serde(skip)]
     pub instances: Vec<Object>,
+    #[serde(skip)]
     pub cells: Vec<Cell>,
+    #[serde(skip)]
     pub inspector_viewport: u16,
+    #[serde(skip)]
     pub inspector_content: [f32; 2],
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub instance_surface: Option<InstanceSurface>,
 }
 /// Signed factories reuse admitted nodes, bindings, properties and event contracts.
@@ -84,43 +99,8 @@ pub struct Allocation {
     /// Reusable renderer slot, never used as an object/property identity.
     pub slot: u16,
 }
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub enum InstanceOperation {
-    /// Atomic definition authoring within the existing signed class surface.
-    Definitions(authoring::DefinitionBatch),
-    Hierarchy(authoring::HierarchyBatch),
-    /// Whole signed factory into the presented canvas, guarded by active generation.
-    Insert {
-        prototype: u64,
-        before: Option<u64>,
-        generation: u64,
-    },
-    /// Reorder a live root in that same admitted canvas. None appends.
-    Reorder {
-        instance: u64,
-        before: Option<u64>,
-        generation: u64,
-    },
-    /// Restore authored factories/bindings, giving deleted objects fresh IDs.
-    /// Optionally reset all UI properties.
-    /// This explicit owner command observes current heads at authority acceptance.
-    Restore {
-        defaults: bool,
-    },
-    Instantiate {
-        component: u64,
-        name: Option<String>,
-    },
-    Duplicate {
-        instance: u64,
-        name: Option<String>,
-    },
-    Remove {
-        instance: u64,
-        observed: Vec<u8>,
-    },
-}
+/// Every structural state request carries this one bounded edit-batch contract.
+pub type InstanceOperation = authoring::EditBatch;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstanceAction {
     Inspect,

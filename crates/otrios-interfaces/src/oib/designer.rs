@@ -90,6 +90,40 @@ pub enum PropertyAddress {
         instance: InstanceId,
         path: PropertyPath,
     },
+    /// Inspector/code address for a graph source field. Edits use the bounded
+    /// structural batch and observed structural generation, not a causal cell.
+    Structural {
+        target: StructuralTarget,
+        property: StructuralProperty,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum StructuralTarget {
+    Definition(DefinitionId),
+    Node {
+        definition: DefinitionId,
+        node: NodeId,
+    },
+    Instance(ObjectAddress),
+    Preset {
+        preset: u64,
+        definition: DefinitionId,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum StructuralProperty {
+    Name,
+    X,
+    Y,
+    Width,
+    Height,
+    Text,
+    Color,
+    Radius,
+    Visible,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -245,6 +279,10 @@ pub struct DefinitionNode {
     pub defaults: Vec<PropertyDefault>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<ComponentReference>,
+    /// Canonical visual declaration; absent only for a nonvisual object or the
+    /// presented shell root attached to the tooling preview viewport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visual: Option<super::graph::Visual>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

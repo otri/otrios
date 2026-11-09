@@ -1251,19 +1251,21 @@ impl Hub {
             }
             self.collection_parent(path)?;
         }
+        let description = canvas::decode_ui(&package.ui)?;
         let mut doc = match file.as_ref().filter(|p| p.exists()) {
-            Some(path) => store::load(
-                path,
-                Document::load(
+            Some(path) => {
+                let mut checkpoint = Document::load(
                     package.schema.clone(),
                     &package.app.state_ref,
                     &bounded(path, canvas::MAX_BYTES)?,
-                )?,
-            )?,
+                )?;
+                checkpoint.prepare_oib_replay(&description)?;
+                store::load(path, checkpoint)?
+            }
             None => Document::new(package.schema.clone(), &package.app.state_ref)?,
         };
         let persisted = doc.clone();
-        let seeded = doc.configure_oib(&canvas::decode_ui(&package.ui)?)?;
+        let seeded = doc.configure_oib(&description)?;
         if seeded && let Some(file) = file.as_ref().filter(|p| p.exists()) {
             store::append(file, &persisted, &doc)?;
         }
@@ -1729,14 +1731,13 @@ impl Hub {
                         ))
                     });
                     let mut doc = if let Some(path) = file.as_ref().filter(|p| p.exists()) {
-                        store::load(
-                            path,
-                            Document::load(
-                                description.state_schema.clone(),
-                                &a.state_ref,
-                                &bounded(path, canvas::MAX_BYTES)?,
-                            )?,
-                        )?
+                        let mut checkpoint = Document::load(
+                            description.state_schema.clone(),
+                            &a.state_ref,
+                            &bounded(path, canvas::MAX_BYTES)?,
+                        )?;
+                        checkpoint.prepare_oib_replay(&description)?;
+                        store::load(path, checkpoint)?
                     } else {
                         if file
                             .as_ref()
@@ -2198,6 +2199,7 @@ impl Hub {
                     if matches!(
                         canvas::decode_state_request(&bytes)?,
                         otrios_interfaces::canvas::StateRequest::OibWrite { .. }
+                            | otrios_interfaces::canvas::StateRequest::OibInstance { .. }
                     ) && !self.ui_allowed(scope, binding)
                     {
                         return Err("OIB editing requires Space Admin".into());

@@ -37,7 +37,7 @@ fn shared(definition: u64, property: u64) -> PropertyAddress {
     }
 }
 fn setup() -> (Ui, Document) {
-    let ui = app::ui(&[]);
+    let ui = canvas::decode_ui(&canvas::encode_ui(&app::ui(&[])).unwrap()).unwrap();
     let mut doc = Document::new(ui.state_schema.clone(), "sources").unwrap();
     doc.configure_oib(&ui).unwrap();
     (ui, doc)
@@ -102,8 +102,18 @@ fn real_forwarding_masks_slider_and_preserves_definition_selection() {
     assert_eq!(result.immediate_source, Some(address(&[], 1)));
     assert_eq!(result.terminal_shared, Some(shared(10, 1)));
     assert!(!result.read_only);
-    assert!(result.hops.iter().any(|h| h.cell == Some(100) && !h.masked));
-    assert!(result.hops.iter().any(|h| h.cell == Some(101) && h.masked));
+    assert!(
+        result
+            .hops
+            .iter()
+            .any(|h| h.address == shared(10, 1) && !h.masked)
+    );
+    assert!(
+        result
+            .hops
+            .iter()
+            .any(|h| h.address == shared(12, 1) && h.masked)
+    );
     assert!(
         result
             .hops
@@ -116,7 +126,7 @@ fn real_forwarding_masks_slider_and_preserves_definition_selection() {
         definition
             .hops
             .iter()
-            .any(|h| h.cell == Some(101) && !h.masked)
+            .any(|h| h.address == shared(12, 1) && !h.masked)
     );
     assert!(result.hops.len() <= 320);
 }
@@ -188,7 +198,10 @@ fn explicit_conflict_choices_include_clear_and_guard_stale_versions() {
     sync(&mut doc, &mut sa, &mut a);
     sync(&mut doc, &mut sb, &mut b);
     let view = a.oib_property_register(&at).unwrap();
-    assert_eq!(view.cell, 203);
+    assert_eq!(
+        view.cell,
+        oib::document::cell_for_address(seed(&ui), &doc.oib_allocations().unwrap(), &at).unwrap()
+    );
     assert!(view.alternatives.contains(&None));
     assert!(view.alternatives.contains(&Some(sound.clone())));
     assert_eq!(view.alternatives.len(), 2);
@@ -348,7 +361,7 @@ fn equal_value_rewrite_changes_exact_version_and_tampered_views_do_not_write() {
     let root = doc.root_hash();
     assert!(a.choose_oib_property(&old, Some(volume.clone())).is_err());
     let mut tampered = current.clone();
-    tampered.cell = 201;
+    tampered.cell = u64::MAX;
     assert!(
         a.choose_oib_property(&tampered, Some(volume.clone()))
             .is_err()
@@ -392,7 +405,7 @@ fn allocated_occurrence_trace_uses_resident_identity_and_stable_cells() {
     );
     assert_eq!(result.terminal_shared, Some(shared(10, 1)));
     let cell = oib::document::cell_for_address(seed(&ui), &allocations, &at).unwrap();
-    assert_ne!(cell, 201);
+    assert_ne!(at, address(&[7], 1));
     assert!(
         result
             .hops

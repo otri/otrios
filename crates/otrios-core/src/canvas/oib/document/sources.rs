@@ -152,6 +152,9 @@ pub fn property_sources(
         hops: Vec::new(),
     };
     match address {
+        PropertyAddress::Structural { .. } => {
+            result.read_only = false;
+        }
         PropertyAddress::Placement { object, .. } => {
             instance(doc, object.instance)?;
             // Automatic layout has no authored scalar default to pretend is a

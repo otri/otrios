@@ -7,7 +7,7 @@
 use super::designer::{
     DefinitionId, InstanceId, NodeId, ObjectAddress, PropertyId, PropertyPath, SlotId,
 };
-use crate::layout::{Binding, Value};
+use crate::{canvas::Projection, layout::Value};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_OPERATIONS: usize = 16;
@@ -17,6 +17,90 @@ pub const MAX_PLACEMENT_BYTES: usize = 4 * 1024;
 pub const MAX_CONNECTION_BYTES: usize = 4 * 1024;
 pub const MAX_DOCUMENT_BYTES: usize = 24 * 1024;
 
+/// One generation-guarded structural intent. Definition operations precede
+/// instance operations; each phase keeps its authored order. Restore is an
+/// explicit singleton command. The authority publishes the whole batch once.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditBatch {
+    pub generation: u64,
+    pub operations: Vec<DocumentEdit>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+// Inline graph edits are bounded by MAX_OPERATIONS and MAX_BATCH_BYTES.
+#[allow(clippy::large_enum_variant)]
+pub enum DocumentEdit {
+    Definition(DefinitionEdit),
+    Preset(PresetEdit),
+    Hierarchy(HierarchyEdit),
+    Restore { defaults: bool },
+}
+
+impl EditBatch {
+    pub fn insert(
+        generation: u64,
+        prototype: u64,
+        before: Option<u64>,
+        name: Option<String>,
+    ) -> Self {
+        Self::hierarchy(HierarchyBatch {
+            generation,
+            operations: vec![HierarchyEdit::Insert {
+                prototype: InstanceId(prototype),
+                name,
+                destination: Destination::Canvas,
+                before: before.map(InstanceId),
+                frame: None,
+            }],
+        })
+    }
+    pub fn reorder(generation: u64, instance: u64, before: Option<u64>) -> Self {
+        Self::hierarchy(HierarchyBatch {
+            generation,
+            operations: vec![HierarchyEdit::Reorder {
+                instance: InstanceId(instance),
+                before: before.map(InstanceId),
+            }],
+        })
+    }
+    pub fn remove(generation: u64, instance: u64) -> Self {
+        Self::hierarchy(HierarchyBatch {
+            generation,
+            operations: vec![HierarchyEdit::Remove {
+                instance: InstanceId(instance),
+            }],
+        })
+    }
+    pub fn definitions(batch: DefinitionBatch) -> Self {
+        Self {
+            generation: batch.generation,
+            operations: batch
+                .operations
+                .into_iter()
+                .map(DocumentEdit::Definition)
+                .collect(),
+        }
+    }
+    pub fn hierarchy(batch: HierarchyBatch) -> Self {
+        Self {
+            generation: batch.generation,
+            operations: batch
+                .operations
+                .into_iter()
+                .map(DocumentEdit::Hierarchy)
+                .collect(),
+        }
+    }
+    pub fn restore(generation: u64, defaults: bool) -> Self {
+        Self {
+            generation,
+            operations: vec![DocumentEdit::Restore { defaults }],
+        }
+    }
+}
+
 /// The one accepted structural source. Layout, semantics, controls, hierarchy
 /// projections and compiler tables are derived from this record and the signed
 /// class implementation surface. Property registers remain independently causal.
@@ -24,10 +108,43 @@ pub const MAX_DOCUMENT_BYTES: usize = 24 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct DocumentSource {
     pub definitions: Vec<super::designer::ComponentDefinition>,
+    pub presets: Vec<super::graph::Preset>,
     pub instances: Vec<InstanceRecord>,
-    pub next_instance: u64,
+    /// Shared high-water mark for authority-created definitions, nodes, slots,
+    /// presets and instances. Deleted identities are never recycled.
+    pub next_identity: u64,
+    /// Authority-maintained mapping from signed default roles to their current
+    /// identities after restoration. Missing entries mean identity mapping.
+    pub baseline: Vec<BaselineIdentity>,
     pub placements: Vec<Placement>,
     pub connections: Vec<AppConnection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum BaselineIdentity {
+    Definition {
+        source: DefinitionId,
+        current: DefinitionId,
+    },
+    Node {
+        definition: DefinitionId,
+        source: NodeId,
+        current: NodeId,
+    },
+    Slot {
+        definition: DefinitionId,
+        source: SlotId,
+        current: SlotId,
+    },
+    Preset {
+        source: u64,
+        current: u64,
+    },
+    Instance {
+        source: InstanceId,
+        current: InstanceId,
+    },
 }
 
 /// Durable root identity and preset selection. Renderer slots are derived for
@@ -53,13 +170,18 @@ impl From<&super::Allocation> for InstanceRecord {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ConnectionSource {
+    pub field: u16,
+    pub projection: Projection,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConnection {
     pub object: ObjectAddress,
     pub property: PropertyId,
-    /// An existing signed local selector and its field identity. Recovery rejects
-    /// a later signed package that reassigns this selector to a different field.
-    pub source: Binding,
-    pub field: u16,
+    /// Semantic signed source; selector locals are disposable compiler output.
+    pub source: ConnectionSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,10 +220,13 @@ pub enum HierarchyEdit {
     Connect {
         object: ObjectAddress,
         property: PropertyId,
-        source: Option<Binding>,
+        source: Option<ConnectionSource>,
     },
     Insert {
         prototype: InstanceId,
+        /// Optional display name; identity is always allocated by the authority.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
         destination: Destination,
         before: Option<InstanceId>,
         frame: Option<[f32; 4]>,
@@ -112,12 +237,23 @@ pub enum HierarchyEdit {
         before: Option<InstanceId>,
         frame: Option<[f32; 4]>,
     },
+    /// Reorder within the current destination, retaining placement and ownership.
+    Reorder {
+        instance: InstanceId,
+        before: Option<InstanceId>,
+    },
+    Rename {
+        instance: InstanceId,
+        name: String,
+    },
     Place {
         instance: InstanceId,
         frame: [f32; 4],
     },
     /// Owned descendants must be moved or removed explicitly in the same batch.
-    Remove { instance: InstanceId },
+    Remove {
+        instance: InstanceId,
+    },
     /// Duplicates the owned subtree with fresh identities and remapped ownership.
     Duplicate {
         instance: InstanceId,
@@ -139,6 +275,41 @@ pub struct DefinitionBatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum DefinitionEdit {
+    /// Both the definition ID and root node ID must be the next authority IDs.
+    CreateDefinition {
+        definition: DefinitionId,
+        name: String,
+        root: super::designer::DefinitionNode,
+    },
+    /// References and presets must be explicitly repaired in this same batch.
+    DeleteDefinition { definition: DefinitionId },
+    CreateNode {
+        definition: DefinitionId,
+        node: super::designer::DefinitionNode,
+        visual_parent: Option<NodeId>,
+        before: Option<NodeId>,
+    },
+    /// Unlinks direct containment. Other references are never silently repaired.
+    DeleteNode {
+        definition: DefinitionId,
+        node: NodeId,
+    },
+    SetVisual {
+        definition: DefinitionId,
+        node: NodeId,
+        visual: Option<super::graph::Visual>,
+    },
+    SetSlots {
+        definition: DefinitionId,
+        slots: Vec<super::designer::SlotDescriptor>,
+    },
+    /// Change authored fallback without changing causal override registers.
+    SetDefault {
+        definition: DefinitionId,
+        node: NodeId,
+        property: PropertyId,
+        value: Value,
+    },
     RenameDefinition {
         definition: DefinitionId,
         name: String,
@@ -175,6 +346,17 @@ pub enum DefinitionEdit {
         target: PropertyPath,
         source: Option<LiteralSource>,
     },
+}
+
+/// Authored palette entries use typed field sources under the signed grants.
+/// Changing a preset's definition while instances still reference it requires
+/// explicit instance removal/replacement in the same edit batch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum PresetEdit {
+    Create { preset: super::graph::Preset },
+    Update { preset: super::graph::Preset },
+    Delete { preset: u64 },
 }
 
 /// Only existing literal and exposed-property sources. This cannot introduce an

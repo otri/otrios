@@ -37,6 +37,12 @@ add persistent resizable panels and insertion/reordering of signed factories in
 one admitted canvas. Nested slot/definition/connection authoring, rich text,
 complete UI transfers, images and XR remain deferred.
 
+[Independent component libraries](docs/OIB_LIBRARY_BOUNDARY.md) are the selected
+next boundary: signed graph/style revisions, followed by a versioned component
+Wasm ABI, should update independently of the host. The library loader remains
+unimplemented; [RFC 0036](docs/rfcs/0036-upgradable-oib-component-libraries.md)
+defines the staged work and compatibility requirements.
+
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 
 ## Build and check

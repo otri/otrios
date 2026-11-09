@@ -24,7 +24,9 @@ pub(super) fn path(branch: u64, address: &PropertyAddress) -> Result<Vec<u64>> {
             path.extend(property.references.iter().map(|node| node.0));
             path.extend([property.node.0, property.property.0]);
         }
-        PropertyAddress::Placement { .. } => return Err("Placement is structural".into()),
+        PropertyAddress::Placement { .. } | PropertyAddress::Structural { .. } => {
+            return Err("Graph source fields are structural".into());
+        }
     }
     Ok(path)
 }

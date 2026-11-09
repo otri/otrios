@@ -26,7 +26,9 @@ fn read_before(
     socket: &mut Socket,
     deadline: Instant,
 ) -> Result<ServerMessage, tungstenite::Error> {
-    let previous_timeout = loopback_stream(socket).read_timeout()?;
+    let previous_timeout = loopback_stream(socket).read_timeout().map_err(|error| {
+        std::io::Error::new(error.kind(), format!("reading D1 timeout: {error}"))
+    })?;
     let response = (|| loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -36,7 +38,15 @@ fn read_before(
             )
             .into());
         }
-        loopback_stream(socket).set_read_timeout(Some(remaining))?;
+        // Keep the socket timeout practical at the observation boundary.
+        loopback_stream(socket)
+            .set_read_timeout(Some(remaining.max(Duration::from_millis(1))))
+            .map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!("setting D1 observation timeout: {error}"),
+                )
+            })?;
         match socket.read() {
             Ok(Message::Binary(bytes)) => {
                 return Ok(canvas::decode_server(bytes.strip_prefix(&[1]).unwrap()).unwrap());
@@ -54,7 +64,11 @@ fn read_before(
             Err(error) => return Err(error),
         }
     })();
-    loopback_stream(socket).set_read_timeout(previous_timeout)?;
+    loopback_stream(socket)
+        .set_read_timeout(previous_timeout)
+        .map_err(|error| {
+            std::io::Error::new(error.kind(), format!("restoring D1 timeout: {error}"))
+        })?;
     response
 }
 
@@ -154,7 +168,7 @@ impl Fixture {
         rig.stop();
         // Add the real companion alongside the existing app. Do not rewrite its
         // ui_ref, fields, signed mappings, seed, selectors or factory identities.
-        let ui = app::ui(&[]);
+        let ui = canvas::decode_ui(&canvas::encode_ui(&app::ui(&[])).unwrap()).unwrap();
         let manifest = app::manifest();
         assert_eq!(ui.ui_ref, "app:oib-designer/ui");
         assert_eq!(ui.state_schema.id, "oib-designer-state-v2");
@@ -281,6 +295,16 @@ impl Fixture {
             &fs::read(&path).unwrap(),
         )
         .unwrap();
+        // Pin the already admitted source before replay. This verifies the
+        // checkpoint without reseeding and keeps replay validation from
+        // rebuilding the canonical compiler input on every journal record.
+        let checkpoint_root = doc.root_hash();
+        doc.prepare_oib_replay(&self.ui).unwrap();
+        assert_eq!(
+            doc.root_hash(),
+            checkpoint_root,
+            "transient replay admission leaves checkpoint root untouched"
+        );
         let log = fs::read(path.with_extension("merkle.log")).unwrap();
         assert!(
             !log.is_empty(),
@@ -360,9 +384,37 @@ impl Peer {
         self.flush();
         self.until(StateAdapter::confirmed);
     }
+    fn edit_addresses(&mut self, changes: &[(PropertyAddress, Option<Value>)]) {
+        let changes: Vec<_> = changes
+            .iter()
+            .map(|(address, value)| {
+                (
+                    self.state.oib_property_register(address).unwrap().cell,
+                    value.clone(),
+                )
+            })
+            .collect();
+        self.edit(&changes);
+    }
     fn edit(&mut self, changes: &[(u64, Option<Value>)]) {
         assert!(self.state.edit_oib(changes).unwrap());
         self.settle();
+    }
+    #[track_caller]
+    fn denied(&mut self) -> String {
+        // Permission rejection can follow an already queued publication/receipt
+        // frame. Drain ordinary updates before inspecting the denial itself.
+        for _ in 0..16 {
+            match read_d1(&mut self.socket) {
+                ServerMessage::Sync { bytes, .. } => {
+                    self.state.receive(&bytes).unwrap();
+                    self.flush();
+                }
+                ServerMessage::Error { message, .. } => return message,
+                other => panic!("expected permission denial: {other:?}"),
+            }
+        }
+        panic!("permission denial missing");
     }
     fn issue(&mut self) -> Vec<u8> {
         for _ in 0..64 {
@@ -435,8 +487,12 @@ fn assert_bounds(ui: &Ui, doc: &Document) {
         allocations.iter().map(|a| a.id).collect::<BTreeSet<_>>(),
         draft.union(&active).copied().collect()
     );
-    let dynamic: Vec<_> = allocations.iter().filter(|a| a.id != a.prototype).collect();
-    assert!(dynamic.iter().all(|a| a.slot < 8));
+    let dynamic: Vec<_> = allocations.iter().collect();
+    assert!(
+        dynamic
+            .iter()
+            .all(|a| usize::from(a.slot) < MAX_ALLOCATIONS)
+    );
     assert_eq!(
         dynamic.len(),
         dynamic
@@ -488,6 +544,54 @@ fn d1_shared_sources_permissions_and_kill_restart_preserve_four_fields_and_other
     let mut f = Fixture::start(&binary);
     let mut a = f.open('a', 41, 0);
     let mut b = f.open('b', 42, 0);
+    let panel_accent = a
+        .state
+        .oib_property_register(&PropertyAddress::Definition {
+            definition: DefinitionId(10),
+            node: NodeId(1),
+            property: PropertyId(1),
+        })
+        .unwrap()
+        .cell;
+    let slider_label = a
+        .state
+        .oib_property_register(&PropertyAddress::Definition {
+            definition: DefinitionId(12),
+            node: NodeId(1),
+            property: PropertyId(3),
+        })
+        .unwrap()
+        .cell;
+    let audio_accent = a
+        .state
+        .oib_property_register(&address(20, &[7], 1))
+        .unwrap()
+        .cell;
+    let display_accent = a
+        .state
+        .oib_property_register(&address(30, &[7], 1))
+        .unwrap()
+        .cell;
+    let audio_toggle = a
+        .state
+        .oib_property_register(&address(20, &[8], 1))
+        .unwrap()
+        .cell;
+    let display_toggle = a
+        .state
+        .oib_property_register(&address(30, &[8], 1))
+        .unwrap()
+        .cell;
+    let audio_label = a
+        .state
+        .oib_property_register(&address(20, &[7], 3))
+        .unwrap()
+        .cell;
+    let display_label = a
+        .state
+        .oib_property_register(&address(30, &[7], 3))
+        .unwrap()
+        .cell;
     assert!(a.binding.ui_editable && !b.binding.ui_editable);
     assert_eq!(a.binding.collection, b.binding.collection);
     assert_eq!(a.state.oib_active().unwrap(), b.state.oib_active().unwrap());
@@ -496,14 +600,14 @@ fn d1_shared_sources_permissions_and_kill_restart_preserve_four_fields_and_other
     b.until(|s| VALUES.iter().all(|(id, v)| s.value(*id).unwrap() == *v));
     let gold = Value::Color([218, 165, 32, 255]);
     let orange = Value::Color([255, 136, 85, 255]);
-    assert!(a.state.edit_oib(&[(100, Some(gold.clone()))]).unwrap());
+    assert!(
+        a.state
+            .edit_oib(&[(panel_accent, Some(gold.clone()))])
+            .unwrap()
+    );
     let denied = a.issue();
     b.send(denied.clone());
-    let denial = read_d1(&mut b.socket);
-    assert!(
-        matches!(denial, ServerMessage::Error { ref message, .. } if message.contains("Space Admin")),
-        "{denial:?}"
-    );
+    assert!(b.denied().contains("Space Admin"));
     drop(b);
     let mut b = f.open('b', 42, 0);
     assert_eq!(
@@ -514,33 +618,39 @@ fn d1_shared_sources_permissions_and_kill_restart_preserve_four_fields_and_other
     a.send(denied);
     a.settle();
     b.observe(&a);
-    a.edit(&[(201, Some(orange.clone()))]);
+    a.edit(&[(audio_accent, Some(orange.clone()))]);
     let doc = f.durable(&a.binding.collection);
-    assert_eq!(effective(&f.ui, &doc, 201), orange);
-    assert_eq!(effective(&f.ui, &doc, 301), gold);
+    assert_eq!(effective(&f.ui, &doc, audio_accent), orange);
+    assert_eq!(effective(&f.ui, &doc, display_accent), gold);
     let blue = Value::Color([65, 155, 230, 255]);
     a.edit(&[
-        (100, Some(blue.clone())),
-        (103, Some(Value::Text("Shared label".into()))),
+        (panel_accent, Some(blue.clone())),
+        (slider_label, Some(Value::Text("Shared label".into()))),
     ]);
     assert_eq!(
-        effective(&f.ui, &f.durable(&a.binding.collection), 201),
+        effective(&f.ui, &f.durable(&a.binding.collection), audio_accent),
         orange,
         "nested override still masks the newly changed forwarded source"
     );
-    a.edit(&[(201, None), (203, Some(Value::Text("Temporary".into())))]);
-    a.edit(&[(203, None), (304, Some(orange.clone()))]);
+    a.edit(&[
+        (audio_accent, None),
+        (audio_label, Some(Value::Text("Temporary".into()))),
+    ]);
+    a.edit(&[(audio_label, None), (display_toggle, Some(orange.clone()))]);
     b.observe(&a);
     assert_values(&a.state);
     assert_values(&b.state);
     let before = f.durable(&a.binding.collection);
-    for cell in [201, 204, 301] {
+    for cell in [audio_accent, audio_toggle, display_accent] {
         assert_eq!(effective(&f.ui, &before, cell), blue);
     }
-    assert_eq!(effective(&f.ui, &before, 304), orange);
-    assert_eq!(effective(&f.ui, &before, 203), Value::Text("Volume".into()));
+    assert_eq!(effective(&f.ui, &before, display_toggle), orange);
     assert_eq!(
-        effective(&f.ui, &before, 303),
+        effective(&f.ui, &before, audio_label),
+        Value::Text("Volume".into())
+    );
+    assert_eq!(
+        effective(&f.ui, &before, display_label),
         Value::Text("Brightness".into())
     );
     assert_eq!(before.oib_values(1).unwrap(), before.oib_values(2).unwrap());
@@ -562,9 +672,9 @@ fn d1_shared_sources_permissions_and_kill_restart_preserve_four_fields_and_other
         recovered.oib_values(1).unwrap(),
         before.oib_values(1).unwrap()
     );
-    assert_eq!(effective(&f.ui, &recovered, 304), orange);
+    assert_eq!(effective(&f.ui, &recovered, display_toggle), orange);
     assert_eq!(
-        effective(&f.ui, &recovered, 203),
+        effective(&f.ui, &recovered, audio_label),
         Value::Text("Volume".into())
     );
     f.counter_unchanged();
@@ -577,6 +687,24 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     };
     let mut f = Fixture::start(&binary);
     let mut a = f.open('a', 51, 0);
+    let shared_width = a
+        .state
+        .oib_property_register(&PropertyAddress::Definition {
+            definition: DefinitionId(12),
+            node: NodeId(1),
+            property: PropertyId(2),
+        })
+        .unwrap()
+        .cell;
+    let toggle_label = a
+        .state
+        .oib_property_register(&PropertyAddress::Definition {
+            definition: DefinitionId(13),
+            node: NodeId(1),
+            property: PropertyId(3),
+        })
+        .unwrap()
+        .cell;
     let mut c = f.open('a', 53, 0); // Same authenticated Admin, independent writer/receipt.
     let mut b = f.open('b', 52, 0);
     assert!(a.state.set(&VALUES).unwrap());
@@ -586,12 +714,12 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     // Both intents capture the same admitted causal baseline before either send.
     assert!(
         a.state
-            .edit_oib(&[(102, Some(Value::Number(400.)))])
+            .edit_oib(&[(shared_width, Some(Value::Number(400.)))])
             .unwrap()
     );
     assert!(
         c.state
-            .edit_oib(&[(105, Some(Value::Text("Shared toggle".into())))])
+            .edit_oib(&[(toggle_label, Some(Value::Text("Shared toggle".into())))])
             .unwrap()
     );
     let left = a.issue();
@@ -604,21 +732,21 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     b.observe(&c);
     assert!(a.state.oib_conflicts().is_empty());
     assert_eq!(
-        a.state.oib_active().unwrap()[&102],
+        a.state.oib_active().unwrap()[&shared_width],
         Some(Value::Number(400.))
     );
     assert_eq!(
-        a.state.oib_active().unwrap()[&105],
+        a.state.oib_active().unwrap()[&toggle_label],
         Some(Value::Text("Shared toggle".into()))
     );
     assert!(
         a.state
-            .edit_oib(&[(102, Some(Value::Number(408.)))])
+            .edit_oib(&[(shared_width, Some(Value::Number(408.)))])
             .unwrap()
     );
     assert!(
         c.state
-            .edit_oib(&[(102, Some(Value::Number(416.)))])
+            .edit_oib(&[(shared_width, Some(Value::Number(416.)))])
             .unwrap()
     );
     let left = a.issue();
@@ -633,7 +761,7 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     c.settle();
     a.observe(&c);
     b.observe(&c);
-    assert_eq!(c.state.oib_conflicts(), vec![102]);
+    assert_eq!(c.state.oib_conflicts(), vec![shared_width]);
     let collection = a.binding.collection.clone();
     let conflicted = f.durable(&collection);
     assert_eq!(conflicted.oib_status().unwrap().active_root, active);
@@ -647,7 +775,7 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     );
     assert!(conflicted.oib_values(1).is_err());
     let snapshot = Snapshot::from_bytes(&conflicted.save().unwrap()).unwrap();
-    let draft = conflicted.oib_property_leaf(1, 102).unwrap();
+    let draft = conflicted.oib_property_leaf(1, shared_width).unwrap();
     let heads: BTreeSet<_> = draft
         .register()
         .unwrap()
@@ -672,7 +800,7 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     f.rig.restart(&binary, true, true);
     let mut a = f.open('a', 51, 0);
     let mut b = f.open('b', 52, 0);
-    assert_eq!(a.state.oib_conflicts(), vec![102]);
+    assert_eq!(a.state.oib_conflicts(), vec![shared_width]);
     assert_eq!(a.state.oib_active().unwrap(), before.oib_values(2).unwrap());
     let recovered = f.durable(&collection);
     let recovered_snapshot = Snapshot::from_bytes(&recovered.save().unwrap()).unwrap();
@@ -687,47 +815,40 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
         conflicted.oib_status().unwrap().source_draft
     );
     // A fresh intent observes both heads, explicitly resolving to this literal.
-    a.edit(&[(102, Some(Value::Number(424.)))]);
+    a.edit(&[(shared_width, Some(Value::Number(424.)))]);
     b.observe(&a);
     assert!(b.state.oib_conflicts().is_empty());
     assert_eq!(
-        b.state.oib_active().unwrap()[&102],
+        b.state.oib_active().unwrap()[&shared_width],
         Some(Value::Number(424.))
     );
     assert!(a.state.oib_generation().unwrap() > before.oib_status().unwrap().generation);
     assert_values(&a.state);
     assert_values(&b.state);
-    // Pin six active roots with a conflict, then replace four roots in draft.
-    // The union, rather than either roster alone, must obey the 64-cell cap.
+    // Structural authoring never publishes an invalid pending graph. A
+    // property conflict pins the complete last coherent active presentation.
     for _ in 0..4 {
         assert!(a.state.duplicate_oib(20, None).unwrap());
         a.settle();
     }
     let six = f.durable(&collection);
     assert_eq!(six.oib_live(2).unwrap().len(), 6);
-    assert_eq!(
-        oib::instances::expanded_seed(seed(&f.ui), &six.oib_allocations().unwrap())
-            .unwrap()
-            .cells
-            .len(),
-        42
-    );
     let removed: Vec<_> = six
         .oib_allocations()
         .unwrap()
-        .iter()
-        .filter(|a| a.id != a.prototype)
-        .map(|a| a.id)
+        .into_iter()
+        .filter(|allocation| allocation.id != 20 && allocation.id != 30)
+        .map(|allocation| allocation.id)
         .collect();
     let mut c = f.open('a', 53, 0);
     assert!(
         a.state
-            .edit_oib(&[(102, Some(Value::Number(432.)))])
+            .edit_oib(&[(shared_width, Some(Value::Number(432.)))])
             .unwrap()
     );
     assert!(
         c.state
-            .edit_oib(&[(102, Some(Value::Number(440.)))])
+            .edit_oib(&[(shared_width, Some(Value::Number(440.)))])
             .unwrap()
     );
     let left = a.issue();
@@ -737,92 +858,93 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     c.send(right);
     c.settle();
     a.observe(&c);
-    let pinned = f.durable(&collection).oib_status().unwrap().active_root;
-    for id in &removed {
-        assert!(a.state.remove_oib(*id).unwrap());
-        a.settle();
-    }
-    for _ in 0..3 {
-        assert!(a.state.duplicate_oib(20, None).unwrap());
-        a.settle();
-    }
-    let nine = f.durable(&collection);
-    assert_eq!(nine.oib_live(2).unwrap().len(), 6);
-    assert_eq!(nine.oib_live(1).unwrap().len(), 5);
-    assert_eq!(nine.oib_allocations().unwrap().len(), 9);
-    assert_eq!(
-        oib::instances::expanded_seed(seed(&f.ui), &nine.oib_allocations().unwrap())
+    let pinned = f.durable(&collection);
+    let source_bytes = |document: &Document| {
+        Snapshot::from_bytes(&document.save().unwrap())
             .unwrap()
-            .cells
-            .len(),
-        60
+            .subtree(&[4, 4])
+            .unwrap()
+            .to_bytes()
+            .unwrap()
+    };
+    assert!(a.state.remove_oib(removed[0]).unwrap());
+    let rejected = a.issue();
+    a.send(rejected.clone());
+    a.settle();
+    let rejected_state = f.durable(&collection);
+    assert!(
+        rejected_state
+            .oib_status()
+            .unwrap()
+            .error
+            .as_ref()
+            .is_some_and(|error| error.contains("Resolve the UI draft"))
     );
-    assert_eq!(nine.oib_status().unwrap().active_root, pinned);
+    assert_eq!(
+        source_bytes(&rejected_state),
+        source_bytes(&pinned),
+        "rejected topology consumes no identity or source edit"
+    );
+    assert_eq!(
+        rejected_state.oib_status().unwrap().active_root,
+        pinned.oib_status().unwrap().active_root
+    );
+    assert_eq!(
+        rejected_state.oib_values(2).unwrap(),
+        pinned.oib_values(2).unwrap()
+    );
+    a.send(rejected); // Exact rejection replay is also durably acknowledged.
+    c.observe(&a);
+    c.edit(&[(shared_width, Some(Value::Number(400.)))]);
+    a.observe(&c);
+    assert!(a.state.oib_conflicts().is_empty());
+    assert_eq!(a.state.oib_instances().unwrap().len(), 6);
     assert!(
         !a.state.duplicate_oib(20, None).unwrap(),
-        "client cell-union preflight"
+        "coherent live-root capacity preflight"
     );
-    assert!(
-        !a.state.instantiate_oib(10, None).unwrap(),
-        "component factory preflight must charge six panel cells"
-    );
-    assert_eq!(
-        a.state.insert_oib(30, None).unwrap_err(),
-        "Resolve the UI draft before changing structure",
-        "canvas insertion still requires a resolved draft"
-    );
-    assert!(a.state.confirmed(), "rejection queues no local intent");
-    // Exercise the authority preflight too, bypassing only the adapter's local
-    // availability UI. The requested root is still a signed admitted factory.
+    // A mixed request bypasses the capacity-only convenience preflight, so the
+    // real authority must reject its final seven-root candidate atomically.
+    use otrios_interfaces::oib::authoring::{
+        DefinitionEdit, Destination, DocumentEdit, EditBatch, HierarchyEdit,
+    };
+    let current = f.durable(&collection);
     assert!(
         a.state
-            .edit_oib(&[(102, Some(Value::Number(400.)))])
+            .edit_oib_structure(EditBatch {
+                generation: a.state.oib_structural_generation().unwrap(),
+                operations: vec![
+                    DocumentEdit::Definition(DefinitionEdit::RenameDefinition {
+                        definition: DefinitionId(10),
+                        name: "SettingsPanel".into()
+                    }),
+                    DocumentEdit::Hierarchy(HierarchyEdit::Duplicate {
+                        instance: InstanceId(20),
+                        name: None,
+                        destination: Destination::Canvas,
+                        before: None,
+                        frame: None
+                    }),
+                ]
+            })
             .unwrap()
     );
-    let StateRequest::OibWrite {
-        epoch, sequence, ..
-    } = canvas::decode_state_request(&a.issue()).unwrap()
-    else {
-        panic!("expected next writer sequence");
-    };
-    a.send(
-        canvas::encode_state_request(&StateRequest::OibInstance {
-            epoch,
-            sequence,
-            operation: otrios_interfaces::oib::InstanceOperation::Duplicate {
-                instance: 20,
-                name: None,
-            },
-        })
-        .unwrap(),
-    );
-    let response = read_d1(&mut a.socket);
-    let ServerMessage::Error { message, .. } = response else {
-        panic!("tenth resident: {response:?}");
-    };
-    assert_eq!(message, "OIB resident property capacity exhausted");
+    a.settle();
+    let capacity_rejected = f.durable(&collection);
+    assert!(capacity_rejected.oib_status().unwrap().error.is_some());
+    assert_eq!(source_bytes(&capacity_rejected), source_bytes(&current));
     assert_eq!(
-        f.durable(&collection).root_hash(),
-        nine.root_hash(),
-        "rejection cannot consume identity or mutate draft"
+        capacity_rejected.oib_status().unwrap().active_root,
+        current.oib_status().unwrap().active_root
     );
-    // Power has a smaller property closure and still fits this resident union.
-    // Check availability without publishing another root. Opening the peer
-    // follows the exact-root assertion because it registers a fresh writer.
-    let mut small = f.open('a', 54, 0);
-    assert!(small.state.instantiate_oib(13, None).unwrap());
-    drop(small);
-    c.observe(&a);
-    c.edit(&[(102, Some(Value::Number(400.)))]);
+    for id in removed {
+        assert!(a.state.remove_oib(id).unwrap());
+        a.settle();
+    }
     let reclaimed = f.durable(&collection);
-    assert_eq!(reclaimed.oib_live(2).unwrap().len(), 5);
-    assert_eq!(reclaimed.oib_allocations().unwrap().len(), 5);
-    assert!(
-        removed
-            .iter()
-            .all(|id| !reclaimed.oib_live(2).unwrap().contains(id))
-    );
-    assert_values(&c.state);
+    assert_eq!(reclaimed.oib_live(2).unwrap().len(), 2);
+    assert_eq!(reclaimed.oib_allocations().unwrap().len(), 2);
+    assert_values(&a.state);
     f.counter_unchanged();
 }
 
@@ -988,7 +1110,7 @@ fn d1_lost_reply_receipt_reclamation_and_retired_path_survive_real_authority_res
 
 #[test]
 fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_values() {
-    use otrios_interfaces::oib::InstanceOperation;
+    use otrios_interfaces::oib::authoring::EditBatch as InstanceOperation;
     let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
         return;
     };
@@ -999,9 +1121,15 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     assert!(a.binding.ui_editable && b.binding.ui_editable);
     assert!(a.state.set(&VALUES).unwrap());
     a.settle();
-    a.edit(&[
-        (203, Some(Value::Text("Audio custom label".into()))),
-        (304, Some(Value::Color([119, 51, 204, 255]))),
+    a.edit_addresses(&[
+        (
+            address(20, &[7], 3),
+            Some(Value::Text("Audio custom label".into())),
+        ),
+        (
+            address(30, &[8], 1),
+            Some(Value::Color([119, 51, 204, 255])),
+        ),
     ]);
     b.observe(&a);
     observer.observe(&a);
@@ -1009,7 +1137,7 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     let original = f.durable(&collection);
 
     let original_allocations = original.oib_allocations().unwrap();
-    let generation = a.state.oib_generation().unwrap();
+    let generation = a.state.oib_structural_generation().unwrap();
     let ids = |state: &StateAdapter| -> Vec<u64> {
         state
             .oib_instances()
@@ -1026,16 +1154,13 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     let accepted = a.issue();
     assert!(
         b.state
-            .edit_oib_structure(InstanceOperation::Insert {
-                prototype: 30,
-                before: Some(20),
-                generation,
-            })
+            .edit_oib_structure(InstanceOperation::insert(generation, 30, Some(20), None))
             .unwrap()
     );
     let rejected = b.issue();
     a.send(accepted.clone());
-    observer.until(|s| s.oib_generation() == Some(generation + 1) && ids(s) == vec![30, 20]);
+    observer
+        .until(|s| s.oib_structural_generation() == Some(generation + 1) && ids(s) == vec![30, 20]);
     b.send(rejected.clone());
     observer.until(|s| s.oib_status_text().contains("Structure rejected"));
     assert!(
@@ -1043,7 +1168,10 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
         "both reply losses are intentional"
     );
     let before_kill = f.durable(&collection);
-    assert_eq!(before_kill.oib_status().unwrap().generation, generation + 1);
+    assert_eq!(
+        before_kill.oib_status().unwrap().structural_generation,
+        generation + 1
+    );
     assert_eq!(
         before_kill.oib_values(2).unwrap(),
         original.oib_values(2).unwrap()
@@ -1075,8 +1203,8 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     b.settle();
     assert_eq!(ids(&a.state), vec![30, 20]);
     assert_eq!(ids(&b.state), vec![30, 20]);
-    assert_eq!(a.state.oib_generation(), Some(generation + 1));
-    assert_eq!(b.state.oib_generation(), Some(generation + 1));
+    assert_eq!(a.state.oib_structural_generation(), Some(generation + 1));
+    assert_eq!(b.state.oib_structural_generation(), Some(generation + 1));
     assert!(b.state.oib_status_text().contains("Structure rejected"));
     // Exact explicit replays after recovery remain idempotent. A subsequent
     // ordinary edit also proves neither stale receipt stranded its writer.
@@ -1101,7 +1229,25 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
         .find(|i| i.id != 20 && i.id != 30)
         .unwrap()
         .clone();
-    assert_eq!(inserted.id, 51, "stale insert consumed no identity");
+    let source = Snapshot::from_bytes(&original.save().unwrap())
+        .unwrap()
+        .subtree(&[4, 4])
+        .unwrap();
+    let source: otrios_interfaces::oib::authoring::DocumentSource = flexbuffers::from_slice(
+        source
+            .register()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .2
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        inserted.id, source.next_identity,
+        "stale insert consumed no identity"
+    );
     assert_eq!(inserted.prototype, 30);
     assert_eq!(ids(&b.state), vec![30, inserted.id, 20]);
     a.observe(&b);
@@ -1168,8 +1314,8 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
         effective(&f.ui, &completed, power_label),
         Value::Text("Power".into())
     );
-    let expanded =
-        oib::instances::expanded_seed(seed(&f.ui), &completed.oib_allocations().unwrap()).unwrap();
+    let (compiled, layout) = completed.oib_compiled(2).unwrap();
+    let expanded = oib::seed(&compiled).unwrap();
     let power_node = expanded
         .designer
         .as_ref()
@@ -1185,7 +1331,6 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
         .unwrap()
         .layout_node
         .unwrap();
-    let (compiled, layout) = completed.oib_compiled(2).unwrap();
     fn find_node(
         root: &otrios_interfaces::layout::TemplateNode,
         id: u16,
@@ -1239,9 +1384,8 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
 
 #[test]
 fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values() {
-    use otrios_interfaces::oib::{
-        InstanceOperation,
-        authoring::{DefinitionBatch, DefinitionEdit},
+    use otrios_interfaces::oib::authoring::{
+        DefinitionBatch, DefinitionEdit, EditBatch as InstanceOperation,
     };
     let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
         return;
@@ -1253,15 +1397,18 @@ fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values
     assert!(!viewer.binding.ui_editable);
     assert!(a.state.set(&VALUES).unwrap());
     a.settle();
-    a.edit(&[(203, Some(Value::Text("Retained source".into())))]);
+    a.edit_addresses(&[(
+        address(20, &[7], 3),
+        Some(Value::Text("Retained source".into())),
+    )]);
     b.observe(&a);
     viewer.observe(&a);
     let collection = a.binding.collection.clone();
     let original = f.durable(&collection);
     let original_tree = Snapshot::from_bytes(&original.save().unwrap()).unwrap();
-    let generation = a.state.oib_generation().unwrap();
+    let generation = a.state.oib_structural_generation().unwrap();
     let edit = |before| {
-        InstanceOperation::Definitions(DefinitionBatch {
+        InstanceOperation::definitions(DefinitionBatch {
             generation,
             operations: vec![DefinitionEdit::MoveNode {
                 definition: DefinitionId(10),
@@ -1277,7 +1424,7 @@ fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values
     let accepted = a.issue();
     let rejected = b.issue();
     a.send(accepted.clone());
-    viewer.until(|s| s.oib_generation() == Some(generation + 1));
+    viewer.until(|s| s.oib_structural_generation() == Some(generation + 1));
     b.send(rejected.clone());
     viewer.until(|s| s.oib_status_text().contains("Structure rejected"));
     let persisted = f.durable(&collection);
@@ -1293,7 +1440,7 @@ fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values
         .unwrap();
     assert_eq!(
         definition.nodes[0].visual_children,
-        [2, 3, 8, 7, 9].map(NodeId)
+        [2, 3, 8, 7, 9, 12].map(NodeId)
     );
     let tree = Snapshot::from_bytes(&persisted.save().unwrap()).unwrap();
     for branch in [1, 2, 5, 6] {
@@ -1327,11 +1474,11 @@ fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values
     b.settle();
     a.send(accepted);
     b.send(rejected);
-    assert_eq!(a.state.oib_generation(), Some(generation + 1));
-    assert_eq!(b.state.oib_generation(), Some(generation + 1));
+    assert_eq!(a.state.oib_structural_generation(), Some(generation + 1));
+    assert_eq!(b.state.oib_structural_generation(), Some(generation + 1));
     assert!(b.state.oib_status_text().contains("Structure rejected"));
     assert_values(&viewer.state);
-    let retry = InstanceOperation::Definitions(DefinitionBatch {
+    let retry = InstanceOperation::definitions(DefinitionBatch {
         generation: generation + 1,
         operations: vec![DefinitionEdit::MoveNode {
             definition: DefinitionId(10),
@@ -1344,8 +1491,224 @@ fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values
     assert!(b.state.edit_oib_structure(retry).unwrap());
     b.settle();
     viewer.observe(&b);
-    assert_eq!(b.state.oib_generation(), Some(generation + 2));
+    assert_eq!(b.state.oib_structural_generation(), Some(generation + 2));
     assert!(!b.state.oib_status_text().contains("Structure rejected"));
     assert_values(&viewer.state);
     f.counter_unchanged();
+}
+
+/// Canonical replacements for the former root tests' parallel-renderer seeds.
+pub(super) fn canonical_admin_permissions_recover(binary: &str) {
+    let mut fixture = Fixture::start(binary);
+    let mut admin = fixture.open('a', 91, 0);
+    let mut member = fixture.open('b', 92, 0);
+    assert!(admin.binding.ui_editable && !member.binding.ui_editable);
+    assert!(admin.state.set(&VALUES).unwrap());
+    admin.settle();
+    member.observe(&admin);
+    let property = PropertyAddress::Definition {
+        definition: DefinitionId(12),
+        node: NodeId(1),
+        property: PropertyId(3),
+    };
+    assert!(
+        admin
+            .state
+            .edit_oib_property(&property, Some(Value::Text("Confirmed live UI".into())))
+            .unwrap()
+    );
+    let request = admin.issue();
+    member.send(request.clone());
+    assert!(member.denied().contains("Space Admin"));
+    drop(member);
+    let mut member = fixture.open('b', 92, 0);
+    admin.send(request);
+    admin.settle();
+    member.observe(&admin);
+    assert_eq!(
+        admin
+            .state
+            .oib_property_register(&property)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Confirmed live UI".into()))]
+    );
+    assert_values(&admin.state);
+    assert_values(&member.state);
+    let active = admin.state.oib_active().unwrap();
+    drop(admin);
+    drop(member);
+    fixture.rig.stop();
+    fixture.rig.restart(binary, true, true);
+    let recovered = fixture.open('a', 91, 0);
+    assert_eq!(recovered.state.oib_active().unwrap(), active);
+    assert_eq!(
+        recovered
+            .state
+            .oib_property_register(&property)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Confirmed live UI".into()))]
+    );
+    assert_values(&recovered.state);
+    fixture.counter_unchanged();
+}
+
+pub(super) fn canonical_instances_unknown_outcomes_recover(binary: &str) {
+    let mut fixture = Fixture::start(binary);
+    let mut admin = fixture.open('a', 93, 0);
+    let mut member = fixture.open('b', 94, 0);
+    assert!(admin.binding.ui_editable && !member.binding.ui_editable);
+    assert!(admin.state.set(&VALUES).unwrap());
+    admin.settle();
+    member.observe(&admin);
+    assert!(admin.state.duplicate_oib(30, Some("gain".into())).unwrap());
+    let request = admin.issue();
+    // A real read-only session cannot submit even an otherwise admitted intent.
+    member.send(request.clone());
+    assert!(member.denied().contains("Space Admin"));
+    drop(member);
+    let mut member = fixture.open('b', 94, 0);
+    admin.send(request.clone());
+    member.until(|state| state.oib_instances().unwrap().len() == 3);
+    let created = member
+        .state
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .find(|instance| instance.id != 20 && instance.id != 30)
+        .unwrap()
+        .id;
+    let pending = admin.state;
+    drop(admin.socket);
+    drop(member);
+    fixture.rig.stop();
+    fixture.rig.restart(binary, true, true);
+    let mut admin = fixture.open('a', 93, pending.resume_sequence());
+    admin.state.restore_pending(&pending).unwrap();
+    admin.settle();
+    assert_eq!(
+        admin.state.oib_instances().unwrap().len(),
+        3,
+        "lost creation reply cannot allocate twice"
+    );
+    admin.send(request);
+    assert!(admin.state.set(&[(1, 632)]).unwrap());
+    admin.settle();
+    assert_eq!(admin.state.oib_instances().unwrap().len(), 3);
+    assert!(admin.state.remove_oib(created).unwrap());
+    admin.settle();
+    let width = PropertyAddress::Definition {
+        definition: DefinitionId(12),
+        node: NodeId(1),
+        property: PropertyId(2),
+    };
+    let label = PropertyAddress::Definition {
+        definition: DefinitionId(12),
+        node: NodeId(1),
+        property: PropertyId(3),
+    };
+    let accent = address(20, &[7], 1);
+    admin.edit_addresses(&[
+        (width.clone(), Some(Value::Number(360.))),
+        (label.clone(), Some(Value::Text("Shared label".into()))),
+        (accent.clone(), Some(Value::Color([119, 51, 204, 255]))),
+    ]);
+    drop(admin);
+    fixture.rig.stop();
+    fixture.rig.restart(binary, true, true);
+    let mut admin = fixture.open('a', 93, 0);
+    assert_eq!(admin.state.value(1).unwrap(), 632);
+    assert_eq!(
+        admin
+            .state
+            .oib_property_register(&width)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Number(360.))]
+    );
+    assert_eq!(
+        admin
+            .state
+            .oib_property_register(&label)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Shared label".into()))]
+    );
+    assert_eq!(
+        admin
+            .state
+            .oib_property_register(&accent)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Color([119, 51, 204, 255]))]
+    );
+    assert!(
+        !admin
+            .state
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .any(|instance| instance.id == created)
+    );
+    assert!(admin.state.duplicate_oib(30, None).unwrap());
+    admin.settle();
+    let replacement = admin
+        .state
+        .oib_instances()
+        .unwrap()
+        .into_iter()
+        .map(|instance| instance.id)
+        .max()
+        .unwrap();
+    assert!(replacement > created);
+    assert!(admin.state.restore_oib(false).unwrap());
+    admin.settle();
+    assert_eq!(
+        admin
+            .state
+            .oib_instances()
+            .unwrap()
+            .iter()
+            .map(|instance| instance.id)
+            .collect::<Vec<_>>(),
+        vec![20, 30]
+    );
+    assert_eq!(
+        admin
+            .state
+            .oib_property_register(&width)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Number(360.))]
+    );
+    let generation = admin.state.oib_structural_generation().unwrap();
+    assert!(admin.state.restore_oib(true).unwrap());
+    let request = admin.issue();
+    admin.send(request.clone());
+    let mut member = fixture.open('b', 94, 0);
+    member.until(|state| state.oib_structural_generation() == Some(generation + 1));
+    let pending = admin.state;
+    drop(admin.socket);
+    drop(member);
+    fixture.rig.stop();
+    fixture.rig.restart(binary, true, true);
+    let mut recovered = fixture.open('a', 93, pending.resume_sequence());
+    recovered.state.restore_pending(&pending).unwrap();
+    recovered.settle();
+    recovered.send(request);
+    assert_eq!(recovered.state.value(1).unwrap(), 632);
+    assert_eq!(recovered.state.oib_instances().unwrap().len(), 2);
+    for property in [width, label, accent] {
+        assert_eq!(
+            recovered
+                .state
+                .oib_property_register(&property)
+                .unwrap()
+                .alternatives,
+            vec![None],
+            "reset clears overrides to current authored defaults"
+        );
+    }
+    fixture.counter_unchanged();
 }

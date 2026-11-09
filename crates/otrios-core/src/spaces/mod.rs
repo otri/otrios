@@ -9,6 +9,8 @@ pub use usage::{AcceptedUser, active_users};
 mod discovery;
 mod moves;
 mod observer;
+#[cfg(test)]
+mod reset_tests;
 mod retained;
 mod schema;
 pub use schema::collection_schema;
@@ -287,7 +289,10 @@ pub fn apply_catalog(
     let attaching = match &request.change {
         Change::Attach { app, .. }
         | Change::RestoreDataset { app, .. }
-        | Change::Move { app, .. } => installed.iter().find(|p| &p.app == app),
+        | Change::Move { app, .. }
+        | Change::DeleteData {
+            app, remove: false, ..
+        } => installed.iter().find(|p| &p.app == app),
         _ => None,
     };
     apply(&current, actor, request, attaching)
@@ -515,6 +520,16 @@ pub fn apply(
                 remove,
                 ..
             } => {
+                // A deliberate reset initializes the currently installed app,
+                // including a breaking schema update. This is fresh data, not
+                // a migration of the discarded collection.
+                let replacement_policy = installed.filter(|p| &p.app == app && valid_policy(p));
+                if !remove
+                    && replacement_policy.is_some_and(|p| p.closed_only)
+                    && s.audience != Audience::Closed
+                {
+                    return Err(Error::Denied);
+                }
                 if next.deletions.len() == MAX_DELETIONS {
                     return Err(Error::Capacity);
                 }
@@ -536,6 +551,9 @@ pub fn apply(
                 });
                 // Replacement and tombstone are one durable management publication.
                 data.collection = fresh()?;
+                if !remove && let Some(policy) = replacement_policy {
+                    data.policy = policy.clone();
+                }
                 data.attached &= !remove;
                 data.attachment_epoch = epoch;
                 if *remove {

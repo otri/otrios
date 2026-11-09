@@ -79,6 +79,31 @@ impl StateSelection {
                 add(*id)?;
             }
         }
+        if let Some(graph) = super::oib::seed(ui).and_then(|seed| seed.graph.as_ref()) {
+            // Canonical app descriptions have no generated selectors yet.
+            // Dependency coverage follows semantic bindings and admitted
+            // connection targets, independent of renderer-local allocation.
+            if graph.presets.len() > otrios_interfaces::oib::designer::MAX_DEFINITIONS
+                || graph.grants.len() > MAX_FIELDS
+            {
+                return Err("OIB dependency declaration budget".into());
+            }
+            for preset in &graph.presets {
+                if preset.assignments.len() > otrios_interfaces::oib::MAX_CELLS {
+                    return Err("OIB binding dependency budget".into());
+                }
+                for assignment in &preset.assignments {
+                    if let otrios_interfaces::oib::graph::Source::AppBinding { field, .. } =
+                        assignment.source
+                    {
+                        add(field)?;
+                    }
+                }
+            }
+            for grant in &graph.grants {
+                add(grant.field)?;
+            }
+        }
         // ABI v1 passes the handler's current field; include permitted reducer
         // fields conservatively so future event changes cannot read defaults.
         if let Some(behavior) = &ui.behavior {
@@ -117,7 +142,8 @@ impl StateSelection {
             fields,
             signals,
             oib: super::oib::seed(ui).is_some(),
-            oib_instances: super::oib::seed(ui).is_some_and(|s| s.instance_surface.is_some()),
+            oib_instances: super::oib::seed(ui)
+                .is_some_and(|s| s.graph.is_some() || s.instance_surface.is_some()),
         })
     }
     pub(crate) fn coverage_oib(

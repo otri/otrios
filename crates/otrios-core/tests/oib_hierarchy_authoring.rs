@@ -11,7 +11,7 @@ use otrios_core::{
 };
 use otrios_interfaces::{
     canvas::{Presentation, StateRequest, Ui},
-    oib::{InstanceOperation, authoring::*, designer::*},
+    oib::{authoring::*, designer::*},
 };
 
 fn ui() -> Ui {
@@ -20,21 +20,25 @@ fn ui() -> Ui {
     let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
         panic!()
     };
-    let doc = seed.designer.as_mut().unwrap();
+    let doc = seed.graph.as_mut().unwrap();
+    // Leave admitted row space for two levels of owned controls. The production
+    // panel's 360px row intentionally only fits a single accessory row.
+    doc.preview_stride = 560.;
     doc.definitions
         .iter_mut()
         .find(|d| d.id == DefinitionId(10))
         .unwrap()
-        .slots
-        .push(SlotDescriptor {
-            id: SlotId(1),
-            name: "Slider overlay".into(),
-            references: vec![],
-            node: NodeId(7),
-            admitted_classes: vec![ClassId(8)],
-            cardinality: [0, 2],
-            layout: SlotLayout::Absolute,
-        });
+        .nodes
+        .iter_mut()
+        .find(|n| n.id == NodeId(1))
+        .unwrap()
+        .visual
+        .as_mut()
+        .unwrap()
+        .frame[3] =
+        otrios_interfaces::layout::Expr::Literal(otrios_interfaces::layout::Value::Number(520.));
+    // The production panel already exposes its empty Accessories slot. Preserve
+    // that canonical slot and add a nested slot to the reusable toggle below.
     doc.definitions
         .iter_mut()
         .find(|d| d.id == DefinitionId(13))
@@ -49,6 +53,7 @@ fn ui() -> Ui {
             cardinality: [2, 4],
             layout: SlotLayout::Absolute,
         });
+    let ui = canvas::decode_ui(&canvas::encode_ui(&ui).unwrap()).unwrap();
     oib::validate(&ui).unwrap();
     ui
 }
@@ -71,8 +76,8 @@ fn edit(
     let bytes = canvas::encode_state_request(&StateRequest::OibInstance {
         epoch: doc.oib_epoch().unwrap(),
         sequence,
-        operation: InstanceOperation::Hierarchy(HierarchyBatch {
-            generation: doc.oib_status().unwrap().generation,
+        operation: EditBatch::hierarchy(HierarchyBatch {
+            generation: doc.oib_status().unwrap().structural_generation,
             operations,
         }),
     })
@@ -91,6 +96,7 @@ fn setup() -> (Ui, Document, canvas::Session) {
 fn insert(destination: Destination, frame: Option<[f32; 4]>) -> HierarchyEdit {
     HierarchyEdit::Insert {
         prototype: InstanceId(50),
+        name: None,
         destination,
         before: None,
         frame,
@@ -106,12 +112,17 @@ fn nested_owned_insert_move_and_explicit_parent_removal_repair_preserve_values()
     doc.set_typed_authority(&[(1, otrios_interfaces::layout::Value::Number(481.))])
         .unwrap();
     let original = snapshot(&doc).subtree(&[1]).unwrap().hash();
-    let generation = doc.oib_status().unwrap().generation;
+    let generation = doc.oib_status().unwrap().structural_generation;
     edit(
         &mut doc,
         &mut session,
         1,
         vec![insert(slot(20), Some([0., 0., 264., 144.]))],
+    );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
     );
     assert!(
         doc.oib_status().unwrap().error.is_none(),
@@ -124,6 +135,11 @@ fn nested_owned_insert_move_and_explicit_parent_removal_repair_preserve_values()
         &mut session,
         2,
         vec![insert(slot(parent), Some([0., 64., 264., 64.]))],
+    );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
     );
     assert!(
         doc.oib_status().unwrap().error.is_none(),
@@ -187,7 +203,10 @@ fn nested_owned_insert_move_and_explicit_parent_removal_repair_preserve_values()
         "{:?}",
         doc.oib_status().unwrap().error
     );
-    assert_eq!(doc.oib_status().unwrap().generation, generation + 3);
+    assert_eq!(
+        doc.oib_status().unwrap().structural_generation,
+        generation + 3
+    );
     assert!(
         !doc.oib_allocations()
             .unwrap()
@@ -206,12 +225,22 @@ fn owned_subtree_duplicate_allocates_fresh_roots_and_remaps_internal_ownership()
         1,
         vec![insert(slot(20), Some([0., 0., 264., 144.]))],
     );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
+    );
     let parent = doc.oib_allocations().unwrap().last().unwrap().id;
     edit(
         &mut doc,
         &mut session,
         2,
         vec![insert(slot(parent), Some([0., 64., 264., 64.]))],
+    );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
     );
     let child = doc.oib_allocations().unwrap().last().unwrap().id;
     edit(
@@ -270,6 +299,7 @@ fn slot_cardinality_rejects_the_whole_batch_without_consuming_identities() {
         (0..3)
             .map(|_| HierarchyEdit::Insert {
                 prototype: InstanceId(50),
+                name: None,
                 destination: slot(20),
                 before: None,
                 frame: None,
@@ -301,6 +331,7 @@ fn wrong_slot_class_cardinality_cycles_and_geometry_reject_without_allocating() 
         1,
         vec![HierarchyEdit::Insert {
             prototype: InstanceId(20),
+            name: None,
             destination: slot(20),
             before: None,
             frame: None,
@@ -317,12 +348,22 @@ fn wrong_slot_class_cardinality_cycles_and_geometry_reject_without_allocating() 
         2,
         vec![insert(slot(20), Some([0., 0., 264., 144.]))],
     );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
+    );
     let parent = doc.oib_allocations().unwrap().last().unwrap().id;
     edit(
         &mut doc,
         &mut session,
         3,
         vec![insert(slot(parent), Some([0., 64., 264., 64.]))],
+    );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
     );
     let child = doc.oib_allocations().unwrap().last().unwrap().id;
     let active = doc.oib_status().unwrap().active_root;
@@ -404,19 +445,21 @@ fn object(instance: u64, references: &[u64]) -> ObjectAddress {
         node: NodeId(1),
     }
 }
-fn source(ui: &Ui, field: u16, toggle: bool) -> otrios_interfaces::layout::Binding {
+fn source(ui: &Ui, field: u16, toggle: bool) -> ConnectionSource {
     let projection = if toggle {
         otrios_interfaces::canvas::Projection::Nonzero
     } else {
         otrios_interfaces::canvas::Projection::Identity
     };
-    otrios_interfaces::layout::Binding::Local(
-        ui.selectors
-            .iter()
-            .find(|s| s.field == field && s.projection == projection)
-            .unwrap()
-            .local,
-    )
+    let selector = ui
+        .selectors
+        .iter()
+        .find(|s| s.field == field && s.projection == projection)
+        .unwrap();
+    ConnectionSource {
+        field: selector.field,
+        projection: selector.projection.clone(),
+    }
 }
 fn control_field(ui: &Ui, target: &ObjectAddress) -> u16 {
     use otrios_interfaces::layout::{Responder, TemplateNode};
@@ -539,12 +582,22 @@ fn rewiring_a_parent_control_leaves_owned_child_controls_independent_and_copies_
         1,
         vec![insert(slot(20), Some([0., 0., 264., 144.]))],
     );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
+    );
     let parent = doc.oib_allocations().unwrap().last().unwrap().id;
     edit(
         &mut doc,
         &mut session,
         2,
         vec![insert(slot(parent), Some([0., 64., 264., 64.]))],
+    );
+    assert!(
+        doc.oib_status().unwrap().error.is_none(),
+        "{:?}",
+        doc.oib_status().unwrap().error
     );
     let child = doc.oib_allocations().unwrap().last().unwrap().id;
     edit(
@@ -590,8 +643,10 @@ fn rewiring_a_parent_control_leaves_owned_child_controls_independent_and_copies_
 }
 
 #[test]
-fn a_signed_read_selector_does_not_grant_a_new_field_effect_pair() {
+fn renderer_selector_does_not_grant_a_new_field_effect_pair() {
     let mut ui = ui();
+    // Compiler-local selectors are not authority grants. Normalization may
+    // discard this extra projection; neither path admits a slider effect on 3.
     ui.selectors.push(otrios_interfaces::canvas::Selector {
         local: 999,
         field: 3,
@@ -609,7 +664,10 @@ fn a_signed_read_selector_does_not_grant_a_new_field_effect_pair() {
         vec![HierarchyEdit::Connect {
             object: object(20, &[7]),
             property: PropertyId(4),
-            source: Some(otrios_interfaces::layout::Binding::Local(999)),
+            source: Some(ConnectionSource {
+                field: 3,
+                projection: otrios_interfaces::canvas::Projection::Identity,
+            }),
         }],
     );
     assert_eq!(doc.oib_status().unwrap().active_root, active);

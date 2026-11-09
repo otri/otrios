@@ -13,6 +13,11 @@ impl Document {
         if bytes(&source)? != data
             || source.instances.len() > MAX_ALLOCATIONS
             || source.definitions.len() > otrios_interfaces::oib::designer::MAX_DEFINITIONS
+            || source.presets.len() > otrios_interfaces::oib::designer::MAX_DEFINITIONS
+            || source
+                .presets
+                .windows(2)
+                .any(|pair| pair[0].id >= pair[1].id)
             || bytes(&source.definitions)?.len() > MAX_SOURCE_BYTES
             || bytes(&source.placements)?.len() > MAX_PLACEMENT_BYTES
             || bytes(&source.connections)?.len() > MAX_CONNECTION_BYTES
@@ -31,6 +36,125 @@ impl Document {
         }
         for placement in &source.placements {
             super::super::super::oib::document::placement::validate_frame(placement.frame)?;
+        }
+        let signed = self.oib_binding()?.seed;
+        let graph = signed.graph.as_ref().ok_or("Missing canonical OIB graph")?;
+        let shell = graph
+            .instances
+            .iter()
+            .find(|instance| instance.id == graph.presented_root)
+            .ok_or("Missing signed shell")?;
+        let shell_preset = graph
+            .presets
+            .iter()
+            .find(|preset| preset.id == shell.preset)
+            .ok_or("Missing signed shell preset")?;
+        let shell_definition = graph
+            .definitions
+            .iter()
+            .find(|definition| definition.id == shell_preset.definition)
+            .ok_or("Missing signed shell definition")?;
+        if !source.presets.iter().any(|preset| {
+            preset.id == shell.preset
+                && preset.definition == shell_preset.definition
+                && !preset.palette
+        }) || !source.definitions.iter().any(|definition| {
+            definition.id == shell_definition.id && definition.root == shell_definition.root
+        }) {
+            return Err("The presented shell identity cannot be removed or rebound".into());
+        }
+        let role_limit = graph.definitions.len()
+            + graph.presets.len()
+            + graph.instances.len()
+            + graph
+                .definitions
+                .iter()
+                .map(|definition| definition.nodes.len() + definition.slots.len())
+                .sum::<usize>();
+        if source.baseline.len() > role_limit {
+            return Err("OIB baseline role budget".into());
+        }
+        let first = lifecycle::first_id(&signed)?;
+        let mut roles = BTreeSet::new();
+        let mut assigned = BTreeSet::new();
+        for identity in &source.baseline {
+            let fixed = match identity {
+                BaselineIdentity::Definition { source, .. } => *source == shell_definition.id,
+                BaselineIdentity::Node {
+                    definition, source, ..
+                } => *definition == shell_definition.id && *source == shell_definition.root,
+                BaselineIdentity::Preset { source, .. } => *source == shell.preset,
+                BaselineIdentity::Instance { source, .. } => *source == graph.presented_root,
+                BaselineIdentity::Slot { .. } => false,
+            };
+            let (key, original, current, admitted) = match identity {
+                BaselineIdentity::Definition { source, current } => (
+                    vec![0, source.0],
+                    source.0,
+                    current.0,
+                    graph
+                        .definitions
+                        .iter()
+                        .any(|definition| definition.id == *source),
+                ),
+                BaselineIdentity::Node {
+                    definition,
+                    source,
+                    current,
+                } => (
+                    vec![1, definition.0, source.0],
+                    source.0,
+                    current.0,
+                    graph
+                        .definitions
+                        .iter()
+                        .find(|candidate| candidate.id == *definition)
+                        .is_some_and(|definition| {
+                            definition.nodes.iter().any(|node| node.id == *source)
+                        }),
+                ),
+                BaselineIdentity::Slot {
+                    definition,
+                    source,
+                    current,
+                } => (
+                    vec![2, definition.0, source.0],
+                    source.0,
+                    current.0,
+                    graph
+                        .definitions
+                        .iter()
+                        .find(|candidate| candidate.id == *definition)
+                        .is_some_and(|definition| {
+                            definition.slots.iter().any(|slot| slot.id == *source)
+                        }),
+                ),
+                BaselineIdentity::Preset { source, current } => (
+                    vec![3, *source],
+                    *source,
+                    *current,
+                    graph.presets.iter().any(|preset| preset.id == *source),
+                ),
+                BaselineIdentity::Instance { source, current } => (
+                    vec![4, source.0],
+                    source.0,
+                    current.0,
+                    graph
+                        .instances
+                        .iter()
+                        .any(|instance| instance.id == *source),
+                ),
+            };
+            if !admitted
+                || !roles.insert(key)
+                || current == 0
+                || fixed && current != original
+                || (current != original
+                    && (!(first..source.next_identity).contains(&current)
+                        || !assigned.insert(current)))
+            {
+                return Err("Invalid OIB baseline identity mapping".into());
+            }
         }
         Ok(source)
     }

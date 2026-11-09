@@ -1976,11 +1976,12 @@ impl Client {
                 .as_ref()
                 .and_then(|m| m.preview_scroll.as_ref())
                 .map(|s| s.info()),
-            panel_scroll: self
-                .active
-                .as_ref()
-                .and_then(|m| m.panel_scroll.as_ref())
-                .map(|s| s.info()),
+            panel_scroll: self.active.as_ref().and_then(|m| {
+                m.designer
+                    .as_ref()
+                    .and_then(oib_designer::Designer::inspector_scroll_info)
+                    .or_else(|| m.panel_scroll.as_ref().map(|s| s.info()))
+            }),
             text_document: self
                 .active
                 .as_ref()

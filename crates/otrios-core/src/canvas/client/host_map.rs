@@ -148,6 +148,25 @@ impl Client {
         {
             return Ok(false);
         }
+        if let Some(viewport) = self
+            .active
+            .as_ref()
+            .and_then(|mount| mount.designer.as_ref())
+            .and_then(oib_designer::Designer::inspector_viewport)
+        {
+            let scene = self.scene()?;
+            let Some(path) = scene.path(viewport) else {
+                return Ok(false);
+            };
+            let Some(frame) = path.last() else {
+                return Ok(false);
+            };
+            let position = [
+                frame.origin[0] + frame.node.frame.width * frame.scale / 2.,
+                frame.origin[1] + frame.node.frame.height * frame.scale / 2.,
+            ];
+            return Ok(self.designer_scroll_at(delta, position)?.unwrap_or(false));
+        }
         let Some(mount) = &mut self.active else {
             return Ok(false);
         };

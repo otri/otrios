@@ -1,21 +1,79 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Compiler-only D2 checks. No authority receipt, process or live acceptance.
+//! Canonical D2 compiler and authority checks. In-process evidence, not live
+//! acceptance or Linux IPC qualification.
 #![cfg(feature = "canvas")]
 #[path = "../../../apps/oib-designer/app.rs"]
 mod app;
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
-use otrios_core::{canvas::oib, dashboard::layout::Layout};
+use otrios_core::{
+    canvas::{self, oib},
+    dashboard::layout::Layout,
+};
 use otrios_interfaces::{
-    canvas::Ui,
-    layout::{TemplateNode, Value},
+    canvas::{GestureKind, Operation, Ui},
+    layout::{Responder, TemplateNode, Value},
     oib::{authoring::*, designer::*},
 };
 use std::collections::BTreeMap;
 
 use otrios_core::canvas::{Document as StateDocument, Session, StateAdapter, StateSelection};
-use otrios_interfaces::oib::InstanceOperation;
 
+fn ui() -> Ui {
+    canvas::decode_ui(&canvas::encode_ui(&app::ui(&[])).unwrap()).unwrap()
+}
+fn cell(ui: &Ui, instance: u64, references: &[u64], property: u64) -> u64 {
+    let mut document = StateDocument::new(ui.state_schema.clone(), "d2:handles").unwrap();
+    document.configure_oib(ui).unwrap();
+    oib::document::cell_for_address(
+        oib::seed(ui).unwrap(),
+        &document.oib_allocations().unwrap(),
+        &PropertyAddress::Occurrence {
+            instance: InstanceId(instance),
+            path: path(references, property),
+        },
+    )
+    .unwrap()
+}
+fn property_sources(ui: &Ui) -> BTreeMap<PropertyAddress, (Value, Option<Value>)> {
+    let seed = oib::seed(ui).unwrap();
+    seed.cells
+        .iter()
+        .map(|cell| {
+            (
+                oib::document::address_for_cell(seed, cell.id).unwrap(),
+                (cell.default.clone(), cell.authored_override.clone()),
+            )
+        })
+        .collect()
+}
+fn actions(ui: &Ui) -> BTreeMap<ObjectAddress, (GestureKind, Operation, Vec<u16>)> {
+    let doc = oib::seed(ui).unwrap().designer.as_ref().unwrap();
+    doc.mappings
+        .objects
+        .iter()
+        .filter(|mapping| mapping.layout_node.is_some())
+        .filter_map(|mapping| {
+            let node = render(ui, &mapping.address);
+            let Some(Responder::AppEvent { control, .. }) = node.responder else {
+                return None;
+            };
+            let handler = ui
+                .handlers
+                .iter()
+                .find(|handler| handler.control == control)
+                .unwrap();
+            Some((
+                mapping.address.clone(),
+                (
+                    handler.kind,
+                    handler.operation.clone(),
+                    handler.fields.clone(),
+                ),
+            ))
+        })
+        .collect()
+}
 fn batch(operations: Vec<DefinitionEdit>) -> DefinitionBatch {
     DefinitionBatch {
         generation: 7,
@@ -86,15 +144,11 @@ fn address(instance: u64, node: u64) -> ObjectAddress {
 #[test]
 fn shared_definition_reorder_updates_both_instances_without_changing_property_identity() {
     assert!(app::manifest().dependencies.iter().any(|d| d == FEATURE));
-    let original = app::ui(&[]);
+    let original = ui();
     let changed = apply(&original, vec![move_node(8, 1, Some(1), Some(7))]);
-    let before = oib::seed(&original).unwrap();
-    let after = oib::seed(&changed).unwrap();
-    assert_eq!(before.cells, after.cells);
-    assert_eq!(
-        before.designer.as_ref().unwrap().mappings,
-        after.designer.as_ref().unwrap().mappings
-    );
+    assert_eq!(property_sources(&original), property_sources(&changed));
+    // Renderer handles are regenerated; semantic addresses remain stable.
+    assert_eq!(actions(&original), actions(&changed));
     for instance in [20, 30] {
         let root = render(&changed, &address(instance, 1));
         let toggle = render(&changed, &address(instance, 8));
@@ -103,16 +157,18 @@ fn shared_definition_reorder_updates_both_instances_without_changing_property_id
             root.children.iter().position(|n| n.id == toggle.id)
                 < root.children.iter().position(|n| n.id == slider.id)
         );
-        assert_eq!(render(&original, &address(instance, 7)), slider);
+        let old_slider = render(&original, &address(instance, 7));
+        assert_eq!(old_slider.frame, slider.frame);
+        assert_eq!(old_slider.shape, slider.shape);
     }
-    assert_eq!(original.handlers, changed.handlers);
+    assert_eq!(actions(&original), actions(&changed));
     assert_eq!(original.selectors, changed.selectors);
     assert_eq!(original.state_schema, changed.state_schema);
 }
 
 #[test]
 fn ownership_and_visual_parent_are_independent_and_geometry_stays_parent_local() {
-    let original = app::ui(&[]);
+    let original = ui();
     let changed = apply(&original, vec![move_node(10, 1, Some(9), None)]);
     let doc = oib::seed(&changed).unwrap().designer.as_ref().unwrap();
     let node = doc
@@ -141,7 +197,7 @@ fn ownership_and_visual_parent_are_independent_and_geometry_stays_parent_local()
 
 #[test]
 fn rename_preserves_all_mappings_bindings_and_layout_bytes() {
-    let original = app::ui(&[]);
+    let original = ui();
     let changed = apply(
         &original,
         vec![
@@ -164,7 +220,7 @@ fn rename_preserves_all_mappings_bindings_and_layout_bytes() {
     );
     assert_eq!(a.cells, b.cells);
     assert_eq!(original.layout, changed.layout);
-    assert_eq!(original.handlers, changed.handlers);
+    assert_eq!(actions(&original), actions(&changed));
     assert_eq!(original.selectors, changed.selectors);
     assert_eq!(
         b.components.iter().find(|c| c.id == 12).unwrap().name,
@@ -174,7 +230,7 @@ fn rename_preserves_all_mappings_bindings_and_layout_bytes() {
 
 #[test]
 fn explicit_forwarding_repair_retains_live_override_and_reset_reveals_current_source() {
-    let original = app::ui(&[]);
+    let original = ui();
     let changed = apply(
         &original,
         vec![
@@ -192,26 +248,28 @@ fn explicit_forwarding_repair_retains_live_override_and_reset_reveals_current_so
         ],
     );
     let seed = oib::seed(&changed).unwrap();
+    let slider = cell(&changed, 20, &[7], 1);
+    let toggle = cell(&changed, 20, &[8], 1);
     let mut values = BTreeMap::from([
-        (201, Some(Value::Color([10, 20, 30, 255]))),
-        (204, Some(Value::Color([40, 50, 60, 255]))),
+        (slider, Some(Value::Color([10, 20, 30, 255]))),
+        (toggle, Some(Value::Color([40, 50, 60, 255]))),
     ]);
     assert_eq!(
-        oib::effective(seed, &values, 204).unwrap(),
+        oib::effective(seed, &values, toggle).unwrap(),
         Value::Color([40, 50, 60, 255])
     );
-    values.insert(204, None);
+    values.insert(toggle, None);
     assert_eq!(
-        oib::effective(seed, &values, 204).unwrap(),
+        oib::effective(seed, &values, toggle).unwrap(),
         Value::Color([10, 20, 30, 255])
     );
-    assert_eq!(original.handlers, changed.handlers);
+    assert_eq!(actions(&original), actions(&changed));
     assert_eq!(original.selectors, changed.selectors);
 }
 
 #[test]
 fn authored_reference_literal_can_be_removed_without_changing_factory_labels() {
-    let original = app::ui(&[]);
+    let original = ui();
     let operations = vec![DefinitionEdit::ConnectReference {
         definition: DefinitionId(10),
         reference: NodeId(8),
@@ -221,19 +279,19 @@ fn authored_reference_literal_can_be_removed_without_changing_factory_labels() {
     let changed = apply(&original, operations);
     let seed = oib::seed(&changed).unwrap();
     assert_eq!(
-        oib::effective(seed, &BTreeMap::new(), 205).unwrap(),
+        oib::effective(seed, &BTreeMap::new(), cell(&changed, 20, &[8], 3)).unwrap(),
         Value::Text("Power".into())
     );
     assert_eq!(
-        oib::effective(seed, &BTreeMap::new(), 305).unwrap(),
+        oib::effective(seed, &BTreeMap::new(), cell(&changed, 30, &[8], 3)).unwrap(),
         Value::Text("Power".into())
     );
     assert_eq!(
-        oib::effective(seed, &BTreeMap::new(), 203).unwrap(),
+        oib::effective(seed, &BTreeMap::new(), cell(&changed, 20, &[7], 3)).unwrap(),
         Value::Text("Volume".into())
     );
     assert_eq!(
-        oib::effective(seed, &BTreeMap::new(), 303).unwrap(),
+        oib::effective(seed, &BTreeMap::new(), cell(&changed, 30, &[7], 3)).unwrap(),
         Value::Text("Brightness".into())
     );
     let restored = apply(
@@ -245,15 +303,12 @@ fn authored_reference_literal_can_be_removed_without_changing_factory_labels() {
             source: None,
         }],
     );
-    assert_eq!(
-        oib::seed(&restored).unwrap().cells,
-        oib::seed(&original).unwrap().cells
-    );
+    assert_eq!(property_sources(&restored), property_sources(&original));
 }
 
 #[test]
 fn invalid_cycles_classes_anchors_and_inherited_moves_leave_original_bytes_unchanged() {
-    let original = app::ui(&[]);
+    let original = ui();
     let bytes = flexbuffers::to_vec(&original).unwrap();
     for operations in [
         vec![move_node(1, 9, Some(9), None)],
@@ -262,12 +317,6 @@ fn invalid_cycles_classes_anchors_and_inherited_moves_leave_original_bytes_uncha
         vec![move_node(9, 1, Some(1), Some(10))],
         vec![move_node(9, 1, Some(1), Some(9))],
         vec![move_node(9, 1, None, Some(7))],
-        vec![DefinitionEdit::ConnectReference {
-            definition: DefinitionId(10),
-            reference: NodeId(7),
-            target: path(&[], 4),
-            source: None,
-        }],
         vec![DefinitionEdit::ConnectReference {
             definition: DefinitionId(10),
             reference: NodeId(7),
@@ -301,7 +350,7 @@ fn invalid_cycles_classes_anchors_and_inherited_moves_leave_original_bytes_uncha
 
 #[test]
 fn final_closure_validation_allows_explicit_repair_in_one_batch() {
-    let original = app::ui(&[]);
+    let original = ui();
     // First move temporarily makes ownership cyclic (button -> surface -> button).
     // The second move explicitly repairs it before complete closure validation.
     let changed = apply(
@@ -312,15 +361,13 @@ fn final_closure_validation_allows_explicit_repair_in_one_batch() {
         ],
     );
     oib::validate(&changed).unwrap();
-    assert_eq!(
-        oib::seed(&original).unwrap().cells,
-        oib::seed(&changed).unwrap().cells
-    );
+    assert_eq!(property_sources(&original), property_sources(&changed));
+    assert_eq!(actions(&original), actions(&changed));
 }
 
 #[test]
 fn operation_count_names_forwarding_order_and_generation_are_bounded() {
-    let original = app::ui(&[]);
+    let original = ui();
     let rename = |name| DefinitionEdit::RenameDefinition {
         definition: DefinitionId(10),
         name,
@@ -350,7 +397,7 @@ fn operation_count_names_forwarding_order_and_generation_are_bounded() {
 }
 
 fn setup() -> (Ui, StateDocument, StateAdapter, Session) {
-    let ui = app::ui(&[]);
+    let ui = ui();
     let mut doc = StateDocument::new(ui.state_schema.clone(), "d2:definitions").unwrap();
     doc.configure_oib(&ui).unwrap();
     let (mut session, _) = doc.open_session(&[81; 16], 0).unwrap();
@@ -393,7 +440,7 @@ fn request(
         &otrios_interfaces::canvas::StateRequest::OibInstance {
             epoch: doc.oib_epoch().unwrap(),
             sequence,
-            operation: InstanceOperation::Definitions(DefinitionBatch {
+            operation: EditBatch::definitions(DefinitionBatch {
                 generation,
                 operations,
             }),
@@ -409,19 +456,22 @@ fn authority_definition_edits_preserve_exact_causal_registers_and_restart_receip
     sync(&mut doc, &mut session, &mut client);
     assert!(
         client
-            .edit_oib(&[(203, Some(Value::Text("Retained".into())))])
+            .edit_oib(&[(cell(&ui, 20, &[7], 3), Some(Value::Text("Retained".into())))])
             .unwrap()
     );
     sync(&mut doc, &mut session, &mut client);
     let tree = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-    let generation = doc.oib_status().unwrap().generation;
+    let generation = doc.oib_status().unwrap().structural_generation;
     let (mut writer, _) = doc.open_session(&[82; 16], 0).unwrap();
     writer.set_oib_editable(true);
     let accepted = request(&doc, 1, generation, vec![move_node(8, 1, Some(1), Some(7))]);
     assert!(doc.receive(&mut writer, &accepted).unwrap());
-    assert_eq!(doc.oib_status().unwrap().generation, generation + 1);
+    assert_eq!(
+        doc.oib_status().unwrap().structural_generation,
+        generation + 1
+    );
     let after = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-    for branch in [1, 2, 5, 6] {
+    for branch in [1, 2] {
         assert_eq!(
             tree.subtree(&[4, branch]).unwrap().to_bytes().unwrap(),
             after.subtree(&[4, branch]).unwrap().to_bytes().unwrap()
@@ -441,7 +491,10 @@ fn authority_definition_edits_preserve_exact_causal_registers_and_restart_receip
         .iter()
         .find(|d| d.id == DefinitionId(10))
         .unwrap();
-    assert_eq!(def.nodes[0].visual_children, [2, 3, 8, 7, 9].map(NodeId));
+    assert_eq!(
+        def.nodes[0].visual_children,
+        [2, 3, 8, 7, 9, 12].map(NodeId)
+    );
     let status = doc.oib_status().unwrap();
     let saved = doc.save().unwrap();
     let mut recovered =
@@ -454,26 +507,32 @@ fn authority_definition_edits_preserve_exact_causal_registers_and_restart_receip
     let (mut resumed, _) = recovered.open_session(&[82; 16], 1).unwrap();
     resumed.set_oib_editable(true);
     assert!(!recovered.receive(&mut resumed, &accepted).unwrap());
-    assert_eq!(recovered.oib_status().unwrap().generation, generation + 1);
+    assert_eq!(
+        recovered.oib_status().unwrap().structural_generation,
+        generation + 1
+    );
     assert_eq!(recovered.oib_compiled(2).unwrap().0, compiled);
     // The existing adapter accepts the same normalized authored metadata.
     sync(&mut doc, &mut session, &mut client);
     assert!(
         client
-            .edit_oib_structure(InstanceOperation::Definitions(DefinitionBatch {
+            .edit_oib_structure(EditBatch::definitions(DefinitionBatch {
                 generation: generation + 1,
                 operations: vec![move_node(8, 1, Some(1), Some(9))],
             }))
             .unwrap()
     );
     sync(&mut doc, &mut session, &mut client);
-    assert_eq!(doc.oib_status().unwrap().generation, generation + 2);
+    assert_eq!(
+        doc.oib_status().unwrap().structural_generation,
+        generation + 2
+    );
 }
 
 #[test]
 fn stale_and_invalid_definition_batches_keep_exact_active_graph_and_receipt_rejection() {
     let (ui, mut doc, _client, _session) = setup();
-    let generation = doc.oib_status().unwrap().generation;
+    let generation = doc.oib_status().unwrap().structural_generation;
     let (mut writer, _) = doc.open_session(&[83; 16], 0).unwrap();
     writer.set_oib_editable(true);
     let accepted = request(&doc, 1, generation, vec![move_node(8, 1, Some(1), Some(7))]);
@@ -531,15 +590,34 @@ fn stale_and_invalid_definition_batches_keep_exact_active_graph_and_receipt_reje
 }
 
 #[test]
-fn snapshots_cannot_replace_signed_classes_defaults_references_or_binding_grants() {
-    let ui = app::ui(&[]);
+fn restored_sources_regenerate_output_and_validate_classes_references_and_grants() {
+    let ui = ui();
     let seed = oib::seed(&ui).unwrap();
-    let original = &seed.designer.as_ref().unwrap().definitions;
+    let original = &seed.graph.as_ref().unwrap().definitions;
+    let original_bytes = canvas::encode_ui(&ui).unwrap();
+    // Authored defaults are mutable source now; they are not a signed factory
+    // allowlist. Valid restoration derives all renderer targets afresh.
+    let mut definitions = original.clone();
+    definitions[0].nodes[0].defaults[0].value = Value::Color([1, 2, 3, 255]);
+    let restored = oib::document::authoring::restore(&ui, &definitions).unwrap();
+    assert_eq!(
+        oib::seed(&restored)
+            .unwrap()
+            .graph
+            .as_ref()
+            .unwrap()
+            .definitions,
+        definitions
+    );
+    assert_eq!(
+        oib::contract::admission(&ui).unwrap(),
+        oib::contract::admission(&restored).unwrap()
+    );
     for kind in 0..5 {
         let mut definitions = original.clone();
         match kind {
-            0 => definitions[0].nodes[0].class = ClassId(1),
-            1 => definitions[0].nodes[0].defaults[0].value = Value::Color([1, 2, 3, 4]),
+            0 => definitions[0].nodes[0].class = ClassId(999),
+            1 => definitions[0].nodes[0].defaults[0].value = Value::Text("wrong type".into()),
             2 => {
                 definitions[0]
                     .nodes
@@ -549,7 +627,7 @@ fn snapshots_cannot_replace_signed_classes_defaults_references_or_binding_grants
                     .reference
                     .as_mut()
                     .unwrap()
-                    .definition = DefinitionId(13)
+                    .definition = DefinitionId(999)
             }
             3 => definitions[0]
                 .nodes
@@ -570,6 +648,10 @@ fn snapshots_cannot_replace_signed_classes_defaults_references_or_binding_grants
                 definitions.pop();
             }
         }
-        assert!(oib::document::authoring::restore(&ui, &definitions).is_err());
+        assert!(
+            oib::document::authoring::restore(&ui, &definitions).is_err(),
+            "invalid source {kind}"
+        );
+        assert_eq!(canvas::encode_ui(&ui).unwrap(), original_bytes);
     }
 }

@@ -3,16 +3,18 @@
 use super::*;
 
 pub(super) fn first_id(seed: &otrios_interfaces::oib::Seed) -> Result<u64> {
-    seed.components
+    let graph = seed.graph.as_ref().ok_or("Missing canonical OIB graph")?;
+    graph
+        .instances
         .iter()
-        .chain(&seed.instances)
-        .map(|o| o.id)
-        .chain(std::iter::once(seed.main_oib))
-        .chain(
-            seed.designer
-                .iter()
-                .flat_map(|d| d.instances.iter().map(|i| i.id.0)),
-        )
+        .map(|instance| instance.id.0)
+        .chain(graph.presets.iter().map(|preset| preset.id))
+        .chain(graph.definitions.iter().flat_map(|definition| {
+            std::iter::once(definition.id.0)
+                .chain(definition.nodes.iter().map(|node| node.id.0))
+                .chain(definition.slots.iter().map(|slot| slot.id.0))
+        }))
+        .chain(std::iter::once(graph.presented_root.0))
         .max()
         .unwrap_or(0)
         .checked_add(1)
@@ -22,7 +24,7 @@ const MAX_ID: u64 = u64::MAX;
 
 impl Document {
     pub(super) fn oib_next_id(&self) -> Result<u64> {
-        Ok(self.oib_source()?.next_instance)
+        Ok(self.oib_source()?.next_identity)
     }
 
     pub(super) fn oib_allocate(
@@ -31,46 +33,33 @@ impl Document {
         prototype: u64,
         name: Option<String>,
     ) -> Result<Allocation> {
-        let seed = self.oib_binding()?.seed;
+        let ui = self.oib_authored_ui()?;
+        let seed = super::super::super::oib::seed(&ui).ok_or("Missing authored graph")?;
         let source = seed
             .instances
             .iter()
             .find(|i| i.id == prototype)
             .ok_or("Undeclared OIB factory")?;
-        let slot = (0
-            ..(MAX_ALLOCATIONS - super::super::super::oib::instances::initial_count(&seed)) as u16)
-            .find(|s| {
+        let slot = (0..MAX_ALLOCATIONS as u16)
+            .find(|slot| {
                 allocations
                     .iter()
-                    .all(|a| a.id == a.prototype || a.slot != *s)
+                    .all(|allocation| allocation.slot != *slot)
             })
             .ok_or("OIB resident instance capacity exhausted")?;
         let id = self.oib_next_id()?;
-        if !(first_id(&seed)?..MAX_ID).contains(&id) {
+        if !(first_id(seed)?..MAX_ID).contains(&id) {
             return Err("OIB identity counter exhausted".into());
         }
         let name = name.unwrap_or_else(|| format!("instance-{id}"));
-        if !admitted_instance_name(&seed, &name) {
+        if !admitted_instance_name(seed, &name) {
             return Err(
                 "Instance names use 1–64 ASCII letters, digits, hyphens or underscores".into(),
             );
         }
-        if seed.designer.is_some() {
-            let mut resident = allocations.to_vec();
-            resident.push(Allocation {
-                id,
-                name: name.clone(),
-                component: source.component.ok_or("Missing component")?,
-                prototype,
-                slot,
-            });
-            // Check the complete draft/active resident union before advancing the
-            // monotonic identity, including each occurrence's entire key table.
-            super::super::super::oib::instances::expanded_seed(&seed, &resident)?;
-        }
         self.change(
             &[],
-            vec![self.oib_source_edit(|source| source.next_instance = id + 1)?],
+            vec![self.oib_source_edit(|source| source.next_identity = id + 1)?],
         )?;
         Ok(Allocation {
             id,
@@ -86,146 +75,176 @@ impl Document {
             return Ok(false);
         }
         let seed = self.oib_binding()?.seed;
-        Ok(seed.instances.iter().any(|i| i.id == id)
-            || (first_id(&seed)?..self.oib_next_id()?).contains(&id))
+        Ok(
+            super::super::super::oib::instances::initial_allocations(&seed)
+                .iter()
+                .any(|i| i.id == id)
+                || (first_id(&seed)?..self.oib_next_id()?).contains(&id),
+        )
+    }
+
+    pub(super) fn oib_retired_property(
+        &self,
+        address: &otrios_interfaces::oib::designer::PropertyAddress,
+    ) -> Result<bool> {
+        use otrios_interfaces::oib::{authoring::BaselineIdentity, designer::*};
+        let source = self.oib_source()?;
+        let signed = self
+            .oib_binding()?
+            .seed
+            .graph
+            .ok_or("Missing signed graph")?;
+        let first = first_id(&self.oib_binding()?.seed)?;
+        let allocated = |identity| (first..source.next_identity).contains(&identity);
+        fn contains(
+            definitions: &[ComponentDefinition],
+            mut definition: DefinitionId,
+            references: &[NodeId],
+            node: NodeId,
+        ) -> bool {
+            for boundary in references {
+                let Some(next) = definitions
+                    .iter()
+                    .find(|current| current.id == definition)
+                    .and_then(|current| current.nodes.iter().find(|node| node.id == *boundary))
+                    .and_then(|node| node.reference.as_ref())
+                else {
+                    return false;
+                };
+                definition = next.definition;
+            }
+            definitions
+                .iter()
+                .find(|current| current.id == definition)
+                .is_some_and(|current| current.nodes.iter().any(|current| current.id == node))
+        }
+        match address {
+            PropertyAddress::Definition {
+                definition, node, ..
+            } => {
+                if contains(&source.definitions, *definition, &[], *node) {
+                    return Ok(false);
+                }
+                Ok(contains(&signed.definitions, *definition, &[], *node)
+                    || allocated(definition.0)
+                    || allocated(node.0))
+            }
+            PropertyAddress::Occurrence { instance, path } => {
+                if self.oib_retired_instance(instance.0)? {
+                    return Ok(true);
+                }
+                let Some(root) = source.instances.iter().find(|root| root.id == instance.0) else {
+                    return Ok(false);
+                };
+                let definition = DefinitionId(root.component);
+                if contains(&source.definitions, definition, &path.references, path.node) {
+                    return Ok(false);
+                }
+                let original = source
+                    .baseline
+                    .iter()
+                    .find_map(|mapping| match mapping {
+                        BaselineIdentity::Definition { source, current }
+                            if *current == definition =>
+                        {
+                            Some(*source)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(definition);
+                Ok(
+                    contains(&signed.definitions, original, &path.references, path.node)
+                        || allocated(definition.0)
+                        || allocated(path.node.0)
+                        || path.references.iter().any(|node| allocated(node.0)),
+                )
+            }
+            _ => Ok(false),
+        }
     }
 
     pub(super) fn oib_restore_residents(&mut self, defaults: bool, writer: Actor) -> Result<()> {
-        let seed = self.oib_binding()?.seed;
-        if seed.designer.is_some() {
-            return self.oib_restore_designer(defaults, writer);
+        use otrios_interfaces::oib::{authoring::BaselineIdentity, designer::*};
+        if defaults {
+            return Err("Reset defaults uses the baseline restoration candidate".into());
         }
-        let previous = self.oib_allocations()?;
+        let signed = self.oib_binding()?.seed;
+        let initial = super::super::super::oib::instances::initial_allocations(&signed);
+        let source = self.oib_source()?;
         let live = self.oib_live(1)?;
-        let mut allocations: Vec<_> = seed
-            .instances
-            .iter()
-            .filter_map(|s| {
-                previous
-                    .iter()
-                    .find(|a| {
-                        live.contains(&a.id)
-                            && a.prototype == s.id
-                            && (a.id == s.id || a.name == s.name)
-                    })
-                    .cloned()
-            })
-            .collect();
-        for source in &seed.instances {
-            if !allocations
-                .iter()
-                .any(|a| a.prototype == source.id && (a.id == source.id || a.name == source.name))
-            {
-                allocations.push(self.oib_allocate(
-                    &allocations,
-                    source.id,
-                    Some(source.name.clone()),
-                )?);
-            }
-        }
-        // Put the authored factories in signed order, independent of creation IDs.
-        allocations.sort_by_key(|a| seed.instances.iter().position(|s| s.id == a.prototype));
-        let resolved = super::super::super::oib::instances::expanded_seed(&seed, &allocations)?;
-        let mut edits = vec![self.oib_source_edit(|source| {
-            source.instances = allocations.iter().map(Into::into).collect()
-        })?];
-        for a in &allocations {
-            edits.push(Edit {
-                path: cell_path(5, a.id),
-                schema: self.oib_instance_schema(a.id),
-                value: Some(bytes(&true)?),
-            });
-        }
-        for cell in &resolved.cells {
-            if defaults
-                || self
-                    .tree
-                    .subtree(&address::cell_path(&resolved, 1, cell.id)?)
-                    .is_err()
-            {
-                edits.push(Edit {
-                    path: address::cell_path(&resolved, 1, cell.id)?,
-                    schema: address::schema(&self.scope, &resolved, cell.id)?,
-                    value: if cell.inherit.is_some() {
-                        None
-                    } else {
-                        Some(bytes(&cell.default)?)
-                    },
-                });
-            }
-        }
-        self.tree = self.tree.edit(writer, &edits).map_err(err)?.0;
-        self.oib_reclaim()
-    }
-
-    /// Retain the union until the coherent new graph activates. In particular,
-    /// restoring a deleted factory cannot borrow cells/slots still pinned by the
-    /// current active graph or consume an identity on capacity failure.
-    fn oib_restore_designer(&mut self, defaults: bool, writer: Actor) -> Result<()> {
-        let seed = self.oib_binding()?.seed;
         let mut resident = self.oib_allocations()?;
-        let live = self.oib_live(1)?;
-        let mut desired = BTreeSet::new();
-        for factory in seed
-            .instances
-            .iter()
-            .filter(|i| !super::super::super::oib::instances::palette_only(&seed, i.id))
-        {
+        let mut desired = Vec::new();
+        let mut baseline = source.baseline.clone();
+        for original in initial {
+            let preset = baseline
+                .iter()
+                .find_map(|mapping| match mapping {
+                    BaselineIdentity::Preset { source, current }
+                        if *source == original.prototype =>
+                    {
+                        Some(*current)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(original.prototype);
+            let definition = baseline
+                .iter()
+                .find_map(|mapping| match mapping {
+                    BaselineIdentity::Definition { source, current }
+                        if source.0 == original.component =>
+                    {
+                        Some(current.0)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(original.component);
+            if !source.presets.iter().any(|current| {
+                current.id == preset && current.definition.0 == definition && current.palette
+            }) {
+                return Err("An authored initial preset was removed or rebound; Reset defaults restores the baseline".into());
+            }
+            let identity = baseline
+                .iter()
+                .find_map(|mapping| match mapping {
+                    BaselineIdentity::Instance { source, current } if source.0 == original.id => {
+                        Some(current.0)
+                    }
+                    _ => None,
+                })
+                .unwrap_or(original.id);
             if let Some(existing) = resident
                 .iter()
-                .filter(|a| live.contains(&a.id) && a.prototype == factory.id)
-                .min_by_key(|a| (a.id != factory.id, a.id))
+                .find(|current| current.id == identity && live.contains(&current.id))
             {
-                desired.insert(existing.id);
+                if existing.prototype != preset || existing.component != definition {
+                    return Err("Initial instance role was rebound".into());
+                }
+                desired.push(existing.clone());
             } else {
-                let new = self.oib_allocate(&resident, factory.id, Some(factory.name.clone()))?;
-                desired.insert(new.id);
-                resident.push(new);
-            }
-        }
-        // Restore returns the authored residents to signed canvas order. Keep
-        // the active/draft union's other descriptors until activation reclaims
-        // them, without ever changing a resident slot or occurrence identity.
-        let initial = super::super::super::oib::instances::initial_allocations(&seed);
-        resident.sort_by_key(|a| {
-            if desired.contains(&a.id) {
-                initial
-                    .iter()
-                    .position(|i| i.prototype == a.prototype)
-                    .unwrap_or(usize::MAX)
-            } else {
-                usize::MAX
-            }
-        });
-        let resolved = super::super::super::oib::instances::expanded_seed(&seed, &resident)?;
-        let mut edits = vec![self.oib_source_edit(|source| {
-            source.instances = resident.iter().map(Into::into).collect()
-        })?];
-        for a in &resident {
-            edits.push(Edit {
-                path: cell_path(5, a.id),
-                schema: self.oib_instance_schema(a.id),
-                value: desired.contains(&a.id).then(|| bytes(&true)).transpose()?,
-            });
-        }
-        for cell in &resolved.cells {
-            let wanted = cell.inherit.is_none() || desired.contains(&cell.owner);
-            if (defaults && wanted)
-                || self
-                    .tree
-                    .subtree(&address::cell_path(&resolved, 1, cell.id)?)
-                    .is_err()
-            {
-                edits.push(Edit {
-                    path: address::cell_path(&resolved, 1, cell.id)?,
-                    schema: address::schema(&self.scope, &resolved, cell.id)?,
-                    value: if cell.inherit.is_some() {
-                        None
-                    } else {
-                        Some(bytes(&cell.default)?)
-                    },
+                let new = self.oib_allocate(&resident, preset, Some(original.name))?;
+                baseline.retain(|mapping| !matches!(mapping, BaselineIdentity::Instance { source, .. } if source.0 == original.id));
+                baseline.push(BaselineIdentity::Instance {
+                    source: InstanceId(original.id),
+                    current: InstanceId(new.id),
                 });
+                resident.push(new.clone());
+                desired.push(new);
             }
+        }
+        // Canonical initial graph currently admits canvas-owned mutable roots
+        // only. No name matching or guessed replacement hosts are involved.
+        let mut edits = vec![self.oib_source_edit(|source| {
+            source.instances = desired.iter().map(Into::into).collect();
+            source.baseline = baseline;
+            source.placements.clear();
+            source.connections.clear();
+        })?];
+        for allocation in desired {
+            edits.push(Edit {
+                path: cell_path(5, allocation.id),
+                schema: self.oib_instance_schema(allocation.id),
+                value: Some(bytes(&true)?),
+            });
         }
         self.tree = self.tree.edit(writer, &edits).map_err(err)?.0;
         Ok(())
@@ -275,30 +294,28 @@ impl Document {
     }
 
     pub(super) fn validate_resident_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
-        let seed = self.oib_binding()?.seed;
+        let seed = self.oib_authored_seed()?;
         let allocations = self.oib_allocations()?;
         let next = self.oib_next_id()?;
+        let first = first_id(&self.oib_binding()?.seed)?;
         super::super::super::oib::instances::expanded_seed(&seed, &allocations)?;
         let mut slots = BTreeSet::new();
         let mut ids = BTreeSet::new();
-        if !(first_id(&seed)?..=MAX_ID).contains(&next) || allocations.len() > MAX_ALLOCATIONS {
+        if !(first..=MAX_ID).contains(&next) || allocations.len() > MAX_ALLOCATIONS {
             return Err("Invalid OIB resident allocator".into());
         }
+        let initial = super::super::super::oib::instances::initial_allocations(&seed);
         for a in &allocations {
-            let original = seed.instances.iter().any(|s| {
-                s.id == a.id
-                    && s.id == a.prototype
-                    && s.name == a.name
-                    && !super::super::super::oib::instances::palette_only(&seed, s.id)
+            let original = initial.iter().any(|source| {
+                source.id == a.id
+                    && source.prototype == a.prototype
+                    && source.component == a.component
             });
             if !admitted_instance_name(&seed, &a.name)
                 || !ids.insert(a.id)
-                || (!original
-                    && (!slots.insert(a.slot)
-                        || usize::from(a.slot)
-                            >= MAX_ALLOCATIONS
-                                - super::super::super::oib::instances::initial_count(&seed)))
-                || (!original && !(first_id(&seed)?..next).contains(&a.id))
+                || !slots.insert(a.slot)
+                || usize::from(a.slot) >= MAX_ALLOCATIONS
+                || (!original && !(first..next).contains(&a.id))
                 || !seed
                     .instances
                     .iter()
@@ -310,7 +327,7 @@ impl Document {
         if let Some(old) = old {
             let source: Option<otrios_interfaces::oib::authoring::DocumentSource> =
                 payload(old, &[4, 4]).ok().map(|v| decode(&v)).transpose()?;
-            let previous_next = source.as_ref().map(|s| s.next_instance);
+            let previous_next = source.as_ref().map(|s| s.next_identity);
             let previous = source.map_or_else(Vec::new, |s| s.instances);
             if previous_next.is_some_and(|n| n > next) {
                 return Err("OIB identity counter regressed".into());
@@ -318,7 +335,6 @@ impl Document {
             for a in &allocations {
                 if let Some(before) = previous.iter().find(|b| b.id == a.id) {
                     if before.id != a.id
-                        || before.name != a.name
                         || before.component != a.component
                         || before.prototype != a.prototype
                     {
@@ -339,8 +355,14 @@ impl Document {
             return Err("OIB resident byte budget".into());
         }
         for branch in [5, 6] {
-            let Ok(tree) = self.tree.subtree(&[4, branch]) else {
-                continue;
+            let tree = match self.tree.subtree(&[4, branch]) {
+                Ok(tree) => tree,
+                Err(merkle::Error::Missing)
+                    if branch == 5 && !self.oib_projection && !ids.is_empty() =>
+                {
+                    return Err("Missing OIB draft presence in complete checkpoint".into());
+                }
+                Err(_) => continue,
             };
             let mut seen = BTreeSet::new();
             trie_ids(&tree, 0, 0, &mut seen)?;
@@ -377,13 +399,8 @@ impl StateAdapter {
         let Ok(allocations) = self.doc.oib_allocations() else {
             return 0;
         };
-        let dynamic_capacity = self.doc.oib_binding().map_or(0, |b| {
-            MAX_ALLOCATIONS
-                .saturating_sub(super::super::super::oib::instances::initial_count(&b.seed))
-        });
-        let dynamic_used = allocations.iter().filter(|a| a.id != a.prototype).count();
-        let cell_capacity = self.doc.oib_binding().map_or(0, |b| {
-            if let Some(d) = &b.seed.designer {
+        let cell_capacity = self.doc.oib_authored_seed().map_or(0, |seed| {
+            if let Some(d) = &seed.designer {
                 let used = d.mappings.definitions.len()
                     + allocations
                         .iter()
@@ -401,10 +418,14 @@ impl StateAdapter {
                     .iter()
                     .filter(|t| prototype.is_none_or(|p| t.prototype.0 == p))
                     .map(|t| t.cells.len())
-                    .filter(|n| *n > 0)
-                    .min()
-                    .unwrap_or(64);
-                otrios_interfaces::oib::MAX_CELLS.saturating_sub(used) / per_root
+                    .min();
+                match per_root {
+                    Some(0) => MAX_ALLOCATIONS,
+                    Some(per_root) => {
+                        otrios_interfaces::oib::MAX_CELLS.saturating_sub(used) / per_root
+                    }
+                    None => 0,
+                }
             } else {
                 MAX_ALLOCATIONS
             }
@@ -412,7 +433,6 @@ impl StateAdapter {
         MAX_ALLOCATIONS
             .saturating_sub(allocations.len())
             .min(cell_capacity)
-            .min(dynamic_capacity.saturating_sub(dynamic_used))
             .min(
                 otrios_interfaces::oib::MAX_LIVE_INSTANCES.saturating_sub(
                     self.doc

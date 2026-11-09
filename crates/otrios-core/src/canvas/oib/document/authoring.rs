@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-//! Disposable D2 definition transforms over the signed D1 lowering.
+//! Definition transforms over the canonical OIB source graph.
 //!
 //! This is a compiler primitive, not an authority endpoint. It cannot publish,
 //! acknowledge, authorize a writer or overwrite a causal property register.
@@ -18,104 +18,29 @@ pub fn apply(ui: &Ui, batch: &DefinitionBatch) -> Result<Ui> {
     {
         return Err("OIB definition batch budget or generation".into());
     }
-    // The input must already be admitted, including render/control correspondence.
     super::super::validate(ui)?;
-    let original = super::super::seed(ui).ok_or("Missing OIB seed")?;
-    let mut seed = original.clone();
-    for operation in &batch.operations {
-        edit(&mut seed, operation)?;
-    }
-    let seed = restore_seed(original, &metadata(&seed)?.definitions)?;
-    let mut candidate = ui.clone();
-    candidate.layout = project_layout(ui, &seed)?;
-    candidate.presentation = Some(Presentation::Oib(Box::new(seed)));
+    let original = super::super::seed(ui).ok_or("Missing OIB graph")?;
+    let definitions = transform(original, &batch.operations)?;
+    let candidate = restore(ui, &definitions)?;
     super::super::validate(&candidate)?;
     Ok(candidate)
 }
 
-/// Reconstruct structural data only against its immutable signed admission
-/// surface. This checks recovery snapshots as strictly as newly authored data.
-/// Renderer mappings, node classes/defaults, reference definitions and slots
-/// cannot be supplied or replaced by this snapshot format.
+/// Reconstruct a mutable definition source against the immutable signed classes
+/// and field/effect grants. Renderer output is regenerated, never accepted from
+/// an old parallel layout or a caller-provided mapping table.
 pub fn restore_seed(signed: &Seed, definitions: &[ComponentDefinition]) -> Result<Seed> {
-    let original = metadata(signed)?;
-    if definitions.len() != original.definitions.len() {
-        return Err("OIB definition snapshot identity mismatch".into());
-    }
-    for (old, new) in original.definitions.iter().zip(definitions) {
-        if old.id != new.id
-            || old.root != new.root
-            || old.slots != new.slots
-            || old.nodes.len() != new.nodes.len()
-            || old.exposed.iter().map(|p| p.property).collect::<Vec<_>>()
-                != new.exposed.iter().map(|p| p.property).collect::<Vec<_>>()
-        {
-            return Err("OIB definition snapshot changed signed admission".into());
-        }
-        for (a, b) in old.nodes.iter().zip(&new.nodes) {
-            if a.id != b.id
-                || a.class != b.class
-                || a.defaults != b.defaults
-                || a.reference.as_ref().map(|r| r.definition)
-                    != b.reference.as_ref().map(|r| r.definition)
-            {
-                return Err("OIB node snapshot changed signed admission".into());
-            }
-            if let (Some(a), Some(b)) = (&a.reference, &b.reference) {
-                let bindings = |r: &ComponentReference| {
-                    r.assignments
-                        .iter()
-                        .filter(|a| matches!(a.source, AssignmentSource::AppBinding(_)))
-                        .cloned()
-                        .collect::<Vec<_>>()
-                };
-                if bindings(a) != bindings(b) {
-                    return Err("OIB snapshot changed signed app bindings".into());
-                }
-            }
-        }
-    }
-    let mut candidate = signed.clone();
-    candidate
-        .designer
-        .as_mut()
-        .ok_or("Missing OIB document")?
-        .definitions = definitions.to_vec();
-    for component in &mut candidate.components {
-        component.name = definitions
-            .iter()
-            .find(|d| d.id.0 == component.id)
-            .ok_or("Unknown OIB snapshot component")?
-            .name
-            .clone();
-    }
-    let current = metadata(&candidate)?;
-    // Indirectly app-bound endpoints are protected too. A literal or forwarding
-    // edit must not disconnect a binding that the signed document owns.
-    for root in &original.instances {
-        let before = sources(original, root)?;
-        let after = sources(current, instance(current, root.id)?)?;
-        for path in before.keys() {
-            if let Some(binding) = bound_source(&before, path, &mut BTreeSet::new())?
-                && bound_source(&after, path, &mut BTreeSet::new())? != Some(binding)
-            {
-                return Err("OIB snapshot disconnected a signed app source".into());
-            }
-        }
-    }
-    synchronize_literals(&mut candidate)?;
+    let graph = signed.graph.as_ref().ok_or("Missing canonical graph")?;
+    let candidate = super::super::graph::with_seed_source(signed, definitions, &graph.presets)?;
     super::super::validate_seed(&candidate)?;
     Ok(candidate)
 }
 
 pub fn restore(ui: &Ui, definitions: &[ComponentDefinition]) -> Result<Ui> {
-    let seed = restore_seed(
-        super::super::seed(ui).ok_or("Missing OIB seed")?,
-        definitions,
-    )?;
-    let mut candidate = ui.clone();
-    candidate.layout = project_layout(ui, &seed)?;
-    candidate.presentation = Some(Presentation::Oib(Box::new(seed)));
+    let graph = super::super::seed(ui)
+        .and_then(|s| s.graph.as_ref())
+        .ok_or("Missing canonical graph")?;
+    let candidate = super::super::graph::with_source(ui, definitions, &graph.presets)?;
     super::super::validate(&candidate)?;
     Ok(candidate)
 }
@@ -130,6 +55,17 @@ fn definition_mut(seed: &mut Seed, id: DefinitionId) -> Result<&mut ComponentDef
         .ok_or_else(|| "Unknown OIB definition".into())
 }
 
+/// Pure source transform used by the authority before preset and resident
+/// repairs. This intentionally defers complete graph validation until the
+/// enclosing structural batch has staged every explicit repair.
+pub fn transform(seed: &Seed, operations: &[DefinitionEdit]) -> Result<Vec<ComponentDefinition>> {
+    let mut candidate = seed.clone();
+    for operation in operations {
+        edit(&mut candidate, operation)?;
+    }
+    Ok(metadata(&candidate)?.definitions.clone())
+}
+
 fn name(value: &str) -> Result<()> {
     if valid_text(value, 64) {
         Ok(())
@@ -140,17 +76,180 @@ fn name(value: &str) -> Result<()> {
 
 fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
     match operation {
+        DefinitionEdit::CreateDefinition {
+            definition,
+            name: label,
+            root,
+        } => {
+            name(label)?;
+            name(&root.name)?;
+            if definition.0 == 0
+                || root.id.0 == 0
+                || root.owner.is_some()
+                || !root.visual_children.is_empty()
+            {
+                return Err(
+                    "New definition requires a fresh root with no owner or children".into(),
+                );
+            }
+            admissible_reference(root)?;
+            let document = seed.designer.as_mut().ok_or("Missing OIB document")?;
+            if document
+                .definitions
+                .iter()
+                .any(|current| current.id == *definition)
+            {
+                return Err("Definition identity already exists".into());
+            }
+            document.definitions.push(ComponentDefinition {
+                id: *definition,
+                name: label.clone(),
+                root: root.id,
+                nodes: vec![root.clone()],
+                exposed: vec![],
+                slots: vec![],
+            });
+            document.definitions.sort_by_key(|definition| definition.id);
+        }
+        DefinitionEdit::DeleteDefinition { definition } => {
+            let document = seed.designer.as_mut().ok_or("Missing OIB document")?;
+            let index = document
+                .definitions
+                .iter()
+                .position(|current| current.id == *definition)
+                .ok_or("Unknown OIB definition")?;
+            document.definitions.remove(index);
+        }
+        DefinitionEdit::CreateNode {
+            definition,
+            node,
+            visual_parent,
+            before,
+        } => {
+            name(&node.name)?;
+            admissible_reference(node)?;
+            if node.id.0 == 0
+                || node.owner.is_none()
+                || !node.visual_children.is_empty()
+                || visual_parent.is_none() && before.is_some()
+            {
+                return Err("New node requires an owner and an empty child list".into());
+            }
+            let def = definition_mut(seed, *definition)?;
+            if def.nodes.iter().any(|existing| existing.id == node.id) {
+                return Err("Node identity already exists".into());
+            }
+            let owner = def
+                .nodes
+                .iter()
+                .find(|existing| Some(existing.id) == node.owner)
+                .ok_or("Unknown ownership parent")?;
+            if owner.reference.is_some() {
+                return Err("Inherited reference content is not an owned child list".into());
+            }
+            if let Some(parent) = visual_parent {
+                let parent = def
+                    .nodes
+                    .iter_mut()
+                    .find(|existing| existing.id == *parent)
+                    .ok_or("Unknown visual parent")?;
+                if parent.reference.is_some() {
+                    return Err("Inherited reference content is not a visual child list".into());
+                }
+                let index = before
+                    .map(|before| {
+                        parent
+                            .visual_children
+                            .iter()
+                            .position(|id| *id == before)
+                            .ok_or("Unknown visual anchor")
+                    })
+                    .transpose()?
+                    .unwrap_or(parent.visual_children.len());
+                parent.visual_children.insert(index, node.id);
+            }
+            def.nodes.push(node.clone());
+            def.nodes.sort_by_key(|node| node.id);
+        }
+        DefinitionEdit::DeleteNode { definition, node } => {
+            let def = definition_mut(seed, *definition)?;
+            if *node == def.root {
+                return Err("Delete the definition to remove its root".into());
+            }
+            let index = def
+                .nodes
+                .iter()
+                .position(|existing| existing.id == *node)
+                .ok_or("Unknown definition node")?;
+            def.nodes.remove(index);
+            for parent in &mut def.nodes {
+                parent.visual_children.retain(|child| child != node);
+            }
+        }
+        DefinitionEdit::SetVisual {
+            definition,
+            node,
+            visual,
+        } => {
+            definition_mut(seed, *definition)?
+                .nodes
+                .iter_mut()
+                .find(|existing| existing.id == *node)
+                .ok_or("Unknown definition node")?
+                .visual = visual.clone();
+        }
+        DefinitionEdit::SetDefault {
+            definition,
+            node,
+            property,
+            value,
+        } => {
+            let document = seed.designer.as_ref().ok_or("Missing OIB document")?;
+            let current = document
+                .definitions
+                .iter()
+                .find(|current| current.id == *definition)
+                .and_then(|definition| definition.nodes.iter().find(|current| current.id == *node))
+                .ok_or("Unknown definition node")?;
+            let descriptor = super::descriptors(document, current.class)?
+                .into_iter()
+                .find(|descriptor| descriptor.id == *property)
+                .ok_or("Unknown definition property")?;
+            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
+                return Err("OIB property is read-only".into());
+            }
+            super::validate_property_value(&descriptor, value)?;
+            let current = definition_mut(seed, *definition)?
+                .nodes
+                .iter_mut()
+                .find(|current| current.id == *node)
+                .ok_or("Unknown definition node")?;
+            if let Some(default) = current
+                .defaults
+                .iter_mut()
+                .find(|default| default.property == *property)
+            {
+                default.value = value.clone();
+            } else {
+                current.defaults.push(PropertyDefault {
+                    property: *property,
+                    value: value.clone(),
+                });
+                current.defaults.sort_by_key(|default| default.property);
+            }
+        }
+        DefinitionEdit::SetSlots { definition, slots } => {
+            if slots.len() > 16 || slots.windows(2).any(|pair| pair[0].id >= pair[1].id) {
+                return Err("Slot declarations must be bounded and ordered by identity".into());
+            }
+            definition_mut(seed, *definition)?.slots = slots.clone();
+        }
         DefinitionEdit::RenameDefinition {
             definition,
             name: n,
         } => {
             name(n)?;
             definition_mut(seed, *definition)?.name = n.clone();
-            seed.components
-                .iter_mut()
-                .find(|c| c.id == definition.0)
-                .ok_or("Missing OIB component")?
-                .name = n.clone();
         }
         DefinitionEdit::RenameNode {
             definition,
@@ -236,12 +335,33 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
             if targets.len() > 64 || targets.windows(2).any(|w| w[0] >= w[1]) {
                 return Err("Noncanonical OIB forwarding targets".into());
             }
+            let root = self::definition(metadata(seed)?, *definition)?.root;
+            let descriptor = self::property(
+                metadata(seed)?,
+                *definition,
+                &PropertyPath {
+                    references: vec![],
+                    node: root,
+                    property: *property,
+                },
+            )?;
+            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
+                return Err("Exposed property requires an admitted writable root property".into());
+            }
             let def = definition_mut(seed, *definition)?;
-            def.exposed
+            if let Some(exposed) = def
+                .exposed
                 .iter_mut()
-                .find(|p| p.property == *property)
-                .ok_or("Only existing exposed OIB properties are editable")?
-                .targets = targets.clone();
+                .find(|exposed| exposed.property == *property)
+            {
+                exposed.targets = targets.clone();
+            } else {
+                def.exposed.push(ExposedProperty {
+                    property: *property,
+                    targets: targets.clone(),
+                });
+                def.exposed.sort_by_key(|exposed| exposed.property);
+            }
         }
         DefinitionEdit::ConnectReference {
             definition,
@@ -257,26 +377,16 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
                 .find(|n| n.id == *reference)
                 .and_then(|n| n.reference.as_ref())
                 .ok_or("Unknown OIB reference boundary")?;
-            let descriptor = property(doc, linked.definition, target)?;
-            if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly {
-                return Err("OIB app sources require signed binding/action admission".into());
+            if source.is_some() {
+                let descriptor = property(doc, linked.definition, target)?;
+                if !descriptor.policy.live_literal || descriptor.editor == PropertyEditor::ReadOnly
+                {
+                    return Err("OIB app sources require signed binding/action admission".into());
+                }
             }
-            // This API must never disconnect a signed app binding, including
-            // one forwarded indirectly to an otherwise editable endpoint.
-            let root = ComponentInstance {
-                id: InstanceId(1),
-                name: "source-check".into(),
-                definition: def.id,
-                owner: Owner::Document,
-                visual_parent: None,
-                order: 0,
-                assignments: vec![],
-            };
-            let mut full = target.clone();
-            full.references.insert(0, *reference);
-            if bound_source(&sources(doc, &root)?, &full, &mut BTreeSet::new())?.is_some() {
-                return Err("OIB app-bound source is protected".into());
-            }
+            // Canonical references cannot carry app bindings. Explicit removal
+            // must remain possible after its target was deleted earlier in the
+            // same batch; final source validation checks all surviving edges.
             let assignments = &mut definition_mut(seed, *definition)?
                 .nodes
                 .iter_mut()
@@ -300,128 +410,14 @@ fn edit(seed: &mut Seed, operation: &DefinitionEdit) -> Result<()> {
     Ok(())
 }
 
-fn synchronize_literals(seed: &mut Seed) -> Result<()> {
-    let doc = metadata(seed)?;
-    let mut literals = BTreeMap::new();
-    for table in &doc.mappings.roots {
-        let root = instance(doc, table.prototype)?;
-        let assignments = sources(doc, root)?;
-        for row in &table.cells {
-            let literal = match assignments.get(&row.path) {
-                Some(Source::Literal(v)) => Some(v.clone()),
-                _ => None,
-            };
-            literals.insert(row.initial_cell, literal);
-        }
-    }
-    for cell in &mut seed.cells {
-        if let Some(literal) = literals.get(&cell.id) {
-            cell.authored_override = literal.clone();
-        }
+fn admissible_reference(node: &DefinitionNode) -> Result<()> {
+    if node.reference.as_ref().is_some_and(|reference| {
+        reference
+            .assignments
+            .iter()
+            .any(|assignment| matches!(assignment.source, AssignmentSource::AppBinding(_)))
+    }) {
+        return Err("Reference assignments use literal or forwarded properties; app sources belong to typed presets".into());
     }
     Ok(())
-}
-
-/// Rebuild authored containment from full object identities. Original render
-/// records supply painting, geometry, bindings and responders; a caller cannot
-/// smuggle a replacement renderer or event handler through a structural edit.
-fn project_layout(ui: &Ui, seed: &Seed) -> Result<Vec<u8>> {
-    let original = super::super::seed(ui).ok_or("Missing OIB seed")?;
-    let original_doc = metadata(original)?;
-    let doc = metadata(seed)?;
-    let mut blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
-    let mut nodes = BTreeMap::new();
-    fn flatten(n: &TemplateNode, out: &mut BTreeMap<u16, TemplateNode>) {
-        out.insert(n.id, n.clone());
-        for c in &n.children {
-            flatten(c, out);
-        }
-    }
-    for template in &blueprint.templates {
-        flatten(&template.root, &mut nodes);
-    }
-    let mapping: BTreeMap<_, _> = original_doc
-        .mappings
-        .objects
-        .iter()
-        .filter_map(|m| m.layout_node.map(|id| (id, m.address.clone())))
-        .collect();
-    fn build(
-        id: u16,
-        doc: &Document,
-        nodes: &BTreeMap<u16, TemplateNode>,
-        mapping: &BTreeMap<u16, ObjectAddress>,
-        visiting: &mut BTreeSet<u16>,
-        work: &mut usize,
-    ) -> Result<TemplateNode> {
-        *work += 1;
-        if *work > 512 || visiting.len() >= 12 || !visiting.insert(id) {
-            return Err("OIB definition projection cycle or resource limit".into());
-        }
-        let mut node = nodes.get(&id).ok_or("Missing OIB render template")?.clone();
-        let mut children: Vec<u16> = node.children.iter().map(|n| n.id).collect();
-        if let Some(address) = mapping.get(&id) {
-            let root = instance(doc, address.instance)?;
-            let (_, authored) = path_node(doc, root.definition, &address.references, address.node)?;
-            let mut desired: Vec<_> = authored
-                .visual_children
-                .iter()
-                .map(|child| ObjectAddress {
-                    instance: address.instance,
-                    references: address.references.clone(),
-                    node: *child,
-                })
-                .collect();
-            if let Some(reference) = &authored.reference {
-                let mut references = address.references.clone();
-                references.push(authored.id);
-                desired.push(ObjectAddress {
-                    instance: address.instance,
-                    references,
-                    node: definition(doc, reference.definition)?.root,
-                });
-            }
-            let desired: Vec<_> = desired
-                .iter()
-                .map(|a| {
-                    doc.mappings
-                        .objects
-                        .iter()
-                        .find(|m| m.address == *a)
-                        .and_then(|m| m.layout_node)
-                        .ok_or_else(|| "Missing OIB child render mapping".to_owned())
-                })
-                .collect::<Result<_>>()?;
-            // Document-owned component roots and unowned tooling are separate
-            // from this definition's local children. Retain them in their order.
-            children.retain(|child| {
-                mapping.get(child).is_none_or(|a| {
-                    a.instance != address.instance
-                        || a.references != address.references
-                            && !a.references.starts_with(&address.references)
-                })
-            });
-            let mut ordered = desired;
-            ordered.extend(children);
-            children = ordered;
-        }
-        node.children = children
-            .into_iter()
-            .map(|id| build(id, doc, nodes, mapping, visiting, work))
-            .collect::<Result<_>>()?;
-        visiting.remove(&id);
-        Ok(node)
-    }
-    let mut work = 0;
-    for template in &mut blueprint.templates {
-        template.root = build(
-            template.root.id,
-            doc,
-            &nodes,
-            &mapping,
-            &mut BTreeSet::new(),
-            &mut work,
-        )?;
-    }
-    Layout::encode(&blueprint)
 }

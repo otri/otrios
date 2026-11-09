@@ -10,8 +10,49 @@ use crate::dashboard::{
 use otrios_interfaces::keyboard::TextInput;
 const KEY_BASE: u32 = 2_695_000_000;
 
+pub(super) fn sources(
+    state: &StateAdapter,
+    seed: &otrios_interfaces::oib::Seed,
+    address: &PropertyAddress,
+) -> Result<PropertySources> {
+    let mut trace = crate::canvas::oib::document::property_sources(
+        seed,
+        &state.oib_allocations()?,
+        address,
+        &state.oib_active()?,
+    )?;
+    if matches!(address, PropertyAddress::Structural { .. }) {
+        let field = state
+            .oib_structural_properties(&selection(address))?
+            .into_iter()
+            .find(|field| field.address.as_ref() == Some(address))
+            .ok_or("Design field no longer available")?;
+        trace.value = field.value;
+        trace.inherited = field.inherited;
+        trace.overridden = field.overridden;
+    }
+    Ok(trace)
+}
+
 pub(super) fn selection(address: &PropertyAddress) -> Selection {
     match address {
+        PropertyAddress::Structural { target, .. } => match target {
+            otrios_interfaces::oib::designer::StructuralTarget::Definition(definition) => {
+                Selection::Definition(*definition)
+            }
+            otrios_interfaces::oib::designer::StructuralTarget::Node { definition, node } => {
+                Selection::DefinitionNode {
+                    definition: *definition,
+                    node: *node,
+                }
+            }
+            otrios_interfaces::oib::designer::StructuralTarget::Instance(object) => {
+                Selection::Object(object.clone())
+            }
+            otrios_interfaces::oib::designer::StructuralTarget::Preset { definition, .. } => {
+                Selection::Definition(*definition)
+            }
+        },
         PropertyAddress::Placement { object, .. } => Selection::Object(object.clone()),
         PropertyAddress::Definition {
             definition, node, ..
@@ -47,6 +88,7 @@ pub(super) fn inspector(
     status: &str,
     editable: bool,
     revision: u64,
+    structural_revision: u64,
     notice: Option<&str>,
     details: Option<&PropertySources>,
     registers: &[PropertyRegisterView],
@@ -171,7 +213,17 @@ pub(super) fn inspector(
             && p.address
                 .as_ref()
                 .is_some_and(|a| drafts.draft(a).is_some());
-        if !allowed || (!pending && drafts.open(p, revision).is_err()) {
+        let field_revision = if p.address.as_ref().is_some_and(|address| {
+            matches!(
+                address,
+                PropertyAddress::Placement { .. } | PropertyAddress::Structural { .. }
+            )
+        }) {
+            structural_revision
+        } else {
+            revision
+        };
+        if !allowed || (!pending && drafts.open(p, field_revision).is_err()) {
             nodes.push(label(
                 b,
                 y,
@@ -307,6 +359,19 @@ pub(super) fn inspector(
             )?);
             y += 56.;
         }
+        if p.overridden
+            && p.inherited.is_some()
+            && matches!(address, PropertyAddress::Structural { .. })
+        {
+            nodes.push(b.focus_button(
+                0.,
+                y,
+                320.,
+                "Restore authored design",
+                LocalAction::RestoreDesign(address.clone(), structural_revision),
+            )?);
+            y += 56.;
+        }
         nodes.push(label(
             b,
             y,
@@ -362,6 +427,8 @@ fn property_context(
             *y,
             if matches!(trace.address, PropertyAddress::Placement { .. }) {
                 "Placement - structural batch"
+            } else if matches!(trace.address, PropertyAddress::Structural { .. }) {
+                "Shared design - structural batch"
             } else if trace.overridden {
                 "Live override at occurrence"
             } else {
@@ -379,11 +446,11 @@ fn property_context(
             )?);
             *y += 40.;
         }
-        if trace.binding.is_some() {
-            let choices = connections
-                .iter()
-                .find(|(address, _)| address == &trace.address)
-                .filter(|_| editable);
+        let choices = connections
+            .iter()
+            .find(|(address, _)| address == &trace.address)
+            .filter(|_| editable);
+        if trace.binding.is_some() || choices.is_some() {
             nodes.push(label(
                 b,
                 *y,
@@ -665,12 +732,7 @@ impl Client {
         let m = self.active.as_mut().ok_or("No Canvas")?;
         let authoring_seed = m.doc.oib_authoring_seed()?;
         let seed = &authoring_seed;
-        let trace = crate::canvas::oib::document::property_sources(
-            seed,
-            &m.doc.oib_allocations()?,
-            address,
-            &m.doc.oib_active()?,
-        )?;
+        let trace = sources(&m.doc, seed, address)?;
         let d = m.designer.as_mut().ok_or("Missing designer")?;
         d.details = if d.details.as_ref().is_some_and(|d| &d.address == address) {
             None
@@ -913,15 +975,17 @@ impl Client {
         }
         let authoring_seed = m.doc.oib_authoring_seed()?;
         let seed = &authoring_seed;
-        let fresh = if let PropertyAddress::Placement { object, .. } = address {
-            m.doc.oib_placement_properties(object)?
-        } else {
-            super::super::super::oib::document::properties(
+        let fresh = match address {
+            PropertyAddress::Placement { object, .. } => m.doc.oib_placement_properties(object)?,
+            PropertyAddress::Structural { .. } => {
+                m.doc.oib_structural_properties(&selection(address))?
+            }
+            _ => super::super::super::oib::document::properties(
                 seed,
                 &m.doc.oib_allocations()?,
                 &selection(address),
                 &m.doc.oib_active()?,
-            )?
+            )?,
         }
         .into_iter()
         .find(|p| p.address.as_ref() == Some(address));
@@ -930,19 +994,57 @@ impl Client {
             .ok_or("Property unavailable".to_string())
             .and_then(|fresh| {
                 d.drafts
-                    .prepare(address, &fresh, m.doc.oib_generation().unwrap_or(0))
+                    .prepare(
+                        address,
+                        &fresh,
+                        if matches!(
+                            address,
+                            PropertyAddress::Placement { .. } | PropertyAddress::Structural { .. }
+                        ) {
+                            m.doc.oib_structural_generation().unwrap_or(0)
+                        } else {
+                            m.doc.oib_generation().unwrap_or(0)
+                        },
+                    )
                     .map_err(|e| format!("{e:?}"))
             });
         let mut accepted = false;
         match result {
             Ok(candidate) => {
-                accepted = m
-                    .doc
-                    .edit_oib_property(address, Some(candidate.value.clone()))?;
+                let value = Some(candidate.value.clone());
+                let structural = matches!(
+                    address,
+                    PropertyAddress::Structural { .. } | PropertyAddress::Placement { .. }
+                );
+                let result = if structural
+                    && Some(candidate.base_revision) != m.doc.oib_structural_generation()
+                {
+                    Err("Document changed; discard this draft and review the current design".into())
+                } else {
+                    match address {
+                        PropertyAddress::Structural { .. } => m.doc.edit_oib_structural_property(
+                            address,
+                            value,
+                            candidate.base_revision,
+                        ),
+                        PropertyAddress::Placement { object, property } => {
+                            m.doc.edit_oib_placement_property_at(
+                                object,
+                                *property,
+                                value,
+                                candidate.base_revision,
+                            )
+                        }
+                        _ => m.doc.edit_oib_property(address, value),
+                    }
+                };
+                let failure = result.as_ref().err().cloned();
+                accepted = result.unwrap_or(false);
                 d.drafts
                     .acknowledge(&candidate, accepted)
                     .map_err(|e| format!("Property acknowledgement: {e:?}"))?;
-                d.editor_notice = (!accepted).then(|| "Waiting for confirmation".into());
+                d.editor_notice =
+                    failure.or_else(|| (!accepted).then(|| "Waiting for confirmation".into()));
             }
             Err(_) => d.editor_notice = Some("Invalid / unavailable edit retained".into()),
         }

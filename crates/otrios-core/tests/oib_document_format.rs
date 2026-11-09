@@ -9,8 +9,12 @@ use otrios_core::canvas::{self, Document, StateAdapter, StateSelection, oib};
 use otrios_interfaces::{
     canvas::*,
     layout::Value,
-    oib::{InstanceOperation, designer::*},
+    oib::{authoring::EditBatch as InstanceOperation, designer::*},
 };
+
+fn ui() -> Ui {
+    canvas::decode_ui(&canvas::encode_ui(&app::ui(&[])).unwrap()).unwrap()
+}
 
 fn document(ui: &Ui) -> Document {
     assert_eq!(app::manifest().id, "oib-designer");
@@ -57,7 +61,7 @@ fn client(ui: &Ui, doc: &mut Document) -> (StateAdapter, canvas::Session) {
 
 #[test]
 fn register_keys_and_schemas_ignore_all_compiler_cell_handles() {
-    let ui = app::ui(&[]);
+    let ui = ui();
     let original = document(&ui);
     let mut revised = ui.clone();
     let Some(Presentation::Oib(seed)) = &mut revised.presentation else {
@@ -79,33 +83,40 @@ fn register_keys_and_schemas_ignore_all_compiler_cell_handles() {
     {
         row.initial_cell += 10_000;
     }
-    let revised = document(&revised);
-    for branch in [1, 2] {
-        for cell in original.oib_values(branch).unwrap().keys() {
-            let a = original.oib_property_leaf(branch, *cell).unwrap();
-            let b = revised.oib_property_leaf(branch, cell + 10_000).unwrap();
-            assert_eq!(
-                a.register().unwrap().schema(),
-                b.register().unwrap().schema()
-            );
-            assert_eq!(
-                a.register()
-                    .unwrap()
-                    .values()
-                    .map(|(_, _, value)| value)
-                    .collect::<Vec<_>>(),
-                b.register()
-                    .unwrap()
-                    .values()
-                    .map(|(_, _, value)| value)
-                    .collect::<Vec<_>>()
-            );
-        }
-    }
+    // Derived caches are discarded at canonical admission. They are never
+    // serialized input and cannot select a register or change its schema.
+    assert_eq!(
+        canvas::encode_ui(&revised).unwrap(),
+        canvas::encode_ui(&ui).unwrap()
+    );
+    let admitted = canvas::decode_ui(&canvas::encode_ui(&revised).unwrap()).unwrap();
+    assert_eq!(
+        oib::seed(&admitted).unwrap().cells,
+        oib::seed(&ui).unwrap().cells
+    );
+    let revised = document(&admitted);
+    let allocations = original.oib_allocations().unwrap();
+    let cell =
+        oib::document::cell_for_address(oib::seed(&ui).unwrap(), &allocations, &address()).unwrap();
+    assert_eq!(
+        original
+            .oib_property_leaf(1, cell)
+            .unwrap()
+            .register()
+            .unwrap()
+            .schema(),
+        revised
+            .oib_property_leaf(1, cell)
+            .unwrap()
+            .register()
+            .unwrap()
+            .schema()
+    );
+
     let snapshot = otrios_core::merkle::Snapshot::from_bytes(&original.save().unwrap()).unwrap();
     assert_eq!(
         snapshot.subtree(&[4, 1, 1, 20, 1, 7, 1, 3]).unwrap().hash(),
-        original.oib_property_leaf(1, 203).unwrap().hash()
+        original.oib_property_leaf(1, cell).unwrap().hash()
     );
     assert_eq!(
         snapshot
@@ -119,7 +130,7 @@ fn register_keys_and_schemas_ignore_all_compiler_cell_handles() {
 
 #[test]
 fn property_wire_intents_carry_the_observed_semantic_address_and_epoch() {
-    let ui = app::ui(&[]);
+    let ui = ui();
     let mut doc = document(&ui);
     let (mut client, mut session) = client(&ui, &mut doc);
     client
@@ -141,15 +152,16 @@ fn property_wire_intents_carry_the_observed_semantic_address_and_epoch() {
 
 #[test]
 fn a_fresh_document_rejects_old_epoch_before_any_receipt_or_allocation_changes() {
-    let ui = app::ui(&[]);
+    let ui = ui();
     let previous = document(&ui);
     let mut fresh = document(&ui);
     let (_, mut session) = client(&ui, &mut fresh);
-    let operation = InstanceOperation::Insert {
-        prototype: 50,
-        before: None,
-        generation: fresh.oib_status().unwrap().generation,
-    };
+    let operation = InstanceOperation::insert(
+        fresh.oib_status().unwrap().structural_generation,
+        50,
+        None,
+        None,
+    );
     let stale = canvas::encode_state_request(&StateRequest::OibInstance {
         epoch: previous.oib_epoch().unwrap(),
         sequence: 1,
@@ -176,18 +188,12 @@ fn a_fresh_document_rejects_old_epoch_before_any_receipt_or_allocation_changes()
     assert!(fresh.receive(&mut session, &stale).is_err());
     assert_eq!(fresh.save().unwrap(), accepted);
     let compiled = fresh.oib_compiled(2).unwrap().0;
-    assert!(
-        oib::seed(&compiled)
-            .unwrap()
-            .instances
-            .iter()
-            .any(|i| i.id == 51)
-    );
+    assert_eq!(oib::seed(&compiled).unwrap().instances.len(), 3);
 }
 
 #[test]
 fn restoring_ram_intents_never_rebases_them_onto_a_fresh_document_epoch() {
-    let ui = app::ui(&[]);
+    let ui = ui();
     let mut previous = document(&ui);
     let (mut old, _) = client(&ui, &mut previous);
     old.edit_oib_property(&address(), Some(Value::Text("Discarded old edit".into())))
@@ -216,7 +222,7 @@ fn restoring_ram_intents_never_rebases_them_onto_a_fresh_document_epoch() {
 
 #[test]
 fn obsolete_format_and_signed_source_rebases_require_fresh_initialization() {
-    let mut ui = app::ui(&[]);
+    let mut ui = ui();
     let mut doc = document(&ui);
     let epoch = doc.oib_epoch().unwrap();
     ui.title = "Presentation update".into();
@@ -224,19 +230,19 @@ fn obsolete_format_and_signed_source_rebases_require_fresh_initialization() {
     assert_eq!(doc.oib_epoch().unwrap(), epoch);
     let before = doc.save().unwrap();
     let mut reconnected = ui.clone();
-    for selector in &mut reconnected.selectors {
-        if selector.field == 1 {
-            selector.field = 2;
-        }
-    }
-    for handler in &mut reconnected.handlers {
-        for field in &mut handler.fields {
-            if *field == 1 {
+    let Some(Presentation::Oib(seed)) = &mut reconnected.presentation else {
+        unreachable!()
+    };
+    for preset in &mut seed.graph.as_mut().unwrap().presets {
+        for assignment in &mut preset.assignments {
+            if let otrios_interfaces::oib::graph::Source::AppBinding { field, .. } =
+                &mut assignment.source
+                && *field == 1
+            {
                 *field = 2;
             }
         }
     }
-    oib::validate(&reconnected).unwrap();
     assert!(
         doc.configure_oib(&reconnected)
             .unwrap_err()
@@ -246,7 +252,7 @@ fn obsolete_format_and_signed_source_rebases_require_fresh_initialization() {
     let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
         unreachable!()
     };
-    seed.designer.as_mut().unwrap().name = "Different signed document".into();
+    seed.graph.as_mut().unwrap().name = "Different signed document".into();
     assert!(
         doc.configure_oib(&ui)
             .unwrap_err()

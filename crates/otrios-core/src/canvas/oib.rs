@@ -7,7 +7,9 @@ use otrios_interfaces::{
     oib::*,
 };
 use std::collections::{BTreeMap, BTreeSet};
+pub mod contract;
 pub mod document;
+pub mod graph;
 pub mod instances;
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -63,8 +65,12 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
         || seed.components.is_empty()
         || seed.components.len() > 16
         || seed.components.len() + seed.instances.len() > 64
-        || seed.cells.is_empty()
-        || seed.cells.len() > MAX_CELLS
+        || seed.cells.len()
+            > if seed.graph.is_some() && !seed.expanded {
+                MAX_CELLS * (designer::MAX_DEFINITIONS + 1)
+            } else {
+                MAX_CELLS
+            }
         || flexbuffers::to_vec(seed).map_err(err)?.len() > 24 * 1024
         || seed
             .inspector_content
@@ -106,8 +112,18 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
     if let Some(surface) = &seed.instance_surface
         && ((seed.designer.is_none() && surface.prototypes.iter().any(|p| p.palette_only))
             || surface.prototypes.len() != seed.instances.len()
-            || seed.instances.len() > MAX_ALLOCATIONS
-            || seed.instances.len() > MAX_LIVE_INSTANCES
+            || seed.instances.len()
+                > if seed.graph.is_some() && !seed.expanded {
+                    designer::MAX_DEFINITIONS
+                } else {
+                    MAX_ALLOCATIONS
+                }
+            || seed.instances.len()
+                > if seed.graph.is_some() && !seed.expanded {
+                    designer::MAX_DEFINITIONS
+                } else {
+                    MAX_LIVE_INSTANCES
+                }
             || [
                 surface.preview_stride,
                 surface.inspector_start,
@@ -202,16 +218,18 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
         }) {
             return Err("Invalid OIB layout surface".into());
         }
-    } else if seed.cells.iter().flat_map(|c| &c.targets).any(|t| {
-        matches!(
-            t.property,
-            Property::X
-                | Property::Height
-                | Property::FrameWidth
-                | Property::OffsetY
-                | Property::Visible
-        )
-    }) {
+    } else if seed.graph.is_none()
+        && seed.cells.iter().flat_map(|c| &c.targets).any(|t| {
+            matches!(
+                t.property,
+                Property::X
+                    | Property::Height
+                    | Property::FrameWidth
+                    | Property::OffsetY
+                    | Property::Visible
+            )
+        })
+    {
         return Err("Geometry targets require an OIB layout surface".into());
     }
     if seed.designer.is_some() {
@@ -403,6 +421,7 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
         let scene = layout.resolve_viewport(&slots, viewport)?;
         if let Some(surface) = &seed.instance_surface
             && (surface.layout.is_some()
+                || seed.graph.is_some()
                 || seed
                     .designer
                     .as_ref()

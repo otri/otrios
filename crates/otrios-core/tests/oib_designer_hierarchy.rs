@@ -16,7 +16,10 @@ use otrios_interfaces::{
 use std::collections::BTreeSet;
 
 fn seed() -> Seed {
-    let Some(Presentation::Oib(seed)) = app::ui(&[]).presentation else {
+    let ui =
+        otrios_core::canvas::decode_ui(&otrios_core::canvas::encode_ui(&app::ui(&[])).unwrap())
+            .unwrap();
+    let Some(Presentation::Oib(seed)) = ui.presentation else {
         panic!("fixture")
     };
     *seed
@@ -130,24 +133,27 @@ fn definitions_are_separate_and_do_not_expand_occurrences() {
 }
 #[test]
 fn rename_and_signed_reorder_change_presentation_without_rekeying() {
-    let mut seed = seed();
-    let before = query(&seed);
-    let doc = seed.designer.as_mut().unwrap();
-    for d in &mut doc.definitions {
-        for n in &mut d.nodes {
-            n.name = format!("Renamed {}", n.id.0);
-            n.visual_children.reverse();
+    let before = query(&seed());
+    let mut ui = app::ui(&[]);
+    let Some(Presentation::Oib(source)) = &mut ui.presentation else {
+        panic!("fixture")
+    };
+    let graph = source.graph.as_mut().unwrap();
+    for definition in &mut graph.definitions {
+        for node in &mut definition.nodes {
+            node.name = format!("Renamed {}", node.id.0);
+            node.visual_children.reverse();
         }
     }
-    for i in &mut doc.instances {
-        i.name = format!("Instance {}", i.id.0);
-        i.order = 2 - i.order;
+    for instance in &mut graph.instances {
+        instance.name = format!("Instance {}", instance.id.0);
+        instance.order = u16::MAX - instance.order;
     }
-    // Initial allocation names come from Seed.instances, as do live names
-    // from Allocation. Definition/document instance labels cannot replace them.
-    for i in &mut seed.instances {
-        i.name = format!("Instance {}", i.id);
-    }
+    let normalized =
+        otrios_core::canvas::decode_ui(&otrios_core::canvas::encode_ui(&ui).unwrap()).unwrap();
+    let Some(Presentation::Oib(seed)) = normalized.presentation else {
+        panic!("fixture")
+    };
     let after = query(&seed);
     closure(&after);
     assert!(
