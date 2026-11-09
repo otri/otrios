@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-09",
+  "implementation_commit": "cfadf50e5583b50859369f56c334ed49073f44e6",
+  "release": "388d7d8209a44e6b773e585483718993fb64ecfee2ea187f366976d4ea0b2c5a",
+  "state_protocol": "otrios-canvas-sync-v30",
+  "release_control_version": 1,
+  "native_before_ms": [
+    3718.379,
+    3403.804
+  ],
+  "native_after_ms": [
+    790.655,
+    642.752
+  ],
+  "native_before_mean_ms": 3561.0915,
+  "native_after_mean_ms": 716.7035,
+  "mean_speedup": 4.968709515162128,
+  "original_gold_restored": true,
+  "measurement": "software evdev touch-down to native confirmed presentation; 80ms touch hold and 5ms polling; not photon latency",
+  "designer_ui_bytes_unchanged": true,
+  "designer_ui_sha256": "dffb5316fd21c06249569d3c371bb4f5669649a460e0389ec59259b69a00de4d",
+  "authority_restarted_for_deployment": true,
+  "live_state_reset": false,
+  "broad_suite_run": false,
+  "browser_interaction_test_run": false,
+  "known_compatible_code_rollback_retained": true,
+  "checks": {
+    "editor_and_cache_release_tests": {
+      "passed": 50,
+      "ignored": 1
+    },
+    "library_adoption_release_tests": {
+      "passed": 10
+    },
+    "installed_ui_ignored_profile": {
+      "passed": 1
+    },
+    "core_canvas_clippy_warnings_denied": "passed",
+    "signed_arm_wasm_build": "passed",
+    "frame_readiness_services_and_collector": "passed",
+    "public_https_health": "passed"
+  }
+}

@@ -5,6 +5,10 @@ The Designer spends substantial time preparing derived editor state, including
 when the document is unchanged. This investigation adds an opt-in timing
 diagnostic; it does not change the deployed runtime or claim an optimization.
 
+The later [Display Accent Apply follow-up](oib-accent-apply-2026-11-09.md)
+records the runtime corrections and native touch measurements after this
+diagnosis.
+
 ## Live Frame observation
 
 The Frame was running signed release
