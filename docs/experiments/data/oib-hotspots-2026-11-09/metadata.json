@@ -1,0 +1,22 @@
+{
+  "release": "242ddb8df90a4499525544fdc1f56a5417c527c88f7472fc9931844213f0bfc2",
+  "implementation_commit": "c10f453401f9e5b0ad45f6473ed426c0aecbb029",
+  "kind": "diagnostic instrumentation and measurement only; default off",
+  "ui_bytes_unchanged": true,
+  "ui_sha256": "dffb5316fd21c06249569d3c371bb4f5669649a460e0389ec59259b69a00de4d",
+  "core_trace_drops": 0,
+  "native_lane_drops": 0,
+  "profiling_service_environments_restored": true,
+  "state_reset": false,
+  "broad_suite_run": false,
+  "browser_interaction_run": false,
+  "checks": {
+    "isolated_profiler_test": 1,
+    "native_trace_tests": 3,
+    "authority_tests": 9,
+    "focused_clippy": "passed",
+    "signed_arm_wasm_build": "passed",
+    "public_https_health": "passed",
+    "frame_control_and_collector": "passed"
+  }
+}

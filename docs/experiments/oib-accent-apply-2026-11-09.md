@@ -8,6 +8,10 @@ from Apply touch-down to a native presentation with the new accent, confirmed
 state, no pending commands and released input. The two edits changed blue then
 restored the user's gold override. No app data was reset.
 
+The subsequent [actual Frame phase profile](oib-hotspots-2026-11-09.md) explains
+the remaining subsecond delay, measures layout throughput and identifies the
+next incremental/parallel execution boundaries.
+
 The [earlier diagnosis](oib-ui-rebuild-2026-11-09.md) isolated repeated source
 processing and structural toolbar preparation. The focused fix:
 
