@@ -181,7 +181,7 @@ impl Clone for Designer {
             actions: self.actions.clone(),
             next_id: self.next_id,
             capture: self.capture.clone(),
-            revision: self.revision.clone(),
+            revision: self.revision,
             objects: self
                 .objects
                 .iter()
