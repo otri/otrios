@@ -37,6 +37,7 @@ mod chat;
 mod collections;
 #[path = "server_ink.rs"]
 mod ink;
+mod profile_trace;
 #[path = "server_session.rs"]
 mod session;
 #[path = "server_space_chat.rs"]

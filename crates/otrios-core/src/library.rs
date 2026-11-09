@@ -168,6 +168,7 @@ pub fn required_classes_compatible(
 /// Package-local bounded source validation. Full property/slot/action and scene
 /// admission still runs against the importing app's class table and grants.
 pub fn validate_graph(graph: &Graph) -> Result<()> {
+    let _profile = crate::canvas::profiling::span("library.graph.validate");
     if graph.format != FORMAT
         || graph.required_classes.is_empty()
         || graph.required_classes.len() > MAX_CLASS_DESCRIPTORS
@@ -423,6 +424,7 @@ struct DefinitionSignature<'a> {
     slots: Vec<SlotSignature<'a>>,
 }
 pub fn export_contract(graph: &Graph, export: ExportId) -> Result<Revision> {
+    let _profile = crate::canvas::profiling::span("library.export_contract");
     let export = graph
         .exports
         .iter()

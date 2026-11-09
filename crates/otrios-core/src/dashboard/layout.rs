@@ -83,6 +83,8 @@ fn preflight(r: Reader<&[u8]>, depth: usize, budget: &mut usize) -> Result<()> {
 }
 impl Layout {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        #[cfg(feature = "canvas")]
+        let _profile = crate::canvas::profiling::span("layout.decode");
         if bytes.is_empty() || bytes.len() > MAX_LAYOUT_BYTES {
             return Err("Invalid layout size".into());
         }
@@ -97,6 +99,8 @@ impl Layout {
         })
     }
     pub fn encode(blueprint: &Blueprint) -> Result<Vec<u8>> {
+        #[cfg(feature = "canvas")]
+        let _profile = crate::canvas::profiling::span("layout.encode");
         validate_blueprint(blueprint)?;
         let bytes = flexbuffers::to_vec(blueprint).map_err(err)?;
         Self::from_bytes(&bytes)?;
@@ -132,6 +136,8 @@ impl Layout {
         viewport: [f32; 2],
         order: &[u16],
     ) -> Result<Scene> {
+        #[cfg(feature = "canvas")]
+        let _profile = crate::canvas::profiling::span("layout.resolve");
         let bindings = Bindings { local: slots };
         let mut root = self.blueprint.root.clone();
         let frames = if let Some(plan) = &self.blueprint.composition {

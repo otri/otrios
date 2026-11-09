@@ -1997,6 +1997,7 @@ impl Hub {
         allow_private: bool,
         scope: &spaces::Scope,
     ) -> Result<(Vec<ServerMessage>, bool)> {
+        let _profile = canvas::profiling::span("authority.process");
         let mut messages = leases.revoke_private(allow_private);
         messages.extend(self.revoke_scoped(leases, scope));
         if leases.retired.len() > 2 {
@@ -2331,6 +2332,7 @@ impl Hub {
         allow_private: bool,
         scope: &spaces::Scope,
     ) -> Result<Vec<ServerMessage>> {
+        let _profile = canvas::profiling::span("authority.updates");
         let mut messages = leases.revoke_private(allow_private);
         messages.extend(self.revoke_scoped(leases, scope));
         if leases.retired.len() > 2 {
@@ -2513,6 +2515,7 @@ pub(super) async fn worker(
             leases.publish(&activation);
             result
         };
+        super::profile_trace::flush();
         match result {
             Ok((messages, changed)) => {
                 if changed {

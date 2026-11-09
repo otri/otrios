@@ -1377,6 +1377,7 @@ impl Mount {
             if designer.revision.as_ref() == Some(&revision) {
                 return Ok(changed);
             }
+            let _profile = crate::canvas::profiling::span("client.designer.rebuild");
             let status = self.doc.oib_status_text();
             if status.contains("Structure rejected:") {
                 designer.editor_notice = Some(status.clone());

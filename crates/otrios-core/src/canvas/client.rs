@@ -2283,6 +2283,7 @@ impl Client {
         Ok(changed)
     }
     pub fn receive(&mut self, bytes: &[u8]) -> Result<bool> {
+        let _profile = crate::canvas::profiling::span("client.receive");
         self.decode_budget.admit(bytes, self.wire_clock)?;
         match decode_server(bytes)? {
             ServerMessage::Activated { epoch } => {
@@ -4076,6 +4077,7 @@ impl Mount {
             && self.oib_generation != Some(generation)
             && !self.oib_activation_blocked()
         {
+            let _profile = super::profiling::span("client.mount.activate_ui");
             let (ui, layout) = self.doc.oib_compiled(self.oib_selected)?;
             let previous_ui = std::mem::replace(&mut self.ui, ui);
             let previous = std::mem::replace(&mut self.layout, layout);
@@ -4152,6 +4154,7 @@ impl Mount {
         {
             return Ok(false);
         }
+        let _profile = super::profiling::span("client.oib_view.rebuild");
         let mut info = self.doc.oib_info()?;
         if deferred {
             // These properties still belong to the displayed inspector. Pin only
@@ -4684,6 +4687,7 @@ fn selected_values(m: &Mount) -> Result<BTreeMap<u16, Value>> {
     Ok(values)
 }
 fn resolve_layout(m: &Mount) -> Result<Scene> {
+    let _profile = crate::canvas::profiling::span("client.layout.resolve");
     let mut bindings = BTreeMap::new();
     for s in &m.ui.selectors {
         let value = if matches!(s.projection, Projection::OibStatus) {
@@ -4811,6 +4815,7 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
     }
 }
 fn resolve_scene(m: &Mount) -> Result<Scene> {
+    let _profile = crate::canvas::profiling::span("client.scene.resolve");
     // Candidate admission and tentative resize validation must always resolve
     // current inputs, even while an older visible scene is still retained.
     present_scene(m, &resolve_layout(m)?)

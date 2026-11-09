@@ -64,6 +64,7 @@ fn node(root: &mut TemplateNode, id: u16) -> Option<&mut TemplateNode> {
     root.children.iter_mut().find_map(|child| node(child, id))
 }
 pub fn validate_seed(seed: &Seed) -> Result<()> {
+    let _profile = crate::canvas::profiling::span("oib.seed.validate");
     let mut local_source = seed.clone();
     local_source.resolved_libraries.clear();
     if seed.format != FORMAT
@@ -307,6 +308,7 @@ pub fn effective(seed: &Seed, values: &BTreeMap<u64, Option<Value>>, id: u64) ->
     Ok(cell.default.clone())
 }
 pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout> {
+    let _profile = crate::canvas::profiling::span("oib.compile_layout");
     let seed = seed(ui).ok_or("Missing OIB seed")?;
     let mut blueprint: Blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
     let outputs = document::output_cells(seed)?;

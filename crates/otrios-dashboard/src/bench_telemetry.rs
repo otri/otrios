@@ -37,6 +37,8 @@ impl Recorder {
 /// `<prefix>.{input,worker,renderer}.jsonl` are created once and written only on
 /// orderly lane exit (including Result error unwinding), never during a gesture.
 /// Each lane retains at most 20,000 rows; its final summary reports dropped rows.
+/// Set OTRIOS_NATIVE_PAN_FINISH to a unique absent sentinel path, then create
+/// that file after the trial to flush all lanes without stopping the app.
 /// All *_us timestamps use process-instant-v1, except drm_usec (kernel DRM clock).
 /// Abrupt termination (SIGKILL/SIGTERM default handler) loses buffered rows; use
 /// existing --seconds / --exit-file for orderly flush. Prefix must be unique per
@@ -117,6 +119,7 @@ pub(crate) struct PanRecorder {
     output: Option<BufWriter<File>>,
     rows: Vec<serde_json::Value>,
     dropped: u64,
+    finish: Option<std::path::PathBuf>,
 }
 const PAN_LIMIT: usize = 20_000;
 static PAN_ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
@@ -162,6 +165,7 @@ impl PanRecorder {
             },
             output,
             dropped: 0,
+            finish: std::env::var_os("OTRIOS_NATIVE_PAN_FINISH").map(Into::into),
         })
     }
     pub(crate) fn enabled(&self) -> bool {
@@ -178,6 +182,15 @@ impl PanRecorder {
             self.dropped = self.dropped.saturating_add(1);
         } else {
             self.rows.push(row());
+        }
+    }
+    /// Close this bounded diagnostic without stopping the live host. Each lane
+    /// observes the same operator-owned sentinel after the measured gesture.
+    pub(crate) fn finish_if_requested(&mut self) {
+        if self.output.is_some() && self.finish.as_ref().is_some_and(|p| p.is_file()) {
+            if let Err(error) = self.flush() {
+                eprintln!("Native phase trace flush: {error}");
+            }
         }
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -213,12 +226,46 @@ impl Drop for PanRecorder {
 mod pan_tests {
     use super::*;
     #[test]
+    fn sentinel_finishes_trace_without_stopping_owner() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("otrios-pan-finish-{unique}.jsonl"));
+        let finish = path.with_extension("finish");
+        let mut recorder = PanRecorder {
+            output: Some(BufWriter::new(File::create(&path).unwrap())),
+            rows: vec![],
+            dropped: 0,
+            finish: Some(finish.clone()),
+        };
+        recorder.record(|| serde_json::json!({"event":"trial"}));
+        recorder.finish_if_requested();
+        assert!(recorder.enabled());
+        std::fs::write(&finish, []).unwrap();
+        recorder.finish_if_requested();
+        assert!(!recorder.enabled());
+        let bytes = std::fs::read(&path).unwrap();
+        let rows: Vec<serde_json::Value> = std::str::from_utf8(&bytes)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows[1]["event"], "trial");
+        assert_eq!(rows.last().unwrap()["rows"], 1);
+        recorder.record(|| panic!("finished recorder must not evaluate rows"));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(finish).unwrap();
+    }
+    #[test]
     fn bounded_deferred_jsonl_and_disabled_fast_path() {
         let path = std::env::temp_dir().join(format!("otrios-pan-{}.jsonl", std::process::id()));
         let mut r = PanRecorder {
             output: Some(BufWriter::new(File::create(&path).unwrap())),
             rows: Vec::new(),
             dropped: 0,
+            finish: None,
         };
         for serial in 0..PAN_LIMIT + 3 {
             r.record(|| serde_json::json!({"event":"present","serial":serial}));

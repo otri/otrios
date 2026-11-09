@@ -147,6 +147,7 @@ fn validate_bindings(imports: &graph::Imports) -> Result<()> {
 /// imports. The returned graph is transient compiler input; never serialize it
 /// as app-authored definitions or replace the source Seed with this projection.
 pub fn resolve(seed: &Seed) -> Result<graph::Document> {
+    let _profile = crate::canvas::profiling::span("oib.imports.resolve");
     let original = seed
         .graph
         .as_ref()

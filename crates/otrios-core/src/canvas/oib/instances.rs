@@ -289,6 +289,7 @@ pub fn validate_row_geometry(scene: &crate::dashboard::scene::Scene, viewport: u
 }
 
 fn expanded_designer_seed(seed: &Seed, allocations: &[Allocation]) -> Result<Seed> {
+    let _profile = crate::canvas::profiling::span("oib.instances.metadata");
     let doc = document::metadata(seed)?;
     let count = doc
         .mappings

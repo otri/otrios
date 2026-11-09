@@ -594,6 +594,7 @@ pub(super) fn state_worker(
     let mut measured_sample = 0;
     let mut bench_present = bench_telemetry::Recorder::from_env()?;
     let mut pan = bench_telemetry::PanRecorder::from_env("worker")?;
+    let mut profile_events = 0_usize;
     let mut local_input = None;
     let mut local_sequence = 0_u64;
     let mut local_update = false;
@@ -786,6 +787,8 @@ pub(super) fn state_worker(
                     NetworkEvent::Packet(id, received_at, bytes)
                         if epoch == Some(id) && connection.load(Ordering::Acquire) == id =>
                     {
+                        let _profile = otrios_core::canvas::profiling::span("native.state_receive");
+                        let receive_started = pan.start();
                         let was_private = client.private();
                         match client.receive(&bytes) {
                             Ok(changed) => {
@@ -810,6 +813,15 @@ pub(super) fn state_worker(
                         }
                         if client.take_collection_revoked() || was_private && !client.private() {
                             revoke_display(&mut display_access, &mut composer);
+                        }
+                        if let Some(began) = receive_started {
+                            pan.record(|| {
+                                serde_json::json!({"event":"state_receive",
+                                "arrived_us":bench_telemetry::process_us(received_at),
+                                "started_us":bench_telemetry::process_us(began),
+                                "ended_us":bench_telemetry::process_us(Instant::now()),
+                                "input":local_input.map(|i|i.json())})
+                            });
                         }
                     }
                     NetworkEvent::Packet(..) => {}
@@ -998,6 +1010,8 @@ pub(super) fn state_worker(
         }
         if connected {
             if outgoing.is_none() {
+                let _profile = (client.pending_count() != 0)
+                    .then(|| otrios_core::canvas::profiling::span("native.outgoing"));
                 outgoing = client.outgoing()?.map(|bytes| NetworkSend {
                     channel: otrios_interfaces::session::STATE,
                     epoch: epoch.expect("connected epoch"),
@@ -1026,6 +1040,12 @@ pub(super) fn state_worker(
                 }
             }
             if let Some(packet) = outgoing.take() {
+                pan.record(|| {
+                    serde_json::json!({"event":"state_offer",
+                    "offered_us":bench_telemetry::process_us(Instant::now()),
+                    "channel":packet.channel,"bytes":packet.bytes.len(),
+                    "input":local_input.map(|i|i.json())})
+                });
                 match tx.try_send(packet) {
                     Ok(()) => {}
                     Err(mpsc::TrySendError::Full(packet)) => outgoing = Some(packet),
@@ -1124,7 +1144,10 @@ pub(super) fn state_worker(
                 composer.clear();
             } else {
                 let compose_started = pan.start();
-                let paint = composer.compose(&mut client, &font)?.clone();
+                let paint = {
+                    let _profile = otrios_core::canvas::profiling::span("native.compose");
+                    composer.compose(&mut client, &font)?.clone()
+                };
                 let compose_ended = pan.start();
                 let motion = client.motion_intent()?;
                 let mut intent = motion.map(|v| v.1).unwrap_or_default();
@@ -1177,6 +1200,28 @@ pub(super) fn state_worker(
                     .try_send(frame)
                     .map_err(|e| format!("Render credit violated: {e}"))?;
             }
+        }
+        if pan.enabled() && otrios_core::canvas::profiling::enabled() {
+            let report = otrios_core::canvas::profiling::take();
+            if !report.events.is_empty() || report.dropped != 0 {
+                if profile_events.saturating_add(report.events.len()) <= 32_768 {
+                    profile_events += report.events.len();
+                    pan.record(|| serde_json::json!({"event":"core_phases",
+                        "origin_process_us":bench_telemetry::process_us(otrios_core::canvas::profiling::origin()),
+                        "report":report}));
+                } else {
+                    pan.record(|| {
+                        serde_json::json!({"event":"core_profile_limit",
+                        "retained":profile_events,"dropped":report.events.len()})
+                    });
+                    otrios_core::canvas::profiling::set_enabled(false);
+                }
+            }
+        }
+        let tracing = pan.enabled();
+        pan.finish_if_requested();
+        if tracing && !pan.enabled() {
+            otrios_core::canvas::profiling::set_enabled(false);
         }
         thread::sleep(Duration::from_millis(2));
     }

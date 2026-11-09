@@ -28,6 +28,7 @@ pub(super) fn validate_metadata(binding: &Binding, status: Option<&Status>) -> R
 /// Complete canonical source/pin identity. Adoption evidence and allocator
 /// bookkeeping are excluded; semantic epoch remains a separate contract.
 pub(super) fn digest(binding: &Binding) -> Result<merkle::Hash> {
+    let _profile = crate::canvas::profiling::span("oib.baseline.digest");
     Ok(super::digest(
         &[
             b"OTriOS\0oib-baseline-v1\0".as_slice(),

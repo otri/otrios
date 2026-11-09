@@ -44,6 +44,8 @@ pub fn render_scene_with_font(scene: &Scene, font: &Font) -> Mesh {
     render_optional_font(scene, Some(font))
 }
 fn render_optional_font(scene: &Scene, font: Option<&Font>) -> Mesh {
+    #[cfg(feature = "canvas")]
+    let _profile = crate::canvas::profiling::span("render.fixed.paint");
     let mut mesh = Mesh::default();
     mesh.paint(
         scene.root(),

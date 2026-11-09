@@ -75,6 +75,7 @@ pub(super) fn load(file: &Path, mut doc: Document) -> Result<Document, String> {
     Ok(doc)
 }
 pub(super) fn append(file: &Path, old: &Document, next: &Document) -> Result<(), String> {
+    let _profile = canvas::profiling::span("authority.store.append");
     let path = log_path(file);
     let checkpoint_at = if old.oib_epoch().is_ok() {
         OIB_CHECKPOINT_AT
@@ -82,6 +83,7 @@ pub(super) fn append(file: &Path, old: &Document, next: &Document) -> Result<(),
         CHECKPOINT_AT
     };
     if fs::metadata(&path).is_ok_and(|m| m.len() >= checkpoint_at) {
+        let _profile = canvas::profiling::span("authority.store.checkpoint");
         persist(file, &old.save()?).map_err(failure)?;
         let log = fs::OpenOptions::new()
             .write(true)
@@ -90,7 +92,10 @@ pub(super) fn append(file: &Path, old: &Document, next: &Document) -> Result<(),
         log.set_len(0).map_err(failure)?;
         log.sync_all().map_err(failure)?;
     }
-    let record = next.journal_delta(old)?;
+    let record = {
+        let _profile = canvas::profiling::span("authority.store.journal_delta");
+        next.journal_delta(old)?
+    };
     let mut options = fs::OpenOptions::new();
     options.read(true).append(true).create(true);
     #[cfg(unix)]
@@ -107,7 +112,10 @@ pub(super) fn append(file: &Path, old: &Document, next: &Document) -> Result<(),
         .map_err(failure)?;
     log.write_all(&canvas::hash(&record)).map_err(failure)?;
     log.write_all(&record).map_err(failure)?;
-    log.sync_all().map_err(failure)?;
+    {
+        let _profile = canvas::profiling::span("authority.store.sync");
+        log.sync_all().map_err(failure)?;
+    }
     if prior == 0
         && let Some(parent) = file.parent()
     {

@@ -107,6 +107,7 @@ impl Document {
     }
 
     pub fn configure_oib(&mut self, ui: &Ui) -> Result<bool> {
+        let _profile = crate::canvas::profiling::span("oib.configure");
         if super::super::oib::seed(ui).is_none() {
             if self.tree.subtree(&[4]).is_ok() && self.oib_binding()?.ui_ref == ui.ui_ref {
                 return Err("Installed app no longer supports retained OIB data".into());
@@ -253,6 +254,7 @@ impl Document {
                 return Ok(cached.binding.clone());
             }
         }
+        let _profile = crate::canvas::profiling::span("oib.binding.normalize");
         let mut binding: Binding = decode(&payload(&self.tree, &[4, 0])?)?;
         baseline::validate_metadata(&binding, None)?;
         if binding.format != baseline::FORMAT
@@ -280,6 +282,7 @@ impl Document {
         Ok(binding)
     }
     fn oib_authored_ui(&self) -> Result<std::sync::Arc<Ui>> {
+        let _profile = crate::canvas::profiling::span("oib.authored_ui");
         let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
         if super::super::oib::seed(&signed).is_none_or(|seed| seed.designer.is_none()) {
             return Ok(signed);
@@ -310,6 +313,7 @@ impl Document {
         Ok(ui)
     }
     fn oib_authored_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
+        let _profile = crate::canvas::profiling::span("oib.authored_seed");
         let mut seed = if self.oib_ui.is_some() {
             super::super::oib::seed(&*self.oib_authored_ui()?)
                 .ok_or("Missing OIB seed")?
@@ -433,6 +437,7 @@ impl Document {
         Ok(live)
     }
     fn oib_resolved_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
+        let _profile = crate::canvas::profiling::span("oib.seed.resolve");
         let seed = self.oib_authored_seed()?;
         super::super::oib::instances::expanded_seed(&seed, &self.oib_allocations()?)
     }
@@ -479,6 +484,7 @@ impl Document {
         properties_and_presence: merkle::Hash,
         branch: u64,
     ) -> Result<merkle::Hash> {
+        let _profile = crate::canvas::profiling::span("oib.structural_root");
         let mut source = self.oib_source()?;
         let live = self.oib_live(branch)?;
         source
@@ -506,6 +512,7 @@ impl Document {
         branch: u64,
         selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
+        let _profile = crate::canvas::profiling::span("oib.compiled");
         let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
         let binding = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
         let source = self.tree.subtree(&[4, 4]).map_err(err)?.hash();
@@ -528,12 +535,14 @@ impl Document {
         {
             let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
             if let Some(index) = cache.iter().position(same_key) {
+                let _profile = crate::canvas::profiling::span("oib.compiled.hit");
                 let cached = cache.remove(index);
                 let result = (cached.ui.clone(), cached.layout.clone());
                 cache.push(cached);
                 return Ok(result);
             }
         }
+        let _profile = crate::canvas::profiling::span("oib.compiled.miss");
         let mut ui = (*self.oib_authored_ui()?).clone();
         if let Some(Presentation::Oib(seed)) = &mut ui.presentation
             && let Some(doc) = &mut seed.designer
@@ -568,6 +577,7 @@ impl Document {
         Ok((resolved, layout))
     }
     pub fn oib_values(&self, branch: u64) -> Result<BTreeMap<u64, Option<Value>>> {
+        let _profile = crate::canvas::profiling::span("oib.values");
         let seed = self.oib_resolved_seed()?;
         let live = self.oib_live(branch)?;
         let mut values = BTreeMap::new();
@@ -603,6 +613,7 @@ impl Document {
         Ok(values)
     }
     pub(super) fn validate_oib(&self, old: Option<&Snapshot>, tree: &Snapshot) -> Result<()> {
+        let _profile = crate::canvas::profiling::span("oib.validate");
         let baseline_changed = if let Some(old) = old {
             self.oib_validate_baseline_transition(old, tree)?
         } else {
@@ -749,6 +760,7 @@ impl Document {
         Ok(())
     }
     pub(super) fn oib_write(&mut self, writer: Actor, changes: &[Change]) -> Result<()> {
+        let _profile = crate::canvas::profiling::span("oib.write");
         if changes.is_empty() || changes.len() > MAX_CHANGES {
             return Err("OIB change batch limit".into());
         }
@@ -790,6 +802,7 @@ impl Document {
         self.activate_oib(next)
     }
     fn activate_oib(&mut self, next: Snapshot) -> Result<()> {
+        let _profile = crate::canvas::profiling::span("oib.activate");
         let seed = self.oib_resolved_seed()?;
         let mut status = self.oib_status()?;
         status.conflicts.clear();
@@ -909,6 +922,7 @@ impl StateAdapter {
         self.doc.tree.subtree(&[4]).ok().map(|n| n.hash())
     }
     pub(in crate::canvas) fn oib_info(&self) -> Result<super::super::oib::Info> {
+        let _profile = crate::canvas::profiling::span("oib.info");
         let resolved = self.doc.oib_resolved_seed()?;
         let seed = &resolved;
         let status = self.doc.oib_status()?;

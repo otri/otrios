@@ -94,6 +94,7 @@ pub(super) fn run() -> Result<(), String> {
         let mut input = TouchInput::open(&touch)?;
         native_input::run(
             || {
+                input_pan.finish_if_requested();
                 input.read().map(|events| {
                     events
                         .into_iter()
@@ -167,6 +168,7 @@ pub(super) fn run() -> Result<(), String> {
     let mut flips = Vec::new();
     let result = (|| -> Result<(), String> {
         loop {
+            pan.finish_if_requested();
             let mut vertex_upload_bytes = 0_usize;
             let mut upload_calls = 0_usize;
             if input_worker.is_finished() {

@@ -8,6 +8,7 @@ pub mod document;
 mod host_ui;
 pub mod oib;
 pub mod presentation;
+pub mod profiling;
 pub mod reflow;
 mod selection;
 mod state;
@@ -123,12 +124,14 @@ macro_rules! codec {
     };
 }
 pub fn encode_ui(value: &Ui) -> Result<Vec<u8>> {
+    let _profile = profiling::span("ui.encode");
     let source = oib::graph::strip(value)?;
     let bytes = flexbuffers::to_vec(&source).map_err(err)?;
     check(&bytes)?;
     Ok(bytes)
 }
 pub fn decode_ui(bytes: &[u8]) -> Result<Ui> {
+    let _profile = profiling::span("ui.decode");
     check(bytes)?;
     let ui: Ui = flexbuffers::from_slice(bytes).map_err(err)?;
     if let Some(seed) = oib::seed(&ui) {

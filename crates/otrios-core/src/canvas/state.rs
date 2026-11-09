@@ -639,6 +639,7 @@ impl Document {
         ))
     }
     pub fn receive(&mut self, session: &mut Session, data: &[u8]) -> Result<bool> {
+        let _profile = crate::canvas::profiling::span("state.document.receive");
         let request = decode_state_request(data)?;
         if let StateRequest::Hello { writer, resume } = request {
             if session.writer.is_some() {
@@ -1293,6 +1294,7 @@ impl StateAdapter {
         Ok(None)
     }
     pub fn receive(&mut self, data: &[u8]) -> Result<bool> {
+        let _profile = crate::canvas::profiling::span("state.adapter.receive");
         let response = decode_state_response(data)?;
         let mounting = matches!(response, StateResponse::Mount { .. });
         let (mut replica, frame) = match response {

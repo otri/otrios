@@ -65,7 +65,11 @@ impl TextPresentation {
         font: &Font,
         mut profile: Option<&mut ComposeProfile>,
     ) -> TextFrame {
+        #[cfg(feature = "canvas")]
+        let _profile = crate::canvas::profiling::span("render.retained.compose");
         let start = profile.as_ref().map(|_| Instant::now());
+        #[cfg(feature = "canvas")]
+        let normalize_profile = crate::canvas::profiling::span("render.retained.normalize");
         let mut key = scene.root().clone();
         let mut positions = BTreeMap::new();
         let extent = [scene.root().frame.width, scene.root().frame.height];
@@ -86,10 +90,14 @@ impl TextPresentation {
             &mut glyphs,
             &mut scales,
         );
+        #[cfg(feature = "canvas")]
+        drop(normalize_profile);
         if let Some(p) = profile.as_deref_mut() {
             p.placement_us = start.unwrap().elapsed().as_micros();
         }
         let rebuild_start = profile.as_ref().map(|_| Instant::now());
+        #[cfg(feature = "canvas")]
+        let rebuild_profile = crate::canvas::profiling::span("render.retained.rebuild");
         if self.key.as_ref() != Some(&key) || self.font != font.hash() {
             // Recycle CPU storage only after every immutable frame snapshot has
             // been released. Held snapshots keep their buffers and bytes intact.
@@ -106,6 +114,8 @@ impl TextPresentation {
             if retain {
                 mesh.glyph_vertices.reserve(glyphs * 64);
                 let mut paint = RetainedPaint { runs: &mut runs };
+                #[cfg(feature = "canvas")]
+                let mesh_profile = crate::canvas::profiling::span("render.retained.mesh.paint");
                 mesh.paint(
                     scene.root(),
                     [0., 0.],
@@ -119,6 +129,8 @@ impl TextPresentation {
                     Some(font),
                     Some(&mut paint),
                 );
+                #[cfg(feature = "canvas")]
+                drop(mesh_profile);
                 // Native retained-view ranges admit at most 65,536 vertices.
                 // Large admitted scenes keep the existing clipped, fixed-
                 // placement path instead of producing out-of-contract views.
@@ -199,10 +211,14 @@ impl TextPresentation {
             self.key = retain.then_some(key);
             self.generation = self.generation.wrapping_add(1);
         }
+        #[cfg(feature = "canvas")]
+        drop(rebuild_profile);
         if let Some(p) = profile.as_deref_mut() {
             p.rebuild_us = rebuild_start.unwrap().elapsed().as_micros();
         }
         let cull_start = profile.as_ref().map(|_| Instant::now());
+        #[cfg(feature = "canvas")]
+        let _cull_profile = crate::canvas::profiling::span("render.retained.cull");
         let mut views = vec![0.; self.mesh.draws.len() / 3 * 8];
         for run in &self.runs {
             let Some(&[x, y, l, t, r, b, _]) = positions.get(&run.id) else {

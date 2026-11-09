@@ -362,6 +362,7 @@ struct Lowering {
     previews: Vec<TemplateNode>,
 }
 fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
+    let _profile = crate::canvas::profiling::span("oib.graph.lower");
     let graph = super::imports::resolve(input)?;
     validate_source(&graph)?;
     let mut selectors = vec![];
@@ -1137,6 +1138,7 @@ fn collect_nodes(root: &TemplateNode, ids: &mut BTreeSet<u16>, controls: &mut BT
 }
 /// Remove only compiler-owned application output. Signed chrome remains intact.
 pub fn strip(ui: &Ui) -> Result<Ui> {
+    let _profile = crate::canvas::profiling::span("oib.graph.strip");
     if super::seed(ui).is_none() {
         return Ok(ui.clone());
     }
@@ -1207,6 +1209,7 @@ pub fn strip(ui: &Ui) -> Result<Ui> {
 
 /// Reconstruct the disposable property and object tables during checkpoint load.
 pub fn materialize_seed(seed: &Seed) -> Result<Seed> {
+    let _profile = crate::canvas::profiling::span("oib.graph.materialize_seed");
     let graph = seed
         .graph
         .as_ref()
@@ -1263,6 +1266,7 @@ pub fn with_source(
 }
 /// Compile a canonical signed graph into the existing bounded layout engine.
 pub fn materialize(ui: &Ui) -> Result<Ui> {
+    let _profile = crate::canvas::profiling::span("oib.graph.materialize");
     if super::seed(ui).is_none() {
         return Ok(ui.clone());
     }
@@ -1315,6 +1319,7 @@ pub fn expand(
     _selected: Option<u64>,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Ui> {
+    let _profile = crate::canvas::profiling::span("oib.graph.expand");
     if live.len() > MAX_LIVE_INSTANCES {
         return Err(error("OIB live instance capacity exhausted"));
     }

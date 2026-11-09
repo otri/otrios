@@ -29,6 +29,7 @@ impl Document {
                 return Ok(cached.clone());
             }
         }
+        let _profile = crate::canvas::profiling::span("oib.source.validate");
         let data = payload(&self.tree, &[4, 4])?;
         if data.len() > MAX_DOCUMENT_BYTES {
             return Err("OIB document source budget".into());
