@@ -5,7 +5,7 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
         "live-ui",
         "Live UI",
         "canvas-app",
-        &["otrios-oib-v1", "otrios-oib-instances-v1"],
+        &["otrios-oib-v2", "otrios-oib-instances-v1"],
     )
 }
 pub fn ui(_code: &[u8]) -> otrios_interfaces::canvas::Ui {

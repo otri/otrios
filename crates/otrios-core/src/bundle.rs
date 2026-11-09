@@ -402,12 +402,12 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-canvas-v6"
                     | "otrios-canvas-v7"
                     | "otrios-canvas-v8"
-                    | "otrios-oib-v1"
+                    | "otrios-oib-v2"
                     | "otrios-oib-instances-v1"
                     | "otrios-oib-layout-v1"
                     | "otrios-oib-restore-v1"
                     | "otrios-oib-authored-defaults-v1"
-                    | "otrios-oib-designer-v1"
+                    | "otrios-oib-designer-v2"
                     | "otrios-layout-v5"
             )
         })

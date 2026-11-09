@@ -5,45 +5,10 @@ use otrios_interfaces::oib::{MAX_LIVE_INSTANCES, authoring::*, designer::Instanc
 
 impl Document {
     pub(super) fn oib_connections(&self) -> Result<Vec<AppConnection>> {
-        if self.tree.subtree(&[4, 10]).is_err() {
-            return Ok(vec![]);
-        }
-        let data = payload(&self.tree, &[4, 10])?;
-        if data.len() > MAX_CONNECTION_BYTES {
-            return Err("OIB connection source budget".into());
-        }
-        let connections: Vec<AppConnection> = decode(&data)?;
-        if connections.len() > otrios_interfaces::oib::MAX_CELLS
-            || connections
-                .windows(2)
-                .any(|w| (&w[0].object, w[0].property) >= (&w[1].object, w[1].property))
-            || bytes(&connections)? != data
-        {
-            return Err("Noncanonical OIB connection source".into());
-        }
-        Ok(connections)
+        Ok(self.oib_source()?.connections)
     }
     pub(super) fn oib_placements(&self) -> Result<Vec<Placement>> {
-        if self.tree.subtree(&[4, 9]).is_err() {
-            return Ok(vec![]);
-        }
-        let data = payload(&self.tree, &[4, 9])?;
-        if data.len() > MAX_PLACEMENT_BYTES {
-            return Err("OIB placement source budget".into());
-        }
-        let placements: Vec<Placement> = decode(&data)?;
-        if placements.len() > MAX_ALLOCATIONS
-            || placements
-                .windows(2)
-                .any(|w| w[0].instance >= w[1].instance)
-            || bytes(&placements)? != data
-        {
-            return Err("Noncanonical OIB placement source".into());
-        }
-        for p in &placements {
-            super::super::super::oib::document::placement::validate_frame(p.frame)?;
-        }
-        Ok(placements)
+        Ok(self.oib_source()?.placements)
     }
 
     pub(super) fn oib_hierarchy_write(
@@ -234,37 +199,12 @@ impl Document {
             }
         }
         connections.sort_by(|a, b| (&a.object, a.property).cmp(&(&b.object, b.property)));
-        if connections != previous_connections {
-            let data = bytes(&connections)?;
-            if connections.len() > otrios_interfaces::oib::MAX_CELLS
-                || data.len() > MAX_CONNECTION_BYTES
-            {
-                return Err("OIB connection source budget".into());
-            }
-            self.change(
-                &[],
-                vec![Edit {
-                    path: vec![4, 10],
-                    schema: self.extra_schema(4, 10),
-                    value: Some(data),
-                }],
-            )?;
-        }
-        if placements != previous
-            || (self.tree.subtree(&[4, 9]).is_err() && self.tree.hash() != original)
-        {
-            let data = bytes(&placements)?;
-            if data.len() > MAX_PLACEMENT_BYTES {
-                return Err("OIB placement source budget".into());
-            }
-            self.change(
-                &[],
-                vec![Edit {
-                    path: vec![4, 9],
-                    schema: self.extra_schema(4, 9),
-                    value: Some(data),
-                }],
-            )?;
+        if connections != previous_connections || placements != previous {
+            let edit = self.oib_source_edit(|source| {
+                source.connections = connections;
+                source.placements = placements;
+            })?;
+            self.change(&[], vec![edit])?;
         }
         if self.tree.hash() != original {
             self.activate_oib(self.tree.clone())?;
@@ -325,11 +265,9 @@ impl Document {
         if allocations != self.oib_allocations()? {
             self.change(
                 &[],
-                vec![Edit {
-                    path: vec![4, 4],
-                    schema: self.extra_schema(4, 4),
-                    value: Some(bytes(&allocations)?),
-                }],
+                vec![self.oib_source_edit(|source| {
+                    source.instances = allocations.iter().map(Into::into).collect()
+                })?],
             )?;
         }
         Ok(())

@@ -7,6 +7,10 @@ linked nested component references, stable full ancestry addresses and authored,
 forwarded and live override sources. The original **Live UI** app retains its
 own schema, bindings and values.
 
+The [D2 work record](OIB_D2_COMPLETION.md) tracks the unreleased v2 format cleanup
+and remaining authoring work. It requires fresh OIB collections; the live behavior
+described here remains the deployed v28 baseline until that cutover is qualified.
+
 ## OIB Designer, Frame Focus and Desktop Studio
 
 Open **Test Playground → OIB Designer** in the selected Space. Two linked

@@ -39,11 +39,11 @@ fn endpoint(
     Ok((path, kind))
 }
 
-fn selector<'a>(
-    ui: &'a Ui,
+fn selector(
+    ui: &Ui,
     kind: ClassKind,
     source: Binding,
-) -> Result<&'a otrios_interfaces::canvas::Selector> {
+) -> Result<&otrios_interfaces::canvas::Selector> {
     let Binding::Local(local) = source;
     let selector = ui
         .selectors
@@ -268,6 +268,9 @@ fn collect(node: &TemplateNode, blocked: &BTreeSet<u16>, out: &mut BTreeSet<u16>
 /// Update display, semantics and the existing effect's field together. Owned
 /// child roots keep their independent connections even inside a control's slot.
 pub fn project_ui(admission: &Ui, ui: &mut Ui) -> Result<()> {
+    if super::super::seed(ui).is_some_and(|seed| seed.designer.is_none()) {
+        return Ok(());
+    }
     let doc = metadata(super::super::seed(ui).ok_or("Missing OIB seed")?)?.clone();
     if doc.connections.is_empty() {
         return Ok(());

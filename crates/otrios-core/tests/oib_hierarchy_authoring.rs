@@ -69,6 +69,7 @@ fn edit(
     operations: Vec<HierarchyEdit>,
 ) -> Vec<u8> {
     let bytes = canvas::encode_state_request(&StateRequest::OibInstance {
+        epoch: doc.oib_epoch().unwrap(),
         sequence,
         operation: InstanceOperation::Hierarchy(HierarchyBatch {
             generation: doc.oib_status().unwrap().generation,
@@ -258,10 +259,42 @@ fn owned_subtree_duplicate_allocates_fresh_roots_and_remaps_internal_ownership()
 }
 
 #[test]
+fn slot_cardinality_rejects_the_whole_batch_without_consuming_identities() {
+    let (_ui, mut doc, mut session) = setup();
+    let before = snapshot(&doc).subtree(&[4, 4]).unwrap().to_bytes().unwrap();
+    let active = doc.oib_status().unwrap().active_root;
+    edit(
+        &mut doc,
+        &mut session,
+        1,
+        (0..3)
+            .map(|_| HierarchyEdit::Insert {
+                prototype: InstanceId(50),
+                destination: slot(20),
+                before: None,
+                frame: None,
+            })
+            .collect(),
+    );
+    assert_eq!(
+        snapshot(&doc).subtree(&[4, 4]).unwrap().to_bytes().unwrap(),
+        before
+    );
+    assert_eq!(doc.oib_status().unwrap().active_root, active);
+    assert!(
+        doc.oib_status()
+            .unwrap()
+            .error
+            .unwrap()
+            .contains("cardinality")
+    );
+}
+
+#[test]
 fn wrong_slot_class_cardinality_cycles_and_geometry_reject_without_allocating() {
     let (_ui, mut doc, mut session) = setup();
     let original = doc.oib_status().unwrap().active_root;
-    let next = snapshot(&doc).subtree(&[4, 7]).unwrap().to_bytes().unwrap();
+    let next = snapshot(&doc).subtree(&[4, 4]).unwrap().to_bytes().unwrap();
     edit(
         &mut doc,
         &mut session,
@@ -275,7 +308,7 @@ fn wrong_slot_class_cardinality_cycles_and_geometry_reject_without_allocating() 
     );
     assert_eq!(doc.oib_status().unwrap().active_root, original);
     assert_eq!(
-        snapshot(&doc).subtree(&[4, 7]).unwrap().to_bytes().unwrap(),
+        snapshot(&doc).subtree(&[4, 4]).unwrap().to_bytes().unwrap(),
         next
     );
     edit(

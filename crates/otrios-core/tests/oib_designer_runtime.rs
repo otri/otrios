@@ -237,14 +237,13 @@ fn fixture() -> Ui {
             }],
         });
         let mut rows = Vec::new();
-        for (rank, refs, key, target) in [
+        for (rank, refs, _key, target) in [
             (0, vec![], 2, None),
             (1, vec![7], 17, Some(base + 3)),
             (2, vec![8], 55, Some(base + 6)),
         ] {
             rows.push(RootCellKey {
                 path: path(&refs),
-                key,
                 initial_cell: alias + rank,
             });
             cells.push(contract::Cell {
@@ -401,7 +400,7 @@ fn fixture() -> Ui {
             inspector_content: [500., 1000.],
             instance_surface: Some(contract::InstanceSurface {
                 layout: None,
-                previous_ui_sha256: vec![0; 32],
+
                 preview_viewport: 2,
                 preview_stride: 100.,
                 inspector_start: 100.,
@@ -411,14 +410,14 @@ fn fixture() -> Ui {
                         instance: 20,
                         palette_only: false,
                         preview_root: 10,
-                        inspector_root: 30,
+                        inspector_root: Some(30),
                         nodes: vec![10, 11, 12, 13, 14, 15, 16, 30],
                     },
                     contract::Prototype {
                         instance: 30,
                         palette_only: false,
                         preview_root: 20,
-                        inspector_root: 31,
+                        inspector_root: Some(31),
                         nodes: vec![20, 21, 22, 23, 24, 25, 26, 31],
                     },
                 ],
@@ -498,7 +497,7 @@ fn full_paths_keys_and_nested_live_precedence() {
 }
 
 #[test]
-fn sparse_key_identity_survives_cell_order_and_names() {
+fn compiler_handles_ignore_object_id_magnitude_cell_order_and_names() {
     let mut ui = fixture();
     let mut allocations = oib::instances::initial_allocations(seed(&ui));
     allocations.push(contract::Allocation {
@@ -508,7 +507,7 @@ fn sparse_key_identity_survives_cell_order_and_names() {
         prototype: 20,
         slot: 7,
     });
-    let expected = 16777216 + 55;
+    let expected = seed(&ui).cells.iter().map(|c| c.id).max().unwrap() + 1 + 7 * 64 + 2;
     assert_eq!(
         oib::document::cell_for_address(seed(&ui), &allocations, &address(65536, &[8])).unwrap(),
         expected
@@ -528,17 +527,17 @@ fn sparse_key_identity_survives_cell_order_and_names() {
     );
     assert_eq!(
         oib::document::cell_for_alias(seed(&ui), &allocations, 65536, 201).unwrap(),
-        16777216 + 17
+        expected - 1
     );
     allocations.last_mut().unwrap().id = u64::MAX;
-    assert!(oib::instances::expanded_seed(seed(&ui), &allocations).is_err());
+    assert!(oib::instances::expanded_seed(seed(&ui), &allocations).is_ok());
 }
 
 #[test]
 fn malformed_graph_mapping_and_types_reject() {
     let base = fixture();
     let mut bad = base.clone();
-    seed_mut(&mut bad).designer.as_mut().unwrap().mappings.roots[0].cells[1].key = 2;
+    seed_mut(&mut bad).designer.as_mut().unwrap().mappings.roots[0].cells[1].path = path(&[]);
     assert!(oib::validate(&bad).is_err());
     let mut bad = base.clone();
     seed_mut(&mut bad).designer.as_mut().unwrap().mappings.roots[0].cells[1].path = path(&[8]);
@@ -687,7 +686,16 @@ fn concurrent_nested_conflict_pins_exact_active_graph() {
     let active = doc.oib_status().unwrap().active_root;
     let values = doc.oib_values(2).unwrap();
     doc.receive(&mut sb, &b_write).unwrap();
-    assert_eq!(doc.oib_status().unwrap().conflicts, vec![201]);
+    assert_eq!(
+        doc.oib_status().unwrap().conflicts,
+        vec![
+            otrios_core::canvas::oib::document::address_for_cell(
+                otrios_core::canvas::oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(),
+                201
+            )
+            .unwrap()
+        ]
+    );
     assert_eq!(doc.oib_status().unwrap().active_root, active);
     assert_eq!(doc.oib_values(2).unwrap(), values);
     let saved = doc.save().unwrap();
@@ -695,19 +703,6 @@ fn concurrent_nested_conflict_pins_exact_active_graph() {
     loaded.configure_oib(&ui).unwrap();
     assert_eq!(loaded.oib_status().unwrap().active_root, active);
 }
-#[test]
-fn designer_none_canonical_bytes_and_legacy_inheritance_stay_unchanged() {
-    let bytes =
-        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-v25-ui.lz4")).unwrap();
-    let ui = canvas::decode_ui(&bytes).unwrap();
-    assert!(seed(&ui).designer.is_none());
-    assert_eq!(canvas::encode_ui(&ui).unwrap(), bytes);
-    oib::validate(&ui).unwrap();
-    let mut doc = StateDocument::new(ui.state_schema.clone(), "oib:legacy-runtime").unwrap();
-    doc.configure_oib(&ui).unwrap();
-    assert!(doc.oib_status().unwrap().conflicts.is_empty());
-}
-
 #[test]
 fn canonical_seed_decoder_rejects_noncanonical_and_oversized_metadata() {
     let ui = fixture();
@@ -778,7 +773,7 @@ fn larger_fixture() -> Ui {
                     .cells
                     .push(RootCellKey {
                         path,
-                        key: (3 + (p - 2) * 3 + rank) as u8,
+
                         initial_cell: id,
                     });
                 seed.cells.push(contract::Cell {
@@ -799,7 +794,7 @@ fn larger_fixture() -> Ui {
         .definitions
         .sort_by_key(|m| (m.definition, m.node, m.property));
     for t in &mut doc.mappings.roots {
-        t.cells.sort_by_key(|r| r.key);
+        t.cells.sort_by_key(|r| r.path.clone());
     }
     ui
 }
@@ -823,6 +818,7 @@ fn resident_cell_union_rejects_before_identity_allocation() {
     let (_, mut bypass) = adapter(&ui, &mut doc, 9);
     let before = doc.root_hash();
     let request = canvas::encode_state_request(&StateRequest::OibInstance {
+        epoch: doc.oib_epoch().unwrap(),
         sequence: 1,
         operation: contract::InstanceOperation::Instantiate {
             component: 10,
@@ -1094,7 +1090,7 @@ fn restore_uses_fresh_roots_and_preserves_signed_sources_and_app_values() {
     assert_eq!(allocations.len(), 2);
     assert!(!allocations.iter().any(|a| a.id == 20));
     let fresh = allocations.iter().find(|a| a.prototype == 20).unwrap().id;
-    assert!(fresh >= 65536);
+    assert!(fresh > 40);
     let cell =
         oib::document::cell_for_address(seed(&ui), &allocations, &address(fresh, &[7])).unwrap();
     let expanded = oib::instances::expanded_seed(seed(&ui), &allocations).unwrap();
@@ -1134,35 +1130,6 @@ fn terminal_compilation_is_independent_of_cell_vector_order() {
     assert!(
         matches!(&leaf.shape,Shape::Text{value:Expr::Literal(Value::Text(v)),..} if v=="Resolved parent")
     );
-}
-
-#[test]
-fn allowlisted_signed_successor_preserves_keys_registers_and_values() {
-    let (ui, mut doc) = setup();
-    let (mut client, mut session) = adapter(&ui, &mut doc, 1);
-    client
-        .edit_oib_property(&address(20, &[7]), Some(text("Retained")))
-        .unwrap();
-    sync(&mut doc, &mut session, &mut client);
-    let values = doc.oib_values(2).unwrap();
-    let allocations = doc.oib_allocations().unwrap();
-    let mut next = ui.clone();
-    let old_hash = canvas::hash(&canvas::encode_ui(&ui).unwrap());
-    let seed = seed_mut(&mut next);
-    seed.instance_surface.as_mut().unwrap().previous_ui_sha256 = old_hash;
-    seed.designer.as_mut().unwrap().definitions[0].nodes[1].name = "Renamed wrapper".into();
-    seed.cells.reverse();
-    assert!(doc.configure_oib(&next).unwrap());
-    assert_eq!(doc.oib_values(2).unwrap(), values);
-    assert_eq!(doc.oib_allocations().unwrap(), allocations);
-    let mut bad = next.clone();
-    let hash = canvas::hash(&canvas::encode_ui(&next).unwrap());
-    let seed = seed_mut(&mut bad);
-    seed.instance_surface.as_mut().unwrap().previous_ui_sha256 = hash;
-    seed.designer.as_mut().unwrap().mappings.roots[0].cells[1].key = 18;
-    let before = doc.root_hash();
-    assert!(doc.configure_oib(&bad).is_err());
-    assert_eq!(doc.root_hash(), before);
 }
 
 #[test]
@@ -1305,7 +1272,7 @@ fn factories_require_signed_document_membership_before_state_changes() {
             instance: 50,
             palette_only: false,
             preview_root: 32,
-            inspector_root: 33,
+            inspector_root: Some(33),
             nodes: vec![32, 33],
         });
 

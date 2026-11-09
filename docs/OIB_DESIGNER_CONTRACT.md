@@ -9,6 +9,11 @@ The [execution plan](OIB_DESIGNER_D1.md),
 editor work and actual acceptance. The contract and handoff details below retain
 the signed D1 scope; later authoring stages remain deferred.
 
+This is the deployed **v1** contract record. The unreleased
+[D2 format work](OIB_D2_COMPLETION.md) uses v2 package features, direct semantic
+register keys and a consolidated document record. Its fresh-data cutover removes
+the migration and immutable numeric-alias requirements described below.
+
 The declarations are in `otrios_interfaces::oib::designer`; the existing SDK's
 `oib` feature/reexport exposes them without a new SDK dependency or API wrapper.
 `Seed.designer` is an optional signed attachment requiring

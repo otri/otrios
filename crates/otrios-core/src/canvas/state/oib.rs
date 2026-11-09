@@ -7,8 +7,10 @@ use otrios_interfaces::oib::{
     MAX_CHANGES,
 };
 use std::collections::BTreeSet;
+mod address;
 mod hierarchy;
 mod lifecycle;
+mod source;
 mod structure;
 
 /// One disposable compiled structural revision, shared by document clones and
@@ -26,13 +28,14 @@ pub struct Status {
     pub generation: u64,
     pub active_root: merkle::Hash,
     pub source_draft: merkle::Hash,
-    pub conflicts: Vec<u64>,
+    pub conflicts: Vec<otrios_interfaces::oib::designer::PropertyAddress>,
     pub error: Option<String>,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Binding {
     seed: otrios_interfaces::oib::Seed,
+    admission: Vec<u8>,
     ui_hash: Vec<u8>,
     ui_ref: String,
 }
@@ -52,26 +55,28 @@ impl Document {
         super::super::oib::validate(ui)?;
         let binding = Binding {
             seed: seed.clone(),
+            admission: hash(&bytes(&(
+                &ui.state_schema,
+                &ui.selectors,
+                &ui.handlers,
+                &ui.behavior,
+            ))?),
             ui_hash: hash(&bytes(ui)?),
             ui_ref: ui.ui_ref.clone(),
         };
         let encoded = bytes(&binding)?;
         let existing = payload(&self.tree, &[4, 0]).ok();
-        let lifecycle_upgrade =
-            seed.instance_surface.is_some() && self.tree.subtree(&[4, 7]).is_err();
-        let mut initialize_instances = seed.instance_surface.is_some();
-        let mut previous_cells = BTreeSet::new();
         if let Some(existing) = &existing {
             let previous: Binding = decode(existing)?;
-            previous_cells.extend(previous.seed.cells.iter().map(|c| c.id));
-            initialize_instances &= previous.seed.instance_surface.is_none();
-            if *existing == encoded && !lifecycle_upgrade {
+            if !same_source(&previous, &binding) {
+                return Err(
+                    "OIB format or signed source changed; initialize a fresh collection".into(),
+                );
+            }
+            if *existing == encoded {
                 self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
                 self.oib_compiled(2)?;
                 return Ok(false);
-            }
-            if *existing != encoded && !compatible_upgrade(&previous, &binding) {
-                return Err("OIB seed update needs explicit compatible migration".into());
             }
         }
         self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
@@ -97,11 +102,9 @@ impl Document {
             schema: self.extra_schema(4, 0),
             value: Some(encoded),
         }];
-        {
+        if existing.is_none() {
             for cell in seed.cells.iter().filter(|c| {
-                !previous_cells.contains(&c.id)
-                    && (c.inherit.is_none()
-                        || !super::super::oib::instances::palette_only(seed, c.owner))
+                c.inherit.is_none() || !super::super::oib::instances::palette_only(seed, c.owner)
             }) {
                 let value = if cell.inherit.is_some() {
                     None
@@ -110,57 +113,47 @@ impl Document {
                 };
                 for branch in [1, 2] {
                     edits.push(Edit {
-                        path: cell_path(branch, cell.id),
-                        schema: self.oib_cell_schema(cell.id),
+                        path: address::cell_path(seed, branch, cell.id)?,
+                        schema: address::schema(&self.scope, seed, cell.id)?,
                         value: value.clone(),
                     });
                 }
             }
-        }
-        if initialize_instances {
             let allocations = super::super::oib::instances::initial_allocations(seed);
-            edits.push(Edit {
-                path: vec![4, 4],
-                schema: self.extra_schema(4, 4),
-                value: Some(bytes(&allocations)?),
-            });
-            for allocation in &allocations {
-                for branch in [5, 6] {
-                    edits.push(Edit {
-                        path: cell_path(branch, allocation.id),
-                        schema: self.oib_instance_schema(allocation.id),
-                        value: Some(bytes(&true)?),
-                    });
-                }
-            }
-        }
-        if lifecycle_upgrade {
-            let allocations = if initialize_instances {
-                super::super::oib::instances::initial_allocations(seed)
-            } else {
-                self.oib_allocations()?
-            };
             let next = allocations
                 .iter()
                 .map(|a| a.id.saturating_add(1))
                 .max()
                 .unwrap_or(0)
-                .max(lifecycle::FIRST_ID);
-            // Replace the earlier initialization edit rather than assigning a
-            // metadata register twice in one canonical batch.
-            edits.retain(|e| e.path != [4, 4]);
-            for (kind, value) in [(4, bytes(&allocations)?), (7, bytes(&next)?)] {
-                edits.push(Edit {
-                    path: vec![4, kind],
-                    schema: self.extra_schema(4, kind as usize),
-                    value: Some(value),
-                });
+                .max(lifecycle::first_id(seed)?);
+            let source = otrios_interfaces::oib::authoring::DocumentSource {
+                definitions: seed
+                    .designer
+                    .as_ref()
+                    .map_or_else(Vec::new, |d| d.definitions.clone()),
+                instances: allocations.iter().map(Into::into).collect(),
+                next_instance: next,
+                placements: vec![],
+                connections: vec![],
+            };
+            edits.push(Edit {
+                path: vec![4, 4],
+                schema: self.extra_schema(4, 4),
+                value: Some(bytes(&source)?),
+            });
+            if seed.instance_surface.is_some() {
+                for allocation in &allocations {
+                    for branch in [5, 6] {
+                        edits.push(Edit {
+                            path: cell_path(branch, allocation.id),
+                            schema: self.oib_instance_schema(allocation.id),
+                            value: Some(bytes(&true)?),
+                        });
+                    }
+                }
             }
         }
         self.change(&[], edits)?;
-        if lifecycle_upgrade {
-            self.oib_reclaim()?;
-        }
         status.active_root = self.oib_active_root()?;
         status.source_draft = self.oib_draft_root()?;
         self.change(
@@ -183,24 +176,25 @@ impl Document {
     }
     fn oib_authored_ui(&self) -> Result<std::sync::Arc<Ui>> {
         let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
-        let Ok(source) = self.tree.subtree(&[4, 8]) else {
+        if super::super::oib::seed(&signed).is_none_or(|seed| seed.designer.is_none()) {
             return Ok(signed);
-        };
+        }
+        let definitions = self.oib_definition_snapshot()?;
+        let source = digest(&bytes(&definitions)?);
         let mut cache = self.oib_authored.lock().map_err(err)?;
         if let Some(cached) = cache.as_ref()
             && std::sync::Arc::ptr_eq(&signed, &cached.signed)
-            && cached.source == source.hash()
+            && cached.source == source
         {
             return Ok(cached.ui.clone());
         }
-        let definitions = self.oib_definition_snapshot()?;
         let ui = std::sync::Arc::new(super::super::oib::document::authoring::restore(
             &signed,
             &definitions,
         )?);
         *cache = Some(AuthoredUi {
             signed,
-            source: source.hash(),
+            source,
             ui: ui.clone(),
         });
         Ok(ui)
@@ -208,16 +202,7 @@ impl Document {
     fn oib_definition_snapshot(
         &self,
     ) -> Result<Vec<otrios_interfaces::oib::designer::ComponentDefinition>> {
-        let data = payload(&self.tree, &[4, 8])?;
-        if data.len() > MAX_STRUCTURE_BYTES {
-            return Err("OIB structural source budget".into());
-        }
-        let definitions: Vec<otrios_interfaces::oib::designer::ComponentDefinition> =
-            decode(&data)?;
-        if bytes(&definitions)? != data {
-            return Err("Noncanonical OIB structural source".into());
-        }
-        Ok(definitions)
+        Ok(self.oib_source()?.definitions)
     }
     fn oib_authored_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
         let mut seed = if self.oib_ui.is_some() {
@@ -226,7 +211,7 @@ impl Document {
                 .clone()
         } else {
             let signed = self.oib_binding()?.seed;
-            if self.tree.subtree(&[4, 8]).is_err() {
+            if signed.designer.is_none() {
                 signed
             } else {
                 super::super::oib::document::authoring::restore_seed(
@@ -241,15 +226,33 @@ impl Document {
         }
         Ok(seed)
     }
-    fn oib_cell_schema(&self, id: u64) -> merkle::Hash {
-        digest(
-            &[
-                b"OTriOS\0oib-cell-v1\0".as_slice(),
-                self.scope.as_bytes(),
-                &id.to_le_bytes(),
-            ]
-            .concat(),
-        )
+    /// Collection incarnation plus signed source. Fresh initialization cannot
+    /// accept an old client's still-in-flight property or structural intent.
+    pub fn oib_epoch(&self) -> Result<Vec<u8>> {
+        let binding = self.oib_binding()?;
+        Ok(hash(&bytes(&(
+            "otrios-oib-epoch-v2",
+            self.actor,
+            binding.seed,
+            binding.admission,
+        ))?))
+    }
+    /// Read a semantic register through a disposable compiler handle. The handle
+    /// is resolved anew; it is never the register key or a state request field.
+    pub fn oib_property_leaf(&self, branch: u64, cell: u64) -> Result<Snapshot> {
+        self.tree
+            .subtree(&address::cell_path(
+                &self.oib_resolved_seed()?,
+                branch,
+                cell,
+            )?)
+            .map_err(err)
+    }
+    pub(super) fn check_oib_epoch(&self, epoch: &[u8]) -> Result<()> {
+        if epoch != self.oib_epoch()? {
+            return Err("OIB document changed; reconnect before editing".into());
+        }
+        Ok(())
     }
     pub fn oib_status(&self) -> Result<Status> {
         decode(&payload(&self.tree, &[4, 3])?)
@@ -265,16 +268,37 @@ impl Document {
         )
     }
     pub fn oib_allocations(&self) -> Result<Vec<Allocation>> {
-        let seed = self.oib_binding()?.seed;
-        if seed.instance_surface.is_none() {
-            return Ok(super::super::oib::instances::initial_allocations(&seed));
-        }
-        let encoded = payload(&self.tree, &[4, 4])?;
-        if self.tree.subtree(&[4, 7]).is_err() {
-            lifecycle::decode_legacy_allocations(&encoded, seed.instances.len())
-        } else {
-            decode(&encoded)
-        }
+        let source = self.oib_source()?;
+        let signed = super::super::oib::instances::initial_allocations(&self.oib_binding()?.seed);
+        let mut dynamic: Vec<_> = source
+            .instances
+            .iter()
+            .filter(|a| a.id != a.prototype)
+            .map(|a| a.id)
+            .collect();
+        dynamic.sort_unstable();
+        source
+            .instances
+            .into_iter()
+            .map(|a| {
+                let slot = if a.id == a.prototype {
+                    signed.iter().find(|s| s.id == a.id).map(|s| s.slot)
+                } else {
+                    dynamic
+                        .iter()
+                        .position(|id| *id == a.id)
+                        .map(|slot| slot as u16)
+                }
+                .ok_or("Unknown OIB resident identity")?;
+                Ok(Allocation {
+                    id: a.id,
+                    name: a.name,
+                    component: a.component,
+                    prototype: a.prototype,
+                    slot,
+                })
+            })
+            .collect()
     }
     pub fn oib_live(&self, branch: u64) -> Result<BTreeSet<u64>> {
         let seed = if let Some(ui) = &self.oib_ui {
@@ -312,7 +336,7 @@ impl Document {
     fn oib_active_root(&self) -> Result<merkle::Hash> {
         let properties = self.tree.subtree(&[4, 2]).map_err(err)?.hash();
         if self.tree.subtree(&[4, 6]).is_err() {
-            return Ok(properties);
+            return self.oib_structural_root(properties, 2);
         }
         let instances = self.tree.subtree(&[4, 6]).map_err(err)?.hash();
         let root = digest(
@@ -323,12 +347,12 @@ impl Document {
             ]
             .concat(),
         );
-        Ok(self.oib_structural_root(root))
+        self.oib_structural_root(root, 2)
     }
     fn oib_draft_root(&self) -> Result<merkle::Hash> {
         let properties = self.tree.subtree(&[4, 1]).map_err(err)?.hash();
         let Ok(instances) = self.tree.subtree(&[4, 5]) else {
-            return Ok(properties);
+            return self.oib_structural_root(properties, 1);
         };
         let root = digest(
             &[
@@ -338,59 +362,29 @@ impl Document {
             ]
             .concat(),
         );
-        Ok(self.oib_structural_root(root))
+        self.oib_structural_root(root, 1)
     }
-    fn oib_structural_root(&self, properties_and_presence: merkle::Hash) -> merkle::Hash {
-        let root = self
-            .tree
-            .subtree(&[4, 8])
-            .map_or(properties_and_presence, |source| {
-                digest(
-                    &[
-                        b"OTriOS\0oib-structure-v1\0".as_slice(),
-                        &properties_and_presence,
-                        &source.hash(),
-                    ]
-                    .concat(),
-                )
-            });
-        let root = self.tree.subtree(&[4, 9]).map_or(root, |source| {
-            digest(
-                &[
-                    b"OTriOS\0oib-placement-v1\0".as_slice(),
-                    &root,
-                    &source.hash(),
-                ]
-                .concat(),
-            )
-        });
-        let root = self.tree.subtree(&[4, 10]).map_or(root, |source| {
-            digest(
-                &[
-                    b"OTriOS\0oib-connections-v1\0".as_slice(),
-                    &root,
-                    &source.hash(),
-                ]
-                .concat(),
-            )
-        });
-        if [8, 9, 10]
-            .iter()
-            .any(|kind| self.tree.subtree(&[4, *kind]).is_ok())
-        {
-            self.tree.subtree(&[4, 4]).map_or(root, |roster| {
-                digest(
-                    &[
-                        b"OTriOS\0oib-structure-roster-v1\0".as_slice(),
-                        &root,
-                        &roster.hash(),
-                    ]
-                    .concat(),
-                )
-            })
-        } else {
-            root
-        }
+    fn oib_structural_root(
+        &self,
+        properties_and_presence: merkle::Hash,
+        branch: u64,
+    ) -> Result<merkle::Hash> {
+        let mut source = self.oib_source()?;
+        let live = self.oib_live(branch)?;
+        source
+            .instances
+            .retain(|instance| live.contains(&instance.id));
+        // The allocation cursor and retained inactive descriptors are residency
+        // bookkeeping. They cannot change the published graph of a slow reader.
+        source.next_instance = 0;
+        Ok(digest(
+            &[
+                b"OTriOS\0oib-document-v2\0".as_slice(),
+                &properties_and_presence,
+                &digest(&bytes(&source)?),
+            ]
+            .concat(),
+        ))
     }
     pub fn oib_compiled(&self, branch: u64) -> Result<(Ui, crate::dashboard::layout::Layout)> {
         self.oib_compiled_selected(branch, None)
@@ -423,7 +417,10 @@ impl Document {
         let live = self.oib_live(branch)?;
         let mut values = BTreeMap::new();
         for cell in &seed.cells {
-            let leaf = match self.tree.subtree(&cell_path(branch, cell.id)) {
+            let leaf = match self
+                .tree
+                .subtree(&address::cell_path(&seed, branch, cell.id)?)
+            {
                 Ok(leaf) => leaf,
                 Err(_) if branch == 2 && cell.inherit.is_some() => {
                     values.insert(cell.id, None);
@@ -454,7 +451,7 @@ impl Document {
         if let Some(old) = old
             && let Ok(before) = payload(old, &[4, 0])
             && before != payload(tree, &[4, 0])?
-            && !compatible_upgrade(&decode(&before)?, &decode(&payload(tree, &[4, 0])?)?)
+            && !same_source(&decode(&before)?, &decode(&payload(tree, &[4, 0])?)?)
         {
             return Err("OIB immutable seed changed".into());
         }
@@ -462,7 +459,11 @@ impl Document {
         candidate.tree = tree.clone();
         let binding = candidate.oib_binding()?;
         super::super::oib::validate_seed(&binding.seed)?;
-        if binding.ui_hash.len() != 32 || binding.ui_ref.is_empty() || binding.ui_ref.len() > 128 {
+        if binding.ui_hash.len() != 32
+            || binding.admission.len() != 32
+            || binding.ui_ref.is_empty()
+            || binding.ui_ref.len() > 128
+        {
             return Err("Invalid OIB seed digest".into());
         }
         candidate.validate_allocations(old)?;
@@ -472,23 +473,15 @@ impl Document {
         if branch.register().is_some()
             || branch.child_keys().any(|k| {
                 k > if binding.seed.instance_surface.is_some() {
-                    if binding.seed.designer.is_some() {
-                        10
-                    } else {
-                        7
-                    }
+                    6
                 } else {
-                    3
+                    4
                 }
             })
         {
             return Err("Invalid OIB branch".into());
         }
-        for index in [0, 3].into_iter().chain(
-            [8, 9, 10]
-                .into_iter()
-                .filter(|kind| tree.subtree(&[4, *kind]).is_ok()),
-        ) {
+        for index in [0, 3, 4] {
             let leaf = tree.subtree(&[4, index]).map_err(err)?;
             if leaf.child_keys().next().is_some()
                 || leaf
@@ -498,28 +491,27 @@ impl Document {
                 return Err("Invalid OIB metadata".into());
             }
         }
-        if tree.subtree(&[4, 8]).is_ok() {
-            let authored = payload(tree, &[4, 8])?;
-            if authored.len() > MAX_STRUCTURE_BYTES {
-                return Err("OIB structural source budget".into());
-            }
-            let total = [1, 4, 5, 7, 8]
-                .iter()
-                .filter_map(|kind| tree.subtree(&[4, *kind]).ok())
-                .map(|t| t.canonical_bytes())
-                .sum::<usize>();
-            if total > otrios_interfaces::oib::MAX_BYTES {
-                return Err("OIB combined authored/causal byte budget".into());
-            }
+        candidate.oib_source()?;
+        let total = [1, 2, 4, 5, 6]
+            .iter()
+            .filter_map(|kind| tree.subtree(&[4, *kind]).ok())
+            .map(|t| t.canonical_bytes())
+            .sum::<usize>();
+        if total > otrios_interfaces::oib::MAX_BYTES {
+            return Err("OIB combined authored/causal byte budget".into());
         }
         let status = candidate.oib_status()?;
         if status.generation == 0
             || status.conflicts.len() > 64
             || status.error.as_ref().is_some_and(|s| s.len() > 256)
-            || status
-                .conflicts
-                .iter()
-                .any(|id| !seed.cells.iter().any(|c| c.id == *id))
+            || status.conflicts.iter().any(|address| {
+                !seed.cells.iter().any(|c| {
+                    super::super::oib::document::address_for_cell(seed, c.id)
+                        .ok()
+                        .as_ref()
+                        == Some(address)
+                })
+            })
         {
             return Err("Invalid OIB status".into());
         }
@@ -527,40 +519,9 @@ impl Document {
             let Ok(branch) = tree.subtree(&[4, kind]) else {
                 continue;
             };
-            fn walk(
-                tree: &Snapshot,
-                depth: usize,
-                id: u64,
-                seen: &mut BTreeSet<u64>,
-            ) -> Result<()> {
-                if depth == 13 {
-                    if tree.child_keys().next().is_some()
-                        || tree.register().is_none()
-                        || !seen.insert(id)
-                    {
-                        return Err("Invalid OIB cell leaf".into());
-                    }
-                } else {
-                    if tree.register().is_some() {
-                        return Err("Invalid OIB cell trie".into());
-                    }
-                    for key in tree.child_keys() {
-                        if key > 31 || (depth == 0 && key > 15) {
-                            return Err("Invalid OIB ID digit".into());
-                        }
-                        walk(
-                            &tree.subtree(&[key]).map_err(err)?,
-                            depth + 1,
-                            (id << 5) | key,
-                            seen,
-                        )?;
-                    }
-                }
-                Ok(())
-            }
             let mut seen = BTreeSet::new();
-            walk(&branch, 0, 0, &mut seen)?;
-            let expected = seed
+            address::leaves(&branch, &mut vec![4, kind], &mut seen)?;
+            let expected: BTreeSet<_> = seed
                 .cells
                 .iter()
                 .filter(|c| {
@@ -569,21 +530,23 @@ impl Document {
                         || c.inherit.is_none()
                         || tree.subtree(&cell_path(6, c.owner)).is_ok()
                 })
-                .map(|c| c.id)
-                .collect();
+                .map(|c| address::cell_path(seed, kind, c.id))
+                .collect::<Result<_>>()?;
             if seen != expected {
-                return Err("OIB cell table changed".into());
+                return Err("OIB property table changed".into());
             }
             if kind == 1 && branch.canonical_bytes() > otrios_interfaces::oib::MAX_BYTES {
                 return Err("OIB draft byte budget".into());
             }
             for cell in &seed.cells {
-                if kind == 2 && !seen.contains(&cell.id) {
+                if kind == 2 && !seen.contains(&address::cell_path(seed, kind, cell.id)?) {
                     continue;
                 }
-                let leaf = tree.subtree(&cell_path(kind, cell.id)).map_err(err)?;
+                let leaf = tree
+                    .subtree(&address::cell_path(seed, kind, cell.id)?)
+                    .map_err(err)?;
                 let r = leaf.register().ok_or("Missing OIB cell")?;
-                if r.schema() != self.oib_cell_schema(cell.id) {
+                if r.schema() != address::schema(&self.scope, seed, cell.id)? {
                     return Err("Wrong OIB cell schema".into());
                 }
                 for (_, _, value) in r.values() {
@@ -616,13 +579,22 @@ impl Document {
         let mut next = self.tree.clone();
         let mut seen = BTreeSet::new();
         for change in changes {
-            if self.oib_retired_cell(change.cell)? {
+            if let otrios_interfaces::oib::designer::PropertyAddress::Occurrence {
+                instance, ..
+            } = &change.address
+                && self.oib_retired_instance(instance.0)?
+            {
                 continue;
             }
+            let id = super::super::oib::document::cell_for_address(
+                &seed,
+                &self.oib_allocations()?,
+                &change.address,
+            )?;
             let cell = seed
                 .cells
                 .iter()
-                .find(|c| c.id == change.cell)
+                .find(|c| c.id == id)
                 .ok_or("Unknown OIB cell")?;
             if !seen.insert(cell.id) {
                 return Err("Duplicate OIB cell edit".into());
@@ -635,8 +607,8 @@ impl Document {
             }
             let observed = Snapshot::from_bytes(&change.observed).map_err(err)?;
             let edit = Edit {
-                path: cell_path(1, cell.id),
-                schema: self.oib_cell_schema(cell.id),
+                path: address::cell_path(&seed, 1, cell.id)?,
+                schema: address::schema(&self.scope, &seed, cell.id)?,
                 value: change.value.as_ref().map(bytes).transpose()?,
             };
             next = next.edit_observed(writer, &edit, &observed).map_err(err)?;
@@ -658,7 +630,10 @@ impl Document {
             if cell.inherit.is_some() && !live.contains(&cell.owner) {
                 continue;
             }
-            let leaf = draft.tree.subtree(&cell_path(1, cell.id)).map_err(err)?;
+            let leaf = draft
+                .tree
+                .subtree(&address::cell_path(&seed, 1, cell.id)?)
+                .map_err(err)?;
             let alternatives: BTreeSet<_> = leaf
                 .register()
                 .ok_or("Missing OIB cell")?
@@ -666,7 +641,11 @@ impl Document {
                 .map(|(_, _, v)| v)
                 .collect();
             if alternatives.len() > 1 {
-                status.conflicts.push(cell.id);
+                status
+                    .conflicts
+                    .push(super::super::oib::document::address_for_cell(
+                        &seed, cell.id,
+                    )?);
             }
         }
         let mut edits = Vec::new();
@@ -706,18 +685,22 @@ impl Document {
                     }
                     for cell in &seed.cells {
                         let value = values[&cell.id].as_ref().map(bytes).transpose()?;
-                        if self.tree.subtree(&cell_path(2, cell.id)).is_ok_and(|old| {
-                            old.register().is_some_and(|r| {
-                                r.values()
-                                    .next()
-                                    .is_some_and(|(_, _, v)| v == value.as_deref())
+                        if self
+                            .tree
+                            .subtree(&address::cell_path(&seed, 2, cell.id)?)
+                            .is_ok_and(|old| {
+                                old.register().is_some_and(|r| {
+                                    r.values()
+                                        .next()
+                                        .is_some_and(|(_, _, v)| v == value.as_deref())
+                                })
                             })
-                        }) {
+                        {
                             continue;
                         }
                         edits.push(Edit {
-                            path: cell_path(2, cell.id),
-                            schema: self.oib_cell_schema(cell.id),
+                            path: address::cell_path(&seed, 2, cell.id)?,
+                            schema: address::schema(&self.scope, &seed, cell.id)?,
                             value,
                         });
                     }
@@ -766,7 +749,7 @@ impl StateAdapter {
         Ok(super::super::oib::Info {
             active_generation: status.generation,
             presented_generation: 0,
-            conflicts: status.conflicts.clone(),
+            conflicts: self.oib_conflicts(),
             status: self.oib_status_text(),
             properties,
             instances: self
@@ -792,9 +775,19 @@ impl StateAdapter {
         Ok(self.oib_info()?.instances)
     }
     pub fn oib_conflicts(&self) -> Vec<u64> {
-        self.doc
-            .oib_status()
-            .map_or_else(|_| vec![], |s| s.conflicts)
+        let Ok(seed) = self.doc.oib_resolved_seed() else {
+            return vec![];
+        };
+        let Ok(status) = self.doc.oib_status() else {
+            return vec![];
+        };
+        seed.cells
+            .iter()
+            .filter_map(|cell| {
+                let address = super::super::oib::document::address_for_cell(&seed, cell.id).ok()?;
+                status.conflicts.contains(&address).then_some(cell.id)
+            })
+            .collect()
     }
     pub fn oib_property_text(&self, id: u64) -> String {
         let result = (|| -> Result<String> {
@@ -880,12 +873,12 @@ impl StateAdapter {
                 return Err("Only instance overrides can be cleared".into());
             }
             edits.push(Change {
-                cell: *id,
+                address: super::super::oib::document::address_for_cell(seed, *id)?,
                 value: value.clone(),
                 observed: self
                     .doc
                     .tree
-                    .subtree(&cell_path(1, *id))
+                    .subtree(&address::cell_path(seed, 1, *id)?)
                     .map_err(err)?
                     .to_bytes()
                     .map_err(err)?,
@@ -896,6 +889,7 @@ impl StateAdapter {
         // compiles/validates the draft and journals the active result atomically.
         // Repeating that work here only blocks delivery of the button release.
         self.flight = Some(Flight {
+            oib_epoch: Some(self.doc.oib_epoch()?),
             sequence: self
                 .acknowledged
                 .checked_add(1)
@@ -907,6 +901,25 @@ impl StateAdapter {
             issued_at: self.clock,
         });
         Ok(true)
+    }
+    pub fn oib_address_action(
+        &mut self,
+        address: &otrios_interfaces::oib::designer::PropertyAddress,
+        action: InspectorAction,
+    ) -> Result<bool> {
+        if let otrios_interfaces::oib::designer::PropertyAddress::Occurrence { instance, .. } =
+            address
+            && self.doc.oib_retired_instance(instance.0)?
+        {
+            return Ok(false);
+        }
+        let seed = self.doc.oib_resolved_seed()?;
+        let cell = super::super::oib::document::cell_for_address(
+            &seed,
+            &self.doc.oib_allocations()?,
+            address,
+        )?;
+        self.oib_inspector_action(cell, action)
     }
     pub fn oib_inspector_action(&mut self, id: u64, action: InspectorAction) -> Result<bool> {
         let resolved = self.doc.oib_resolved_seed()?;
@@ -948,7 +961,12 @@ fn property_text(
     status: &Status,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<String> {
-    if status.conflicts.contains(&cell.id) {
+    if status
+        .conflicts
+        .contains(&super::super::oib::document::address_for_cell(
+            seed, cell.id,
+        )?)
+    {
         return Ok(format!("{}: conflict", cell.name));
     }
     let value = match super::super::oib::effective(seed, values, cell.id)? {
@@ -970,158 +988,8 @@ fn property_text(
     Ok(format!("{}: {} ({})", cell.name, value, kind))
 }
 
-fn compatible_upgrade(old: &Binding, new: &Binding) -> bool {
-    if !super::super::oib::document::compatible_mappings(&old.seed, &new.seed) {
-        return false;
-    }
-    // A signed presentation update can retain the exact OIB contract. Keep all
-    // allocated identities, tombstones and overrides; this is not seed rebasing.
-    if old.ui_ref == new.ui_ref
-        && bytes(&old.seed)
-            .ok()
-            .zip(bytes(&new.seed).ok())
-            .is_some_and(|(old, new)| old == new)
-    {
-        return true;
-    }
-    // D1's signed predecessor allowlist may update presentation labels/order.
-    // Register identity is checked by explicit definition/path/key/alias mappings;
-    // no vector rank or display name participates in compatibility.
-    if old.seed.designer.is_some()
-        && new.seed.designer.is_some()
-        && old.ui_ref == new.ui_ref
-        && old.seed.main_oib == new.seed.main_oib
-        && old.seed.main_class == new.seed.main_class
-        && new.seed.instance_surface.as_ref().is_some_and(|s| {
-            s.previous_ui_sha256 == old.ui_hash
-                || s.layout
-                    .as_ref()
-                    .is_some_and(|l| l.previous_ui_sha256.contains(&old.ui_hash))
-        })
-        && old
-            .seed
-            .components
-            .iter()
-            .map(|c| c.id)
-            .collect::<BTreeSet<_>>()
-            == new.seed.components.iter().map(|c| c.id).collect()
-        && old
-            .seed
-            .instances
-            .iter()
-            .all(|a| new.seed.instances.contains(a))
-        && new
-            .seed
-            .instances
-            .iter()
-            .filter(|b| !old.seed.instances.contains(b))
-            .all(|b| super::super::oib::instances::palette_only(&new.seed, b.id))
-        && super::super::oib::instances::initial_allocations(&old.seed)
-            == super::super::oib::instances::initial_allocations(&new.seed)
-        && old.seed.cells.iter().all(|a| {
-            new.seed.cells.iter().any(|b| {
-                a.id == b.id
-                    && a.owner == b.owner
-                    && a.inherit == b.inherit
-                    && std::mem::discriminant(&a.default) == std::mem::discriminant(&b.default)
-            })
-        })
-    {
-        return true;
-    }
-    let layout_upgrade = new
-        .seed
-        .instance_surface
-        .as_ref()
-        .and_then(|s| s.layout.as_ref())
-        .is_some_and(|l| {
-            l.previous_ui_sha256.contains(&old.ui_hash)
-                || (old.seed.instance_surface.is_none()
-                    && new
-                        .seed
-                        .instance_surface
-                        .as_ref()
-                        .is_some_and(|s| s.previous_ui_sha256 == old.ui_hash))
-        });
-    if layout_upgrade
-        && old.ui_ref == new.ui_ref
-        && old.seed.main_oib == new.seed.main_oib
-        && old.seed.main_class == new.seed.main_class
-        && old.seed.components == new.seed.components
-        && old.seed.instances == new.seed.instances
-    {
-        let retained = old.seed.cells.iter().all(|a| {
-            new.seed.cells.iter().any(|b| {
-                a.id == b.id
-                    && a.owner == b.owner
-                    && a.name == b.name
-                    && (a.default == b.default || compatible_geometry_default(a, b))
-                    && (a.choices == b.choices || a.inherit.is_some())
-                    && (a.authored_override == b.authored_override || a.inherit.is_some())
-                    && a.inherit == b.inherit
-            })
-        });
-        let appended = new
-            .seed
-            .cells
-            .iter()
-            .filter(|c| !old.seed.cells.iter().any(|old| old.id == c.id))
-            .all(|c| c.inherit.is_none() && new.seed.components.iter().any(|o| o.id == c.owner));
-        if retained && appended {
-            return true;
-        }
-    }
-    let Some(surface) = &new.seed.instance_surface else {
-        return false;
-    };
-    if old.seed.instance_surface.is_some()
-        || surface.previous_ui_sha256 != old.ui_hash
-        || old.ui_ref != new.ui_ref
-        || old.seed.main_oib != new.seed.main_oib
-        || old.seed.main_class != new.seed.main_class
-        || old.seed.components != new.seed.components
-        || old.seed.instances != new.seed.instances
-        || old.seed.cells.len() != new.seed.cells.len()
-    {
-        return false;
-    }
-    old.seed.cells.iter().zip(&new.seed.cells).all(|(a, b)| {
-        a.id == b.id
-            && a.owner == b.owner
-            && a.name == b.name
-            && a.default == b.default
-            && a.choices == b.choices
-            && a.authored_override == b.authored_override
-            && a.inherit == b.inherit
-    })
-}
-/// An explicitly allowlisted signed presentation may revise component geometry
-/// defaults. Retained register values remain untouched until an owner resets
-/// them; changing defaults never rebases shared edits or instance history.
-fn compatible_geometry_default(
-    old: &otrios_interfaces::oib::Cell,
-    new: &otrios_interfaces::oib::Cell,
-) -> bool {
-    use otrios_interfaces::oib::Property;
-    let geometry = |cell: &otrios_interfaces::oib::Cell| {
-        cell.inherit.is_none()
-            && !cell.targets.is_empty()
-            && cell.targets.iter().all(|t| {
-                matches!(
-                    t.property,
-                    Property::X
-                        | Property::Y
-                        | Property::Width
-                        | Property::Height
-                        | Property::FrameWidth
-                        | Property::OffsetY
-                        | Property::Visible
-                )
-            })
-    };
-    geometry(old)
-        && geometry(new)
-        && std::mem::discriminant(&old.default) == std::mem::discriminant(&new.default)
+fn same_source(old: &Binding, new: &Binding) -> bool {
+    old.ui_ref == new.ui_ref && old.seed == new.seed && old.admission == new.admission
 }
 fn admitted_instance_name(seed: &otrios_interfaces::oib::Seed, name: &str) -> bool {
     if seed.designer.is_some() {
@@ -1162,86 +1030,24 @@ fn trie_ids(tree: &Snapshot, depth: usize, id: u64, seen: &mut BTreeSet<u64>) ->
 }
 impl Document {
     fn validate_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
-        if self.tree.subtree(&[4, 7]).is_ok() {
-            return self.validate_resident_allocations(old);
-        }
-        self.validate_legacy_allocations(old)
-    }
-    fn validate_legacy_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
         let seed = self.oib_binding()?.seed;
         if seed.instance_surface.is_none() {
+            let source = self.oib_source()?;
+            let initial: Vec<otrios_interfaces::oib::authoring::InstanceRecord> =
+                super::super::oib::instances::initial_allocations(&seed)
+                    .iter()
+                    .map(Into::into)
+                    .collect();
+            if source.instances != initial
+                || source.next_instance != lifecycle::first_id(&seed)?
+                || !source.placements.is_empty()
+                || !source.connections.is_empty()
+            {
+                return Err("Invalid fixed OIB document source".into());
+            }
             return Ok(());
         }
-        let allocations = self.oib_allocations()?;
-        let initial = super::super::oib::instances::initial_allocations(&seed);
-        let meta = self.tree.subtree(&[4, 4]).map_err(err)?;
-        if meta
-            .register()
-            .is_none_or(|r| r.schema() != self.extra_schema(4, 4))
-            || meta.child_keys().next().is_some()
-            || allocations.len() > MAX_ALLOCATIONS
-            || !allocations.starts_with(&initial)
-        {
-            return Err("Invalid OIB allocation ledger".into());
-        }
-        if let Some(previous) = old.and_then(|t| payload(t, &[4, 4]).ok()) {
-            let previous = lifecycle::decode_legacy_allocations(&previous, seed.instances.len())?;
-            if !allocations.starts_with(&previous) {
-                return Err("OIB identities cannot be changed or reused".into());
-            }
-        }
-        for (index, a) in allocations.iter().enumerate() {
-            if !instance_name(&a.name)
-                || (index >= initial.len() && a.id != 0x1_0000 + index as u64)
-                || !seed
-                    .instances
-                    .iter()
-                    .any(|i| i.id == a.prototype && i.component == Some(a.component))
-            {
-                return Err("Invalid OIB allocated identity or binding".into());
-            }
-        }
-        if let Ok(properties) = self.tree.subtree(&[4, 1]) {
-            let instances = self.tree.subtree(&[4, 5]).map_err(err)?;
-            if properties.canonical_bytes() + instances.canonical_bytes() + meta.canonical_bytes()
-                > otrios_interfaces::oib::MAX_BYTES
-            {
-                return Err("OIB combined draft byte budget".into());
-            }
-        }
-        for kind in [5, 6] {
-            let Ok(branch) = self.tree.subtree(&[4, kind]) else {
-                continue;
-            };
-            let mut seen = BTreeSet::new();
-            trie_ids(&branch, 0, 0, &mut seen)?;
-            let allowed = allocations.iter().map(|a| a.id).collect();
-            let required = initial.iter().map(|a| a.id).collect::<BTreeSet<_>>();
-            if (kind == 5 && seen != allowed)
-                || !seen.is_subset(&allowed)
-                || !required.is_subset(&seen)
-            {
-                return Err("OIB presence table mismatch".into());
-            }
-            for a in &allocations {
-                if !seen.contains(&a.id) {
-                    continue;
-                }
-                let leaf = self.tree.subtree(&cell_path(kind, a.id)).map_err(err)?;
-                let r = leaf.register().ok_or("Missing instance register")?;
-                if r.schema() != self.oib_instance_schema(a.id) {
-                    return Err("Wrong instance register schema".into());
-                }
-                for (_, _, v) in r.values() {
-                    if let Some(v) = v
-                        && !decode::<bool>(v)?
-                    {
-                        return Err("Invalid instance presence".into());
-                    }
-                }
-            }
-        }
-        Ok(())
+        self.validate_resident_allocations(old)
     }
     pub(super) fn oib_instance_write(
         &mut self,
@@ -1256,42 +1062,21 @@ impl Document {
                 || connections.iter().any(|c| c.object.instance.0 == *instance)) {
             return self.oib_reject_structure("Placed components require a hierarchy delete or owned subtree duplicate");
         }
-        if let InstanceOperation::Restore { defaults } = operation
-            && (!placements.is_empty()
-                || !connections.is_empty()
-                || (*defaults && self.tree.subtree(&[4, 8]).is_ok()))
-        {
+        if let InstanceOperation::Restore { defaults } = operation {
             let mut candidate = self.clone();
-            let mut edits = vec![Edit {
-                path: vec![4, 9],
-                schema: self.extra_schema(4, 9),
-                value: Some(bytes(
-                    &Vec::<otrios_interfaces::oib::authoring::Placement>::new(),
-                )?),
-            }];
-            if !connections.is_empty() {
-                edits.push(Edit {
-                    path: vec![4, 10],
-                    schema: self.extra_schema(4, 10),
-                    value: Some(bytes(&Vec::<
-                        otrios_interfaces::oib::authoring::AppConnection,
-                    >::new())?),
-                });
-            }
-            if *defaults && self.tree.subtree(&[4, 8]).is_ok() {
-                let definitions = self
-                    .oib_binding()?
-                    .seed
-                    .designer
-                    .ok_or("Missing OIB document")?
-                    .definitions;
-                edits.push(Edit {
-                    path: vec![4, 8],
-                    schema: self.extra_schema(4, 8),
-                    value: Some(bytes(&definitions)?),
-                });
-            }
-            candidate.change(&[], edits)?;
+            let signed_definitions = self
+                .oib_binding()?
+                .seed
+                .designer
+                .map_or_else(Vec::new, |d| d.definitions);
+            let edit = candidate.oib_source_edit(|source| {
+                source.placements.clear();
+                source.connections.clear();
+                if *defaults {
+                    source.definitions = signed_definitions;
+                }
+            })?;
+            candidate.change(&[], vec![edit])?;
             candidate.oib_instance_apply(writer, operation)?;
             if let Some(error) = candidate.oib_status()?.error {
                 return self.oib_reject_structure(&error);
@@ -1353,11 +1138,9 @@ impl Document {
                 }
                 candidate.change(
                     &[],
-                    vec![Edit {
-                        path: vec![4, 4],
-                        schema: self.extra_schema(4, 4),
-                        value: Some(bytes(&allocations)?),
-                    }],
+                    vec![candidate.oib_source_edit(|source| {
+                        source.instances = allocations.iter().map(Into::into).collect()
+                    })?],
                 )?;
             }
             InstanceOperation::Restore { defaults } => {
@@ -1451,11 +1234,9 @@ impl Document {
                 allocations.insert(index, new);
                 let expanded = super::super::oib::instances::expanded_seed(seed, &allocations)?;
                 let values = self.oib_values(2)?;
-                let mut edits = vec![Edit {
-                    path: vec![4, 4],
-                    schema: self.extra_schema(4, 4),
-                    value: Some(bytes(&allocations)?),
-                }];
+                let mut edits = vec![candidate.oib_source_edit(|source| {
+                    source.instances = allocations.iter().map(Into::into).collect()
+                })?];
                 edits.push(Edit {
                     path: cell_path(5, id),
                     schema: self.oib_instance_schema(id),
@@ -1496,8 +1277,8 @@ impl Document {
                         None
                     };
                     edits.push(Edit {
-                        path: cell_path(1, cell.id),
-                        schema: self.oib_cell_schema(cell.id),
+                        path: address::cell_path(&expanded, 1, cell.id)?,
+                        schema: address::schema(&self.scope, &expanded, cell.id)?,
                         value,
                     });
                 }
@@ -1731,6 +1512,7 @@ impl StateAdapter {
             }
         }
         self.flight = Some(Flight {
+            oib_epoch: Some(self.doc.oib_epoch()?),
             sequence: self
                 .acknowledged
                 .checked_add(1)
@@ -1806,7 +1588,11 @@ impl StateAdapter {
             &self.doc.oib_allocations()?,
             address,
         )?;
-        let leaf = self.doc.tree.subtree(&cell_path(1, cell)).map_err(err)?;
+        let leaf = self
+            .doc
+            .tree
+            .subtree(&address::path(1, address)?)
+            .map_err(err)?;
         let register = leaf.register().ok_or("Missing OIB property register")?;
         let mut alternatives = Vec::new();
         for (_, _, data) in register.values() {

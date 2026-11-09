@@ -2921,12 +2921,12 @@ impl Client {
                 }
                 return Ok(changed);
             }
-            Operation::Oib { cell, action } => {
+            Operation::Oib { address, action } => {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 if m.binding.as_ref().is_some_and(|b| !b.ui_editable) {
                     return Ok(false);
                 }
-                let changed = m.doc.oib_inspector_action(cell, action)?;
+                let changed = m.doc.oib_address_action(&address, action)?;
                 if changed {
                     m.refresh()?;
                     m.invalidate();
@@ -4285,9 +4285,16 @@ fn qualify(
                             }
                     })
             }
-            Operation::Oib { cell, .. } => {
+            Operation::Oib { address, .. } => {
                 h.fields.is_empty()
-                    && super::oib::seed(&ui).is_some_and(|s| s.cells.iter().any(|c| c.id == *cell))
+                    && super::oib::seed(&ui).is_some_and(|s| {
+                        s.cells.iter().any(|c| {
+                            super::oib::document::address_for_cell(s, c.id)
+                                .ok()
+                                .as_ref()
+                                == Some(address)
+                        })
+                    })
             }
             Operation::Chat(command) => {
                 h.fields.is_empty()

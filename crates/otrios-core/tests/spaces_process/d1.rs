@@ -157,7 +157,7 @@ impl Fixture {
         let ui = app::ui(&[]);
         let manifest = app::manifest();
         assert_eq!(ui.ui_ref, "app:oib-designer/ui");
-        assert_eq!(ui.state_schema.id, "oib-designer-state-v1");
+        assert_eq!(ui.state_schema.id, "oib-designer-state-v2");
         assert_eq!(
             ui.state_schema
                 .fields
@@ -647,10 +647,7 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
     );
     assert!(conflicted.oib_values(1).is_err());
     let snapshot = Snapshot::from_bytes(&conflicted.save().unwrap()).unwrap();
-    // Persisted OIB property trie: branch, then thirteen base-32 ID digits.
-    let mut path = vec![4, 1];
-    path.extend((0..13).rev().map(|i| (102_u64 >> (i * 5)) & 31));
-    let draft = snapshot.subtree(&path).unwrap();
+    let draft = conflicted.oib_property_leaf(1, 102).unwrap();
     let heads: BTreeSet<_> = draft
         .register()
         .unwrap()
@@ -782,12 +779,15 @@ fn d1_concurrent_edits_keep_exact_active_graph_and_recover_conflict_before_obser
             .edit_oib(&[(102, Some(Value::Number(400.)))])
             .unwrap()
     );
-    let StateRequest::OibWrite { sequence, .. } = canvas::decode_state_request(&a.issue()).unwrap()
+    let StateRequest::OibWrite {
+        epoch, sequence, ..
+    } = canvas::decode_state_request(&a.issue()).unwrap()
     else {
         panic!("expected next writer sequence");
     };
     a.send(
         canvas::encode_state_request(&StateRequest::OibInstance {
+            epoch,
             sequence,
             operation: otrios_interfaces::oib::InstanceOperation::Duplicate {
                 instance: 20,
@@ -948,7 +948,14 @@ fn d1_lost_reply_receipt_reclamation_and_retired_path_survive_real_authority_res
         let cell =
             oib::document::cell_for_address(seed(&f.ui), &allocations, &address(new.id, &[7], 3))
                 .unwrap();
-        assert_eq!(cell, 0x100_0000 + (new.id - 0x1_0000) * 64 + 28);
+        assert_eq!(
+            oib::document::address_for_cell(
+                oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(),
+                cell
+            )
+            .unwrap(),
+            address(new.id, &[7], 3)
+        );
         assert_eq!(
             effective(&f.ui, &doc, cell),
             Value::Text("Brightness".into())
@@ -1000,7 +1007,7 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     observer.observe(&a);
     let collection = a.binding.collection.clone();
     let original = f.durable(&collection);
-    let original_tree = Snapshot::from_bytes(&original.save().unwrap()).unwrap();
+
     let original_allocations = original.oib_allocations().unwrap();
     let generation = a.state.oib_generation().unwrap();
     let ids = |state: &StateAdapter| -> Vec<u64> {
@@ -1094,7 +1101,7 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
         .find(|i| i.id != 20 && i.id != 30)
         .unwrap()
         .clone();
-    assert_eq!(inserted.id, 0x1_0002, "stale insert consumed no identity");
+    assert_eq!(inserted.id, 51, "stale insert consumed no identity");
     assert_eq!(inserted.prototype, 30);
     assert_eq!(ids(&b.state), vec![30, inserted.id, 20]);
     a.observe(&b);
@@ -1124,14 +1131,19 @@ fn d2_canvas_order_stale_receipts_rebase_and_restart_preserve_overrides_and_valu
     let expected_order = vec![20, power.id, 30, inserted.id];
     assert_eq!(ids(&a.state), expected_order);
     let completed = f.durable(&collection);
-    let completed_tree = Snapshot::from_bytes(&completed.save().unwrap()).unwrap();
     for branch in [1, 2] {
         for cell in original.oib_values(branch).unwrap().keys() {
-            let mut path = vec![4, branch];
-            path.extend((0..13).rev().map(|i| (*cell >> (i * 5)) & 31));
             assert_eq!(
-                completed_tree.subtree(&path).unwrap().to_bytes().unwrap(),
-                original_tree.subtree(&path).unwrap().to_bytes().unwrap(),
+                completed
+                    .oib_property_leaf(branch, *cell)
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap(),
+                original
+                    .oib_property_leaf(branch, *cell)
+                    .unwrap()
+                    .to_bytes()
+                    .unwrap(),
                 "surviving causal property register {branch}/{cell}"
             );
         }
@@ -1284,7 +1296,7 @@ fn d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values
         [2, 3, 8, 7, 9].map(NodeId)
     );
     let tree = Snapshot::from_bytes(&persisted.save().unwrap()).unwrap();
-    for branch in [1, 2, 4, 5, 6, 7] {
+    for branch in [1, 2, 5, 6] {
         assert_eq!(
             original_tree
                 .subtree(&[4, branch])

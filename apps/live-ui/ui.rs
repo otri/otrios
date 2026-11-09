@@ -218,6 +218,23 @@ pub fn description() -> Ui {
         }
         for (index, label) in ["Label", "Accent", "Width", "Spacing"].iter().enumerate() {
             let id = start + index as u64;
+            let property = designer::PropertyId(100 + index as u64);
+            let address = if start == 100 {
+                designer::PropertyAddress::Definition {
+                    definition: designer::DefinitionId(10),
+                    node: designer::NodeId(1),
+                    property,
+                }
+            } else {
+                designer::PropertyAddress::Occurrence {
+                    instance: designer::InstanceId(if start == 200 { 20 } else { 30 }),
+                    path: designer::PropertyPath {
+                        references: vec![],
+                        node: designer::NodeId(1),
+                        property,
+                    },
+                }
+            };
             rows.push(
                 text(ValueExpr::State(
                     StateField::normalized(0, "oib-cell", 0),
@@ -230,21 +247,21 @@ pub fn description() -> Ui {
                 button("Change")
                     .frame([176., row_y, 112., 56.])
                     .semantic_label(&format!("{owner} {label} change"))
-                    .on_press(Event::oib(id, InspectorAction::Cycle)),
+                    .on_press(Event::oib(address.clone(), InspectorAction::Cycle)),
             );
             if start != 100 {
                 rows.push(
                     button("Reset")
                         .frame([296., row_y, 112., 56.])
                         .semantic_label(&format!("{owner} {label} reset"))
-                        .on_press(Event::oib(id, InspectorAction::Clear)),
+                        .on_press(Event::oib(address.clone(), InspectorAction::Clear)),
                 );
             }
             rows.push(
                 button("Default")
                     .frame([416., row_y, 128., 56.])
                     .semantic_label(&format!("{owner} {label} resolve to default"))
-                    .on_press(Event::oib(id, InspectorAction::Resolve)),
+                    .on_press(Event::oib(address.clone(), InspectorAction::Resolve)),
             );
             row_y += 68.;
         }
@@ -279,7 +296,7 @@ pub fn description() -> Ui {
     AppUi::new(
         "live-ui",
         "Live UI",
-        schema("live-ui-state-v1", &[VOLUME, BRIGHTNESS]),
+        schema("live-ui-state-v2", &[VOLUME, BRIGHTNESS]),
     )
     .with_breadcrumbs(&[("OTriOS", "home"), ("Test Playground", "test-playground")])
     .with_composition(
@@ -289,30 +306,9 @@ pub fn description() -> Ui {
     .with_oib(seed, "inspector-scroll", targets)
     .with_oib_instances(NamedOibSurface {
         layout: Some(LayoutSurface {
-            previous_ui_sha256: [
-                "b202dc66dfea4e987448e7c6ae100d1cad0bf703d1a6c7d127953719250801d0",
-                "c25ff9811d3c1744b78a01f769aca73bc5e81090083987144595c826adb54db2",
-                "f810f69342264e7778aeaee97646bbaf8fe8182fb4acfd8fcd110a49e58ce8ce",
-                "22fa4203073790b9d1f5c16663a8ea4445760641dbe6274aaee5276490698f7f",
-                "886b642a9b6c651ad8b4e43a53812a98862c6a6be272b09cb32319f13c06f7d8",
-            ]
-            .into_iter()
-            .map(|hex| {
-                (0..32)
-                    .map(|i| {
-                        u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("constant SHA-256")
-                    })
-                    .collect()
-            })
-            .collect(),
             preview_pitch_cell: 112,
         }),
-        previous_ui_sha256: [
-            0x5a, 0x89, 0xe8, 0x8f, 0x9e, 0x00, 0xa6, 0xb3, 0x47, 0x1c, 0x2c, 0x14, 0x7c, 0x81,
-            0xa6, 0x4c, 0x83, 0xd4, 0xd1, 0x9f, 0xba, 0xff, 0x7f, 0xe9, 0xe0, 0xb8, 0x58, 0xc5,
-            0xe7, 0x38, 0x47, 0x02,
-        ]
-        .to_vec(),
+
         preview: "preview-scroll".into(),
         preview_stride: 216.,
         inspector_start: 344.,
@@ -323,7 +319,7 @@ pub fn description() -> Ui {
                 palette_only: false,
                 instance,
                 preview: format!("{name}-preview"),
-                inspector: format!("{name}-inspector"),
+                inspector: Some(format!("{name}-inspector")),
             })
             .collect(),
     })

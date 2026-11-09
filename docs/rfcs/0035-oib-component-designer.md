@@ -16,6 +16,11 @@ subsequently delivered persistent resizable panels and Insert/Edit/Delete/Reorde
 of whole signed components within one admitted canvas. Nested/slot/definition
 authoring, connection editing and D3/D4 remain deferred.
 
+On 2026-11-09 the user selected the remaining D2 implementation and a clean
+format break with fresh PoC data. The [D2 work record](../OIB_D2_COMPLETION.md)
+separates the unreleased v2 document/protocol foundation from the remaining graph
+compiler, authoring work and live acceptance. No old-data migration is required.
+
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.
 Preserves [bounded instance lifecycle](0030-live-oib-instances.md),

@@ -77,11 +77,14 @@ pub fn cell_id(seed: &Seed, allocations: &[Allocation], owner: u64, property: u6
         .filter(|c| c.owner == allocations[index].prototype)
         .position(|c| c.id == source.id)
         .ok_or("Missing instance property")?;
-    owner
-        .checked_sub(0x1_0000)
-        .and_then(|id| id.checked_mul(64))
-        .and_then(|id| id.checked_add(0x100_0000 + slot as u64))
-        .ok_or_else(|| "OIB property identity exhausted".into())
+    seed.cells
+        .iter()
+        .map(|c| c.id)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .and_then(|base| base.checked_add(u64::from(allocations[index].slot) * 64 + slot as u64))
+        .ok_or_else(|| "OIB compiler handle capacity exhausted".into())
 }
 pub(super) fn mapped_node(seed: &Seed, index: usize, prototype: u64, id: u16) -> Result<u16> {
     let surface = seed
@@ -340,15 +343,22 @@ pub fn expand(
             .find_map(|t| find(&t.root, prototype.preview_root))
             .ok_or("Missing OIB preview prototype")?
             .clone();
-        let inspector = blueprint
-            .templates
-            .iter()
-            .find_map(|t| find(&t.root, prototype.inspector_root))
-            .ok_or("Missing OIB inspector prototype")?
-            .clone();
+        let inspector = prototype
+            .inspector_root
+            .map(|id| {
+                blueprint
+                    .templates
+                    .iter()
+                    .find_map(|t| find(&t.root, id))
+                    .cloned()
+                    .ok_or("Missing OIB inspector prototype")
+            })
+            .transpose()?;
         let mut set = BTreeSet::new();
         controls(&preview, &mut set);
-        controls(&inspector, &mut set);
+        if let Some(inspector) = &inspector {
+            controls(inspector, &mut set);
+        }
         stride = stride.max(set.len());
         all_controls.extend(set.iter().copied());
         roots.insert(prototype.instance, (preview, inspector, set));
@@ -360,7 +370,7 @@ pub fn expand(
     let removed: BTreeSet<_> = surface
         .prototypes
         .iter()
-        .flat_map(|p| [p.preview_root, p.inspector_root])
+        .flat_map(|p| std::iter::once(p.preview_root).chain(p.inspector_root))
         .collect();
     fn remove(root: &mut TemplateNode, ids: &BTreeSet<u16>) {
         root.children.retain(|c| !ids.contains(&c.id));
@@ -432,19 +442,23 @@ pub fn expand(
                 &locals,
                 (old_name, &allocation.name),
             )?;
-            remap(
-                &mut inspector,
-                seed,
-                allocation.prototype,
-                index,
-                &control_ids,
-                &locals,
-                (old_name, &allocation.name),
-            )?;
+            if let Some(inspector) = &mut inspector {
+                remap(
+                    inspector,
+                    seed,
+                    allocation.prototype,
+                    index,
+                    &control_ids,
+                    &locals,
+                    (old_name, &allocation.name),
+                )?;
+            }
             let mut visible_controls = BTreeSet::new();
             controls(&roots[&allocation.prototype].0, &mut visible_controls);
-            if selected == Some(allocation.id) {
-                controls(&roots[&allocation.prototype].1, &mut visible_controls);
+            if selected == Some(allocation.id)
+                && let Some(inspector) = &roots[&allocation.prototype].1
+            {
+                controls(inspector, &mut visible_controls);
             }
             for handler in ui
                 .handlers
@@ -455,13 +469,16 @@ pub fn expand(
                 h.control = control_ids[&h.control];
                 h.event = u16::from(h.control);
                 match &mut h.operation {
-                    Operation::Oib { cell, .. } => {
-                        let source = seed
-                            .cells
-                            .iter()
-                            .find(|c| c.id == *cell)
-                            .ok_or("Missing OIB handler cell")?;
-                        *cell = mapped_cell(seed, allocations, allocation.id, source)?;
+                    Operation::Oib { address, .. } => {
+                        if let otrios_interfaces::oib::designer::PropertyAddress::Occurrence {
+                            instance,
+                            ..
+                        } = address
+                        {
+                            instance.0 = allocation.id;
+                        } else {
+                            return Err("Instance control cannot edit a shared definition".into());
+                        }
                     }
                     Operation::OibInstance { target, .. } => *target = allocation.id,
                     Operation::Set | Operation::Toggle => {}
@@ -472,8 +489,10 @@ pub fn expand(
         } else {
             let mut visible_controls = BTreeSet::new();
             controls(&preview, &mut visible_controls);
-            if selected == Some(allocation.id) {
-                controls(&inspector, &mut visible_controls);
+            if selected == Some(allocation.id)
+                && let Some(inspector) = &inspector
+            {
+                controls(inspector, &mut visible_controls);
             }
             result.handlers.extend(
                 ui.handlers
@@ -483,7 +502,9 @@ pub fn expand(
             );
         }
         preview.frame[1] = Expr::Literal(Value::Number(row as f32 * pitch));
-        inspector.frame[1] = Expr::Literal(Value::Number(surface.inspector_start));
+        if let Some(inspector) = &mut inspector {
+            inspector.frame[1] = Expr::Literal(Value::Number(surface.inspector_start));
+        }
         blueprint
             .templates
             .iter_mut()
@@ -491,7 +512,9 @@ pub fn expand(
             .ok_or("Missing preview viewport")?
             .children
             .push(preview);
-        if selected == Some(allocation.id) {
+        if selected == Some(allocation.id)
+            && let Some(inspector) = inspector
+        {
             blueprint
                 .templates
                 .iter_mut()
@@ -589,21 +612,30 @@ pub fn validate_surface(ui: &Ui) -> Result<()> {
             .iter()
             .find(|c| c.id == prototype.preview_root)
             .ok_or("Factory preview must be a direct viewport child")?;
-        let b = inspector
-            .children
-            .iter()
-            .find(|c| c.id == prototype.inspector_root)
-            .ok_or("Factory inspector must be a direct viewport child")?;
+        let b = prototype
+            .inspector_root
+            .map(|id| {
+                inspector
+                    .children
+                    .iter()
+                    .find(|c| c.id == id)
+                    .ok_or("Factory inspector must be a direct viewport child")
+            })
+            .transpose()?;
         let before = seen.clone();
         visit(a, &mut seen)?;
-        visit(b, &mut seen)?;
+        if let Some(b) = b {
+            visit(b, &mut seen)?;
+        }
         let actual: Vec<_> = seen.difference(&before).copied().collect();
         if actual != prototype.nodes || actual.len() > usize::from(surface.node_stride) {
             return Err("Invalid signed OIB node allocation table".into());
         }
         let mut set = BTreeSet::new();
         controls(a, &mut set);
-        controls(b, &mut set);
+        if let Some(b) = b {
+            controls(b, &mut set);
+        }
         for h in ui.handlers.iter().filter(|h| set.contains(&h.control)) {
             match h.operation {
                 Operation::Set if h.fields.len() == 1 => {}
@@ -616,11 +648,11 @@ pub fn validate_surface(ui: &Ui) -> Result<()> {
                                 && f.writable
                                 && matches!(f.default, Value::Number(n) if n == 0. || n == 1000.)
                         }) => {}
-                Operation::Oib { cell, .. }
-                    if seed
-                        .cells
-                        .iter()
-                        .any(|c| c.id == cell && c.owner == prototype.instance) => {}
+                Operation::Oib { ref address, .. }
+                    if matches!(address, otrios_interfaces::oib::designer::PropertyAddress::Occurrence { instance, .. } if instance.0 == prototype.instance)
+                        && seed.cells.iter().any(|cell| {
+                            document::address_for_cell(seed, cell.id).ok().as_ref() == Some(address)
+                        }) => {}
                 Operation::OibInstance {
                     target,
                     action:
@@ -803,7 +835,7 @@ fn expanded_designer_seed(seed: &Seed, allocations: &[Allocation]) -> Result<See
                 .find(|c| c.id == row.initial_cell)
                 .ok_or("Missing source alias")?
                 .clone();
-            cell.id = document::lower(a, row)?;
+            cell.id = document::lower(seed, a, row)?;
             cell.owner = a.id;
             if a.id != a.prototype {
                 for t in &mut cell.targets {

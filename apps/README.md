@@ -234,8 +234,8 @@ The [OIB Designer D1 sample](oib-designer/README.md) is a separate companion
 collection linked from Test Playground. It uses signed Shell/SettingsPanel/
 LabeledSlider/LabeledToggle definitions, separate slider and enable fields, and
 empty tooling viewports for core-generated local hierarchy and selected inspector.
-It requires `otrios-oib-designer-v1`; runtime/host activation is an integration gate.
-Its schema does not replace `live-ui-state-v1`.
+It requires `otrios-oib-designer-v2`; runtime/host activation is an integration gate.
+Its schema does not replace `live-ui-state-v2`.
 
 ## Independent UI updates
 

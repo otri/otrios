@@ -105,7 +105,7 @@ fn signed_sample_has_one_paint_tree_and_three_empty_tooling_surfaces() {
     assert!(find(&root, hierarchy).children.is_empty());
     let surface = seed.instance_surface.as_ref().unwrap();
     for prototype in &surface.prototypes {
-        assert!(find(&root, prototype.inspector_root).children.is_empty());
+        assert!(prototype.inspector_root.is_none());
     }
     let preview = doc
         .mappings
@@ -222,10 +222,6 @@ fn canonical_metadata_and_sparse_aliases_do_not_use_names_or_vector_rank() {
             .find(|r| r.prototype == InstanceId(factory))
             .unwrap();
         assert_eq!(
-            table.cells.iter().map(|r| r.key).collect::<Vec<_>>(),
-            vec![2, 9, 17, 28, 41, 55]
-        );
-        assert_eq!(
             table
                 .cells
                 .iter()
@@ -268,9 +264,9 @@ fn signed_bindings_and_checked_semantics_use_distinct_numeric_fields() {
     let ui = app::ui(&[]);
     let old = live_ui::ui(&[]);
     assert_eq!(live_ui::manifest().id, "live-ui");
-    assert_eq!(old.state_schema.id, "live-ui-state-v1");
+    assert_eq!(old.state_schema.id, "live-ui-state-v2");
     assert_eq!(old.state_schema.fields.len(), 2);
-    assert_eq!(ui.state_schema.id, "oib-designer-state-v1");
+    assert_eq!(ui.state_schema.id, "oib-designer-state-v2");
     assert_eq!(
         ui.state_schema
             .fields
@@ -491,7 +487,7 @@ fn sample_admission_fits_signed_budgets_and_preflights_maximum_renderer_slot() {
     assert!(expanded.layout.len() <= 128 * 1024);
     assert!(expanded.handlers.len() <= 128 && expanded.selectors.len() <= 128);
     let table = &doc.mappings.roots[1];
-    for row in &table.cells {
+    for (rank, row) in table.cells.iter().enumerate() {
         let lowered = oib::document::cell_for_address(
             seed,
             resident,
@@ -501,7 +497,13 @@ fn sample_admission_fits_signed_budgets_and_preflights_maximum_renderer_slot() {
             },
         )
         .unwrap();
-        assert_eq!(lowered, 0x100_0000 + 9 * 64 + u64::from(row.key));
+        assert_eq!(
+            lowered,
+            seed.cells.iter().map(|c| c.id).max().unwrap()
+                + 1
+                + u64::from(allocations[9].slot) * 64
+                + rank as u64
+        );
     }
     let six = oib::instances::expanded_seed(seed, &allocations[..6]).unwrap();
     assert_eq!(six.cells.len(), 42);
@@ -690,20 +692,19 @@ fn slider_value_binding_must_match_the_control_mutation_field() {
 }
 
 fn property_registers(doc: &StateDocument) -> BTreeMap<(u64, u64), Vec<u8>> {
-    let tree = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
     [1, 2]
         .into_iter()
         .flat_map(|branch| {
-            let tree = &tree;
             doc.oib_values(branch)
                 .unwrap()
                 .keys()
-                .map(move |id| {
-                    let mut path = vec![4, branch];
-                    path.extend((0..13).rev().map(|i| (id >> (i * 5)) & 31));
+                .map(|id| {
                     (
                         (branch, *id),
-                        tree.subtree(&path).unwrap().to_bytes().unwrap(),
+                        doc.oib_property_leaf(branch, *id)
+                            .unwrap()
+                            .to_bytes()
+                            .unwrap(),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -711,11 +712,13 @@ fn property_registers(doc: &StateDocument) -> BTreeMap<(u64, u64), Vec<u8>> {
         .collect()
 }
 fn structural_request(
+    doc: &StateDocument,
     sequence: u64,
     operation: otrios_interfaces::oib::InstanceOperation,
 ) -> Vec<u8> {
     otrios_core::canvas::encode_state_request(
         &otrios_interfaces::canvas::StateRequest::OibInstance {
+            epoch: doc.oib_epoch().unwrap(),
             sequence,
             operation,
         },
@@ -758,7 +761,7 @@ fn d2_insert_exact_factory_and_reorder_preserve_property_registers_slots_and_val
     sync(&mut doc, &mut session, &mut client);
     let allocations = doc.oib_allocations().unwrap();
     let inserted = &allocations[0];
-    assert!(inserted.id >= 0x1_0002);
+    assert!(inserted.id > 50);
     assert_eq!(
         inserted.prototype, 30,
         "explicit Display factory retains its binding"
@@ -881,6 +884,7 @@ fn d2_stale_and_invalid_structures_are_receipted_without_allocating_or_rewriting
     let mut other = fresh_admin(&mut doc, 2);
     let generation = doc.oib_status().unwrap().generation;
     let first = structural_request(
+        &doc,
         1,
         Reorder {
             instance: 30,
@@ -893,7 +897,7 @@ fn d2_stale_and_invalid_structures_are_receipted_without_allocating_or_rewriting
     let accepted = doc.oib_allocations().unwrap();
     let registers = property_registers(&doc);
     let tree = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-    let next_id = tree.subtree(&[4, 7]).unwrap().to_bytes().unwrap();
+    let next_id = tree.subtree(&[4, 4]).unwrap().to_bytes().unwrap();
     let rejected = [
         Insert {
             prototype: 20,
@@ -923,13 +927,13 @@ fn d2_stale_and_invalid_structures_are_receipted_without_allocating_or_rewriting
     ];
     let mut last = vec![];
     for (index, operation) in rejected.into_iter().enumerate() {
-        last = structural_request(index as u64 + 2, operation);
+        last = structural_request(&doc, index as u64 + 2, operation);
         assert!(doc.receive(&mut other, &last).unwrap());
         assert_eq!(doc.oib_status().unwrap().generation, generation + 1);
         assert_eq!(doc.oib_allocations().unwrap(), accepted);
         assert_eq!(property_registers(&doc), registers);
         let tree = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-        assert_eq!(tree.subtree(&[4, 7]).unwrap().to_bytes().unwrap(), next_id);
+        assert_eq!(tree.subtree(&[4, 4]).unwrap().to_bytes().unwrap(), next_id);
         assert!(
             doc.oib_status()
                 .unwrap()
@@ -953,6 +957,7 @@ fn d2_stale_and_invalid_structures_are_receipted_without_allocating_or_rewriting
     resumed.set_oib_editable(true);
     assert!(!recovered.receive(&mut resumed, &last).unwrap());
     let retry = structural_request(
+        &doc,
         7,
         Reorder {
             instance: 20,
@@ -1004,7 +1009,7 @@ fn d2_palette_only_power_uses_fresh_identity_and_restore_keeps_original_resident
     sync(&mut doc, &mut session, &mut client);
     let allocations = doc.oib_allocations().unwrap();
     let power = allocations.iter().find(|a| a.prototype == 50).unwrap();
-    assert!(power.id >= 0x1_0002);
+    assert!(power.id > 50);
     assert_ne!(power.id, power.prototype);
     assert_eq!(power.component, 13);
     assert_eq!(
@@ -1021,7 +1026,14 @@ fn d2_palette_only_power_uses_fresh_identity_and_restore_keeps_original_resident
         },
     )
     .unwrap();
-    assert_eq!(label, 0x100_0000 + (power.id - 0x1_0000) * 64 + 55);
+    assert_eq!(
+        oib::document::address_for_cell(oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(), label)
+            .unwrap(),
+        PropertyAddress::Occurrence {
+            instance: InstanceId(power.id),
+            path: path(&[], 1, 3)
+        }
+    );
     assert_eq!(
         oib::effective(&expanded, &doc.oib_values(2).unwrap(), label).unwrap(),
         Value::Text("Power".into())
@@ -1086,126 +1098,6 @@ fn d2_palette_only_power_uses_fresh_identity_and_restore_keeps_original_resident
     );
 }
 
-fn without_palette(mut ui: Ui) -> Ui {
-    use otrios_interfaces::layout::Responder;
-    let Some(Presentation::Oib(seed)) = &mut ui.presentation else {
-        unreachable!()
-    };
-    let palette = seed
-        .instance_surface
-        .as_ref()
-        .unwrap()
-        .prototypes
-        .iter()
-        .filter(|p| p.palette_only)
-        .map(|p| p.instance)
-        .collect::<BTreeSet<_>>();
-    let nodes = seed
-        .instance_surface
-        .as_ref()
-        .unwrap()
-        .prototypes
-        .iter()
-        .filter(|p| p.palette_only)
-        .flat_map(|p| p.nodes.iter().copied())
-        .collect::<BTreeSet<_>>();
-    let cells = seed
-        .cells
-        .iter()
-        .filter(|c| palette.contains(&c.owner))
-        .map(|c| c.id)
-        .collect::<BTreeSet<_>>();
-    seed.instances.retain(|i| !palette.contains(&i.id));
-    seed.cells.retain(|c| !cells.contains(&c.id));
-    for cell in &mut seed.cells {
-        cell.targets.retain(|t| !nodes.contains(&t.node));
-    }
-    seed.instance_surface
-        .as_mut()
-        .unwrap()
-        .prototypes
-        .retain(|p| !p.palette_only);
-    let doc = seed.designer.as_mut().unwrap();
-    doc.instances.retain(|i| !palette.contains(&i.id.0));
-    doc.mappings
-        .roots
-        .retain(|r| !palette.contains(&r.prototype.0));
-    doc.mappings
-        .objects
-        .retain(|m| !palette.contains(&m.address.instance.0));
-    let mut blueprint = Layout::from_bytes(&ui.layout).unwrap().blueprint().clone();
-    let mut controls = BTreeSet::new();
-    fn remove(node: &mut TemplateNode, removed: &BTreeSet<u16>, controls: &mut BTreeSet<u8>) {
-        if removed.contains(&node.id)
-            && let Some(Responder::AppEvent { control, .. }) = node.responder
-        {
-            controls.insert(control);
-        }
-        for child in &mut node.children {
-            remove(child, removed, controls);
-        }
-        node.children.retain(|n| !removed.contains(&n.id));
-    }
-    for template in &mut blueprint.templates {
-        remove(&mut template.root, &nodes, &mut controls);
-    }
-    ui.handlers.retain(|h| !controls.contains(&h.control));
-    ui.selectors
-        .retain(|s| !matches!(s.projection, Projection::OibCell { cell } if cells.contains(&cell)));
-    ui.layout = Layout::encode(&blueprint).unwrap();
-    ui
-}
-
-#[test]
-fn d2_allowlisted_palette_factory_upgrade_preserves_existing_document_and_registers() {
-    let mut successor = app::ui(&[]);
-    let predecessor = without_palette(successor.clone());
-    oib::validate(&predecessor).unwrap();
-    let Some(Presentation::Oib(seed)) = &mut successor.presentation else {
-        unreachable!()
-    };
-    seed.instance_surface.as_mut().unwrap().previous_ui_sha256 =
-        otrios_core::canvas::hash(&otrios_core::canvas::encode_ui(&predecessor).unwrap());
-    let mut doc = StateDocument::new(predecessor.state_schema.clone(), "designer:fixture").unwrap();
-    doc.configure_oib(&predecessor).unwrap();
-    let mut session = fresh_admin(&mut doc, 1);
-    session
-        .set_selection(StateSelection::from_ui(&predecessor).unwrap())
-        .unwrap();
-    let mut client = StateAdapter::for_ui(&predecessor, "designer:fixture", &[], [1; 16]).unwrap();
-    client
-        .receive(&doc.generate(&mut session).unwrap().unwrap())
-        .unwrap();
-    sync(&mut doc, &mut session, &mut client);
-    client
-        .edit_oib(&[(203, Some(Value::Text("Keep Audio".into())))])
-        .unwrap();
-    sync(&mut doc, &mut session, &mut client);
-    let registers = property_registers(&doc);
-    let residents = doc.oib_allocations().unwrap();
-    let original = doc.save().unwrap();
-    let mut not_allowlisted = successor.clone();
-    let Some(Presentation::Oib(seed)) = &mut not_allowlisted.presentation else {
-        unreachable!()
-    };
-    seed.instance_surface.as_mut().unwrap().previous_ui_sha256 = vec![0; 32];
-    assert!(doc.configure_oib(&not_allowlisted).is_err());
-    assert_eq!(doc.save().unwrap(), original);
-    assert!(doc.configure_oib(&successor).unwrap());
-    assert_eq!(doc.oib_allocations().unwrap(), residents);
-    assert_eq!(property_registers(&doc), registers);
-    assert!(!doc.oib_values(1).unwrap().contains_key(&400));
-    assert!(!doc.oib_values(2).unwrap().contains_key(&401));
-    let mut recovered = StateDocument::load(
-        successor.state_schema.clone(),
-        "designer:fixture",
-        &doc.save().unwrap(),
-    )
-    .unwrap();
-    assert!(!recovered.configure_oib(&successor).unwrap());
-    assert_eq!(property_registers(&recovered), registers);
-}
-
 #[test]
 fn d2_full_canvas_rejection_preserves_identity_counter_and_surviving_causal_bytes() {
     use otrios_interfaces::oib::InstanceOperation;
@@ -1221,6 +1113,7 @@ fn d2_full_canvas_rejection_preserves_identity_counter_and_surviving_causal_byte
     let generation = doc.oib_status().unwrap().generation;
     let mut other = fresh_admin(&mut doc, 3);
     let request = structural_request(
+        &doc,
         1,
         InstanceOperation::Insert {
             prototype: 50,
@@ -1234,8 +1127,8 @@ fn d2_full_canvas_rejection_preserves_identity_counter_and_surviving_causal_byte
     assert_eq!(property_registers(&doc), registers);
     let after = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
     assert_eq!(
-        after.subtree(&[4, 7]).unwrap().to_bytes().unwrap(),
-        before.subtree(&[4, 7]).unwrap().to_bytes().unwrap()
+        after.subtree(&[4, 4]).unwrap().to_bytes().unwrap(),
+        before.subtree(&[4, 4]).unwrap().to_bytes().unwrap()
     );
     assert!(
         doc.oib_status()
@@ -1268,6 +1161,7 @@ fn d2_captured_stale_client_actions_are_receipted_after_observing_remote_publica
         doc.receive(
             &mut other,
             &structural_request(
+                &doc,
                 1,
                 Reorder {
                     instance: 30,
@@ -1285,7 +1179,7 @@ fn d2_captured_stale_client_actions_are_receipted_after_observing_remote_publica
     let accepted = doc.oib_allocations().unwrap();
     let registers = property_registers(&doc);
     let before = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-    let next_id = before.subtree(&[4, 7]).unwrap().to_bytes().unwrap();
+    let next_id = before.subtree(&[4, 4]).unwrap().to_bytes().unwrap();
     for operation in captured {
         assert!(client.edit_oib_structure(operation).unwrap());
         assert!(!client.confirmed());
@@ -1299,7 +1193,7 @@ fn d2_captured_stale_client_actions_are_receipted_after_observing_remote_publica
         assert_eq!(doc.oib_allocations().unwrap(), accepted);
         assert_eq!(property_registers(&doc), registers);
         let tree = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-        assert_eq!(tree.subtree(&[4, 7]).unwrap().to_bytes().unwrap(), next_id);
+        assert_eq!(tree.subtree(&[4, 4]).unwrap().to_bytes().unwrap(), next_id);
     }
     // A deliberate retry captures the confirmed generation and can succeed.
     assert!(client.reorder_oib(20, Some(30)).unwrap());

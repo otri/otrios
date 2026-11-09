@@ -8,9 +8,9 @@ pub fn manifest() -> otrios_interfaces::canvas::App {
         "OIB Designer",
         "canvas-app",
         &[
-            "otrios-oib-v1",
+            "otrios-oib-v2",
             "otrios-oib-instances-v1",
-            "otrios-oib-designer-v1",
+            "otrios-oib-designer-v2",
         ],
     )
 }

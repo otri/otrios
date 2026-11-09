@@ -383,9 +383,15 @@ fn sync(doc: &mut StateDocument, session: &mut Session, client: &mut StateAdapte
     }
     panic!("definition test did not settle");
 }
-fn request(sequence: u64, generation: u64, operations: Vec<DefinitionEdit>) -> Vec<u8> {
+fn request(
+    doc: &StateDocument,
+    sequence: u64,
+    generation: u64,
+    operations: Vec<DefinitionEdit>,
+) -> Vec<u8> {
     otrios_core::canvas::encode_state_request(
         &otrios_interfaces::canvas::StateRequest::OibInstance {
+            epoch: doc.oib_epoch().unwrap(),
             sequence,
             operation: InstanceOperation::Definitions(DefinitionBatch {
                 generation,
@@ -411,11 +417,11 @@ fn authority_definition_edits_preserve_exact_causal_registers_and_restart_receip
     let generation = doc.oib_status().unwrap().generation;
     let (mut writer, _) = doc.open_session(&[82; 16], 0).unwrap();
     writer.set_oib_editable(true);
-    let accepted = request(1, generation, vec![move_node(8, 1, Some(1), Some(7))]);
+    let accepted = request(&doc, 1, generation, vec![move_node(8, 1, Some(1), Some(7))]);
     assert!(doc.receive(&mut writer, &accepted).unwrap());
     assert_eq!(doc.oib_status().unwrap().generation, generation + 1);
     let after = otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap()).unwrap();
-    for branch in [1, 2, 4, 5, 6, 7] {
+    for branch in [1, 2, 5, 6] {
         assert_eq!(
             tree.subtree(&[4, branch]).unwrap().to_bytes().unwrap(),
             after.subtree(&[4, branch]).unwrap().to_bytes().unwrap()
@@ -470,7 +476,7 @@ fn stale_and_invalid_definition_batches_keep_exact_active_graph_and_receipt_reje
     let generation = doc.oib_status().unwrap().generation;
     let (mut writer, _) = doc.open_session(&[83; 16], 0).unwrap();
     writer.set_oib_editable(true);
-    let accepted = request(1, generation, vec![move_node(8, 1, Some(1), Some(7))]);
+    let accepted = request(&doc, 1, generation, vec![move_node(8, 1, Some(1), Some(7))]);
     assert!(doc.receive(&mut writer, &accepted).unwrap());
     let active = doc.oib_status().unwrap().active_root;
     let compiled = doc.oib_compiled(2).unwrap().0;
@@ -490,7 +496,7 @@ fn stale_and_invalid_definition_batches_keep_exact_active_graph_and_receipt_reje
             ],
         ),
     ] {
-        last = request(sequence, observed, operations);
+        last = request(&doc, sequence, observed, operations);
         assert!(doc.receive(&mut writer, &last).unwrap());
         assert_eq!(doc.oib_status().unwrap().active_root, active);
         assert_eq!(doc.oib_compiled(2).unwrap().0, compiled);
@@ -513,7 +519,12 @@ fn stale_and_invalid_definition_batches_keep_exact_active_graph_and_receipt_reje
     let (mut resumed, _) = recovered.open_session(&[83; 16], 4).unwrap();
     resumed.set_oib_editable(true);
     assert!(!recovered.receive(&mut resumed, &last).unwrap());
-    let retry = request(5, generation + 1, vec![move_node(8, 1, Some(1), Some(9))]);
+    let retry = request(
+        &doc,
+        5,
+        generation + 1,
+        vec![move_node(8, 1, Some(1), Some(9))],
+    );
     assert!(recovered.receive(&mut resumed, &retry).unwrap());
     assert!(recovered.oib_status().unwrap().error.is_none());
     assert_ne!(recovered.oib_status().unwrap().active_root, active);

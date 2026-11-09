@@ -2,16 +2,18 @@
 # OIB Designer
 
 This separate Test Playground companion owns `app:oib-designer/ui` and
-`app:oib-designer/state`, using `oib-designer-state-v1`. Volume (field 1, initial
+`app:oib-designer/state`, using `oib-designer-state-v2`. Volume (field 1, initial
 400) and brightness (2, 700) are normalized numeric sliders. Audio enabled (3,
 1000) and display enabled (4, 0) are independent numeric 0/1000 toggle fields.
 `Projection::Nonzero` supplies dynamic Boolean checked semantics. The existing
-Live UI app, schema, factories and values are unchanged.
+Live UI app retains its separate two-field state schema.
 
-`app.rs` requires `otrios-oib-designer-v1` alongside OIB and instance features.
+`app.rs` requires `otrios-oib-designer-v2` alongside OIB and instance features.
 The packer signs `Seed.designer` with the rest of the UI; this source does not
 sign, install or deploy a package. Parent integration owns feature discovery and
-the coordinated v28 host/publisher activation. Release control remains v1.
+the coordinated candidate v29 host/publisher activation with fresh OIB collections.
+Release control remains v1. See the [D2 work record](../../docs/OIB_D2_COMPLETION.md)
+for the unreleased format cleanup and remaining graph compiler work.
 
 The signed document is 1, with fixed Shell definition 11 / instance 40, and its
 nonvisual Configuration node 2. The presented shell root is O2DView node 1.

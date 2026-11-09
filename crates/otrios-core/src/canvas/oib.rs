@@ -104,13 +104,10 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
         }
     }
     if let Some(surface) = &seed.instance_surface
-        && (surface.previous_ui_sha256.len() != 32
-            || (seed.designer.is_none() && surface.prototypes.iter().any(|p| p.palette_only))
+        && ((seed.designer.is_none() && surface.prototypes.iter().any(|p| p.palette_only))
             || surface.prototypes.len() != seed.instances.len()
             || seed.instances.len() > MAX_ALLOCATIONS
             || seed.instances.len() > MAX_LIVE_INSTANCES
-            || ids.iter().any(|id| *id >= 0x1_0000)
-            || seed.cells.iter().any(|c| c.id >= 0x100_0000)
             || [
                 surface.preview_stride,
                 surface.inspector_start,
@@ -198,15 +195,11 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
         .as_ref()
         .and_then(|s| s.layout.as_ref())
     {
-        if layout.previous_ui_sha256.is_empty()
-            || layout.previous_ui_sha256.len() > 8
-            || layout.previous_ui_sha256.iter().any(|h| h.len() != 32)
-            || !seed.cells.iter().any(|c| {
-                c.id == layout.preview_pitch_cell
-                    && seed.components.iter().any(|o| o.id == c.owner)
-                    && matches!(c.default, Value::Number(_))
-            })
-        {
+        if !seed.cells.iter().any(|c| {
+            c.id == layout.preview_pitch_cell
+                && seed.components.iter().any(|o| o.id == c.owner)
+                && matches!(c.default, Value::Number(_))
+        }) {
             return Err("Invalid OIB layout surface".into());
         }
     } else if seed.cells.iter().flat_map(|c| &c.targets).any(|t| {

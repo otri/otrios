@@ -8,8 +8,8 @@ pub mod authoring;
 /// RFC 0035 D1 signed metadata and stable occurrence/property identities.
 pub mod designer;
 
-pub const FORMAT: &str = "otrios-oib-v1";
-pub const FEATURE: &str = "otrios-oib-v1";
+pub const FORMAT: &str = "otrios-oib-v2";
+pub const FEATURE: &str = "otrios-oib-v2";
 pub const INSTANCES_FEATURE: &str = "otrios-oib-instances-v1";
 pub const LAYOUT_FEATURE: &str = "otrios-oib-layout-v1";
 pub const RESTORE_FEATURE: &str = "otrios-oib-restore-v1";
@@ -25,7 +25,7 @@ pub const MAX_BYTES: usize = 64 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct Seed {
     pub format: String,
-    /// Signed D1 hierarchy/inspector metadata. Absence preserves legacy bytes.
+    /// Signed hierarchy/inspector metadata for Designer applications.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub designer: Option<designer::Document>,
     pub main_oib: u64,
@@ -45,8 +45,6 @@ pub struct Seed {
 pub struct InstanceSurface {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<LayoutSurface>,
-    /// Explicit one-time upgrade from the exact O1 UI; not a general seed rebase.
-    pub previous_ui_sha256: Vec<u8>,
     pub preview_viewport: u16,
     pub preview_stride: f32,
     pub inspector_start: f32,
@@ -59,8 +57,6 @@ pub struct InstanceSurface {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutSurface {
-    /// Exact admitted predecessors permitted to append component layout cells.
-    pub previous_ui_sha256: Vec<Vec<u8>>,
     /// Component numeric property controlling the preview row pitch/content extent.
     pub preview_pitch_cell: u64,
 }
@@ -73,7 +69,7 @@ pub struct Prototype {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub palette_only: bool,
     pub preview_root: u16,
-    pub inspector_root: u16,
+    pub inspector_root: Option<u16>,
     pub nodes: Vec<u16>,
 }
 /// Authority-owned resident descriptor. Removed objects are reclaimed.
@@ -187,7 +183,9 @@ pub struct Target {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Change {
-    pub cell: u64,
+    /// Complete semantic identity. Activation-local cell indices never cross
+    /// the state protocol or identify durable property registers.
+    pub address: designer::PropertyAddress,
     /// None is a causal clear of an instance override.
     pub value: Option<Value>,
     /// Canonical leaf snapshot actually observed, including causal context.

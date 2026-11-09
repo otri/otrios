@@ -98,7 +98,7 @@ pub enum Operation {
         action: crate::oib::InstanceAction,
     },
     Oib {
-        cell: u64,
+        address: crate::oib::designer::PropertyAddress,
         action: crate::oib::InspectorAction,
     },
     /// Fixed host presentation action. Chat owns controls 40..=254 and reserves
@@ -335,10 +335,12 @@ pub struct MountBinding {
 #[derive(Clone, Debug, PartialEq)]
 pub enum StateRequest {
     OibInstance {
+        epoch: Vec<u8>,
         sequence: u64,
         operation: crate::oib::InstanceOperation,
     },
     OibWrite {
+        epoch: Vec<u8>,
         sequence: u64,
         changes: Vec<crate::oib::Change>,
     },

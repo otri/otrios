@@ -2576,7 +2576,14 @@ fn activate_studio_tool(client: &mut Client, label: &str) -> u32 {
             .nodes
             .iter()
             .find(|n| n.semantics.as_ref().is_some_and(|s| s.label == label))
-            .unwrap_or_else(|| panic!("Missing Studio tool: {label}"));
+            .unwrap_or_else(|| {
+                panic!(
+                    "Missing Studio tool: {label}; confirmed={} status={} factories={:?}",
+                    client.active.as_ref().unwrap().doc.confirmed(),
+                    client.active.as_ref().unwrap().doc.oib_status_text(),
+                    client.active.as_ref().unwrap().doc.oib_canvas_factories()
+                )
+            });
         (row.id, row.frame.y)
     };
     fixture_scroll_to(client, 0, y - 8.);
@@ -2655,7 +2662,7 @@ fn desktop_studio_visible_palette_authors_power_and_reorders_without_retargeting
         .oib_instances()
         .unwrap()
         .into_iter()
-        .filter(|i| i.id > 0xffff)
+        .filter(|i| i.id != i.prototype)
         .map(|i| i.id)
         .collect();
     for id in temporary {
@@ -2712,7 +2719,7 @@ fn desktop_studio_visible_palette_authors_power_and_reorders_without_retargeting
         .find(|i| i.component == 13 && i.active)
         .expect("palette insertion publishes Power");
     assert_eq!(power.prototype, 50);
-    assert!(power.id > 0xffff);
+    assert_ne!(power.id, power.prototype);
     activate_studio_root(&mut client, power.id);
     let label = PropertyAddress::Occurrence {
         instance: InstanceId(power.id),
@@ -3020,7 +3027,7 @@ fn desktop_studio_visible_component_management_edits_and_deletes_inserted_power_
         .oib_instances()
         .unwrap()
         .into_iter()
-        .filter(|i| i.id > 0xffff)
+        .filter(|i| i.id != i.prototype)
         .map(|i| i.id)
         .collect();
     for id in temporary {

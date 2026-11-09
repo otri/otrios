@@ -291,12 +291,15 @@ impl Event {
             operation: Operation::EditOrder,
         }
     }
-    pub fn oib(cell: u64, action: otrios_interfaces::oib::InspectorAction) -> Self {
+    pub fn oib(
+        address: otrios_interfaces::oib::designer::PropertyAddress,
+        action: otrios_interfaces::oib::InspectorAction,
+    ) -> Self {
         Self {
             kind: GestureKind::Activate,
             fields: vec![],
             behavior: None,
-            operation: Operation::Oib { cell, action },
+            operation: Operation::Oib { address, action },
         }
     }
     pub fn oib_instance(target: u64, action: otrios_interfaces::oib::InstanceAction) -> Self {
@@ -860,11 +863,10 @@ pub struct NamedOibPrototype {
     pub instance: u64,
     pub palette_only: bool,
     pub preview: String,
-    pub inspector: String,
+    pub inspector: Option<String>,
 }
 pub struct NamedOibSurface {
     pub layout: Option<otrios_interfaces::oib::LayoutSurface>,
-    pub previous_ui_sha256: Vec<u8>,
     pub preview: String,
     pub preview_stride: f32,
     pub inspector_start: f32,
@@ -1049,10 +1051,12 @@ impl AppUi {
                     .into_iter()
                     .map(|p| {
                         let preview_root = compiler.named_nodes[&p.preview];
-                        let inspector_root = compiler.named_nodes[&p.inspector];
+                        let inspector_root = p.inspector.map(|name| compiler.named_nodes[&name]);
                         let mut nodes = vec![];
                         collect(&root, preview_root, false, &mut nodes);
-                        collect(&root, inspector_root, false, &mut nodes);
+                        if let Some(inspector_root) = inspector_root {
+                            collect(&root, inspector_root, false, &mut nodes);
+                        }
                         nodes.sort_unstable();
                         otrios_interfaces::oib::Prototype {
                             instance: p.instance,
@@ -1070,7 +1074,7 @@ impl AppUi {
                     .unwrap_or(0);
                 seed.instance_surface = Some(otrios_interfaces::oib::InstanceSurface {
                     layout: surface.layout,
-                    previous_ui_sha256: surface.previous_ui_sha256,
+
                     preview_viewport: compiler.named_nodes[&surface.preview],
                     preview_stride: surface.preview_stride,
                     inspector_start: surface.inspector_start,

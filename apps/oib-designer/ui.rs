@@ -313,7 +313,6 @@ fn definitions() -> Vec<ComponentDefinition> {
 // not allocate shared IDs, occurrence aliases, keys or reference boundaries.
 struct Editable {
     path: PropertyPath,
-    key: u8,
     shared: u64,
     definition: u64,
     audio: u64,
@@ -336,7 +335,7 @@ fn rows() -> Vec<Editable> {
     vec![
         Editable {
             path: path(&[], 1, 1),
-            key: 2,
+
             shared: 100,
             definition: 10,
             audio: 200,
@@ -347,7 +346,7 @@ fn rows() -> Vec<Editable> {
         },
         Editable {
             path: path(&[7], 1, 1),
-            key: 9,
+
             shared: 101,
             definition: 12,
             audio: 201,
@@ -358,7 +357,7 @@ fn rows() -> Vec<Editable> {
         },
         Editable {
             path: path(&[7], 1, 2),
-            key: 17,
+
             shared: 102,
             definition: 12,
             audio: 202,
@@ -372,7 +371,7 @@ fn rows() -> Vec<Editable> {
         },
         Editable {
             path: path(&[7], 1, 3),
-            key: 28,
+
             shared: 103,
             definition: 12,
             audio: 203,
@@ -386,7 +385,7 @@ fn rows() -> Vec<Editable> {
         },
         Editable {
             path: path(&[8], 1, 1),
-            key: 41,
+
             shared: 104,
             definition: 13,
             audio: 204,
@@ -397,7 +396,7 @@ fn rows() -> Vec<Editable> {
         },
         Editable {
             path: path(&[8], 1, 3),
-            key: 55,
+
             shared: 105,
             definition: 13,
             audio: 205,
@@ -482,7 +481,7 @@ fn document() -> Document {
                         .iter()
                         .map(|row| RootCellKey {
                             path: row.path.clone(),
-                            key: row.key,
+
                             initial_cell: row.alias(id),
                         })
                         .collect(),
@@ -492,12 +491,12 @@ fn document() -> Document {
                     cells: vec![
                         RootCellKey {
                             path: path(&[], 1, 1),
-                            key: 41,
+
                             initial_cell: 400,
                         },
                         RootCellKey {
                             path: path(&[], 1, 3),
-                            key: 55,
+
                             initial_cell: 401,
                         },
                     ],
@@ -872,13 +871,7 @@ pub fn description() -> Ui {
         .with_oib_designer_bindings(bindings)
         .with_oib_instances(NamedOibSurface {
             layout: None,
-            // Exact signed D1 predecessor; app bindings/keys survive this append.
-            previous_ui_sha256: [
-                0x71, 0xd0, 0x11, 0x78, 0x2e, 0xf2, 0x30, 0xe3, 0x20, 0x56, 0x83, 0x40, 0xfe, 0xf4,
-                0x53, 0x5c, 0xa8, 0x91, 0xf8, 0x0d, 0x8e, 0xfc, 0x67, 0x3a, 0xf4, 0x52, 0x1b, 0x14,
-                0x44, 0x67, 0x3c, 0xd8,
-            ]
-            .to_vec(),
+
             preview: "preview-scroll".into(),
             preview_stride: 280.,
             inspector_start: 1.,
@@ -893,7 +886,7 @@ pub fn description() -> Ui {
                     } else {
                         format!("{name}-panel")
                     },
-                    inspector: format!("{name}-inspector-placeholder"),
+                    inspector: None,
                 })
                 .collect(),
         })
@@ -913,23 +906,8 @@ pub fn description() -> Ui {
                     ],
                 )
                 .frame([288., 120., 568., 656.]),
-                tooling_panel(
-                    "inspector",
-                    "Selected properties",
-                    [376., 656.],
-                    vec![
-                        canvas(vec![])
-                            .frame([0., 0., 1., 1.])
-                            .key("Audio-inspector-placeholder"),
-                        canvas(vec![])
-                            .frame([0., 1., 1., 1.])
-                            .key("Display-inspector-placeholder"),
-                        canvas(vec![])
-                            .frame([0., 2., 1., 1.])
-                            .key("Power-inspector-placeholder"),
-                    ],
-                )
-                .frame([880., 120., 376., 656.]),
+                tooling_panel("inspector", "Selected properties", [376., 656.], vec![])
+                    .frame([880., 120., 376., 656.]),
             ],
         )
 }

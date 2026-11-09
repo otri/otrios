@@ -633,18 +633,20 @@ impl Document {
             .ok_or("State write without admitted writer")?;
         match request {
             StateRequest::OibInstance {
+                epoch,
                 sequence,
                 operation,
             } => {
                 if !session.oib_edit {
                     return Err("OIB editing requires Space Admin admission".into());
                 }
+                self.check_oib_epoch(&epoch)?;
                 let slot = session.slot.ok_or("Missing OIB writer receipt")?;
                 let mut receipt: Receipt = decode(&payload(&self.tree, &path(2, slot))?)?;
                 if receipt.writer != hash(&writer) {
                     return Err("OIB writer receipt retired".into());
                 }
-                let digest = hash(&bytes(&("oib-instances-v1", &operation))?);
+                let digest = hash(&bytes(&("oib-instances-v2", &epoch, &operation))?);
                 if sequence <= receipt.sequence {
                     if sequence != receipt.sequence || receipt.digest != digest {
                         return Err("Changed OIB replay".into());
@@ -675,16 +677,21 @@ impl Document {
                 self.tree = candidate.tree;
                 Ok(true)
             }
-            StateRequest::OibWrite { sequence, changes } => {
+            StateRequest::OibWrite {
+                epoch,
+                sequence,
+                changes,
+            } => {
                 if !session.oib_edit {
                     return Err("OIB editing requires Space Admin admission".into());
                 }
+                self.check_oib_epoch(&epoch)?;
                 let slot = session.slot.ok_or("Missing OIB writer receipt")?;
                 let mut receipt: Receipt = decode(&payload(&self.tree, &path(2, slot))?)?;
                 if receipt.writer != hash(&writer) {
                     return Err("OIB writer receipt retired".into());
                 }
-                let digest = hash(&bytes(&("oib-v1", &changes))?);
+                let digest = hash(&bytes(&("oib-v2", &epoch, &changes))?);
                 if sequence <= receipt.sequence {
                     if sequence != receipt.sequence || receipt.digest != digest {
                         return Err("Changed OIB replay".into());
@@ -835,6 +842,7 @@ impl Document {
 
 #[derive(Clone)]
 struct Flight {
+    oib_epoch: Option<Vec<u8>>,
     oib: Vec<otrios_interfaces::oib::Change>,
     oib_instance: Option<otrios_interfaces::oib::InstanceOperation>,
     sequence: u64,
@@ -1001,6 +1009,13 @@ impl StateAdapter {
         Ok(())
     }
     fn reconcile(&mut self) -> Result<()> {
+        if self.replica.is_some()
+            && let Some(epoch) = self.flight.as_ref().and_then(|f| f.oib_epoch.as_ref())
+            && *epoch != self.doc.oib_epoch()?
+        {
+            self.flight = None;
+            self.acknowledged = 0;
+        }
         let sequence = if let Some(slot) = self.slot {
             let record: Receipt = decode(&payload(&self.doc.tree, &path(2, slot))?)?;
             if record.writer != hash(&self.writer) {
@@ -1215,6 +1230,7 @@ impl StateAdapter {
             self.pending_since = None;
             let values = std::mem::take(&mut self.pending).into_iter().collect();
             self.flight = Some(Flight {
+                oib_epoch: None,
                 sequence: self
                     .acknowledged
                     .checked_add(1)
@@ -1232,6 +1248,7 @@ impl StateAdapter {
             f.sent = true;
             if let Some(operation) = &f.oib_instance {
                 return encode_state_request(&StateRequest::OibInstance {
+                    epoch: f.oib_epoch.clone().ok_or("Missing captured OIB epoch")?,
                     sequence: f.sequence,
                     operation: operation.clone(),
                 })
@@ -1239,6 +1256,7 @@ impl StateAdapter {
             }
             if !f.oib.is_empty() {
                 return encode_state_request(&StateRequest::OibWrite {
+                    epoch: f.oib_epoch.clone().ok_or("Missing captured OIB epoch")?,
                     sequence: f.sequence,
                     changes: f.oib.clone(),
                 })
@@ -1307,6 +1325,15 @@ impl StateAdapter {
                 // is not another package admission or seed migration.
                 next.oib_ui = Some(ui.clone());
             }
+        }
+        if mounting && self.replica.is_some() && next.actor != self.doc.actor {
+            // A fresh collection may discard unconfirmed RAM intents. Never
+            // rebase an old document's work onto a new incarnation.
+            self.flight = None;
+            self.pending.clear();
+            self.pending_since = None;
+            self.deadline = None;
+            self.acknowledged = 0;
         }
         next.wall = self.doc.wall;
         let cursor = replica.cursor().ok_or("Missing state cursor")?;

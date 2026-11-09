@@ -133,14 +133,9 @@ impl Document {
                     if value.len() > MAX_STRUCTURE_BYTES {
                         return Err("OIB structural source budget".into());
                     }
-                    candidate.change(
-                        &[],
-                        vec![Edit {
-                            path: vec![4, 8],
-                            schema: candidate.extra_schema(4, 8),
-                            value: Some(value),
-                        }],
-                    )?;
+                    let edit = candidate
+                        .oib_source_edit(|source| source.definitions = definitions.clone())?;
+                    candidate.change(&[], vec![edit])?;
                     candidate.activate_oib(candidate.tree.clone())?;
                 }
             } else {

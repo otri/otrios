@@ -6,7 +6,7 @@ pub const AUDIO_ENABLED: StateField = StateField::normalized(3, "audio-enabled",
 pub const DISPLAY_ENABLED: StateField = StateField::normalized(4, "display-enabled", 0);
 pub fn description() -> otrios_interfaces::canvas::StateSchema {
     schema(
-        "oib-designer-state-v1",
+        "oib-designer-state-v2",
         &[VOLUME, BRIGHTNESS, AUDIO_ENABLED, DISPLAY_ENABLED],
     )
 }

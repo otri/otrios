@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! RFC 0035 D1 signed authoring metadata and stable identity proposal.
+//! RFC 0035 signed authoring metadata and stable semantic identities.
 //!
-//! [`super::Seed::designer`] carries these signed records under the required D1
-//! package feature. An absent attachment preserves legacy canonical seed bytes.
-//! See `docs/OIB_DESIGNER_CONTRACT.md` for canonicalization, lowering, bounds and
-//! rejection requirements. Admission/resolution belong in the covered runtime.
+//! [`super::Seed::designer`] carries these records under the required v2
+//! Designer package feature. Compiler mappings do not identify durable registers.
+//! See `docs/OIB_D2_COMPLETION.md` for the v2 work record and the D1 contract for
+//! the earlier delivered design. Admission/resolution belong in the covered runtime.
 use crate::layout::{Binding, Value, ValueType};
 use serde::{Deserialize, Serialize};
 
-pub const FEATURE: &str = "otrios-oib-designer-v1";
+pub const FEATURE: &str = "otrios-oib-designer-v2";
 pub const MAX_DEFINITIONS: usize = 16;
 pub const MAX_AUTHORED_OBJECTS: usize = 64;
 pub const MAX_CLASS_DESCRIPTORS: usize = 16;
@@ -349,8 +349,8 @@ pub struct DefinitionCellMapping {
     pub cell: u64,
 }
 
-/// Immutable signed key table for one root factory. New roots select this table
-/// through Allocation.prototype; descriptor/traversal order cannot assign keys.
+/// Disposable lowering rows for an admitted preset. Durable registers and wire
+/// edits use PropertyAddress; row rank is only an activation-local handle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RootCellMapping {
@@ -362,10 +362,7 @@ pub struct RootCellMapping {
 #[serde(deny_unknown_fields)]
 pub struct RootCellKey {
     pub path: PropertyPath,
-    /// Explicit stable key in 0..64, unique within this factory, never recycled.
-    pub key: u8,
-    /// Explicit Cell.id alias for the signed initial prototype only. Dynamically
-    /// allocated roots use the checked owner/key formula in the contract note.
+    /// Compiler cell handle in the admitted initial layout.
     pub initial_cell: u64,
 }
 

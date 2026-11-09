@@ -607,9 +607,11 @@ pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Res
     };
     write(out, tag, |w| match value {
         StateRequest::OibInstance {
+            epoch,
             sequence,
             operation,
         } => {
+            w.fixed(epoch, 32)?;
             w.u64(*sequence)?;
             let bytes = flexbuffers::to_vec(operation).map_err(err)?;
             if bytes.len() > otrios_interfaces::oib::MAX_BYTES {
@@ -617,10 +619,15 @@ pub fn encode_state_request_into(value: &StateRequest, out: &mut Vec<u8>) -> Res
             }
             w.blob(&bytes)
         }
-        StateRequest::OibWrite { sequence, changes } => {
+        StateRequest::OibWrite {
+            epoch,
+            sequence,
+            changes,
+        } => {
             if changes.is_empty() || changes.len() > otrios_interfaces::oib::MAX_CHANGES {
                 return Err("OIB batch limit".into());
             }
+            w.fixed(epoch, 32)?;
             w.u64(*sequence)?;
             let bytes = flexbuffers::to_vec(changes).map_err(err)?;
             if bytes.len() > otrios_interfaces::oib::MAX_BYTES {
@@ -665,6 +672,7 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
     read(bytes, |r| {
         let message = match r.u8()? {
             38 => {
+                let epoch = r.take(32)?.to_vec();
                 let sequence = r.u64()?;
                 let bytes = r.blob(otrios_interfaces::oib::MAX_BYTES)?;
                 crate::flex_guard::validate(&bytes, 24, 131072, 65536)?;
@@ -674,11 +682,13 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
                     return Err("Noncanonical OIB instance operation".into());
                 }
                 StateRequest::OibInstance {
+                    epoch,
                     sequence,
                     operation,
                 }
             }
             37 => {
+                let epoch = r.take(32)?.to_vec();
                 let sequence = r.u64()?;
                 let bytes = r.blob(otrios_interfaces::oib::MAX_BYTES)?;
                 if bytes.len() > otrios_interfaces::oib::MAX_BYTES {
@@ -702,7 +712,11 @@ pub fn decode_state_request(bytes: &[u8]) -> Result<StateRequest> {
                 {
                     return Err("OIB noncanonical batch".into());
                 }
-                StateRequest::OibWrite { sequence, changes }
+                StateRequest::OibWrite {
+                    epoch,
+                    sequence,
+                    changes,
+                }
             }
             33 => StateRequest::Hello {
                 writer: r.take(16)?.to_vec(),

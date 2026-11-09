@@ -15,6 +15,41 @@ pub const MAX_BATCH_BYTES: usize = 8 * 1024;
 pub const MAX_SOURCE_BYTES: usize = 16 * 1024;
 pub const MAX_PLACEMENT_BYTES: usize = 4 * 1024;
 pub const MAX_CONNECTION_BYTES: usize = 4 * 1024;
+pub const MAX_DOCUMENT_BYTES: usize = 24 * 1024;
+
+/// The one accepted structural source. Layout, semantics, controls, hierarchy
+/// projections and compiler tables are derived from this record and the signed
+/// class implementation surface. Property registers remain independently causal.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentSource {
+    pub definitions: Vec<super::designer::ComponentDefinition>,
+    pub instances: Vec<InstanceRecord>,
+    pub next_instance: u64,
+    pub placements: Vec<Placement>,
+    pub connections: Vec<AppConnection>,
+}
+
+/// Durable root identity and preset selection. Renderer slots are derived for
+/// each admitted revision and deliberately absent from this record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstanceRecord {
+    pub id: u64,
+    pub name: String,
+    pub component: u64,
+    pub prototype: u64,
+}
+impl From<&super::Allocation> for InstanceRecord {
+    fn from(value: &super::Allocation) -> Self {
+        Self {
+            id: value.id,
+            name: value.name.clone(),
+            component: value.component,
+            prototype: value.prototype,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

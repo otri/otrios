@@ -210,6 +210,9 @@ pub(super) fn project_metadata(doc: &mut Document, allocations: &[Allocation]) -
 /// or property mapping is invented by placement; identities keep their resources.
 pub fn project_ui(ui: &mut Ui, allocations: &[Allocation], live: &BTreeSet<u64>) -> Result<()> {
     let seed = super::super::seed(ui).ok_or("Missing OIB seed")?;
+    if seed.designer.is_none() {
+        return Ok(());
+    }
     let doc = metadata(seed)?;
     if doc.placements.is_empty() {
         return Ok(());

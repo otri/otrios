@@ -226,12 +226,12 @@ pub fn validate(seed: &Seed) -> Result<()> {
         .chain(doc.instances.iter().map(|i| i.id.0))
     {
         require(
-            id != 0 && id < 0x1_0000 && raw_ids.insert(id),
+            id != 0 && raw_ids.insert(id),
             "Colliding OIB object-owner namespaces",
         )?;
     }
     require(
-        doc.id.0 < 0x1_0000
+        doc.id.0 != 0
             && class(doc, doc.class)?.implementation == ClassKind::OIBDocument
             && seed
                 .components
@@ -468,7 +468,7 @@ pub fn validate(seed: &Seed) -> Result<()> {
     let mut aliases = BTreeSet::new();
     for m in &doc.mappings.definitions {
         require(
-            m.cell != 0 && m.cell < 0x100_0000 && aliases.insert(m.cell),
+            m.cell != 0 && aliases.insert(m.cell),
             "Colliding OIB definition aliases",
         )?;
         let cell = seed
@@ -676,19 +676,15 @@ pub fn validate(seed: &Seed) -> Result<()> {
                 .ok_or("Missing OIB root mapping")?;
             require(
                 table.cells.len() <= 64
-                    && ordered(table.cells.iter().map(|r| r.key))
+                    && ordered(table.cells.iter().map(|r| r.path.clone()))
                     && editable == table.cells.iter().map(|r| r.path.clone()).collect(),
                 "Missing/extra OIB occurrence mappings",
             )?;
-            let mut keys = BTreeSet::new();
             let mut mapped_paths = BTreeSet::new();
             for row in &table.cells {
                 require(
-                    row.key < 64
-                        && keys.insert(row.key)
-                        && mapped_paths.insert(&row.path)
+                    mapped_paths.insert(&row.path)
                         && row.initial_cell != 0
-                        && row.initial_cell < 0x100_0000
                         && aliases.insert(row.initial_cell),
                     "Colliding OIB path/key/alias",
                 )?;
@@ -1158,32 +1154,4 @@ pub fn validate_layout(ui: &Ui) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// A compatible signed successor may rename/reorder objects, but cannot move a
-/// surviving register or reuse a removed immutable key/alias for another path.
-pub fn compatible_mappings(old: &Seed, new: &Seed) -> bool {
-    let (Some(a), Some(b)) = (&old.designer, &new.designer) else {
-        return old.designer.is_none() && new.designer.is_none();
-    };
-    a.id == b.id
-        && a.mappings
-            .definitions
-            .iter()
-            .all(|old| b.mappings.definitions.iter().any(|new| old == new))
-        && a.mappings.roots.iter().all(|old| {
-            b.mappings
-                .roots
-                .iter()
-                .find(|new| new.prototype == old.prototype)
-                .is_some_and(|new| {
-                    old.cells.iter().all(|r| new.cells.iter().any(|n| n == r))
-                        && new.cells.iter().all(|n| {
-                            old.cells.iter().all(|r| {
-                                n.path == r.path
-                                    || (n.key != r.key && n.initial_cell != r.initial_cell)
-                            })
-                        })
-                })
-        })
 }

@@ -12,9 +12,10 @@ fn setup() -> (Ui, Document) {
     setup_ui(app::ui(&[]))
 }
 fn setup_stacked() -> (Ui, Document) {
-    // Retain the previous wide-track input and signed-default upgrade cases.
+    // A wide-track fixture keeps input/layout edge cases independent of current sample styling.
     let ui = decode_ui(
-        &lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-v24-ui.lz4")).unwrap(),
+        &lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-wide-track-ui.lz4"))
+            .unwrap(),
     )
     .unwrap();
     setup_ui(ui)
@@ -202,68 +203,6 @@ fn restored_brightness_inspector_resets_and_cycles_its_own_authored_label() {
 }
 
 #[test]
-fn authored_label_upgrade_preserves_existing_values_and_explicit_overrides() {
-    use sha2::{Digest, Sha256};
-    let encoded =
-        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-v25-ui.lz4")).unwrap();
-    let old = decode_ui(&encoded).unwrap();
-    assert_eq!(
-        encode_ui(&old).unwrap(),
-        encoded,
-        "optional field preserves old canonical bytes"
-    );
-    let new = app::ui(&[]);
-    assert!(
-        oib::seed(&new)
-            .unwrap()
-            .instance_surface
-            .as_ref()
-            .unwrap()
-            .layout
-            .as_ref()
-            .unwrap()
-            .previous_ui_sha256
-            .contains(&Sha256::digest(&encoded).to_vec())
-    );
-    let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
-    doc.configure_oib(&old).unwrap();
-    let (mut admin, mut sa) = adapter(&old, &mut doc, 1, true);
-    admin
-        .edit_oib(&[
-            (100, Some(Value::Text("Volume".into()))),
-            (200, Some(Value::Text("Custom volume".into()))),
-        ])
-        .unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    doc.set_typed(&[(1, Value::Number(610.)), (2, Value::Number(570.))])
-        .unwrap();
-    let before = doc.clone();
-    let saved = doc.save().unwrap();
-    doc.configure_oib(&new).unwrap();
-    assert_eq!(doc.oib_values(2).unwrap(), before.oib_values(2).unwrap());
-    assert_eq!(
-        doc.oib_allocations().unwrap(),
-        before.oib_allocations().unwrap()
-    );
-    assert_eq!(
-        oib::effective(oib::seed(&new).unwrap(), &doc.oib_values(2).unwrap(), 200).unwrap(),
-        Value::Text("Custom volume".into())
-    );
-    assert_eq!(
-        oib::effective(oib::seed(&new).unwrap(), &doc.oib_values(2).unwrap(), 300).unwrap(),
-        Value::Text("Brightness".into())
-    );
-    let mut recovered = Document::load(old.state_schema.clone(), "oib:test", &saved).unwrap();
-    recovered
-        .replay(&doc.journal_delta(&before).unwrap())
-        .unwrap();
-    assert!(!recovered.configure_oib(&new).unwrap());
-    assert_eq!(recovered.root_hash(), doc.root_hash());
-    assert_eq!(recovered.typed_value(1).unwrap(), Value::Number(610.));
-    assert_eq!(recovered.typed_value(2).unwrap(), Value::Number(570.));
-}
-
-#[test]
 fn compact_defaults_survive_remove_add_restore_and_reset() {
     use otrios_interfaces::scene::TouchResponder;
     let ui = app::ui(&[]);
@@ -328,75 +267,6 @@ fn compact_defaults_survive_remove_add_restore_and_reset() {
     assert_eq!(client.epoch(), epoch);
     assert_eq!(doc.typed_value(1).unwrap(), Value::Number(610.));
     assert_eq!(doc.typed_value(2).unwrap(), Value::Number(570.));
-}
-
-#[test]
-fn signed_compact_default_upgrade_retains_edits_history_and_recovery() {
-    use sha2::{Digest, Sha256};
-    let (old, mut doc) = setup_stacked();
-    let new = app::ui(&[]);
-    let previous_hash = Sha256::digest(encode_ui(&old).unwrap()).to_vec();
-    assert!(
-        oib::seed(&new)
-            .unwrap()
-            .instance_surface
-            .as_ref()
-            .unwrap()
-            .layout
-            .as_ref()
-            .unwrap()
-            .previous_ui_sha256
-            .contains(&previous_hash)
-    );
-    let (mut admin, mut sa) = adapter(&old, &mut doc, 2, true);
-    admin.edit_oib(&compact_changes()).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    admin.instantiate_oib(10, Some("retained".into())).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    admin.remove_oib(20).unwrap();
-    sync(&mut doc, &mut sa, &mut admin);
-    doc.set_typed(&[(2, Value::Number(632.))]).unwrap();
-    let saved = doc.save().unwrap();
-    let before = doc.clone();
-    assert!(doc.configure_oib(&new).unwrap());
-    for branch in [1, 2] {
-        assert_eq!(
-            doc.oib_values(branch).unwrap(),
-            before.oib_values(branch).unwrap()
-        );
-        assert_eq!(
-            doc.oib_live(branch).unwrap(),
-            before.oib_live(branch).unwrap()
-        );
-    }
-    assert_eq!(
-        doc.oib_allocations().unwrap(),
-        before.oib_allocations().unwrap()
-    );
-    assert_eq!(doc.typed_value(2).unwrap(), Value::Number(632.));
-    let mut recovered = Document::load(old.state_schema.clone(), "oib:test", &saved).unwrap();
-    recovered
-        .replay(&doc.journal_delta(&before).unwrap())
-        .unwrap();
-    assert!(!recovered.configure_oib(&new).unwrap());
-    assert_eq!(recovered.root_hash(), doc.root_hash());
-    let mut unlisted = new.clone();
-    if let Some(Presentation::Oib(seed)) = &mut unlisted.presentation {
-        seed.instance_surface
-            .as_mut()
-            .unwrap()
-            .layout
-            .as_mut()
-            .unwrap()
-            .previous_ui_sha256
-            .retain(|h| h != &previous_hash);
-    }
-    assert!(before.clone().configure_oib(&unlisted).is_err());
-    let mut changed_label = new.clone();
-    if let Some(Presentation::Oib(seed)) = &mut changed_label.presentation {
-        seed.cells[0].default = Value::Text("Unrelated contract change".into());
-    }
-    assert!(before.clone().configure_oib(&changed_label).is_err());
 }
 
 #[test]
@@ -738,7 +608,16 @@ fn concurrent_values_remain_draft_conflicts_until_an_observing_resolution() {
     let active = doc.oib_values(2).unwrap();
     let generation = doc.oib_status().unwrap().generation;
     doc.receive(&mut sb, &b_bytes).unwrap();
-    assert_eq!(doc.oib_status().unwrap().conflicts, vec![100]);
+    assert_eq!(
+        doc.oib_status().unwrap().conflicts,
+        vec![
+            otrios_core::canvas::oib::document::address_for_cell(
+                otrios_core::canvas::oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(),
+                100
+            )
+            .unwrap()
+        ]
+    );
     assert_eq!(doc.oib_values(2).unwrap(), active);
     assert_eq!(doc.oib_status().unwrap().generation, generation);
     assert!(
@@ -778,7 +657,16 @@ fn disjoint_changes_merge_and_clear_conflicts_with_a_concurrent_override() {
         .unwrap();
     doc.receive(&mut sa, &issue(&mut a)).unwrap();
     doc.receive(&mut sb, &issue(&mut b)).unwrap();
-    assert_eq!(doc.oib_status().unwrap().conflicts, vec![201]);
+    assert_eq!(
+        doc.oib_status().unwrap().conflicts,
+        vec![
+            otrios_core::canvas::oib::document::address_for_cell(
+                otrios_core::canvas::oib::seed(&doc.oib_compiled(2).unwrap().0).unwrap(),
+                201
+            )
+            .unwrap()
+        ]
+    );
 }
 #[test]
 fn invalid_and_unauthorized_edits_keep_the_active_ui_and_receipts_atomic() {
@@ -1499,7 +1387,20 @@ fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
     .unwrap();
     assert!(new.id > old.id);
     assert_eq!(new.slot, old.slot);
-    assert_ne!(new_cell, old_cell);
+    assert_eq!(new_cell, old_cell, "compiler handles may be reused");
+    assert_ne!(
+        doc.oib_property_leaf(1, new_cell)
+            .unwrap()
+            .register()
+            .unwrap()
+            .schema(),
+        pinned
+            .oib_property_leaf(1, old_cell)
+            .unwrap()
+            .register()
+            .unwrap()
+            .schema()
+    );
     let active = doc.oib_status().unwrap().active_root;
     let generation = doc.oib_status().unwrap().generation;
     for (session, request) in [(&mut se, &edit), (&mut sr, &remove), (&mut sc, &copy)] {
@@ -1511,7 +1412,12 @@ fn delayed_edits_remove_and_duplicate_cannot_address_a_reused_renderer_slot() {
         assert_eq!(doc.oib_status().unwrap().active_root, active);
         assert_eq!(doc.oib_status().unwrap().generation, generation);
         assert_eq!(doc.oib_allocations().unwrap().len(), 3);
-        assert!(!doc.oib_values(1).unwrap().contains_key(&old_cell));
+        assert!(
+            otrios_core::merkle::Snapshot::from_bytes(&doc.save().unwrap())
+                .unwrap()
+                .subtree(&[4, 1, 1, old.id, 0, 1, 100])
+                .is_err()
+        );
         assert_eq!(doc.oib_values(1).unwrap()[&new_cell], None);
     }
     assert!(pinned.oib_values(1).unwrap().contains_key(&old_cell));
@@ -1569,10 +1475,7 @@ fn invalid_restore_retains_the_active_roster_and_does_not_consume_fresh_ids() {
     assert!(doc.oib_status().unwrap().error.is_none());
     let allocations = doc.oib_allocations().unwrap();
     assert_eq!(allocations.len(), 2);
-    assert_eq!(
-        allocations[0].id, 65539,
-        "failed restoration consumes no IDs"
-    );
+    assert_eq!(allocations[0].id, 32, "failed restoration consumes no IDs");
     assert_eq!(
         allocations.iter().map(|a| a.prototype).collect::<Vec<_>>(),
         [20, 30]
@@ -1603,123 +1506,6 @@ fn instance_requests_are_authorized_and_budgeted_before_allocation() {
     for id in doc.oib_live(2).unwrap() {
         doc.oib_compiled_selected(2, Some(id)).unwrap();
     }
-}
-
-#[test]
-fn exact_signed_o1_upgrade_preserves_properties_and_journal_recovery() {
-    use sha2::{Digest, Sha256};
-    let bytes =
-        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-o1-ui.lz4")).unwrap();
-    let old = decode_ui(&bytes).unwrap();
-    let new = app::ui(&[]);
-    assert_eq!(
-        Sha256::digest(&bytes).as_slice(),
-        oib::seed(&new)
-            .unwrap()
-            .instance_surface
-            .as_ref()
-            .unwrap()
-            .previous_ui_sha256
-    );
-    let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
-    doc.configure_oib(&old).unwrap();
-    let (mut a, mut sa) = adapter(&old, &mut doc, 1, true);
-    a.edit_oib(&[(201, Some(Value::Color([7, 8, 9, 255])))])
-        .unwrap();
-    sync(&mut doc, &mut sa, &mut a);
-    doc.set_typed(&[(1, Value::Number(730.))]).unwrap();
-    let checkpoint = doc.save().unwrap();
-    let before = doc.clone();
-    assert!(doc.configure_oib(&new).unwrap());
-    assert_eq!(
-        doc.oib_values(2).unwrap()[&201],
-        Some(Value::Color([7, 8, 9, 255]))
-    );
-    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(730.));
-    let mut restored = Document::load(old.state_schema.clone(), "oib:test", &checkpoint).unwrap();
-    restored
-        .replay(&doc.journal_delta(&before).unwrap())
-        .unwrap();
-    assert!(!restored.configure_oib(&new).unwrap());
-    assert_eq!(restored.root_hash(), doc.root_hash());
-    let mut incompatible = new.clone();
-    if let Some(Presentation::Oib(seed)) = &mut incompatible.presentation {
-        seed.cells[0].default = Value::Text("changed contract".into());
-    }
-    let mut original = before;
-    assert!(original.configure_oib(&incompatible).is_err());
-}
-
-#[test]
-fn signed_layout_surface_upgrade_keeps_retained_instances_and_properties() {
-    let bytes =
-        lz4_flex::decompress_size_prepended(include_bytes!("fixtures/oib-o2-ui.lz4")).unwrap();
-    let old = decode_ui(&bytes).unwrap();
-    let new = app::ui(&[]);
-    assert!(oib::seed(&new).unwrap().cells.len() > oib::seed(&old).unwrap().cells.len());
-    assert_ne!(old.layout, new.layout);
-    let mut doc = Document::new(old.state_schema.clone(), "oib:test").unwrap();
-    doc.configure_oib(&old).unwrap();
-    let (mut a, mut sa) = adapter(&old, &mut doc, 1, true);
-    for name in ["retained", "removed"] {
-        a.instantiate_oib(10, Some(name.into())).unwrap();
-        sync(&mut doc, &mut sa, &mut a);
-    }
-    a.edit_oib_instance_property(65538, "label", Some(Value::Text("Keep".into())))
-        .unwrap();
-    sync(&mut doc, &mut sa, &mut a);
-    a.remove_oib(65539).unwrap();
-    sync(&mut doc, &mut sa, &mut a);
-    doc.set_typed(&[(1, Value::Number(730.))]).unwrap();
-    let checkpoint = doc.save().unwrap();
-    let before = doc.clone();
-    assert!(doc.configure_oib(&new).unwrap());
-    assert_eq!(
-        doc.oib_allocations().unwrap(),
-        before.oib_allocations().unwrap()
-    );
-    for branch in [1, 2] {
-        assert_eq!(
-            doc.oib_live(branch).unwrap(),
-            before.oib_live(branch).unwrap()
-        );
-        let values = doc.oib_values(branch).unwrap();
-        for (id, value) in before.oib_values(branch).unwrap() {
-            assert_eq!(values[&id], value);
-        }
-    }
-    assert!(doc.oib_values(2).unwrap().contains_key(&112));
-    assert_eq!(doc.typed_value(1).unwrap(), Value::Number(730.));
-    let mut restored = Document::load(old.state_schema.clone(), "oib:test", &checkpoint).unwrap();
-    restored
-        .replay(&doc.journal_delta(&before).unwrap())
-        .unwrap();
-    assert!(!restored.configure_oib(&new).unwrap());
-    assert_eq!(restored.root_hash(), doc.root_hash());
-
-    let (mut client, mut session) = mounted_client(&new, &mut doc);
-    pump_client(&mut client, &mut doc, &mut session);
-    let scene = client.scene().unwrap();
-    let seed = oib::seed(&new).unwrap();
-    let surface = seed.instance_surface.as_ref().unwrap();
-    for (viewport, inset) in [
-        (surface.preview_viewport, 16.),
-        (seed.inspector_viewport, 16.),
-    ] {
-        let path = scene.path(u32::from(viewport)).unwrap();
-        let p = path.last().unwrap();
-        assert_eq!(p.origin[1] + p.node.frame.height * p.scale + inset, 776.);
-    }
-    client.set_viewport([800., 1280.]).unwrap();
-    let tall = client.scene().unwrap();
-    let path = tall.path(u32::from(seed.inspector_viewport)).unwrap();
-    let p = path.last().unwrap();
-    assert_eq!(p.origin[1] + p.node.frame.height * p.scale + 16., 1256.);
-    let mut incompatible = new.clone();
-    if let Some(Presentation::Oib(seed)) = &mut incompatible.presentation {
-        seed.cells[0].default = Value::Text("changed contract".into());
-    }
-    assert!(doc.configure_oib(&incompatible).is_err());
 }
 
 #[test]

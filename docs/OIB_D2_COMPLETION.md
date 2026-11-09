@@ -1,225 +1,148 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB D2 completion
 
-Date: 2026-11-09. Status: **selected; contract and implementation in progress**.
+Date: 2026-11-09. Status: **selected; implementation in progress, not deployed**.
 Branch: `feat/oib-d2-completion`, from `39156f2`.
 
-## Disposable development data
+The original repository remains on `main`. Work is isolated in the D2 worktree.
+The local authoring prototype was checkpointed in `6c954f0` before the format
+cleanup. The live Frame/Web release still uses state protocol v28.
 
-On 2026-11-09 the user clarified that existing data does not need preservation.
-D2 may introduce a new document/checkpoint format and initialize fresh affected
-collections. Predecessor migration, old checkpoint decoding and preservation of
-current fixture identities/overrides are no longer acceptance requirements.
-Initialize a fresh document/collection epoch so stale operations from a discarded
-document cannot target newly created objects.
+## Selected clean break
 
-This changes upgrade policy, not the behavior of the new runtime: ordinary design
-edits must still respect app-value ownership, causal conflicts, atomic publication,
-durable receipts/restart and local input safety. Keep release-control v1, signature
-verification, signed class/field/action admission and explicit resource bounds.
-A code rollback may initialize fresh data compatible with its signed schema.
+The user approved discarding existing PoC data on 2026-11-09. Initialize fresh
+OIB collections for this cutover. No predecessor migration, old checkpoint reader
+or preservation of existing values, identities or overrides is required. A fresh
+collection has a fresh document epoch, so a delayed operation from discarded data
+cannot target a replacement object. A signed code rollback can initialize fresh
+data compatible with that release.
 
-## Proposed cleanup before completing D2
+Keep ordinary runtime guarantees: app-value ownership, causal conflicts and
+observed Reset, atomic publication, durable receipts/restart, input safety,
+signed class/field/action admission, resource bounds and release-control v1.
+Disposable data does not relax these guarantees.
 
-The current prototype extends D1's flat signed-layout lowering. With disposable
-data, the recommended boundary is a clean document model instead:
+The selected cleanup is:
 
-- One canonical authored graph owns definitions, instances, slots, placement and
-  typed connections. Compile it into the existing layout, scene, semantics and
-  responders. Remove the parallel authored layout tree and object-mapping tables.
-- Key causal properties directly by stable typed addresses. Remove static cell
-  aliases, prototype-specific key tables, arithmetic ID ranges and renderer-slot
-  identity bookkeeping. Renderer IDs remain disposable compilation resources.
-- Represent palette entries as admitted definitions and binding/default presets.
-  Remove fake palette-only live instances and empty inspector placeholders.
-- Use one bounded structural edit batch for creation, movement, removal, rename
-  and reconnection. Keep causal property updates independently checked and derive
-  all inspector/code entry points from those contracts.
-- Replace predecessor hash allowlists, old allocation decoders and compatibility
-  branches with fresh-schema initialization. Remove tests that only qualify old
-  formats; retain the behavioral race, conflict, reset, bounds, input and restart
-  cases against the new format.
+- One authored graph for definitions, instances, slots, geometry and connections;
+  derive the application layout, semantics, responders and object mappings.
+- Full typed property addresses as causal keys and wire identities. Compiler
+  handles and renderer slots are temporary resources.
+- Palette definitions and binding/default presets, with no fake live objects or
+  empty inspector placeholders.
+- One bounded structural editing API, with an observed structural generation;
+  retain independent causal contexts for literal properties.
+- Fresh initialization instead of predecessor hash allowlists and legacy readers.
 
-Reuse the Merkle/CRDT primitives, shared layout/render/input engines, retained
-tooling, host transport and signed deployment machinery. This cleanup does not
-select D3 typography/content behaviors, images, XR or general transactions.
-The prototype below is local and has not been deployed; its useful behavior
-tests and tooling can carry forward without preserving its overlay encoding.
+Reuse the existing Merkle library, layout/render/input engines, retained tooling,
+transport and signed publication workflow. D3 typography/content, images, XR,
+general transactions and complete UI transfer remain separate work. Continue to
+refuse OIB data/UI transfer until a complete portable format is implemented.
 
-This milestone completes the bounded hierarchy-authoring stage of
-[RFC 0035](rfcs/0035-oib-component-designer.md#d2-bounded-hierarchy-authoring).
-The delivered [Studio slice](OIB_DESKTOP_STUDIO_D2.md) remains the baseline.
-The original repository stays on main; implementation uses its separate worktree.
+## Implemented format foundation
 
-## Scope and ownership
+This branch now requires package feature and seed format `otrios-oib-v2`, plus
+`otrios-oib-designer-v2` for Designer metadata.
+The app schemas are `oib-designer-state-v2` and `live-ui-state-v2`; deployment must
+initialize fresh collection identities before opening them. Old OIB
+packages/checkpoints are rejected. State protocol v29 is the unreleased
+candidate in Rust, browser session code and publication tooling. The opening
+release-control v1 envelope is unchanged.
 
-Admit nested factory insertion, placement into declared slots, owned-child moves
-and removal, definition structure editing, and explicit source connections.
-Use the existing OIB classes, layout, causal property registers, signed app
-handlers and selectors. Neither client-supplied executable/layout bytes nor new
-class implementations are an authoring operation. Images, typography, fit-content,
-composable D3 behaviors, inherited-child overrides, detachment and document undo
-remain outside D2. Portable transfers and the Components conversion remain a
-separate milestone; keep the existing transfer refusal until complete UI export
-and replacement are implemented and qualified.
+OIB edits carry a 32-byte document epoch before their sequence number. The epoch
+binds the collection incarnation, signed OIB source and admitted schema/selector/action grants; it survives a restart of
+the same collection and changes on fresh initialization. The authority checks it
+before allocation or receipt replay. Clients capture that epoch when queuing an
+intent; restoring RAM intents against a different mounted document discards them
+instead of substituting the new epoch. An ordinary presentation update with the
+identical signed OIB source retains the epoch. Changing that signed source or those grants requires
+a fresh collection; predecessor-specific rebasing is gone.
 
-Runtime transforms, validation and tests remain in LGPL core. Public records,
-signed admission descriptions, app fixtures, tooling and documentation remain
-Apache-2.0. Reuse existing dependencies and safe Rust.
+Property changes and inspector actions carry `PropertyAddress`, including the
+complete occurrence ancestry. Conflict status stores these same addresses.
+Numbers used by local compiler tables do not identify durable registers or wire
+edits. Merkle property paths are direct tuples:
 
-## Structural contract
+| Scope | Path |
+| --- | --- |
+| Definition | `[4, branch, 0, definition, node, property]` |
+| Occurrence | `[4, branch, 1, instance, reference_count, references..., node, property]` |
 
-One batch names the observed active document generation and at most 16 typed
-operations. The authority checks generation and coherent draft/active state
-before allocation. Apply operations to a disposable candidate and validate the
-complete closure once before publication. An operation may temporarily leave a
-reference unresolved within its batch only if a later explicit repair fixes it.
-Rejection persists a bounded diagnostic and the ordinary sequence receipt;
-it changes no graph, allocation counter, property register or app value.
-Retries require a refreshed generation and an explicit user action. Exact replay
-returns the original outcome, including after a lost reply and process restart.
+Branch 1 is the causal draft; branch 2 is the active value projection. The existing
+reference-path ceiling is eight, so these paths fit the Merkle depth ceiling of
+16. The existing fanout, node, edit and byte limits still apply. Property schema
+hashes bind the app scope and canonical typed address under
+`OTriOS\0oib-property-v2\0`.
 
-An instance destination is either the admitted document canvas or a declared slot
-at a full object occurrence address. An insertion anchor is a stable sibling ID;
-absence appends. Ownership, visual parent and order are explicit. Moving a child
-preserves its identity, bindings and property registers. Slot-owned objects are
-separate from inherited definition nodes. Never reparent inherited content through
-an instance selection. Definition edits name the shared definition explicitly.
+There is one canonical structural record at `[4,4]`, `DocumentSource`, containing
+shared definitions, durable instance descriptors, the monotonic allocation cursor,
+placements and typed app connections. The old independent allocation/cursor,
+definition, placement and connection records have been consolidated. Structural
+source is bounded to 24 KiB, including the existing 16 KiB definition, 4 KiB
+placement and 4 KiB connection sub-budgets; the combined resident authored/causal
+budget remains 64 KiB.
 
-New authority IDs and new property addresses are allocated monotonically and are
-never reused. A fresh duplicate remaps owned objects and their internal references
-while retaining definition links and admitted external app bindings. Names, list
-rank and renderer slots never supply identity. Failed batches allocate nothing.
-Renderer resources are reusable only after the old active graph and local input
-release them. Removing a referenced object requires explicit repairs/removals in
-the same batch; there is no implicit dangling-reference cleanup or name matching.
+`InstanceRecord` contains no renderer slot. The runtime derives slots from resident
+identities. New object IDs follow the highest admitted initial identity; there is
+no reserved object-ID range or object-ID-to-cell arithmetic. Property handles may
+be reused after reclamation; delayed edits retain their old semantic address.
+The active closure hashes the active graph projection, excluding the allocation
+cursor and inactive resident bookkeeping. Thus an invalid draft cannot change a
+pinned active closure. Surviving causal registers remain unchanged by reclamation.
 
-Signed class/child/slot rules and admitted factories bound every structural edit.
-Source edits select typed literal/forwarded sources or existing admitted app
-binding/action pairs. Reconnecting a value also updates its displayed source,
-semantics and responder together. A mutable source cannot grant a new action,
-field, effect or cross-Space reference. Forwarding cycles and incompatible sources
-reject the whole candidate. Ordinary property edits retain independent causality;
-a structure batch does not overwrite unrelated property registers.
+The definition-lowering cache uses the signed admission identity and definition
+content hash, so roster or placement changes do not invalidate it unnecessarily.
+The production Designer fixture no longer emits empty per-preset inspector nodes.
+Legacy allocation decoding, predecessor allowlists and migration-only tests were
+removed. The retained wide-track fixture uses the current format and qualifies
+input/layout behavior rather than an obsolete migration.
 
-## Projection, storage and activation
+## Remaining structural cutover
 
-Persist authored structural data and allocation metadata separately from the
-immutable signed admission surface. Resolve the current definitions into the
-existing layout and property mappings; do not introduce a sample-specific scene
-renderer. Retain surviving explicit cell identities through renames and reorders.
-Expanded references and slot content count toward all existing limits.
+This foundation is **not the complete graph compiler or D2 acceptance**. The signed
+admission surface still carries the flat application layout, property-output
+aliases and object/property lowering tables. Remove those by generating them from
+the canonical definition graph. Replace palette-only factory objects with explicit
+presets, then consolidate the older lifecycle requests and definition/hierarchy
+batch variants into the single editing contract. Do not retain two permanent
+runtime modes to preserve old PoC data.
 
-Compile layout, paint resources, semantics and responders as one candidate.
-Connected clients wait for confirmed edits and finished gestures/composition
-before activation. Removed selections, focus and captures are cancelled against
-their old full identities; they never transfer to recycled renderer indices.
+The checkpointed authoring prototype already exercises shared rename/reorder,
+exposed forwarding, reference assignments, owned slot insertion/movement/removal,
+subtree duplication, placement and admitted app binding/effect reconnection. Carry
+those behaviors and their tests forward to the graph compiler. Definition/node
+creation and deletion and the complete corresponding editor surface remain work.
+The production signed fixture must declare useful slots before live slot authoring
+can be accepted; test-only slot declarations are insufficient.
 
-Persist state and receipts before acknowledging or publishing. Recovery validates
-the signed admission surface and reconstructs the same canonical graph, identities
-and outcomes. Keep the existing six live roots, ten resident descriptors, 64 cells,
-64 KiB draft/causal budget, 512 scene nodes, 128 controls and 128 KiB layout limit.
-Do not raise ceilings to accommodate the fixture. Specify additional structural
-source/work limits in the public contract before adding its encoding to state.
+## Validation and completion gates
 
-The new wire format must bump matching browser/native/server state identifiers.
-Release control remains v1 on the shared socket, with the current release hello
-on reconnect and code discovery independent of state decoding. Qualify fresh
-schema initialization and signed code rollback before live activation; reseeding
-affected test data is permitted and no old-data migration is required.
+Use Rust 1.90.0 and the committed lockfile. Runtime code/tests remain LGPL core;
+contracts, app descriptions, tooling and docs remain Apache-2.0. No dependency or
+unsafe-code addition is needed for this cleanup.
 
-## Acceptance gates
+Focused development evidence for the format foundation:
 
-- Real Studio controls insert, move, edit and remove nested owned content; enforce
-  slot class/cardinality and protected inherited nodes. Numeric placement precedes
-  optional drag tools. Definition edits propagate to linked instances.
-- Rename/reorder preserves surviving full addresses and overrides. Referenced-node
-  removal rejects without a repair and succeeds with an explicit atomic repair.
-- Two clients racing moves yield one acceptance and one durable rejection. A
-  deliberate refreshed retry succeeds. Lost-reply replay and authority restart
-  preserve the accepted order, property causality, IDs and receipt outcomes.
-- Connection changes select only signed sources/actions, retain app values and
-  agree with rendered/semantic/control bindings. Invalid cycles, types, references,
-  geometry and expansion/resource overflow preserve the exact active graph.
-- Focus, composition, held input and delayed retired actions retain or safely
-  cancel their original targets through structural activation and resource reuse.
-- Focused core and process tests pass, followed by signed ARM/Wasm builds and
-  actual Frame/Web authoring acceptance with a compatible code rollback.
+- OIB causal properties, lifecycle, invalid draft publication and gesture tests:
+  31 passed during this increment; obsolete migration-only cases were removed.
+- Definition authoring: 11 passed. Designer fixture: 14 passed. Designer runtime:
+  15 passed. New format/epoch tests: five passed.
+- The hierarchy authoring suite passed eight cases, including a three-child slot
+  cardinality rejection that verifies no identities are consumed. Navigation and
+  property-source suites passed 11 and seven cases, respectively.
+- A freshly built `dashboard-server` passed both `spaces_process d1::d2_` tests:
+  two passed, none skipped. These cross a real authority process and cover races,
+  lost accepted/rejected replies, exact replay, kill/restart, read-only projection,
+  stale order operations and unchanged app/other-app values. The separate real
+  authority lost-reply/reclamation/retired-path restart test also passed.
+- Workspace Clippy passed with all targets, the server/canvas/host-sync/Merkle
+  features and `-D warnings`. The 41 focused OIB library cases passed across the
+  initial run and focused reruns after replacing obsolete numeric-ID assumptions.
+- Shared session/update/text-input Node suites: 36 passed, including codec agreement
+  and upgrade discovery when state negotiation/recovery is unavailable.
 
-Record actual commands, release identities, results and remaining limitations.
-Do not claim D2 completion from semantic graph tests or artifact compilation alone.
-Do not open a PR until the complete selected scope and live acceptance are ready.
-
-## First increment: shared definition editing
-
-Implemented on the branch; **not yet built for ARM/Wasm or live-qualified**.
-The live environment still uses v28. This increment introduces candidate state
-protocol **v29**, with matching Rust/browser/publisher declarations and unchanged
-release-control v1. It extends the existing Admin-only instance request:
-
-```text
-OibInstance { sequence, operation: Definitions(DefinitionBatch) }
-DefinitionBatch { generation: u64, operations: [DefinitionEdit] }
-```
-
-`otrios_interfaces::oib::authoring` fixes the operation names and typed fields:
-
-| Operation | Fields | Admitted effect |
-| --- | --- | --- |
-| RenameDefinition | definition, name | Change the shared display name |
-| RenameNode | definition, node, name | Change one template node's display name |
-| MoveNode | definition, node, owner, visual_parent, before | Move an existing local node using explicit owner and visual parent; preserve identity and parent-local design geometry |
-| Expose | definition, property, targets | Replace an existing exposed property's ordered forwarding targets |
-| ConnectReference | definition, reference, target, optional source | Set/remove an authored literal or forwarded assignment at an existing reference boundary |
-
-Names are 1–64 NUL-free UTF-8 bytes. Batches have 1–16 operations, a nonzero
-generation and at most 8 KiB of encoded source. Paths retain their existing
-typed identities and depth limits. Forwarding target arrays are strictly ordered
-by full path, with no duplicates. App bindings remain protected in this increment;
-literal or forwarding edits cannot disconnect an indirectly bound endpoint.
-Node/definition creation and deletion, owned slot content, placement editors and
-app binding/action reconnection remain subsequent D2 work.
-
-Encoding uses the existing locked Serde/FlexBuffers serializers and externally
-tagged variant names. Accepted structure lives in `[4,8]` as the canonical vector
-of definition records, bounded to 16 KiB and included in the existing 64 KiB
-resident authored/causal budget. Definition/node identity order is canonical;
-visual-child order remains authored. Recovery reencodes the snapshot and requires
-byte equality. Its nodes/classes, roots, defaults, reference-definition links,
-slot declarations and app binding grants must match the signed admission surface.
-Only the mutable fields listed above may differ. Renderer mappings and causal
-property registers are not snapshot inputs.
-
-The source hash participates in both active and draft closure hashes under the
-`OTriOS\0oib-structure-v1\0` domain. There is one accepted structural snapshot:
-an invalid candidate is rejected, rather than retained as an invalid structural
-draft. Property conflicts still retain their existing draft/active registers.
-Reclamation preserves `[4,8]`; read-only projections include the same active
-source while excluding private property drafts. A bounded one-entry compiled-UI
-cache is keyed by signed admission identity and structural source hash.
-
-Studio exposes Move shared earlier/later for selected definition children.
-The Components tree follows authored visual order and retains actual ownership
-separately. These tools use the existing edit/test, dirty-draft, input and Space
-gates. Source-aware property/reset behavior uses the current authored definitions.
-
-Initial focused evidence, using Rust/Cargo 1.90.0 from the existing private
-builder environment with `--locked --offline`:
-
-- `cargo test -p otrios-core --features canvas --test oib_definition_authoring`:
-  11 passed, covering projection, stable cells, literal/forwarded reset sources,
-  explicit repair, invalid closure rejection, immutable snapshot admission,
-  authority generation races and receipt recovery.
-- The focused library test
-  `desktop_studio_shared_definition_tools_preserve_instances_values_and_stale_targets`
-  passed using actual generated tooling actions.
-- A freshly built `dashboard-server`, supplied as `OTRIOS_SPACES_SERVER`, passed
-  `spaces_process d1::d2_definition_race_lost_reply_restart_and_readonly_projection_preserve_values`
-  (one passed, 8.07 seconds). This crosses a real authority process and exercises
-  a move race, lost accepted/rejected replies, kill/restart, exact replay, explicit
-  retry, read-only projection and unchanged app/other-app data.
-- `cargo clippy -p otrios-core --features canvas,merkle --lib -- -D warnings`
-  passed. The shared session/update/text-input Node suites passed all 36 tests.
-
-These are development checks, not completed D2 acceptance. Signed deployment,
-compatible v29 rollback and actual Frame/Web authoring checks remain outstanding.
+These are local development checks, not Frame/Web acceptance or Linux shared-memory
+IPC qualification. Finish the remaining cutover, required repository checks, signed
+ARM/Wasm build and deployment, fresh-collection activation and focused Frame/Web
+acceptance before opening a PR. Keep a compatible signed code rollback available.
+After user acceptance, follow the existing builder-maintenance workflow.

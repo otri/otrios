@@ -11,7 +11,7 @@ pub mod connections;
 mod hierarchy;
 pub mod placement;
 mod sources;
-pub use admission::{compatible_mappings, validate, validate_layout};
+pub use admission::{validate, validate_layout};
 pub use hierarchy::{HierarchyKey, HierarchyRow, HierarchyScope, hierarchy};
 pub use sources::{
     AuthoredOrigin, PropertyRegisterView, PropertySources, SourceHop, SourceRole, property_sources,
@@ -231,6 +231,15 @@ pub fn cell_for_address(
     allocations: &[Allocation],
     address: &PropertyAddress,
 ) -> Result<u64> {
+    if seed.designer.is_none() {
+        return seed
+            .cells
+            .iter()
+            .find_map(|cell| {
+                (address_for_cell(seed, cell.id).ok().as_ref() == Some(address)).then_some(cell.id)
+            })
+            .ok_or_else(|| "Unknown OIB property address".into());
+    }
     let doc = metadata(seed)?;
     match address {
         PropertyAddress::Placement { .. } => {
@@ -252,7 +261,8 @@ pub fn cell_for_address(
                 .iter()
                 .find(|a| a.id == instance.0)
                 .ok_or("Unknown resident OIB root")?;
-            let root = self::instance(doc, InstanceId(allocation.prototype))?;
+            let root = self::instance(doc, *instance)
+                .or_else(|_| self::instance(doc, InstanceId(allocation.prototype)))?;
             let descriptor = property(doc, root.definition, path)?;
             if !descriptor.policy.live_literal
                 || descriptor.editor == PropertyEditor::ReadOnly
@@ -264,27 +274,91 @@ pub fn cell_for_address(
                 .mappings
                 .roots
                 .iter()
-                .find(|m| m.prototype.0 == allocation.prototype)
+                .find(|m| m.prototype == *instance)
+                .or_else(|| {
+                    doc.mappings
+                        .roots
+                        .iter()
+                        .find(|m| m.prototype.0 == allocation.prototype)
+                })
                 .and_then(|m| m.cells.iter().find(|m| m.path == *path))
                 .ok_or("Unmapped OIB occurrence property")?;
-            lower(allocation, row)
+            if root.id == *instance && allocation.id != allocation.prototype {
+                Ok(row.initial_cell)
+            } else {
+                lower(seed, allocation, row)
+            }
         }
     }
 }
-pub(super) fn lower(allocation: &Allocation, row: &RootCellKey) -> Result<u64> {
-    if row.key >= 64 {
-        return Err("Invalid OIB stable property key".into());
+/// Inverse of the disposable lowering table. Only this semantic address is
+/// written to the wire and Merkle state; numeric cells are compiler handles.
+pub fn address_for_cell(seed: &Seed, cell: u64) -> Result<PropertyAddress> {
+    if let Some(doc) = &seed.designer {
+        if let Some(row) = doc.mappings.definitions.iter().find(|row| row.cell == cell) {
+            return Ok(PropertyAddress::Definition {
+                definition: row.definition,
+                node: row.node,
+                property: row.property,
+            });
+        }
+        for table in &doc.mappings.roots {
+            if let Some(row) = table.cells.iter().find(|row| row.initial_cell == cell) {
+                return Ok(PropertyAddress::Occurrence {
+                    instance: table.prototype,
+                    path: row.path.clone(),
+                });
+            }
+        }
+        return Err("Unknown OIB property address".into());
     }
+    let cell = seed
+        .cells
+        .iter()
+        .find(|row| row.id == cell)
+        .ok_or("Unknown OIB property")?;
+    let property = PropertyId(cell.inherit.unwrap_or(cell.id));
+    Ok(if cell.inherit.is_some() {
+        PropertyAddress::Occurrence {
+            instance: InstanceId(cell.owner),
+            path: PropertyPath {
+                references: vec![],
+                node: NodeId(1),
+                property,
+            },
+        }
+    } else {
+        PropertyAddress::Definition {
+            definition: DefinitionId(cell.owner),
+            node: NodeId(1),
+            property,
+        }
+    })
+}
+pub(super) fn lower(seed: &Seed, allocation: &Allocation, row: &RootCellKey) -> Result<u64> {
     if allocation.id == allocation.prototype {
         return Ok(row.initial_cell);
     }
-    allocation
-        .id
-        .checked_sub(0x1_0000)
-        .and_then(|n| n.checked_mul(64))
-        .and_then(|n| n.checked_add(0x100_0000))
-        .and_then(|n| n.checked_add(u64::from(row.key)))
-        .ok_or_else(|| "OIB property identity exhausted".into())
+    let doc = metadata(seed)?;
+    let table = doc
+        .mappings
+        .roots
+        .iter()
+        .find(|t| t.prototype.0 == allocation.prototype)
+        .ok_or("Missing OIB preset lowering")?;
+    let rank = table
+        .cells
+        .iter()
+        .position(|r| r.path == row.path)
+        .ok_or("Unknown OIB property")?;
+    seed.cells
+        .iter()
+        .map(|c| c.id)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .and_then(|base| base.checked_add(u64::from(allocation.slot) * 64 + rank as u64))
+        .ok_or_else(|| "OIB compiler handle capacity exhausted".into())
 }
 /// Resolve a signed source alias, never an inherited-property/name guess.
 pub fn cell_for_alias(
@@ -305,7 +379,7 @@ pub fn cell_for_alias(
         .find(|m| m.prototype.0 == allocation.prototype)
         .and_then(|m| m.cells.iter().find(|r| r.initial_cell == alias))
         .ok_or("Unknown OIB property alias")?;
-    lower(allocation, row)
+    lower(seed, allocation, row)
 }
 fn occurrence_cell(doc: &Document, instance: InstanceId, path: &PropertyPath) -> Option<u64> {
     doc.mappings
@@ -486,7 +560,7 @@ pub(in crate::canvas) fn expanded_metadata(
             .clone();
         table.prototype = InstanceId(allocation.id);
         for row in &mut table.cells {
-            row.initial_cell = lower(allocation, row)?;
+            row.initial_cell = lower(seed, allocation, row)?;
         }
         doc.mappings.roots.push(table);
         for mapping in original
@@ -593,17 +667,7 @@ fn object_rows(doc: &Document) -> Result<Vec<ObjectInfo>> {
         layout_node: None,
     }];
     let mut pending: Vec<_> = doc.instances.iter().collect();
-    pending.sort_by_key(|i| {
-        (
-            i.id != doc.presented_root,
-            if i.id.0 >= 0x1_0000 {
-                i.id.0
-            } else {
-                u64::from(i.order)
-            },
-            i.id,
-        )
-    });
+    pending.sort_by_key(|i| (i.id != doc.presented_root, i.order, i.id));
     let mut emitted = BTreeSet::new();
     while !pending.is_empty() {
         let index = pending
