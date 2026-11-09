@@ -35,7 +35,9 @@ fn every_demo_reflows_with_breadcrumb_navigation_and_preserves_control_identity(
         } else {
             &[]
         };
-        let ui = factory(bytes);
+        // App packages provide canonical graph source. Inspect the admitted
+        // projections used by the client, including its Frame Focus chrome.
+        let ui = decode_ui(&encode_ui(&factory(bytes)).unwrap()).unwrap();
         let frame_focus = oib::seed(&ui).is_some_and(|seed| {
             seed.instance_surface.is_some()
                 && seed

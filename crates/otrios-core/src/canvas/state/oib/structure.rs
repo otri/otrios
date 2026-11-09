@@ -111,6 +111,7 @@ impl Document {
                         .oib_binding()?
                         .seed
                         .graph
+                        .clone()
                         .ok_or("Missing signed graph")?;
                     let (mut restored, desired) =
                         reset::restore(&signed, &candidate.oib_source()?)?;
@@ -189,6 +190,7 @@ impl Document {
             .oib_binding()?
             .seed
             .graph
+            .clone()
             .ok_or("Missing signed graph")?;
         let shell = graph
             .instances
@@ -267,6 +269,7 @@ impl Document {
             .oib_binding()?
             .seed
             .graph
+            .clone()
             .ok_or("Missing signed graph")?;
         let shell = graph
             .instances

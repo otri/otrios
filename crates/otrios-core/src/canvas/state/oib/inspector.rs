@@ -157,6 +157,7 @@ impl StateAdapter {
             .oib_binding()?
             .seed
             .graph
+            .clone()
             .ok_or("Missing signed graph")?;
         let mut result = vec![];
         let (definition, selected_node) = match selected {

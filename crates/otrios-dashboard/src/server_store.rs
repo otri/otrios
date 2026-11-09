@@ -6,6 +6,9 @@ use otrios_core::canvas::{self, Document};
 use std::io::{Read, Seek, SeekFrom};
 const MAX_JOURNAL: usize = 16 * 1024 * 1024;
 const CHECKPOINT_AT: u64 = 4 * 1024 * 1024;
+// OIB records carry graph revisions and require compilation during validation.
+// Bound cold replay sooner using the same atomic checkpoint rotation.
+const OIB_CHECKPOINT_AT: u64 = 256 * 1024;
 fn log_path(file: &Path) -> PathBuf {
     file.with_extension("merkle.log")
 }
@@ -73,7 +76,12 @@ pub(super) fn load(file: &Path, mut doc: Document) -> Result<Document, String> {
 }
 pub(super) fn append(file: &Path, old: &Document, next: &Document) -> Result<(), String> {
     let path = log_path(file);
-    if fs::metadata(&path).is_ok_and(|m| m.len() >= CHECKPOINT_AT) {
+    let checkpoint_at = if old.oib_epoch().is_ok() {
+        OIB_CHECKPOINT_AT
+    } else {
+        CHECKPOINT_AT
+    };
+    if fs::metadata(&path).is_ok_and(|m| m.len() >= checkpoint_at) {
         persist(file, &old.save()?).map_err(failure)?;
         let log = fs::OpenOptions::new()
             .write(true)

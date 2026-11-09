@@ -976,6 +976,14 @@ fn d1_lost_reply_receipt_reclamation_and_retired_path_survive_real_authority_res
         .max()
         .unwrap();
     let collection = b.binding.collection.clone();
+    let checkpoint_path = f
+        .rig
+        .root
+        .join(format!("state/collection-{collection}.merkle"));
+    let initial_checkpoint = Snapshot::from_bytes(&fs::read(&checkpoint_path).unwrap())
+        .unwrap()
+        .hash();
+
     let actor = a.binding.actor;
     assert!(
         !a.state.confirmed(),
@@ -1094,6 +1102,21 @@ fn d1_lost_reply_receipt_reclamation_and_retired_path_survive_real_authority_res
         assert_values(&a.state);
         id = new.id;
     }
+
+    let retained = fs::metadata(checkpoint_path.with_extension("merkle.log"))
+        .unwrap()
+        .len();
+    assert!(
+        retained < 512 * 1024,
+        "bounded OIB fixture retains {retained} journal bytes after rotation"
+    );
+    assert_ne!(
+        Snapshot::from_bytes(&fs::read(&checkpoint_path).unwrap())
+            .unwrap()
+            .hash(),
+        initial_checkpoint,
+        "OIB checkpoint advances during repeated structural churn"
+    );
     let before = f.durable(&collection);
     drop(a);
     f.rig.stop();

@@ -409,14 +409,15 @@ fn main() -> Result<()> {
         }
         Some("bump") if args.len() == 8 && args[4] == "--key" && args[6] == "--openssl" => {
             let key = bundle_files::public_key(Path::new(&args[5]), false, &args[7])?;
-            let before = bundle::verify(read_tree(Path::new(&args[2]))?, &key)?;
-            let mut current = bundle::with_revision(read_tree(Path::new(&args[1]))?, before.summary().info.revision)?;
-            for (path,data) in before.files().filter(|(path,_)|path.starts_with("Resources/")||path.starts_with("Dependencies/")||path.starts_with("Notices/")) {
+            let predecessor = read_tree(Path::new(&args[2]))?;
+            let before = bundle::authenticate_revision(&predecessor, &key)?;
+            let mut current = bundle::with_revision(read_tree(Path::new(&args[1]))?, before.revision())?;
+            for (path,data) in predecessor.iter().filter(|(path,_)|path.starts_with("Resources/")||path.starts_with("Dependencies/")||path.starts_with("Notices/")) {
                 if !current.contains_key(path) { current=bundle::with_payload(current,path,data)?; }
             }
-            if bundle::inspect(&current)?.info.app.id != before.summary().info.app.id { return Err("App identity differs".into()); }
-            let current = if bundle::inspect(&current)?.digest == before.summary().digest { current }
-                else { bundle::with_revision(current, before.summary().info.revision.checked_add(1).ok_or("App revision overflow")?)? };
+            if bundle::inspect(&current)?.info.app.id != before.app_id() { return Err("App identity differs".into()); }
+            let current = if bundle::inspect(&current)?.digest == before.digest() { current }
+                else { bundle::with_revision(current, before.revision().checked_add(1).ok_or("App revision overflow")?)? };
             write_tree(Path::new(&args[3]), &current)
         }
         Some("compose") if args.len() == 10 && args[4] == "--key" && args[6] == "--sign-key" && args[8] == "--openssl" =>

@@ -1023,3 +1023,61 @@ fn replay_preparation_preserves_exact_and_compatible_chrome_roots_and_unseeded_a
     assert_eq!(recovered.root_hash(), seeded.root_hash());
     assert!(!recovered.configure_oib(&ui).unwrap());
 }
+
+#[test]
+fn four_cycle_authority_journal_replays_to_the_exact_root_with_a_warm_binding() {
+    let (ui, mut document) = setup();
+    let mut writer = session(&mut document, 72);
+    let checkpoint = document.save().unwrap();
+    let mut records = vec![];
+    for cycle in 0..4 {
+        for remove in [false, true] {
+            let previous = document.clone();
+            let instance = if remove {
+                document
+                    .oib_allocations()
+                    .unwrap()
+                    .into_iter()
+                    .map(|a| a.id)
+                    .max()
+                    .unwrap()
+            } else {
+                30
+            };
+            let operation = if remove {
+                HierarchyEdit::Remove {
+                    instance: InstanceId(instance),
+                }
+            } else {
+                HierarchyEdit::Duplicate {
+                    instance: InstanceId(instance),
+                    name: None,
+                    destination: Destination::Canvas,
+                    before: None,
+                    frame: None,
+                }
+            };
+            submit(
+                &mut document,
+                &mut writer,
+                cycle * 2 + u64::from(remove) + 1,
+                vec![DocumentEdit::Hierarchy(operation)],
+            );
+            records.push(document.journal_delta(&previous).unwrap());
+        }
+    }
+    let started = std::time::Instant::now();
+    let mut recovered = Document::load(ui.state_schema.clone(), "d2:batch", &checkpoint).unwrap();
+    recovered.prepare_oib_replay(&ui).unwrap();
+    for record in &records {
+        recovered.replay(record).unwrap();
+    }
+    eprintln!(
+        "Replayed {} representative structural records in {:?}",
+        records.len(),
+        started.elapsed()
+    );
+    assert_eq!(recovered.root_hash(), document.root_hash());
+    assert_eq!(recovered.oib_allocations().unwrap().len(), 2);
+    assert_eq!(recovered.oib_status().unwrap().structural_generation, 9);
+}

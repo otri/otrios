@@ -139,6 +139,16 @@ A missing private draft branch is legal only in that live projection context;
 loading incomplete full checkpoints still fails. Before journal replay, the
 verified UI can warm transient compilation only when the checkpoint root remains
 identical. Initialization or a compatible chrome binding update stays after replay.
+The normalized binding cache is keyed by the immutable `[4,0]` leaf hash and exact
+admitted UI identity; it never changes root or wire bytes. OIB journals use the
+existing atomic checkpoint rotation at 256 KiB instead of the ordinary 4 MiB
+threshold, bounding accumulated graph replay without increasing test deadlines.
+
+Revision tooling authenticates a predecessor's package envelope, complete file
+closure and publisher signature without admitting its obsolete UI payload.
+The resulting metadata-only revision record cannot be installed or executed.
+Current package inspection, signature verification and host admission remain
+required for the new candidate; no old OIB reader or feature allowlist was added.
 
 ## Validation and completion gates
 
@@ -156,6 +166,17 @@ rerun; the additional unbound-preset source-choice case also passed. The remaini
 passed. Workspace all-target Clippy with `-D warnings` passed. The repository-wide
 check and final long authority restart qualification are running; do not count
 them or Frame/Web acceptance as passing yet.
+
+The subsequent current core library run passed 299 cases, including the new
+binding-cache and predecessor-authentication tests. The full 69-case Canvas
+integration suite passed after materializing canonical source before inspecting
+derived navigation metadata. Bundle authentication passed 14 cases, and the exact
+signed v28 Live UI predecessor produced current unsigned revision 8 while remaining
+ineligible for current-host admission itself. The first signed staging attempt
+stopped at predecessor admission before activation; this tooling fix is qualified
+before retrying. Two earlier accumulated-journal debug runs exceeded the 10-second
+restart deadline; the final run now checks actual checkpoint advancement and the
+bounded retained journal. Those failed runs are not acceptance evidence.
 
 Historical development evidence at foundation commit `8548f43` (before the
 canonical compiler/edit-batch cutover; these are not results for the current tree):

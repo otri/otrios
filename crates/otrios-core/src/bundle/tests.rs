@@ -418,6 +418,150 @@ fn signed_snapshot_requires_external_trust_and_survives_source_mutation() {
 }
 
 #[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+fn sign_metadata_fixture(tree: &mut BundleTree, key: &ring::signature::Ed25519KeyPair) {
+    use ring::signature::KeyPair;
+    // Deliberately bypass host admission to model bytes signed by a predecessor
+    // publisher. Production signing and current bundle verification stay strict.
+    reseal(tree);
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let mut digest = Sha256::new();
+    digest.update(DIGEST_DOMAIN);
+    digest.update(&tree[FILES_PATH]);
+    let signature = key.sign(&signing_payload(&hex(&digest.finalize()), &public).unwrap());
+    tree.insert(
+        SIGNATURE_PATH.into(),
+        encode(&BundleSignature {
+            format: SIGNATURE_FORMAT.into(),
+            key_sha256: hex(&hash(&public)),
+            signature: signature.as_ref().to_vec(),
+        })
+        .unwrap(),
+    );
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn authenticated_revision_does_not_admit_unsupported_features_or_unreadable_payloads() {
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    let key = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let mut tree = fixture(None);
+    change_info(&mut tree, |info| {
+        info.revision = 17;
+        info.required_features
+            .extend(["otrios-oib-v1".into(), "otrios-oib-designer-v1".into()]);
+    });
+    tree.insert(
+        UI_PATH.into(),
+        b"obsolete UI encoding, intentionally unreadable".to_vec(),
+    );
+    tree.insert(SCHEMA_PATH.into(), b"obsolete schema encoding".to_vec());
+    tree.insert("Resources/preserved.bin".into(), vec![1, 2, 3]);
+    sign_metadata_fixture(&mut tree, &key);
+    let original = tree.clone();
+    let revision = authenticate_revision(&tree, &public).unwrap();
+    assert_eq!(revision.app_id(), "sample");
+    assert_eq!(revision.revision(), 17);
+    assert_eq!(revision.digest(), inspect_envelope(&tree).unwrap().digest);
+    assert!(
+        verify(tree.clone(), &public)
+            .unwrap_err()
+            .contains("Unsupported required bundle feature")
+    );
+    assert!(inspect(&tree).is_err());
+    assert_eq!(
+        tree, original,
+        "metadata authentication never rewrites predecessor bytes"
+    );
+
+    // With supported feature metadata alone, unreadable payloads still cannot
+    // become a VerifiedBundle. Revision authentication never decodes them.
+    change_info(&mut tree, |info| {
+        info.required_features
+            .retain(|feature| !feature.starts_with("otrios-oib"))
+    });
+    sign_metadata_fixture(&mut tree, &key);
+    assert!(authenticate_revision(&tree, &public).is_ok());
+    assert!(verify(tree, &public).is_err());
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn authenticated_revision_rejects_unsigned_wrong_key_and_tampered_closures() {
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    let key = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let mut original = fixture(None);
+    sign_metadata_fixture(&mut original, &key);
+    assert!(authenticate_revision(&original, &public).is_ok());
+    assert!(authenticate_revision(&original, &[8; 32]).is_err());
+    let mut unsigned = original.clone();
+    unsigned.remove(SIGNATURE_PATH);
+    assert!(authenticate_revision(&unsigned, &public).is_err());
+    for path in [UI_PATH, INFO_PATH, FILES_PATH, SIGNATURE_PATH] {
+        let mut tampered = original.clone();
+        tampered.get_mut(path).unwrap()[0] ^= 1;
+        assert!(
+            authenticate_revision(&tampered, &public).is_err(),
+            "tampered {path}"
+        );
+    }
+    let mut rehashed = original;
+    rehashed.get_mut(UI_PATH).unwrap().push(1);
+    reseal(&mut rehashed);
+    assert!(
+        authenticate_revision(&rehashed, &public).is_err(),
+        "a new hash does not authenticate substituted content"
+    );
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+#[test]
+fn authenticated_revision_preserves_optional_info_but_bounds_package_metadata() {
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+    #[derive(Serialize)]
+    struct Extended<'a> {
+        #[serde(flatten)]
+        info: &'a BundleInfo,
+        display_hint: &'a str,
+    }
+    let key = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
+    let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+    let original = fixture(None);
+    let mut extended = original.clone();
+    let info = decode_info(&extended[INFO_PATH]).unwrap();
+    let mut bytes = INFO_HEADER.to_vec();
+    bytes.extend(
+        encode(&Extended {
+            info: &info,
+            display_hint: "optional predecessor extension",
+        })
+        .unwrap(),
+    );
+    extended.insert(INFO_PATH.into(), bytes);
+    sign_metadata_fixture(&mut extended, &key);
+    assert!(authenticate_revision(&extended, &public).is_ok());
+    assert!(verify(extended, &public).is_ok());
+    for feature in ["".to_string(), "x".repeat(129), "bad\0feature".into()] {
+        let mut invalid = original.clone();
+        change_info(&mut invalid, |info| info.required_features.push(feature));
+        sign_metadata_fixture(&mut invalid, &key);
+        assert!(authenticate_revision(&invalid, &public).is_err());
+    }
+    let mut missing_kind = original.clone();
+    change_info(&mut missing_kind, |info| {
+        info.required_features
+            .retain(|feature| feature != PACKAGE_FEATURE)
+    });
+    sign_metadata_fixture(&mut missing_kind, &key);
+    assert!(authenticate_revision(&missing_kind, &public).is_err());
+    let mut wrong_major = original;
+    wrong_major.get_mut(INFO_PATH).unwrap()[6] = 2;
+    sign_metadata_fixture(&mut wrong_major, &key);
+    assert!(authenticate_revision(&wrong_major, &public).is_err());
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
 #[test]
 fn app_intake_requires_independent_trust_and_separates_reuse_from_host_installation() {
     use crate::{spaces, transfers::*};

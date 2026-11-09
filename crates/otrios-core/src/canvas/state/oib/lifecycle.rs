@@ -74,7 +74,7 @@ impl Document {
         if self.oib_live(1)?.contains(&id) {
             return Ok(false);
         }
-        let seed = self.oib_binding()?.seed;
+        let seed = self.oib_binding()?.seed.clone();
         Ok(
             super::super::super::oib::instances::initial_allocations(&seed)
                 .iter()
@@ -93,6 +93,7 @@ impl Document {
             .oib_binding()?
             .seed
             .graph
+            .clone()
             .ok_or("Missing signed graph")?;
         let first = first_id(&self.oib_binding()?.seed)?;
         let allocated = |identity| (first..source.next_identity).contains(&identity);
@@ -168,7 +169,7 @@ impl Document {
         if defaults {
             return Err("Reset defaults uses the baseline restoration candidate".into());
         }
-        let signed = self.oib_binding()?.seed;
+        let signed = self.oib_binding()?.seed.clone();
         let initial = super::super::super::oib::instances::initial_allocations(&signed);
         let source = self.oib_source()?;
         let live = self.oib_live(1)?;

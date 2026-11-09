@@ -12,7 +12,7 @@ impl Document {
     }
 
     pub(super) fn oib_hierarchy_stage(&mut self, operations: &[HierarchyEdit]) -> Result<()> {
-        let signed = self.oib_binding()?.seed;
+        let signed = self.oib_binding()?.seed.clone();
         if signed.designer.is_none() || signed.instance_surface.is_none() {
             return Err("Hierarchy authoring requires signed designer factories".into());
         }

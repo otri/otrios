@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::*;
+pub(super) use crate::test_support::oib_designer as designer_fixture;
 use otrios_interfaces::{
     layout::ValueType,
     oib::{Cell, Seed, designer::*},
 };
-#[path = "../../../../../apps/oib-designer/app.rs"]
-pub(super) mod designer_fixture;
 fn fixture_ui() -> Ui {
     crate::canvas::decode_ui(&crate::canvas::encode_ui(&designer_fixture::ui(&[])).unwrap())
         .unwrap()

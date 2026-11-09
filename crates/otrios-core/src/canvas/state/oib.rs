@@ -8,6 +8,8 @@ use otrios_interfaces::oib::{
 };
 use std::collections::BTreeSet;
 mod address;
+#[cfg(test)]
+mod cache_tests;
 mod hierarchy;
 mod inspector;
 mod lifecycle;
@@ -33,6 +35,15 @@ pub struct Status {
     pub conflicts: Vec<otrios_interfaces::oib::designer::PropertyAddress>,
     pub error: Option<String>,
 }
+/// One normalized immutable binding. The key includes admitted chrome identity
+/// because pure graph materialization and admitted UI can use different renderer
+/// bases. This cache is disposable and never changes a publication or wire byte.
+pub(super) struct CachedBinding {
+    leaf: merkle::Hash,
+    ui: Option<std::sync::Arc<Ui>>,
+    binding: std::sync::Arc<Binding>,
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Binding {
@@ -189,7 +200,21 @@ impl Document {
         )?;
         Ok(true)
     }
-    fn oib_binding(&self) -> Result<Binding> {
+    fn oib_binding(&self) -> Result<std::sync::Arc<Binding>> {
+        let leaf = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
+        {
+            let cache = self.oib_binding_cache.lock().map_err(err)?;
+            if let Some(cached) = cache.as_ref()
+                && cached.leaf == leaf
+                && match (&cached.ui, &self.oib_ui) {
+                    (Some(previous), Some(current)) => std::sync::Arc::ptr_eq(previous, current),
+                    (None, None) => true,
+                    _ => false,
+                }
+            {
+                return Ok(cached.binding.clone());
+            }
+        }
         let mut binding: Binding = decode(&payload(&self.tree, &[4, 0])?)?;
         if let Some(ui) = &self.oib_ui
             && let Some(seed) = super::super::oib::seed(ui)
@@ -199,6 +224,12 @@ impl Document {
         } else {
             binding.seed = super::super::oib::graph::materialize_seed(&binding.seed)?;
         }
+        let binding = std::sync::Arc::new(binding);
+        *self.oib_binding_cache.lock().map_err(err)? = Some(CachedBinding {
+            leaf,
+            ui: self.oib_ui.clone(),
+            binding: binding.clone(),
+        });
         Ok(binding)
     }
     fn oib_authored_ui(&self) -> Result<std::sync::Arc<Ui>> {
@@ -233,7 +264,7 @@ impl Document {
                 .ok_or("Missing OIB seed")?
                 .clone()
         } else {
-            let signed = self.oib_binding()?.seed;
+            let signed = self.oib_binding()?.seed.clone();
             let authored = self.oib_source()?;
             super::super::oib::graph::with_seed_source(
                 &signed,
@@ -255,14 +286,14 @@ impl Document {
             "otrios-oib-epoch-v3",
             self.actor,
             &self.scope,
-            binding.ui_ref,
+            &binding.ui_ref,
             binding
                 .seed
                 .graph
                 .as_ref()
                 .ok_or("Missing canonical graph")?
                 .id,
-            binding.admission,
+            &binding.admission,
         ))?))
     }
     /// Read a semantic register through a disposable compiler handle. The handle
@@ -327,7 +358,7 @@ impl Document {
                 .ok_or("Missing OIB seed")?
                 .clone()
         } else {
-            self.oib_binding()?.seed
+            self.oib_binding()?.seed.clone()
         };
         if seed.instance_surface.is_none() {
             return Ok(seed.instances.iter().map(|i| i.id).collect());
@@ -811,7 +842,7 @@ impl StateAdapter {
         })
     }
     pub(in crate::canvas) fn admitted_oib_hash(&self) -> Option<Vec<u8>> {
-        self.doc.oib_binding().ok().map(|b| b.ui_hash)
+        self.doc.oib_binding().ok().map(|b| b.ui_hash.clone())
     }
     pub fn oib_instances(&self) -> Result<Vec<super::super::oib::InstanceInfo>> {
         Ok(self.oib_info()?.instances)
@@ -1096,7 +1127,7 @@ enum InstanceStage {
 }
 impl Document {
     fn validate_allocations(&self, old: Option<&Snapshot>) -> Result<()> {
-        let seed = self.oib_binding()?.seed;
+        let seed = self.oib_binding()?.seed.clone();
         if seed.instance_surface.is_none() {
             let source = self.oib_source()?;
             let initial: Vec<otrios_interfaces::oib::authoring::InstanceRecord> =

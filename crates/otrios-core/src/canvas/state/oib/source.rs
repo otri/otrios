@@ -37,7 +37,7 @@ impl Document {
         for placement in &source.placements {
             super::super::super::oib::document::placement::validate_frame(placement.frame)?;
         }
-        let signed = self.oib_binding()?.seed;
+        let signed = self.oib_binding()?.seed.clone();
         let graph = signed.graph.as_ref().ok_or("Missing canonical OIB graph")?;
         let shell = graph
             .instances

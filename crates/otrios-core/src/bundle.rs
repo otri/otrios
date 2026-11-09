@@ -305,7 +305,7 @@ pub fn qualify_install(bundle: &VerifiedBundle) -> Result<()> {
     Ok(())
 }
 
-pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
+fn inspect_envelope(tree: &BundleTree) -> Result<InspectedBundle> {
     if tree.is_empty() || tree.len() > MAX_FILES {
         return Err("Bundle file count budget exceeded".into());
     }
@@ -383,10 +383,69 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
             .behavior
             .as_deref()
             .is_some_and(|path| path != CODE_PATH)
-        || !info.capabilities.is_empty()
     {
         return Err("Unsupported bundle identity, entry paths or capabilities".into());
     }
+    // These identifiers describe required semantics; recognizing them is a
+    // separate host-admission step. Even metadata-only authentication is bounded.
+    fn names(values: &[String], limit: usize) -> bool {
+        values.len() <= limit
+            && values.iter().all(|value| {
+                !value.is_empty()
+                    && value.len() <= 128
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_.".contains(&byte)
+                    })
+            })
+            && values.iter().collect::<BTreeSet<_>>().len() == values.len()
+    }
+    if !names(&info.required_features, 64)
+        || !info
+            .required_features
+            .iter()
+            .any(|feature| feature == PACKAGE_FEATURE)
+        || !names(&info.capabilities, 32)
+        || !tree.contains_key(UI_PATH)
+        || !tree.contains_key(SCHEMA_PATH)
+        || tree.contains_key(CODE_PATH) != info.behavior.is_some()
+    {
+        return Err("Invalid package feature names or entry file closure".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(DIGEST_DOMAIN);
+    digest.update(manifest_bytes);
+    let signature = tree
+        .get(SIGNATURE_PATH)
+        .map(|bytes| metadata::<BundleSignature>(bytes))
+        .transpose()?;
+    if signature.as_ref().is_some_and(|receipt| {
+        receipt.format != SIGNATURE_FORMAT
+            || receipt.signature.len() != 64
+            || !valid_digest(&receipt.key_sha256)
+    }) {
+        return Err("Invalid bundle signature envelope".into());
+    }
+    Ok(InspectedBundle {
+        info,
+        digest: hex(&digest.finalize()),
+        files: tree.len(),
+        bytes: total,
+        signature,
+    })
+}
+
+/// Inspect byte identity and admit the complete payload to this host's contracts.
+pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
+    let summary = inspect_envelope(tree)?;
+    let info = &summary.info;
+    if !info.capabilities.is_empty() {
+        return Err("Unsupported bundle identity, entry paths or capabilities".into());
+    }
+    let get = |path: &str| {
+        tree.get(path)
+            .map(Vec::as_slice)
+            .ok_or("Missing bundle file".to_string())
+    };
     let features: BTreeSet<_> = info.required_features.iter().map(String::as_str).collect();
     if features.len() != info.required_features.len()
         || !features.contains(PACKAGE_FEATURE)
@@ -483,27 +542,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
             return Err("Bundle behavior digest/ABI mismatch".into());
         }
     }
-    let mut digest = Sha256::new();
-    digest.update(DIGEST_DOMAIN);
-    digest.update(manifest_bytes);
-    let signature = tree
-        .get(SIGNATURE_PATH)
-        .map(|bytes| metadata::<BundleSignature>(bytes))
-        .transpose()?;
-    if signature.as_ref().is_some_and(|receipt| {
-        receipt.format != SIGNATURE_FORMAT
-            || receipt.signature.len() != 64
-            || !valid_digest(&receipt.key_sha256)
-    }) {
-        return Err("Invalid bundle signature envelope".into());
-    }
-    Ok(InspectedBundle {
-        info,
-        digest: hex(&digest.finalize()),
-        files: tree.len(),
-        bytes: total,
-        signature,
-    })
+    Ok(summary)
 }
 
 /// Decode only Ed25519 SubjectPublicKeyInfo DER, never arbitrary algorithm keys.
@@ -596,16 +635,56 @@ impl VerifiedBundle {
     }
 }
 
+/// Authenticated predecessor identity only. This record contains no executable
+/// payload, grants or installable bundle, and cannot substitute for VerifiedBundle.
+#[derive(Clone, Debug)]
+pub struct AuthenticatedRevision {
+    app_id: String,
+    revision: u64,
+    digest: String,
+}
+impl AuthenticatedRevision {
+    pub fn app_id(&self) -> &str {
+        &self.app_id
+    }
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+}
+
 #[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
-pub fn verify(tree: BundleTree, key: &[u8; 32]) -> Result<VerifiedBundle> {
-    let summary = inspect(&tree)?;
+fn authenticate_signature(summary: &InspectedBundle, key: &[u8; 32]) -> Result<()> {
     let receipt = summary.signature.as_ref().ok_or("Unsigned app bundle")?;
     if receipt.key_sha256 != hex(&hash(key)) {
         return Err("Bundle publisher is not trusted".into());
     }
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
         .verify(&signing_payload(&summary.digest, key)?, &receipt.signature)
-        .map_err(|_| "Bundle publisher signature rejected")?;
+        .map_err(|_| "Bundle publisher signature rejected".to_string())
+}
+
+/// Authenticate a bounded canonical package's revision metadata without parsing
+/// or admitting UI/schema/guest payloads or recognizing host-required features.
+/// The caller supplies the independently trusted key. Retain the same immutable
+/// input tree if copying ancillary bytes; this record grants no payload access.
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+pub fn authenticate_revision(tree: &BundleTree, key: &[u8; 32]) -> Result<AuthenticatedRevision> {
+    let summary = inspect_envelope(tree)?;
+    authenticate_signature(&summary, key)?;
+    Ok(AuthenticatedRevision {
+        app_id: summary.info.app.id,
+        revision: summary.info.revision,
+        digest: summary.digest,
+    })
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+pub fn verify(tree: BundleTree, key: &[u8; 32]) -> Result<VerifiedBundle> {
+    let summary = inspect(&tree)?;
+    authenticate_signature(&summary, key)?;
     Ok(VerifiedBundle { summary, tree })
 }
 
