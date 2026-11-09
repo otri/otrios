@@ -142,7 +142,7 @@ pub(super) struct Designer {
     next_id: u32,
     capture: Option<Capture>,
     // Rebuild chrome on diagnostics/selection changes, never on a pan sample.
-    revision: Option<(crate::merkle::Hash, bool, String, bool)>,
+    revision: Option<(crate::merkle::Hash, bool, bool, bool)>,
 }
 impl Clone for Designer {
     fn clone(&self) -> Self {
@@ -1369,6 +1369,14 @@ impl Mount {
                 return Ok(changed);
             }
             let root = self.doc.oib_root().ok_or("Missing designer state")?;
+            let editable = self.binding.as_ref().is_none_or(|b| b.ui_editable);
+            // Status formatting walks authored source and capacity metadata.
+            // Its inputs are immutable OIB state plus the cheap local flight
+            // flag; do not repeat that work on unchanged owner ticks.
+            let revision = (root, self.doc.confirmed(), self.doc.oib_saving(), editable);
+            if designer.revision.as_ref() == Some(&revision) {
+                return Ok(changed);
+            }
             let status = self.doc.oib_status_text();
             if status.contains("Structure rejected:") {
                 designer.editor_notice = Some(status.clone());
@@ -1378,11 +1386,6 @@ impl Mount {
                 .is_some_and(|s| s.contains("Structure rejected:"))
             {
                 designer.editor_notice = None;
-            }
-            let editable = self.binding.as_ref().is_none_or(|b| b.ui_editable);
-            let revision = (root, self.doc.confirmed(), status.clone(), editable);
-            if designer.revision.as_ref() == Some(&revision) {
-                return Ok(changed);
             }
             previous.get_or_insert_with(|| designer.clone());
             let authoring_seed = self.doc.oib_authoring_seed()?;
@@ -1510,7 +1513,15 @@ impl Mount {
             {
                 designer.management = Some(ManagedComponent { instance: allocation.id, root: root.selection.clone() });
             }
-            if editable && self.doc.confirmed() && designer.mode == DesignerMode::Edit {
+            // Frame Focus discards the closed Layers pane from the presented
+            // scene. Its structural candidates can run full admission, so only
+            // prepare them when that pane is visible. Opening it rebuilds from
+            // the current confirmed document; Desktop Studio keeps it visible.
+            if editable
+                && self.doc.confirmed()
+                && designer.mode == DesignerMode::Edit
+                && (!designer.focus_layout || designer.layers_open || designer.studio.enabled)
+            {
                 use otrios_interfaces::oib::InstanceOperation;
                 let generation = self.doc.oib_structural_generation().unwrap_or(0);
                 if designer.graph_tools.as_ref().is_none_or(|cache| {
@@ -2106,7 +2117,9 @@ impl Client {
                 let m = self.active.as_mut().ok_or("No Canvas")?;
                 let d = m.designer.as_mut().ok_or("Missing designer")?;
                 d.layers_open = !d.layers_open;
+                d.revision = None;
                 d.invalidate_bounds();
+                m.refresh_designer()?;
                 m.invalidate();
                 Ok(true)
             }

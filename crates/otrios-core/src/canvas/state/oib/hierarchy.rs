@@ -5,10 +5,10 @@ use otrios_interfaces::oib::{MAX_LIVE_INSTANCES, authoring::*, designer::Instanc
 
 impl Document {
     pub(super) fn oib_connections(&self) -> Result<Vec<AppConnection>> {
-        Ok(self.oib_source()?.connections)
+        Ok(self.oib_source_shared()?.connections.clone())
     }
     pub(super) fn oib_placements(&self) -> Result<Vec<Placement>> {
-        Ok(self.oib_source()?.placements)
+        Ok(self.oib_source_shared()?.placements.clone())
     }
 
     pub(super) fn oib_hierarchy_stage(&mut self, operations: &[HierarchyEdit]) -> Result<()> {

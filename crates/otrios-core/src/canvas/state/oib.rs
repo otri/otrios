@@ -19,10 +19,11 @@ mod source;
 mod structure;
 
 /// One disposable compiled structural revision, shared by document clones and
-/// keyed by both signed admission identity and canonical authored source hash.
+/// keyed by signed admission identity and validated structural-source digest.
 pub(super) struct AuthoredUi {
     signed: std::sync::Arc<Ui>,
     source: merkle::Hash,
+    binding: merkle::Hash,
     ui: std::sync::Arc<Ui>,
 }
 
@@ -43,6 +44,17 @@ pub(super) struct CachedBinding {
     leaf: merkle::Hash,
     ui: Option<std::sync::Arc<Ui>>,
     binding: std::sync::Arc<Binding>,
+}
+
+/// One canonically validated source, shared by snapshot clones. Source validity
+/// also depends on signed baseline roles, so both immutable leaf identities and
+/// the admitted UI identity participate in the key. No cache bytes are saved.
+pub(super) struct CachedSource {
+    leaf: merkle::Hash,
+    binding: merkle::Hash,
+    ui: Option<std::sync::Arc<Ui>>,
+    source: std::sync::Arc<otrios_interfaces::oib::authoring::DocumentSource>,
+    structural: merkle::Hash,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -255,12 +267,15 @@ impl Document {
         if super::super::oib::seed(&signed).is_none_or(|seed| seed.designer.is_none()) {
             return Ok(signed);
         }
-        let authored = self.oib_source()?;
-        let source = digest(&bytes(&(&authored.definitions, &authored.presets))?);
+        let validated = self.oib_source_entry()?;
+        let authored = &validated.source;
+        let source = validated.structural;
+        let binding = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
         let mut cache = self.oib_authored.lock().map_err(err)?;
         if let Some(cached) = cache.as_ref()
             && std::sync::Arc::ptr_eq(&signed, &cached.signed)
             && cached.source == source
+            && cached.binding == binding
         {
             return Ok(cached.ui.clone());
         }
@@ -272,6 +287,7 @@ impl Document {
         *cache = Some(AuthoredUi {
             signed,
             source,
+            binding,
             ui: ui.clone(),
         });
         Ok(ui)
@@ -283,7 +299,7 @@ impl Document {
                 .clone()
         } else {
             let signed = self.oib_binding()?.seed.clone();
-            let authored = self.oib_source()?;
+            let authored = self.oib_source_shared()?;
             super::super::oib::graph::with_seed_source(
                 &signed,
                 &authored.definitions,
@@ -345,7 +361,7 @@ impl Document {
         )
     }
     pub fn oib_allocations(&self) -> Result<Vec<Allocation>> {
-        let source = self.oib_source()?;
+        let source = self.oib_source_shared()?;
         let mut ids: Vec<_> = source
             .instances
             .iter()
@@ -354,7 +370,7 @@ impl Document {
         ids.sort_unstable();
         source
             .instances
-            .into_iter()
+            .iter()
             .map(|instance| {
                 let slot = ids
                     .iter()
@@ -362,7 +378,7 @@ impl Document {
                     .ok_or("Unknown resident OIB identity")? as u16;
                 Ok(Allocation {
                     id: instance.id,
-                    name: instance.name,
+                    name: instance.name.clone(),
                     component: instance.component,
                     prototype: instance.prototype,
                     slot,

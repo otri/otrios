@@ -1806,6 +1806,131 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
     );
 }
 #[test]
+fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_values() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    let selection = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .root_selection(30)
+        .unwrap();
+    assert!(client.inspect_oib_selection(selection.clone()).unwrap());
+    let address = {
+        let mount = client.active.as_ref().unwrap();
+        crate::canvas::oib::document::properties(
+            &mount.doc.oib_authoring_seed().unwrap(),
+            &mount.doc.oib_allocations().unwrap(),
+            &selection,
+            &mount.doc.oib_active().unwrap(),
+        )
+        .unwrap()
+        .into_iter()
+        .find(|property| property.descriptor.label == "Accent")
+        .unwrap()
+        .address
+        .unwrap()
+    };
+    let values = [1, 2, 3, 4].map(|id| client.active.as_ref().unwrap().read(id).unwrap());
+    let structure = authority.oib_status().unwrap().structural_generation;
+    let audio_accent = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_property_register(&PropertyAddress::Occurrence {
+            instance: InstanceId(20),
+            path: PropertyPath {
+                references: vec![],
+                node: NodeId(1),
+                property: PropertyId(1),
+            },
+        })
+        .unwrap();
+    for color in [[153, 102, 204, 255], [52, 211, 153, 255]] {
+        let generation = authority.oib_status().unwrap().generation;
+        assert!(
+            client
+                .designer_action(LocalAction::PickColor(address.clone(), color))
+                .unwrap()
+        );
+        assert_eq!(authority.oib_status().unwrap().generation, generation);
+        assert!(
+            client
+                .active
+                .as_mut()
+                .unwrap()
+                .doc
+                .generate()
+                .unwrap()
+                .is_none(),
+            "choosing an accent stays local until Apply"
+        );
+        assert!(activate_inspector_action(
+            &mut client,
+            &LocalAction::Apply(address.clone())
+        ));
+        assert!(client.active.as_ref().unwrap().doc.oib_saving());
+        settle_editor(&mut client, &mut authority, &mut session);
+        let mount = client.active.as_ref().unwrap();
+        assert!(mount.doc.confirmed());
+        assert_eq!(authority.oib_status().unwrap().generation, generation + 1);
+        assert_eq!(
+            authority.oib_status().unwrap().structural_generation,
+            structure
+        );
+        assert_eq!(
+            mount
+                .doc
+                .oib_property_register(&address)
+                .unwrap()
+                .alternatives,
+            vec![Some(Value::Color(color))]
+        );
+        assert_eq!(
+            mount
+                .doc
+                .oib_property_register(&audio_accent.address)
+                .unwrap(),
+            audio_accent
+        );
+        assert_eq!([1, 2, 3, 4].map(|id| mount.read(id).unwrap()), values);
+        assert!(mount.designer.as_ref().unwrap().structure_tools.is_empty());
+        assert_eq!(mount.designer.as_ref().unwrap().selection, selection);
+        assert!(
+            mount
+                .designer
+                .as_ref()
+                .unwrap()
+                .drafts
+                .draft(&address)
+                .is_some_and(|draft| !draft.dirty),
+            "the next Apply starts from the newly confirmed accent"
+        );
+        client.designer_action(LocalAction::Layers).unwrap();
+        let tools = &client
+            .active
+            .as_ref()
+            .unwrap()
+            .designer
+            .as_ref()
+            .unwrap()
+            .structure_tools;
+        assert!(
+            !tools.is_empty(),
+            "opening Layers prepares current authoring actions"
+        );
+        assert!(
+            tools
+                .iter()
+                .all(|(_, operation)| operation.generation == structure)
+        );
+        client.designer_action(LocalAction::Layers).unwrap();
+    }
+}
+#[test]
 fn frame_focus_invalid_drafts_cancel_and_color_picker_stay_local_until_apply() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     client

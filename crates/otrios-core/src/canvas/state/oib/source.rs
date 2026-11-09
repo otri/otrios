@@ -5,6 +5,30 @@ use otrios_interfaces::oib::authoring::*;
 
 impl Document {
     pub(super) fn oib_source(&self) -> Result<DocumentSource> {
+        Ok(self.oib_source_shared()?.as_ref().clone())
+    }
+
+    pub(super) fn oib_source_shared(&self) -> Result<std::sync::Arc<DocumentSource>> {
+        Ok(self.oib_source_entry()?.source.clone())
+    }
+
+    pub(super) fn oib_source_entry(&self) -> Result<std::sync::Arc<CachedSource>> {
+        let leaf = self.tree.subtree(&[4, 4]).map_err(err)?.hash();
+        let binding = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
+        {
+            let cache = self.oib_source_cache.lock().map_err(err)?;
+            if let Some(cached) = cache.as_ref()
+                && cached.leaf == leaf
+                && cached.binding == binding
+                && match (&cached.ui, &self.oib_ui) {
+                    (Some(previous), Some(current)) => std::sync::Arc::ptr_eq(previous, current),
+                    (None, None) => true,
+                    _ => false,
+                }
+            {
+                return Ok(cached.clone());
+            }
+        }
         let data = payload(&self.tree, &[4, 4])?;
         if data.len() > MAX_DOCUMENT_BYTES {
             return Err("OIB document source budget".into());
@@ -37,7 +61,8 @@ impl Document {
         for placement in &source.placements {
             super::super::super::oib::document::placement::validate_frame(placement.frame)?;
         }
-        let signed = self.oib_binding()?.seed.clone();
+        let baseline = self.oib_binding()?;
+        let signed = &baseline.seed;
         let graph = signed.graph.as_ref().ok_or("Missing canonical OIB graph")?;
         let shell = graph
             .instances
@@ -74,7 +99,7 @@ impl Document {
         if source.baseline.len() > role_limit {
             return Err("OIB baseline role budget".into());
         }
-        let first = self.oib_binding()?.identity_floor;
+        let first = baseline.identity_floor;
         let mut roles = BTreeSet::new();
         let mut assigned = BTreeSet::new();
         for identity in &source.baseline {
@@ -156,7 +181,19 @@ impl Document {
                 return Err("Invalid OIB baseline identity mapping".into());
             }
         }
-        Ok(source)
+        // Materialization depends on definitions/presets, while placement and
+        // resident changes still require their own full-source validation.
+        // Compute this structural key once per source miss, never per UI hit.
+        let structural = digest(&bytes(&(&source.definitions, &source.presets))?);
+        let validated = std::sync::Arc::new(CachedSource {
+            leaf,
+            binding,
+            ui: self.oib_ui.clone(),
+            source: std::sync::Arc::new(source),
+            structural,
+        });
+        *self.oib_source_cache.lock().map_err(err)? = Some(validated.clone());
+        Ok(validated)
     }
     pub(super) fn oib_source_edit(&self, change: impl FnOnce(&mut DocumentSource)) -> Result<Edit> {
         let mut source = self.oib_source()?;
