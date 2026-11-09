@@ -1,84 +1,43 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer
 
-This separate Test Playground companion owns `app:oib-designer/ui` and
-`app:oib-designer/state`, using `oib-designer-state-v2`. Volume (field 1, initial
-400) and brightness (2, 700) are normalized numeric sliders. Audio enabled (3,
-1000) and display enabled (4, 0) are independent numeric 0/1000 toggle fields.
-`Projection::Nonzero` supplies dynamic Boolean checked semantics. The existing
-Live UI app retains its separate two-field state schema.
+OIB Designer is a Test Playground companion with its own
+`app:oib-designer/ui` and `app:oib-designer/state`, using
+`oib-designer-state-v2`. Volume and brightness are independent numeric slider
+fields; audio and display enabled are independent numeric toggle fields. Live UI
+has its own collection and app values.
 
-`app.rs` requires `otrios-oib-designer-v2` alongside OIB and instance features.
-The packer signs `Seed.designer` with the rest of the UI; this source does not
-sign, install or deploy a package. Parent integration owns feature discovery and
-the coordinated candidate v29 host/publisher activation with fresh OIB collections.
-Release control remains v1. See the [D2 work record](../../docs/OIB_D2_COMPLETION.md)
-for the unreleased format cleanup and remaining graph compiler work.
+The canonical signed seed contains a format and graph, with reusable definitions,
+true presets and real initial instances. Audio (root 20) and Display (root 30)
+are SettingsPanel instances with linked slider and toggle definitions. Power is a
+preset, not a phantom instance. SettingsPanel exposes an Accessories slot.
+Renderer identities, cells, selectors and layouts are derived from the graph;
+they are not durable aliases. Full typed property addresses identify shared and
+occurrence properties, including nested reference ancestry.
 
-The signed document is 1, with fixed Shell definition 11 / instance 40, and its
-nonvisual Configuration node 2. The presented shell root is O2DView node 1.
-It has no factory, allocation, occurrence cells or mutable selection. SettingsPanel
-10 has Audio 20 and Display 30 factory roots visually attached to that shell.
-Reference wrapper 7 mounts LabeledSlider 12; wrapper 8 mounts LabeledToggle 13.
-Wrappers and inherited roots map to distinct existing canvases. Definition/node
-names and paint order are labels and ordering, never identity inputs.
+The editor supports component and preset creation, shapes, text, linked references,
+deletion, renaming, literal and numeric design/placement edits, slot placement and
+admitted app-field choices including unbound endpoints. The SDK also exposes
+bounded hierarchy, forwarding and connection operations. One generation-guarded
+structural batch applies definitions, presets and hierarchy in that order; literal
+properties use separate causal contexts. An unset shared register inherits its
+authored default, while observed reset preserves the correct causal override
+semantics. Selection, scrolling and Edit/Test mode are local. Desktop Studio is
+the browser default and Frame Focus the native default.
 
-[Desktop Studio and bounded authoring](../../docs/OIB_DESKTOP_STUDIO_D2.md)
-now add persistent resizable panels, an insert palette and live reorder within the
-presented canvas. Persistent Edit/Delete controls manage the selected canvas
-component, including one selected through an internal part. Inspector Info
-controls show their expanded/collapsed state. A palette-only Power factory (prototype 50 / definition 13)
-reuses the toggle definition, with an admitted `audio-enabled` binding. It is not
-an initial resident. Insertion gives it a fresh ID; its accent/label use relative
-keys 41/55 and source aliases 400/401. Existing Audio/Display bindings and values
-remain unchanged. Structural edits carry the observed active generation; stale
-requests receive durable rejection receipts and require deliberate retry.
+The app requires `otrios-oib-v2` and `otrios-oib-designer-v2`. The deployed
+signed release `f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b`
+uses state protocol v29 and release-control v1. Fresh Live UI and Designer
+collections were initialized at registry generations 74 and 75, respectively.
+Browser and physical Frame acceptance, including preserved app values, is recorded in the
+[current OIB guide](../../docs/OIB.md). The packer signs the seed as part of the
+app package; this source does not itself sign, install or deploy it.
 
-All editable properties are on component roots. Property-free text and shape
-children supply the one actual paint tree; the root cell targets those descendants.
-Panel accent forwards to both referenced root accents. Literal inner overrides
-may mask that source, and reset reveals its current value. The two factories keep
-their signed Volume/Brightness labels. Slider value and toggle checked connections
-are signed local selector bindings, read-only to UI literal edits. The ordinary
-text button toggles the same enable field as its neighboring toggle. The seed has
-no live override; acceptance creates one through admitted causal operations.
-
-| Relative property path | Immutable key | Shared cell | Audio alias | Display alias |
-| --- | ---: | ---: | ---: | ---: |
-| `[]/1/accent(1)` | 2 | 100 | 200 | 300 |
-| `[7]/1/accent(1)` | 9 | 101 | 201 | 301 |
-| `[7]/1/width(2)` | 17 | 102 | 202 | 302 |
-| `[7]/1/label(3)` | 28 | 103 | 203 | 303 |
-| `[8]/1/accent(1)` | 41 | 104 | 204 | 304 |
-| `[8]/1/label(3)` | 55 | 105 | 205 | 305 |
-
-These aliases and keys are explicit for both factories; vector order does not
-allocate them. Six shared cells plus six per resident root use 18 initially, 42
-at six roots, and 60 at nine residents. Ten residents require 66 and must be
-rejected by the runtime's 64-cell union preflight. Descriptor capacity does not
-override cell capacity. No resource ceiling is increased.
-
-The named tooling viewports are `hierarchy-scroll`, `preview-scroll` and
-`inspector-scroll`. Preview is also the fixed shell's layout root. Hierarchy is
-empty in the signed layout; inspector contains only empty 1px factory placeholders
-needed by the existing instance surface. Core generates local hierarchy rows and
-one selected inspector, with local selection, Edit/Test mode and scroll state.
-No app handler or causal cell is allocated per hierarchy row. The browser defaults
-to Desktop Studio's persistent hierarchy/canvas/properties panels; native Frame
-defaults to Focus's canvas/dock and Layers drawer. An explicit local control
-switches profiles. Sidebar resizing changes tooling geometry, preserving authored
-component internals. Signed wide/portrait layouts supply the admitted viewports;
-the core projects their shared tooling shell.
-
-The focused covered tests live at
-`crates/otrios-core/tests/oib_designer_fixture.rs`. Run after integrating the
-runtime/client lanes:
-
-```sh
-cargo test -p otrios-core --features canvas --test oib_designer_fixture --locked --offline -- --nocapture
-```
-
-This exercises signed metadata, source/checked bindings, budget admission at the
-highest renderer slot, shared forwarding, nested override/reset, factory labels,
-unchanged app values, and checkpoint recovery. It is in-process evidence, not
-Linux IPC, authority-process restart or physical/browser acceptance.
+The [D2 work record](../../docs/OIB_D2_COMPLETION.md) describes the current format,
+implementation and qualification. The earlier
+[Frame Focus](../../docs/OIB_FRAME_FOCUS_D1.md) and
+[Desktop Studio](../../docs/OIB_DESKTOP_STUDIO_D2.md) records are dated evidence,
+not current wire or geometry specifications. D3/D4, images, complete UI transfer
+and XR remain deferred. [RFC 0036](../../docs/rfcs/0036-upgradable-oib-component-libraries.md)
+selects signed data libraries before a component Wasm ABI; neither is implemented.
+Existing Wasmi is app ABI 1 and classes/actions remain bounded host contracts.

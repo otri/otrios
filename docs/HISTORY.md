@@ -5,13 +5,22 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Canonical OIB D2](OIB_D2_COMPLETION.md), qualified 2026-11-09, replaces flat
+fixtures with a canonical graph, true presets, semantic property identities and
+one bounded structural batch. Definition, slot and connection authoring uses
+the existing renderer/input engines. State v29 was signed and deployed to fresh
+Designer/Live UI collections; browser authoring, calibrated Frame input, ARM
+slot operations and real-process recovery passed focused qualification.
+[Independent libraries](rfcs/0036-upgradable-oib-component-libraries.md) are the
+selected next boundary; their loader and component Wasm ABI remain unimplemented.
+
 [Desktop Studio and bounded D2](OIB_DESKTOP_STUDIO_D2.md), qualified 2026-11-04,
 adds persistent resizable hierarchy/canvas/properties panels and a signed-factory
 palette with single-canvas insertion/reordering. State v28 preserves original
 instance overrides and app values, durably rejects stale moves, and recovers
 through real authority restart and compatible signed code rollback. The linked
-record defines the remaining D2/D3/D4 and transfer boundary and the next
-Components dogfooding goal.
+record describes its historical scope and proposed Components dogfooding goal;
+the canonical D2 record above supersedes its remaining-D2 boundary.
 
 [Authored instance defaults](rfcs/0034-oib-authored-instance-defaults.md) keep
 Volume/Brightness label defaults and suggestions separate while sharing styling.

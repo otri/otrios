@@ -1,0 +1,135 @@
+{
+  "date": "2026-11-09",
+  "status": "focused-live-qualified-awaiting-user-review",
+  "implementation_commit": "5aa2a39",
+  "release": "f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b",
+  "state_protocol": "otrios-canvas-sync-v29",
+  "release_control_version": 1,
+  "fresh_collections": {
+    "apps": [
+      "live-ui",
+      "oib-designer"
+    ],
+    "registry_generations": [
+      74,
+      75
+    ],
+    "installed_v2_schemas_adopted": true,
+    "other_apps_reset": false,
+    "membership_and_audience_retained": true,
+    "app_data_migrated": false
+  },
+  "validation": {
+    "core_library_passed": 299,
+    "core_integration_reported_passed": 414,
+    "other_workspace_passed": 77,
+    "python_suite_passed": 73,
+    "signed_bundle_installation_passed": 3,
+    "node_suite_passed": 75,
+    "portable_fixture_verifier_passed": true,
+    "clippy_all_targets_warnings_denied_passed": true,
+    "format_and_whitespace_passed": true,
+    "check_script_uninterrupted_pass": false,
+    "check_script_note": "Initial stale raw-source Canvas fixture failed; normalized fixture and remaining commands passed separately.",
+    "process_engine_totals_are_not_process_acceptance": true,
+    "explicit_server_d2_cases_passed": 2,
+    "explicit_server_reclamation": {
+      "passed": true,
+      "cycles": 24,
+      "observation_deadline_seconds": 10,
+      "checkpoint_advanced": true,
+      "retained_journal_below_bytes": 524288,
+      "lost_reply_replayed_exactly": true,
+      "retired_path_discarded": true,
+      "final_restart_passed": true
+    },
+    "linux_shared_memory_ipc_qualified": false
+  },
+  "browser": {
+    "passed": true,
+    "created_component_and_true_preset": true,
+    "phantom_instance_created": false,
+    "design_width_edit": [
+      320,
+      400
+    ],
+    "scratch_definition_and_preset_deleted": true,
+    "revisions": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "original_active_roots": [
+      20,
+      30
+    ],
+    "original_property_displays_restored": 18,
+    "slider_values_unchanged": [
+      40,
+      70
+    ],
+    "live_ui_mounted_fresh_v2": true,
+    "live_ui_generation": 1
+  },
+  "physical_frame": {
+    "passed": true,
+    "release": "f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b",
+    "native_ui": "app:oib-designer/ui",
+    "active_generation": 3,
+    "presented_generation": 3,
+    "live_instances": 2,
+    "input_idle": true,
+    "calibration_unchanged": true,
+    "pixels_exported": false
+  },
+  "arm_slot_flow": {
+    "passed": true,
+    "architecture": "armv7 Linux",
+    "release": "f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b",
+    "production_slot_insert_move_remove": true,
+    "revisions": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "all_four_app_values_unchanged": true,
+    "original_active_instances_restored": true
+  },
+  "readiness": {
+    "passed": true,
+    "native_and_web_release_match": true,
+    "authority_native_tunnel_active": true,
+    "monitoring_resumed_successfully": true,
+    "renderer": "gles2-direct",
+    "rotation": 90,
+    "output": [
+      800,
+      1280
+    ],
+    "touch_calibrated": true,
+    "scanout": "RGB565",
+    "pixels_exported": false
+  },
+  "rollback": {
+    "compatible_code_only_archive_verified": true,
+    "app_state_backed_up": false
+  },
+  "deferred": [
+    "signed_component_library_loader_L1",
+    "component_wasm_ABI_L2",
+    "D3_D4",
+    "complete_OIB_transfer",
+    "images",
+    "XR"
+  ],
+  "accepted_work_maintenance_run": false,
+  "physical_frame_final": {
+    "passed": true,
+    "active_generation": 7,
+    "presented_generation": 7,
+    "live_instances": 2,
+    "input_idle": true
+  }
+}

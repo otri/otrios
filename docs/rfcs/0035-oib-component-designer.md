@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0035: OIB component designer and composable 2D controls
 
-Date: 2026-11-03. Status: **D1, Frame Focus and bounded D2 implemented and live-qualified; remaining D2 and later stages proposed**.
+Date: 2026-11-03. Updated: 2026-11-09. Status: **D1 and canonical bounded D2 implemented and live-qualified; D3/D4 remain proposed**.
 
 The [D1 execution plan](../OIB_DESIGNER_D1.md) records the concrete milestone,
 isolated worktree roles, integration gates and acceptance.
@@ -13,13 +13,15 @@ tree, typed property drafts and measured Frame scrolling. Its
 [shared-style qualification](../OIB_FRAME_FOCUS_STYLE_FOLLOWUP.md) records final
 Frame/Web acceptance. [Desktop Studio and bounded D2](../OIB_DESKTOP_STUDIO_D2.md)
 subsequently delivered persistent resizable panels and Insert/Edit/Delete/Reorder
-of whole signed components within one admitted canvas. Nested/slot/definition
-authoring, connection editing and D3/D4 remain deferred.
+of whole signed components within one admitted canvas. The canonical D2 cutover
+then added bounded definition/preset creation, nested slots, placement and source
+connections. D3/D4 remain deferred.
 
 On 2026-11-09 the user selected the remaining D2 implementation and a clean
 format break with fresh PoC data. The [D2 work record](../OIB_D2_COMPLETION.md)
-separates the unreleased v2 document/protocol foundation from the remaining graph
-compiler, authoring work and live acceptance. No old-data migration is required.
+records the deployed v2 graph/compiler, unified editing contract and focused
+Frame/browser acceptance. State is v29 with control v1; the two OIB collections
+were initialized fresh, with no old-data migration.
 
 The user also selected independently upgradable component libraries.
 [RFC 0036](0036-upgradable-oib-component-libraries.md) separates signed graph/style
@@ -86,8 +88,9 @@ instance defaults, live overrides and causal clears, instance lifecycle,
 geometry mappings, durable receipts, conflict diagnostics, and validated active
 publication. These features are the starting point, not new acceptance claims.
 D1 shipped state protocol v27 and the required `otrios-oib-designer-v1` package
-feature, preserving release-control v1. Its separate OIB Designer companion
-retains the original Live UI app's schema, signed factories and values.
+feature, preserving release-control v1. The later clean D2 cutover uses
+`otrios-oib-v2`, `otrios-oib-designer-v2`, fresh v2 app schemas and state v29.
+Designer and Live UI retain separate collections and business values.
 
 The shared UI runtime has parent-local frames, pins and springs, row/column/wrap
 composition, rounded surfaces, circles, paths and triangle geometry, admitted
@@ -465,7 +468,9 @@ Validate the complete candidate closure: references, cycles, types, sources,
 ownership, geometry, input semantics, expanded resource use, and admitted actions.
 Invalid structural batches do not publish partial trees. Accepted property
 drafts may remain conflicted; every viewer continues using the same active root.
-Detailed structural encoding and repair operations are required before D2 coding.
+The implemented encoding and repair operations are defined in the bounded
+[authoring contract](../../crates/otrios-interfaces/src/oib/authoring.rs) and
+[D2 work record](../OIB_D2_COMPLETION.md).
 
 Code and designer use the same admitted operations and authorization. Space
 Admins edit UI initially; viewers receive active UI without private drafts.
@@ -535,8 +540,8 @@ add durable/offline edit migration as an incidental requirement.
 
 ## Delivery stages and acceptance
 
-Only a separately selected stage is implementation scope. These are proposed
-increments, not claims of completed functionality.
+D1 and D2 have been selected and implemented. Later stages require separate
+selection and qualification; their descriptions are not delivery claims.
 
 ### D1: document foundation and a useful component inspector
 
@@ -583,8 +588,8 @@ Required focused evidence:
 The [Desktop Studio and bounded D2 milestone](../OIB_DESKTOP_STUDIO_D2.md)
 delivers the selected first slice: an existing-factory/Power palette and
 Insert/Edit/Delete/Reorder of whole signed components within one admitted canvas.
-The remaining D2 scope below, including slots, nested structure, definition edits
-and connections, is deferred.
+The [canonical D2 completion](../OIB_D2_COMPLETION.md) subsequently added the
+bounded slots, nested structure, definition edits and connections below.
 
 Add the insert/component palette, root/slot placement, owned-child reorder,
 definition structure editing, and explicit source connections within the signed

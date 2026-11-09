@@ -6,7 +6,7 @@ Date: 2026-11-09. Status: **selected architecture; loader not implemented**.
 The user selected independently upgradable OIB libraries on 2026-11-09. This RFC
 defines that boundary and a bounded first loader milestone. It does not claim
 that the current D2 branch imports libraries or executes library behavior.
-[D2 completion](../OIB_D2_COMPLETION.md) remains the immediate implementation.
+[D2 completion](../OIB_D2_COMPLETION.md) is delivered; L1 is the next loader milestone.
 The practical boundary is summarized in [OIB library boundary](../OIB_LIBRARY_BOUNDARY.md).
 
 ## Goal and current execution
@@ -33,7 +33,7 @@ The existing app ABI's five command lanes are not that ABI either.
 
 | Stage | Scope | Host changes |
 | --- | --- | --- |
-| D2 | Canonical authored graph, semantic property identities, bounded structural edits | Current work; no library imports |
+| D2 | Canonical authored graph, semantic property identities, bounded structural edits | Deployed; no library imports |
 | L1 | Signed data-only library imports, exact pins, compatible baseline adoption | Implement loader/adoption once; later compatible library bodies reuse it |
 | L2 | Portable component behavior with a generic typed event/command ABI | Implement and qualify the ABI once; widget behavior then ships in libraries |
 | Later XR | Spatial scene/input/backend support and XR libraries | Explicit runtime/backend milestone before XR library iteration |

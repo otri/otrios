@@ -1,17 +1,19 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB D2 completion
 
-Date: 2026-11-09. Status: **selected; implementation in progress, not deployed**.
+Date: 2026-11-09. Status: **implemented, deployed and focused live-qualified; awaiting user review**.
 Branch: `feat/oib-d2-completion`, from `39156f2`.
 
 The original repository remains on `main`. Work is isolated in the D2 worktree.
 The local authoring prototype was checkpointed in `6c954f0` before the format
-cleanup. The live Frame/Web release still uses state protocol v28.
+cleanup. Implementation commit `5aa2a39` is deployed as signed release
+`f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b`,
+using state protocol v29 and release-control v1.
 
 ## Selected clean break
 
-The user approved discarding existing PoC data on 2026-11-09. Initialize fresh
-OIB collections for this cutover. No predecessor migration, old checkpoint reader
+The user approved discarding existing PoC data on 2026-11-09. The cutover initialized fresh
+OIB collections; the resets are complete. No predecessor migration, old checkpoint reader
 or preservation of existing values, identities or overrides is required. A fresh
 collection has a fresh document epoch, so a delayed operation from discarded data
 cannot target a replacement object. A signed code rollback can initialize fresh
@@ -44,9 +46,9 @@ refuse OIB data/UI transfer until a complete portable format is implemented.
 This branch now requires package feature and seed format `otrios-oib-v2`, plus
 `otrios-oib-designer-v2` for Designer metadata.
 The app schemas are `oib-designer-state-v2` and `live-ui-state-v2`; deployment must
-initialize fresh collection identities before opening them. Old OIB
-packages/checkpoints are rejected. State protocol v29 is the unreleased
-candidate in Rust, browser session code and publication tooling. The opening
+use the fresh collection identities initialized for this cutover. Old OIB
+packages/checkpoints are rejected. State protocol v29 is the deployed
+version in Rust, browser session code and publication tooling. The opening
 release-control v1 envelope is unchanged.
 
 OIB edits carry a 32-byte document epoch before their sequence number. The epoch
@@ -110,7 +112,7 @@ overwriting explicit edits.
 
 ## Current structural cutover
 
-The graph compiler and one generation-guarded `EditBatch` are implemented locally.
+The graph compiler and one generation-guarded `EditBatch` are deployed.
 Definition edits precede presets and hierarchy edits; the complete candidate is
 validated and published once. Rejected batches retain the active graph and consume
 no identities. Literal property changes use their independent causal contexts and
@@ -127,8 +129,8 @@ and linked references, remove unused objects, rename designs and instances, edit
 literal visual declarations, and connect admitted app fields, including an unbound
 preset. Numeric placement, slot operations and shared reorder use the same batch.
 Structural inspector drafts retain their captured generation; stale drafts remain
-for review instead of silently rebasing. Live qualification remains in progress.
-This is **not completed D2 acceptance**.
+for review instead of silently rebasing. The focused live checks below qualify
+this bounded scope; D3/D4, complete OIB transfer, library loading and XR are separate.
 
 Source projections contain no predicted renderer IDs. The presented graph supplies
 actual object mappings; hierarchy navigation uses semantic classes. Inspector
@@ -150,61 +152,75 @@ The resulting metadata-only revision record cannot be installed or executed.
 Current package inspection, signature verification and host admission remain
 required for the new candidate; no old OIB reader or feature allowlist was added.
 
-## Validation and completion gates
+## Validation and live qualification
 
-Use Rust 1.90.0 and the committed lockfile. Runtime code/tests remain LGPL core;
-contracts, app descriptions, tooling and docs remain Apache-2.0. No dependency or
-unsafe-code addition is needed for this cleanup.
+Rust 1.90.0 and Cargo.lock remain pinned. Runtime code/tests stay LGPL-3.0-only;
+contracts, app descriptions, tooling and docs remain Apache-2.0. No dependency,
+unsafe code, service, trust root or identity was added.
 
-Current local focused evidence (before signed deployment): graph compiler 11,
-production fixture 14, runtime 9, format/epoch 5, definition authoring 11, hierarchy
-authoring 8, navigation 11, property sources 7 and property editor 13 cases passed.
-All 31 OIB integration cases passed, retaining the 24/64 churn iterations. The
-editor's 41 cases passed across the main run and one focused corrected-viewport
-rerun; the additional unbound-preset source-choice case also passed. The remaining
-245 core library cases, three collection-reset cases and 48 focused Node cases
-passed. Workspace all-target Clippy with `-D warnings` passed. The repository-wide
-check and final long authority restart qualification are running; do not count
-them or Frame/Web acceptance as passing yet.
+Actual local commands used the existing private toolchain/target environment:
 
-The subsequent current core library run passed 299 cases, including the new
-binding-cache and predecessor-authentication tests. The full 69-case Canvas
-integration suite passed after materializing canonical source before inspecting
-derived navigation metadata. Bundle authentication passed 14 cases, and the exact
-signed v28 Live UI predecessor produced current unsigned revision 8 while remaining
-ineligible for current-host admission itself. The first signed staging attempt
-stopped at predecessor admission before activation; this tooling fix is qualified
-before retrying. Two earlier accumulated-journal debug runs exceeded the 10-second
-restart deadline; the final run now checks actual checkpoint advancement and the
-bounded retained journal. Those failed runs are not acceptance evidence.
+- `cargo test -p otrios-core --features canvas,merkle,signed-bundles --lib --locked --offline`:
+  **299 passed**, including binding-cache and predecessor-authentication tests.
+- `cargo test -p otrios-core --features canvas,merkle,signed-bundles --test '*' --locked --offline`:
+  **414 reported passed**, including the corrected 69-case Canvas suite.
+- `cargo test --workspace --exclude otrios-core --features otrios-dashboard/server,otrios-dashboard/canvas,otrios-dashboard/host-sync,otrios-core/merkle --locked --offline`:
+  **77 passed** in the other workspace targets.
+- Workspace all-target Clippy with those server/canvas/host-sync/Merkle features
+  and `-D warnings`, formatting and whitespace checks passed.
+- The check script's Python suites passed **73 cases**, the independent portable
+  fixture verifier passed, signed bundle installation passed **3 cases**, and
+  focused shared-session/input/worker/transfer/cache Node suites passed **75 cases**.
 
-Historical development evidence at foundation commit `8548f43` (before the
-canonical compiler/edit-batch cutover; these are not results for the current tree):
+`bash scripts/check.sh` initially stopped at a stale test that inspected derived
+Frame Focus data on raw canonical source. After normalizing that fixture, all
+69 Canvas cases passed and the remaining commands above ran separately. The
+script is not reported as a single uninterrupted passing run. Process tests can
+return early without `OTRIOS_SPACES_SERVER`; their ordinary test-engine totals
+alone are not process acceptance.
 
-- OIB causal properties, lifecycle, invalid draft publication and gesture tests:
-  31 passed during this increment; obsolete migration-only cases were removed.
-- Definition authoring: 11 passed. Designer fixture: 14 passed. Designer runtime:
-  15 passed. New format/epoch tests: five passed.
-- The hierarchy authoring suite passed eight cases, including a three-child slot
-  cardinality rejection that verifies no identities are consumed. Navigation and
-  property-source suites passed 11 and seven cases, respectively.
-- A freshly built `dashboard-server` passed both `spaces_process d1::d2_` tests:
-  two passed, none skipped. These cross a real authority process and cover races,
-  lost accepted/rejected replies, exact replay, kill/restart, read-only projection,
-  stale order operations and unchanged app/other-app values. The separate real
-  authority lost-reply/reclamation/retired-path restart test also passed.
-- Workspace Clippy passed with all targets, the server/canvas/host-sync/Merkle
-  features and `-D warnings`. The 41 focused OIB library cases passed across the
-  initial run and focused reruns after replacing obsolete numeric-ID assumptions.
-- Shared session/update/text-input Node suites: 36 passed, including codec agreement
-  and upgrade discovery when state negotiation/recovery is unavailable.
+With a freshly built `dashboard-server` explicitly supplied through
+`OTRIOS_SPACES_SERVER`, both `spaces_process d1::d2_` cases passed. The final
+`d1_lost_reply_receipt_reclamation_and_retired_path_survive_real_authority_restart`
+case passed with all **24 cycles**, exact lost-reply replay, retired-path discard,
+checkpoint advancement, a retained journal below 512 KiB and final kill/restart
+under the unchanged **10-second** observation deadline. The cache-key regression,
+16 unified-batch cases and other focused permission/conflict/restart cases passed.
+Two earlier debug recovery runs exceeded the deadline; those failures led to the
+binding cache and bounded OIB checkpoint policy and are not counted as acceptance.
+These are Canvas authority-process checks, not Linux shared-memory IPC qualification.
 
-These are local development checks, not Frame/Web acceptance or Linux shared-memory
-IPC qualification. Finish the remaining cutover, required repository checks, signed
-ARM/Wasm build and deployment, fresh-collection activation and focused Frame/Web
-acceptance before opening a PR. Keep a compatible signed code rollback available.
-After user acceptance, follow the existing builder-maintenance workflow.
+The signed ARM/Wasm build, package composition, transfer and receiver verification
+passed. The actual old signed Live UI package could supply authenticated revision
+metadata for the v2 bump while strict current-host verification still rejected
+its obsolete UI. Signed release activation used the established deploy script and
+existing publisher key. A verified compatible code-only rollback archive is held
+privately; no app-data backup or migration was performed.
 
+Focused live acceptance on release
+`f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b`:
+
+- Only Live UI and OIB Designer were reset through authenticated Admin requests
+  with exact observed collections/generations. Registry generations 74/75 adopted
+  the installed v2 schemas. Other apps, membership and audience were retained.
+- The real browser/Wasm client mounted Designer, created a component/preset with
+  no phantom instance, edited design width **320 → 400**, then deleted that scratch
+  definition. Revisions **1 → 2 → 3 → 4** kept roots **20/30**, the original
+  18 property displays and slider values **40/70**. Live UI also mounted its own
+  fresh v2 collection without an error.
+- Physical touch on Frame opened Designer at revision 3, with confirmed active
+  and presented generations equal. The actual native renderer remained GLES2,
+  rotation 90, with its calibrated touch device and existing scanout unchanged.
+- A current ARM Linux client inserted Power into the production **Accessories**
+  slot, moved it to the canvas, then removed it at revisions **4 → 5 → 6 → 7**.
+  All four business values stayed equal and the original two active roots remained.
+- Readiness/health/service checks passed; Monitoring resumed successfully. No
+  private pixels were exported. The release-control v1 boundary stayed intact.
+
+[Acceptance summary](experiments/data/oib-d2-canonical-2026-11-09/acceptance.json)
+records these bounded facts. Await user review before accepted-work builder
+maintenance. Future signed library loading remains the explicit L1 milestone in
+[RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md).
 
 ## Fresh-collection operational cutover
 

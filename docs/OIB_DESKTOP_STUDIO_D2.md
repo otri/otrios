@@ -3,6 +3,10 @@
 
 Date: 2026-11-04. Status: **completed, live-qualified and accepted, including Insert/Edit/Delete**.
 
+This is the dated v28 acceptance record. The [canonical D2 completion](OIB_D2_COMPLETION.md)
+now supersedes its current-format and active-release statements. Components
+dogfooding below remains future work.
+
 Desktop Studio presents persistent Layers, runtime canvas and Properties using
 Frame Focus's typed hierarchy, drafts, provenance, reset and retained scrolling.
 The browser chooses Studio; native Frame chooses Focus. An explicit local
@@ -10,7 +14,7 @@ profile control switches presentations. Sidebar sizes and the profile are local
 client preferences retained across app mounts; they never enter shared UI data.
 Resize keeps authored preview geometry, full property addresses and app bindings.
 
-## Active goal and completion boundary
+## Historical goal and completion boundary
 
 Deliver Desktop Studio with persistent, resizable hierarchy/canvas/properties
 panels, sharing Frame Focus's editing model. Then provide a palette of the
@@ -85,7 +89,7 @@ application data.
 Implementation commit: `3689fd1199bb028e5c561a483f921bf6737818a4`.
 The initially qualified signed release was
 `f92ac1a0afd6ac3d2d41545fd1e47dfef784eed7d6c0b402f048fa7cef2fe3ae`.
-The full control-management follow-up below is the current active release.
+The full control-management follow-up below was the active release for this milestone.
 The final documentation commit has identical build inputs.
 
 Runtime implementation and tests remain LGPL-3.0-only in core. Public contracts,
@@ -316,10 +320,11 @@ The [factory preflight evidence](experiments/data/oib-studio-d2-2026-11-04/facto
 records the focused results. State stays v28 and release control v1; existing
 compatible signed code rollback remains available during review.
 
-## Next goal: design-agnostic OIB and Components dogfooding
+## Historical next-goal proposal: Components dogfooding
 
-After this active goal is qualified, make OIB independent of any particular app
-design and rebuild Test Playground's Components interface as an OIB document.
+Canonical design-independent D2 authoring is now delivered in the
+[D2 completion record](OIB_D2_COMPLETION.md). Rebuilding Test Playground's
+Components interface as an OIB document remains a future dogfooding goal.
 Use the conversion to expose and close architecture gaps rather than adding
 another app-specific renderer or a privileged fixed fixture.
 

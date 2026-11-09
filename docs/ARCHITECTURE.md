@@ -30,9 +30,20 @@ Capabilities are authority-issued grants for operations on named resources. Neit
 
 ## Streamable executable modules
 
+The deployed Canvas experiment already verifies signed app packages and runs
+optional `Code/behavior.wasm` in bounded Wasmi app ABI 1. OIB v2 compiles canonical
+graphs into the shared renderer/input engines; semantic property identities and
+generation-checked structural edits are described in [D2](OIB_D2_COMPLETION.md).
+These app-specific contracts do not implement the general module system below.
+
+[RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md) selects signed graph/style
+libraries, followed by a generic component Wasm ABI, so compatible library updates
+can reuse host mechanisms. The loader and component ABI are not implemented.
+XR requires a separately qualified backend before XR library iteration.
+
 A later module manifest binds content hashes, interface versions, imported capabilities, target constraints, and signer identity. Verify trusted signatures, the full referenced content graph, and policy before execution. Streaming may fetch chunks lazily; it must never execute unverified bytes. Define trust roots, revocation, rollback policy, and resource limits in a security RFC.
 
-Portable compilation is a later experiment comparing candidate portable IRs and native execution. Native cache keys must bind module hash, compiler version, target architecture/features, runtime ABI, and compilation options. Treat cached output as an untrusted optimization until validated. No portable IR, compiler, or signing scheme is selected in this scaffold.
+Portable native compilation remains a later experiment. Native cache keys must bind module hash, compiler version, target architecture/features, runtime ABI, and compilation options. Treat cached output as an untrusted optimization until validated. The general module IR and compiler remain unselected; Canvas's signed app/Wasm path has its own bounded contract.
 
 ## Transactions and CRDT acceleration
 

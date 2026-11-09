@@ -20,8 +20,9 @@ records completed Safari/Frame acceptance, migration, rollback and data preserva
 [Live OIB UI](docs/OIB.md) adds Space-owned reusable components, per-instance
 overrides and live instance creation, duplication and removal through shared
 CRDT operations. The [O2 qualification](docs/experiments/live-oib-instances-2026-11-03.md)
-records the deployed Live UI companion app. Arbitrary graph placement and
-executable class/outlet APIs remain later work. Declared
+records the earlier Live UI companion app. Bounded graph authoring now uses the
+canonical [D2 model](docs/OIB_D2_COMPLETION.md); executable class/outlet APIs
+remain later work. Declared
 [component geometry](docs/experiments/live-slider-layout-2026-11-03.md) now changes
 through live CRDT batches; restore/default controls recover the original bindings
 without resetting app values.
@@ -32,10 +33,11 @@ addresses. Its [Frame Focus editor](docs/OIB_FRAME_FOCUS_D1.md) adds readable
 Layers navigation, typed property drafts, source-aware Reset and retained
 scrolling, qualified on Frame and the signed-in browser. The
 [component designer RFC](docs/rfcs/0035-oib-component-designer.md) separates delivered
-scope from later authoring. [Desktop Studio and bounded D2](docs/OIB_DESKTOP_STUDIO_D2.md)
-add persistent resizable panels and insertion/reordering of signed factories in
-one admitted canvas. Nested slot/definition/connection authoring, rich text,
-complete UI transfers, images and XR remain deferred.
+scope from later controls. [Desktop Studio](docs/OIB_DESKTOP_STUDIO_D2.md) supplies
+persistent resizable panels. The [completed D2 cutover](docs/OIB_D2_COMPLETION.md)
+adds canonical graphs, real presets, definition and slot authoring, typed
+connections and one atomic edit batch, qualified on Frame and the live browser.
+Rich text, complete UI transfers, images and XR remain deferred.
 
 [Independent component libraries](docs/OIB_LIBRARY_BOUNDARY.md) are the selected
 next boundary: signed graph/style revisions, followed by a versioned component

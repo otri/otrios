@@ -14,7 +14,7 @@ updates. A runtime update is needed when adding a new host primitive or ABI.
 
 | Area | Current D2 branch | Selected next work |
 | --- | --- | --- |
-| Authored UI | Canonical graph being completed; renderer output is derived | Resolve imported immutable graphs before the same compiler |
+| Authored UI | Canonical graph deployed; renderer output is derived | Resolve imported immutable graphs before the same compiler |
 | Components | Signed bounded built-in classes and actions | L1 reuses them; L2 supplies generic executable component behavior |
 | App executable | Optional `Code/behavior.wasm`, bounded Wasmi app ABI 1 | Keep separate from the new component ABI |
 | Packages | Signed app packages and complete release publication | Signed library kind plus exact app dependency locks |
@@ -97,12 +97,11 @@ admission/replacement. It is not a styling update. No migration of the current
 disposable PoC data is required to introduce the new format; routine compatible
 updates after that cutover must not depend on collection resets.
 
-## Changes to fix now and changes to defer
+## Foundation and remaining work
 
-For D2 completion, preserve source versus compiler output, stable semantic
+D2 now separates source from compiler output and preserves stable semantic
 addresses, absent-value inheritance, semantic admission/body separation and
-strict changed-baseline rejection. Do not add library loader scaffolding to the
-current structural-edit cutover.
+strict changed-baseline rejection. It contains no library loader scaffolding.
 
 Before implementing L1, freeze the import-binding codec, distinct library
 package/hash/signature envelope, exposed compatibility contracts and recoverable

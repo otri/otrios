@@ -12,6 +12,13 @@ app-scoped Merkle adapter and viewport-scoped collection windows. See the
 [milestone history](HISTORY.md) for current behavior and dated evidence. These
 experiments do not satisfy the Linux IPC acceptance gates below.
 
+The [canonical OIB D2 milestone](OIB_D2_COMPLETION.md) is deployed on Frame/Web
+with state protocol v29 and release-control v1. It adds bounded graph authoring,
+presets and connections over the existing runtime. Independently upgradable
+component libraries are the selected next boundary in
+[RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md); their loader and
+component Wasm ABI remain unimplemented. Neither work changes the P1–P5 gates.
+
 ## Scope
 
 Rust 1.90.0, Linux x86_64 first, aarch64 as a follow-up; one local authority, one named aggregate, one writer, and two readers. Each update replaces two related counter objects in one manifest. Readers must always observe equal counters within a pinned snapshot, even during rapid publication. The same mechanism supports more objects, but this demo is deliberately small.
