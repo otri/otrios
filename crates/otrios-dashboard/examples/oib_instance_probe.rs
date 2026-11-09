@@ -121,6 +121,155 @@ fn state_controls(client: &Client) -> Result<Value, Box<dyn std::error::Error>> 
     Ok(Value::Object(values))
 }
 
+// Models withheld renderer capacity with one real core composition after a
+// bounded pointer burst. This is an ARM/IPC probe, not evdev or photon timing.
+fn slider_burst(
+    client: &mut Client,
+    step: &Value,
+    start: Instant,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    use otrios_core::{
+        canvas::{presentation::Composer, profiling},
+        dashboard::font::Font,
+    };
+    use otrios_interfaces::scene::{Action, PointerEvent, PointerPhase, TouchResponder};
+    use std::collections::BTreeMap;
+    let samples = step["samples"].as_u64().unwrap_or(100);
+    if !(2..=256).contains(&samples) {
+        return Err("Use 2-256 bounded slider samples".into());
+    }
+    client.set_oib_designer_mode(DesignerMode::Test)?;
+    let font = Font::from_zstd(
+        include_bytes!("../../../web/shared/fonts/Roboto-Regular.otq.zst"),
+        otrios_core::dashboard::font_reference::RESOURCE_SHA256,
+    )?;
+    let mut composer = Composer::default();
+    let first = composer.compose(client, &font)?.clone();
+    let scene = client.scene()?;
+    let mut target = None;
+    for located in scene.controls() {
+        let Some(TouchResponder::Drag(Action::AppEvent(control))) = located.node.responder else {
+            continue;
+        };
+        let Some(percent) = client.control_value(located.node.id)? else {
+            continue;
+        };
+        let point = [
+            located.origin[0] + located.node.frame.width * located.scale * 0.25,
+            located.origin[1] + located.node.frame.height * located.scale * 0.5,
+        ];
+        if !scene
+            .hit_path(point)
+            .iter()
+            .any(|node| node.node.id == located.node.id)
+        {
+            continue;
+        }
+        target = Some((
+            control,
+            (percent * 10.).round() as u16,
+            located.origin,
+            located.scale,
+            [located.node.frame.width, located.node.frame.height],
+        ));
+        break;
+    }
+    let (control, original, origin, scale, extent) = target.ok_or("No visible admitted slider")?;
+    let before = (1..=4)
+        .map(|id| client.value(id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let epoch = client.epoch();
+    let pointer = 239;
+    let at = start.elapsed().as_millis() as u64;
+    let point = |fraction: f32| {
+        [
+            origin[0] + extent[0] * scale * fraction,
+            origin[1] + extent[1] * scale * 0.5,
+        ]
+    };
+    let enabled = profiling::enabled();
+    profiling::set_enabled(true);
+    let _ = profiling::take();
+    let work = (|| -> Result<Value, Box<dyn std::error::Error>> {
+        client.pointer_at(
+            epoch,
+            PointerEvent {
+                id: pointer,
+                phase: PointerPhase::Down,
+                position: point(0.25),
+            },
+            at,
+        )?;
+        let _ = profiling::take();
+        let began = Instant::now();
+        for index in 0..samples {
+            let now = at + (index + 1) * 8;
+            client.pointer_at(
+                epoch,
+                PointerEvent {
+                    id: pointer,
+                    phase: PointerPhase::Move,
+                    position: point(0.25 + 0.5 * (index + 1) as f32 / samples as f32),
+                },
+                now,
+            )?;
+            client.tick(now, 0)?;
+        }
+        let held_us = began.elapsed().as_micros();
+        let held = profiling::take();
+        let began = Instant::now();
+        let frame = composer.compose(client, &font)?.clone();
+        let presentation_us = began.elapsed().as_micros();
+        let presentation = profiling::take();
+        fn counts(report: &profiling::Report) -> BTreeMap<&'static str, usize> {
+            let mut result = BTreeMap::new();
+            for event in &report.events {
+                *result.entry(event.phase).or_default() += 1;
+            }
+            result
+        }
+        let changed: Vec<_> = frame
+            .base
+            .chunks
+            .iter()
+            .filter(|chunk| {
+                !first
+                    .base
+                    .chunks
+                    .iter()
+                    .any(|old| Arc::ptr_eq(&old.resource, &chunk.resource))
+            })
+            .collect();
+        Ok(
+            json!({"phase":"slider-burst","samples":samples,"measurement":"pointer samples with ticks but without scene/composition queries, then one core composition; not physical input or GLES presentation","held_us":held_us,"one_composition_us":presentation_us,"held_phases":counts(&held),"composition_phases":counts(&presentation),"held_dropped":held.dropped,"composition_dropped":presentation.dropped,"changed_resources":changed.len(),"changed_source_vertex_bytes":changed.iter().map(|chunk|(chunk.resource.mesh.vertices.len()+chunk.resource.mesh.glyph_vertices.len())*4).sum::<usize>()}),
+        )
+    })();
+    // Restore the original normalized value before flushing the cancelled drag.
+    let restored = client.event(epoch, control, original, 0);
+    let cancelled = client.pointer_at(
+        epoch,
+        PointerEvent {
+            id: pointer,
+            phase: PointerPhase::Cancel,
+            position: point(0.5),
+        },
+        at + (samples + 1) * 8,
+    );
+    profiling::set_enabled(enabled);
+    restored?;
+    cancelled?;
+    let after = (1..=4)
+        .map(|id| client.value(id))
+        .collect::<Result<Vec<_>, _>>()?;
+    if after != before {
+        return Err("Slider probe failed to restore normalized app values".into());
+    }
+    let mut result = work?;
+    result["normalized_values_restored"] = json!(true);
+    println!("{result}");
+    Ok(true)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     let endpoint = args.get(1).ok_or("Loopback session endpoint required")?;
@@ -230,6 +379,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 client.inspect_oib_selection(selection)?
             }
+            "slider-burst" => slider_burst(&mut client, step, start)?,
             "mode" => client.set_oib_designer_mode(match step["mode"].as_str() {
                 Some("edit") => DesignerMode::Edit,
                 Some("test") => DesignerMode::Test,

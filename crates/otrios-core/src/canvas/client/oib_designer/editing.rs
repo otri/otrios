@@ -703,13 +703,17 @@ fn repaint(m: &mut Mount) -> Result<()> {
         let properties = d.properties.clone();
         let objects = d.objects.clone();
         let status = m.oib_view.as_ref().map_or("", |v| v.info.status.as_str());
-        d.rebuild(
+        // Draft, notice, focus and details changes do not rebuild the shared
+        // hierarchy or its action generations. Structural activation refreshes
+        // those through Mount::refresh_designer before this local repaint.
+        d.rebuild_panels(
             seed,
             objects,
             &properties,
             &m.doc.oib_conflicts(),
             status,
             m.binding.as_ref().is_none_or(|b| b.ui_editable),
+            false,
         )
     })();
     m.designer = Some(d);

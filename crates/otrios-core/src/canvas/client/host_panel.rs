@@ -152,6 +152,11 @@ impl Client {
         if epoch != m.epoch {
             return Ok(Some(false));
         }
+        if event.phase != PointerPhase::Down
+            && !m.preview_scroll.as_ref().is_some_and(|s| s.touching())
+        {
+            return Ok(None);
+        }
         if event.phase == PointerPhase::Down {
             // Slider gestures keep their target. Panning starts on the preview's
             // noninteractive background, never on a sibling panel or modal.

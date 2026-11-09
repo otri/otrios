@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::*;
 use crate::test_support::oib_designer as app;
+#[path = "../../../../tests/support/oib_library_fixture.rs"]
+#[allow(dead_code)]
+mod encoding_imported_fixture;
 
 fn cached_source_document() -> Document {
     let ui = app::ui(&[]);
@@ -450,4 +453,110 @@ fn baseline_digest_cache_tracks_exact_binding_across_sibling_replacement() {
     assert_ne!(first, changed);
     assert_eq!(document.oib_binding_digest().unwrap(), first);
     assert_eq!(sibling.oib_binding_digest().unwrap(), changed);
+}
+
+#[test]
+fn compiled_artifact_reuses_equal_runtime_encoding_for_plain_and_imported_graphs() {
+    let mut document = cached_source_document();
+    for color in [[19, 143, 207, 255], [8, 191, 71, 255]] {
+        replace_compiler_property(&mut document, Value::Color(color));
+        let compiled = document.oib_compiled(2).unwrap();
+        let cache = document.oib_compiled_cache.lock().unwrap();
+        let current = cache.last().unwrap();
+        assert!(
+            current
+                .layout
+                .has_same_encoding_input(&current.prepared.blueprint)
+        );
+        assert_eq!(compiled.0.layout, compiled.1.bytes());
+        assert_eq!(compiled.0, current.prepared.to_ui().unwrap());
+    }
+    let ui = encoding_imported_fixture::admit(&encoding_imported_fixture::imported());
+    let mut document = Document::new(ui.state_schema.clone(), "oib:encoding-probe").unwrap();
+    document.configure_oib(&ui).unwrap();
+    for color in [[19, 143, 207, 255], [8, 191, 71, 255]] {
+        replace_compiler_property(&mut document, Value::Color(color));
+        let compiled = document.oib_compiled(2).unwrap();
+        let cache = document.oib_compiled_cache.lock().unwrap();
+        let current = cache.last().unwrap();
+        assert!(
+            current
+                .layout
+                .has_same_encoding_input(&current.prepared.blueprint)
+        );
+        assert_eq!(compiled.0.layout, compiled.1.bytes());
+        assert_eq!(compiled.0, current.prepared.to_ui().unwrap());
+    }
+}
+
+#[test]
+fn distinct_artifact_blueprint_keeps_its_independent_encoding() {
+    let document = cached_source_document();
+    let _compiled = document.oib_compiled(2).unwrap();
+    let cache = document.oib_compiled_cache.lock().unwrap();
+    let prepared = &cache.last().unwrap().prepared;
+    let mut blueprint = prepared.blueprint.clone();
+    blueprint.templates[0].name = "Distinct runtime template".into();
+    let runtime = crate::dashboard::layout::Layout::from_blueprint(blueprint).unwrap();
+    let artifact = prepared.to_ui_with_layout(&runtime).unwrap();
+    assert_eq!(artifact, prepared.to_ui().unwrap());
+    assert_ne!(artifact.layout, runtime.bytes());
+}
+
+#[test]
+#[ignore = "global profiler must run in isolation"]
+fn cold_paint_compilation_encodes_identical_artifact_and_runtime_once() {
+    let ui = encoding_imported_fixture::admit(&encoding_imported_fixture::imported());
+    let mut document = Document::new(ui.state_schema.clone(), "oib:one-layout-encoding").unwrap();
+    document.configure_oib(&ui).unwrap();
+    let before = document.oib_compiled(2).unwrap();
+    replace_compiler_property(&mut document, Value::Color([19, 143, 207, 255]));
+    crate::canvas::profiling::set_enabled(true);
+    let _ = crate::canvas::profiling::take();
+    let compiled = document.oib_compiled(2);
+    let report = crate::canvas::profiling::take();
+    crate::canvas::profiling::set_enabled(false);
+    let compiled = compiled.unwrap();
+    assert_ne!(compiled.1.bytes(), before.1.bytes());
+    assert_eq!(compiled.0.layout, compiled.1.bytes());
+    for phase in [
+        "layout.encode",
+        "oib.compiled.paint",
+        "oib.compiled.shared_encoding",
+    ] {
+        assert_eq!(
+            report
+                .events
+                .iter()
+                .filter(|event| event.phase == phase)
+                .count(),
+            1,
+            "{phase}"
+        );
+    }
+    assert!(
+        report
+            .events
+            .iter()
+            .all(|event| event.phase != "layout.decode")
+    );
+}
+
+#[test]
+fn signed_zero_runtime_difference_does_not_replace_artifact_bytes() {
+    let document = cached_source_document();
+    let _compiled = document.oib_compiled(2).unwrap();
+    let cache = document.oib_compiled_cache.lock().unwrap();
+    let prepared = &cache.last().unwrap().prepared;
+    let mut blueprint = prepared.blueprint.clone();
+    blueprint.root.frame[0] = -0.;
+    assert_eq!(
+        blueprint, prepared.blueprint,
+        "ordinary PartialEq conflates signed zero"
+    );
+    let runtime = crate::dashboard::layout::Layout::from_blueprint(blueprint).unwrap();
+    assert!(!runtime.has_same_encoding_input(&prepared.blueprint));
+    let artifact = prepared.to_ui_with_layout(&runtime).unwrap();
+    assert_eq!(artifact, prepared.to_ui().unwrap());
+    assert_ne!(artifact.layout, runtime.bytes());
 }

@@ -13,6 +13,8 @@ mod baseline;
 mod cache_tests;
 mod hierarchy;
 #[cfg(test)]
+mod identity_cache_tests;
+#[cfg(test)]
 mod imports_cache_tests;
 mod inspector;
 mod lifecycle;
@@ -159,7 +161,13 @@ impl Document {
             binding.identity_floor = previous.identity_floor;
             binding.adoption = previous.adoption;
             if *existing == bytes(&binding)? {
-                self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
+                if self
+                    .oib_ui
+                    .as_ref()
+                    .is_none_or(|admitted| admitted.as_ref() != ui)
+                {
+                    self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
+                }
                 self.oib_compiled(2)?;
                 return Ok(false);
             }
@@ -287,7 +295,7 @@ impl Document {
     }
     fn oib_binding_entry(&self) -> Result<std::sync::Arc<CachedBinding>> {
         let leaf = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
-        {
+        let miss = {
             let cache = self.oib_binding_cache.lock().map_err(err)?;
             if let Some(cached) = cache.as_ref()
                 && cached.leaf == leaf
@@ -299,7 +307,13 @@ impl Document {
             {
                 return Ok(cached.clone());
             }
-        }
+            match cache.as_ref() {
+                None => "oib.binding.miss.empty",
+                Some(cached) if cached.leaf != leaf => "oib.binding.miss.leaf",
+                Some(_) => "oib.binding.miss.admission",
+            }
+        };
+        let _miss_profile = crate::canvas::profiling::span(miss);
         let _profile = crate::canvas::profiling::span("oib.binding.normalize");
         let mut binding: Binding = decode(&payload(&self.tree, &[4, 0])?)?;
         baseline::validate_metadata(&binding, None)?;
@@ -705,7 +719,7 @@ impl Document {
             (prepared, layout)
         };
         let prepared = std::sync::Arc::new(prepared);
-        let resolved = prepared.to_ui()?;
+        let resolved = prepared.to_ui_with_layout(&layout)?;
         let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
         // Sibling snapshots share this small MRU. Never accumulate historical
         // revisions, even when two owners compile concurrently.

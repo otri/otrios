@@ -73,6 +73,25 @@ impl InputRouter {
     pub fn active(&self) -> bool {
         !self.captures.is_empty()
     }
+    pub fn dragging(&self, pointer: u32) -> bool {
+        self.captures
+            .get(&pointer)
+            .is_some_and(|capture| matches!(capture.responder, TouchResponder::Drag(_)))
+    }
+    pub fn drag_action(&self, pointer: u32) -> Option<Action> {
+        self.captures.get(&pointer).and_then(|capture| {
+            if let TouchResponder::Drag(action) = capture.responder {
+                Some(action)
+            } else {
+                None
+            }
+        })
+    }
+    pub fn drag_active(&self) -> bool {
+        self.captures
+            .values()
+            .any(|capture| matches!(capture.responder, TouchResponder::Drag(_)))
+    }
     pub fn cancel_all(&mut self) {
         self.captures.clear();
     }

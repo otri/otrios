@@ -33,6 +33,18 @@ impl PreparedUi {
         ui.layout = Layout::encode(&self.blueprint)?;
         Ok(ui)
     }
+    /// Reuse a validated runtime encoding only when its complete typed input is
+    /// identical. Artifact and runtime layouts can differ for legacy targets;
+    /// those continue through the independent artifact encoder.
+    pub(crate) fn to_ui_with_layout(&self, layout: &Layout) -> Result<Ui> {
+        if !layout.has_same_encoding_input(&self.blueprint) {
+            return self.to_ui();
+        }
+        let _profile = crate::canvas::profiling::span("oib.compiled.shared_encoding");
+        let mut ui = self.ui.clone();
+        ui.layout = layout.bytes().to_vec();
+        Ok(ui)
+    }
     pub(crate) fn finish(mut self) -> Result<Ui> {
         self.ui.layout = Layout::encode(&self.blueprint)?;
         Ok(self.ui)

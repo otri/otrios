@@ -250,6 +250,40 @@ fn run(nodes: usize, iterations: usize, font: &Font) -> Result<(), String> {
                         );
                     },
                 );
+                let mut rebound = first.root().clone();
+                for child in &mut rebound.children {
+                    child.id += 10000;
+                }
+                let rebound = Scene::new(rebound)?;
+                let mut owner = TextPresentation::default();
+                let before = owner.compose(&first, font);
+                let after = owner.compose(&rebound, font);
+                let changed = after
+                    .chunks
+                    .iter()
+                    .filter(|chunk| {
+                        !before
+                            .chunks
+                            .iter()
+                            .any(|old| std::sync::Arc::ptr_eq(&old.resource, &chunk.resource))
+                    })
+                    .count();
+                println!(
+                    "{{\"stage\":\"identity_rebind_resources\",\"kind\":{kind:?},\"nodes\":{nodes},\"clipped\":{clipped},\"resources\":{},\"changed_resources\":{changed}}}",
+                    after.chunks.len()
+                );
+                measure(
+                    "retained_identity_change",
+                    kind,
+                    nodes,
+                    clipped,
+                    iterations,
+                    |index| {
+                        black_box(
+                            owner.compose(if index % 2 == 0 { &first } else { &rebound }, font),
+                        );
+                    },
+                );
             }
             let mut retained = TextPresentation::default();
             let mut profile = ComposeProfile::default();

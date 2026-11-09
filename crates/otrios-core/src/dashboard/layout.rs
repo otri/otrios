@@ -2,6 +2,8 @@
 //! Bounded FlexBuffers reader and typed component/binding interpreter. No JSON path.
 use super::{Result, scene::Scene};
 pub mod composition;
+mod content_update;
+mod encoding_input;
 pub mod resizing;
 use flexbuffers::{FlexBufferType, Reader};
 use otrios_interfaces::{layout::*, scene::*};
@@ -16,6 +18,14 @@ const MAX_ITEMS: usize = 32768;
 pub struct Layout {
     bytes: Arc<[u8]>,
     blueprint: Arc<Blueprint>,
+}
+/// Exact input equality for the retained raw-scene cache, including signed zero.
+#[cfg(feature = "canvas")]
+pub(crate) fn same_binding_values(a: &BTreeMap<u16, Value>, b: &BTreeMap<u16, Value>) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|((a_id, a), (b_id, b))| a_id == b_id && content_update::same_value(a, b))
 }
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -124,6 +134,40 @@ impl Layout {
 
     pub fn blueprint(&self) -> &Blueprint {
         &self.blueprint
+    }
+    /// The complete typed input must match, including the sign of finite zero.
+    pub(crate) fn has_same_encoding_input(&self, blueprint: &Blueprint) -> bool {
+        encoding_input::same(&self.blueprint, blueprint)
+    }
+    /// Identity of the immutable admitted template, independent of slot values.
+    pub fn same_source(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.blueprint, &other.blueprint)
+    }
+    /// A conservative drag certificate: no visibility or input-subtree bounds
+    /// depend on the changed slots. Decorative fill sizes may still change.
+    pub fn content_input_bounds_stable(
+        &self,
+        old_slots: &BTreeMap<u16, Value>,
+        new_slots: &BTreeMap<u16, Value>,
+    ) -> bool {
+        content_update::input_bounds_stable(&self.blueprint, old_slots, new_slots)
+    }
+    /// Patch visual/semantic content in a raw scene from this exact layout and
+    /// old slots. `None` requests full layout. Source identity and viewport/order
+    /// cache keys (including viewport and order) remain the caller's responsibility.
+    /// Static composition geometry is reused from the previous raw scene; value
+    /// changes cannot affect its literal flow plans. Initial or changed-viewport/
+    /// order scenes must go through the full resolver.
+    pub fn update_content(
+        &self,
+        previous: &Scene,
+        old_slots: &BTreeMap<u16, Value>,
+        new_slots: &BTreeMap<u16, Value>,
+        viewport: [f32; 2],
+    ) -> Result<Option<Scene>> {
+        #[cfg(feature = "canvas")]
+        let _profile = crate::canvas::profiling::span("layout.update_content");
+        content_update::update(&self.blueprint, previous, old_slots, new_slots, viewport)
     }
     /// App layouts can read only their explicitly projected slots. No dashboard scope.
     pub fn resolve_slots(&self, slots: &BTreeMap<u16, Value>) -> Result<Scene> {
@@ -503,73 +547,40 @@ fn eval(
         }
     })
 }
-fn expand(
-    b: &Blueprint,
-    i: &Instance,
-    bindings: &Bindings<'_>,
-    depth: usize,
-    count: &mut usize,
-    frames: Option<&BTreeMap<u16, [f32; 4]>>,
-) -> Result<SceneNode> {
-    if depth > 8 {
-        return Err("Instance expansion limit".into());
+/// The full resolver and content updater share all expression/type/shape checks.
+struct NodeEvaluation<'a, 'slots> {
+    instance_frame: [f32; 4],
+    params: &'a BTreeMap<u16, Value>,
+    bindings: &'a Bindings<'slots>,
+}
+impl NodeEvaluation<'_, '_> {
+    fn run(&self, expression: &Expr) -> Result<Value> {
+        eval(expression, self.instance_frame, self.params, self.bindings)
     }
-    let t = b
-        .templates
-        .iter()
-        .find(|t| t.id == i.template)
-        .ok_or("Unknown component")?;
-    let mut params = BTreeMap::new();
-    for p in &t.parameters {
-        let e = i
-            .properties
-            .iter()
-            .find(|v| v.key == p.key)
-            .map(|v| &v.value)
-            .unwrap_or(&p.default);
-        let value = eval(e, i.frame, &BTreeMap::new(), bindings)?;
-        if value_type(&value) != p.value_type {
-            return Err(format!("Wrong type for {}", p.name));
-        }
-        params.insert(p.key, value);
-    }
-    struct Context<'a, 'v> {
-        b: &'a Blueprint,
-        i: &'a Instance,
-        bindings: &'a Bindings<'v>,
-        params: &'a BTreeMap<u16, Value>,
-        depth: usize,
-        frames: Option<&'a BTreeMap<u16, [f32; 4]>>,
-    }
-    fn walk(
-        n: &TemplateNode,
-        c: &Context<'_, '_>,
-        parent_size: [f32; 2],
+    fn frame(
+        &self,
+        node: &TemplateNode,
+        parent: [f32; 2],
         is_root: bool,
-        count: &mut usize,
-        slots: &mut usize,
-    ) -> Result<Option<SceneNode>> {
-        let run = |e: &Expr| eval(e, c.i.frame, c.params, c.bindings);
-        if !boolean(run(&n.visible)?)? {
-            return Ok(None);
+        schema: &str,
+        frames: Option<&BTreeMap<u16, [f32; 4]>>,
+    ) -> Result<Rect> {
+        let mut frame = [0.; 4];
+        for (value, expression) in frame.iter_mut().zip(&node.frame) {
+            *value = number(self.run(expression)?)?;
         }
-        *count += 1;
-        if *count > 512 {
-            return Err("Expanded scene too large".into());
+        if is_root && schema != "otrios-layout-v1" {
+            frame = self.instance_frame;
+        } else if let Some(resolved) = frames.and_then(|frames| frames.get(&node.id)) {
+            frame = *resolved;
+        } else if let Some(rule) = node.resize {
+            frame = resizing::resolve(frame, parent, rule)?;
         }
-        let mut f = [0.; 4];
-        for (v, e) in f.iter_mut().zip(&n.frame) {
-            *v = number(run(e)?)?;
-        }
-        if is_root && c.b.schema != "otrios-layout-v1" {
-            f = c.i.frame;
-        } else if let Some(frame) = c.frames.and_then(|frames| frames.get(&n.id)) {
-            f = *frame;
-        } else if let Some(rule) = n.resize {
-            f = resizing::resolve(f, parent_size, rule)?;
-        }
-        let r = Rect::new(f[0], f[1], f[2], f[3]);
-        let primitive = match &n.shape {
+        Ok(Rect::new(frame[0], frame[1], frame[2], frame[3]))
+    }
+    fn primitive(&self, shape: &Shape, r: Rect) -> Result<Primitive> {
+        let run = |expr: &Expr| self.run(expr);
+        Ok(match shape {
             Shape::Canvas { clip } => Primitive::Canvas { clip: *clip },
             Shape::Slot => Primitive::Canvas { clip: true },
             Shape::Text {
@@ -649,7 +660,104 @@ fn expand(
                     color: color(run(paint)?)?,
                 }
             }
+        })
+    }
+    fn semantics(&self, semantics: Option<&Semantics>) -> Result<Option<SwitchSemantics>> {
+        Ok(if let Some(semantics) = semantics {
+            Some(SwitchSemantics {
+                label: text(self.run(&semantics.label)?)?,
+                checked: boolean(self.run(&semantics.checked)?)?,
+            })
+        } else {
+            None
+        })
+    }
+}
+fn resolve_responder(schema: &str, responder: Option<Responder>) -> Result<Option<TouchResponder>> {
+    Ok(if let Some(responder) = responder {
+        Some(match responder {
+            Responder::AppEvent { control, drag } => {
+                if (schema != otrios_interfaces::layout::SPARSE_EVENTS_FORMAT && control >= 128)
+                    || control == 255
+                {
+                    return Err("Canvas event index exceeds limit".into());
+                }
+                if drag {
+                    TouchResponder::Drag(Action::AppEvent(control))
+                } else {
+                    TouchResponder::Activate(Action::AppEvent(control))
+                }
+            }
+            Responder::AppNavigate(id) => TouchResponder::Activate(Action::AppNavigate(id)),
+            Responder::Bubble => TouchResponder::Bubble,
+            Responder::Consume => TouchResponder::Consume,
+        })
+    } else {
+        None
+    })
+}
+
+fn expand(
+    b: &Blueprint,
+    i: &Instance,
+    bindings: &Bindings<'_>,
+    depth: usize,
+    count: &mut usize,
+    frames: Option<&BTreeMap<u16, [f32; 4]>>,
+) -> Result<SceneNode> {
+    if depth > 8 {
+        return Err("Instance expansion limit".into());
+    }
+    let t = b
+        .templates
+        .iter()
+        .find(|t| t.id == i.template)
+        .ok_or("Unknown component")?;
+    let mut params = BTreeMap::new();
+    for p in &t.parameters {
+        let e = i
+            .properties
+            .iter()
+            .find(|v| v.key == p.key)
+            .map(|v| &v.value)
+            .unwrap_or(&p.default);
+        let value = eval(e, i.frame, &BTreeMap::new(), bindings)?;
+        if value_type(&value) != p.value_type {
+            return Err(format!("Wrong type for {}", p.name));
+        }
+        params.insert(p.key, value);
+    }
+    struct Context<'a, 'v> {
+        b: &'a Blueprint,
+        i: &'a Instance,
+        bindings: &'a Bindings<'v>,
+        params: &'a BTreeMap<u16, Value>,
+        depth: usize,
+        frames: Option<&'a BTreeMap<u16, [f32; 4]>>,
+    }
+    fn walk(
+        n: &TemplateNode,
+        c: &Context<'_, '_>,
+        parent_size: [f32; 2],
+        is_root: bool,
+        count: &mut usize,
+        slots: &mut usize,
+    ) -> Result<Option<SceneNode>> {
+        let evaluation = NodeEvaluation {
+            instance_frame: c.i.frame,
+            params: c.params,
+            bindings: c.bindings,
         };
+        let run = |e: &Expr| evaluation.run(e);
+        if !boolean(run(&n.visible)?)? {
+            return Ok(None);
+        }
+        *count += 1;
+        if *count > 512 {
+            return Err("Expanded scene too large".into());
+        }
+        let r = evaluation.frame(n, parent_size, is_root, &c.b.schema, c.frames)?;
+        let primitive = evaluation.primitive(&n.shape, r)?;
         let mut children = Vec::new();
         if matches!(n.shape, Shape::Slot) {
             *slots += 1;
@@ -663,36 +771,8 @@ fn expand(
                 }
             }
         }
-        let responder = if let Some(r) = n.responder {
-            Some(match r {
-                Responder::AppEvent { control, drag } => {
-                    if (c.b.schema != otrios_interfaces::layout::SPARSE_EVENTS_FORMAT
-                        && control >= 128)
-                        || control == 255
-                    {
-                        return Err("Canvas event index exceeds limit".into());
-                    }
-                    if drag {
-                        TouchResponder::Drag(Action::AppEvent(control))
-                    } else {
-                        TouchResponder::Activate(Action::AppEvent(control))
-                    }
-                }
-                Responder::AppNavigate(id) => TouchResponder::Activate(Action::AppNavigate(id)),
-                Responder::Bubble => TouchResponder::Bubble,
-                Responder::Consume => TouchResponder::Consume,
-            })
-        } else {
-            None
-        };
-        let semantics = if let Some(s) = &n.semantics {
-            Some(SwitchSemantics {
-                label: text(run(&s.label)?)?,
-                checked: boolean(run(&s.checked)?)?,
-            })
-        } else {
-            None
-        };
+        let responder = resolve_responder(&c.b.schema, n.responder)?;
+        let semantics = evaluation.semantics(n.semantics.as_ref())?;
         Ok(Some(SceneNode {
             id: c.i.id * 1000 + u32::from(n.id),
             frame: r,

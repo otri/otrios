@@ -105,31 +105,30 @@ fn retain_inspector_ids(
     next: &mut [SceneNode],
     previous_actions: &BTreeMap<u32, LocalAction>,
     next_actions: &mut BTreeMap<u32, LocalAction>,
+    diagnostics: std::ops::Range<usize>,
 ) {
     fn compatible(
         old: &SceneNode,
         new: &SceneNode,
         old_actions: &BTreeMap<u32, LocalAction>,
         new_actions: &BTreeMap<u32, LocalAction>,
+        owned: bool,
     ) -> bool {
-        old.frame == new.frame
+        let action = old_actions.get(&old.id);
+        let owned = owned || action.is_some();
+        old.frame.width == new.frame.width
+            && old.frame.height == new.frame.height
             && old.responder == new.responder
             && std::mem::discriminant(&old.primitive) == std::mem::discriminant(&new.primitive)
-            && old_actions.get(&old.id) == new_actions.get(&new.id)
+            && action == new_actions.get(&new.id)
+            // A typed control owns its decorative surface/label identities.
+            // Standalone diagnostics have no such owner: match their actual
+            // content, rather than assigning an old heading ID to a new notice.
+            && (owned || (old.primitive == new.primitive && old.semantics == new.semantics))
             && old.children.len() == new.children.len()
-            && old
-                .children
-                .iter()
-                .zip(&new.children)
-                .all(|(old, new)| compatible(old, new, old_actions, new_actions))
-    }
-    if previous.len() != next.len()
-        || !previous
-            .iter()
-            .zip(next.iter())
-            .all(|(old, new)| compatible(old, new, previous_actions, next_actions))
-    {
-        return;
+            && old.children.iter().zip(&new.children).all(|(old, new)| {
+                compatible(old, new, old_actions, new_actions, owned)
+            })
     }
     fn retain(old: &SceneNode, new: &mut SceneNode, actions: &mut BTreeMap<u32, LocalAction>) {
         if let Some(action) = actions.remove(&new.id) {
@@ -140,10 +139,32 @@ fn retain_inspector_ids(
             retain(old, new, actions);
         }
     }
-    for (old, new) in previous.iter().zip(next) {
-        retain(old, new, next_actions);
+    let mut used = vec![false; previous.len()];
+    for (index, node) in next.iter_mut().enumerate() {
+        let matches = |previous_index: usize| {
+            !used[previous_index]
+                // Only typed controls can follow rows across positions. Text
+                // diagnostics are not semantic keys for finding another row.
+                && (previous_index == index || previous_actions.contains_key(&previous[previous_index].id))
+                && compatible(
+                    &previous[previous_index], node, previous_actions, next_actions,
+                    // Selection title and status are fixed presentation slots
+                    // for this unchanged inspector owner, not text-derived keys.
+                    diagnostics.contains(&index) && previous_index == index,
+                )
+        };
+        // Normal value/status updates stay linear. Inserted/removed rows may
+        // move an unchanged typed control, whose identity follows its action.
+        let matched = (index < previous.len() && matches(index))
+            .then_some(index)
+            .or_else(|| (0..previous.len()).find(|index| matches(*index)));
+        if let Some(index) = matched {
+            used[index] = true;
+            retain(&previous[index], node, next_actions);
+        }
     }
 }
+
 pub(super) struct Designer {
     selection: Selection,
     focus_layout: bool,
@@ -573,14 +594,15 @@ impl Designer {
         let single = self.panels.len() == 1;
         let panel = self.panels.last_mut().ok_or("Missing designer inspector")?;
         if !structure {
-            // A value/status repaint keeps the semantic identity of every row
-            // when its geometry and typed actions are unchanged. A newly
-            // disclosed Reset or conflict row receives fresh IDs instead.
+            // Local value/status changes preserve independent typed controls,
+            // even when another row is inserted or moves. Different actions
+            // and newly disclosed Reset/conflict controls receive fresh IDs.
             retain_inspector_ids(
                 &panel.nodes,
                 &mut nodes,
                 &self.actions,
                 &mut builder.actions,
+                usize::from(single)..usize::from(single) + 2,
             );
             let mut retired = Vec::new();
             fn ids(node: &SceneNode, out: &mut Vec<u32>) {
@@ -2386,6 +2408,11 @@ impl Client {
             return Ok(None);
         };
         if m.designer.is_none() {
+            return Ok(None);
+        }
+        if event.phase != PointerPhase::Down
+            && m.designer.as_ref().is_none_or(|d| d.capture.is_none())
+        {
             return Ok(None);
         }
         if event.phase == PointerPhase::Down && self.input_busy() {

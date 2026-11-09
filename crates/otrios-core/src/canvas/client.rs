@@ -13,7 +13,7 @@ mod oib_property_editor;
 use crate::dashboard::{
     input::{Delivery, InputRouter},
     keyboard::{Keyboard, TextBuffer},
-    layout::Layout,
+    layout::{Layout, same_binding_values},
     scene::Scene,
 };
 use otrios_interfaces::{
@@ -23,7 +23,7 @@ use otrios_interfaces::{
 };
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 #[derive(Clone)]
 struct OrderDrag {
@@ -40,6 +40,28 @@ struct OibView {
     deferred: bool,
     info: super::oib::Info,
 }
+struct RawLayout {
+    source: Layout,
+    viewport: [f32; 2],
+    order: Vec<u16>,
+    slots: BTreeMap<u16, Value>,
+    scene: Arc<Scene>,
+}
+struct CaptureValidation {
+    source: Layout,
+    viewport: [f32; 2],
+    order: Vec<u16>,
+    slots: BTreeMap<u16, Value>,
+    scene: Arc<Scene>,
+    selectors: Vec<Selector>,
+    handlers: Vec<Handler>,
+    oib_generation: Option<u64>,
+    access: (bool, bool, bool),
+    quit_control: Option<u8>,
+    binding: Option<otrios_interfaces::canvas::MountBinding>,
+    projection: Option<(bool, bool, bool, oib_focus_layout::Studio)>,
+    backdrop: Option<SceneNode>,
+}
 struct Mount {
     epoch: u32,
     viewport: [f32; 2],
@@ -54,6 +76,7 @@ struct Mount {
     doc: StateAdapter,
     behavior: Option<Behavior>,
     input: InputRouter,
+    captured_handlers: BTreeMap<u32, Handler>,
     state_ref: String,
     binding: Option<otrios_interfaces::canvas::MountBinding>,
     quit_control: Option<u8>,
@@ -62,6 +85,8 @@ struct Mount {
     private_access: bool,
     scene: OnceLock<Arc<Scene>>,
     layout_scene: OnceLock<Arc<Scene>>,
+    raw_layout: Mutex<Option<RawLayout>>,
+    capture_validation: Option<Arc<CaptureValidation>>,
     visible: BTreeMap<u16, Value>,
     keyboard: Keyboard,
     editors: BTreeMap<u16, TextBuffer>,
@@ -2734,6 +2759,12 @@ impl Client {
         self.auth_required = false;
         Ok(true)
     }
+    pub(crate) fn prepare_presentation_scene(&mut self) -> Result<()> {
+        if let Some(mount) = &mut self.active {
+            mount.sync_panel_scroll()?;
+        }
+        Ok(())
+    }
     pub fn scene(&self) -> Result<Arc<Scene>> {
         cached_scene(self.active.as_ref().ok_or("No Canvas")?)
     }
@@ -3087,6 +3118,26 @@ impl Client {
         if epoch != self.epoch() || self.active.is_none() {
             return Ok(false);
         }
+        {
+            let mount = self.active.as_mut().ok_or("No Canvas")?;
+            mount
+                .captured_handlers
+                .retain(|pointer, _| mount.input.dragging(*pointer));
+            if event.phase != PointerPhase::Down
+                && let Some(expected) = mount.captured_handlers.get(&event.id)
+                && mount.handler(expected.control).as_ref() != Some(expected)
+            {
+                // A control index can remain in the scene while its app field
+                // or operation is rebound. Old gestures cannot target that new
+                // handler even after a generic invalidation revoked the cache.
+                event.phase = PointerPhase::Cancel;
+            }
+            if event.phase == PointerPhase::Down {
+                mount.captured_handlers.remove(&event.id);
+                mount.capture_validation = None;
+                mount.sync_panel_scroll()?;
+            }
+        }
         if !self.host_active
             && let Some(changed) = self.designer_pointer(event, at)?
         {
@@ -3114,7 +3165,19 @@ impl Client {
                 || m.text_scroll.as_ref().is_some_and(|s| s.touching())
                 || m.text_document.as_ref().is_some_and(|s| s.touching())
         });
-        let scene = if captured_text && event.phase != PointerPhase::Down {
+        let capture_scene = if let Some(mount) = self.active.as_ref()
+            && event.phase != PointerPhase::Down
+            && mount.input.dragging(event.id)
+            && let Some(capture) = mount.capture_validation.as_ref()
+            && mount.capture_bounds_stable(capture)?
+        {
+            Some(capture.scene.clone())
+        } else {
+            None
+        };
+        let scene = if let Some(scene) = capture_scene {
+            scene
+        } else if captured_text && event.phase != PointerPhase::Down {
             cached_layout(self.active.as_ref().ok_or("No Canvas")?)?
         } else {
             self.scene()?
@@ -3231,6 +3294,21 @@ impl Client {
             return Ok(true);
         }
         let delivery = m.input.dispatch_at(scene.clone(), event, at);
+        if event.phase == PointerPhase::Down
+            && let Some(Action::AppEvent(control)) = m.input.drag_action(event.id)
+            && let Some(handler) = m.handler(control)
+        {
+            m.captured_handlers.insert(event.id, handler);
+        } else if !m.input.dragging(event.id) {
+            m.captured_handlers.remove(&event.id);
+        }
+        if m.input.drag_active() {
+            if m.capture_validation.is_none() {
+                m.capture_validation = Some(Arc::new(m.capture_basis(scene.clone())?));
+            }
+        } else {
+            m.capture_validation = None;
+        }
         let pad = delivery.gesture.as_ref().is_some_and(|g| matches!(m.ui.presentation,Some(Presentation::TouchPad{control}) if g.action==Action::AppEvent(control)));
         if pad && self.requested.as_ref().is_some_and(|r| !r.reconnecting) {
             return Ok(false);
@@ -3802,7 +3880,14 @@ impl Client {
             scrolled |= s.tick(now);
             self.host.scroll = s.info().offset[1];
         }
-        m.sync_panel_scroll()?;
+        if m.designer
+            .as_ref()
+            .is_some_and(oib_designer::Designer::busy)
+            || m.preview_scroll.as_ref().is_some_and(|s| s.touching())
+            || m.panel_scroll.as_ref().is_some_and(|s| s.touching())
+        {
+            m.sync_panel_scroll()?;
+        }
         if let Some(s) = &mut m.preview_scroll {
             scrolled |= s.tick(now);
         }
@@ -4045,6 +4130,7 @@ impl Mount {
         self.invalidate_presentation();
     }
     fn invalidate_presentation(&mut self) {
+        self.capture_validation = None;
         self.scene.take();
     }
     fn sync_panel_scroll(&mut self) -> Result<()> {
@@ -4071,6 +4157,7 @@ impl Mount {
         Ok(())
     }
     fn refresh(&mut self) -> Result<bool> {
+        let capture = self.capture_validation.take();
         let mut oib_changed = self.refresh_oib_view()?;
         if let Some(generation) = self
             .oib_view
@@ -4146,11 +4233,99 @@ impl Mount {
         }
         let values = selected_values(self)?;
         if values == self.visible {
+            if let Some(capture) = capture
+                && self.capture_bounds_stable(&capture)?
+            {
+                self.capture_validation = Some(capture);
+            }
             return Ok(oib_changed);
         }
+        let changed_editor = self
+            .editors
+            .keys()
+            .any(|field| self.visible.get(field) != values.get(field));
         self.visible = values;
-        self.invalidate();
+        if let Some(capture) = capture
+            && !changed_editor
+            && self.capture_bounds_stable(&capture)?
+        {
+            // The next renderer credit builds the latest visual value. Input
+            // validation remains on a separately certified immutable tree.
+            self.layout_scene.take();
+            self.scene.take();
+            self.capture_validation = Some(capture);
+        } else {
+            self.invalidate();
+        }
         Ok(true)
+    }
+    fn capture_basis(&self, scene: Arc<Scene>) -> Result<CaptureValidation> {
+        Ok(CaptureValidation {
+            source: self.layout.clone(),
+            viewport: self.viewport,
+            order: ordered_items(self)?.iter().map(|item| item.node).collect(),
+            slots: layout_bindings(self)?,
+            scene,
+            selectors: self.ui.selectors.clone(),
+            handlers: self.ui.handlers.clone(),
+            oib_generation: self.oib_generation,
+            access: (self.private, self.private_access, self.session_controls),
+            quit_control: self.quit_control,
+            binding: self.binding.clone(),
+            projection: self.designer.as_ref().map(|d| {
+                (
+                    d.focus_layout(),
+                    d.layers_open(),
+                    d.management_visible(),
+                    d.studio,
+                )
+            }),
+            backdrop: self.host_backdrop.clone(),
+        })
+    }
+    fn capture_bounds_stable(&self, capture: &CaptureValidation) -> Result<bool> {
+        if !self.input.drag_active()
+            || self.keyboard.visible
+            || self.focus.is_some()
+            || self.keyboard_pointer.is_some()
+            || self.order_editing
+            || self.order_drag.is_some()
+            || self.chat.is_some()
+            || self.text_document.is_some()
+            || self
+                .designer
+                .as_ref()
+                .is_some_and(oib_designer::Designer::busy)
+            || self.preview_scroll.as_ref().is_some_and(|s| s.touching())
+            || self.panel_scroll.as_ref().is_some_and(|s| s.touching())
+            || !self.layout.same_source(&capture.source)
+            || self.viewport != capture.viewport
+            || self.oib_generation != capture.oib_generation
+            || self.ui.selectors != capture.selectors
+            || self.ui.handlers != capture.handlers
+            || (self.private, self.private_access, self.session_controls) != capture.access
+            || self.quit_control != capture.quit_control
+            || self.binding != capture.binding
+            || self.designer.as_ref().map(|d| {
+                (
+                    d.focus_layout(),
+                    d.layers_open(),
+                    d.management_visible(),
+                    d.studio,
+                )
+            }) != capture.projection
+            || self.host_backdrop != capture.backdrop
+            || ordered_items(self)?
+                .iter()
+                .map(|item| item.node)
+                .collect::<Vec<_>>()
+                != capture.order
+        {
+            return Ok(false);
+        }
+        Ok(self
+            .layout
+            .content_input_bounds_stable(&capture.slots, &layout_bindings(self)?))
     }
     fn oib_activation_blocked(&self) -> bool {
         self.designer
@@ -4664,6 +4839,7 @@ fn qualify(
         doc,
         behavior,
         input: InputRouter::default(),
+        captured_handlers: BTreeMap::new(),
         state_ref: state_ref.into(),
         binding: None,
         quit_control: None,
@@ -4672,6 +4848,8 @@ fn qualify(
         private_access: false,
         scene: OnceLock::new(),
         layout_scene: OnceLock::new(),
+        raw_layout: Mutex::new(None),
+        capture_validation: None,
         visible: BTreeMap::new(),
         keyboard: Keyboard::default(),
         text_views: editors
@@ -4732,8 +4910,7 @@ fn selected_values(m: &Mount) -> Result<BTreeMap<u16, Value>> {
     }
     Ok(values)
 }
-fn resolve_layout(m: &Mount) -> Result<Scene> {
-    let _profile = crate::canvas::profiling::span("client.layout.resolve");
+fn layout_bindings(m: &Mount) -> Result<BTreeMap<u16, Value>> {
     let mut bindings = BTreeMap::new();
     for s in &m.ui.selectors {
         let value = if matches!(s.projection, Projection::OibStatus) {
@@ -4830,8 +5007,53 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
         };
         bindings.insert(s.local, value);
     }
+    Ok(bindings)
+}
+fn resolve_layout(m: &Mount) -> Result<Scene> {
+    Ok(resolve_layout_arc(m, false)?.as_ref().clone())
+}
+fn resolve_layout_arc(m: &Mount, incremental: bool) -> Result<Arc<Scene>> {
+    let _profile = crate::canvas::profiling::span("client.layout.resolve");
+    let bindings = layout_bindings(m)?;
     let order: Vec<_> = ordered_items(m)?.iter().map(|i| i.node).collect();
-    let scene = m.layout.resolve_ordered(&bindings, m.viewport, &order)?;
+    let scene = {
+        let mut cache = m
+            .raw_layout
+            .lock()
+            .map_err(|_| "Raw layout cache poisoned")?;
+        let updated = if incremental {
+            if let Some(previous) = cache.as_ref()
+                && m.layout.same_source(&previous.source)
+                && m.viewport == previous.viewport
+                && order == previous.order
+            {
+                if same_binding_values(&bindings, &previous.slots) {
+                    Some(previous.scene.clone())
+                } else {
+                    m.layout
+                        .update_content(&previous.scene, &previous.slots, &bindings, m.viewport)?
+                        .map(Arc::new)
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let scene = if let Some(scene) = updated {
+            scene
+        } else {
+            Arc::new(m.layout.resolve_ordered(&bindings, m.viewport, &order)?)
+        };
+        *cache = Some(RawLayout {
+            source: m.layout.clone(),
+            viewport: m.viewport,
+            order,
+            slots: bindings,
+            scene: scene.clone(),
+        });
+        scene
+    };
     let scene = if let Some(designer) = &m.designer
         && designer.focus_layout()
     {
@@ -4842,7 +5064,7 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
                 .find(|h| matches!(h.operation, Operation::Back))
                 .map(|h| h.control)
         });
-        oib_focus_layout::project(
+        Arc::new(oib_focus_layout::project(
             &scene,
             seed,
             back,
@@ -4850,12 +5072,16 @@ fn resolve_layout(m: &Mount) -> Result<Scene> {
             m.keyboard.visible,
             designer.studio,
             designer.management_visible(),
-        )?
+        )?)
     } else {
         scene
     };
     if let Some(chat) = &m.chat {
-        chat.scene(&scene, m.viewport, m.keyboard.visible)
+        Ok(Arc::new(chat.scene(
+            &scene,
+            m.viewport,
+            m.keyboard.visible,
+        )?))
     } else {
         Ok(scene)
     }
@@ -5242,7 +5468,7 @@ fn cached_layout(m: &Mount) -> Result<Arc<Scene>> {
     Ok(if let Some(scene) = m.layout_scene.get() {
         scene.clone()
     } else {
-        let scene = Arc::new(resolve_layout(m)?);
+        let scene = resolve_layout_arc(m, true)?;
         let _ = m.layout_scene.set(scene.clone());
         scene
     })

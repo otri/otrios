@@ -212,7 +212,14 @@ impl TextPresentation {
                     &admission.near,
                     font,
                     &positions,
-                    &self.primitives,
+                    &PrimitiveReuse {
+                        previous: &self.primitives,
+                        order: self
+                            .chunks
+                            .iter()
+                            .flat_map(|chunk| chunk.sources.iter().map(|source| source.key.id))
+                            .collect(),
+                    },
                     &mut ordered,
                 );
                 let mut primitives = BTreeMap::new();
@@ -372,7 +379,7 @@ impl TextPresentation {
                             .sources
                             .iter()
                             .zip(sources)
-                            .all(|(a, b)| Arc::ptr_eq(a, b))
+                            .all(|(a, b)| Arc::ptr_eq(&a.mesh, &b.mesh) && a.style == b.style)
                 }) {
                     return CachedChunk {
                         sources: sources.to_vec(),
@@ -422,6 +429,13 @@ struct PrimitiveCollection {
     entries: Vec<Arc<CachedPrimitive>>,
     geometry: usize,
     glyphs: usize,
+    drawn: usize,
+}
+struct PrimitiveReuse<'a> {
+    previous: &'a BTreeMap<u32, Arc<CachedPrimitive>>,
+    // One bounded fallback per current painter ordinal; no quadratic geometry
+    // search when semantic controls are replaced with fresh input identities.
+    order: Vec<u32>,
 }
 impl PrimitiveCollection {
     fn admit(&mut self, primitive: Arc<CachedPrimitive>) -> bool {
@@ -430,6 +444,7 @@ impl PrimitiveCollection {
         if self.geometry > 65536 || self.glyphs > 65536 {
             return false;
         }
+        self.drawn += usize::from(primitive.run.is_some());
         self.entries.push(primitive);
         true
     }
@@ -441,7 +456,7 @@ fn collect_primitives(
     admitted: &BTreeSet<u32>,
     font: &Font,
     positions: &BTreeMap<u32, [f32; 7]>,
-    previous: &BTreeMap<u32, Arc<CachedPrimitive>>,
+    reuse: &PrimitiveReuse<'_>,
     ordered: &mut PrimitiveCollection,
 ) -> bool {
     if matches!(
@@ -454,7 +469,7 @@ fn collect_primitives(
             factor
         };
         for child in &node.children {
-            if !collect_primitives(child, factor, admitted, font, positions, previous, ordered) {
+            if !collect_primitives(child, factor, admitted, font, positions, reuse, ordered) {
                 return false;
             }
         }
@@ -463,11 +478,33 @@ fn collect_primitives(
     if !admitted.contains(&node.id) {
         return true;
     }
-    if let Some(old) = previous.get(&node.id)
-        && old.factor == factor
-        && old.key == *node
-    {
-        return ordered.admit(old.clone());
+    let compatible = |old: &&Arc<CachedPrimitive>| {
+        old.factor == factor && old.key.frame == node.frame && old.key.primitive == node.primitive
+    };
+    let old = reuse.previous.get(&node.id).filter(compatible).or_else(|| {
+        reuse
+            .order
+            .get(ordered.drawn)
+            .and_then(|id| reuse.previous.get(id))
+            .filter(compatible)
+    });
+    if let Some(old) = old {
+        if old.key == *node {
+            return ordered.admit(old.clone());
+        }
+        // Geometry has no scene IDs. Bind the shared immutable bytes/bounds to
+        // this frame's identity so hit tests, placement and paint stay current.
+        let mut run = old.run.clone();
+        if let Some(run) = &mut run {
+            run.id = node.id;
+        }
+        return ordered.admit(Arc::new(CachedPrimitive {
+            key: node.clone(),
+            factor,
+            mesh: old.mesh.clone(),
+            run,
+            style: old.style,
+        }));
     }
     let mut mesh = Mesh::default();
     let mut runs = Vec::new();
@@ -1228,6 +1265,66 @@ mod tests {
             &WHITE.map(|value| f32::from(value) / 255.).repeat(40),
             "Held per-draw paints stay immutable"
         );
+    }
+    #[test]
+    fn fresh_input_ids_rebind_existing_geometry_and_current_paint_placement() {
+        use otrios_interfaces::scene::{Action, SwitchSemantics, TouchResponder};
+        let font = super::super::font::test_font();
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&chunk_scene(false, 0., WHITE), &font);
+        let old_mesh = renderer.primitives[&2].mesh.clone();
+        let held_views = first.views.clone();
+        let mut root = chunk_scene(false, 4.25, [17, 91, 205, 140]).root().clone();
+        for child in &mut root.children {
+            child.id += 1000;
+        }
+        root.children[0].responder = Some(TouchResponder::Activate(Action::AppEvent(77)));
+        root.children[0].semantics = Some(SwitchSemantics {
+            label: "Replacement control".into(),
+            checked: true,
+        });
+        let scene = Scene::new(root).unwrap();
+        let after = renderer.compose(&scene, &font);
+        assert!(Arc::ptr_eq(&old_mesh, &renderer.primitives[&1002].mesh));
+        assert_eq!(renderer.primitives[&1002].run.as_ref().unwrap().id, 1002);
+        for (old, new) in first.chunks.iter().zip(&after.chunks) {
+            assert!(Arc::ptr_eq(&old.resource, &new.resource));
+        }
+        assert_eq!(scene.hit_path([5., 15.]).last().unwrap().node.id, 1001);
+        let cold = TextPresentation::default().compose(&scene, &font);
+        assert_eq!(after.mesh.vertices, cold.mesh.vertices);
+        assert_eq!(after.mesh.glyph_vertices, cold.mesh.glyph_vertices);
+        assert_eq!(after.views, cold.views);
+        assert_eq!(after.paints, cold.paints);
+        assert_eq!(first.views, held_views);
+        assert_chunk_projection(&after);
+    }
+    #[test]
+    fn id_rebinding_does_not_reuse_different_geometry() {
+        let font = super::super::font::test_font();
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&chunk_scene(false, 0., WHITE), &font);
+        let old = renderer.primitives[&2].mesh.clone();
+        let mut root = chunk_scene(false, 0., WHITE).root().clone();
+        for child in &mut root.children {
+            child.id += 1000;
+        }
+        root.children[1].frame.width = 28.;
+        let scene = Scene::new(root).unwrap();
+        let after = renderer.compose(&scene, &font);
+        assert!(!Arc::ptr_eq(&old, &renderer.primitives[&1002].mesh));
+        assert!(!Arc::ptr_eq(
+            &first.chunks[0].resource,
+            &after.chunks[0].resource
+        ));
+        for (old, new) in first.chunks.iter().zip(&after.chunks).skip(1) {
+            assert!(Arc::ptr_eq(&old.resource, &new.resource));
+        }
+        let cold = TextPresentation::default().compose(&scene, &font);
+        assert_eq!(after.mesh.vertices, cold.mesh.vertices);
+        assert_eq!(after.mesh.glyph_vertices, cold.mesh.glyph_vertices);
+        assert_eq!(after.views, cold.views);
+        assert_chunk_projection(&after);
     }
     #[test]
     fn font_cache_reset_replaces_resources_without_reusing_live_versions() {

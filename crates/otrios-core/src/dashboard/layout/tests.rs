@@ -300,3 +300,71 @@ fn typed_constructor_matches_binary_admission_and_keeps_all_bounds() {
     validate_blueprint(&invalid).unwrap();
     assert!(Layout::from_blueprint(invalid).is_err());
 }
+
+#[test]
+fn encoding_input_checks_signed_zero_in_numeric_layout_families() {
+    fn check(edit: impl Fn(&mut Blueprint, f32)) {
+        let mut positive = blueprint();
+        edit(&mut positive, 0.);
+        let mut negative = positive.clone();
+        edit(&mut negative, -0.);
+        assert_eq!(positive, negative);
+        assert!(encoding_input::same(&positive, &positive.clone()));
+        assert!(!encoding_input::same(&positive, &negative));
+    }
+    check(|b, v| b.root.frame[0] = v);
+    check(|b, v| b.templates[0].root.frame[0] = n(v));
+    check(|b, v| {
+        b.templates[0].parameters = vec![Parameter {
+            key: 1,
+            name: "Scale".into(),
+            value_type: ValueType::Number,
+            default: n(v),
+        }]
+    });
+    check(|b, v| {
+        b.root.properties = vec![Property {
+            key: 1,
+            value: Expr::Literal(Value::TimedSeries(vec![[v, 1.]])),
+        }]
+    });
+    check(|b, v| b.templates[0].root.frame[0] = Expr::Literal(Value::Series(vec![v])));
+    check(|b, v| {
+        b.templates[0].root.resize = Some(ResizeRule {
+            reference_size: [1., 1.],
+            horizontal: AxisResize::Pins {
+                leading: Some(v),
+                trailing: None,
+            },
+            vertical: AxisResize::Center { offset: v },
+        })
+    });
+    check(|b, v| {
+        let content = Flow {
+            flexible: [true, true],
+            kind: FlowKind::Group {
+                axis: 0,
+                gap: v,
+                alignment: Alignment::Start,
+                children: vec![Flow {
+                    flexible: [true, true],
+                    kind: FlowKind::Wrap {
+                        nodes: vec![1],
+                        preferred: [10., 10.],
+                        minimum: [1., 1.],
+                        gap: [v, 1.],
+                    },
+                }],
+            },
+        };
+        let plan = FlowPlan {
+            insets: [v, 0., 0., 0.],
+            content,
+        };
+        b.composition = Some(Composition {
+            wide_min_width: 900.,
+            wide: plan.clone(),
+            tall: plan,
+        });
+    });
+}

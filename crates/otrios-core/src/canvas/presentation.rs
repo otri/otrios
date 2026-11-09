@@ -99,6 +99,7 @@ impl Composer {
     /// Call only after obtaining renderer capacity. State/input can continue
     /// changing while no capacity is available; only their latest view is built.
     pub fn compose(&mut self, client: &mut Client, font: &Font) -> Result<&Frame> {
+        client.prepare_presentation_scene()?;
         let scene = client.scene()?;
         let changed = self.epoch != client.epoch()
             || self.font != font.hash()

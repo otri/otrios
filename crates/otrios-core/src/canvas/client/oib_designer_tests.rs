@@ -1871,6 +1871,125 @@ fn paint_dependencies_classify_accent_and_reject_width_text_and_composed_colors(
 }
 
 #[test]
+fn inspector_rows_retain_only_matching_typed_control_identities() {
+    let address = editor_address(1);
+    let other = editor_address(2);
+    let mut old_builder = Builder::new();
+    let old = vec![
+        old_builder
+            .focus_button(0., 0., 148., "Apply", LocalAction::Apply(address.clone()))
+            .unwrap(),
+        old_builder
+            .focus_button(
+                164.,
+                0.,
+                148.,
+                "Cancel",
+                LocalAction::Discard(address.clone()),
+            )
+            .unwrap(),
+        old_builder
+            .label(0., 56., "Unchanged heading", WHITE)
+            .unwrap(),
+    ];
+    let mut next_builder = Builder::at(old_builder.next);
+    let mut next = vec![
+        next_builder
+            .label(0., 0., "New conflict notice", ACCENT)
+            .unwrap(),
+        next_builder
+            .focus_button(0., 40., 148., "Apply", LocalAction::Apply(address.clone()))
+            .unwrap(),
+        next_builder
+            .focus_button(
+                164.,
+                40.,
+                148.,
+                "Cancel",
+                LocalAction::Discard(address.clone()),
+            )
+            .unwrap(),
+        next_builder
+            .label(0., 96., "Unchanged heading", WHITE)
+            .unwrap(),
+        next_builder
+            .focus_button(0., 136., 148., "Apply", LocalAction::Apply(other.clone()))
+            .unwrap(),
+    ];
+    let new_control = next[4].id;
+    retain_inspector_ids(
+        &old,
+        &mut next,
+        &old_builder.actions,
+        &mut next_builder.actions,
+        0..0,
+    );
+    assert_eq!(next[1].id, old[0].id);
+    assert_eq!(next[1].children, old[0].children);
+    assert_eq!(next[2].id, old[1].id);
+    assert_ne!(
+        next[3].id, old[2].id,
+        "matching text alone cannot move a diagnostic identity to another row"
+    );
+    assert_eq!(next[4].id, new_control);
+    assert_eq!(
+        next_builder.actions.get(&old[0].id),
+        Some(&LocalAction::Apply(address.clone()))
+    );
+    assert_eq!(
+        next_builder.actions.get(&new_control),
+        Some(&LocalAction::Apply(other))
+    );
+
+    let mut changed_builder = Builder::at(next_builder.next);
+    let mut changed = vec![
+        changed_builder
+            .focus_button(0., 40., 148., "Apply", LocalAction::Discard(address))
+            .unwrap(),
+    ];
+    let fresh = changed[0].id;
+    retain_inspector_ids(
+        &old[..1],
+        &mut changed,
+        &old_builder.actions,
+        &mut changed_builder.actions,
+        0..0,
+    );
+    assert_eq!(
+        changed[0].id, fresh,
+        "an old Apply ID cannot retarget a different action"
+    );
+}
+
+fn inspector_controls(designer: &Designer) -> Vec<(u32, LocalAction)> {
+    designer
+        .panels
+        .last()
+        .unwrap()
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            designer
+                .actions
+                .get(&node.id)
+                .map(|action| (node.id, action.clone()))
+        })
+        .collect()
+}
+fn assert_compatible_inspector_controls(before: &[(u32, LocalAction)], designer: &Designer) {
+    let current = inspector_controls(designer);
+    for (id, action) in before {
+        if current.iter().any(|(_, next)| next == action) {
+            assert_eq!(
+                designer.actions.get(id),
+                Some(action),
+                "unchanged typed control keeps its identity"
+            );
+        }
+    }
+}
+
+#[test]
 fn confirmed_accent_waits_for_held_designer_input_before_paint_activation() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     let old_generation = client.active.as_ref().unwrap().oib_generation;
@@ -2017,12 +2136,29 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
         .enumerate()
     {
         let generation = authority.oib_status().unwrap().generation;
+        let (before_hierarchy, before_management, before_controls) = {
+            let designer = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+            (
+                designer.panels[0].nodes.clone(),
+                designer.management_nodes.clone(),
+                inspector_controls(designer),
+            )
+        };
         assert!(
             client
                 .designer_action(LocalAction::PickColor(address.clone(), color))
                 .unwrap()
         );
         assert_eq!(authority.oib_status().unwrap().generation, generation);
+        {
+            let designer = client.active.as_ref().unwrap().designer.as_ref().unwrap();
+            assert_eq!(
+                designer.panels[0].nodes, before_hierarchy,
+                "local palette preview retains hierarchy identities"
+            );
+            assert_eq!(designer.management_nodes, before_management);
+            assert_compatible_inspector_controls(&before_controls, designer);
+        }
         assert!(
             client
                 .active
@@ -2039,6 +2175,17 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
             &LocalAction::Apply(address.clone())
         ));
         assert!(client.active.as_ref().unwrap().doc.oib_saving());
+        {
+            let mount = client.active.as_ref().unwrap();
+            let designer = mount.designer.as_ref().unwrap();
+            assert!(!mount.doc.confirmed());
+            assert_eq!(
+                designer.panels[0].nodes, before_hierarchy,
+                "Saving status retains hierarchy identities before confirmation"
+            );
+            assert_eq!(designer.management_nodes, before_management);
+            assert_compatible_inspector_controls(&before_controls, designer);
+        }
         let (held_layout, held_hierarchy, held_handlers, held_inspector) = {
             let mount = client.active.as_ref().unwrap();
             (
@@ -2059,6 +2206,7 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
         settle_editor(&mut client, &mut authority, &mut session);
         let mount = client.active.as_ref().unwrap();
         assert_eq!(mount.ui.handlers, held_handlers);
+        assert_compatible_inspector_controls(&before_controls, mount.designer.as_ref().unwrap());
         if index > 0 {
             let before: Vec<_> = held_inspector.iter().map(|node| node.id).collect();
             let after: Vec<_> = mount
@@ -4593,6 +4741,310 @@ fn desktop_studio_connects_an_unbound_preset_through_visible_source_choices() {
 
 #[path = "../../../tests/support/oib_library_fixture.rs"]
 mod library_fixture;
+
+fn captured_slider_fixture() -> (
+    Client,
+    crate::canvas::Document,
+    Session,
+    u16,
+    u32,
+    [f32; 2],
+    f32,
+) {
+    let ui = library_fixture::admit(&library_fixture::imported());
+    let (mut client, authority, session) = mounted_fixture_session_with_ui(true, 0, ui);
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    client.set_viewport([1280., 800.]).unwrap();
+    client.prepare_presentation_scene().unwrap();
+    let scene = client.scene().unwrap();
+    let mount = client.active.as_ref().unwrap();
+    let slider = scene
+        .controls()
+        .into_iter()
+        .find(|node| {
+            let Some(TouchResponder::Drag(Action::AppEvent(control))) = node.node.responder else {
+                return false;
+            };
+            mount
+                .ui
+                .handlers
+                .iter()
+                .any(|h| h.control == control && h.kind == GestureKind::Slider)
+        })
+        .unwrap();
+    let Some(TouchResponder::Drag(Action::AppEvent(control))) = slider.node.responder else {
+        unreachable!()
+    };
+    let field = mount.handler(control).unwrap().fields[0];
+    (
+        client,
+        authority,
+        session,
+        field,
+        slider.node.id,
+        [
+            slider.origin[0],
+            slider.origin[1] + slider.node.frame.height * 0.5 * slider.scale,
+        ],
+        slider.node.frame.width * slider.scale,
+    )
+}
+fn capture_event(client: &mut Client, phase: PointerPhase, position: [f32; 2], at: u64) {
+    client
+        .pointer_at(
+            client.epoch(),
+            PointerEvent {
+                id: 812,
+                phase,
+                position,
+            },
+            at,
+        )
+        .unwrap();
+}
+fn capture_template(
+    root: &mut otrios_interfaces::layout::TemplateNode,
+    id: u16,
+) -> Option<&mut otrios_interfaces::layout::TemplateNode> {
+    if root.id == id {
+        return Some(root);
+    }
+    root.children
+        .iter_mut()
+        .find_map(|child| capture_template(child, id))
+}
+#[test]
+fn imported_slider_coalesces_one_hundred_moves_until_presentation_credit() {
+    let (mut client, mut authority, mut session, field, _node, origin, width) =
+        captured_slider_fixture();
+    capture_event(
+        &mut client,
+        PointerPhase::Down,
+        [origin[0] + width * 0.1, origin[1]],
+        1000,
+    );
+    let raw = {
+        let mount = client.active.as_ref().unwrap();
+        assert!(mount.input.dragging(812));
+        assert!(
+            mount.capture_validation.is_some(),
+            "real imported slider must qualify for captured input reuse"
+        );
+        mount
+            .raw_layout
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .scene
+            .clone()
+    };
+    assert!(client.set_viewport([1000., 700.]).unwrap());
+    assert_eq!(
+        client.active.as_ref().unwrap().viewport,
+        [1280., 800.],
+        "viewport activation waits for held input"
+    );
+    for index in 1..=100 {
+        let fraction = 0.1 + 0.8 * index as f32 / 100.;
+        capture_event(
+            &mut client,
+            PointerPhase::Move,
+            [origin[0] + width * fraction, origin[1]],
+            1000 + index * 8,
+        );
+        client.tick(1000 + index * 8, 0).unwrap();
+        let mount = client.active.as_ref().unwrap();
+        assert!(mount.capture_validation.is_some());
+        assert!(
+            Arc::ptr_eq(
+                &raw,
+                &mount.raw_layout.lock().unwrap().as_ref().unwrap().scene
+            ),
+            "Move and Tick cannot resolve a visual layout while renderer credit is held"
+        );
+        assert!(mount.layout_scene.get().is_none());
+    }
+    assert_eq!(client.active.as_ref().unwrap().number(field).unwrap(), 900);
+    client.prepare_presentation_scene().unwrap();
+    let rendered = client.scene().unwrap();
+    let latest = client
+        .active
+        .as_ref()
+        .unwrap()
+        .raw_layout
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .scene
+        .clone();
+    assert!(!Arc::ptr_eq(&raw, &latest));
+    assert!(Arc::ptr_eq(&rendered, &client.scene().unwrap()));
+    assert!(Arc::ptr_eq(
+        &latest,
+        &client
+            .active
+            .as_ref()
+            .unwrap()
+            .raw_layout
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .scene
+    ));
+    let full = resolve_layout(client.active.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        cached_layout(client.active.as_ref().unwrap())
+            .unwrap()
+            .root(),
+        full.root(),
+        "content update matches a full current-state resolution"
+    );
+    capture_event(
+        &mut client,
+        PointerPhase::Up,
+        [origin[0] + width * 0.9, origin[1]],
+        1810,
+    );
+    assert!(!client.active.as_ref().unwrap().input.active());
+    assert!(client.active.as_ref().unwrap().capture_validation.is_none());
+    settle_editor(&mut client, &mut authority, &mut session);
+    assert_eq!(client.active.as_ref().unwrap().viewport, [1000., 700.]);
+}
+#[test]
+fn captured_slider_visibility_changes_force_current_owner_validation() {
+    use otrios_interfaces::layout::{Binding, Expr};
+    let (mut client, _authority, _session, field, node, origin, width) = captured_slider_fixture();
+    {
+        let mount = client.active.as_mut().unwrap();
+        mount.ui.selectors.push(Selector {
+            local: 60000,
+            field,
+            projection: Projection::Nonzero,
+        });
+        let mut blueprint = mount.layout.blueprint().clone();
+        let target = blueprint
+            .templates
+            .iter_mut()
+            .find_map(|t| capture_template(&mut t.root, node as u16))
+            .unwrap();
+        target.visible = Expr::State(Binding::Local(60000));
+        mount.layout = Layout::from_blueprint(blueprint).unwrap();
+        mount.invalidate();
+    }
+    capture_event(
+        &mut client,
+        PointerPhase::Down,
+        [origin[0] + width * 0.2, origin[1]],
+        1000,
+    );
+    capture_event(
+        &mut client,
+        PointerPhase::Move,
+        [origin[0], origin[1]],
+        1010,
+    );
+    assert_eq!(client.active.as_ref().unwrap().number(field).unwrap(), 0);
+    assert!(
+        client.active.as_ref().unwrap().capture_validation.is_none(),
+        "changed visibility cannot retain an old validation tree"
+    );
+    capture_event(
+        &mut client,
+        PointerPhase::Move,
+        [origin[0] + width * 0.8, origin[1]],
+        1020,
+    );
+    assert!(!client.active.as_ref().unwrap().input.active());
+    assert_eq!(
+        client.active.as_ref().unwrap().number(field).unwrap(),
+        0,
+        "removed owner cannot receive another captured value"
+    );
+}
+#[test]
+fn captured_slider_handler_rebind_cannot_retarget_another_field_after_invalidation() {
+    let (mut client, _authority, _session, field, _node, origin, width) = captured_slider_fixture();
+    capture_event(
+        &mut client,
+        PointerPhase::Down,
+        [origin[0] + width * 0.2, origin[1]],
+        1000,
+    );
+    let other = if field == 1 { 3 } else { 1 };
+    let before = [field, other].map(|field| client.active.as_ref().unwrap().number(field).unwrap());
+    {
+        let mount = client.active.as_mut().unwrap();
+        let control = mount.captured_handlers[&812].control;
+        mount
+            .ui
+            .handlers
+            .iter_mut()
+            .find(|handler| handler.control == control)
+            .unwrap()
+            .fields = vec![other];
+        mount.invalidate();
+        assert!(mount.capture_validation.is_none());
+    }
+    capture_event(
+        &mut client,
+        PointerPhase::Move,
+        [origin[0] + width * 0.8, origin[1]],
+        1010,
+    );
+    assert!(!client.active.as_ref().unwrap().input.active());
+    assert!(
+        !client
+            .active
+            .as_ref()
+            .unwrap()
+            .captured_handlers
+            .contains_key(&812)
+    );
+    assert_eq!(
+        [field, other].map(|field| client.active.as_ref().unwrap().number(field).unwrap()),
+        before
+    );
+}
+
+#[test]
+fn captured_slider_rebound_responder_revokes_the_validation_tree() {
+    let (mut client, _authority, _session, field, node, origin, width) = captured_slider_fixture();
+    capture_event(
+        &mut client,
+        PointerPhase::Down,
+        [origin[0] + width * 0.2, origin[1]],
+        1000,
+    );
+    let before = client.active.as_ref().unwrap().number(field).unwrap();
+    {
+        let mount = client.active.as_mut().unwrap();
+        let mut blueprint = mount.layout.blueprint().clone();
+        let target = blueprint
+            .templates
+            .iter_mut()
+            .find_map(|t| capture_template(&mut t.root, node as u16))
+            .unwrap();
+        target.responder = Some(otrios_interfaces::layout::Responder::Consume);
+        target.semantics = None;
+        mount.layout = Layout::from_blueprint(blueprint).unwrap();
+        mount.invalidate();
+        assert!(mount.capture_validation.is_none());
+    }
+    capture_event(
+        &mut client,
+        PointerPhase::Move,
+        [origin[0] + width * 0.8, origin[1]],
+        1020,
+    );
+    assert!(!client.active.as_ref().unwrap().input.active());
+    assert_eq!(
+        client.active.as_ref().unwrap().number(field).unwrap(),
+        before
+    );
+}
 
 #[test]
 fn compatible_library_activation_waits_for_held_slider_and_final_receipt_without_ui_history() {
