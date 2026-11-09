@@ -32,6 +32,7 @@ pub struct Document {
     oib_authored: std::sync::Arc<std::sync::Mutex<Option<oib::AuthoredUi>>>,
     oib_binding_cache: std::sync::Arc<std::sync::Mutex<Option<oib::CachedBinding>>>,
     oib_source_cache: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<oib::CachedSource>>>>,
+    oib_compiled_cache: std::sync::Arc<std::sync::Mutex<Vec<oib::CachedCompilation>>>,
     schema: std::sync::Arc<StateSchema>,
     required_fields: u64,
     /// Live subscription snapshots may omit private OIB draft branches. This
@@ -140,6 +141,7 @@ impl Document {
             oib_authored: Default::default(),
             oib_binding_cache: Default::default(),
             oib_source_cache: Default::default(),
+            oib_compiled_cache: Default::default(),
             required_fields: StateSelection::all(&schema).fields,
             oib_projection: false,
             schema: schema.into(),
@@ -204,6 +206,7 @@ impl Document {
             oib_authored: Default::default(),
             oib_binding_cache: Default::default(),
             oib_source_cache: Default::default(),
+            oib_compiled_cache: Default::default(),
             field_hashes: std::sync::Arc::new(Self::field_hashes(&schema, scope)?),
             required_fields,
             oib_projection,

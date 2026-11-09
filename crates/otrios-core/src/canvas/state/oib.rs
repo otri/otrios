@@ -57,6 +57,20 @@ pub(super) struct CachedSource {
     structural: merkle::Hash,
 }
 
+/// At most two successful compiler results (validation and selected presentation).
+/// The semantic input digest deliberately
+/// excludes draft/active causal metadata, so equivalent branches share a
+/// compilation. Raw snapshot and journal validation still run independently.
+pub(super) struct CachedCompilation {
+    signed: std::sync::Arc<Ui>,
+    binding: merkle::Hash,
+    source: merkle::Hash,
+    semantic: merkle::Hash,
+    selected: Option<u64>,
+    ui: Ui,
+    layout: crate::dashboard::layout::Layout,
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Binding {
@@ -254,6 +268,9 @@ impl Document {
         } else {
             binding.seed = super::super::oib::graph::materialize_seed(&binding.seed)?;
         }
+        // The normalized signed seed is immutable for this cache key. Validate
+        // new baseline bytes here, rather than once per property delta.
+        super::super::oib::validate_seed(&binding.seed)?;
         let binding = std::sync::Arc::new(binding);
         *self.oib_binding_cache.lock().map_err(err)? = Some(CachedBinding {
             leaf,
@@ -489,6 +506,34 @@ impl Document {
         branch: u64,
         selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
+        let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
+        let binding = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
+        let source = self.tree.subtree(&[4, 4]).map_err(err)?.hash();
+        let values = self.oib_values(branch)?;
+        let live = self.oib_live(branch)?;
+        // Ordered vectors retain exact encoded values (including numeric
+        // representations), rather than relying on float PartialEq or causal
+        // register identities that differ between equivalent draft/active data.
+        let semantic = digest(&bytes(&(
+            live.iter().collect::<Vec<_>>(),
+            values.iter().collect::<Vec<_>>(),
+        ))?);
+        let same_key = |cached: &CachedCompilation| {
+            std::sync::Arc::ptr_eq(&signed, &cached.signed)
+                && cached.binding == binding
+                && cached.source == source
+                && cached.semantic == semantic
+                && cached.selected == selected
+        };
+        {
+            let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
+            if let Some(index) = cache.iter().position(same_key) {
+                let cached = cache.remove(index);
+                let result = (cached.ui.clone(), cached.layout.clone());
+                cache.push(cached);
+                return Ok(result);
+            }
+        }
         let mut ui = (*self.oib_authored_ui()?).clone();
         if let Some(Presentation::Oib(seed)) = &mut ui.presentation
             && let Some(doc) = &mut seed.designer
@@ -496,15 +541,30 @@ impl Document {
             doc.placements = self.oib_placements()?;
             doc.connections = self.oib_connections()?;
         }
-        let values = self.oib_values(branch)?;
         let resolved = super::super::oib::instances::expand(
             &ui,
             &self.oib_allocations()?,
-            &self.oib_live(branch)?,
+            &live,
             selected,
             &values,
         )?;
         let layout = super::super::oib::compile(&resolved, &values)?;
+        let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
+        // Sibling snapshots share this small MRU. Never accumulate historical
+        // revisions, even when two owners compile concurrently.
+        cache.retain(|cached| !same_key(cached));
+        if cache.len() == 2 {
+            cache.remove(0);
+        }
+        cache.push(CachedCompilation {
+            signed,
+            binding,
+            source,
+            semantic,
+            selected,
+            ui: resolved.clone(),
+            layout: layout.clone(),
+        });
         Ok((resolved, layout))
     }
     pub fn oib_values(&self, branch: u64) -> Result<BTreeMap<u64, Option<Value>>> {
@@ -554,7 +614,6 @@ impl Document {
             candidate.oib_reconcile_ui()?;
         }
         let binding = candidate.oib_binding()?;
-        super::super::oib::validate_seed(&binding.seed)?;
         if binding.ui_hash.len() != 32
             || binding.admission.len() != 32
             || binding.ui_ref.is_empty()
