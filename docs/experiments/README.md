@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [OIB incremental presentation — 2026-11-10](oib-incremental-presentation-2026-11-10.md):
+  retained typed compilation, paint-only activation, bounded visible geometry,
+  signed Frame deployment and measured native Apply latency.
+
 - [Desktop Studio and bounded D2 — 2026-11-04](../OIB_DESKTOP_STUDIO_D2.md):
   resizable shared tooling, single-canvas insert/reorder, stable overrides,
   durable rejection/retry, actual Frame/Web authoring and signed rollback.

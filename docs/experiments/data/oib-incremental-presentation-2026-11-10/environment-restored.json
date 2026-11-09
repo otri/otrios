@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "services": {
+    "otrios-authority.service": {
+      "active": "active",
+      "profiling_environment": false,
+      "task_dropin_exists": false
+    },
+    "otrios-dashboard-direct.service": {
+      "active": "active",
+      "profiling_environment": false,
+      "task_dropin_exists": false
+    }
+  },
+  "release": "ecfeca9f059e0252bc2ddc0d5aa49205e3211bf60087892c2a908004ba073abe"
+}

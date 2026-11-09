@@ -1,0 +1,16 @@
+{"clock":"process-instant-v1","drm_clock":"kernel DRM event usec; separate domain","event":"schema","limit":20000,"pid":7601,"version":1}
+{"device_age_us":78,"event":"receive","phase":0,"received_us":35348354,"sampled_us":35348276}
+{"device_age_us":540,"event":"receive","phase":2,"received_us":35429212,"sampled_us":35428672}
+{"device_age_us":801,"event":"receive","phase":0,"received_us":40330391,"sampled_us":40329590}
+{"device_age_us":1749,"event":"receive","phase":2,"received_us":40411708,"sampled_us":40409959}
+{"device_age_us":241,"event":"receive","phase":0,"received_us":40812490,"sampled_us":40812249}
+{"device_age_us":1447,"event":"receive","phase":2,"received_us":40894056,"sampled_us":40892609}
+{"device_age_us":1727,"event":"receive","phase":0,"received_us":41294910,"sampled_us":41293183}
+{"device_age_us":1830,"event":"receive","phase":2,"received_us":41375359,"sampled_us":41373529}
+{"device_age_us":147,"event":"receive","phase":0,"received_us":41391077,"sampled_us":41390930}
+{"device_age_us":1795,"event":"receive","phase":2,"received_us":41473087,"sampled_us":41471292}
+{"device_age_us":833,"event":"receive","phase":0,"received_us":41761481,"sampled_us":41760648}
+{"device_age_us":156,"event":"receive","phase":2,"received_us":41841155,"sampled_us":41840999}
+{"device_age_us":529,"event":"receive","phase":0,"received_us":41858952,"sampled_us":41858423}
+{"device_age_us":632,"event":"receive","phase":2,"received_us":41939392,"sampled_us":41938760}
+{"dropped":0,"event":"summary","rows":14}

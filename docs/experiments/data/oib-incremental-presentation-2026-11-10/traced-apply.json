@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "release": "ecfeca9f059e0252bc2ddc0d5aa49205e3211bf60087892c2a908004ba073abe",
+  "measurement": "software evdev touch-down to native confirmed presentation; 80ms touch hold and 5ms polling; not photon latency",
+  "original_property": "Accent: #DAA520 (override)",
+  "final_property": "Accent: #DAA520 (override)",
+  "records": [
+    {
+      "color": "#5588FF",
+      "touch_down_unix_us": 1794236695972267,
+      "touch_to_confirmed_presented_ms": 369.623,
+      "generation": 25
+    },
+    {
+      "color": "#DAA520",
+      "touch_down_unix_us": 1794236696439766,
+      "touch_to_confirmed_presented_ms": 287.62,
+      "generation": 26
+    }
+  ],
+  "live_state_reset": false,
+  "input_idle": true
+}
