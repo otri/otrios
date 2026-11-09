@@ -1192,6 +1192,11 @@ pub(super) fn state_worker(
                         "compose_started_us":bench_telemetry::process_us(began),
                         "compose_ended_us":bench_telemetry::process_us(ended),
                         "produced_us":bench_telemetry::process_us(produced),
+                        "confirmed":frame.state_confirmed,"pending":frame.pending_commands,
+                        "oib_active_generation":frame.resources.oib.as_ref().map(|o|o.active_generation),
+                        "oib_presented_generation":frame.resources.oib.as_ref().map(|o|o.presented_generation),
+                        "base_triangle_vertices":frame.paint.base.mesh.vertices.len()/6,
+                        "base_glyph_vertices":frame.paint.base.mesh.glyph_vertices.len()/16,
                         "content_revision":frame.paint.revisions.content,
                         "placement_revision":frame.paint.revisions.placement}));
                 }
