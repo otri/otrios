@@ -1,0 +1,37 @@
+{
+  "format": "otrios-oib-resource-reuse-v1",
+  "implementation_commits": [
+    "b77a226719e1ecf0cd5c9b90589837e5c8acae4f",
+    "f613aae8fc0f012e96934423e3d7f2751a406ec6"
+  ],
+  "release": "50af827f924ed27ebc47ed2a86dd4f3c9f06ee7c190d4c726e943479c2f4d724",
+  "native_final": {
+    "release": "50af827f924ed27ebc47ed2a86dd4f3c9f06ee7c190d4c726e943479c2f4d724",
+    "ui_ref": "app:oib-designer/ui",
+    "selected_instance": 30,
+    "active_generation": 43,
+    "presented_generation": 43,
+    "accent": "Accent: #FF8855 (override)",
+    "width": "Width: 420 (override)",
+    "library_revisions": [
+      "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba"
+    ],
+    "cpu_online": 4
+  },
+  "observed_initial": {
+    "generation": 37,
+    "accent": "Accent: #FF8855 (override)",
+    "width": "Width: 420 (override)"
+  },
+  "ui_payload_unchanged": true,
+  "ui_sha256": "dffb5316fd21c06249569d3c371bb4f5669649a460e0389ec59259b69a00de4d",
+  "state_protocol": "otrios-canvas-sync-v30",
+  "opening_control_version": 1,
+  "benchmark_sha256": "176e7c8512cdeafeebae7c584dbae85a0105d2998bb7176b0d8f85f689a82fb0",
+  "benchmark_args": [
+    "--nodes",
+    "128",
+    "--iterations",
+    "200"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "health": {
+    "release": "50af827f924ed27ebc47ed2a86dd4f3c9f06ee7c190d4c726e943479c2f4d724",
+    "state_available": true,
+    "status": "ok"
+  },
+  "presentation_module_sha256": "25f61faffbdffc89e9295d07769eab285401910bdc994535dc70d33893b459c6",
+  "presentation_module_bytes": 5185,
+  "content_type": "text/javascript",
+  "passed": true
+}

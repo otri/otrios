@@ -130,6 +130,12 @@ was **2.072 ms**, previously **17.350 ms**. New unchanged/color update overhead 
 that clipped case was **0.371 / 0.380 ms**. The synthetic workload isolates stages;
 it does not predict total app latency or arbitrary layout scalability.
 
+## Follow-up
+
+The [resource reuse pass](oib-resource-reuse-2026-11-10.md) subsequently removed
+repeated immutable import checks and added independently retained geometry groups.
+The timings above remain evidence for this preceding release.
+
 ## Reproduction and evidence
 
 Commands actually run include the focused core tests/Clippy above, the three host

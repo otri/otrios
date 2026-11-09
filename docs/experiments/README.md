@@ -7,6 +7,10 @@ revision, workload and conditions recorded in each report.
 
 ## Current qualification records
 
+- [OIB resource reuse — 2026-11-10](oib-resource-reuse-2026-11-10.md):
+  immutable import reuse, retained geometry resources, signed native/Web delivery
+  and measured Apply/upload behavior.
+
 - [OIB incremental presentation — 2026-11-10](oib-incremental-presentation-2026-11-10.md):
   retained typed compilation, paint-only activation, bounded visible geometry,
   signed Frame deployment and measured native Apply latency.
