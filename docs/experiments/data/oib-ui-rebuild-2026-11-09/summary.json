@@ -1,0 +1,159 @@
+{
+  "date": "2026-11-09",
+  "source_commit": "975bdcb13b899bd564e689bf8f949274e5e598f4",
+  "changes": "ignored diagnostic and documentation only",
+  "host": {
+    "cpu": "Apple M2 Max",
+    "architecture": "aarch64-apple-darwin",
+    "os": "macOS 27.0.1",
+    "rust": "1.90.0",
+    "profile": "release"
+  },
+  "installed_ui": {
+    "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+    "bundle_path": "authority/bundles/oib-designer.otapp/UI/main.flex",
+    "bytes": 36359,
+    "sha256": "dffb5316fd21c06249569d3c371bb4f5669649a460e0389ec59259b69a00de4d",
+    "isolated_document": true,
+    "live_state_read": false
+  },
+  "stages": {
+    "unchanged_refresh_designer": {
+      "samples": 20,
+      "median_us": 316.5,
+      "min_us": 314,
+      "max_us": 399
+    },
+    "unchanged_oib_status_text": {
+      "samples": 20,
+      "median_us": 316.0,
+      "min_us": 315,
+      "max_us": 322
+    },
+    "unchanged_refresh_oib_view": {
+      "samples": 20,
+      "median_us": 0.0,
+      "min_us": 0,
+      "max_us": 0
+    },
+    "unchanged_mount_refresh": {
+      "samples": 20,
+      "median_us": 319.0,
+      "min_us": 318,
+      "max_us": 380
+    },
+    "nested_selection_warm_tools_invalidate": {
+      "samples": 3,
+      "median_us": 6630,
+      "min_us": 6527,
+      "max_us": 6698
+    },
+    "root_selection_cold_tools": {
+      "samples": 1,
+      "median_us": 39076,
+      "min_us": 39076,
+      "max_us": 39076
+    },
+    "root_selection_warm_tools_invalidate": {
+      "samples": 3,
+      "median_us": 37942,
+      "min_us": 37905,
+      "max_us": 38295
+    },
+    "hierarchy_allowed_duplicate": {
+      "samples": 3,
+      "median_us": 12081,
+      "min_us": 12027,
+      "max_us": 12219
+    },
+    "hierarchy_allowed_move": {
+      "samples": 3,
+      "median_us": 15438,
+      "min_us": 11192,
+      "max_us": 17067
+    },
+    "document_oib_compiled": {
+      "samples": 3,
+      "median_us": 2948,
+      "min_us": 2664,
+      "max_us": 3013
+    },
+    "state_oib_info": {
+      "samples": 3,
+      "median_us": 1754,
+      "min_us": 1639,
+      "max_us": 1887
+    },
+    "root_selection_test_mode_invalidate": {
+      "samples": 3,
+      "median_us": 3550,
+      "min_us": 3512,
+      "max_us": 3637
+    },
+    "property_queue": {
+      "samples": 3,
+      "median_us": 430,
+      "min_us": 429,
+      "max_us": 459
+    },
+    "property_authority_and_client_sync": {
+      "samples": 3,
+      "median_us": 13601,
+      "min_us": 13569,
+      "max_us": 15360
+    },
+    "property_confirmed_mount_refresh": {
+      "samples": 3,
+      "median_us": 42801,
+      "min_us": 42456,
+      "max_us": 42936
+    },
+    "unchanged_client_tick": {
+      "samples": 20,
+      "median_us": 314.0,
+      "min_us": 312,
+      "max_us": 368
+    },
+    "rejected_structure_status_only_mount_refresh": {
+      "samples": 1,
+      "median_us": 38805,
+      "min_us": 38805,
+      "max_us": 38805
+    },
+    "unchanged_rejected_status_client_tick": {
+      "samples": 20,
+      "median_us": 5.0,
+      "min_us": 5,
+      "max_us": 28
+    },
+    "unchanged_client_reload_ready": {
+      "samples": 20,
+      "median_us": 0.0,
+      "min_us": 0,
+      "max_us": 0
+    },
+    "unchanged_client_resource_usage": {
+      "samples": 20,
+      "median_us": 0.0,
+      "min_us": 0,
+      "max_us": 3
+    }
+  },
+  "full_build_cargo_seconds": {
+    "mac_tools": 16.47,
+    "mac_canvas_pack": 3.68,
+    "web_wasm": 20.37,
+    "armv7": 28.6,
+    "total": 69.12,
+    "source": "prior L1 correction /tmp/otrios-l1-fix-stage.log",
+    "total_publication_elapsed_measured": false
+  },
+  "limitations": [
+    "not Frame stage timing or input-to-display latency",
+    "no browser profile",
+    "source fixture or exact installed UI with fresh isolated state",
+    "stage timings overlap",
+    "no production changes or deployment",
+    "no broad suite or Linux IPC acceptance"
+  ]
+}

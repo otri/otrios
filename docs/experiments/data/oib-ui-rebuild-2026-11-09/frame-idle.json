@@ -1,0 +1,48 @@
+{
+  "clock_ticks_per_second": 100,
+  "date": "2026-11-09",
+  "input_busy": false,
+  "pending_commands": 0,
+  "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+  "sample_seconds": 3.0164387880358845,
+  "state_confirmed": true,
+  "stream_ready": true,
+  "threads": [
+    {
+      "cpu_percent": 3.65,
+      "name": "dashboard-nativ",
+      "tid": 2973
+    },
+    {
+      "cpu_percent": 0.0,
+      "name": "dashboa:disk$0",
+      "tid": 2974
+    },
+    {
+      "cpu_percent": 90.17,
+      "name": "dashboard-nativ",
+      "tid": 2975
+    },
+    {
+      "cpu_percent": 2.65,
+      "name": "dashboard-nativ",
+      "tid": 2976
+    },
+    {
+      "cpu_percent": 0.0,
+      "name": "dashboard-nativ",
+      "tid": 2977
+    },
+    {
+      "cpu_percent": 0.0,
+      "name": "transfers",
+      "tid": 2978
+    },
+    {
+      "cpu_percent": 0.66,
+      "name": "dashboard-nativ",
+      "tid": 2979
+    }
+  ],
+  "ui_ref": "app:oib-designer/ui"
+}

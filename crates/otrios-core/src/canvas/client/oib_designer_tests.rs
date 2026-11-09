@@ -9,6 +9,182 @@ fn fixture_ui() -> Ui {
     crate::canvas::decode_ui(&crate::canvas::encode_ui(&designer_fixture::ui(&[])).unwrap())
         .unwrap()
 }
+
+/// A manual diagnostic, deliberately excluded from correctness test runs.
+/// Measures the real admitted production graph and designer refresh path; the
+/// fixture uses local definitions rather than a signed installed-library import.
+#[test]
+#[ignore = "manual optimized UI rebuild timing diagnostic"]
+fn profile_oib_designer_refresh_stages() {
+    use otrios_interfaces::oib::authoring::{HierarchyBatch, HierarchyEdit};
+    use std::time::Instant;
+
+    fn measure(label: &str, roots: usize, repeats: usize, mut action: impl FnMut()) {
+        let samples: Vec<_> = (0..repeats)
+            .map(|_| {
+                let start = Instant::now();
+                action();
+                start.elapsed().as_micros()
+            })
+            .collect();
+        println!("{{\"stage\":\"{label}\",\"roots\":{roots},\"us\":{samples:?}}}");
+    }
+    let installed = std::env::var_os("OTRIOS_OIB_PROFILE_UI");
+    println!(
+        "{{\"baseline\":\"{}\"}}",
+        if installed.is_some() {
+            "installed_library"
+        } else {
+            "production_local_fixture"
+        }
+    );
+    for extra in if installed.is_some() {
+        vec![0]
+    } else {
+        vec![0, 4]
+    } {
+        let (mut client, mut authority, mut session) = mounted_fixture_session_with_ui(
+            true,
+            extra,
+            installed.as_ref().map_or_else(fixture_ui, |path| {
+                crate::canvas::decode_ui(&std::fs::read(path).unwrap()).unwrap()
+            }),
+        );
+        let mount = client.active.as_mut().unwrap();
+        let roots = mount.doc.oib_allocations().unwrap().len();
+        let original = mount.doc.oib_root();
+        measure("unchanged_refresh_designer", roots, 20, || {
+            assert!(!mount.refresh_designer().unwrap());
+        });
+        measure("unchanged_oib_status_text", roots, 20, || {
+            std::hint::black_box(mount.doc.oib_status_text());
+        });
+        measure("unchanged_refresh_oib_view", roots, 20, || {
+            assert!(!mount.refresh_oib_view().unwrap());
+        });
+        measure("unchanged_mount_refresh", roots, 20, || {
+            assert!(!mount.refresh().unwrap());
+        });
+        measure("nested_selection_warm_tools_invalidate", roots, 3, || {
+            mount.designer.as_mut().unwrap().revision = None;
+            assert!(mount.refresh_designer().unwrap());
+        });
+        let root = mount.designer.as_ref().unwrap().root_selection(20).unwrap();
+        mount.designer.as_mut().unwrap().select(root);
+        measure("root_selection_cold_tools", roots, 1, || {
+            assert!(mount.refresh_designer().unwrap());
+        });
+        measure("root_selection_warm_tools_invalidate", roots, 3, || {
+            mount.designer.as_mut().unwrap().revision = None;
+            assert!(mount.refresh_designer().unwrap());
+        });
+        assert_eq!(mount.doc.oib_root(), original);
+        let generation = mount.doc.oib_structural_generation().unwrap();
+        for (label, edit) in [
+            (
+                "hierarchy_allowed_duplicate",
+                HierarchyEdit::Duplicate {
+                    instance: InstanceId(20),
+                    name: None,
+                    destination: otrios_interfaces::oib::authoring::Destination::Canvas,
+                    before: None,
+                    frame: Some([0., 0., 400., 200.]),
+                },
+            ),
+            (
+                "hierarchy_allowed_move",
+                HierarchyEdit::Move {
+                    instance: InstanceId(20),
+                    destination: otrios_interfaces::oib::authoring::Destination::Canvas,
+                    before: None,
+                    frame: Some([0., 40., 400., 200.]),
+                },
+            ),
+        ] {
+            let batch = HierarchyBatch {
+                generation,
+                operations: vec![edit],
+            };
+            measure(label, roots, 3, || {
+                std::hint::black_box(mount.doc.oib_hierarchy_allowed(&batch));
+            });
+        }
+        measure("document_oib_compiled", roots, 3, || {
+            std::hint::black_box(mount.doc.oib_compiled(Some(20)).unwrap());
+        });
+        measure("state_oib_info", roots, 3, || {
+            std::hint::black_box(mount.doc.oib_info().unwrap());
+        });
+        mount.designer.as_mut().unwrap().mode = DesignerMode::Test;
+        measure("root_selection_test_mode_invalidate", roots, 3, || {
+            mount.designer.as_mut().unwrap().revision = None;
+            assert!(mount.refresh_designer().unwrap());
+        });
+        mount.designer.as_mut().unwrap().mode = DesignerMode::Edit;
+        mount.designer.as_mut().unwrap().revision = None;
+        mount.refresh_designer().unwrap();
+        for width in [362., 364., 366.] {
+            let start = Instant::now();
+            assert!(
+                mount
+                    .doc
+                    .edit_oib_property(&editor_address(2), Some(Value::Number(width)))
+                    .unwrap()
+            );
+            println!(
+                "{{\"stage\":\"property_queue\",\"roots\":{roots},\"us\":[{}]}}",
+                start.elapsed().as_micros()
+            );
+            let start = Instant::now();
+            fixture_sync(&mut authority, &mut session, &mut mount.doc);
+            println!(
+                "{{\"stage\":\"property_authority_and_client_sync\",\"roots\":{roots},\"us\":[{}]}}",
+                start.elapsed().as_micros()
+            );
+            measure("property_confirmed_mount_refresh", roots, 1, || {
+                assert!(mount.refresh().unwrap());
+            });
+        }
+        let mut tick = 1;
+        measure("unchanged_client_tick", roots, 20, || {
+            std::hint::black_box(client.tick(tick, 0).unwrap());
+            tick += 1;
+        });
+        let mount = client.active.as_mut().unwrap();
+        let active_generation = mount.doc.oib_generation().unwrap();
+        assert!(
+            mount
+                .doc
+                .edit_oib_structure(otrios_interfaces::oib::InstanceOperation::reorder(
+                    u64::MAX,
+                    20,
+                    None
+                ))
+                .unwrap()
+        );
+        fixture_sync(&mut authority, &mut session, &mut mount.doc);
+        assert_eq!(mount.doc.oib_generation().unwrap(), active_generation);
+        assert!(mount.doc.oib_status_text().contains("Structure rejected:"));
+        measure(
+            "rejected_structure_status_only_mount_refresh",
+            roots,
+            1,
+            || {
+                assert!(mount.refresh().unwrap());
+            },
+        );
+        measure("unchanged_rejected_status_client_tick", roots, 20, || {
+            std::hint::black_box(client.tick(tick, 0).unwrap());
+            tick += 1;
+        });
+        measure("unchanged_client_reload_ready", roots, 20, || {
+            std::hint::black_box(client.reload_ready());
+        });
+        measure("unchanged_client_resource_usage", roots, 20, || {
+            std::hint::black_box(client.resource_usage());
+        });
+    }
+}
 fn seed() -> Seed {
     Seed {
         graph: None,
@@ -851,12 +1027,18 @@ fn mounted_fixture_session_with_count(
     focus: bool,
     extra: usize,
 ) -> (Client, crate::canvas::Document, Session) {
+    mounted_fixture_session_with_ui(focus, extra, fixture_ui())
+}
+fn mounted_fixture_session_with_ui(
+    focus: bool,
+    extra: usize,
+    ui: Ui,
+) -> (Client, crate::canvas::Document, Session) {
     assert!(
         designer_fixture::manifest()
             .dependencies
             .contains(&FEATURE.into())
     );
-    let ui = fixture_ui();
     let mut authority =
         crate::canvas::Document::new(ui.state_schema.clone(), "designer-mount").unwrap();
     authority.configure_oib(&ui).unwrap();
