@@ -1,0 +1,1732 @@
+{
+  "info": {
+    "format": "otrios-oib-library-package-v1",
+    "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
+    "version": "0.1.0",
+    "required_features": [
+      "otrios-oib-library-v1"
+    ],
+    "entry_graph": "OIB/library.flex"
+  },
+  "graph": {
+    "format": "otrios-oib-library-v1",
+    "required_classes": [
+      {
+        "id": 1,
+        "name": "OIBObject",
+        "implementation": "OIBObject",
+        "properties": [],
+        "owned_child_classes": [
+          1
+        ],
+        "visual_child_classes": []
+      },
+      {
+        "id": 2,
+        "name": "OIBDocument",
+        "implementation": "OIBDocument",
+        "base": 1,
+        "properties": [],
+        "owned_child_classes": [
+          1
+        ],
+        "visual_child_classes": []
+      },
+      {
+        "id": 3,
+        "name": "O2DView",
+        "implementation": "O2DView",
+        "base": 1,
+        "properties": [],
+        "owned_child_classes": [
+          1
+        ],
+        "visual_child_classes": [
+          3
+        ]
+      },
+      {
+        "id": 4,
+        "name": "O2DPanel",
+        "implementation": "O2DPanel",
+        "base": 3,
+        "properties": [
+          {
+            "id": 1,
+            "name": "Accent",
+            "label": "Accent",
+            "value_type": "Color",
+            "default": {
+              "Color": [
+                85,
+                136,
+                255,
+                255
+              ]
+            },
+            "group": "Appearance",
+            "editor": "Palette",
+            "policy": {
+              "live_literal": true,
+              "app_binding": false
+            }
+          }
+        ],
+        "owned_child_classes": [
+          1
+        ],
+        "visual_child_classes": [
+          3
+        ]
+      },
+      {
+        "id": 5,
+        "name": "O2DShape",
+        "implementation": "O2DShape",
+        "base": 3,
+        "properties": [],
+        "owned_child_classes": [],
+        "visual_child_classes": []
+      },
+      {
+        "id": 6,
+        "name": "O2DText",
+        "implementation": "O2DText",
+        "base": 3,
+        "properties": [],
+        "owned_child_classes": [],
+        "visual_child_classes": []
+      },
+      {
+        "id": 7,
+        "name": "O2DButton",
+        "implementation": "O2DButton",
+        "base": 3,
+        "properties": [],
+        "owned_child_classes": [
+          3
+        ],
+        "visual_child_classes": [
+          3
+        ]
+      },
+      {
+        "id": 8,
+        "name": "O2DToggle",
+        "implementation": "O2DToggle",
+        "base": 7,
+        "properties": [
+          {
+            "id": 1,
+            "name": "Accent",
+            "label": "Accent",
+            "value_type": "Color",
+            "default": {
+              "Color": [
+                85,
+                136,
+                255,
+                255
+              ]
+            },
+            "group": "Appearance",
+            "editor": "Palette",
+            "policy": {
+              "live_literal": true,
+              "app_binding": false
+            }
+          },
+          {
+            "id": 3,
+            "name": "Label",
+            "label": "Label",
+            "value_type": "Text",
+            "default": {
+              "Text": "Enabled"
+            },
+            "group": "Component",
+            "editor": "TextSuggestions",
+            "policy": {
+              "live_literal": true,
+              "app_binding": false
+            }
+          },
+          {
+            "id": 5,
+            "name": "Checked",
+            "label": "Checked",
+            "value_type": "Boolean",
+            "default": {
+              "Boolean": false
+            },
+            "group": "Connections",
+            "editor": "ReadOnly",
+            "policy": {
+              "live_literal": false,
+              "app_binding": true
+            }
+          }
+        ],
+        "owned_child_classes": [
+          3
+        ],
+        "visual_child_classes": [
+          3
+        ]
+      },
+      {
+        "id": 9,
+        "name": "O2DSlider",
+        "implementation": "O2DSlider",
+        "base": 3,
+        "properties": [
+          {
+            "id": 1,
+            "name": "Accent",
+            "label": "Accent",
+            "value_type": "Color",
+            "default": {
+              "Color": [
+                85,
+                136,
+                255,
+                255
+              ]
+            },
+            "group": "Appearance",
+            "editor": "Palette",
+            "policy": {
+              "live_literal": true,
+              "app_binding": false
+            }
+          },
+          {
+            "id": 2,
+            "name": "Width",
+            "label": "Width",
+            "value_type": "Number",
+            "default": {
+              "Number": 440.0
+            },
+            "number_range": [
+              320.0,
+              440.0
+            ],
+            "number_step": 40.0,
+            "units": "px",
+            "group": "Layout",
+            "editor": "NumberSuggestions",
+            "policy": {
+              "live_literal": true,
+              "app_binding": false
+            }
+          },
+          {
+            "id": 3,
+            "name": "Label",
+            "label": "Label",
+            "value_type": "Text",
+            "default": {
+              "Text": "Level"
+            },
+            "group": "Component",
+            "editor": "TextSuggestions",
+            "policy": {
+              "live_literal": true,
+              "app_binding": false
+            }
+          },
+          {
+            "id": 4,
+            "name": "Value",
+            "label": "Value",
+            "value_type": "Number",
+            "default": {
+              "Number": 0.0
+            },
+            "group": "Connections",
+            "editor": "ReadOnly",
+            "policy": {
+              "live_literal": false,
+              "app_binding": true
+            }
+          }
+        ],
+        "owned_child_classes": [
+          3
+        ],
+        "visual_child_classes": [
+          3
+        ]
+      }
+    ],
+    "definitions": [
+      {
+        "id": 10,
+        "name": "SettingsPanel",
+        "root": 1,
+        "nodes": [
+          {
+            "id": 1,
+            "name": "Panel",
+            "class": 4,
+            "visual_children": [
+              2,
+              3,
+              7,
+              8,
+              9,
+              12
+            ],
+            "defaults": [
+              {
+                "property": 1,
+                "value": {
+                  "Color": [
+                    85,
+                    136,
+                    255,
+                    255
+                  ]
+                }
+              }
+            ],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 520.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 360.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          },
+          {
+            "id": 2,
+            "name": "Background",
+            "class": 5,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 520.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 360.0
+                  }
+                }
+              ],
+              "resize": {
+                "reference_size": [
+                  520.0,
+                  360.0
+                ],
+                "horizontal": {
+                  "Pins": {
+                    "leading": 0.0,
+                    "trailing": 0.0
+                  }
+                },
+                "vertical": {
+                  "Pins": {
+                    "leading": 0.0,
+                    "trailing": 0.0
+                  }
+                }
+              },
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Superellipse": {
+                  "radius": {
+                    "Literal": {
+                      "Number": 12.0
+                    }
+                  },
+                  "exponent": 4.0,
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        35,
+                        40,
+                        46,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          },
+          {
+            "id": 3,
+            "name": "Title",
+            "class": 6,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 24.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 16.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 472.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 32.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Text": {
+                  "value": {
+                    "Parameter": 0
+                  },
+                  "scale": {
+                    "Literal": {
+                      "Number": 2.0
+                    }
+                  },
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        239,
+                        241,
+                        237,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "InstanceName": {
+                      "prefix": "",
+                      "suffix": "",
+                      "lowercase": false
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 7,
+            "name": "Slider reference",
+            "class": 3,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "reference": {
+              "definition": 12,
+              "assignments": []
+            },
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 24.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 64.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 472.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 112.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          },
+          {
+            "id": 8,
+            "name": "Toggle reference",
+            "class": 3,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "reference": {
+              "definition": 13,
+              "assignments": []
+            },
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 24.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 200.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 264.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 64.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          },
+          {
+            "id": 9,
+            "name": "Text button",
+            "class": 7,
+            "owner": 1,
+            "visual_children": [
+              10,
+              11
+            ],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 312.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 208.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 184.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 48.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": {
+                "label": {
+                  "Parameter": 0
+                },
+                "checked": {
+                  "Literal": {
+                    "Boolean": false
+                  }
+                }
+              },
+              "action": {
+                "kind": "Activate",
+                "operation": "Toggle",
+                "source": {
+                  "references": [
+                    8
+                  ],
+                  "node": 1,
+                  "property": 5
+                }
+              },
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "InstanceName": {
+                      "prefix": "Toggle ",
+                      "suffix": " power",
+                      "lowercase": true
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 10,
+            "name": "Button surface",
+            "class": 5,
+            "owner": 9,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 184.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 48.0
+                  }
+                }
+              ],
+              "resize": {
+                "reference_size": [
+                  184.0,
+                  48.0
+                ],
+                "horizontal": {
+                  "Pins": {
+                    "leading": 0.0,
+                    "trailing": 0.0
+                  }
+                },
+                "vertical": {
+                  "Pins": {
+                    "leading": 0.0,
+                    "trailing": 0.0
+                  }
+                }
+              },
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Superellipse": {
+                  "radius": {
+                    "Literal": {
+                      "Number": 10.0
+                    }
+                  },
+                  "exponent": 4.0,
+                  "color": {
+                    "Parameter": 0
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 1
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 11,
+            "name": "Button title",
+            "class": 6,
+            "owner": 9,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 16.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 10.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 152.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 28.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Text": {
+                  "value": {
+                    "Literal": {
+                      "Text": "Toggle power"
+                    }
+                  },
+                  "scale": {
+                    "Literal": {
+                      "Number": 2.0
+                    }
+                  },
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        239,
+                        241,
+                        237,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          },
+          {
+            "id": 12,
+            "name": "Accessories",
+            "class": 3,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 24.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 280.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 472.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 64.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          }
+        ],
+        "exposed": [
+          {
+            "property": 1,
+            "targets": [
+              {
+                "references": [
+                  7
+                ],
+                "node": 1,
+                "property": 1
+              },
+              {
+                "references": [
+                  8
+                ],
+                "node": 1,
+                "property": 1
+              }
+            ]
+          }
+        ],
+        "slots": [
+          {
+            "id": 1,
+            "name": "Accessories",
+            "references": [],
+            "node": 12,
+            "admitted_classes": [
+              8
+            ],
+            "cardinality": [
+              0,
+              2
+            ],
+            "layout": "Absolute"
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "name": "LabeledSlider",
+        "root": 1,
+        "nodes": [
+          {
+            "id": 1,
+            "name": "Slider",
+            "class": 9,
+            "visual_children": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "defaults": [
+              {
+                "property": 1,
+                "value": {
+                  "Color": [
+                    85,
+                    136,
+                    255,
+                    255
+                  ]
+                }
+              },
+              {
+                "property": 2,
+                "value": {
+                  "Number": 440.0
+                }
+              },
+              {
+                "property": 3,
+                "value": {
+                  "Text": "Level"
+                }
+              }
+            ],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Parameter": 0
+                },
+                {
+                  "Literal": {
+                    "Number": 112.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": {
+                "label": {
+                  "Parameter": 1
+                },
+                "checked": {
+                  "Literal": {
+                    "Boolean": false
+                  }
+                }
+              },
+              "action": {
+                "kind": "Slider",
+                "operation": "Set",
+                "source": {
+                  "references": [],
+                  "node": 1,
+                  "property": 4
+                }
+              },
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 2
+                    }
+                  },
+                  "projection": "Identity"
+                },
+                {
+                  "local": 1,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 3
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 2,
+            "name": "Label",
+            "class": 6,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 320.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 28.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Text": {
+                  "value": {
+                    "Parameter": 0
+                  },
+                  "scale": {
+                    "Literal": {
+                      "Number": 2.0
+                    }
+                  },
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        239,
+                        241,
+                        237,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 3
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 3,
+            "name": "Value",
+            "class": 6,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 344.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 96.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 28.0
+                  }
+                }
+              ],
+              "resize": {
+                "reference_size": [
+                  440.0,
+                  112.0
+                ],
+                "horizontal": {
+                  "Pins": {
+                    "leading": null,
+                    "trailing": 0.0
+                  }
+                },
+                "vertical": "Fixed"
+              },
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Text": {
+                  "value": {
+                    "Parameter": 0
+                  },
+                  "scale": {
+                    "Literal": {
+                      "Number": 2.0
+                    }
+                  },
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        239,
+                        241,
+                        237,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 4
+                    }
+                  },
+                  "projection": "Percent"
+                }
+              ]
+            }
+          },
+          {
+            "id": 4,
+            "name": "Track",
+            "class": 5,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 66.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 440.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 12.0
+                  }
+                }
+              ],
+              "resize": {
+                "reference_size": [
+                  440.0,
+                  112.0
+                ],
+                "horizontal": {
+                  "Pins": {
+                    "leading": 0.0,
+                    "trailing": 0.0
+                  }
+                },
+                "vertical": "Fixed"
+              },
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Superellipse": {
+                  "radius": {
+                    "Literal": {
+                      "Number": 6.0
+                    }
+                  },
+                  "exponent": 4.0,
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        66,
+                        73,
+                        81,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": []
+            }
+          },
+          {
+            "id": 5,
+            "name": "Knob",
+            "class": 5,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Parameter": 1
+                },
+                {
+                  "Literal": {
+                    "Number": 48.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 48.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 48.0
+                  }
+                }
+              ],
+              "resize": {
+                "reference_size": [
+                  440.0,
+                  112.0
+                ],
+                "horizontal": {
+                  "Springs": {
+                    "leading": true,
+                    "length": false,
+                    "trailing": true
+                  }
+                },
+                "vertical": "Fixed"
+              },
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Circle": {
+                  "color": {
+                    "Parameter": 0
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 1
+                    }
+                  },
+                  "projection": "Identity"
+                },
+                {
+                  "local": 1,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 4
+                    }
+                  },
+                  "projection": {
+                    "Number": {
+                      "scale": 0.392,
+                      "offset": 0.0
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "exposed": [],
+        "slots": []
+      },
+      {
+        "id": 13,
+        "name": "LabeledToggle",
+        "root": 1,
+        "nodes": [
+          {
+            "id": 1,
+            "name": "Toggle",
+            "class": 8,
+            "visual_children": [
+              2,
+              3
+            ],
+            "defaults": [
+              {
+                "property": 1,
+                "value": {
+                  "Color": [
+                    85,
+                    136,
+                    255,
+                    255
+                  ]
+                }
+              },
+              {
+                "property": 3,
+                "value": {
+                  "Text": "Enabled"
+                }
+              }
+            ],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 0.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 264.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 64.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Canvas": {
+                  "clip": true
+                }
+              },
+              "semantics": {
+                "label": {
+                  "Parameter": 1
+                },
+                "checked": {
+                  "Parameter": 0
+                }
+              },
+              "action": {
+                "kind": "Activate",
+                "operation": "Toggle",
+                "source": {
+                  "references": [],
+                  "node": 1,
+                  "property": 5
+                }
+              },
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 5
+                    }
+                  },
+                  "projection": "Identity"
+                },
+                {
+                  "local": 1,
+                  "source": {
+                    "InstanceName": {
+                      "prefix": "",
+                      "suffix": " enabled",
+                      "lowercase": false
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 2,
+            "name": "Indicator",
+            "class": 5,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 4.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 12.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 32.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 32.0
+                  }
+                }
+              ],
+              "resize": null,
+              "visible": {
+                "Parameter": 1
+              },
+              "shape": {
+                "Circle": {
+                  "color": {
+                    "Parameter": 0
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 1
+                    }
+                  },
+                  "projection": "Identity"
+                },
+                {
+                  "local": 1,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 5
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          },
+          {
+            "id": 3,
+            "name": "Label",
+            "class": 6,
+            "owner": 1,
+            "visual_children": [],
+            "defaults": [],
+            "visual": {
+              "frame": [
+                {
+                  "Literal": {
+                    "Number": 48.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 12.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 216.0
+                  }
+                },
+                {
+                  "Literal": {
+                    "Number": 32.0
+                  }
+                }
+              ],
+              "resize": {
+                "reference_size": [
+                  264.0,
+                  64.0
+                ],
+                "horizontal": {
+                  "Pins": {
+                    "leading": 48.0,
+                    "trailing": 0.0
+                  }
+                },
+                "vertical": "Fixed"
+              },
+              "visible": {
+                "Literal": {
+                  "Boolean": true
+                }
+              },
+              "shape": {
+                "Text": {
+                  "value": {
+                    "Parameter": 0
+                  },
+                  "scale": {
+                    "Literal": {
+                      "Number": 2.0
+                    }
+                  },
+                  "color": {
+                    "Literal": {
+                      "Color": [
+                        239,
+                        241,
+                        237,
+                        255
+                      ]
+                    }
+                  }
+                }
+              },
+              "semantics": null,
+              "action": null,
+              "parameters": [
+                {
+                  "local": 0,
+                  "source": {
+                    "Property": {
+                      "references": [],
+                      "node": 1,
+                      "property": 3
+                    }
+                  },
+                  "projection": "Identity"
+                }
+              ]
+            }
+          }
+        ],
+        "exposed": [],
+        "slots": []
+      }
+    ],
+    "exports": [
+      {
+        "id": 1,
+        "name": "SettingsPanel",
+        "definition": 10,
+        "contract": [
+          68,
+          214,
+          120,
+          68,
+          150,
+          109,
+          30,
+          136,
+          69,
+          56,
+          241,
+          41,
+          18,
+          106,
+          85,
+          11,
+          16,
+          167,
+          135,
+          27,
+          54,
+          55,
+          48,
+          202,
+          170,
+          41,
+          70,
+          172,
+          102,
+          219,
+          198,
+          247
+        ]
+      },
+      {
+        "id": 2,
+        "name": "LabeledSlider",
+        "definition": 12,
+        "contract": [
+          179,
+          11,
+          134,
+          95,
+          233,
+          75,
+          161,
+          15,
+          146,
+          246,
+          126,
+          182,
+          53,
+          155,
+          49,
+          167,
+          215,
+          215,
+          55,
+          159,
+          144,
+          145,
+          120,
+          57,
+          56,
+          104,
+          98,
+          34,
+          158,
+          188,
+          54,
+          229
+        ]
+      },
+      {
+        "id": 3,
+        "name": "LabeledToggle",
+        "definition": 13,
+        "contract": [
+          86,
+          26,
+          16,
+          184,
+          180,
+          90,
+          250,
+          52,
+          79,
+          129,
+          215,
+          200,
+          189,
+          176,
+          239,
+          18,
+          178,
+          77,
+          119,
+          165,
+          29,
+          248,
+          124,
+          197,
+          40,
+          35,
+          110,
+          233,
+          92,
+          3,
+          148,
+          212
+        ]
+      }
+    ]
+  }
+}

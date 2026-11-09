@@ -14,6 +14,7 @@ mod transfers;
 #[derive(Clone)]
 struct Package {
     bundle_sha256: Option<String>,
+    library_locks: Vec<otrios_interfaces::oib::graph::LibraryLock>,
     app: AppContract,
     ui: Vec<u8>,
     ui_hash: Vec<u8>,
@@ -177,6 +178,26 @@ fn bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
+/// Package bytes have already passed signed closure admission. A changed library
+/// body uses its own expected-version operation; arbitrary app source changes
+/// still require a fresh collection. Callers journal the candidate before swap.
+fn configure_package_oib(doc: &mut Document, ui: &otrios_interfaces::canvas::Ui) -> Result<bool> {
+    match doc.configure_oib(ui) {
+        Ok(changed) => Ok(changed),
+        Err(original) => {
+            if canvas::oib::seed(ui)
+                .and_then(|seed| seed.graph.as_ref())
+                .and_then(|graph| graph.imports.as_ref())
+                .is_none()
+            {
+                return Err(original);
+            }
+            let (generation, lock) = doc.oib_baseline()?;
+            doc.adopt_oib_baseline(ui, generation, lock)
+        }
+    }
+}
+
 fn collection_room(binding: &otrios_interfaces::spaces::Binding, package: &Package) -> String {
     if package.app.state_ref == package.primary_ref {
         binding.collection.clone()
@@ -1265,7 +1286,7 @@ impl Hub {
             None => Document::new(package.schema.clone(), &package.app.state_ref)?,
         };
         let persisted = doc.clone();
-        let seeded = doc.configure_oib(&description)?;
+        let seeded = configure_package_oib(&mut doc, &description)?;
         if seeded && let Some(file) = file.as_ref().filter(|p| p.exists()) {
             store::append(file, &persisted, &doc)?;
         }
@@ -1747,7 +1768,7 @@ impl Hub {
                         }
                         Document::new(description.state_schema.clone(), &a.state_ref)?
                     };
-                    doc.configure_oib(&description)?;
+                    configure_package_oib(&mut doc, &description)?;
                     doc.set_signal_fields(&signal_fields)?;
                     if let Some(path) = &file
                         && !path.exists()
@@ -1791,6 +1812,9 @@ impl Hub {
                     a.ui_ref.clone(),
                     Package {
                         bundle_sha256: verified.as_ref().map(|v| v.summary().digest.clone()),
+                        library_locks: verified
+                            .as_ref()
+                            .map_or_else(Vec::new, |v| v.summary().info.libraries.clone()),
                         code_bytes: verified.as_ref().map(|v| v.summary().bytes as u64),
                         revision: verified.as_ref().map(|v| v.summary().info.revision),
                         app: a,
@@ -1844,6 +1868,31 @@ impl Hub {
             let (policy, primary_ref) = policies.get(owner).ok_or("Missing admitted app owner")?;
             p.policy = policy.clone();
             p.primary_ref = primary_ref.clone();
+        }
+        // Optional catalog history must not keep an unbounded sequence of
+        // library bodies. Retain each app's candidate and one prior exact lock;
+        // an older catalog request must discover/remount the current release.
+        // Active session snapshots have their own bounded Merkle resync policy.
+        let previous_pins: BTreeMap<_, _> = self
+            .bundles
+            .get(&self.active)
+            .into_iter()
+            .flat_map(|bundle| &bundle.packages)
+            .map(|(ui, package)| (ui.clone(), package.library_locks.clone()))
+            .collect();
+        for old in self.bundles.values_mut() {
+            old.packages.retain(|ui, package| {
+                let Some(candidate) = packages.get(ui) else {
+                    return true;
+                };
+                if candidate.library_locks.is_empty() && package.library_locks.is_empty() {
+                    return true;
+                }
+                package.library_locks == candidate.library_locks
+                    || previous_pins
+                        .get(ui)
+                        .is_some_and(|pins| pins == &package.library_locks)
+            });
         }
         self.rooms.extend(new_rooms);
         self.bundles
@@ -2072,7 +2121,19 @@ impl Hub {
                     return Err("App persistence outcome uncertain; restart required".into());
                 }
                 let mut candidate = room.doc.clone();
-                let oib_seed_changed = candidate.configure_oib(&canvas::decode_ui(&p.ui)?)?;
+                let oib_seed_changed =
+                    configure_package_oib(&mut candidate, &canvas::decode_ui(&p.ui)?)?;
+                // Baseline adoption preserves every receipt/app register. Persist
+                // that operation separately before registering a new writer.
+                if oib_seed_changed {
+                    if let Some(file) = &room.file
+                        && let Err(error) = store::append(file, &room.doc, &candidate)
+                    {
+                        room.failed = true;
+                        return Err(error.to_string());
+                    }
+                    room.doc = candidate.clone();
+                }
                 candidate.set_wall_time(
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -2087,7 +2148,6 @@ impl Hub {
                     candidate.open_session(&writer, resume)?
                 };
                 sync.set_oib_editable(mount_binding.as_ref().is_some_and(|b| b.ui_editable));
-                let changed = changed || oib_seed_changed;
                 sync.set_selection(p.selection.clone())?;
                 if changed
                     && let Some(file) = &room.file

@@ -656,6 +656,7 @@ dependencies = [
  "otrios-interfaces",
  "otrios-linux-display",
  "rustls",
+ "serde",
  "serde_json",
  "sha2",
  "tokio",

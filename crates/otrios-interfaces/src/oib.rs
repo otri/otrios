@@ -8,6 +8,7 @@ pub mod authoring;
 /// RFC 0035 D1 signed metadata and stable occurrence/property identities.
 pub mod designer;
 pub mod graph;
+pub mod library;
 
 pub const FORMAT: &str = "otrios-oib-v2";
 pub const FEATURE: &str = "otrios-oib-v2";
@@ -29,6 +30,10 @@ pub struct Seed {
     /// Canonical authored source. Everything below is disposable compiler output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<graph::Document>,
+    /// Immutable verified import bodies carried with the exact app dependency
+    /// lock. They never become app-authored local definition copies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved_libraries: Vec<graph::ResolvedLibrary>,
     /// Disposable projection state; preset IDs and real instance IDs are
     /// independent domains even when their numeric values coincide.
     #[serde(skip)]

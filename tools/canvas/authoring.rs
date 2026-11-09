@@ -994,6 +994,7 @@ impl AppUi {
             Some(Presentation::Oib(Box::new(otrios_interfaces::oib::Seed {
                 format: otrios_interfaces::oib::FORMAT.into(),
                 graph: Some(graph),
+                resolved_libraries: vec![],
                 expanded: false,
                 designer: None,
                 main_oib: 0,

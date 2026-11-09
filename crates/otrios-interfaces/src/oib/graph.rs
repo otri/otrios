@@ -17,6 +17,10 @@ pub struct Document {
     pub presented_root: InstanceId,
     pub classes: Vec<ClassDescriptor>,
     pub definitions: Vec<ComponentDefinition>,
+    /// App-owned exact dependency pins and stable definition namespace maps.
+    /// Imported bodies remain separate from these editable local definitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imports: Option<Imports>,
     pub presets: Vec<Preset>,
     pub instances: Vec<Instance>,
     pub grants: Vec<ActionGrant>,
@@ -26,6 +30,61 @@ pub struct Document {
     pub hierarchy_viewport: Option<u16>,
     pub preview_stride: f32,
     pub inspector_content: [f32; 2],
+}
+
+pub const IMPORTS_FORMAT: &str = "otrios-oib-imports-v1";
+pub const MAX_LIBRARIES: usize = 4;
+pub const MAX_IMPORTED_BYTES: usize = 32 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Imports {
+    pub format: String,
+    pub locks: Vec<LibraryLock>,
+    pub bindings: Vec<ImportBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibraryLock {
+    pub library: super::library::LibraryId,
+    pub revision: super::library::Revision,
+    pub exports: Vec<LockedExport>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LockedExport {
+    pub export: super::library::ExportId,
+    pub contract: super::library::Revision,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportBinding {
+    pub id: u64,
+    pub library: super::library::LibraryId,
+    pub export: super::library::ExportId,
+    /// Complete reachable definition closure. Map entries are stable source
+    /// identities, never inferred from export order or package content hashes.
+    pub definitions: Vec<DefinitionBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefinitionBinding {
+    pub source: DefinitionId,
+    pub target: DefinitionId,
+}
+
+/// Verified immutable dependency transport, separate from the authored graph.
+/// Package admission matches this body to the independently signed exact pin.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedLibrary {
+    pub library: super::library::LibraryId,
+    pub revision: super::library::Revision,
+    pub graph: super::library::Graph,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

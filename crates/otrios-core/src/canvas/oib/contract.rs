@@ -57,6 +57,40 @@ fn grant_key(grant: &ActionGrant) -> (u16, u8, u8) {
     (grant.field, kind, operation)
 }
 
+fn class_signature(class: &otrios_interfaces::oib::designer::ClassDescriptor) -> ClassSignature {
+    let mut properties = class
+        .properties
+        .iter()
+        .map(|property| PropertySignature {
+            id: property.id,
+            value_type: property.value_type,
+            number_range: property.number_range,
+            policy: property.policy,
+        })
+        .collect::<Vec<_>>();
+    properties.sort_unstable_by_key(|property| property.id);
+    ClassSignature {
+        id: class.id,
+        implementation: class.implementation,
+        base: class.base,
+        properties,
+        owned_child_classes: class_set(&class.owned_child_classes),
+        visual_child_classes: class_set(&class.visual_child_classes),
+    }
+}
+
+/// Exact semantic requirement for a library's admitted host class. Defaults,
+/// names and editor hints are body/presentation data and do not supply grants.
+pub fn class_contract(
+    class: &otrios_interfaces::oib::designer::ClassDescriptor,
+) -> Result<[u8; 32]> {
+    let mut canonical = b"OTriOS\0oib-class-contract-v1\0".to_vec();
+    canonical.extend(flexbuffers::to_vec(class_signature(class)).map_err(err)?);
+    hash(&canonical)
+        .try_into()
+        .map_err(|_| "Invalid SHA-256 length".into())
+}
+
 /// Hash an already-admitted OIB UI's semantic contract, never its graph body.
 ///
 /// The caller still validates the complete signed UI and compares baseline
@@ -73,27 +107,7 @@ pub fn admission(ui: &Ui) -> Result<Vec<u8>> {
     let mut classes = graph
         .classes
         .iter()
-        .map(|class| {
-            let mut properties = class
-                .properties
-                .iter()
-                .map(|property| PropertySignature {
-                    id: property.id,
-                    value_type: property.value_type,
-                    number_range: property.number_range,
-                    policy: property.policy,
-                })
-                .collect::<Vec<_>>();
-            properties.sort_unstable_by_key(|property| property.id);
-            ClassSignature {
-                id: class.id,
-                implementation: class.implementation,
-                base: class.base,
-                properties,
-                owned_child_classes: class_set(&class.owned_child_classes),
-                visual_child_classes: class_set(&class.visual_child_classes),
-            }
-        })
+        .map(class_signature)
         .collect::<Vec<_>>();
     classes.sort_unstable_by_key(|class| class.id);
     let mut grants = graph.grants.clone();

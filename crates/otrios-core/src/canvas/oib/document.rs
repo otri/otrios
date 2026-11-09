@@ -995,10 +995,10 @@ pub(super) fn output_cells(seed: &Seed) -> Result<BTreeMap<(u16, u8), u64>> {
 /// Canonical decoder for a standalone signed Seed envelope. Embedded UI decoders
 /// must equivalently compare their complete reencoding to the signed input bytes.
 pub fn decode_seed(bytes: &[u8]) -> Result<Seed> {
-    if bytes.is_empty() || bytes.len() > 24 * 1024 {
+    if bytes.is_empty() || bytes.len() > otrios_interfaces::oib::MAX_BYTES {
         return Err("OIB seed byte budget".into());
     }
-    crate::flex_guard::validate(bytes, 32, 48 * 1024, 24 * 1024)?;
+    crate::flex_guard::validate(bytes, 32, 128 * 1024, otrios_interfaces::oib::MAX_BYTES)?;
     let seed: Seed = flexbuffers::from_slice(bytes).map_err(err)?;
     if flexbuffers::to_vec(&seed).map_err(err)? != bytes {
         return Err("Noncanonical OIB seed bytes".into());

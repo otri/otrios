@@ -9,6 +9,8 @@ use std::collections::BTreeSet;
 
 #[path = "../../../../apps/oib-designer/app.rs"]
 mod app;
+#[path = "../support/oib_library_fixture.rs"]
+mod library_fixture;
 
 const STATE: &str = "app:oib-designer/state";
 const VALUES: [(u16, u16); 4] = [(1, 481), (2, 729), (3, 0), (4, 1000)];
@@ -151,6 +153,9 @@ struct Fixture {
 }
 impl Fixture {
     fn start(binary: &str) -> Self {
+        Self::start_ui(binary, app::ui(&[]))
+    }
+    fn start_ui(binary: &str, input: Ui) -> Self {
         let mut rig = Rig::start(binary);
         let space = rig.space("D1 authority process acceptance");
         rig.change(
@@ -168,7 +173,7 @@ impl Fixture {
         rig.stop();
         // Add the real companion alongside the existing app. Do not rewrite its
         // ui_ref, fields, signed mappings, seed, selectors or factory identities.
-        let ui = canvas::decode_ui(&canvas::encode_ui(&app::ui(&[])).unwrap()).unwrap();
+        let ui = canvas::decode_ui(&canvas::encode_ui(&input).unwrap()).unwrap();
         let manifest = app::manifest();
         assert_eq!(ui.ui_ref, "app:oib-designer/ui");
         assert_eq!(ui.state_schema.id, "oib-designer-state-v2");
@@ -1733,5 +1738,163 @@ pub(super) fn canonical_instances_unknown_outcomes_recover(binary: &str) {
             "reset clears overrides to current authored defaults"
         );
     }
+    fixture.counter_unchanged();
+}
+
+#[test]
+fn l1_compatible_library_baseline_upgrade_restart_and_rollback_preserve_collection_and_causal_data()
+{
+    let Ok(binary) = std::env::var("OTRIOS_SPACES_SERVER") else {
+        return;
+    };
+    // This exercises the real authority/persistence boundary with synthetic
+    // already-verified bodies. Signed package/publication acceptance is separate.
+    let original = library_fixture::admit(&library_fixture::imported());
+    assert_eq!(library_fixture::seed(&original).resolved_libraries.len(), 1);
+    let styled = library_fixture::admit(&library_fixture::update(&original, |graph| {
+        graph
+            .definitions
+            .iter_mut()
+            .find(|d| d.id == DefinitionId(13))
+            .unwrap()
+            .nodes[0]
+            .defaults
+            .iter_mut()
+            .find(|d| d.property == PropertyId(3))
+            .unwrap()
+            .value = Value::Text("Library revision two".into());
+    }));
+    let mut fixture = Fixture::start_ui(&binary, original.clone());
+    let mut admin = fixture.open('a', 201, 0);
+    assert!(admin.state.set(&VALUES).unwrap());
+    admin.settle();
+    let width = PropertyAddress::Definition {
+        definition: DefinitionId(12),
+        node: NodeId(1),
+        property: PropertyId(2),
+    };
+    admin.edit_addresses(&[
+        (width.clone(), Some(Value::Number(360.))),
+        (
+            address(20, &[8], 3),
+            Some(Value::Text("Retained instance label".into())),
+        ),
+    ]);
+    assert!(
+        admin
+            .state
+            .edit_oib_structure(otrios_interfaces::oib::authoring::EditBatch::definitions(
+                otrios_interfaces::oib::authoring::DefinitionBatch {
+                    generation: admin.state.oib_structural_generation().unwrap(),
+                    operations: vec![
+                        otrios_interfaces::oib::authoring::DefinitionEdit::RenameDefinition {
+                            definition: DefinitionId(10),
+                            name: "Retained local wrapper".into()
+                        }
+                    ],
+                }
+            ))
+            .unwrap()
+    );
+    admin.settle();
+    let collection = admin.binding.collection.clone();
+    let actor = admin.binding.actor;
+    let resume = admin.state.resume_sequence();
+    let before = fixture.durable(&collection);
+    let epoch = before.oib_epoch().unwrap();
+    let (generation, lock) = before.oib_baseline().unwrap();
+    let properties = Snapshot::from_bytes(&before.save().unwrap()).unwrap();
+    drop(admin);
+    fn replace(fixture: &mut Fixture, binary: &str, ui: &Ui) {
+        fixture.rig.stop();
+        let bytes = canvas::encode_ui(ui).unwrap();
+        fs::write(
+            fixture.rig.root.join("apps/oib-designer/package/ui.flex"),
+            &bytes,
+        )
+        .unwrap();
+        let mut catalog = canvas::decode_catalog(&fixture.rig.catalog).unwrap();
+        catalog
+            .apps
+            .iter_mut()
+            .find(|entry| entry.app.id == "oib-designer")
+            .unwrap()
+            .ui_hash = canvas::hash(&bytes);
+        fixture.rig.catalog = canvas::encode_catalog(&catalog).unwrap();
+        fs::write(
+            fixture.rig.root.join("apps/catalog.flex"),
+            &fixture.rig.catalog,
+        )
+        .unwrap();
+        fixture.ui = ui.clone();
+        fixture.rig.restart(binary, true, true);
+    }
+    replace(&mut fixture, &binary, &styled);
+    let admin = fixture.open('a', 201, resume);
+    assert_eq!(admin.binding.collection, collection);
+    assert_eq!(admin.binding.actor, actor);
+    assert_eq!(admin.state.resume_sequence(), resume);
+    assert_values(&admin.state);
+    let upgraded = fixture.durable(&collection);
+    assert_eq!(upgraded.oib_epoch().unwrap(), epoch);
+    assert_eq!(upgraded.oib_baseline().unwrap().0, generation + 1);
+    assert_ne!(upgraded.oib_baseline().unwrap().1, lock);
+    for branch in [1, 2, 4] {
+        assert_eq!(
+            Snapshot::from_bytes(&upgraded.save().unwrap())
+                .unwrap()
+                .subtree(&[4, branch])
+                .unwrap()
+                .to_bytes()
+                .unwrap(),
+            properties
+                .subtree(&[4, branch])
+                .unwrap()
+                .to_bytes()
+                .unwrap()
+        );
+    }
+    let read = |document: &Document, property: &PropertyAddress| {
+        let (ui, _) = document.oib_compiled(2).unwrap();
+        let source = oib::seed(&ui).unwrap();
+        let cell =
+            oib::document::cell_for_address(source, &document.oib_allocations().unwrap(), property)
+                .unwrap();
+        oib::effective(source, &document.oib_values(2).unwrap(), cell).unwrap()
+    };
+    assert_eq!(
+        read(&upgraded, &address(30, &[8], 3)),
+        Value::Text("Library revision two".into())
+    );
+    assert_eq!(
+        read(&upgraded, &address(20, &[8], 3)),
+        Value::Text("Retained instance label".into())
+    );
+    assert_eq!(read(&upgraded, &address(30, &[7], 2)), Value::Number(360.));
+    drop(admin);
+    fixture.rig.stop();
+    fixture.rig.restart(&binary, true, true);
+    let admin = fixture.open('a', 201, resume);
+    assert_values(&admin.state);
+    assert_eq!(
+        fixture.durable(&collection).oib_baseline().unwrap(),
+        upgraded.oib_baseline().unwrap()
+    );
+    drop(admin);
+    replace(&mut fixture, &binary, &original);
+    let admin = fixture.open('a', 201, resume);
+    assert_eq!(admin.binding.collection, collection);
+    assert_values(&admin.state);
+    let rollback = fixture.durable(&collection);
+    assert_eq!(rollback.oib_epoch().unwrap(), epoch);
+    assert_eq!(rollback.oib_baseline().unwrap().0, generation + 2);
+    assert_eq!(
+        read(&rollback, &address(30, &[8], 3)),
+        Value::Text("Enabled".into())
+    );
+    assert_eq!(
+        read(&rollback, &address(20, &[8], 3)),
+        Value::Text("Retained instance label".into())
+    );
     fixture.counter_unchanged();
 }

@@ -232,6 +232,7 @@ fn fixture_with(extra_properties: u64) -> Ui {
         presented_root: InstanceId(40),
         classes,
         definitions,
+        imports: None,
         presets,
         instances,
         grants: vec![],

@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0036: Independently upgradable OIB component libraries
 
-Date: 2026-11-09. Status: **selected architecture; loader not implemented**.
+Date: 2026-11-09. Status: **L1 implementation in progress; live qualification pending**.
 
 The user selected independently upgradable OIB libraries on 2026-11-09. This RFC
-defines that boundary and a bounded first loader milestone. It does not claim
-that the current D2 branch imports libraries or executes library behavior.
+defines that boundary and a bounded first loader milestone. The
+[L1 work record](../OIB_LIBRARY_L1.md) tracks implementation and qualification.
+D2 itself did not import libraries or execute library behavior.
 [D2 completion](../OIB_D2_COMPLETION.md) is delivered; L1 is the next loader milestone.
 The practical boundary is summarized in [OIB library boundary](../OIB_LIBRARY_BOUNDARY.md).
 
@@ -93,6 +94,36 @@ unknown required host/format versions and untrusted packages. Do not resolve
 The publisher stages a complete signed app/library closure and updates the app's
 lock. This may republish app metadata but must not rebuild a host executable.
 Automatic catalog-wide adoption and a general dependency solver are not L1.
+
+## L1 codec selected for implementation
+
+The public contracts are [library.rs](../../crates/otrios-interfaces/src/oib/library.rs)
+and [graph.rs](../../crates/otrios-interfaces/src/oib/graph.rs). The package header is
+`OTLIB\0\x01\0`, distinct from `OTAPP`. The package SHA-256 input is
+`otrios-oib-library-v1\0` followed by the existing canonical integrity manifest.
+Ed25519 signs `otrios-oib-library-signature-v1\0`, the raw trusted public key
+and the binary package digest. The detached receipt format omits the trailing
+NUL. [Package vectors](../../crates/otrios-core/src/library/tests.rs) lock these
+bytes independently of the app package vectors.
+
+`LibraryId` is `<publisher-public-key-sha256>:<slug>`; it is separate from the
+32-byte package revision. Exports carry stable numeric IDs and derived semantic
+contract digests. `otrios-oib-imports-v1` records exact locks and persistent,
+complete source-definition to document-definition maps. The app manifest repeats
+the same lock. Signed packages are nested under
+`Dependencies/<revision>.otlib/`; the enclosing app's integrity closure covers
+all files, and admission separately verifies each inner publisher signature.
+No transitive library package is admitted.
+
+Canonical app graph definitions stay local. Separately transported
+`Seed.resolved_libraries` contains the exact verified immutable bodies;
+resolution must agree with the locks, exports, class requirements and namespace
+maps before lowering. Compiled renderer output never becomes this source.
+The new recoverable binding is `otrios-oib-binding-v2`, with a fixed allocator
+floor and a bounded last-adoption witness. State protocol advances to v30;
+the opening release-control envelope remains v1. The initial format/import
+cutover uses fresh disposable OIB collections. Compatible library updates after
+that cutover retain the collection and semantic epoch.
 
 ## Authored source, resolved graph and identity
 

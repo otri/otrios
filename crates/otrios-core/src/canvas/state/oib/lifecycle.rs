@@ -14,6 +14,21 @@ pub(super) fn first_id(seed: &otrios_interfaces::oib::Seed) -> Result<u64> {
                 .chain(definition.nodes.iter().map(|node| node.id.0))
                 .chain(definition.slots.iter().map(|slot| slot.id.0))
         }))
+        .chain(
+            graph
+                .imports
+                .as_ref()
+                .into_iter()
+                .flat_map(|imports| &imports.bindings)
+                .flat_map(|binding| {
+                    std::iter::once(binding.id).chain(
+                        binding
+                            .definitions
+                            .iter()
+                            .map(|definition| definition.target.0),
+                    )
+                }),
+        )
         .chain(std::iter::once(graph.presented_root.0))
         .max()
         .unwrap_or(0)
@@ -48,7 +63,7 @@ impl Document {
             })
             .ok_or("OIB resident instance capacity exhausted")?;
         let id = self.oib_next_id()?;
-        if !(first_id(seed)?..MAX_ID).contains(&id) {
+        if !(self.oib_binding()?.identity_floor..MAX_ID).contains(&id) {
             return Err("OIB identity counter exhausted".into());
         }
         let name = name.unwrap_or_else(|| format!("instance-{id}"));
@@ -79,7 +94,7 @@ impl Document {
             super::super::super::oib::instances::initial_allocations(&seed)
                 .iter()
                 .any(|i| i.id == id)
-                || (first_id(&seed)?..self.oib_next_id()?).contains(&id),
+                || (self.oib_binding()?.identity_floor..self.oib_next_id()?).contains(&id),
         )
     }
 
@@ -89,13 +104,14 @@ impl Document {
     ) -> Result<bool> {
         use otrios_interfaces::oib::{authoring::BaselineIdentity, designer::*};
         let source = self.oib_source()?;
-        let signed = self
-            .oib_binding()?
-            .seed
-            .graph
-            .clone()
-            .ok_or("Missing signed graph")?;
-        let first = first_id(&self.oib_binding()?.seed)?;
+        let signed = super::super::super::oib::imports::resolve(&self.oib_binding()?.seed)?;
+        let current = self.oib_authored_seed()?;
+        let current = &current
+            .designer
+            .as_ref()
+            .ok_or("Missing resolved metadata")?
+            .definitions;
+        let first = self.oib_binding()?.identity_floor;
         let allocated = |identity| (first..source.next_identity).contains(&identity);
         fn contains(
             definitions: &[ComponentDefinition],
@@ -123,7 +139,7 @@ impl Document {
             PropertyAddress::Definition {
                 definition, node, ..
             } => {
-                if contains(&source.definitions, *definition, &[], *node) {
+                if contains(current, *definition, &[], *node) {
                     return Ok(false);
                 }
                 Ok(contains(&signed.definitions, *definition, &[], *node)
@@ -138,7 +154,7 @@ impl Document {
                     return Ok(false);
                 };
                 let definition = DefinitionId(root.component);
-                if contains(&source.definitions, definition, &path.references, path.node) {
+                if contains(current, definition, &path.references, path.node) {
                     return Ok(false);
                 }
                 let original = source
@@ -298,7 +314,7 @@ impl Document {
         let seed = self.oib_authored_seed()?;
         let allocations = self.oib_allocations()?;
         let next = self.oib_next_id()?;
-        let first = first_id(&self.oib_binding()?.seed)?;
+        let first = self.oib_binding()?.identity_floor;
         super::super::super::oib::instances::expanded_seed(&seed, &allocations)?;
         let mut slots = BTreeSet::new();
         let mut ids = BTreeSet::new();

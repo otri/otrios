@@ -1,0 +1,43 @@
+[
+  {
+    "id": 1,
+    "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
+    "export": 1,
+    "definitions": [
+      {
+        "source": 10,
+        "target": 10
+      },
+      {
+        "source": 12,
+        "target": 12
+      },
+      {
+        "source": 13,
+        "target": 13
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
+    "export": 2,
+    "definitions": [
+      {
+        "source": 12,
+        "target": 12
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
+    "export": 3,
+    "definitions": [
+      {
+        "source": 13,
+        "target": 13
+      }
+    ]
+  }
+]

@@ -15,6 +15,7 @@ fn allocate(next: &mut u64) -> Result<u64> {
 
 struct Remap<'a> {
     signed: &'a graph::Document,
+    resolved: &'a [ComponentDefinition],
     definitions: BTreeMap<DefinitionId, DefinitionId>,
     nodes: BTreeMap<(DefinitionId, NodeId), NodeId>,
     slots: BTreeMap<(DefinitionId, SlotId), SlotId>,
@@ -27,13 +28,23 @@ impl Remap<'_> {
             .definitions
             .iter()
             .find(|d| d.id == id)
+            .or_else(|| self.resolved.iter().find(|definition| definition.id == id))
             .ok_or_else(|| "Missing signed definition".into())
     }
     fn node(&self, definition: DefinitionId, node: NodeId) -> Result<NodeId> {
-        self.nodes
-            .get(&(definition, node))
-            .copied()
-            .ok_or_else(|| "Missing baseline node role".into())
+        if let Some(current) = self.nodes.get(&(definition, node)) {
+            return Ok(*current);
+        }
+        if !self.definitions.contains_key(&definition)
+            && self
+                .definition(definition)?
+                .nodes
+                .iter()
+                .any(|current| current.id == node)
+        {
+            return Ok(node);
+        }
+        Err("Missing baseline node role".into())
     }
     fn path(&self, definition: DefinitionId, path: &PropertyPath) -> Result<PropertyPath> {
         let mut definition = definition;
@@ -78,7 +89,11 @@ impl Remap<'_> {
             }
             if let Some(reference) = &mut node.reference {
                 let target_definition = reference.definition;
-                reference.definition = self.definitions[&target_definition];
+                reference.definition = self
+                    .definitions
+                    .get(&target_definition)
+                    .copied()
+                    .unwrap_or(target_definition);
                 for assignment in &mut reference.assignments {
                     assignment.target = self.path(target_definition, &assignment.target)?;
                     if let AssignmentSource::Forward(path) = &mut assignment.source {
@@ -115,7 +130,11 @@ impl Remap<'_> {
     fn preset(&self, value: &graph::Preset) -> Result<graph::Preset> {
         let mut result = value.clone();
         result.id = self.presets[&value.id];
-        result.definition = self.definitions[&value.definition];
+        result.definition = self
+            .definitions
+            .get(&value.definition)
+            .copied()
+            .unwrap_or(value.definition);
         for assignment in &mut result.assignments {
             assignment.target = self.path(value.definition, &assignment.target)?;
             if let graph::Source::Forward(path) = &mut assignment.source {
@@ -129,12 +148,15 @@ impl Remap<'_> {
 /// Return the complete restored authored source and desired real roots. The
 /// caller publishes this only after final class/layout/connection validation.
 pub(super) fn restore(
-    signed: &graph::Document,
+    seed: &otrios_interfaces::oib::Seed,
     source: &DocumentSource,
 ) -> Result<(DocumentSource, Vec<Allocation>)> {
+    let signed = seed.graph.as_ref().ok_or("Missing signed baseline")?;
+    let resolved = super::super::super::oib::imports::resolve(seed)?;
     let mut next = source.next_identity;
     let mut map = Remap {
         signed,
+        resolved: &resolved.definitions,
         definitions: BTreeMap::new(),
         nodes: BTreeMap::new(),
         slots: BTreeMap::new(),
@@ -347,7 +369,12 @@ pub(super) fn restore(
             Allocation {
                 id: map.instances[&i.id].0,
                 name: i.name.clone(),
-                component: map.definitions[&original_preset.definition].0,
+                component: map
+                    .definitions
+                    .get(&original_preset.definition)
+                    .copied()
+                    .unwrap_or(original_preset.definition)
+                    .0,
                 prototype: map.presets[&i.preset],
                 slot: slot as u16,
             }

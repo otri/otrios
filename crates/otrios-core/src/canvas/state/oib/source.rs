@@ -74,7 +74,7 @@ impl Document {
         if source.baseline.len() > role_limit {
             return Err("OIB baseline role budget".into());
         }
-        let first = lifecycle::first_id(&signed)?;
+        let first = self.oib_binding()?.identity_floor;
         let mut roles = BTreeSet::new();
         let mut assigned = BTreeSet::new();
         for identity in &source.baseline {

@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 mod bundle_files;
+mod canvas_library;
 use bundle_files::{read_file, read_tree};
 #[path = "../../../tools/canvas/authoring.rs"]
 pub mod authoring;
@@ -17,12 +18,19 @@ pub mod components;
 
 fn sign_tree(mut tree: BundleTree, private: &Path, openssl: &str) -> Result<BundleTree> {
     let key = bundle_files::public_key(private, true, openssl)?;
+    let signature = sign_payload(
+        &bundle::signing_payload(&bundle::inspect(&tree)?.digest, &key)?,
+        private,
+        openssl,
+    )?;
+    bundle::attach_signature(&mut tree, &key, &signature)?;
+    bundle::verify(tree.clone(), &key)?;
+    Ok(tree)
+}
+
+fn sign_payload(payload: &[u8], private: &Path, openssl: &str) -> Result<Vec<u8>> {
     let work = WorkDir::new()?;
-    fs::write(
-        work.0.join("payload"),
-        bundle::signing_payload(&bundle::inspect(&tree)?.digest, &key)?,
-    )
-    .map_err(|e| e.to_string())?;
+    fs::write(work.0.join("payload"), payload).map_err(|e| e.to_string())?;
     let output = std::process::Command::new(openssl)
         .args(["pkeyutl", "-sign", "-rawin", "-inkey"])
         .arg(private)
@@ -33,15 +41,9 @@ fn sign_tree(mut tree: BundleTree, private: &Path, openssl: &str) -> Result<Bund
         .output()
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err("Bundle signing failed".into());
+        return Err("Package signing failed".into());
     }
-    bundle::attach_signature(
-        &mut tree,
-        &key,
-        &fs::read(work.0.join("signature")).map_err(|e| e.to_string())?,
-    )?;
-    bundle::verify(tree.clone(), &key)?;
-    Ok(tree)
+    fs::read(work.0.join("signature")).map_err(|e| e.to_string())
 }
 
 fn compose(
@@ -302,8 +304,19 @@ impl Drop for WorkDir {
 }
 
 fn write_tree(destination: &Path, tree: &BundleTree) -> Result<()> {
-    if destination.extension().and_then(|s| s.to_str()) != Some("otapp") {
-        return Err("Bundle output must end in .otapp".into());
+    write_package(destination, tree, "otapp", |tree| {
+        bundle::inspect(tree).map(|_| ())
+    })
+}
+
+fn write_package(
+    destination: &Path,
+    tree: &BundleTree,
+    extension: &str,
+    validate: impl Fn(&BundleTree) -> Result<()>,
+) -> Result<()> {
+    if destination.extension().and_then(|s| s.to_str()) != Some(extension) {
+        return Err(format!("Package output must end in .{extension}"));
     }
     if fs::symlink_metadata(destination).is_ok() {
         return Err("Bundle output already exists".into());
@@ -332,7 +345,7 @@ fn write_tree(destination: &Path, tree: &BundleTree) -> Result<()> {
                 .map_err(|e| e.to_string())?;
             fs::write(output, bytes).map_err(|e| e.to_string())?;
         }
-        bundle::inspect(&read_tree(&temporary)?)?;
+        validate(&read_tree(&temporary)?)?;
         if fs::symlink_metadata(destination).is_ok() {
             return Err("Bundle output appeared during staging".into());
         }
@@ -367,6 +380,9 @@ fn report(tree: &BundleTree) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg.starts_with("library-")) {
+        return canvas_library::run(&args);
+    }
     match args.first().map(String::as_str) {
         Some("unpack") if args.len() == 7 && args[3] == "--key" && args[5] == "--openssl" => {
             let key = bundle_files::public_key(Path::new(&args[4]), false, &args[6])?;
@@ -413,8 +429,9 @@ fn main() -> Result<()> {
             let before = bundle::authenticate_revision(&predecessor, &key)?;
             let mut current = bundle::with_revision(read_tree(Path::new(&args[1]))?, before.revision())?;
             for (path,data) in predecessor.iter().filter(|(path,_)|path.starts_with("Resources/")||path.starts_with("Dependencies/")||path.starts_with("Notices/")) {
-                if !current.contains_key(path) { current=bundle::with_payload(current,path,data)?; }
+                if !canvas_library::library_path(path) && !current.contains_key(path) { current=bundle::with_payload(current,path,data)?; }
             }
+            current=canvas_library::inherit_libraries(current,&predecessor,&key)?;
             if bundle::inspect(&current)?.info.app.id != before.app_id() { return Err("App identity differs".into()); }
             let current = if bundle::inspect(&current)?.digest == before.digest() { current }
                 else { bundle::with_revision(current, before.revision().checked_add(1).ok_or("App revision overflow")?)? };

@@ -2493,7 +2493,14 @@ impl Client {
                 })();
                 match candidate {
                     Ok(candidate) => {
-                        if !candidate.private {
+                        let has_libraries = super::oib::seed(&candidate.ui)
+                            .is_some_and(|seed| !seed.resolved_libraries.is_empty());
+                        if has_libraries {
+                            // Library closures belong to active/qualified mounts;
+                            // optional UI history must not retain old library pins.
+                            self.ui_cache.retain(|(hash, _)| hash != &ui_hash);
+                        }
+                        if !candidate.private && !has_libraries {
                             // Move the qualified bytes, including on a cache hit.
                             // Repeated mounts must not clone an entire UI document.
                             let bytes = if cached {

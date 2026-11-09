@@ -773,6 +773,7 @@ pub fn graph(sliders_only: bool) -> g::Document {
         presented_root: InstanceId(40),
         classes: classes(),
         definitions: defs,
+        imports: None,
         presets,
         instances,
         grants,

@@ -8,6 +8,7 @@ use otrios_interfaces::oib::{
 };
 use std::collections::BTreeSet;
 mod address;
+mod baseline;
 #[cfg(test)]
 mod cache_tests;
 mod hierarchy;
@@ -47,6 +48,9 @@ pub(super) struct CachedBinding {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Binding {
+    format: String,
+    identity_floor: u64,
+    adoption: Option<baseline::Adoption>,
     seed: otrios_interfaces::oib::Seed,
     admission: Vec<u8>,
     ui_hash: Vec<u8>,
@@ -65,9 +69,11 @@ impl Document {
         if self.tree.subtree(&[4]).is_err() {
             return Ok(());
         }
+        let normalized = super::super::oib::graph::materialize(ui)?;
         let mut candidate = self.clone();
-        candidate.configure_oib(ui)?;
-        if candidate.tree.hash() == self.tree.hash() {
+        candidate.oib_ui = Some(std::sync::Arc::new(normalized));
+        candidate.oib_reconcile_ui()?;
+        if candidate.oib_ui.is_some() {
             self.oib_ui = candidate.oib_ui;
             self.oib_authored = candidate.oib_authored;
         }
@@ -85,13 +91,15 @@ impl Document {
         let ui = &normalized;
         let seed = super::super::oib::seed(ui).ok_or("Missing canonical OIB graph")?;
         super::super::oib::validate(ui)?;
-        let binding = Binding {
+        let mut binding = Binding {
+            format: baseline::FORMAT.into(),
+            identity_floor: lifecycle::first_id(seed)?,
+            adoption: None,
             seed: seed.clone(),
             admission: super::super::oib::contract::admission(ui)?,
             ui_hash: hash(&super::super::encode_ui(ui)?),
             ui_ref: ui.ui_ref.clone(),
         };
-        let encoded = bytes(&binding)?;
         let existing = payload(&self.tree, &[4, 0]).ok();
         if let Some(existing) = &existing {
             let previous: Binding = decode(existing)?;
@@ -100,7 +108,9 @@ impl Document {
                     "OIB format or signed source changed; initialize a fresh collection".into(),
                 );
             }
-            if *existing == encoded {
+            binding.identity_floor = previous.identity_floor;
+            binding.adoption = previous.adoption;
+            if *existing == bytes(&binding)? {
                 self.oib_ui = Some(std::sync::Arc::new(ui.clone()));
                 self.oib_compiled(2)?;
                 return Ok(false);
@@ -128,7 +138,7 @@ impl Document {
         let mut edits = vec![Edit {
             path: vec![4, 0],
             schema: self.extra_schema(4, 0),
-            value: Some(encoded),
+            value: Some(bytes(&binding)?),
         }];
         if existing.is_none() {
             let allocations = super::super::oib::instances::initial_allocations(seed);
@@ -160,9 +170,11 @@ impl Document {
             presets.sort_by_key(|preset| preset.id);
             let source = otrios_interfaces::oib::authoring::DocumentSource {
                 definitions: seed
-                    .designer
+                    .graph
                     .as_ref()
-                    .map_or_else(Vec::new, |d| d.definitions.clone()),
+                    .ok_or("Missing canonical graph")?
+                    .definitions
+                    .clone(),
                 presets,
                 instances: allocations.iter().map(Into::into).collect(),
                 next_identity: next,
@@ -216,6 +228,12 @@ impl Document {
             }
         }
         let mut binding: Binding = decode(&payload(&self.tree, &[4, 0])?)?;
+        baseline::validate_metadata(&binding, None)?;
+        if binding.format != baseline::FORMAT
+            || binding.identity_floor != lifecycle::first_id(&binding.seed)?
+        {
+            return Err("Unsupported OIB baseline binding".into());
+        }
         if let Some(ui) = &self.oib_ui
             && let Some(seed) = super::super::oib::seed(ui)
             && bytes(seed)? == bytes(&binding.seed)?
@@ -442,6 +460,7 @@ impl Document {
                 b"OTriOS\0oib-document-v2\0".as_slice(),
                 &properties_and_presence,
                 &digest(&bytes(&source)?),
+                &baseline::digest(self.oib_binding()?.as_ref())?,
             ]
             .concat(),
         ))
@@ -508,15 +527,16 @@ impl Document {
         Ok(values)
     }
     pub(super) fn validate_oib(&self, old: Option<&Snapshot>, tree: &Snapshot) -> Result<()> {
-        if let Some(old) = old
-            && let Ok(before) = payload(old, &[4, 0])
-            && before != payload(tree, &[4, 0])?
-            && !same_source(&decode(&before)?, &decode(&payload(tree, &[4, 0])?)?)
-        {
-            return Err("OIB immutable seed changed".into());
-        }
+        let baseline_changed = if let Some(old) = old {
+            self.oib_validate_baseline_transition(old, tree)?
+        } else {
+            false
+        };
         let mut candidate = self.clone();
         candidate.tree = tree.clone();
+        if baseline_changed {
+            candidate.oib_reconcile_ui()?;
+        }
         let binding = candidate.oib_binding()?;
         super::super::oib::validate_seed(&binding.seed)?;
         if binding.ui_hash.len() != 32
@@ -556,11 +576,14 @@ impl Document {
             .iter()
             .filter_map(|kind| tree.subtree(&[4, *kind]).ok())
             .map(|t| t.canonical_bytes())
-            .sum::<usize>();
+            .sum::<usize>()
+            .checked_add(bytes(&binding.seed.resolved_libraries)?.len())
+            .ok_or("OIB resident byte count overflow")?;
         if total > otrios_interfaces::oib::MAX_BYTES {
             return Err("OIB combined authored/causal byte budget".into());
         }
         let status = candidate.oib_status()?;
+        baseline::validate_metadata(&binding, Some(&status))?;
         if status.generation == 0
             || status.structural_generation == 0
             || status.structural_generation > status.generation
@@ -820,6 +843,16 @@ impl StateAdapter {
             properties.insert(cell.id, property_text(seed, cell, &status, &values)?);
         }
         Ok(super::super::oib::Info {
+            semantic_epoch: super::super::hex(&self.doc.oib_epoch()?),
+            baseline_lock: super::super::hex(&self.doc.oib_baseline()?.1),
+            libraries: self
+                .doc
+                .oib_binding()?
+                .seed
+                .graph
+                .as_ref()
+                .and_then(|graph| graph.imports.as_ref())
+                .map_or_else(Vec::new, |imports| imports.locks.clone()),
             active_generation: status.generation,
             presented_generation: 0,
             conflicts: self.oib_conflicts(),
@@ -1136,7 +1169,7 @@ impl Document {
                     .map(Into::into)
                     .collect();
             if source.instances != initial
-                || source.next_identity != lifecycle::first_id(&seed)?
+                || source.next_identity != self.oib_binding()?.identity_floor
                 || !source.placements.is_empty()
                 || !source.connections.is_empty()
             {

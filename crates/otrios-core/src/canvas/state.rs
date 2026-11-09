@@ -362,7 +362,12 @@ impl Document {
     pub fn replay(&mut self, data: &[u8]) -> Result<()> {
         let tree = self.tree.apply_delta(data).map_err(err)?;
         self.validate_changed(&tree)?;
+        let baseline_changed = self.tree.subtree(&[4, 0]).ok().map(|tree| tree.hash())
+            != tree.subtree(&[4, 0]).ok().map(|tree| tree.hash());
         self.tree = tree;
+        if baseline_changed {
+            self.oib_reconcile_ui()?;
+        }
         Ok(())
     }
     pub fn schema(&self) -> &StateSchema {
@@ -1335,7 +1340,11 @@ impl StateAdapter {
                 // validate_changed already checked immutable seed identity and
                 // the active closure against this admitted UI. A property delta
                 // is not another package admission or seed migration.
-                next.oib_ui = Some(ui.clone());
+                if self.doc.tree.subtree(&[4, 0]).ok().map(|tree| tree.hash())
+                    != next.tree.subtree(&[4, 0]).ok().map(|tree| tree.hash())
+                {
+                    next.oib_reconcile_ui()?;
+                }
             }
         }
         if mounting && self.replica.is_some() && next.actor != self.doc.actor {

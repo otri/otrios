@@ -10,10 +10,15 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod contract;
 pub mod document;
 pub mod graph;
+pub mod imports;
 pub mod instances;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Info {
+    /// Read-only verification diagnostics; hashes confer no authority.
+    pub semantic_epoch: String,
+    pub baseline_lock: String,
+    pub libraries: Vec<otrios_interfaces::oib::graph::LibraryLock>,
     pub active_generation: u64,
     pub presented_generation: u64,
     pub conflicts: Vec<u64>,
@@ -59,6 +64,8 @@ fn node(root: &mut TemplateNode, id: u16) -> Option<&mut TemplateNode> {
     root.children.iter_mut().find_map(|child| node(child, id))
 }
 pub fn validate_seed(seed: &Seed) -> Result<()> {
+    let mut local_source = seed.clone();
+    local_source.resolved_libraries.clear();
     if seed.format != FORMAT
         || seed.main_oib == 0
         || seed.main_class != "otrios.declarative-v1"
@@ -71,7 +78,8 @@ pub fn validate_seed(seed: &Seed) -> Result<()> {
             } else {
                 MAX_CELLS
             }
-        || flexbuffers::to_vec(seed).map_err(err)?.len() > 24 * 1024
+        || flexbuffers::to_vec(&local_source).map_err(err)?.len() > 24 * 1024
+        || flexbuffers::to_vec(seed).map_err(err)?.len() > otrios_interfaces::oib::MAX_BYTES
         || seed
             .inspector_content
             .iter()

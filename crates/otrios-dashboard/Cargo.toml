@@ -8,7 +8,7 @@ publish.workspace = true
 license = "Apache-2.0"
 
 [features]
-canvas = ["otrios-core/signed-bundles", "dep:wat"]
+canvas = ["otrios-core/signed-bundles", "dep:wat", "dep:serde", "dep:serde_json"]
 default = []
 host-sync = ["dep:tungstenite", "dep:serde_json", "dep:rustls", "dep:webpki-roots", "dep:getrandom"]
 direct = ["host-sync", "otrios-core/signed-bundles", "dep:otrios-linux-display"]
@@ -28,6 +28,8 @@ webpki-roots = { version = "=1.0.9", optional = true }
 tungstenite = { version = "=0.30.0", features = ["rustls-tls-webpki-roots"], optional = true }
 axum = { version = "=0.8.9", features = ["ws"], optional = true }
 tokio = { version = "=1.53.3", features = ["rt-multi-thread", "net", "sync", "time", "macros", "fs"], optional = true }
+# Reuse locked Serde for closed, typed library JSON authoring in canvas-bundle.
+serde = { version = "=1.0.229", features = ["derive"], optional = true }
 serde_json = { version = "=1.0.154", optional = true }
 argon2 = { version = "=0.5.3", optional = true }
 getrandom = { version = "=0.4.3", optional = true }

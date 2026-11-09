@@ -113,6 +113,9 @@ pub mod canvas;
 pub mod bundle;
 
 #[cfg(feature = "canvas")]
+pub mod library;
+
+#[cfg(feature = "canvas")]
 pub mod spaces;
 
 #[cfg(feature = "canvas")]

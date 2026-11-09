@@ -60,10 +60,35 @@ fn definition_mut(seed: &mut Seed, id: DefinitionId) -> Result<&mut ComponentDef
 /// enclosing structural batch has staged every explicit repair.
 pub fn transform(seed: &Seed, operations: &[DefinitionEdit]) -> Result<Vec<ComponentDefinition>> {
     let mut candidate = seed.clone();
+    let imported = super::super::imports::imported_definitions(seed);
     for operation in operations {
+        let definition = match operation {
+            DefinitionEdit::CreateDefinition { definition, .. }
+            | DefinitionEdit::DeleteDefinition { definition }
+            | DefinitionEdit::CreateNode { definition, .. }
+            | DefinitionEdit::DeleteNode { definition, .. }
+            | DefinitionEdit::SetVisual { definition, .. }
+            | DefinitionEdit::SetSlots { definition, .. }
+            | DefinitionEdit::SetDefault { definition, .. }
+            | DefinitionEdit::RenameDefinition { definition, .. }
+            | DefinitionEdit::RenameNode { definition, .. }
+            | DefinitionEdit::MoveNode { definition, .. }
+            | DefinitionEdit::Expose { definition, .. }
+            | DefinitionEdit::ConnectReference { definition, .. } => definition,
+        };
+        if imported.contains(definition) {
+            return Err(
+                "Imported library definitions are read-only; create a new local component".into(),
+            );
+        }
         edit(&mut candidate, operation)?;
     }
-    Ok(metadata(&candidate)?.definitions.clone())
+    Ok(metadata(&candidate)?
+        .definitions
+        .iter()
+        .filter(|definition| !imported.contains(&definition.id))
+        .cloned()
+        .collect())
 }
 
 fn name(value: &str) -> Result<()> {

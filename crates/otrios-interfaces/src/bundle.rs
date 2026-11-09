@@ -28,6 +28,9 @@ pub struct BundleInfo {
     pub entry_ui: String,
     pub state_schema: String,
     pub behavior: Option<String>,
+    /// Exact independently signed OIB libraries. Empty for existing apps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<crate::oib::graph::LibraryLock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,7 +42,7 @@ pub struct BundleFile {
 }
 
 /// Closed integrity schema. Entries are strictly sorted by path and cover every
-/// regular file except this manifest. Signatures are a later milestone.
+/// regular file except this manifest and the detached publisher receipt.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BundleFiles {

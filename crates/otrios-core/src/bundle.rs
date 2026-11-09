@@ -90,10 +90,18 @@ fn payload_path(path: &str) -> bool {
 }
 
 pub(crate) fn metadata<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
-    if bytes.len() > MAX_METADATA_BYTES {
+    metadata_limit(bytes, MAX_METADATA_BYTES, 16)
+}
+
+pub(crate) fn metadata_limit<T: DeserializeOwned>(
+    bytes: &[u8],
+    max_bytes: usize,
+    max_depth: usize,
+) -> Result<T> {
+    if bytes.len() > max_bytes {
         return Err("Bundle metadata budget exceeded".into());
     }
-    crate::flex_guard::validate(bytes, 16, MAX_METADATA_BYTES, MAX_METADATA_BYTES)?;
+    crate::flex_guard::validate(bytes, max_depth, max_bytes, max_bytes)?;
     // The span guard protects library readers. Also reject duplicate/unsorted map
     // keys (including unknown metadata) instead of relying on lookup behavior.
     fn maps(reader: Reader<&[u8]>) -> Result<()> {
@@ -120,7 +128,7 @@ pub(crate) fn metadata<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     flexbuffers::from_slice(bytes).map_err(canvas::err)
 }
 
-fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+pub(crate) fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let bytes = flexbuffers::to_vec(value).map_err(canvas::err)?;
     if bytes.len() > MAX_METADATA_BYTES {
         return Err("Bundle metadata budget exceeded".into());
@@ -144,7 +152,7 @@ pub fn decode_info(bytes: &[u8]) -> Result<BundleInfo> {
     metadata(&bytes[INFO_HEADER.len()..])
 }
 
-fn file_manifest(tree: &BundleTree) -> BundleFiles {
+pub(crate) fn file_manifest(tree: &BundleTree) -> BundleFiles {
     BundleFiles {
         format: FILES_FORMAT.into(),
         files: tree
@@ -225,6 +233,7 @@ pub fn pack(
         entry_ui: UI_PATH.into(),
         state_schema: SCHEMA_PATH.into(),
         behavior: code.map(|_| CODE_PATH.into()),
+        libraries: vec![],
     };
     let mut tree = BTreeMap::from([
         (INFO_PATH.into(), encode_info(&info)?),
@@ -269,6 +278,199 @@ pub fn with_payload(mut tree: BundleTree, path: &str, bytes: &[u8]) -> Result<Bu
     Ok(tree)
 }
 
+/// Canonical nested path selected only by the exact library revision.
+pub fn library_root(revision: &otrios_interfaces::oib::library::Revision) -> String {
+    format!("Dependencies/{}.otlib/", hex(revision))
+}
+
+fn library_trees(
+    tree: &BundleTree,
+    locks: &[otrios_interfaces::oib::graph::LibraryLock],
+) -> Result<Vec<(otrios_interfaces::oib::graph::LibraryLock, BundleTree)>> {
+    if locks.len() > crate::library::MAX_LIBRARIES
+        || locks.windows(2).any(|w| w[0].library >= w[1].library)
+    {
+        return Err("Invalid app library lock ordering/count".into());
+    }
+    let mut result = vec![];
+    let roots: BTreeSet<_> = locks
+        .iter()
+        .map(|pin| library_root(&pin.revision))
+        .collect();
+    if roots.len() != locks.len() {
+        return Err("Duplicate app library revision".into());
+    }
+    for path in tree.keys() {
+        if let Some(rest) = path.strip_prefix("Dependencies/")
+            && let Some((segment, _)) = rest.split_once('/')
+            && segment.ends_with(".otlib")
+            && !roots.contains(&format!("Dependencies/{segment}/"))
+        {
+            return Err("Unpinned nested library package".into());
+        }
+    }
+    for pin in locks {
+        if !crate::library::valid_id(&pin.library)
+            || pin.exports.is_empty()
+            || pin.exports.windows(2).any(|w| w[0].export >= w[1].export)
+        {
+            return Err("Invalid app library export lock".into());
+        }
+        let root = library_root(&pin.revision);
+        let nested: BundleTree = tree
+            .iter()
+            .filter_map(|(path, bytes)| {
+                path.strip_prefix(&root)
+                    .map(|p| (p.to_string(), bytes.clone()))
+            })
+            .collect();
+        if nested.is_empty() {
+            return Err("Missing pinned library package".into());
+        }
+        result.push((pin.clone(), nested));
+    }
+    Ok(result)
+}
+
+fn match_library_bodies(
+    tree: &BundleTree,
+    info: &BundleInfo,
+    ui: &otrios_interfaces::canvas::Ui,
+) -> Result<()> {
+    let seed = canvas::oib::seed(ui);
+    let locks = seed
+        .and_then(|s| s.graph.as_ref())
+        .and_then(|g| g.imports.as_ref())
+        .map_or(&[][..], |i| i.locks.as_slice());
+    if locks != info.libraries
+        || info
+            .required_features
+            .iter()
+            .any(|f| f == otrios_interfaces::oib::library::FEATURE)
+            == locks.is_empty()
+    {
+        return Err("App manifest/UI library locks or feature differ".into());
+    }
+    let bodies = seed.map_or(&[][..], |s| s.resolved_libraries.as_slice());
+    if bodies.len() != locks.len() {
+        return Err("App resolved library closure differs".into());
+    }
+    let mut bytes = 0usize;
+    for (pin, nested) in library_trees(tree, locks)? {
+        let summary = crate::library::inspect(&nested)?;
+        let body = bodies
+            .iter()
+            .find(|b| b.library == pin.library)
+            .ok_or("Missing resolved library body")?;
+        bytes = bytes
+            .checked_add(nested[otrios_interfaces::oib::library::GRAPH_PATH].len())
+            .ok_or("Imported byte count overflow")?;
+        if bytes > crate::library::MAX_IMPORTED_GRAPH_BYTES
+            || summary.info.library != pin.library
+            || summary.revision != pin.revision
+            || body.revision != pin.revision
+            || crate::library::encode_graph(&body.graph)?
+                != nested[otrios_interfaces::oib::library::GRAPH_PATH]
+        {
+            return Err("Signed package and resolved library body/pin differ".into());
+        }
+        for expected in &pin.exports {
+            if summary
+                .graph
+                .exports
+                .iter()
+                .find(|e| e.id == expected.export)
+                .is_none_or(|e| e.contract != expected.contract)
+            {
+                return Err("Nested library export contract differs".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Rebuild one app's exact independently signed library closure. This authoring
+/// transform never preserves the old app signature or bypasses current payload
+/// admission. Unchanged nested libraries are reverified with the supplied key.
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+pub fn with_oib_ui_and_libraries(
+    mut tree: BundleTree,
+    ui: &otrios_interfaces::canvas::Ui,
+    locks: &[otrios_interfaces::oib::graph::LibraryLock],
+    changed: &[crate::library::VerifiedLibrary],
+    key: &[u8; 32],
+) -> Result<BundleTree> {
+    let before = inspect(&tree)?;
+    if tree.get(INFO_PATH) != Some(&encode_info(&before.info)?) {
+        return Err("Extended/noncanonical app metadata requires a compatible publisher".into());
+    }
+    let old_ui = canvas::decode_ui(&tree[UI_PATH])?;
+    if ui.ui_ref != before.info.app.ui_ref
+        || ui.state_schema != old_ui.state_schema
+        || ui.behavior != old_ui.behavior
+        || canvas::oib::contract::admission(ui)? != canvas::oib::contract::admission(&old_ui)?
+    {
+        return Err("Library binding changed app state/behavior/admission".into());
+    }
+    if changed.len() > crate::library::MAX_LIBRARIES {
+        return Err("Changed library count budget".into());
+    }
+    let previous = library_trees(&tree, &before.info.libraries)?;
+    let mut available = BTreeMap::new();
+    for (_, nested) in previous {
+        let verified = crate::library::verify(nested, key)?;
+        available.insert(verified.summary().info.library.clone(), verified);
+    }
+    let mut supplied = BTreeSet::new();
+    for library in changed {
+        let id = &library.summary().info.library;
+        if !supplied.insert(id.clone()) || !locks.iter().any(|p| &p.library == id) {
+            return Err("Unused/duplicate changed library".into());
+        }
+        let nested = library
+            .files()
+            .map(|(p, b)| (p.to_owned(), b.to_vec()))
+            .collect();
+        available.insert(id.clone(), crate::library::verify(nested, key)?);
+    }
+    for pin in &before.info.libraries {
+        let root = library_root(&pin.revision);
+        tree.retain(|path, _| !path.starts_with(&root));
+    }
+    for pin in locks {
+        let library = available
+            .get(&pin.library)
+            .ok_or("Missing verified candidate library")?;
+        if library.revision() != pin.revision {
+            return Err("Candidate library revision differs from lock".into());
+        }
+        let root = library_root(&pin.revision);
+        for (path, bytes) in library.files() {
+            let path = format!("{root}{path}");
+            if tree.get(&path).is_some_and(|existing| existing != bytes) {
+                return Err("Nested library collides with unrelated app payload".into());
+            }
+            tree.insert(path, bytes.to_vec());
+        }
+    }
+    let mut info = before.info;
+    info.libraries = locks.to_vec();
+    info.required_features
+        .retain(|f| f != otrios_interfaces::oib::library::FEATURE);
+    if !locks.is_empty() {
+        info.required_features
+            .push(otrios_interfaces::oib::library::FEATURE.into());
+        info.required_features.sort();
+    }
+    tree.remove(SIGNATURE_PATH);
+    tree.insert(INFO_PATH.into(), encode_info(&info)?);
+    tree.insert(UI_PATH.into(), canvas::encode_ui(ui)?);
+    tree.insert(SCHEMA_PATH.into(), canvas::encode_schema(&ui.state_schema)?);
+    tree.insert(FILES_PATH.into(), encode(&file_manifest(&tree))?);
+    inspect(&tree)?;
+    Ok(tree)
+}
+
 /// Existing app upgrades preserve identity/admission and the live state schema.
 /// Explicit operational rollback selects a previous verified release snapshot,
 /// rather than disguising an older bundle as a forward update.
@@ -305,8 +507,14 @@ pub fn qualify_install(bundle: &VerifiedBundle) -> Result<()> {
     Ok(())
 }
 
-fn inspect_envelope(tree: &BundleTree) -> Result<InspectedBundle> {
-    if tree.is_empty() || tree.len() > MAX_FILES {
+pub(crate) fn validate_files(
+    tree: &BundleTree,
+    max_files: usize,
+    max_file_bytes: usize,
+    max_total_bytes: usize,
+    payload_path: fn(&str) -> bool,
+) -> Result<usize> {
+    if tree.is_empty() || tree.len() > max_files {
         return Err("Bundle file count budget exceeded".into());
     }
     let mut total = 0usize;
@@ -314,7 +522,7 @@ fn inspect_envelope(tree: &BundleTree) -> Result<InspectedBundle> {
     let mut folded = BTreeMap::new();
     for (path, bytes) in tree {
         if (!matches!(path.as_str(), FILES_PATH | SIGNATURE_PATH) && !payload_path(path))
-            || bytes.len() > MAX_FILE_BYTES
+            || bytes.len() > max_file_bytes
         {
             return Err("Bundle path/file budget rejected".into());
         }
@@ -335,7 +543,7 @@ fn inspect_envelope(tree: &BundleTree) -> Result<InspectedBundle> {
         total = total
             .checked_add(bytes.len())
             .ok_or("Bundle size overflow")?;
-        if total > MAX_TOTAL_BYTES {
+        if total > max_total_bytes {
             return Err("Bundle total byte budget exceeded".into());
         }
     }
@@ -356,6 +564,23 @@ fn inspect_envelope(tree: &BundleTree) -> Result<InspectedBundle> {
     if manifest != file_manifest(tree) || encode(&manifest)? != manifest_bytes {
         return Err("Bundle file closure/digest or encoding mismatch".into());
     }
+    Ok(total)
+}
+
+fn inspect_envelope(tree: &BundleTree) -> Result<InspectedBundle> {
+    let total = validate_files(
+        tree,
+        MAX_FILES,
+        MAX_FILE_BYTES,
+        MAX_TOTAL_BYTES,
+        payload_path,
+    )?;
+    let get = |path: &str| {
+        tree.get(path)
+            .map(Vec::as_slice)
+            .ok_or("Missing bundle file".to_string())
+    };
+    let manifest_bytes = get(FILES_PATH)?;
     let info = decode_info(get(INFO_PATH)?)?;
     if info.revision == 0
         || info.app.id.is_empty()
@@ -468,6 +693,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
                     | "otrios-oib-authored-defaults-v1"
                     | "otrios-oib-designer-v2"
                     | "otrios-layout-v5"
+                    | "otrios-oib-library-v1"
             )
         })
     {
@@ -532,7 +758,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
     {
         return Err("Bundle UI/schema/behavior contract mismatch".into());
     }
-    if let Some(reference) = ui.behavior {
+    if let Some(reference) = &ui.behavior {
         let bytes = get(CODE_PATH)?;
         if !bytes.starts_with(b"\0asm\x01\0\0\0")
             || bytes.len() > 65536
@@ -542,6 +768,7 @@ pub fn inspect(tree: &BundleTree) -> Result<InspectedBundle> {
             return Err("Bundle behavior digest/ABI mismatch".into());
         }
     }
+    match_library_bodies(tree, &summary.info, &ui)?;
     Ok(summary)
 }
 
@@ -580,10 +807,18 @@ pub fn public_key_pem(bytes: &[u8]) -> Result<[u8; 32]> {
 
 /// Fixed-size signing input: domain separator, raw public key, binary bundle hash.
 pub fn signing_payload(digest: &str, key: &[u8; 32]) -> Result<Vec<u8>> {
+    signing_payload_in_domain(digest, key, b"otrios-app-bundle-signature-v1\0")
+}
+
+pub(crate) fn signing_payload_in_domain(
+    digest: &str,
+    key: &[u8; 32],
+    domain: &[u8],
+) -> Result<Vec<u8>> {
     if !valid_digest(digest) {
         return Err("Invalid signing digest".into());
     }
-    let mut bytes = b"otrios-app-bundle-signature-v1\0".to_vec();
+    let mut bytes = domain.to_vec();
     bytes.extend_from_slice(key);
     for index in (0..64).step_by(2) {
         bytes.push(u8::from_str_radix(&digest[index..index + 2], 16).map_err(canvas::err)?);
@@ -657,12 +892,34 @@ impl AuthenticatedRevision {
 
 #[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
 fn authenticate_signature(summary: &InspectedBundle, key: &[u8; 32]) -> Result<()> {
-    let receipt = summary.signature.as_ref().ok_or("Unsigned app bundle")?;
-    if receipt.key_sha256 != hex(&hash(key)) {
-        return Err("Bundle publisher is not trusted".into());
+    verify_signature(
+        summary.signature.as_ref().ok_or("Unsigned app bundle")?,
+        &summary.digest,
+        key,
+        SIGNATURE_FORMAT,
+        b"otrios-app-bundle-signature-v1\0",
+    )
+}
+
+#[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
+pub(crate) fn verify_signature(
+    receipt: &BundleSignature,
+    digest: &str,
+    key: &[u8; 32],
+    format: &str,
+    domain: &[u8],
+) -> Result<()> {
+    if receipt.format != format
+        || receipt.signature.len() != 64
+        || receipt.key_sha256 != hex(&hash(key))
+    {
+        return Err("Bundle publisher is not trusted or signature envelope invalid".into());
     }
     ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
-        .verify(&signing_payload(&summary.digest, key)?, &receipt.signature)
+        .verify(
+            &signing_payload_in_domain(digest, key, domain)?,
+            &receipt.signature,
+        )
         .map_err(|_| "Bundle publisher signature rejected".to_string())
 }
 
@@ -684,6 +941,9 @@ pub fn authenticate_revision(tree: &BundleTree, key: &[u8; 32]) -> Result<Authen
 #[cfg(all(feature = "signed-bundles", not(target_arch = "wasm32")))]
 pub fn verify(tree: BundleTree, key: &[u8; 32]) -> Result<VerifiedBundle> {
     let summary = inspect(&tree)?;
+    for (_, nested) in library_trees(&tree, &summary.info.libraries)? {
+        crate::library::verify(nested, key)?;
+    }
     authenticate_signature(&summary, key)?;
     Ok(VerifiedBundle { summary, tree })
 }

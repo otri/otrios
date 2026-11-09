@@ -12,6 +12,7 @@ fn fixture_ui() -> Ui {
 fn seed() -> Seed {
     Seed {
         graph: None,
+        resolved_libraries: vec![],
         expanded: false,
         format: otrios_interfaces::oib::FORMAT.into(),
         main_oib: 1,
@@ -4053,4 +4054,298 @@ fn desktop_studio_connects_an_unbound_preset_through_visible_source_choices() {
     )
     .unwrap();
     assert!(info.binding.is_some());
+}
+
+#[path = "../../../tests/support/oib_library_fixture.rs"]
+mod library_fixture;
+
+#[test]
+fn compatible_library_activation_waits_for_held_slider_and_final_receipt_without_ui_history() {
+    fn pump(client: &mut Client, authority: &mut crate::canvas::Document, session: &mut Session) {
+        for _ in 0..30 {
+            let now = client
+                .active
+                .as_ref()
+                .map_or(1000, |mount| mount.now.saturating_add(33));
+            client.tick(now, 0).unwrap();
+            let mut progress = false;
+            while let Some(bytes) = client.outgoing().unwrap() {
+                if let ClientMessage::Sync { bytes, .. } = decode_client(&bytes).unwrap() {
+                    authority.receive(session, &bytes).unwrap();
+                    progress = true;
+                }
+            }
+            if let Some(bytes) = authority.generate(session).unwrap() {
+                client
+                    .receive(
+                        &encode_server(&ServerMessage::Sync {
+                            epoch: client.epoch(),
+                            bytes,
+                        })
+                        .unwrap(),
+                    )
+                    .unwrap();
+                progress = true;
+            }
+            if !progress {
+                assert!(client.confirmed());
+                return;
+            }
+        }
+        panic!("library client did not settle");
+    }
+    let ui = library_fixture::admit(&library_fixture::imported());
+    let state = "library:held-slider";
+    let mut authority = crate::canvas::Document::new(ui.state_schema.clone(), state).unwrap();
+    authority.configure_oib(&ui).unwrap();
+    let encoded = crate::canvas::encode_ui(&ui).unwrap();
+    let mut manifest = designer_fixture::manifest();
+    manifest.state_ref = state.into();
+    manifest
+        .dependencies
+        .push(otrios_interfaces::oib::library::FEATURE.into());
+    let mut client = Client::default();
+    client
+        .admit_catalog(
+            &crate::canvas::encode_catalog(&Catalog {
+                format: "otrios-app-catalog-v1".into(),
+                apps: vec![CatalogEntry {
+                    app: manifest,
+                    path: "oib-designer".into(),
+                    private: false,
+                    ui_hash: hash(&encoded),
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    client.open(&ui.ui_ref, state);
+    let ClientMessage::Mount { epoch, writer, .. } =
+        decode_client(&client.outgoing().unwrap().unwrap()).unwrap()
+    else {
+        panic!("mount request")
+    };
+    let (mut session, _) = authority.open_session(&writer, 0).unwrap();
+    session.set_oib_editable(true);
+    session
+        .set_selection(StateSelection::from_ui(&ui).unwrap())
+        .unwrap();
+    client
+        .receive(
+            &encode_server(&ServerMessage::Mounted {
+                epoch,
+                ui_hash: hash(&encoded),
+                ui: encoded,
+                code: vec![],
+                state: authority.generate(&mut session).unwrap().unwrap(),
+                binding: None,
+                initial_view: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(
+        matches!(decode_client(&client.outgoing().unwrap().unwrap()).unwrap(),ClientMessage::AcceptMount{epoch:accepted} if accepted==epoch)
+    );
+    pump(&mut client, &mut authority, &mut session);
+    assert!(
+        client.ui_cache.is_empty(),
+        "imported bodies never enter optional UI history"
+    );
+    let label = PropertyAddress::Occurrence {
+        instance: InstanceId(20),
+        path: PropertyPath {
+            references: vec![NodeId(7)],
+            node: NodeId(1),
+            property: PropertyId(3),
+        },
+    };
+    client
+        .active
+        .as_mut()
+        .unwrap()
+        .doc
+        .edit_oib_property(&label, Some(Value::Text("Pinned volume".into())))
+        .unwrap();
+    pump(&mut client, &mut authority, &mut session);
+    client.set_oib_designer_mode(DesignerMode::Test).unwrap();
+    client.set_viewport([1280., 800.]).unwrap();
+    let override_version = client
+        .active
+        .as_ref()
+        .unwrap()
+        .doc
+        .oib_property_register(&label)
+        .unwrap()
+        .version;
+    let address = ObjectAddress {
+        instance: InstanceId(20),
+        references: vec![NodeId(7)],
+        node: NodeId(1),
+    };
+    let slider = super::super::oib::seed(&client.active.as_ref().unwrap().ui)
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .mappings
+        .objects
+        .iter()
+        .find(|mapping| mapping.address == address)
+        .unwrap()
+        .layout_node
+        .unwrap();
+    let scene = client.scene().unwrap();
+    let located = scene.path(u32::from(slider)).unwrap();
+    let located = located.last().unwrap();
+    assert_eq!(located.node.frame.width, 440.);
+    assert!(matches!(
+        located.node.responder,
+        Some(TouchResponder::Drag(Action::AppEvent(_)))
+    ));
+    let point = |fraction: f32| {
+        [
+            located.origin[0] + located.node.frame.width * fraction * located.scale,
+            located.origin[1] + located.node.frame.height * 0.5 * located.scale,
+        ]
+    };
+    let down = point(0.25);
+    let release = point(0.75);
+    assert!(
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 247,
+                    phase: PointerPhase::Down,
+                    position: down
+                },
+                10000
+            )
+            .unwrap()
+    );
+    assert!(client.input_busy());
+    pump(&mut client, &mut authority, &mut session);
+    assert!(client.confirmed());
+    let old = client.active.as_ref().unwrap().ui.clone();
+    let old_layout = crate::dashboard::layout::Layout::encode(
+        client.active.as_ref().unwrap().layout.blueprint(),
+    )
+    .unwrap();
+    let old_handlers = old.handlers.clone();
+    let old_generation = client.active.as_ref().unwrap().oib_generation;
+    let collection_epoch = authority.oib_epoch().unwrap();
+    let untouched = [2, 3, 4].map(|field| authority.typed_value(field).unwrap());
+    let changed = library_fixture::update(&ui, |library| {
+        library
+            .definitions
+            .iter_mut()
+            .find(|definition| definition.id == DefinitionId(12))
+            .unwrap()
+            .nodes[0]
+            .defaults
+            .iter_mut()
+            .find(|value| value.property == PropertyId(2))
+            .unwrap()
+            .value = Value::Number(400.);
+    });
+    let (generation, baseline) = authority.oib_baseline().unwrap();
+    assert!(
+        authority
+            .adopt_oib_baseline(&changed, generation, baseline)
+            .unwrap()
+    );
+    pump(&mut client, &mut authority, &mut session);
+    let held = client.active.as_ref().unwrap();
+    assert!(held.input.active());
+    assert_eq!(
+        held.doc.oib_generation(),
+        Some(authority.oib_status().unwrap().generation)
+    );
+    assert_eq!(held.oib_generation, old_generation);
+    assert_eq!(
+        held.doc.admitted_oib_hash(),
+        Some(hash(&crate::canvas::encode_ui(&changed).unwrap())),
+        "the new admitted baseline arrives while presentation remains pinned"
+    );
+    assert_eq!(held.ui, old);
+    assert_eq!(held.ui.handlers, old_handlers);
+    assert_eq!(
+        crate::dashboard::layout::Layout::encode(held.layout.blueprint()).unwrap(),
+        old_layout
+    );
+    assert_eq!(
+        library_fixture::seed(&held.ui).resolved_libraries[0].revision,
+        [1; 32]
+    );
+    assert!(
+        client
+            .pointer_at(
+                epoch,
+                PointerEvent {
+                    id: 247,
+                    phase: PointerPhase::Up,
+                    position: release
+                },
+                10100
+            )
+            .unwrap()
+    );
+    assert!(!client.input_busy());
+    assert!(!client.confirmed());
+    assert_eq!(
+        client.value(1).unwrap(),
+        750,
+        "release uses the captured 440px extent rather than the new 400px library extent"
+    );
+    assert_eq!(
+        client.active.as_ref().unwrap().ui,
+        old,
+        "unconfirmed final value also pins the old complete closure"
+    );
+    pump(&mut client, &mut authority, &mut session);
+    assert!(client.confirmed());
+    let current = client.active.as_ref().unwrap();
+    assert_eq!(
+        current.oib_generation,
+        Some(authority.oib_status().unwrap().generation)
+    );
+    assert_eq!(
+        library_fixture::seed(&current.ui).resolved_libraries[0].revision,
+        [2; 32]
+    );
+    assert_ne!(current.ui.layout, old.layout);
+    assert_eq!(current.ui.handlers, old_handlers);
+    assert_eq!(authority.oib_epoch().unwrap(), collection_epoch);
+    assert_eq!(authority.typed_value(1).unwrap(), Value::Number(750.));
+    assert_eq!(
+        [2, 3, 4].map(|field| authority.typed_value(field).unwrap()),
+        untouched
+    );
+    assert_eq!(
+        current
+            .doc
+            .oib_property_register(&label)
+            .unwrap()
+            .alternatives,
+        vec![Some(Value::Text("Pinned volume".into()))]
+    );
+    assert_eq!(
+        current.doc.oib_property_register(&label).unwrap().version,
+        override_version,
+        "baseline activation preserves the exact causal override head"
+    );
+    assert!(client.ui_cache.is_empty());
+    let scene = client.scene().unwrap();
+    assert_eq!(
+        scene
+            .path(u32::from(slider))
+            .unwrap()
+            .last()
+            .unwrap()
+            .node
+            .frame
+            .width,
+        400.
+    );
 }

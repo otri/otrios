@@ -152,13 +152,19 @@ impl StateAdapter {
         selected: &Selection,
     ) -> Result<Vec<PropertyInfo>> {
         let source = self.doc.oib_source()?;
-        let signed = self
-            .doc
-            .oib_binding()?
-            .seed
-            .graph
-            .clone()
-            .ok_or("Missing signed graph")?;
+        let binding = self.doc.oib_binding()?;
+        let imported = crate::canvas::oib::imports::imported_definitions(&binding.seed);
+        if match selected {
+            Selection::Definition(id) => imported.contains(id),
+            Selection::DefinitionNode { definition, .. } => imported.contains(definition),
+            _ => false,
+        } {
+            // Immutable library structure is edited in its publishing workspace.
+            // Ordinary shared/occurrence property overrides remain available.
+            return Ok(vec![]);
+        }
+        let signed = binding.seed.graph.clone().ok_or("Missing signed graph")?;
+        let resolved = crate::canvas::oib::imports::resolve(&binding.seed)?;
         let mut result = vec![];
         let (definition, selected_node) = match selected {
             Selection::Definition(id) => {
@@ -239,6 +245,7 @@ impl StateAdapter {
                     && source
                         .definitions
                         .iter()
+                        .chain(resolved.definitions.iter())
                         .any(|d| d.id.0 == instance.component && d.root == object.node)
                 {
                     let original = source

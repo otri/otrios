@@ -362,11 +362,7 @@ struct Lowering {
     previews: Vec<TemplateNode>,
 }
 fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
-    let graph = input
-        .graph
-        .as_ref()
-        .ok_or("Canonical OIB graph is required")?
-        .clone();
+    let graph = super::imports::resolve(input)?;
     validate_source(&graph)?;
     let mut selectors = vec![];
     let mut metadata = Document {
@@ -456,7 +452,8 @@ fn build(input: &Seed, node_base: u16, control_base: u8) -> Result<Lowering> {
         .sort_by_key(|m| (m.definition, m.node, m.property));
     let mut seed = Seed {
         format: FORMAT.into(),
-        graph: Some(graph.clone()),
+        graph: input.graph.clone(),
+        resolved_libraries: input.resolved_libraries.clone(),
         expanded: false,
         designer: Some(metadata),
         main_oib: graph.id.0,
@@ -1227,6 +1224,7 @@ pub fn with_seed_source(
     definitions: &[ComponentDefinition],
     presets: &[source::Preset],
 ) -> Result<Seed> {
+    super::imports::validate_local_definitions(seed, definitions)?;
     let mut candidate = seed.clone();
     let graph = candidate
         .graph
@@ -1244,6 +1242,10 @@ pub fn with_source(
     definitions: &[ComponentDefinition],
     presets: &[source::Preset],
 ) -> Result<Ui> {
+    super::imports::validate_local_definitions(
+        super::seed(ui).ok_or("Missing OIB graph")?,
+        definitions,
+    )?;
     let mut candidate = strip(ui)?;
     let Some(Presentation::Oib(seed)) = &mut candidate.presentation else {
         return Err(error("Missing OIB graph"));
@@ -1317,11 +1319,7 @@ pub fn expand(
         return Err(error("OIB live instance capacity exhausted"));
     }
     let original = super::seed(ui).ok_or("Missing OIB graph")?;
-    let graph = original
-        .graph
-        .as_ref()
-        .ok_or("Canonical OIB graph is required")?
-        .clone();
+    let graph = super::imports::resolve(original)?;
     let mut result = strip(ui)?;
     let mut blueprint = Layout::from_bytes(&result.layout)?.blueprint().clone();
     let mut nodes = BTreeSet::new();
