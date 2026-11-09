@@ -532,6 +532,8 @@ fn asset_type(path: &str) -> Option<&'static str> {
         | "app-transfers.mjs"
         | "web/app-transfers.mjs"
         | "document-transfer.mjs"
+        | "presentation-transfer.mjs"
+        | "web/presentation-transfer.mjs"
         | "touch-input.mjs"
         | "web/touch-input.mjs"
         | "web/document-transfer.mjs"
@@ -1074,4 +1076,21 @@ fn interactive_socket(socket: &mut tokio::net::TcpStream) {
     if let Err(error) = socket.set_nodelay(true) {
         eprintln!("Could not disable interactive socket buffering: {error}");
     }
+}
+
+#[test]
+fn presentation_transfer_has_explicit_public_mime_admission() {
+    assert_eq!(
+        asset_type("presentation-transfer.mjs"),
+        Some("text/javascript")
+    );
+    assert_eq!(
+        asset_type("web/presentation-transfer.mjs"),
+        Some("text/javascript")
+    );
+    assert_eq!(
+        asset_type("web/presentation-transfer.mjs.gz"),
+        Some("application/gzip")
+    );
+    assert_eq!(asset_type("web/arbitrary-transfer.mjs"), None);
 }
