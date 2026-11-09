@@ -252,6 +252,7 @@ fn main() -> Result<()> {
         if profile {
             profiles.push((scene_us, detail));
         }
+        let changed = frame.as_ref().is_none_or(|f| f.generation != generation);
         let flat;
         let mesh = if let Some(frame) = &frame {
             frame.mesh.as_ref()
@@ -259,7 +260,6 @@ fn main() -> Result<()> {
             flat = render_scene_with_font(&scene, &font);
             &flat
         };
-        let changed = frame.as_ref().is_none_or(|f| f.generation != generation);
         let views = frame.as_ref().map_or(&[][..], |f| f.views.as_slice());
         if let Some(frame) = &frame {
             generation = frame.generation;
@@ -273,6 +273,10 @@ fn main() -> Result<()> {
         if measure_only {
             continue;
         }
+        // Legacy binary fixtures carry baked colors. Keep export conversion
+        // outside the measured retained composition interval.
+        let exported = frame.as_ref().filter(|_| changed).map(|f| f.baked_mesh());
+        let mesh = exported.as_ref().unwrap_or(mesh);
         if retained {
             output
                 .write_all(&generation.to_le_bytes())

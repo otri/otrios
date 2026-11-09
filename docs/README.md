@@ -8,7 +8,7 @@
 | Public routes and private Monitoring | [Public access](PUBLIC_ACCESS.md), [Monitoring](MONITORING.md) |
 | Runtime ownership and resource limits | [Modern app pattern](MODERN_APP_PATTERN.md), [resource budgets](ARCHITECTURE-RESOURCES.md), [client storage](CLIENT_STORAGE.md) |
 | Scene, layout and input contracts | [Scene tree](SCENE_TREE.md), [binary layout](BINARY_LAYOUT.md), [Home and input](HOME_AND_INPUT.md) |
-| Live UI editing and reusable components | [OIB property editing](OIB.md), [OIB design and milestones](rfcs/0029-live-oib-ui.md), [component designer](rfcs/0035-oib-component-designer.md), [D1 qualification](experiments/oib-designer-d1-2026-11-03.md), [Frame Focus editor and qualification](OIB_FRAME_FOCUS_D1.md), [usability design](OIB_DESIGNER_USABILITY.md), [active Studio/D2 plan and next goal](OIB_DESKTOP_STUDIO_D2.md) |
+| Live UI editing and reusable components | [OIB property editing](OIB.md), [OIB design and milestones](rfcs/0029-live-oib-ui.md), [component designer](rfcs/0035-oib-component-designer.md), [D1 qualification](experiments/oib-designer-d1-2026-11-03.md), [Frame Focus editor and qualification](OIB_FRAME_FOCUS_D1.md), [usability design](OIB_DESIGNER_USABILITY.md), [Studio/D2 design](OIB_DESKTOP_STUDIO_D2.md), [D2 completion](OIB_D2_COMPLETION.md), [upgradable libraries L1](OIB_LIBRARY_L1.md) |
 | Linux object-model research backlog | [PoC plan](POC.md), [architecture](ARCHITECTURE.md) |
 | Design decisions and status | [RFC index](rfcs/README.md) |
 | Standalone app bundles and native Wasm compilation plan | [Bundle RFC](rfcs/0025-standalone-app-bundles.md), [compilation RFC](rfcs/0026-target-wasm-compilation.md) |

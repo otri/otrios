@@ -19,6 +19,7 @@ pub enum Layer {
 #[cfg_attr(any(feature = "layout", feature = "release"), derive(serde::Serialize))]
 pub struct Revisions {
     pub content: u32,
+    pub paint: u32,
     pub placement: u32,
     pub semantics: u32,
     pub effects: u32,

@@ -24,6 +24,7 @@ int ot_draw(ot_display *d,const float *projection,int animated);
 int ot_draw_slots(ot_display *d,const float *projection,const uint32_t *slots,size_t count);
 int ot_retire_slot(ot_display *d,uint32_t slot);
 int ot_present(ot_display *d,ot_flip *flip);
+int ot_text_paints(ot_display *d,uint32_t slot,const float *paints,size_t floats);
 int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t floats);
 int ot_text_views(ot_display *d,uint32_t slot,const float *views,size_t floats);
 int ot_input(ot_display *d,ot_touch *events,size_t capacity);

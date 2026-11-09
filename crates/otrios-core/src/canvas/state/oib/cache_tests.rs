@@ -46,7 +46,7 @@ fn replace_compiler_property(document: &mut Document, value: Value) {
 }
 
 #[test]
-fn compiled_cache_shares_equal_draft_active_inputs_and_bounds_selected_presentations() {
+fn compiled_cache_shares_equal_draft_active_inputs_and_ignores_selection() {
     let document = cached_source_document();
     let saved = document.save().unwrap();
     let first = document.oib_compiled(2).unwrap();
@@ -55,7 +55,7 @@ fn compiled_cache_shares_equal_draft_active_inputs_and_bounds_selected_presentat
     assert_eq!(first.1.bytes(), draft.1.bytes());
 
     let selected = document.oib_compiled_selected(2, Some(20)).unwrap();
-    assert!(!std::ptr::eq(first.1.blueprint(), selected.1.blueprint()));
+    assert!(std::ptr::eq(first.1.blueprint(), selected.1.blueprint()));
     let validation = document.oib_compiled(2).unwrap();
     assert!(std::ptr::eq(first.1.blueprint(), validation.1.blueprint()));
     let selected_again = document.oib_compiled_selected(1, Some(20)).unwrap();
@@ -64,13 +64,13 @@ fn compiled_cache_shares_equal_draft_active_inputs_and_bounds_selected_presentat
         selected_again.1.blueprint()
     ));
     document.oib_compiled_selected(2, Some(30)).unwrap();
-    assert_eq!(document.oib_compiled_cache.lock().unwrap().len(), 2);
+    assert_eq!(document.oib_compiled_cache.lock().unwrap().len(), 1);
     let validation_again = document.oib_compiled(2).unwrap();
-    assert!(!std::ptr::eq(
+    assert!(std::ptr::eq(
         first.1.blueprint(),
         validation_again.1.blueprint()
     ));
-    assert_eq!(document.oib_compiled_cache.lock().unwrap().len(), 2);
+    assert_eq!(document.oib_compiled_cache.lock().unwrap().len(), 1);
     assert_eq!(document.save().unwrap(), saved);
 }
 
@@ -352,4 +352,102 @@ fn normalized_binding_cache_keys_payload_and_exact_admitted_ui_without_changing_
             .name,
         first.seed.graph.as_ref().unwrap().name
     );
+}
+
+#[test]
+fn retained_color_compilation_matches_full_graph_lowering_and_artifact_bytes() {
+    let mut document = cached_source_document();
+    let before = document.oib_compiled(2).unwrap();
+    let previous_values = document.oib_values(2).unwrap();
+    replace_compiler_property(&mut document, Value::Color([19, 143, 207, 255]));
+    assert!(
+        crate::canvas::oib::paint::changes(
+            crate::canvas::oib::seed(&before.0).unwrap(),
+            &previous_values,
+            &document.oib_values(2).unwrap(),
+        )
+        .unwrap()
+        .is_some()
+    );
+    let retained = document.oib_compiled(2).unwrap();
+    let mut fresh = document.clone();
+    fresh.oib_compiled_cache = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+    let rebuilt = fresh.oib_compiled(2).unwrap();
+    assert_eq!(retained.1.bytes(), rebuilt.1.bytes());
+    assert_eq!(
+        crate::canvas::encode_ui(&retained.0).unwrap(),
+        crate::canvas::encode_ui(&rebuilt.0).unwrap()
+    );
+    assert_eq!(
+        crate::dashboard::layout::Layout::from_bytes(&retained.0.layout)
+            .unwrap()
+            .bytes(),
+        retained.0.layout
+    );
+}
+
+#[test]
+fn resolved_metadata_reuses_property_edits_and_invalidates_source_and_binding() {
+    let document = cached_source_document();
+    let resolved = document.oib_resolved_shared().unwrap();
+    let mut property = document.clone();
+    replace_compiler_property(&mut property, Value::Color([18, 32, 77, 255]));
+    assert!(std::sync::Arc::ptr_eq(
+        &resolved,
+        &property.oib_resolved_shared().unwrap()
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &resolved,
+        &document.clone().oib_resolved_shared().unwrap()
+    ));
+
+    let mut source = document.clone();
+    let mut authored = source.oib_source().unwrap();
+    authored.definitions[0].name = "Changed metadata source".into();
+    replace_source_leaf(&mut source, 4, bytes(&authored).unwrap());
+    assert!(!std::sync::Arc::ptr_eq(
+        &resolved,
+        &source.oib_resolved_shared().unwrap()
+    ));
+
+    let mut binding_document = document.clone();
+    let mut binding: Binding = decode(&payload(&binding_document.tree, &[4, 0]).unwrap()).unwrap();
+    binding.seed.graph.as_mut().unwrap().name = "Changed metadata binding".into();
+    replace_source_leaf(&mut binding_document, 0, bytes(&binding).unwrap());
+    assert!(!std::sync::Arc::ptr_eq(
+        &resolved,
+        &binding_document.oib_resolved_shared().unwrap()
+    ));
+    assert_eq!(
+        document
+            .oib_resolved_shared()
+            .unwrap()
+            .graph
+            .as_ref()
+            .unwrap()
+            .name,
+        resolved.graph.as_ref().unwrap().name
+    );
+}
+
+#[test]
+fn baseline_digest_cache_tracks_exact_binding_across_sibling_replacement() {
+    let document = cached_source_document();
+    let first = document.oib_binding_digest().unwrap();
+    assert_eq!(
+        first,
+        baseline::digest(document.oib_binding().unwrap().as_ref()).unwrap()
+    );
+    let mut sibling = document.clone();
+    let mut binding: Binding = decode(&payload(&sibling.tree, &[4, 0]).unwrap()).unwrap();
+    binding.seed.graph.as_mut().unwrap().name = "Changed digest binding".into();
+    replace_source_leaf(&mut sibling, 0, bytes(&binding).unwrap());
+    let changed = sibling.oib_binding_digest().unwrap();
+    assert_eq!(
+        changed,
+        baseline::digest(sibling.oib_binding().unwrap().as_ref()).unwrap()
+    );
+    assert_ne!(first, changed);
+    assert_eq!(document.oib_binding_digest().unwrap(), first);
+    assert_eq!(sibling.oib_binding_digest().unwrap(), changed);
 }

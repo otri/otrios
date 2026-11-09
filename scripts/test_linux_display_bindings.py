@@ -33,7 +33,7 @@ enum { GL_FALSE, GL_TRUE, GL_BLEND, GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER,
 '''
 
 STUBS = r'''
-struct attribute { int enabled,size,type,normalized,stride; GLuint vbo; uintptr_t offset; };
+struct attribute { int enabled,size,type,normalized,stride; float rgba[4]; GLuint vbo; uintptr_t offset; };
 struct event {
     GLuint program,vbo,ibo,texture[2];
     int indexed,first,count,blend,scissor,clip[4];
@@ -47,6 +47,7 @@ static void glEnable(GLenum cap){assert(cap==GL_BLEND || cap==GL_SCISSOR_TEST);i
 static void glDisable(GLenum cap){assert(cap==GL_BLEND || cap==GL_SCISSOR_TEST);if(cap==GL_BLEND)state.blend=0;else state.scissor=0;disables++;}
 static void glEnableVertexAttribArray(GLuint a){assert(a<5);state.attributes[a].enabled=1;attribute_enables++;}
 static void glDisableVertexAttribArray(GLuint a){assert(a<5);state.attributes[a].enabled=0;attribute_disables++;}
+static void glVertexAttrib4fv(GLuint a,const float *v){assert(a<5);memcpy(state.attributes[a].rgba,v,4*sizeof(float));}
 static void glBindBuffer(GLenum target,GLuint b){assert(target==GL_ARRAY_BUFFER || target==GL_ELEMENT_ARRAY_BUFFER);if(target==GL_ARRAY_BUFFER)state.vbo=b;else state.ibo=b;binds++;}
 static void glVertexAttribPointer(GLuint a,GLint size,GLenum type,int normalized,GLsizei stride,const void *offset){
     assert(a<5);struct attribute *v=&state.attributes[a];
@@ -180,7 +181,20 @@ static void slots(void){
     assert(event_count==2 && uses[1]==2 && binds==2 && pointers==4);geometry(0,0,0,9,0);geometry(1,0,0,9,0);
     puts("slots: first draw always binds, separate slots/calls reset, empty and draw-without-plan paths");
 }
-int main(void){consecutive();clipping();transitions();slots();return 0;}
+static void paints(void){
+    for(int cached=0;cached<2;cached++){
+        reset();display.cache_ready=cached;display.text[0].cache_all=cached;display.meshes[0].opaque=1;
+        uint32_t runs[]={0,0,3,1,0,4,0,3,3};float rgba[]={1,0,0,.5f, 0,1,0,.7f, 0,0,1,1};
+        plan(runs,9,NULL);display.text[0].paints=rgba;draw_slot(&display,0,projection);
+        assert(event_count==3 && uploads==0);
+        for(int i=0;i<3;i++){int attr=i==1?2:1;assert(!events[i].attributes[attr].enabled);assert(!memcmp(events[i].attributes[attr].rgba,rgba+i*4,4*sizeof(float)));}
+        assert(events[0].blend && events[1].blend && !events[2].blend);
+        display.text[0].paints=NULL;draw_slot(&display,0,projection);
+        geometry(3,0,0,3,1);text(4,cached,0,6);geometry(5,0,3,3,1);
+    }
+    puts("paints: per-draw geometry/analytic/cached RGBA, alpha blend, zero uploads, legacy attributes restored");
+}
+int main(void){consecutive();clipping();transitions();slots();paints();return 0;}
 '''
 
 

@@ -89,7 +89,7 @@ impl Document {
     pub fn oib_baseline(&self) -> Result<(u64, merkle::Hash)> {
         Ok((
             self.oib_status()?.structural_generation,
-            digest(self.oib_binding()?.as_ref())?,
+            self.oib_binding_digest()?,
         ))
     }
 

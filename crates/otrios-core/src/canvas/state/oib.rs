@@ -25,6 +25,7 @@ pub(super) struct AuthoredUi {
     source: merkle::Hash,
     binding: merkle::Hash,
     ui: std::sync::Arc<Ui>,
+    prepared: std::sync::Arc<super::super::oib::graph::PreparedUi>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -44,6 +45,17 @@ pub(super) struct CachedBinding {
     leaf: merkle::Hash,
     ui: Option<std::sync::Arc<Ui>>,
     binding: std::sync::Arc<Binding>,
+    digest: merkle::Hash,
+}
+
+/// Immutable authored and expanded metadata, independent of property registers.
+/// Exact source/binding leaves and admitted UI identity prevent stale reuse.
+pub(super) struct CachedMetadata {
+    binding: merkle::Hash,
+    source: merkle::Hash,
+    ui: Option<std::sync::Arc<Ui>>,
+    authored: std::sync::Arc<otrios_interfaces::oib::Seed>,
+    resolved: std::sync::Arc<otrios_interfaces::oib::Seed>,
 }
 
 /// One canonically validated source, shared by snapshot clones. Source validity
@@ -57,7 +69,8 @@ pub(super) struct CachedSource {
     structural: merkle::Hash,
 }
 
-/// At most two successful compiler results (validation and selected presentation).
+/// At most two successful semantic compiler results. Selection is chrome state
+/// and does not change canonical graph output.
 /// The semantic input digest deliberately
 /// excludes draft/active causal metadata, so equivalent branches share a
 /// compilation. Raw snapshot and journal validation still run independently.
@@ -66,7 +79,9 @@ pub(super) struct CachedCompilation {
     binding: merkle::Hash,
     source: merkle::Hash,
     semantic: merkle::Hash,
-    selected: Option<u64>,
+    live: BTreeSet<u64>,
+    values: BTreeMap<u64, Option<Value>>,
+    prepared: std::sync::Arc<super::super::oib::graph::PreparedUi>,
     ui: Ui,
     layout: crate::dashboard::layout::Layout,
 }
@@ -240,6 +255,12 @@ impl Document {
         Ok(true)
     }
     fn oib_binding(&self) -> Result<std::sync::Arc<Binding>> {
+        Ok(self.oib_binding_entry()?.binding.clone())
+    }
+    fn oib_binding_digest(&self) -> Result<merkle::Hash> {
+        Ok(self.oib_binding_entry()?.digest)
+    }
+    fn oib_binding_entry(&self) -> Result<std::sync::Arc<CachedBinding>> {
         let leaf = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
         {
             let cache = self.oib_binding_cache.lock().map_err(err)?;
@@ -251,7 +272,7 @@ impl Document {
                     _ => false,
                 }
             {
-                return Ok(cached.binding.clone());
+                return Ok(cached.clone());
             }
         }
         let _profile = crate::canvas::profiling::span("oib.binding.normalize");
@@ -273,13 +294,16 @@ impl Document {
         // The normalized signed seed is immutable for this cache key. Validate
         // new baseline bytes here, rather than once per property delta.
         super::super::oib::validate_seed(&binding.seed)?;
+        let digest = baseline::digest(&binding)?;
         let binding = std::sync::Arc::new(binding);
-        *self.oib_binding_cache.lock().map_err(err)? = Some(CachedBinding {
+        let cached = std::sync::Arc::new(CachedBinding {
             leaf,
             ui: self.oib_ui.clone(),
-            binding: binding.clone(),
+            binding,
+            digest,
         });
-        Ok(binding)
+        *self.oib_binding_cache.lock().map_err(err)? = Some(cached.clone());
+        Ok(cached)
     }
     fn oib_authored_ui(&self) -> Result<std::sync::Arc<Ui>> {
         let _profile = crate::canvas::profiling::span("oib.authored_ui");
@@ -299,20 +323,74 @@ impl Document {
         {
             return Ok(cached.ui.clone());
         }
-        let ui = std::sync::Arc::new(super::super::oib::graph::with_source(
-            &signed,
+        let prepared = std::sync::Arc::new(super::super::oib::graph::with_source_prepared(
+            super::super::oib::graph::PreparedUi::from_ui(&signed)?,
             &authored.definitions,
             &authored.presets,
         )?);
+        let ui = std::sync::Arc::new(prepared.to_ui()?);
         *cache = Some(AuthoredUi {
             signed,
             source,
             binding,
             ui: ui.clone(),
+            prepared,
         });
         Ok(ui)
     }
+    fn oib_authored_prepared(
+        &self,
+    ) -> Result<std::sync::Arc<super::super::oib::graph::PreparedUi>> {
+        let ui = self.oib_authored_ui()?;
+        let cache = self.oib_authored.lock().map_err(err)?;
+        if let Some(cached) = cache.as_ref()
+            && std::sync::Arc::ptr_eq(&ui, &cached.ui)
+        {
+            return Ok(cached.prepared.clone());
+        }
+        Ok(std::sync::Arc::new(
+            super::super::oib::graph::PreparedUi::from_ui(&ui)?,
+        ))
+    }
     fn oib_authored_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
+        Ok((*self.oib_authored_shared()?).clone())
+    }
+    fn oib_authored_shared(&self) -> Result<std::sync::Arc<otrios_interfaces::oib::Seed>> {
+        Ok(self.oib_metadata()?.authored.clone())
+    }
+    fn oib_resolved_shared(&self) -> Result<std::sync::Arc<otrios_interfaces::oib::Seed>> {
+        Ok(self.oib_metadata()?.resolved.clone())
+    }
+    fn oib_metadata(&self) -> Result<std::sync::Arc<CachedMetadata>> {
+        let binding = self.tree.subtree(&[4, 0]).map_err(err)?.hash();
+        let source = self.tree.subtree(&[4, 4]).map_err(err)?.hash();
+        if let Some(cached) = self.oib_metadata_cache.lock().map_err(err)?.as_ref()
+            && cached.binding == binding
+            && cached.source == source
+            && match (&cached.ui, &self.oib_ui) {
+                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+        {
+            return Ok(cached.clone());
+        }
+        let authored = std::sync::Arc::new(self.oib_build_authored_seed()?);
+        let resolved = std::sync::Arc::new(super::super::oib::instances::expanded_seed(
+            &authored,
+            &self.oib_allocations()?,
+        )?);
+        let cached = std::sync::Arc::new(CachedMetadata {
+            binding,
+            source,
+            ui: self.oib_ui.clone(),
+            authored,
+            resolved,
+        });
+        *self.oib_metadata_cache.lock().map_err(err)? = Some(cached.clone());
+        Ok(cached)
+    }
+    fn oib_build_authored_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
         let _profile = crate::canvas::profiling::span("oib.authored_seed");
         let mut seed = if self.oib_ui.is_some() {
             super::super::oib::seed(&*self.oib_authored_ui()?)
@@ -408,12 +486,12 @@ impl Document {
             .collect()
     }
     pub fn oib_live(&self, branch: u64) -> Result<BTreeSet<u64>> {
+        let binding;
         let seed = if let Some(ui) = &self.oib_ui {
-            super::super::oib::seed(ui)
-                .ok_or("Missing OIB seed")?
-                .clone()
+            super::super::oib::seed(ui).ok_or("Missing OIB seed")?
         } else {
-            self.oib_binding()?.seed.clone()
+            binding = self.oib_binding()?;
+            &binding.seed
         };
         if seed.instance_surface.is_none() {
             return Ok(seed.instances.iter().map(|i| i.id).collect());
@@ -438,8 +516,7 @@ impl Document {
     }
     fn oib_resolved_seed(&self) -> Result<otrios_interfaces::oib::Seed> {
         let _profile = crate::canvas::profiling::span("oib.seed.resolve");
-        let seed = self.oib_authored_seed()?;
-        super::super::oib::instances::expanded_seed(&seed, &self.oib_allocations()?)
+        Ok((*self.oib_resolved_shared()?).clone())
     }
     fn oib_active_root(&self) -> Result<merkle::Hash> {
         let properties = self.oib_property_root(2)?;
@@ -499,7 +576,7 @@ impl Document {
                 b"OTriOS\0oib-document-v2\0".as_slice(),
                 &properties_and_presence,
                 &digest(&bytes(&source)?),
-                &baseline::digest(self.oib_binding()?.as_ref())?,
+                &self.oib_binding_digest()?,
             ]
             .concat(),
         ))
@@ -510,7 +587,7 @@ impl Document {
     pub fn oib_compiled_selected(
         &self,
         branch: u64,
-        selected: Option<u64>,
+        _selected: Option<u64>,
     ) -> Result<(Ui, crate::dashboard::layout::Layout)> {
         let _profile = crate::canvas::profiling::span("oib.compiled");
         let signed = self.oib_ui.clone().ok_or("Missing admitted OIB UI")?;
@@ -530,7 +607,6 @@ impl Document {
                 && cached.binding == binding
                 && cached.source == source
                 && cached.semantic == semantic
-                && cached.selected == selected
         };
         {
             let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
@@ -543,21 +619,65 @@ impl Document {
             }
         }
         let _profile = crate::canvas::profiling::span("oib.compiled.miss");
-        let mut ui = (*self.oib_authored_ui()?).clone();
-        if let Some(Presentation::Oib(seed)) = &mut ui.presentation
-            && let Some(doc) = &mut seed.designer
+        let previous = {
+            let cache = self.oib_compiled_cache.lock().map_err(err)?;
+            cache
+                .iter()
+                .rev()
+                .find(|cached| {
+                    std::sync::Arc::ptr_eq(&signed, &cached.signed)
+                        && cached.binding == binding
+                        && cached.source == source
+                        && cached.live == live
+                })
+                .map(|cached| {
+                    (
+                        cached.prepared.clone(),
+                        cached.values.clone(),
+                        cached.layout.clone(),
+                    )
+                })
+        };
+        let mut retained = None;
+        if let Some((previous, previous_values, previous_layout)) = previous
+            && let Some(colors) = super::super::oib::paint::changes(
+                super::super::oib::seed(&previous.ui).ok_or("Missing retained OIB seed")?,
+                &previous_values,
+                &values,
+            )?
         {
-            doc.placements = self.oib_placements()?;
-            doc.connections = self.oib_connections()?;
+            let _profile = crate::canvas::profiling::span("oib.compiled.paint");
+            let mut prepared = previous.as_ref().clone();
+            prepared.repaint(&colors)?;
+            let mut blueprint = previous_layout.blueprint().clone();
+            super::super::oib::graph::repaint_blueprint(&mut blueprint, &colors)?;
+            retained = Some((
+                prepared,
+                crate::dashboard::layout::Layout::from_blueprint(blueprint)?,
+            ));
         }
-        let resolved = super::super::oib::instances::expand(
-            &ui,
-            &self.oib_allocations()?,
-            &live,
-            selected,
-            &values,
-        )?;
-        let layout = super::super::oib::compile(&resolved, &values)?;
+        let (prepared, layout) = if let Some(retained) = retained {
+            retained
+        } else {
+            let mut prepared = self.oib_authored_prepared()?.as_ref().clone();
+            if let Some(Presentation::Oib(seed)) = &mut prepared.ui.presentation
+                && let Some(doc) = &mut seed.designer
+            {
+                doc.placements = self.oib_placements()?;
+                doc.connections = self.oib_connections()?;
+            }
+            let prepared = super::super::oib::graph::expand_prepared(
+                prepared,
+                &self.oib_allocations()?,
+                &live,
+                &values,
+            )?;
+            let layout =
+                super::super::oib::compile_prepared(&prepared.ui, &prepared.blueprint, &values)?;
+            (prepared, layout)
+        };
+        let prepared = std::sync::Arc::new(prepared);
+        let resolved = prepared.to_ui()?;
         let mut cache = self.oib_compiled_cache.lock().map_err(err)?;
         // Sibling snapshots share this small MRU. Never accumulate historical
         // revisions, even when two owners compile concurrently.
@@ -570,7 +690,9 @@ impl Document {
             binding,
             source,
             semantic,
-            selected,
+            live,
+            values,
+            prepared,
             ui: resolved.clone(),
             layout: layout.clone(),
         });
@@ -578,7 +700,7 @@ impl Document {
     }
     pub fn oib_values(&self, branch: u64) -> Result<BTreeMap<u64, Option<Value>>> {
         let _profile = crate::canvas::profiling::span("oib.values");
-        let seed = self.oib_resolved_seed()?;
+        let seed = self.oib_resolved_shared()?;
         let live = self.oib_live(branch)?;
         let mut values = BTreeMap::new();
         for cell in &seed.cells {
@@ -633,7 +755,7 @@ impl Document {
             return Err("Invalid OIB seed digest".into());
         }
         candidate.validate_allocations(old)?;
-        let resolved = candidate.oib_resolved_seed()?;
+        let resolved = candidate.oib_resolved_shared()?;
         let seed = &resolved;
         let branch = tree.subtree(&[4]).map_err(err)?;
         if branch.register().is_some()
@@ -764,7 +886,7 @@ impl Document {
         if changes.is_empty() || changes.len() > MAX_CHANGES {
             return Err("OIB change batch limit".into());
         }
-        let seed = self.oib_resolved_seed()?;
+        let seed = self.oib_resolved_shared()?;
         let mut next = self.tree.clone();
         let mut seen = BTreeSet::new();
         for change in changes {
@@ -803,7 +925,7 @@ impl Document {
     }
     fn activate_oib(&mut self, next: Snapshot) -> Result<()> {
         let _profile = crate::canvas::profiling::span("oib.activate");
-        let seed = self.oib_resolved_seed()?;
+        let seed = self.oib_resolved_shared()?;
         let mut status = self.oib_status()?;
         status.conflicts.clear();
         status.error = None;
@@ -923,7 +1045,7 @@ impl StateAdapter {
     }
     pub(in crate::canvas) fn oib_info(&self) -> Result<super::super::oib::Info> {
         let _profile = crate::canvas::profiling::span("oib.info");
-        let resolved = self.doc.oib_resolved_seed()?;
+        let resolved = self.doc.oib_resolved_shared()?;
         let seed = &resolved;
         let status = self.doc.oib_status()?;
         let values = self.doc.oib_values(2)?;
@@ -947,18 +1069,7 @@ impl StateAdapter {
             conflicts: self.oib_conflicts(),
             status: self.oib_status_text(),
             properties,
-            instances: self
-                .doc
-                .oib_allocations()?
-                .into_iter()
-                .map(|a| super::super::oib::InstanceInfo {
-                    active: self.doc.oib_live(2).is_ok_and(|live| live.contains(&a.id)),
-                    id: a.id,
-                    name: a.name,
-                    component: a.component,
-                    prototype: a.prototype,
-                })
-                .collect(),
+            instances: self.oib_instances()?,
             selected_instance: None,
             available_instance_slots: self.oib_available_slots(),
         })
@@ -967,10 +1078,22 @@ impl StateAdapter {
         self.doc.oib_binding().ok().map(|b| b.ui_hash.clone())
     }
     pub fn oib_instances(&self) -> Result<Vec<super::super::oib::InstanceInfo>> {
-        Ok(self.oib_info()?.instances)
+        let live = self.doc.oib_live(2)?;
+        Ok(self
+            .doc
+            .oib_allocations()?
+            .into_iter()
+            .map(|a| super::super::oib::InstanceInfo {
+                active: live.contains(&a.id),
+                id: a.id,
+                name: a.name,
+                component: a.component,
+                prototype: a.prototype,
+            })
+            .collect())
     }
     pub fn oib_conflicts(&self) -> Vec<u64> {
-        let Ok(seed) = self.doc.oib_resolved_seed() else {
+        let Ok(seed) = self.doc.oib_resolved_shared() else {
             return vec![];
         };
         let Ok(status) = self.doc.oib_status() else {
@@ -986,7 +1109,7 @@ impl StateAdapter {
     }
     pub fn oib_property_text(&self, id: u64) -> String {
         let result = (|| -> Result<String> {
-            let resolved = self.doc.oib_resolved_seed()?;
+            let resolved = self.doc.oib_resolved_shared()?;
             let seed = &resolved;
             let cell = seed
                 .cells
@@ -1012,6 +1135,15 @@ impl StateAdapter {
 
     pub fn oib_active(&self) -> Result<BTreeMap<u64, Option<Value>>> {
         self.doc.oib_values(2)
+    }
+    pub(in crate::canvas) fn oib_paint_basis(&self) -> Result<super::super::oib::paint::Basis> {
+        Ok(super::super::oib::paint::Basis {
+            signed: self.doc.oib_ui.clone().ok_or("Missing admitted OIB UI")?,
+            binding: self.doc.tree.subtree(&[4, 0]).map_err(err)?.hash(),
+            source: self.doc.tree.subtree(&[4, 4]).map_err(err)?.hash(),
+            live: self.doc.oib_live(2)?,
+            values: self.doc.oib_values(2)?,
+        })
     }
     pub(in crate::canvas) fn oib_compiled(
         &self,
@@ -1055,7 +1187,7 @@ impl StateAdapter {
         if changes.is_empty() || changes.len() > MAX_CHANGES {
             return Err("OIB change batch limit".into());
         }
-        let resolved = self.doc.oib_resolved_seed()?;
+        let resolved = self.doc.oib_resolved_shared()?;
         let seed = &resolved;
         let mut edits = Vec::new();
         let mut seen = BTreeSet::new();
@@ -1113,7 +1245,7 @@ impl StateAdapter {
         {
             return Ok(false);
         }
-        let seed = self.doc.oib_resolved_seed()?;
+        let seed = self.doc.oib_resolved_shared()?;
         let cell = super::super::oib::document::cell_for_address(
             &seed,
             &self.doc.oib_allocations()?,
@@ -1122,7 +1254,7 @@ impl StateAdapter {
         self.oib_inspector_action(cell, action)
     }
     pub fn oib_inspector_action(&mut self, id: u64, action: InspectorAction) -> Result<bool> {
-        let resolved = self.doc.oib_resolved_seed()?;
+        let resolved = self.doc.oib_resolved_shared()?;
         let seed = &resolved;
         let cell = seed
             .cells
@@ -1419,7 +1551,7 @@ impl StateAdapter {
         property: &str,
         value: Option<Value>,
     ) -> Result<bool> {
-        let seed = self.doc.oib_resolved_seed()?;
+        let seed = self.doc.oib_resolved_shared()?;
         let mut cells = seed.cells.iter().filter(|cell| {
             cell.owner == instance && cell.inherit.is_some() && cell.name == property
         });
@@ -1627,7 +1759,7 @@ impl StateAdapter {
         &self,
         address: &otrios_interfaces::oib::designer::PropertyAddress,
     ) -> Result<PropertyRegisterView> {
-        let seed = self.doc.oib_resolved_seed()?;
+        let seed = self.doc.oib_resolved_shared()?;
         let cell = super::super::oib::document::cell_for_address(
             &seed,
             &self.doc.oib_allocations()?,

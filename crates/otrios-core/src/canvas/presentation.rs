@@ -81,6 +81,16 @@ impl Composer {
                 advance(&mut self.revisions.content);
             }
             if old.is_none_or(|f| {
+                !Arc::ptr_eq(&f.base.paints, &base.paints)
+                    || match (&f.overlay, &overlay) {
+                        (Some(a), Some(b)) => !Arc::ptr_eq(&a.paints, &b.paints),
+                        (None, None) => false,
+                        _ => true,
+                    }
+            }) {
+                advance(&mut self.revisions.paint);
+            }
+            if old.is_none_or(|f| {
                 f.base.views != base.views
                     || f.viewport != [scene.root().frame.width, scene.root().frame.height]
                     || f.overlay.as_ref().map(|f| &f.views) != overlay.as_ref().map(|f| &f.views)

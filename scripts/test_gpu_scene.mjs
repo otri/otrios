@@ -169,3 +169,21 @@ test('declared text scales are validated before publication and stay independent
   assert.throws(()=>layer.setFrame({...f,draws:new Uint32Array([1,0,4,1,0,4]),textStyles:new Float32Array([1,2])}),/Conflicting/);
   assert.equal(calls.filter(c=>c[0]==='bufferData').length,0,'invalid metadata cannot replace GPU buffers');
 });
+
+
+test('paint-only updates reuse geometry and coverage, and restore color arrays for legacy draws',()=>{
+  const {gl,calls}=device(),renderer=new SceneRenderer(gl),layer=renderer.createLayer(),legacy=renderer.createLayer();renderer.setFont(packet());
+  layer.setFrame(frame());legacy.setFrame(frame());renderer.prepare([layer,legacy]);
+  const plan=layer.preparedDraws,misses=renderer.cacheStats.misses;
+  calls.length=0;
+  layer.setPaints(new Float32Array([1,0,0,.5,0,1,0,.75,0,0,1,1]));
+  renderer.prepare([layer]);layer.draw();
+  assert.equal(layer.preparedDraws,plan);assert.equal(renderer.cacheStats.misses,misses);
+  assert.equal(calls.filter(c=>c[0]==='bufferData'||c[0]==='texImage2D').length,0);
+  assert.deepEqual(calls.filter(c=>c[0]==='vertexAttrib4fv').map(c=>Array.from(c[2])),[[1,0,0,.5],[0,1,0,.75],[0,0,1,1]]);
+  calls.length=0;legacy.draw();assert(calls.some(c=>c[0]==='enableVertexAttribArray'&&c[1]===renderer.geometryAttributes[1]));
+  assert(!calls.some(c=>c[0]==='vertexAttrib4fv'));
+  calls.length=0;assert.throws(()=>layer.setFrame({...frame(),textPaints:new Float32Array([1,0,0,1])}),/Paint dimensions/);
+  assert.equal(calls.filter(c=>c[0]==='bufferData').length,0);
+  assert.throws(()=>layer.setPaints(new Float32Array(12).fill(NaN)),/Nonfinite/);
+});

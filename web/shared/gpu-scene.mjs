@@ -230,8 +230,8 @@ export class SceneRenderer {
   }
 }
 class SceneLayer {
-  constructor(owner){this.owner=owner;const gl=owner.gl;this.geometry=gl.createBuffer();this.text=gl.createBuffer();this.cached=gl.createBuffer();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.preparedGroups=[];this.preparedGeneration=0;this.preparedDraws=null;if(!this.geometry||!this.text||!this.cached)throw Error('Unable to allocate presentation buffers');this.draws=new Uint32Array();this.invalid=false;}
-  setFrame({vertices,glyphVertices=new Float32Array(),draws,textStyles=new Float32Array()}){
+  constructor(owner){this.owner=owner;const gl=owner.gl;this.geometry=gl.createBuffer();this.text=gl.createBuffer();this.cached=gl.createBuffer();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.paints=new Float32Array();this.preparedGroups=[];this.preparedGeneration=0;this.preparedDraws=null;if(!this.geometry||!this.text||!this.cached)throw Error('Unable to allocate presentation buffers');this.draws=new Uint32Array();this.invalid=false;}
+  setFrame({vertices,glyphVertices=new Float32Array(),draws,textStyles=new Float32Array(),textPaints=new Float32Array()}){
     const owner=this.owner;owner.assertReady();if(this.invalid)throw Error('Presentation layer is unavailable');
     floats(vertices,6,'geometry');floats(glyphVertices,16,'glyph vertices');
     if(glyphVertices.length/16>MAX_GLYPH_VERTICES||glyphVertices.length%64)throw Error('Invalid glyph quad count');
@@ -240,7 +240,11 @@ class SceneLayer {
     for(let i=0;i<draws.length;i+=3){const kind=draws[i],first=draws[i+1],count=draws[i+2],stride=kind===0?3:4,limit=kind===0?vertices.length/6:glyphVertices.length/16;if(kind>1||first%stride||count%stride||first+count>limit)throw Error('Drawing plan exceeds its presentation buffer');}
     floats(textStyles,1,'text styles');if(textStyles.length>4096||(textStyles.length&&textStyles.length!==draws.length/3))throw Error('Text style dimensions');if(textStyles.some(v=>v<0||v>1000000))throw Error('Text style range');
     if(textStyles.length){const assigned=new Float32Array(glyphVertices.length/64);for(let i=0;i<draws.length;i+=3){const em=textStyles[i/3];if(draws[i]!==1||!em)continue;for(let q=draws[i+1]/4,end=q+draws[i+2]/4;q<end;q++){if(assigned[q]&&assigned[q]!==em)throw Error('Conflicting text style ranges');assigned[q]=em;}}}this.textStyles=textStyles;
-    const gl=owner.gl;gl.bindBuffer(gl.ARRAY_BUFFER,this.geometry);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.bindBuffer(gl.ARRAY_BUFFER,this.text);gl.bufferData(gl.ARRAY_BUFFER,glyphVertices,gl.STATIC_DRAW);owner.ensureIndices(glyphVertices.length/64);this.draws=draws;this.textViews=new Float32Array();this.glyphVertices=glyphVertices;this.preparedGeneration=0;this.preparedDraws=null;
+    floats(textPaints,4,'scene paints');if(textPaints.length&&textPaints.length!==draws.length/3*4)throw Error('Paint dimensions');if(textPaints.some(v=>v<0||v>1))throw Error('Paint range');
+    const gl=owner.gl;gl.bindBuffer(gl.ARRAY_BUFFER,this.geometry);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);gl.bindBuffer(gl.ARRAY_BUFFER,this.text);gl.bufferData(gl.ARRAY_BUFFER,glyphVertices,gl.STATIC_DRAW);owner.ensureIndices(glyphVertices.length/64);this.draws=draws;this.textViews=new Float32Array();this.glyphVertices=glyphVertices;this.preparedGeneration=0;this.preparedDraws=null;this.setPaints(textPaints);
+  }
+  setPaints(paints){
+    floats(paints,4,'scene paints');if(paints.length&&paints.length!==this.draws.length/3*4)throw Error('Paint dimensions');if(paints.some(v=>v<0||v>1))throw Error('Paint range');this.paints=paints;
   }
   setTextViews(views){
     floats(views,8,'text viewport');
@@ -264,6 +268,7 @@ class SceneLayer {
         else if(kind===1)owner.bindText(this.text);
         else{gl.useProgram(owner.cacheProgram);gl.uniformMatrix3fv(owner.cacheTransform,false,owner.transform);gl.uniform1i(owner.cacheSampler,2);gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,owner.atlas);owner.useAttributes(owner.cacheAttributes);gl.bindBuffer(gl.ARRAY_BUFFER,this.cached);gl.vertexAttribPointer(owner.cacheAttributes[0],2,gl.FLOAT,false,32,0);gl.vertexAttribPointer(owner.cacheAttributes[1],2,gl.FLOAT,false,32,8);gl.vertexAttribPointer(owner.cacheAttributes[2],4,gl.FLOAT,false,32,16);}
       }
+      if(this.paints.length){const group=this.preparedGeneration===owner.cacheGeneration?this.preparedGroups[i/3*2]:i/3,attribute=kind===0?owner.geometryAttributes[1]:kind===1?owner.textAttributes[2]:owner.cacheAttributes[2];gl.disableVertexAttribArray(attribute);owner.activeAttributes.delete(attribute);gl.vertexAttrib4fv(attribute,this.paints.subarray(group*4,group*4+4));}
       {
         if(kind===2&&owner.stableTextQuads){
           if(view&&owner.atlasScale){const q=this.glyphVertices.subarray(sourceVertex*16,sourceVertex*16+64),em=this.textStyles[sourceDraw]||Math.abs((q[33]-q[1])/(q[35]-q[3])),sx=Math.round(em*owner.scaleX*256)/256,sy=Math.round(em*owner.scaleY*256)/256;
@@ -278,5 +283,5 @@ class SceneLayer {
       if(view)gl.disable(gl.SCISSOR_TEST);
     }
   }
-  dispose(){if(!this.invalid){this.owner.gl.deleteBuffer(this.geometry);this.owner.gl.deleteBuffer(this.text);this.owner.gl.deleteBuffer(this.cached);}this.owner.layers.delete(this);this.invalid=true;this.draws=new Uint32Array();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.preparedDraws=null;this.preparedGroups=[];}
+  dispose(){if(!this.invalid){this.owner.gl.deleteBuffer(this.geometry);this.owner.gl.deleteBuffer(this.text);this.owner.gl.deleteBuffer(this.cached);}this.owner.layers.delete(this);this.invalid=true;this.draws=new Uint32Array();this.glyphVertices=new Float32Array();this.textViews=new Float32Array();this.textStyles=new Float32Array();this.paints=new Float32Array();this.preparedDraws=null;this.preparedGroups=[];}
 }

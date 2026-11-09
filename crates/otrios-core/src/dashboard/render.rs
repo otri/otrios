@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 use super::{font::Font, scene::Scene};
 use otrios_interfaces::scene::{Color, Primitive, Rect, SceneNode};
+use std::collections::BTreeSet;
 pub(super) struct RetainedPaint<'a> {
     pub runs: &'a mut Vec<(usize, u32)>,
+    pub admitted: &'a BTreeSet<u32>,
 }
 /// Ordered geometry and Slug glyph runs, retained by both GPU hosts.
 #[derive(Default)]
@@ -267,11 +269,26 @@ impl Mesh {
             f.width * factor,
             f.height * factor,
         );
+        // Avoid even constructing curved outlines on the fixed fallback path.
+        // Projected paths/triangles may extend beyond their logical frame and
+        // therefore retain their exact per-triangle clipping below.
+        if retained.is_none()
+            && (clip.empty()
+                || matches!(
+                    node.primitive,
+                    Primitive::Circle { .. } | Primitive::Superellipse { .. }
+                ) && clip.intersect(r).empty())
+        {
+            return;
+        }
         if !matches!(
             node.primitive,
             Primitive::Canvas { .. } | Primitive::Viewport { .. } | Primitive::Text { .. }
         ) && let Some(paint) = retained.as_deref_mut()
         {
+            if !paint.admitted.contains(&node.id) {
+                return;
+            }
             // Geometry uses the same immutable local coordinates and translated
             // clip contract as glyphs. Scrolling a button must not tessellate it
             // again or upload a new mesh. Keep this run separate from neighbors
@@ -282,6 +299,16 @@ impl Mesh {
             let mut local = node.clone();
             local.frame.x = 0.;
             local.frame.y = 0.;
+            // Retained draw tint is independent of immutable geometry. Fixed
+            // rendering keeps its authored per-vertex colors.
+            match &mut local.primitive {
+                Primitive::Text { color, .. }
+                | Primitive::Superellipse { color, .. }
+                | Primitive::Circle { color }
+                | Primitive::Triangles { color, .. }
+                | Primitive::Path { color, .. } => *color = [255; 4],
+                _ => {}
+            }
             self.paint(
                 &local,
                 [0., 0.],
@@ -344,6 +371,9 @@ impl Mesh {
             } => {
                 if let Some(font) = font {
                     if let Some(paint) = retained {
+                        if !paint.admitted.contains(&node.id) {
+                            return;
+                        }
                         let first = self.glyph_vertices.len() / 16;
                         let before = self.draws.len();
                         let previous = self.draws.last().copied();
@@ -351,7 +381,7 @@ impl Mesh {
                             Rect::new(0., 0., 100_000., 100_000.),
                             value,
                             *scale as f32 * factor,
-                            *color,
+                            [255; 4],
                             Clip {
                                 left: -100_000.,
                                 top: -100_000.,

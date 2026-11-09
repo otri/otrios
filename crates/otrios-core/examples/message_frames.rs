@@ -139,7 +139,7 @@ fn expected(
         })?;
         let text = TextPresentation::default().compose(&scene, font);
         let base = (mesh.glyph_vertices.len() / 16) as u32;
-        mesh.glyph_vertices.extend(&text.mesh.glyph_vertices);
+        mesh.glyph_vertices.extend(text.baked_mesh().glyph_vertices);
         for ((run, view), style) in text
             .mesh
             .draws

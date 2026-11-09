@@ -8,12 +8,12 @@ function workerContext(fields){
   if(fields.fake){
     const app=fields.fake;
     let dirty=false,inFlight=null,serial=0n;
-    app.control_is_checkbox??=()=>false;
+    app.control_is_checkbox??=()=>false;app.text_paints??=()=>new Float32Array();app.overlay_paints??=()=>new Float32Array();
     app.document_chunk_geometry??=()=>new Float32Array();
     app.request_frame??=()=>{dirty=true;};
     app.begin_frame??=()=>{if(!dirty||inFlight!==null)return;dirty=false;return inFlight=++serial;};
     app.frame_presented??=s=>{if(s!==inFlight)return false;inFlight=null;return true;};
-    app.prepare_frame??=()=>JSON.stringify({revisions:{content:app.text_generation?.()||1,placement:1,semantics:app.text_generation?.()||1,effects:1},order:['base']});
+    app.prepare_frame??=()=>JSON.stringify({revisions:{content:app.text_generation?.()||1,paint:1,placement:1,semantics:app.text_generation?.()||1,effects:1},order:['base']});
     app.scroll_text_input??=()=>false;app.text_inputs??=()=> '[]';app.effect_vertices??=()=>new Float32Array();app.chat_info??=()=> 'null';app.chat_messages??=()=> '[]';app.chat_outgoing??=()=>null;app.chat_disconnected??=()=>{};app.collection_outgoing??=()=>null;app.take_collection_revoked??=()=>false;app.screen??=()=> 'home';app.document_frame??=()=> 'null';
     app.transfer_actor??=()=>undefined;app.take_transfer_task??=()=> 'null';app.transfer_drop_kind??=()=>undefined;
     app.rejected_mount_pending??=()=>false;app.space_managed??=()=>false;app.spaces_outgoing??=()=>null;app.spaces_ui??=()=>false;app.take_sign_in??=()=>false;app.take_space_switch??=()=>null;app.take_chat_upload_request??=()=>null;app.take_chat_download??=()=> 'null';app.send_chat_attachment??=()=>false;
@@ -219,10 +219,10 @@ test('pointer batches preserve sample spacing across worker clocks and reject st
 
 test('renderer credit coalesces before Wasm assembly and effects do not recopy UI or semantics',async()=>{
   const source=(await readFile(new URL('../web/canvas/state-worker.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
-  const messages=[];let prepared=0,meshes=0,semantics=0,effect=1;
+  const messages=[];let prepared=0,meshes=0,semantics=0,effect=1,paint=1;
   const fake={ui_ref:()=> 'app:chat/ui',screen:()=> 'chat',path:()=> 'chat',epoch:()=>1,state_ref:()=> 'state',viewport_size:()=>[1280,800],
     keyboard_visible:()=>false,editing:()=>false,auth_required:()=>false,presentation_kind:()=> 'chat',motion_intent:()=>[],stress_updates:()=>0,resource_stats:()=>'{}',
-    prepare_frame(){prepared++;return JSON.stringify({revisions:{content:1,placement:1,semantics:1,effects:effect},order:['base','effects']});},
+    prepare_frame(){prepared++;return JSON.stringify({revisions:{content:1,paint,placement:1,semantics:1,effects:effect},order:['base','effects']});},
     text_views:()=>new Float32Array(),text_styles:()=>new Float32Array(),reflow_frame:()=>new Uint8Array(),
     vertices(){meshes++;return new Float32Array();},glyph_vertices:()=>new Float32Array(),draws:()=>new Uint32Array(),text:()=> 'Chat',title:()=> 'Chat',controls(){semantics++;return [];}};
   const context=workerContext({fake,postMessage:m=>messages.push(m)});vm.runInContext(source,context);vm.runInContext('app=fake;publish()',context);
@@ -238,6 +238,12 @@ test('renderer credit coalesces before Wasm assembly and effects do not recopy U
   assert.equal(messages.filter(m=>m.type==='frame').length,2);
   await context.onmessage({data:{type:'frame-ack',serial:first.serial,documentToken:first.document.token}});
   assert.equal(prepared,2);
+  await context.onmessage({data:{type:'frame-ack',serial:latest.serial,documentToken:latest.document.token}});
+  paint++;vm.runInContext('publish()',context);
+  const recolored=messages.filter(m=>m.type==='frame').at(-1);
+  assert(recolored.textPaints);assert(recolored.overlayPaints);
+  assert.equal(recolored.vertices,undefined);assert.equal(recolored.controls,undefined);
+  assert.equal(meshes,1);assert.equal(semantics,1);
 });
 
 test('browser input acknowledgement reconciles rejected edits even when scene semantics stay unchanged',async()=>{

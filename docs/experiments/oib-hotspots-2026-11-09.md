@@ -156,6 +156,14 @@ only the 331.7 ms client stage four ways would leave about **325 ms** of the war
 post-release pipeline, with all other stages held fixed. That is a model, not a
 measured speedup. A paint-only path removes whole stages instead.
 
+## Subsequent implementation
+
+The [incremental presentation cleanup](oib-incremental-presentation-2026-11-10.md)
+implements typed compilation, exact-key immutable metadata reuse, conservative
+Color-only activation and independent paint with visible/overscan geometry.
+The measurements above describe the preceding release. Parallel preparation
+remains future work; no worker pool or speculative activation was introduced.
+
 ## Reproduction and limits
 
 Run the benchmark on each target with profiling disabled:

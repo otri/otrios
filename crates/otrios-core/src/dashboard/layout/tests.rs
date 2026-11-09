@@ -264,3 +264,39 @@ fn truncated_mutated_oversize_and_nested_data_fail_safely() {
     blueprint.schema = "unknown".into();
     assert!(Layout::encode(&blueprint).is_err());
 }
+
+#[test]
+fn typed_constructor_matches_binary_admission_and_keeps_all_bounds() {
+    let blueprint = blueprint();
+    let bytes = Layout::encode(&blueprint).unwrap();
+    let typed = Layout::from_blueprint(blueprint.clone()).unwrap();
+    let admitted = Layout::from_bytes(&bytes).unwrap();
+    assert_eq!(typed.bytes(), bytes);
+    assert_eq!(typed.hex_id(), admitted.hex_id());
+    assert_eq!(
+        typed.resolve_slots(&slots()).unwrap().root(),
+        admitted.resolve_slots(&slots()).unwrap().root()
+    );
+
+    let mut invalid = blueprint.clone();
+    invalid.templates[0].root.frame[0] = n(f32::NAN);
+    assert!(Layout::from_blueprint(invalid).is_err());
+    let mut invalid = blueprint.clone();
+    invalid.templates[0].root.children = vec![invalid.templates[0].root.clone(); 513];
+    assert!(Layout::from_blueprint(invalid).is_err());
+    // A typed value can meet semantic expression limits yet exceed the binary
+    // container nesting budget. Typed compilation must still reject it.
+    let mut invalid = blueprint;
+    let mut expression = n(1.);
+    for _ in 0..12 {
+        expression = Expr::Add(Box::new(expression), Box::new(n(1.)));
+    }
+    let mut nested = node(12, Shape::Canvas { clip: true }, vec![]);
+    nested.frame[0] = expression;
+    for id in (1..12).rev() {
+        nested = node(id, Shape::Canvas { clip: true }, vec![nested]);
+    }
+    invalid.templates[0].root.children = vec![nested];
+    validate_blueprint(&invalid).unwrap();
+    assert!(Layout::from_blueprint(invalid).is_err());
+}

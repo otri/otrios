@@ -243,6 +243,7 @@ mod linux {
                     base = Some(f.base.mesh.clone());
                     uploads += 1;
                 }
+                display.text_paints(0, &f.base.paints)?;
                 display.text_views(0, &f.base.views)?;
                 if let Some(o) = &f.overlay {
                     if overlay.as_ref().is_none_or(|b| !Arc::ptr_eq(b, &o.mesh)) {
@@ -256,6 +257,7 @@ mod linux {
                         overlay = Some(o.mesh.clone());
                         uploads += 1;
                     }
+                    display.text_paints(1, &o.paints)?;
                     display.text_views(1, &o.views)?;
                 }
                 display.upload(2, &f.effects)?;

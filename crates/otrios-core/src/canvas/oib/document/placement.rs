@@ -210,6 +210,26 @@ pub(super) fn project_metadata(doc: &mut Document, allocations: &[Allocation]) -
 /// or property mapping is invented by placement; identities keep their resources.
 pub fn project_ui(ui: &mut Ui, allocations: &[Allocation], live: &BTreeSet<u64>) -> Result<()> {
     let seed = super::super::seed(ui).ok_or("Missing OIB seed")?;
+    if seed
+        .designer
+        .as_ref()
+        .is_none_or(|doc| doc.placements.is_empty())
+    {
+        return Ok(());
+    }
+    let mut blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
+    project_blueprint(ui, &mut blueprint, allocations, live)?;
+    ui.layout = Layout::encode(&blueprint)?;
+    Ok(())
+}
+
+pub(crate) fn project_blueprint(
+    ui: &Ui,
+    blueprint: &mut Blueprint,
+    allocations: &[Allocation],
+    live: &BTreeSet<u64>,
+) -> Result<()> {
+    let seed = super::super::seed(ui).ok_or("Missing OIB seed")?;
     if seed.designer.is_none() {
         return Ok(());
     }
@@ -221,7 +241,6 @@ pub fn project_ui(ui: &mut Ui, allocations: &[Allocation], live: &BTreeSet<u64>)
         .instance_surface
         .as_ref()
         .ok_or("Missing OIB instance surface")?;
-    let mut blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
     let preview = blueprint
         .templates
         .iter_mut()
@@ -333,6 +352,5 @@ pub fn project_ui(ui: &mut Ui, allocations: &[Allocation], live: &BTreeSet<u64>)
     if !projection.roots.is_empty() {
         return Err("Owned component has no reachable canvas root".into());
     }
-    ui.layout = Layout::encode(&blueprint)?;
     Ok(())
 }

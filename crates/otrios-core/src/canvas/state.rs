@@ -30,7 +30,9 @@ struct Receipt {
 pub struct Document {
     oib_ui: Option<std::sync::Arc<Ui>>,
     oib_authored: std::sync::Arc<std::sync::Mutex<Option<oib::AuthoredUi>>>,
-    oib_binding_cache: std::sync::Arc<std::sync::Mutex<Option<oib::CachedBinding>>>,
+    oib_metadata_cache:
+        std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<oib::CachedMetadata>>>>,
+    oib_binding_cache: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<oib::CachedBinding>>>>,
     oib_source_cache: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<oib::CachedSource>>>>,
     oib_compiled_cache: std::sync::Arc<std::sync::Mutex<Vec<oib::CachedCompilation>>>,
     schema: std::sync::Arc<StateSchema>,
@@ -139,6 +141,7 @@ impl Document {
         Ok(Self {
             oib_ui: None,
             oib_authored: Default::default(),
+            oib_metadata_cache: Default::default(),
             oib_binding_cache: Default::default(),
             oib_source_cache: Default::default(),
             oib_compiled_cache: Default::default(),
@@ -204,6 +207,7 @@ impl Document {
         let result = Self {
             oib_ui: None,
             oib_authored: Default::default(),
+            oib_metadata_cache: Default::default(),
             oib_binding_cache: Default::default(),
             oib_source_cache: Default::default(),
             oib_compiled_cache: Default::default(),

@@ -330,6 +330,7 @@ pub(super) fn run() -> Result<(), String> {
                         retained = Some(f.paint.base.mesh.clone());
                     }
                     if f.paint.reflow.is_none() {
+                        display.text_paints(0, &f.paint.base.paints)?;
                         display.text_views(0, &f.paint.base.views)?;
                     }
                     if animated {
@@ -391,6 +392,7 @@ pub(super) fn run() -> Result<(), String> {
                             display.text_styles(1, &overlay.styles)?;
                             retained_overlay = Some(overlay.mesh.clone());
                         }
+                        display.text_paints(1, &overlay.paints)?;
                         display.text_views(1, &overlay.views)?;
                     }
                     if let Some(active) = scrolling {

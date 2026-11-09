@@ -6,7 +6,11 @@ use super::{
     scene::Scene,
 };
 use otrios_interfaces::scene::{Primitive, SceneNode};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Instant,
+};
 #[derive(Default)]
 pub struct TextPresentation {
     key: Option<SceneNode>,
@@ -14,6 +18,8 @@ pub struct TextPresentation {
     mesh: Arc<Mesh>,
     runs: Vec<Run>,
     styles: Arc<Vec<f32>>,
+    paints: Arc<Vec<f32>>,
+    admitted: BTreeSet<u32>,
     em_cache: Vec<(u32, f32)>,
     generation: u32,
 }
@@ -35,7 +41,37 @@ pub struct TextFrame {
     pub views: Vec<f32>,
     /// Canonical logical em per draw; zero requests legacy inference.
     pub styles: Arc<Vec<f32>>,
+    /// Authored straight RGBA per draw, independent of geometry. An empty array
+    /// selects the fixed renderer's legacy per-vertex colors.
+    pub paints: Arc<Vec<f32>>,
     pub generation: u32,
+}
+impl TextFrame {
+    /// Materialize per-draw tint for legacy mesh exporters. Production hosts
+    /// consume `paints` directly and retain the original immutable mesh.
+    pub fn baked_mesh(&self) -> Mesh {
+        let mut mesh = Mesh {
+            vertices: self.mesh.vertices.clone(),
+            glyph_vertices: self.mesh.glyph_vertices.clone(),
+            draws: self.mesh.draws.clone(),
+        };
+        if self.paints.is_empty() {
+            return mesh;
+        }
+        for (draw, range) in mesh.draws.chunks_exact(3).enumerate() {
+            let color = &self.paints[draw * 4..draw * 4 + 4];
+            let (vertices, stride, offset) = if range[0] == 0 {
+                (&mut mesh.vertices, 6, 2)
+            } else {
+                (&mut mesh.glyph_vertices, 16, 4)
+            };
+            for vertex in range[1] as usize..(range[1] + range[2]) as usize {
+                vertices[vertex * stride + offset..vertex * stride + offset + 4]
+                    .copy_from_slice(color);
+            }
+        }
+        mesh
+    }
 }
 /// Opt-in probe timings. Ordinary composition reads no profiling clock.
 #[derive(Default, Debug)]
@@ -72,6 +108,8 @@ impl TextPresentation {
         let normalize_profile = crate::canvas::profiling::span("render.retained.normalize");
         let mut key = scene.root().clone();
         let mut positions = BTreeMap::new();
+        let mut colors = BTreeMap::new();
+        let mut admission = Admission::default();
         let extent = [scene.root().frame.width, scene.root().frame.height];
         let mut glyphs = 0;
         if self.font != font.hash() {
@@ -86,9 +124,19 @@ impl TextPresentation {
             [0., 0.],
             1.,
             [0., 0., extent[0], extent[1]],
-            &mut positions,
-            &mut glyphs,
-            &mut scales,
+            [
+                -OVERSCAN,
+                -OVERSCAN,
+                extent[0] + OVERSCAN,
+                extent[1] + OVERSCAN,
+            ],
+            &mut Normalization {
+                out: &mut positions,
+                glyphs: &mut glyphs,
+                scales: &mut scales,
+                colors: &mut colors,
+                admission: &mut admission,
+            },
         );
         #[cfg(feature = "canvas")]
         drop(normalize_profile);
@@ -98,7 +146,10 @@ impl TextPresentation {
         let rebuild_start = profile.as_ref().map(|_| Instant::now());
         #[cfg(feature = "canvas")]
         let rebuild_profile = crate::canvas::profiling::span("render.retained.rebuild");
-        if self.key.as_ref() != Some(&key) || self.font != font.hash() {
+        if self.key.as_ref() != Some(&key)
+            || self.font != font.hash()
+            || !admission.visible.is_subset(&self.admitted)
+        {
             // Recycle CPU storage only after every immutable frame snapshot has
             // been released. Held snapshots keep their buffers and bytes intact.
             let mut mesh = Arc::get_mut(&mut self.mesh)
@@ -113,7 +164,10 @@ impl TextPresentation {
             let mut retain = glyphs <= 16384;
             if retain {
                 mesh.glyph_vertices.reserve(glyphs * 64);
-                let mut paint = RetainedPaint { runs: &mut runs };
+                let mut paint = RetainedPaint {
+                    runs: &mut runs,
+                    admitted: &admission.near,
+                };
                 #[cfg(feature = "canvas")]
                 let mesh_profile = crate::canvas::profiling::span("render.retained.mesh.paint");
                 mesh.paint(
@@ -200,6 +254,11 @@ impl TextPresentation {
                 })
                 .collect();
             self.styles = Arc::new(styles);
+            self.admitted = if retain {
+                admission.near
+            } else {
+                BTreeSet::new()
+            };
             self.mesh = Arc::new(mesh);
             if let Some(p) = profile.as_deref_mut() {
                 p.mesh_payload_bytes = (self.mesh.vertices.len()
@@ -210,6 +269,18 @@ impl TextPresentation {
             self.font = font.hash().into();
             self.key = retain.then_some(key);
             self.generation = self.generation.wrapping_add(1);
+        }
+        let mut paints = vec![0.; self.mesh.draws.len() / 3 * 4];
+        for run in &self.runs {
+            if let Some(color) = colors.get(&run.id) {
+                paints[run.draw * 4..run.draw * 4 + 4].copy_from_slice(color);
+            }
+        }
+        if self.runs.is_empty() {
+            paints.clear();
+        }
+        if self.paints.as_ref() != &paints {
+            self.paints = Arc::new(paints);
         }
         #[cfg(feature = "canvas")]
         drop(rebuild_profile);
@@ -271,12 +342,76 @@ impl TextPresentation {
             views,
             generation: self.generation,
             styles: self.styles.clone(),
+            paints: self.paints.clone(),
         }
     }
 }
 struct EmScales<'a> {
     font: &'a Font,
     cache: &'a mut Vec<(u32, f32)>,
+}
+#[derive(Default)]
+struct Admission {
+    visible: BTreeSet<u32>,
+    near: BTreeSet<u32>,
+}
+/// A small scroll guard band keeps short pans on immutable local geometry. A
+/// newly visible uncached primitive replaces this bounded working set; merely
+/// moving a cached primitive offscreen never invalidates a captured frame.
+const OVERSCAN: f32 = 64.;
+fn primitive_bounds(node: &SceneNode, x: f32, y: f32, factor: f32, font: &Font) -> [f32; 4] {
+    let mut bounds = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    let mut include = |l: f32, t: f32, r: f32, b: f32| {
+        bounds[0] = bounds[0].min(l);
+        bounds[1] = bounds[1].min(t);
+        bounds[2] = bounds[2].max(r);
+        bounds[3] = bounds[3].max(b);
+    };
+    match &node.primitive {
+        Primitive::Text { value, scale, .. } => {
+            let scale = *scale as f32 * factor;
+            let unit = font.metrics().scale(scale);
+            let baseline = y + font.metrics().baseline_from_top(scale);
+            let mut pen = x;
+            for ch in value.chars() {
+                let glyph = font.glyph(ch);
+                if glyph.curve_count != 0 {
+                    let b = glyph.ink_bounds;
+                    include(
+                        pen + b[0] * unit - 1.,
+                        baseline - b[3] * unit - 1.,
+                        pen + b[2] * unit + 1.,
+                        baseline - b[1] * unit + 1.,
+                    );
+                }
+                pen += glyph.advance * unit;
+            }
+        }
+        Primitive::Triangles { points, .. } | Primitive::Path { points, .. } => {
+            let margin = if let Primitive::Path { width, .. } = node.primitive {
+                width * factor / 2.
+            } else {
+                0.
+            };
+            for p in points {
+                let px = x + p[0] * factor;
+                let py = y + p[1] * factor;
+                include(px - margin, py - margin, px + margin, py + margin);
+            }
+        }
+        _ => include(
+            x,
+            y,
+            x + node.frame.width * factor,
+            y + node.frame.height * factor,
+        ),
+    }
+    bounds
 }
 impl EmScales<'_> {
     fn get(&mut self, scale: f32) -> f32 {
@@ -292,28 +427,70 @@ impl EmScales<'_> {
         em
     }
 }
+struct Normalization<'a, 'font> {
+    out: &'a mut BTreeMap<u32, [f32; 7]>,
+    glyphs: &'a mut usize,
+    scales: &'a mut EmScales<'font>,
+    colors: &'a mut BTreeMap<u32, [f32; 4]>,
+    admission: &'a mut Admission,
+}
 fn normalize(
     node: &mut SceneNode,
     parent: [f32; 2],
     factor: f32,
     clip: [f32; 4],
-    out: &mut BTreeMap<u32, [f32; 7]>,
-    glyphs: &mut usize,
-    scales: &mut EmScales<'_>,
+    overscan_clip: [f32; 4],
+    context: &mut Normalization<'_, '_>,
 ) {
     let f = node.frame;
     let x = parent[0] + f.x * factor;
     let y = parent[1] + f.y * factor;
     let mut clip = clip;
+    let mut overscan_clip = overscan_clip;
     let mut factor = factor;
+    if !matches!(
+        node.primitive,
+        Primitive::Canvas { .. } | Primitive::Viewport { .. }
+    ) {
+        let bounds = primitive_bounds(node, x, y, factor, context.scales.font);
+        let intersects = |clip: [f32; 4]| {
+            clip[2] > clip[0]
+                && clip[3] > clip[1]
+                && bounds[2] > clip[0]
+                && bounds[0] < clip[2]
+                && bounds[3] > clip[1]
+                && bounds[1] < clip[3]
+        };
+        if intersects(clip) {
+            context.admission.visible.insert(node.id);
+        }
+        if intersects(overscan_clip) {
+            context.admission.near.insert(node.id);
+            if let Primitive::Text { value, .. } = &node.primitive {
+                *context.glyphs += value.chars().count();
+            }
+        }
+        match &mut node.primitive {
+            Primitive::Text { color, .. }
+            | Primitive::Superellipse { color, .. }
+            | Primitive::Circle { color }
+            | Primitive::Triangles { color, .. }
+            | Primitive::Path { color, .. } => {
+                context
+                    .colors
+                    .insert(node.id, color.map(|v| f32::from(v) / 255.));
+                *color = [255; 4];
+            }
+            _ => {}
+        }
+    }
     // Input clipping/semantics are rebuilt with the scene, independently from
     // painted content. Offscreen controls must not invalidate retained geometry.
     node.responder = None;
     node.semantics = None;
     match &node.primitive {
-        Primitive::Text { value, scale, .. } => {
-            *glyphs += value.chars().count();
-            out.insert(
+        Primitive::Text { scale, .. } => {
+            context.out.insert(
                 node.id,
                 [
                     x,
@@ -322,12 +499,21 @@ fn normalize(
                     clip[1],
                     clip[2],
                     clip[3],
-                    scales.get(*scale as f32 * factor),
+                    context.scales.get(*scale as f32 * factor),
                 ],
             );
             node.frame = otrios_interfaces::scene::Rect::new(0., 0., 0., 0.);
         }
         Primitive::Canvas { clip: true } | Primitive::Viewport { .. } => {
+            // Intersect expanded ancestor clips separately. Expanding an
+            // already empty exact intersection cannot recover a nearby row
+            // whose own clipped canvas lies just outside the panel.
+            overscan_clip = [
+                overscan_clip[0].max(x - OVERSCAN),
+                overscan_clip[1].max(y - OVERSCAN),
+                overscan_clip[2].min(x + f.width * factor + OVERSCAN),
+                overscan_clip[3].min(y + f.height * factor + OVERSCAN),
+            ];
             clip = [
                 clip[0].max(x),
                 clip[1].max(y),
@@ -344,11 +530,13 @@ fn normalize(
         node.primitive,
         Primitive::Canvas { .. } | Primitive::Viewport { .. } | Primitive::Text { .. }
     ) {
-        out.insert(node.id, [x, y, clip[0], clip[1], clip[2], clip[3], 0.]);
+        context
+            .out
+            .insert(node.id, [x, y, clip[0], clip[1], clip[2], clip[3], 0.]);
     }
     // Placement and container clipping are carried by views. In particular,
     // clipping a partially visible button changes its semantic Canvas bounds,
-    // without changing any painted content. Viewport scales remain in the key.
+    // without changing any painted content. Viewport context.scales remain in the key.
     node.frame.x = 0.;
     node.frame.y = 0.;
     if matches!(
@@ -359,7 +547,7 @@ fn normalize(
         node.frame.height = 0.;
     }
     for child in &mut node.children {
-        normalize(child, [x, y], factor, clip, out, glyphs, scales);
+        normalize(child, [x, y], factor, clip, overscan_clip, context);
     }
 }
 
@@ -470,10 +658,25 @@ mod tests {
         let mut renderer = TextPresentation::default();
         let before = renderer.compose(&make(0., 20., WHITE), &font);
         let original = before.mesh.vertices.clone();
-        let partial = renderer.compose(&make(30., 20., WHITE), &font);
+        let partial_scene = make(30., 20., WHITE);
+        let partial = renderer.compose(&partial_scene, &font);
         assert!(Arc::ptr_eq(&before.mesh, &partial.mesh));
         assert_eq!(&partial.views[2..], &[40., 14., 10., 10., 50., 40.]);
         assert_eq!(partial.views[1] as u32, partial.mesh.draws[2]);
+        assert!(
+            partial_scene
+                .hit_path([45., 20.])
+                .iter()
+                .any(|n| n.node.id == 2),
+            "The visible part of a clipped control remains clickable"
+        );
+        assert!(
+            !partial_scene
+                .hit_path([55., 20.])
+                .iter()
+                .any(|n| n.node.id == 2),
+            "The clipped part of the control remains excluded from input"
+        );
         let hidden = renderer.compose(&make(50., 20., WHITE), &font);
         assert!(Arc::ptr_eq(&before.mesh, &hidden.mesh));
         assert!(
@@ -487,8 +690,196 @@ mod tests {
         let resized = renderer.compose(&make(30., 22., WHITE), &font);
         assert!(!Arc::ptr_eq(&before.mesh, &resized.mesh));
         let recolored = renderer.compose(&make(30., 22., [1, 2, 3, 255]), &font);
-        assert!(!Arc::ptr_eq(&resized.mesh, &recolored.mesh));
+        assert!(Arc::ptr_eq(&resized.mesh, &recolored.mesh));
+        assert!(Arc::ptr_eq(&resized.styles, &recolored.styles));
+        assert_eq!(resized.generation, recolored.generation);
+        assert_eq!(
+            recolored.paints.as_ref(),
+            &[1. / 255., 2. / 255., 3. / 255., 1.]
+        );
+        assert_eq!(
+            resized.paints.as_ref(),
+            &WHITE.map(|v| f32::from(v) / 255.),
+            "Held paint snapshots stay immutable"
+        );
         assert_eq!(before.mesh.vertices, original);
+    }
+
+    #[test]
+    fn paint_only_updates_preserve_draw_order_and_match_fixed_color_bytes() {
+        let font = super::super::font::test_font();
+        let make = |color| {
+            Scene::new(canvas(
+                0,
+                Rect::new(0., 0., 200., 100.),
+                vec![
+                    super::super::components::node(
+                        1,
+                        Rect::new(20., 20., 20., 20.),
+                        Primitive::Circle { color },
+                    ),
+                    text(2, Rect::new(50., 20., 100., 24.), "ABC", 2, color),
+                    super::super::components::node(
+                        3,
+                        Rect::new(160., 20., 20., 20.),
+                        Primitive::Superellipse {
+                            radius: 5.,
+                            exponent: 4.,
+                            color,
+                        },
+                    ),
+                ],
+            ))
+            .unwrap()
+        };
+        let mut renderer = TextPresentation::default();
+        let old = renderer.compose(&make([255; 4]), &font);
+        let color = [17, 83, 192, 127];
+        let scene = make(color);
+        let new = renderer.compose(&scene, &font);
+        let baked = new.baked_mesh();
+        let fixed = super::super::render_scene_with_font(&scene, &font);
+        assert!(Arc::ptr_eq(&old.mesh, &new.mesh));
+        assert!(!Arc::ptr_eq(&old.paints, &new.paints));
+        assert_eq!(old.views, new.views);
+        assert_eq!(
+            new.mesh.draws, fixed.draws,
+            "Painter order and ranges stay identical"
+        );
+        for (draw, range) in new.mesh.draws.chunks_exact(3).enumerate() {
+            let (retained, expected, stride, offset) = if range[0] == 0 {
+                (&baked.vertices, &fixed.vertices, 6, 2)
+            } else {
+                (&baked.glyph_vertices, &fixed.glyph_vertices, 16, 4)
+            };
+            for vertex in range[1] as usize..(range[1] + range[2]) as usize {
+                let mut actual = retained[vertex * stride..(vertex + 1) * stride].to_vec();
+                actual[0] += new.views[draw * 8 + 2];
+                actual[1] += new.views[draw * 8 + 3];
+                assert_eq!(
+                    &actual[offset..offset + 4],
+                    &expected[vertex * stride + offset..vertex * stride + offset + 4],
+                    "Paint substitution reproduces fixed RGBA bytes exactly"
+                );
+                for (actual, expected) in actual
+                    .iter()
+                    .zip(&expected[vertex * stride..(vertex + 1) * stride])
+                {
+                    assert!(
+                        (actual - expected).abs() < 0.00004,
+                        "Style substitution reproduces the fixed vertex payload: {actual} != {expected}"
+                    );
+                }
+            }
+        }
+        let identical = renderer.compose(&scene, &font);
+        assert!(Arc::ptr_eq(&new.paints, &identical.paints));
+        assert_eq!(old.paints.as_ref(), &[1.; 12]);
+    }
+
+    #[test]
+    fn offscreen_geometry_uses_bounded_overscan_and_small_pans_reuse_it() {
+        let font = super::super::font::test_font();
+        let make = |offset| {
+            Scene::new(canvas(
+                0,
+                Rect::new(0., 0., 200., 100.),
+                (1..=127)
+                    .map(|id| {
+                        super::super::components::node(
+                            id,
+                            Rect::new(10., (id - 1) as f32 * 20. - offset, 20., 20.),
+                            Primitive::Superellipse {
+                                radius: 5.,
+                                exponent: 4.,
+                                color: WHITE,
+                            },
+                        )
+                    })
+                    .collect(),
+            ))
+            .unwrap()
+        };
+        let mut renderer = TextPresentation::default();
+        let first = renderer.compose(&make(0.), &font);
+        assert_eq!(first.mesh.vertices.len() / 6, 9 * 156);
+        assert_eq!(renderer.runs.len(), 9);
+        let short_pan = renderer.compose(&make(10.), &font);
+        assert!(Arc::ptr_eq(&first.mesh, &short_pan.mesh));
+        let long_pan = renderer.compose(&make(180.), &font);
+        assert!(!Arc::ptr_eq(&first.mesh, &long_pan.mesh));
+        assert!(renderer.runs.len() <= 13);
+        for id in 10..=14 {
+            assert!(
+                renderer.runs.iter().any(|r| r.id == id),
+                "Visible shape {id} is admitted"
+            );
+        }
+        assert!(first.mesh.vertices.len() < 127 * 156 * 6);
+        assert_eq!(
+            first.mesh.vertices.len() / 6,
+            9 * 156,
+            "Held old geometry is unchanged"
+        );
+    }
+
+    #[test]
+    fn overscan_survives_an_empty_exact_clip_on_a_nearby_row_canvas() {
+        let font = super::super::font::test_font();
+        let make = |offset: f32| {
+            Scene::new(canvas(
+                0,
+                Rect::new(0., 0., 100., 100.),
+                vec![canvas(
+                    1,
+                    Rect::new(10., 120. - offset, 40., 20.),
+                    vec![super::super::components::node(
+                        2,
+                        Rect::new(0., 0., 20., 20.),
+                        Primitive::Circle { color: WHITE },
+                    )],
+                )],
+            ))
+            .unwrap()
+        };
+        let mut renderer = TextPresentation::default();
+        let before = renderer.compose(&make(0.), &font);
+        assert_eq!(
+            before.mesh.draws.len(),
+            3,
+            "Near row geometry is prepared before its exact clip becomes visible"
+        );
+        assert_eq!(before.views[4], before.views[6]);
+        let visible = renderer.compose(&make(30.), &font);
+        assert!(Arc::ptr_eq(&before.mesh, &visible.mesh));
+        assert!(visible.views[6] > visible.views[4]);
+        assert!(visible.views[7] > visible.views[5]);
+    }
+
+    #[test]
+    fn culling_uses_projected_points_and_ink_instead_of_logical_frames() {
+        let font = super::super::font::test_font();
+        let scene = Scene::new(canvas(
+            0,
+            Rect::new(0., 0., 100., 100.),
+            vec![
+                super::super::components::node(
+                    1,
+                    Rect::new(300., 10., 1., 1.),
+                    Primitive::Triangles {
+                        points: vec![[-290., 0.], [-280., 0.], [-290., 10.]],
+                        color: WHITE,
+                    },
+                ),
+                text(2, Rect::new(90., 20., 1., 8.), "ABCDEFGHIJK", 2, WHITE),
+            ],
+        ))
+        .unwrap();
+        let mut renderer = TextPresentation::default();
+        let frame = renderer.compose(&scene, &font);
+        assert_eq!(frame.mesh.draws.len(), 6);
+        assert!(renderer.runs.iter().any(|r| r.id == 1));
+        assert!(renderer.runs.iter().any(|r| r.id == 2));
     }
 
     #[test]
@@ -514,6 +905,8 @@ mod tests {
         let first = renderer.compose(&make(0.), &font);
         assert!(first.mesh.vertices.len() / 6 > 65536);
         assert!(first.views.is_empty());
+        assert!(first.paints.is_empty());
+        assert_eq!(first.baked_mesh().vertices, first.mesh.vertices);
         let moved = renderer.compose(&make(12.), &font);
         assert!(!Arc::ptr_eq(&first.mesh, &moved.mesh));
         assert!(moved.views.is_empty());

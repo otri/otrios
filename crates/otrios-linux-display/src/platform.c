@@ -34,7 +34,7 @@ struct mesh { GLuint vbo; GLsizei count; int opaque; };
 #define CACHE_ALPHA_ENTRY_LIMIT 256
 #define CACHE_ENTRIES 4096
 #define CACHE_BUCKETS 8192
-struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; float alpha_transform[4]; int alpha_valid,alpha_compatible,raw_dirty,cache_all; };
+struct text_mesh { GLuint vbo,ibo,cached_vbo; GLsizei count; uint32_t *draws; size_t draw_words; float *vertices,*views,*ems,*paints; struct cached_vertex *cached_vertices; unsigned char *cached_valid; size_t vertex_capacity,cached_capacity,valid_capacity; uint64_t cached_generation; float cached_projection[9]; size_t index_capacity; float alpha_transform[4]; int alpha_valid,alpha_compatible,raw_dirty,cache_all; };
 struct glyph_entry { float key[24],uv_scale[2],uv_bias[2]; int x,y,w,h,next; };
 struct framebuffer { struct gbm_bo *bo; uint32_t id; };
 struct ot_display {
@@ -298,6 +298,7 @@ int ot_upload_text(ot_display *d,uint32_t slot,const float *vertices,size_t floa
     // View storage is indexed by the ordered draw plan, not glyph count.
     if(words!=m->draw_words || count!=(size_t)m->count){free(m->views);m->views=NULL;if(d->stable_text)m->cached_generation=0;}
     if(grow){glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,m->ibo);glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)(count/4*6*sizeof(*indices)),indices,GL_STATIC_DRAW);m->index_capacity=count;}
+    free(m->paints);m->paints=NULL;
     free(indices);free(m->draws);m->draws=plan;m->draw_words=words;m->count=(GLsizei)count;
     return gl_ok(d,"Upload retained glyph quads");
 }
@@ -306,7 +307,7 @@ int ot_retire_slot(ot_display *d,uint32_t slot) {
     if(slot>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid retirement slot");
     struct text_mesh *m=&d->text[slot];
     GLuint vbo=m->vbo,ibo=m->ibo,cached=m->cached_vbo;
-    free(m->vertices);free(m->views);free(m->ems);free(m->draws);free(m->cached_vertices);free(m->cached_valid);
+    free(m->vertices);free(m->views);free(m->ems);free(m->paints);free(m->draws);free(m->cached_vertices);free(m->cached_valid);
     memset(m,0,sizeof(*m));m->vbo=vbo;m->ibo=ibo;m->cached_vbo=cached;
     GLuint buffers[4]={d->meshes[slot].vbo,vbo,ibo,cached};
     for(int i=0;i<4;i++){glBindBuffer(GL_ARRAY_BUFFER,buffers[i]);glBufferData(GL_ARRAY_BUFFER,0,NULL,GL_STATIC_DRAW);}
@@ -346,11 +347,22 @@ int ot_text_styles(ot_display *d,uint32_t slot,const float *styles,size_t count)
     if(m->ems && (!m->count || !memcmp(m->ems,ems,(size_t)m->count/4*sizeof(*ems)))){free(ems);return 0;}
     free(m->ems);m->ems=ems;m->cached_generation=0;m->alpha_valid=0;return 0;
 }
+int ot_text_paints(ot_display *d,uint32_t slot,const float *paints,size_t count) {
+    if(slot>=OT_MAX_SCENE_SLOTS)return fail(d,"Invalid paint slot");
+    struct text_mesh *m=&d->text[slot];
+    if(count && count!=m->draw_words/3*4)return fail(d,"Invalid paint dimensions");
+    for(size_t i=0;i<count;i++)if(!isfinite(paints[i])||paints[i]<0||paints[i]>1)return fail(d,"Invalid paint value");
+    if(m->paints && count && !memcmp(m->paints,paints,count*sizeof(float)))return 0;
+    float *next=count?malloc(count*sizeof(float)):NULL;
+    if(count && !next)return fail(d,"Paint allocation");
+    if(count)memcpy(next,paints,count*sizeof(float));
+    free(m->paints);m->paints=next;return 0;
+}
 void ot_text_stats(ot_display *d,uint64_t *stats) { stats[0]=d->text_hits;stats[1]=d->text_misses;stats[2]=d->cache_texture?(uint64_t)CACHE_SIZE*CACHE_SIZE*(d->alpha_atlas?1:4)+(d->alpha_atlas?(uint64_t)CACHE_SCRATCH_SIZE*CACHE_SCRATCH_SIZE*4:0):0; }
 // Binding state belongs to one draw_slot invocation, never to the GL context.
 // Text paths use 1 (analytic) and 2 (cached); geometry has its own sentinel.
 enum { DRAW_UNBOUND=0, DRAW_GEOMETRY=3 };
-static int draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count,int bound) {
+static int draw_geometry(ot_display *d,struct mesh *m,const float *projection,GLint first,GLsizei count,int bound,const float *paint) {
     if(!count)return bound;
     if(bound!=DRAW_GEOMETRY){
     glUseProgram(d->program);
@@ -361,11 +373,12 @@ static int draw_geometry(ot_display *d,struct mesh *m,const float *projection,GL
     glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(struct vertex),(void*)offsetof(struct vertex,x));
     glVertexAttribPointer(1,4,GL_UNSIGNED_BYTE,GL_TRUE,sizeof(struct vertex),(void*)offsetof(struct vertex,rgba));
     }
+    if(paint){glDisableVertexAttribArray(1);glVertexAttrib4fv(1,paint);if(paint[3]<1)glEnable(GL_BLEND);else if(m->opaque)glDisable(GL_BLEND);}
     glUniformMatrix3fv(d->transform,1,GL_FALSE,projection);
     glDrawArrays(GL_TRIANGLES,first,count);
     return DRAW_GEOMETRY;
 }
-static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projection,uint32_t first,uint32_t count,int cached,int rebind) {
+static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projection,uint32_t first,uint32_t count,int cached,int rebind,const float *paint) {
     if(!count)return;
     if(cached) {
         if(rebind){
@@ -382,6 +395,7 @@ static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projec
         const float identity[]={1,0,0,0,1,0,0,0,1};
         const float *base=d->atlas_scale?projection:identity;
         glUniformMatrix3fv(d->cache_transform,1,GL_FALSE,base);
+        if(paint){glDisableVertexAttribArray(2);glVertexAttrib4fv(2,paint);}
         glDrawElements(GL_TRIANGLES,(GLsizei)(count/4*6),GL_UNSIGNED_SHORT,(void*)((size_t)first/4*6*sizeof(uint16_t)));
         return;
     }
@@ -395,36 +409,37 @@ static void draw_text_part(ot_display *d,struct text_mesh *m,const float *projec
     const GLint size[]={2,2,4,4,4};const size_t offset[]={0,2,4,8,12};
     for(GLuint i=0;i<5;i++){glEnableVertexAttribArray(i);glVertexAttribPointer(i,size[i],GL_FLOAT,GL_FALSE,16*sizeof(float),(void*)(offset[i]*sizeof(float)));}
     }
+    if(paint){glDisableVertexAttribArray(2);glVertexAttrib4fv(2,paint);}
     glUniformMatrix3fv(d->text_transform,1,GL_FALSE,projection);
     glDrawElements(GL_TRIANGLES,(GLsizei)(count/4*6),GL_UNSIGNED_SHORT,(void*)((size_t)first/4*6*sizeof(uint16_t)));
 }
 // Preserve painter order and culling when only part of a large-font working set
 // fits the bounded atlas. Normal all-cached runs retain one draw and bind.
-static int draw_text(ot_display *d,struct text_mesh *m,const float *projection,uint32_t first,uint32_t count,int bound) {
+static int draw_text(ot_display *d,struct text_mesh *m,const float *projection,uint32_t first,uint32_t count,int bound,const float *paint) {
     if(!count)return bound;
     if(!d->cache_ready || m->cache_all){
         int kind=d->cache_ready?2:1;
-        draw_text_part(d,m,projection,first,count,kind==2,bound!=kind);return kind;
+        draw_text_part(d,m,projection,first,count,kind==2,bound!=kind,paint);return kind;
     }
     uint32_t end=(first+count)/4;
     for(uint32_t q=first/4;q<end;){
         int cached=m->cached_valid[q]!=0,kind=cached?2:1;uint32_t begin=q++;
         while(q<end && (m->cached_valid[q]!=0)==cached)q++;
-        draw_text_part(d,m,projection,begin*4,(q-begin)*4,cached,bound!=kind);bound=kind;
+        draw_text_part(d,m,projection,begin*4,(q-begin)*4,cached,bound!=kind,paint);bound=kind;
     }
     return bound;
 }
 static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
     struct text_mesh *text=&d->text[slot];
-    if(!text->draw_words){draw_geometry(d,&d->meshes[slot],projection,0,d->meshes[slot].count,DRAW_UNBOUND);return;}
+    if(!text->draw_words){draw_geometry(d,&d->meshes[slot],projection,0,d->meshes[slot].count,DRAW_UNBOUND,NULL);return;}
     // Cache preparation may have changed every binding. Within this slot only
     // the draw helpers change program/blend/buffer/attribute state; scissoring
     // and skipped runs do not invalidate it. Switching draw kind forces a rebind.
     int bound=DRAW_UNBOUND,scissoring=0,has_clip=0;
     float last_clip[4]={0};int x0=0,y0=0,x1=0,y1=0;
     for(size_t i=0;i<text->draw_words;i+=3) {
-        uint32_t *r=text->draws+i;
-        if(r[0]==0 && (!text->views || text->views[i/3*8+1]==0)){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}bound=draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2],bound);}
+        uint32_t *r=text->draws+i;const float *paint=text->paints?text->paints+i/3*4:NULL;
+        if(r[0]==0 && (!text->views || text->views[i/3*8+1]==0)){if(scissoring){glDisable(GL_SCISSOR_TEST);scissoring=0;}bound=draw_geometry(d,&d->meshes[slot],projection,(GLint)r[1],(GLsizei)r[2],bound,paint);}
         else if(text->views){
             const float *v=text->views+i/3*8;if(v[1]==0 || v[6]<=v[4] || v[7]<=v[5])continue;
             if(!has_clip || memcmp(last_clip,v+4,sizeof(last_clip))){
@@ -443,9 +458,9 @@ static void draw_slot(ot_display *d,uint32_t slot,const float *projection) {
             float moved[9];memcpy(moved,projection,sizeof(moved));
             moved[6]+=projection[0]*v[2]+projection[3]*v[3];moved[7]+=projection[1]*v[2]+projection[4]*v[3];
             if(!scissoring){glEnable(GL_SCISSOR_TEST);scissoring=1;}
-            if(r[0]==0){bound=draw_geometry(d,&d->meshes[slot],moved,(GLint)v[0],(GLsizei)v[1],bound);}
-            else bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],bound);
-        }else{bound=draw_text(d,text,projection,r[1],r[2],bound);}
+            if(r[0]==0){bound=draw_geometry(d,&d->meshes[slot],moved,(GLint)v[0],(GLsizei)v[1],bound,paint);}
+            else bound=draw_text(d,text,moved,(uint32_t)v[0],(uint32_t)v[1],bound,paint);
+        }else{bound=draw_text(d,text,projection,r[1],r[2],bound,paint);}
     }
     if(scissoring)glDisable(GL_SCISSOR_TEST);
 }
@@ -952,7 +967,7 @@ void ot_close(ot_display *d) {
     free(d->saved_connectors);
     ot_touch_close(d->touch);
     if(d->fd>=0){drmDropMaster(d->fd);close(d->fd);}
-    for(uint32_t i=0;i<OT_MAX_SCENE_SLOTS;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
+    for(uint32_t i=0;i<OT_MAX_SCENE_SLOTS;i++){free(d->text[i].views);free(d->text[i].ems);free(d->text[i].paints);free(d->text[i].draws);free(d->text[i].vertices);free(d->text[i].cached_vertices);free(d->text[i].cached_valid);}
     free(d->glyph_cache);
     free(d);
 }

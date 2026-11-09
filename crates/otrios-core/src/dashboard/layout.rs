@@ -101,10 +101,16 @@ impl Layout {
     pub fn encode(blueprint: &Blueprint) -> Result<Vec<u8>> {
         #[cfg(feature = "canvas")]
         let _profile = crate::canvas::profiling::span("layout.encode");
-        validate_blueprint(blueprint)?;
-        let bytes = flexbuffers::to_vec(blueprint).map_err(err)?;
-        Self::from_bytes(&bytes)?;
-        Ok(bytes)
+        encode_blueprint(blueprint)
+    }
+    /// Construct runtime output without deserializing the blueprint we already own.
+    /// Serialized bounds still match byte admission; callers cannot bypass limits.
+    pub fn from_blueprint(blueprint: Blueprint) -> Result<Self> {
+        let bytes = Self::encode(&blueprint)?;
+        Ok(Self {
+            bytes: bytes.into(),
+            blueprint: Arc::new(blueprint),
+        })
     }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
@@ -170,6 +176,24 @@ impl Layout {
             frames.as_ref(),
         )?)
     }
+}
+
+/// The serializer is trusted, but its output must obey the same resource limits
+/// as an admitted artifact. Keep binary traversal checks without decoding again.
+fn encode_blueprint(blueprint: &Blueprint) -> Result<Vec<u8>> {
+    validate_blueprint(blueprint)?;
+    let bytes = flexbuffers::to_vec(blueprint).map_err(err)?;
+    if bytes.is_empty() || bytes.len() > MAX_LAYOUT_BYTES {
+        return Err("Invalid layout size".into());
+    }
+    crate::flex_guard::validate(&bytes, 48, MAX_ITEMS, 512)?;
+    let mut budget = MAX_ITEMS;
+    preflight(
+        Reader::get_root(bytes.as_slice()).map_err(err)?,
+        0,
+        &mut budget,
+    )?;
+    Ok(bytes)
 }
 
 fn bounded_expr(e: &Expr, depth: usize, parameters: bool) -> Result<()> {

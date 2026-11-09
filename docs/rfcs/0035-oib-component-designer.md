@@ -480,9 +480,12 @@ already admitted for the binding. D1 cannot reconnect app fields. No edit can
 introduce executable bytes, grants, authentication identities, services, or
 cross-Space access.
 
-Compile candidate layout, retained resources, semantic bounds, and responder
-mappings together. While connected, wait for confirmed app edits and finished
-gestures/composition before geometry or connection activation. Coalesce pending
+Compile structural, geometry, text and unproven changes with their candidate
+layout, retained resources, semantic bounds and responder mappings. Confirmed
+Color-only changes whose effective terminal dependencies are proven may update
+paint while retaining layout, responder mappings and GPU geometry. Composed color
+expressions without tracked dependencies use full compilation. Both paths wait
+for confirmed app edits and finished gestures/composition before activation. Coalesce pending
 revisions and preserve compatible focus and mount identity. If a later structural
 change removes a focused/captured object, cancel its local interaction safely
 at the activation boundary; never retarget it to a recycled renderer index.

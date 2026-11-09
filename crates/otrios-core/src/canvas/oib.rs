@@ -12,6 +12,7 @@ pub mod document;
 pub mod graph;
 pub mod imports;
 pub mod instances;
+pub(crate) mod paint;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Info {
@@ -308,9 +309,18 @@ pub fn effective(seed: &Seed, values: &BTreeMap<u64, Option<Value>>, id: u64) ->
     Ok(cell.default.clone())
 }
 pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout> {
+    let layout = Layout::from_bytes(&ui.layout)?;
+    compile_prepared(ui, layout.blueprint(), values)
+}
+/// Compile admitted typed graph output without a FlexBuffers round trip.
+pub(crate) fn compile_prepared(
+    ui: &Ui,
+    blueprint: &Blueprint,
+    values: &BTreeMap<u64, Option<Value>>,
+) -> Result<Layout> {
     let _profile = crate::canvas::profiling::span("oib.compile_layout");
     let seed = seed(ui).ok_or("Missing OIB seed")?;
-    let mut blueprint: Blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
+    let mut blueprint = blueprint.clone();
     let outputs = document::output_cells(seed)?;
     for cell in &seed.cells {
         let value = effective(seed, values, cell.id)?;
@@ -393,7 +403,7 @@ pub fn compile(ui: &Ui, values: &BTreeMap<u64, Option<Value>>) -> Result<Layout>
             );
         }
     }
-    let layout = Layout::from_bytes(&Layout::encode(&blueprint)?)?;
+    let layout = Layout::from_blueprint(blueprint)?;
     let mut slots = BTreeMap::new();
     for selector in &ui.selectors {
         let field = ui

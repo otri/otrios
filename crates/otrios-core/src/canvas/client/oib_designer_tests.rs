@@ -921,14 +921,15 @@ fn slab_pans_reuse_paint_buffers_and_capture_keeps_typed_action() {
             Some(action.clone())
         );
     }
-    // Passing the previous 152-unit boundary now retains the same geometry;
-    // visibility checks still reject a captured action that has scrolled away.
+    // Larger pans may replace the bounded geometry working set independently
+    // of the larger semantic slab. Capture keeps its typed action and node IDs;
+    // visibility still rejects an action that has scrolled away.
+    let slab_nodes = d.panels[0].nodes.clone();
     for offset in [160., 200., 300.] {
         d.panels[0].scroll.set_offset([0., offset]);
         let scene = presented(&d, &base);
-        let frame = paint.compose(&scene, &font);
-        assert_eq!(frame.generation, first.generation);
-        assert!(Arc::ptr_eq(&frame.mesh, &first.mesh));
+        paint.compose(&scene, &font);
+        assert_eq!(d.panels[0].nodes, slab_nodes);
         assert_eq!(d.tap_action(&capture, &scene, [200., 50.]), None);
     }
     d.panels[0].scroll.set_offset([0., WINDOW_STEP + 48.]);
@@ -1806,6 +1807,168 @@ fn frame_focus_direct_inputs_commit_once_and_reset_without_changing_bindings() {
     );
 }
 #[test]
+fn paint_dependencies_classify_accent_and_reject_width_text_and_composed_colors() {
+    let (client, _, _) = mounted_fixture_session(true);
+    let mount = client.active.as_ref().unwrap();
+    let seed = super::super::super::oib::seed(&mount.ui).unwrap();
+    let previous = mount.doc.oib_active().unwrap();
+    for (property, value, paint_only) in [
+        (1, Value::Color([19, 143, 207, 255]), true),
+        (2, Value::Number(377.), false),
+        (3, Value::Text("New label".into()), false),
+    ] {
+        let address = editor_address(property);
+        let cell = super::super::super::oib::document::properties(
+            &mount.doc.oib_authoring_seed().unwrap(),
+            &mount.doc.oib_allocations().unwrap(),
+            &editing::selection(&address),
+            &previous,
+        )
+        .unwrap()
+        .into_iter()
+        .find(|p| p.address.as_ref() == Some(&address))
+        .unwrap()
+        .cell
+        .unwrap();
+        let mut next = previous.clone();
+        next.insert(cell, Some(value));
+        let result = super::super::super::oib::paint::changes(seed, &previous, &next).unwrap();
+        assert_eq!(result.is_some(), paint_only);
+        if paint_only {
+            assert!(!result.unwrap().is_empty());
+            let mut composed = seed.clone();
+            let visual = composed
+                .graph
+                .as_mut()
+                .unwrap()
+                .definitions
+                .iter_mut()
+                .flat_map(|definition| &mut definition.nodes)
+                .filter_map(|node| node.visual.as_mut())
+                .find(|visual| {
+                    matches!(
+                        visual.shape,
+                        otrios_interfaces::layout::Shape::Superellipse { .. }
+                    )
+                })
+                .unwrap();
+            if let otrios_interfaces::layout::Shape::Superellipse { color, .. } = &mut visual.shape
+            {
+                use otrios_interfaces::layout::Expr;
+                *color = Expr::Select {
+                    condition: Box::new(Expr::Literal(Value::Boolean(true))),
+                    yes: Box::new(color.clone()),
+                    no: Box::new(Expr::Literal(Value::Color([0, 0, 0, 255]))),
+                };
+            }
+            assert!(
+                super::super::super::oib::paint::changes(&composed, &previous, &next)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+}
+
+#[test]
+fn confirmed_accent_waits_for_held_designer_input_before_paint_activation() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    let old_generation = client.active.as_ref().unwrap().oib_generation;
+    let old_scene = cached_layout(client.active.as_ref().unwrap()).unwrap();
+    {
+        let mount = client.active.as_mut().unwrap();
+        assert!(
+            mount
+                .doc
+                .edit_oib_property(&editor_address(1), Some(Value::Color([19, 143, 207, 255])))
+                .unwrap()
+        );
+        mount.designer.as_mut().unwrap().capture = Some(Capture {
+            pointer: 77,
+            start: [0., 0.],
+            moving: false,
+            action: None,
+            panel: None,
+        });
+    }
+    settle_editor(&mut client, &mut authority, &mut session);
+    let held = client.active.as_ref().unwrap();
+    assert!(held.doc.confirmed());
+    assert_ne!(held.doc.oib_generation(), old_generation);
+    assert_eq!(held.oib_generation, old_generation);
+    assert_eq!(cached_layout(held).unwrap().root(), old_scene.root());
+    let mount = client.active.as_mut().unwrap();
+    mount.designer.as_mut().unwrap().capture = None;
+    assert!(mount.refresh().unwrap());
+    assert_eq!(mount.oib_generation, mount.doc.oib_generation());
+    assert_eq!(
+        cached_layout(mount).unwrap().root(),
+        resolve_layout(mount).unwrap().root()
+    );
+    assert_ne!(cached_layout(mount).unwrap().root(), old_scene.root());
+}
+
+#[test]
+fn confirmed_accent_keeps_focused_inspector_field_and_keyboard_geometry() {
+    let (mut client, mut authority, mut session) = mounted_fixture_session(true);
+    client
+        .inspect_oib_selection(editing::selection(&editor_address(2)))
+        .unwrap();
+    let field = focus_property(&mut client, 2);
+    let focused = client
+        .active
+        .as_ref()
+        .unwrap()
+        .designer
+        .as_ref()
+        .unwrap()
+        .drafts
+        .focused()
+        .cloned();
+    let old_generation = client.active.as_ref().unwrap().oib_generation;
+    let old_scene = cached_layout(client.active.as_ref().unwrap()).unwrap();
+    {
+        let mount = client.active.as_mut().unwrap();
+        assert!(mount.keyboard.visible);
+        assert!(
+            mount
+                .doc
+                .edit_oib_property(&editor_address(1), Some(Value::Color([19, 143, 207, 255])))
+                .unwrap()
+        );
+        assert!(!mount.doc.confirmed());
+        mount.refresh().unwrap();
+        assert_eq!(
+            mount.oib_generation, old_generation,
+            "unconfirmed local values cannot enter the displayed graph"
+        );
+        assert_eq!(cached_layout(mount).unwrap().root(), old_scene.root());
+    }
+    settle_editor(&mut client, &mut authority, &mut session);
+    let mount = client.active.as_ref().unwrap();
+    assert!(mount.keyboard.visible);
+    assert_eq!(
+        mount.designer.as_ref().unwrap().drafts.focused(),
+        focused.as_ref()
+    );
+    assert!(
+        mount
+            .designer
+            .as_ref()
+            .unwrap()
+            .drafts
+            .drafts()
+            .iter()
+            .flat_map(|draft| &draft.fields)
+            .any(|input| input.id == field)
+    );
+    assert_eq!(
+        cached_layout(mount).unwrap().root(),
+        resolve_layout(mount).unwrap().root()
+    );
+}
+
+#[test]
 fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_values() {
     let (mut client, mut authority, mut session) = mounted_fixture_session(true);
     let selection = client
@@ -1849,7 +2012,10 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
             },
         })
         .unwrap();
-    for color in [[153, 102, 204, 255], [52, 211, 153, 255]] {
+    for (index, color) in [[153, 102, 204, 255], [52, 211, 153, 255]]
+        .into_iter()
+        .enumerate()
+    {
         let generation = authority.oib_status().unwrap().generation;
         assert!(
             client
@@ -1873,8 +2039,70 @@ fn display_root_accent_apply_confirms_once_without_changing_structure_or_app_val
             &LocalAction::Apply(address.clone())
         ));
         assert!(client.active.as_ref().unwrap().doc.oib_saving());
+        let (held_layout, held_hierarchy, held_handlers, held_inspector) = {
+            let mount = client.active.as_ref().unwrap();
+            (
+                cached_layout(mount).unwrap(),
+                mount.designer.as_ref().unwrap().panels[0].nodes.clone(),
+                mount.ui.handlers.clone(),
+                mount
+                    .designer
+                    .as_ref()
+                    .unwrap()
+                    .panels
+                    .last()
+                    .unwrap()
+                    .nodes
+                    .clone(),
+            )
+        };
         settle_editor(&mut client, &mut authority, &mut session);
         let mount = client.active.as_ref().unwrap();
+        assert_eq!(mount.ui.handlers, held_handlers);
+        if index > 0 {
+            let before: Vec<_> = held_inspector.iter().map(|node| node.id).collect();
+            let after: Vec<_> = mount
+                .designer
+                .as_ref()
+                .unwrap()
+                .panels
+                .last()
+                .unwrap()
+                .nodes
+                .iter()
+                .map(|node| node.id)
+                .collect();
+            assert_eq!(
+                before, after,
+                "value-only inspector refresh preserves row IDs"
+            );
+        }
+        assert_eq!(
+            mount.designer.as_ref().unwrap().panels[0].nodes,
+            held_hierarchy,
+            "paint activation keeps hierarchy rows and their semantic IDs"
+        );
+        let painted = cached_layout(mount).unwrap();
+        assert_ne!(painted.root(), held_layout.root());
+        assert_eq!(
+            painted.root(),
+            resolve_layout(mount).unwrap().root(),
+            "incremental paint agrees with a full resolution of current state"
+        );
+        fn scene_structure(node: &SceneNode, out: &mut Vec<(u32, Rect, Option<TouchResponder>)>) {
+            out.push((node.id, node.frame, node.responder));
+            for child in &node.children {
+                scene_structure(child, out);
+            }
+        }
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        scene_structure(held_layout.root(), &mut before);
+        scene_structure(painted.root(), &mut after);
+        assert_eq!(
+            before, after,
+            "Accent preserves resolved layout and hit-test identities"
+        );
         assert!(mount.doc.confirmed());
         assert_eq!(authority.oib_status().unwrap().generation, generation + 1);
         assert_eq!(

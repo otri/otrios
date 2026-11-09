@@ -114,8 +114,10 @@ try{
     if(f.effects)hudLayer.setFrame({vertices:f.effects});
     if(f.reflow)model.reflow=!!f.reflow.length;
     if(f.vertices||(wasReflow&&!model.reflow))staticLayer.setFrame(model);
+    if(f.textPaints&&!model.reflow)staticLayer.setPaints(f.textPaints);
     if(f.textViews&&!model.reflow)staticLayer.setTextViews(f.textViews);
     if(f.overlayVertices)motionLayer.setFrame({vertices:f.overlayVertices,glyphVertices:f.overlayGlyphVertices,draws:f.overlayDraws,textStyles:f.overlayStyles});
+    if(f.overlayPaints)motionLayer.setPaints(f.overlayPaints);
     if(f.overlayViews)motionLayer.setTextViews(f.overlayViews);
     if(f.controls){
       renderer.setLogicalSize(...f.extent);stageElement.style.setProperty('--aspect',String(f.extent[0]/f.extent[1]));

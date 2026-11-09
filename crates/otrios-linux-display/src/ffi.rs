@@ -82,6 +82,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn ot_linear_scene(d: *mut c_void) -> c_int;
     fn ot_text_stats(d: *mut c_void, stats: *mut u64);
+    fn ot_text_paints(d: *mut c_void, slot: u32, paints: *const f32, floats: usize) -> c_int;
     fn ot_text_styles(d: *mut c_void, slot: u32, styles: *const f32, floats: usize) -> c_int;
     fn ot_text_views(d: *mut c_void, slot: u32, views: *const f32, floats: usize) -> c_int;
     fn ot_present(d: *mut c_void, flip: *mut Flip) -> c_int;
@@ -274,6 +275,23 @@ impl Display {
         // integral ranges against the admitted draw plan before retaining them.
         self.result(unsafe {
             ot_text_views(self.owner.as_ptr(), slot, views.as_ptr(), views.len())
+        })
+    }
+    /// Straight RGBA per ordered draw; empty uses legacy vertex colors.
+    pub fn text_paints(&mut self, slot: u32, paints: &[f32]) -> Result<(), String> {
+        if slot >= crate::MAX_SCENE_SLOTS
+            || paints.len() > 4096 * 4
+            || !paints.len().is_multiple_of(4)
+            || paints
+                .iter()
+                .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
+        {
+            return Err("Invalid scene paints".into());
+        }
+        // SAFETY: bounded finite borrowed RGBA copied synchronously; C verifies
+        // dimensions against the admitted ordered draw plan before replacing it.
+        self.result(unsafe {
+            ot_text_paints(self.owner.as_ptr(), slot, paints.as_ptr(), paints.len())
         })
     }
     /// Immutable logical font em per draw. Zero retains legacy inference.
@@ -505,6 +523,7 @@ mod tests {
                 )
                 .unwrap();
             display.text_styles(slot, &frame.styles).unwrap();
+            display.text_paints(slot, &frame.paints).unwrap();
             display.text_views(slot, &frame.views).unwrap();
         }
         display.draw(projection, false).unwrap();
@@ -520,6 +539,7 @@ mod tests {
             .upload_scene(0, &b.mesh.vertices, &b.mesh.glyph_vertices, &b.mesh.draws)
             .unwrap();
         display.text_styles(0, &b.styles).unwrap();
+        display.text_paints(0, &b.paints).unwrap();
         display.text_views(0, &b.views).unwrap();
         display.draw(projection, false).unwrap();
         assert_eq!(retained, display.pixels().unwrap());

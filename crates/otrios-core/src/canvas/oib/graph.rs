@@ -8,6 +8,59 @@ use otrios_interfaces::{
     oib::{designer::*, graph as source},
 };
 
+/// Admitted typed chrome plus disposable graph output. Internal transformations
+/// update `blueprint`; conversion to an artifact Ui serializes at the boundary.
+#[derive(Clone)]
+pub(crate) struct PreparedUi {
+    pub(crate) ui: Ui,
+    pub(crate) blueprint: Blueprint,
+}
+impl PreparedUi {
+    pub(crate) fn from_ui(ui: &Ui) -> Result<Self> {
+        Ok(Self {
+            ui: ui.clone(),
+            blueprint: Layout::from_bytes(&ui.layout)?.blueprint().clone(),
+        })
+    }
+    pub(crate) fn repaint(
+        &mut self,
+        colors: &BTreeMap<u16, otrios_interfaces::scene::Color>,
+    ) -> Result<()> {
+        repaint_blueprint(&mut self.blueprint, colors)
+    }
+    pub(crate) fn to_ui(&self) -> Result<Ui> {
+        let mut ui = self.ui.clone();
+        ui.layout = Layout::encode(&self.blueprint)?;
+        Ok(ui)
+    }
+    pub(crate) fn finish(mut self) -> Result<Ui> {
+        self.ui.layout = Layout::encode(&self.blueprint)?;
+        Ok(self.ui)
+    }
+}
+
+/// Recolor admitted terminal outputs without changing geometry or bindings.
+pub(crate) fn repaint_blueprint(
+    blueprint: &mut Blueprint,
+    colors: &BTreeMap<u16, otrios_interfaces::scene::Color>,
+) -> Result<()> {
+    for (id, color) in colors {
+        let node = blueprint
+            .templates
+            .iter_mut()
+            .find_map(|template| super::node(&mut template.root, *id))
+            .ok_or("Missing retained OIB paint target")?;
+        let expression = match &mut node.shape {
+            Shape::Text { color, .. }
+            | Shape::Superellipse { color, .. }
+            | Shape::Circle { color } => color,
+            _ => return Err("Unsupported retained OIB paint target".into()),
+        };
+        *expression = Expr::Literal(Value::Color(*color));
+    }
+    Ok(())
+}
+
 fn error(message: &str) -> String {
     message.into()
 }
@@ -1142,12 +1195,15 @@ pub fn strip(ui: &Ui) -> Result<Ui> {
     if super::seed(ui).is_none() {
         return Ok(ui.clone());
     }
-    let mut result = ui.clone();
-    let seed = super::seed(ui).ok_or("Missing OIB seed")?;
+    strip_prepared(PreparedUi::from_ui(ui)?)?.finish()
+}
+fn strip_prepared(mut prepared: PreparedUi) -> Result<PreparedUi> {
+    let result = &mut prepared.ui;
+    let seed = super::seed(result).ok_or("Missing OIB seed")?;
     if seed.graph.is_none() {
         return Err(error("Canonical OIB graph is required"));
     }
-    let mut blueprint = Layout::from_bytes(&ui.layout)?.blueprint().clone();
+    let blueprint = &mut prepared.blueprint;
     let graph = seed.graph.as_ref().unwrap();
     let mut controls = BTreeSet::new();
     for host in [graph.preview_viewport, graph.inspector_viewport] {
@@ -1203,8 +1259,7 @@ pub fn strip(ui: &Ui) -> Result<Ui> {
     // OIB chrome is intentionally independent of app values. Every app selector
     // is derived from graph bindings; hidden inspector placeholders are absent.
     result.selectors.clear();
-    result.layout = Layout::encode(&blueprint)?;
-    Ok(result)
+    Ok(prepared)
 }
 
 /// Reconstruct the disposable property and object tables during checkpoint load.
@@ -1245,12 +1300,19 @@ pub fn with_source(
     definitions: &[ComponentDefinition],
     presets: &[source::Preset],
 ) -> Result<Ui> {
+    with_source_prepared(PreparedUi::from_ui(ui)?, definitions, presets)?.finish()
+}
+pub(crate) fn with_source_prepared(
+    prepared: PreparedUi,
+    definitions: &[ComponentDefinition],
+    presets: &[source::Preset],
+) -> Result<PreparedUi> {
     super::imports::validate_local_definitions(
-        super::seed(ui).ok_or("Missing OIB graph")?,
+        super::seed(&prepared.ui).ok_or("Missing OIB graph")?,
         definitions,
     )?;
-    let mut candidate = strip(ui)?;
-    let Some(Presentation::Oib(seed)) = &mut candidate.presentation else {
+    let mut candidate = strip_prepared(prepared)?;
+    let Some(Presentation::Oib(seed)) = &mut candidate.ui.presentation else {
         return Err(error("Missing OIB graph"));
     };
     let graph = seed
@@ -1262,7 +1324,7 @@ pub fn with_source(
     graph
         .instances
         .retain(|i| i.id == graph.presented_root || graph.presets.iter().any(|p| p.id == i.preset));
-    materialize(&candidate)
+    materialize_prepared(candidate)
 }
 /// Compile a canonical signed graph into the existing bounded layout engine.
 pub fn materialize(ui: &Ui) -> Result<Ui> {
@@ -1270,9 +1332,13 @@ pub fn materialize(ui: &Ui) -> Result<Ui> {
     if super::seed(ui).is_none() {
         return Ok(ui.clone());
     }
-    let mut result = strip(ui)?;
-    let mut blueprint = Layout::from_bytes(&result.layout)?.blueprint().clone();
-    let seed = super::seed(&result).ok_or("Missing OIB graph")?.clone();
+    materialize_prepared(PreparedUi::from_ui(ui)?)?.finish()
+}
+fn materialize_prepared(prepared: PreparedUi) -> Result<PreparedUi> {
+    let mut prepared = strip_prepared(prepared)?;
+    let result = &mut prepared.ui;
+    let blueprint = &mut prepared.blueprint;
+    let seed = super::seed(result).ok_or("Missing OIB graph")?.clone();
     let mut nodes = BTreeSet::new();
     let mut controls = BTreeSet::new();
     for template in &blueprint.templates {
@@ -1303,11 +1369,10 @@ pub fn materialize(ui: &Ui) -> Result<Ui> {
         ));
     }
     preview.children = lowering.previews;
-    result.layout = Layout::encode(&blueprint)?;
     result.selectors = lowering.selectors;
     result.handlers.extend(lowering.handlers);
     result.presentation = Some(Presentation::Oib(Box::new(lowering.seed)));
-    Ok(result)
+    Ok(prepared)
 }
 
 /// Compile the admitted graph directly for the current resident roots. Presets
@@ -1319,14 +1384,23 @@ pub fn expand(
     _selected: Option<u64>,
     values: &BTreeMap<u64, Option<Value>>,
 ) -> Result<Ui> {
+    expand_prepared(PreparedUi::from_ui(ui)?, allocations, live, values)?.finish()
+}
+pub(crate) fn expand_prepared(
+    prepared: PreparedUi,
+    allocations: &[Allocation],
+    live: &BTreeSet<u64>,
+    values: &BTreeMap<u64, Option<Value>>,
+) -> Result<PreparedUi> {
     let _profile = crate::canvas::profiling::span("oib.graph.expand");
     if live.len() > MAX_LIVE_INSTANCES {
         return Err(error("OIB live instance capacity exhausted"));
     }
-    let original = super::seed(ui).ok_or("Missing OIB graph")?;
+    let mut prepared = strip_prepared(prepared)?;
+    let result = &mut prepared.ui;
+    let blueprint = &mut prepared.blueprint;
+    let original = super::seed(result).ok_or("Missing OIB graph")?;
     let graph = super::imports::resolve(original)?;
-    let mut result = strip(ui)?;
-    let mut blueprint = Layout::from_bytes(&result.layout)?.blueprint().clone();
     let mut nodes = BTreeSet::new();
     let mut controls = BTreeSet::new();
     for template in &blueprint.templates {
@@ -1452,10 +1526,9 @@ pub fn expand(
                 )
         });
     }
-    result.layout = Layout::encode(&blueprint)?;
     result.selectors = compiler.selectors;
     result.handlers.extend(compiler.handlers);
     result.presentation = Some(Presentation::Oib(Box::new(compiler.seed)));
-    super::document::placement::project_ui(&mut result, allocations, live)?;
-    Ok(result)
+    super::document::placement::project_blueprint(result, blueprint, allocations, live)?;
+    Ok(prepared)
 }

@@ -496,6 +496,16 @@ impl CanvasApp {
     pub fn text_generation(&self) -> Result<u32, String> {
         Ok(self.frame()?.revisions.content)
     }
+    pub fn text_paints(&self) -> Result<Vec<f32>, String> {
+        Ok(self.frame()?.base.paints.as_ref().clone())
+    }
+    pub fn overlay_paints(&self) -> Result<Vec<f32>, String> {
+        Ok(self
+            .frame()?
+            .overlay
+            .as_ref()
+            .map_or_else(Vec::new, |f| f.paints.as_ref().clone()))
+    }
     pub fn text_styles(&self) -> Result<Vec<f32>, String> {
         Ok(self.frame()?.base.styles.as_ref().clone())
     }

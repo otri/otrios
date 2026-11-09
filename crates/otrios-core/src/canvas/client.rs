@@ -46,6 +46,8 @@ struct Mount {
     ui: Ui,
     layout: Layout,
     oib_generation: Option<u64>,
+    oib_paint_basis: Option<super::oib::paint::Basis>,
+    oib_paint_refresh: bool,
     oib_view: Option<OibView>,
     oib_selected: Option<u64>,
     designer: Option<oib_designer::Designer>,
@@ -4078,10 +4080,31 @@ impl Mount {
             && !self.oib_activation_blocked()
         {
             let _profile = super::profiling::span("client.mount.activate_ui");
+            let basis = self.doc.oib_paint_basis()?;
+            let colors = self
+                .oib_paint_basis
+                .as_ref()
+                .filter(|previous| previous.same_structure(&basis))
+                .map(|previous| {
+                    super::oib::paint::changes(
+                        super::oib::seed(&self.ui).ok_or("Missing presented OIB seed")?,
+                        &previous.values,
+                        &basis.values,
+                    )
+                })
+                .transpose()?
+                .flatten();
+            let painted = colors
+                .as_ref()
+                .zip(self.layout_scene.get())
+                .map(|(colors, scene)| paint_layout_scene(scene, colors))
+                .transpose()?;
             let (ui, layout) = self.doc.oib_compiled(self.oib_selected)?;
             let previous_ui = std::mem::replace(&mut self.ui, ui);
             let previous = std::mem::replace(&mut self.layout, layout);
-            if let Err(error) = resolve_scene(self) {
+            if painted.is_none()
+                && let Err(error) = resolve_scene(self)
+            {
                 self.layout = previous;
                 self.ui = previous_ui;
                 return Err(error);
@@ -4098,13 +4121,22 @@ impl Mount {
                 scroll.set_content(super::oib::document::placement::preview_content(seed));
             }
             self.oib_generation = Some(generation);
+            self.oib_paint_basis = Some(basis);
             if let Some(view) = &mut self.oib_view {
                 view.info.presented_generation = generation;
             }
-            self.invalidate();
+            if let Some(scene) = painted {
+                self.layout_scene.take();
+                let _ = self.layout_scene.set(Arc::new(scene));
+                self.invalidate_presentation();
+                self.oib_paint_refresh = true;
+            } else {
+                self.invalidate();
+            }
             oib_changed = true;
         }
         oib_changed |= self.refresh_designer()?;
+        self.oib_paint_refresh = false;
         for (id, editor) in &mut self.editors {
             if let Value::Text(text) = self.doc.typed_value(*id)?
                 && editor.text() != text
@@ -4182,7 +4214,18 @@ impl Mount {
             info,
         });
         if changed {
-            self.invalidate();
+            // Canonical designer diagnostics are local presentation nodes. The
+            // older signed inspector can still bind these values in layout.
+            if self.ui.selectors.iter().any(|selector| {
+                matches!(
+                    selector.projection,
+                    Projection::OibStatus | Projection::OibCell { .. }
+                )
+            }) {
+                self.invalidate();
+            } else {
+                self.invalidate_presentation();
+            }
         }
         Ok(changed)
     }
@@ -4614,6 +4657,8 @@ fn qualify(
         ui,
         layout,
         oib_generation: None,
+        oib_paint_basis: None,
+        oib_paint_refresh: false,
         oib_view: None,
         oib_selected: None,
         doc,
@@ -4666,6 +4711,7 @@ fn qualify(
             scroll.set_content(super::oib::document::placement::preview_content(seed));
         }
         m.oib_generation = m.doc.oib_generation();
+        m.oib_paint_basis = Some(m.doc.oib_paint_basis()?);
         m.refresh_oib_view()?;
     }
     m.refresh_designer()?;
@@ -5149,6 +5195,39 @@ fn order_pointer(m: &mut Mount, scene: &Scene, event: PointerEvent) -> Result<Op
     m.order_drag = Some(drag);
     m.invalidate();
     Ok(Some(true))
+}
+/// A color-only target table cannot alter placement, clipping, semantics or
+/// responders. Invisible targets are absent from this resolved scene and will
+/// acquire their current color on the next ordinary layout resolution.
+fn paint_layout_scene(
+    scene: &Scene,
+    colors: &BTreeMap<u16, otrios_interfaces::scene::Color>,
+) -> Result<Scene> {
+    fn paint(
+        node: &mut SceneNode,
+        colors: &BTreeMap<u16, otrios_interfaces::scene::Color>,
+    ) -> Result<()> {
+        if let Ok(id) = u16::try_from(node.id)
+            && let Some(next) = colors.get(&id)
+        {
+            use otrios_interfaces::scene::Primitive;
+            match &mut node.primitive {
+                Primitive::Text { color, .. }
+                | Primitive::Superellipse { color, .. }
+                | Primitive::Circle { color } => *color = *next,
+                _ => return Err("Paint target does not match admitted color primitive".into()),
+            }
+        }
+        for child in &mut node.children {
+            paint(child, colors)?;
+        }
+        Ok(())
+    }
+    let mut root = scene.root().clone();
+    paint(&mut root, colors)?;
+    // Keep complete scene bounds and semantic validation at publication even
+    // though the dependency certificate has ruled out layout changes.
+    Scene::new(root)
 }
 fn cached_scene(m: &Mount) -> Result<Arc<Scene>> {
     if let Some(scene) = m.scene.get() {

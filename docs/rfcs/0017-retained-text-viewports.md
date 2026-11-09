@@ -11,13 +11,19 @@ Reusing an oversampled glyph atlas removes rasterization churn; retaining the
 entire text strip also removes per-frame glyph shaping, validation and upload.
 
 `TextPresentation` owns one bounded canonical mesh. Text quads use coordinates
-local to their run. A changed value, font, scale, tint, surrounding geometry or
-clip hierarchy rebuilds the mesh. A changed text origin only updates a small
+local to their run. A changed value, font, scale, surrounding geometry or clip
+hierarchy rebuilds the mesh. Tint uses independent straight RGBA per ordered draw;
+color changes preserve mesh identity and coverage resources. Initial preparation
+admits visible primitives plus 64 logical pixels of overscan. Pans retain that
+working set until uncached content enters the visible clip, then replace it with
+a bounded working set. A changed text origin only updates a small
 presentation record: visible first/count, translation x/y and clip l/t/r/b.
-These eight scalars correspond to each existing ordered draw. Geometry records
-are ignored. Both GLES and WebGL retain their vertex buffers across these updates.
+These eight scalars correspond to each existing ordered draw. Triangle geometry
+can use the same translation and clip records; zero records retain legacy fixed
+placement. Both GLES and WebGL retain their vertex buffers across these updates.
 The browser worker sends a new mesh only when its presentation generation changes;
-coalesced viewport updates carry the latest range and transform. Privacy clearing
+coalesced viewport updates carry the latest range and transform. A separate
+paint revision sends changed RGBA without recopying vertex buffers. Privacy clearing
 also drops the retained runtime cache.
 
 Prefix maximum right bounds and suffix minimum left bounds allow two binary

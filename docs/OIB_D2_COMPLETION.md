@@ -133,7 +133,8 @@ literal visual declarations, and connect admitted app fields, including an unbou
 preset. Numeric placement, slot operations and shared reorder use the same batch.
 Structural inspector drafts retain their captured generation; stale drafts remain
 for review instead of silently rebasing. The focused live checks below qualify
-this bounded scope; D3/D4, complete OIB transfer, library loading and XR are separate.
+this bounded scope; D3/D4, complete OIB transfer and XR are separate. Signed
+library loading subsequently shipped in [L1](OIB_LIBRARY_L1.md).
 
 Source projections contain no predicted renderer IDs. The presented graph supplies
 actual object mappings; hierarchy navigation uses semantic classes. Inspector
@@ -148,6 +149,13 @@ The normalized binding cache is keyed by the immutable `[4,0]` leaf hash and exa
 admitted UI identity; it never changes root or wire bytes. OIB journals use the
 existing atomic checkpoint rotation at 256 KiB instead of the ordinary 4 MiB
 threshold, bounding accumulated graph replay without increasing test deadlines.
+
+The subsequent [incremental presentation cleanup](experiments/oib-incremental-presentation-2026-11-10.md)
+retains admitted typed Blueprints across graph and placement transforms. Authored
+and expanded metadata and baseline digests reuse exact binding/source leaf hashes
+and admitted UI identity. Proven confirmed Color-only changes preserve layout and
+input identities; independent per-draw paint retains GPU geometry. Width, text,
+structural and unproven dependencies retain the full compilation path.
 
 Revision tooling authenticates a predecessor's package envelope, complete file
 closure and publisher signature without admitting its obsolete UI payload.
@@ -222,8 +230,8 @@ Focused live acceptance on release
 
 [Acceptance summary](experiments/data/oib-d2-canonical-2026-11-09/acceptance.json)
 records these bounded facts. Await user review before accepted-work builder
-maintenance. Future signed library loading remains the explicit L1 milestone in
-[RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md).
+maintenance. Signed library loading subsequently shipped in
+[L1](OIB_LIBRARY_L1.md), under [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md).
 
 ## Fresh-collection operational cutover
 

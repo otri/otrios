@@ -100,6 +100,50 @@ struct ToolCache {
     selection: Selection,
     operations: Vec<(String, otrios_interfaces::oib::InstanceOperation)>,
 }
+fn retain_inspector_ids(
+    previous: &[SceneNode],
+    next: &mut [SceneNode],
+    previous_actions: &BTreeMap<u32, LocalAction>,
+    next_actions: &mut BTreeMap<u32, LocalAction>,
+) {
+    fn compatible(
+        old: &SceneNode,
+        new: &SceneNode,
+        old_actions: &BTreeMap<u32, LocalAction>,
+        new_actions: &BTreeMap<u32, LocalAction>,
+    ) -> bool {
+        old.frame == new.frame
+            && old.responder == new.responder
+            && std::mem::discriminant(&old.primitive) == std::mem::discriminant(&new.primitive)
+            && old_actions.get(&old.id) == new_actions.get(&new.id)
+            && old.children.len() == new.children.len()
+            && old
+                .children
+                .iter()
+                .zip(&new.children)
+                .all(|(old, new)| compatible(old, new, old_actions, new_actions))
+    }
+    if previous.len() != next.len()
+        || !previous
+            .iter()
+            .zip(next.iter())
+            .all(|(old, new)| compatible(old, new, previous_actions, next_actions))
+    {
+        return;
+    }
+    fn retain(old: &SceneNode, new: &mut SceneNode, actions: &mut BTreeMap<u32, LocalAction>) {
+        if let Some(action) = actions.remove(&new.id) {
+            actions.insert(old.id, action);
+        }
+        new.id = old.id;
+        for (old, new) in old.children.iter().zip(&mut new.children) {
+            retain(old, new, actions);
+        }
+    }
+    for (old, new) in previous.iter().zip(next) {
+        retain(old, new, next_actions);
+    }
+}
 pub(super) struct Designer {
     selection: Selection,
     focus_layout: bool,
@@ -363,6 +407,19 @@ impl Designer {
         status: &str,
         editable: bool,
     ) -> Result<()> {
+        self.rebuild_panels(seed, objects, properties, conflicts, status, editable, true)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn rebuild_panels(
+        &mut self,
+        seed: &otrios_interfaces::oib::Seed,
+        objects: Vec<ObjectInfo>,
+        properties: &[PropertyInfo],
+        conflicts: &[u64],
+        status: &str,
+        editable: bool,
+        structure: bool,
+    ) -> Result<()> {
         // Bound even the hidden/disclosed semantic model, independently from
         // the retained subtree and presented scene bounds. Runtime admission
         // supplies a smaller bounded graph; this is a defensive local ceiling.
@@ -370,8 +427,10 @@ impl Designer {
             return Err("Designer object model budget exceeded".into());
         }
         let mut builder = Builder::at(self.next_id);
-        self.management_nodes.clear();
-        if let Some(target) = &self.management {
+        if structure {
+            self.management_nodes.clear();
+        }
+        if structure && let Some(target) = &self.management {
             let mut edit = builder.focus_button(
                 0.,
                 0.,
@@ -397,7 +456,7 @@ impl Designer {
                 .label = "Delete component".into();
             self.management_nodes = vec![edit, delete];
         }
-        let hierarchy = if self.panels.len() == 2 {
+        let hierarchy = if structure && self.panels.len() == 2 {
             Some(if self.focus_layout {
                 focus_hierarchy(
                     &mut builder,
@@ -513,6 +572,28 @@ impl Designer {
         }
         let single = self.panels.len() == 1;
         let panel = self.panels.last_mut().ok_or("Missing designer inspector")?;
+        if !structure {
+            // A value/status repaint keeps the semantic identity of every row
+            // when its geometry and typed actions are unchanged. A newly
+            // disclosed Reset or conflict row receives fresh IDs instead.
+            retain_inspector_ids(
+                &panel.nodes,
+                &mut nodes,
+                &self.actions,
+                &mut builder.actions,
+            );
+            let mut retired = Vec::new();
+            fn ids(node: &SceneNode, out: &mut Vec<u32>) {
+                out.push(node.id);
+                for child in &node.children {
+                    ids(child, out);
+                }
+            }
+            for node in &panel.nodes {
+                ids(node, &mut retired);
+            }
+            self.actions.retain(|id, _| !retired.contains(id));
+        }
         panel.nodes = nodes;
         panel.content = inspector.1 + if single { ROW } else { 0. };
         for panel in &mut self.panels {
@@ -521,7 +602,11 @@ impl Designer {
             }
             panel.scroll.set_content([0., panel.content]);
         }
-        self.actions = builder.actions;
+        if structure {
+            self.actions = builder.actions;
+        } else {
+            self.actions.extend(builder.actions);
+        }
         self.next_id = builder.next;
         self.objects = objects;
         Ok(())
@@ -1351,6 +1436,7 @@ impl Mount {
         let blocked = self.oib_activation_blocked();
         let mut designer = self.designer.take().ok_or("Missing designer")?;
         let mut previous = None;
+        let mut inspector_only = false;
         let previous_viewport = self.viewport;
         let previous_management = designer.management_visible();
         let result = (|| {
@@ -1392,6 +1478,44 @@ impl Mount {
             let authoring_seed = self.doc.oib_authoring_seed()?;
             let seed = &authoring_seed;
             let allocations = self.doc.oib_allocations()?;
+            if self.oib_paint_refresh
+                && !changed
+                && designer.revision.is_some()
+                && designer.pending_selection.is_none()
+                && designer.pending_source.is_none()
+                && designer.details.is_none()
+                && designer.registers.is_empty()
+                && self.doc.oib_conflicts().is_empty()
+            {
+                let mut properties = super::super::oib::document::properties(
+                    seed,
+                    &allocations,
+                    &designer.selection,
+                    &self.doc.oib_active()?,
+                )?;
+                properties.extend(self.doc.oib_structural_properties(&designer.selection)?);
+                if designer.placement_open
+                    && let Selection::Object(object) = &designer.selection
+                    && let Ok(placement) = self.doc.oib_placement_properties(object)
+                {
+                    properties.extend(placement);
+                }
+                designer.editor_revision = self.doc.oib_generation().unwrap_or(0);
+                designer.editor_structural_revision =
+                    self.doc.oib_structural_generation().unwrap_or(0);
+                designer.rebuild_panels(
+                    super::super::oib::seed(&self.ui).ok_or("Missing presented OIB graph")?,
+                    designer.objects.clone(),
+                    &properties,
+                    &[],
+                    &status,
+                    editable,
+                    false,
+                )?;
+                designer.revision = Some(revision);
+                inspector_only = true;
+                return Ok(true);
+            }
             let objects = super::super::oib::document::objects(
                 super::super::oib::seed(&self.ui).ok_or("Missing presented OIB graph")?,
                 &allocations,
@@ -1816,7 +1940,11 @@ impl Mount {
         self.designer = Some(designer);
         let result = result.and_then(|changed| {
             if changed {
-                let layout = resolve_layout(self)?;
+                let layout = if inspector_only {
+                    cached_layout(self)?
+                } else {
+                    Arc::new(resolve_layout(self)?)
+                };
                 if let Some(designer) = &mut self.designer {
                     designer.sync(&layout)?;
                 }

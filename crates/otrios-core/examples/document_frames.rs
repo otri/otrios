@@ -116,7 +116,13 @@ fn main() -> Result<(), String> {
             }
         }
         let scalar = presentation.compose(&reference.scene(width, 600., reader.offset()), &font);
-        write_frame(&mut a, i + 1, &scalar.mesh, &scalar.views, &scalar.styles)?;
+        write_frame(
+            &mut a,
+            i + 1,
+            &scalar.baked_mesh(),
+            &scalar.views,
+            &scalar.styles,
+        )?;
         let frame = reader.frame();
         let mut mesh = Mesh::default();
         let mut views = Vec::new();
