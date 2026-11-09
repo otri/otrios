@@ -5,6 +5,14 @@ These historical milestone notes record qualified increments and their evidence.
 
 ## UI, rendering and input
 
+[Independent OIB library L1](OIB_LIBRARY_L1.md), qualified 2026-11-09,
+adds signed data libraries, exact app pins and compatible baseline adoption.
+Library-only style/default updates and rollback reuse native/browser/authority
+binaries while preserving collection, epoch, business values and causal overrides.
+Frame/Web gesture and restart checks passed on state v30/control v1. The live
+snapshot validator also admits coalesced library revisions while journal replay
+keeps exact predecessor validation. Component Wasm behavior and XR remain later.
+
 [Canonical OIB D2](OIB_D2_COMPLETION.md), qualified 2026-11-09, replaces flat
 fixtures with a canonical graph, true presets, semantic property identities and
 one bounded structural batch. Definition, slot and connection authoring uses

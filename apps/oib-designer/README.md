@@ -1,43 +1,39 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB Designer
 
-OIB Designer is a Test Playground companion with its own
-`app:oib-designer/ui` and `app:oib-designer/state`, using
-`oib-designer-state-v2`. Volume and brightness are independent numeric slider
-fields; audio and display enabled are independent numeric toggle fields. Live UI
-has its own collection and app values.
+OIB Designer is a Test Playground companion with `app:oib-designer/ui`,
+`app:oib-designer/state` and business schema `oib-designer-state-v2`. Its volume,
+brightness, audio-enabled and display-enabled fields are independent of Live UI's
+collection and values.
 
-The canonical signed seed contains a format and graph, with reusable definitions,
-true presets and real initial instances. Audio (root 20) and Display (root 30)
-are SettingsPanel instances with linked slider and toggle definitions. Power is a
-preset, not a phantom instance. SettingsPanel exposes an Accessories slot.
-Renderer identities, cells, selectors and layouts are derived from the graph;
-they are not durable aliases. Full typed property addresses identify shared and
-occurrence properties, including nested reference ancestry.
+The deployed document imports SettingsPanel, LabeledSlider and LabeledToggle from
+the signed [OIB 2D library](../../libraries/oib-2d/README.md). Shell and the app's
+presets, real instances, connections and grants stay local. Audio (20) and Display
+(30) are real SettingsPanel instances; Power is a true preset without a phantom
+object. SettingsPanel declares an Accessories slot. The Rust component fixture
+bootstraps app builds/tests; revision tooling retains installed library pins.
 
-The editor supports component and preset creation, shapes, text, linked references,
-deletion, renaming, literal and numeric design/placement edits, slot placement and
-admitted app-field choices including unbound endpoints. The SDK also exposes
-bounded hierarchy, forwarding and connection operations. One generation-guarded
-structural batch applies definitions, presets and hierarchy in that order; literal
-properties use separate causal contexts. An unset shared register inherits its
-authored default, while observed reset preserves the correct causal override
-semantics. Selection, scrolling and Edit/Test mode are local. Desktop Studio is
-the browser default and Frame Focus the native default.
+Imported definitions are read-only in the app. Edit their source and publish a
+signed library revision, or create a local wrapper. Shared and occurrence literal
+overrides remain editable; absent assignments inherit the newly pinned default.
+Renderer/cell IDs are compiler output. Full typed property addresses carry
+semantic identity, including nested occurrence ancestry.
 
-The app requires `otrios-oib-v2` and `otrios-oib-designer-v2`. The deployed
-signed release `f642416df9b7754d39aef8b62cbb592783ea6df5989f965a45c7fd6e392ac18b`
-uses state protocol v29 and release-control v1. Fresh Live UI and Designer
-collections were initialized at registry generations 74 and 75, respectively.
-Browser and physical Frame acceptance, including preserved app values, is recorded in the
-[current OIB guide](../../docs/OIB.md). The packer signs the seed as part of the
-app package; this source does not itself sign, install or deploy it.
+The editor supports local components/presets, shapes, text, linked references,
+removal, names, literal design/placement values, slots and admitted app fields.
+One generation-guarded batch validates and publishes structural changes;
+properties retain their independent causal contexts. Selection, scrolling and
+Edit/Test mode are local. Desktop Studio is the browser default and Focus is the
+native default.
 
-The [D2 work record](../../docs/OIB_D2_COMPLETION.md) describes the current format,
-implementation and qualification. The earlier
-[Frame Focus](../../docs/OIB_FRAME_FOCUS_D1.md) and
-[Desktop Studio](../../docs/OIB_DESKTOP_STUDIO_D2.md) records are dated evidence,
-not current wire or geometry specifications. D3/D4, images, complete UI transfer
-and XR remain deferred. [RFC 0036](../../docs/rfcs/0036-upgradable-oib-component-libraries.md)
-selects signed data libraries before a component Wasm ABI; neither is implemented.
-Existing Wasmi is app ABI 1 and classes/actions remain bounded host contracts.
+Current state protocol is v30 with release-control v1. App features include
+`otrios-oib-v2`, `otrios-oib-designer-v2` and `otrios-oib-library-v1`. The initial
+format cutover reset only Designer and Live UI, with unchanged v2 business
+schemas. Compatible library-only update, rollback and return retained collection,
+epoch, app values and an explicit width override without recompiling hosts.
+
+See [the current guide](../../docs/OIB.md) and [L1 qualification](../../docs/OIB_LIBRARY_L1.md).
+[D2](../../docs/OIB_D2_COMPLETION.md), [Frame Focus](../../docs/OIB_FRAME_FOCUS_D1.md)
+and [Desktop Studio](../../docs/OIB_DESKTOP_STUDIO_D2.md) are dated earlier records.
+D3/D4, complete authored UI transfer, images, component Wasm ABI L2 and XR remain
+separate work. Existing Wasmi executes app ABI 1.

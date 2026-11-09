@@ -20,13 +20,14 @@ connections. D3/D4 remain deferred.
 On 2026-11-09 the user selected the remaining D2 implementation and a clean
 format break with fresh PoC data. The [D2 work record](../OIB_D2_COMPLETION.md)
 records the deployed v2 graph/compiler, unified editing contract and focused
-Frame/browser acceptance. State is v29 with control v1; the two OIB collections
-were initialized fresh, with no old-data migration.
+Frame/browser acceptance. D2 qualified at state v29/control v1 with fresh OIB
+collections and no old-data migration. The subsequent library L1 uses state v30.
 
 The user also selected independently upgradable component libraries.
 [RFC 0036](0036-upgradable-oib-component-libraries.md) separates signed graph/style
-libraries from stable host mechanisms and a later component Wasm ABI. That loader
-is a separate milestone; D2 prepares the canonical source and semantic boundary.
+libraries from stable host mechanisms and a later component Wasm ABI.
+[Library L1](../OIB_LIBRARY_L1.md) subsequently delivered that loader; D2 supplied
+the canonical source and semantic boundary.
 
 Extends [Live OIB](0029-live-oib-ui.md) and its
 [current implementation](../OIB.md) into an application component designer.

@@ -2,7 +2,7 @@
   "info": {
     "format": "otrios-oib-library-package-v1",
     "library": "c56f10dbeb3793120e2f45f4b087976d2c9cc109e98f150d7653c4652e04bacf:oib-2d",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "required_features": [
       "otrios-oib-library-v1"
     ],
@@ -283,9 +283,9 @@
                 "property": 1,
                 "value": {
                   "Color": [
-                    85,
-                    136,
-                    255,
+                    52,
+                    211,
+                    153,
                     255
                   ]
                 }
@@ -916,9 +916,9 @@
                 "property": 1,
                 "value": {
                   "Color": [
-                    85,
-                    136,
-                    255,
+                    52,
+                    211,
+                    153,
                     255
                   ]
                 }
@@ -926,7 +926,7 @@
               {
                 "property": 2,
                 "value": {
-                  "Number": 440.0
+                  "Number": 400.0
                 }
               },
               {
@@ -1357,9 +1357,9 @@
                 "property": 1,
                 "value": {
                   "Color": [
-                    85,
-                    136,
-                    255,
+                    52,
+                    211,
+                    153,
                     255
                   ]
                 }

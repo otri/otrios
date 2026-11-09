@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB library boundary
 
-Date: 2026-11-09. Status: **selected design; library loading not implemented**.
+Date: 2026-11-09. Status: **L1 implemented and focused live-qualified; L2 and XR remain proposed**.
 See [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md) for the normative
-selected stages, identity, admission, bounds and acceptance requirements.
+stages, identity, admission, bounds and acceptance requirements.
+[L1 qualification](OIB_LIBRARY_L1.md) records the deployed result.
 
 The desired iteration loop is to edit a component library, publish a signed
 revision and update an app's exact dependency pin. The Frame executable, browser
@@ -12,18 +13,18 @@ updates. A runtime update is needed when adding a new host primitive or ABI.
 
 ## What exists and what comes next
 
-| Area | Current D2 branch | Selected next work |
+| Area | Current runtime | Later work |
 | --- | --- | --- |
-| Authored UI | Canonical graph deployed; renderer output is derived | Resolve imported immutable graphs before the same compiler |
-| Components | Signed bounded built-in classes and actions | L1 reuses them; L2 supplies generic executable component behavior |
+| Authored UI | Canonical local graph plus verified immutable imports; renderer output is derived | Richer separately selected controls/content |
+| Components | L1 reuses signed bounded host classes/actions | L2 supplies generic executable component behavior |
 | App executable | Optional `Code/behavior.wasm`, bounded Wasmi app ABI 1 | Keep separate from the new component ABI |
-| Packages | Signed app packages and complete release publication | Signed library kind plus exact app dependency locks |
-| Baseline changes | Changed signed graph requires fresh collection | Dedicated compatible baseline adoption preserves app data |
+| Packages | Independently signed library kind, exact app locks and complete release closure | New package/ABI requirements need explicit admission |
+| Baseline changes | Compatible library adoption preserves app data/overrides; other signed-source changes require fresh admission | Future additive import/replacement operations |
 | XR | No XR backend/library runtime | Explicit later backend milestone, then library iteration |
 
 The browser's engine runs the outer host WebAssembly; our host embeds Wasmi for
-the nested app guest. The native ARM host embeds Wasmi directly. Libraries will
-use portable graph/guest bytes, not `.so` plugins. No new WASI, filesystem,
+the nested app guest. The native ARM host embeds Wasmi directly. L1 libraries use portable graph bytes; L2 will add component guest bytes.
+Neither uses `.so` plugins. No new WASI, filesystem,
 network, unsafe runtime code or trust roots are selected here.
 
 ## Responsibilities
@@ -46,7 +47,7 @@ app; author a library revision or make an explicit new local component.
 
 ## The first loader milestone
 
-L1 adds a library package kind with `Info.flex`, `OIB/library.flex`, integrity and
+L1 provides a library package kind with `Info.flex`, `OIB/library.flex`, integrity and
 notices, using existing signed-package rules. An app pins up to four exact direct
 library revisions. There are no floating versions, transitive dependency solver,
 remote resources or new guest behavior in this milestone.
@@ -62,7 +63,7 @@ The load path is:
    lock and scene coherently with the expected structural generation.
 5. Recover that exact pin after restart; rollback through the same validation.
 
-This requires one scoped host/authority update to introduce the loader. Later
+The deployed host/authority update introduced the loader. Later
 compatible library-body updates change package bytes and pins. Multiple apps
 can upgrade independently. A stale or invalid candidate leaves the prior scene,
 pin and data active. Discovery remains available through release-control v1
@@ -85,7 +86,7 @@ the currently pinned default through the ordinary observed-reset semantics.
 The D2 boundary cleanup separates semantic admission from graph body bytes. Its
 selected epoch binds incarnation, scope, UI reference and logical graph ID with
 the schema/class/property/grant contract. Full source equality still gates
-configuration. L1 adds a separately recoverable library/body pin and compatible
+configuration. L1 provides a separately recoverable library/body pin and compatible
 adoption, preserving collection identity, semantic epoch, business data, receipts
 and independent property intents. It advances the structural generation and
 rejects stale structural work. It must not quietly replace an intent's epoch or
@@ -103,9 +104,9 @@ D2 now separates source from compiler output and preserves stable semantic
 addresses, absent-value inheritance, semantic admission/body separation and
 strict changed-baseline rejection. It contains no library loader scaffolding.
 
-Before implementing L1, freeze the import-binding codec, distinct library
-package/hash/signature envelope, exposed compatibility contracts and recoverable
-baseline-adoption record. Connect the loader at
+L1 fixes the import-binding codec, distinct library package/hash/signature
+envelope, exposed compatibility contracts and recoverable baseline-adoption
+record. The loader connects at
 bundle admission, the OIB graph compiler, `configure_oib`/state binding and client
 mount/release activation. Keep expected-generation baseline adoption separate
 from structural user edits and general transactions.
@@ -128,6 +129,6 @@ host binary/module hashes and preserved collection, values and overrides. Check
 restart recovery, compatible rollback, a held gesture, stale-generation
 rejection, bad package/API/limit rejection and bounded slow-reader resync. L2
 also needs a changed widget implementation without a host rebuild and qualified
-ABI/permission/trap/resource handling on both hosts. None of these library-loader
-acceptance checks have run; these documents select the work rather than report
-it as implemented.
+ABI/permission/trap/resource handling on both hosts. The [L1 record](OIB_LIBRARY_L1.md) includes these bounded
+data-library results.
+Component behavior ABI L2 and XR acceptance remain future work.

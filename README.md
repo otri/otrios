@@ -39,11 +39,11 @@ adds canonical graphs, real presets, definition and slot authoring, typed
 connections and one atomic edit batch, qualified on Frame and the live browser.
 Rich text, complete UI transfers, images and XR remain deferred.
 
-[Independent component libraries](docs/OIB_LIBRARY_BOUNDARY.md) are the selected
-next boundary: signed graph/style revisions, followed by a versioned component
-Wasm ABI, should update independently of the host. The library loader remains
-unimplemented; [RFC 0036](docs/rfcs/0036-upgradable-oib-component-libraries.md)
-defines the staged work and compatibility requirements.
+[Independent component libraries](docs/OIB_LIBRARY_L1.md) now publish signed
+2D graph/style revisions without rebuilding the Frame, browser or authority
+hosts. Live update, rollback and restart preserve app values and overrides.
+[RFC 0036](docs/rfcs/0036-upgradable-oib-component-libraries.md) keeps executable
+component behavior ABI L2 and XR as separate later stages.
 
 The [app packages](apps/README.md) include The Brass Relay, Test Playground and private Monitoring. The single negotiated session carries release control, scoped state and ephemeral ink; see [live deployment](docs/FRAME_HOSTING.md) and [public access](docs/PUBLIC_ACCESS.md). The [RFC index](docs/rfcs/README.md) and [milestone history](docs/HISTORY.md) link designs and qualification evidence. The [modern app pattern](docs/MODERN_APP_PATTERN.md) records the current ownership model and limits.
 

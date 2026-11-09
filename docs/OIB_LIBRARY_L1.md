@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # OIB library L1 implementation
 
-Date: 2026-11-09. Status: **in development; not deployed or qualified**.
+Date: 2026-11-09. Status: **implemented, signed, deployed and focused live-qualified; awaiting user review**.
 Branch: `feat/oib-library-l1`, based on canonical D2 commit `7b88756`.
 
 This implements the data-only L1 selected in
@@ -49,15 +49,17 @@ outside the explicit compatible-library adoption path.
 ## Results
 
 Local implementation checks now include 19 signed library/app package cases,
-three unsigned-library cases, ten import/resolver cases, seven adoption cases and
-sixteen existing structural-batch cases. A real authority process passed the
-focused upgrade/restart/rollback case with synthetic already-verified bodies;
+three unsigned-library cases, ten import/resolver cases, ten adoption cases and
+sixteen existing structural-batch cases. Two real authority process cases passed
+upgrade/restart/rollback and held-offer coalescing with synthetic already-verified
+bodies;
 this is separate from signature/publication acceptance. The actual Client held
 slider and final receipt while a new baseline arrived, then activated it after
 confirmation. Nineteen ordinary state tests, nine server tests and nineteen
 shared-session/update Node tests passed. CLI source/pack/sign/bind/verify passed
 using a production library, as did ordinary-build pin inheritance and explicit
-newer-pin preservation. The final live result will be recorded after deployment.
+newer-pin preservation. The signed ARM/Wasm build and actual live results are
+recorded below.
 
 The packer reuses the already locked Serde and serde_json packages for closed,
 typed JSON authoring. Serde becomes an explicit optional dashboard dependency;
@@ -112,3 +114,68 @@ app/library release without compiling a host. Add the existing deployment config
 with `--deploy-config CONFIG` to activate it. The script checks the reviewed
 baseline, freezes the requested source/bindings, verifies both package signatures,
 and reuses the ordinary installer's unchanged-host closure checks.
+
+
+## Signed live qualification
+
+Implementation commits are `b51f60c` and the coalesced-live-state correction
+`e1b7882`. The corrected active release is
+`ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1`,
+with state protocol v30 and release-control v1. Designer imports the independently
+signed [OIB 2D library](../libraries/oib-2d/README.md), revision
+`3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba`.
+Only the initial format/import cutover reset Live UI and Designer (registry
+76/77), preserving their installed v2 business schemas. No later update or code
+correction reset either collection.
+
+Actual commands used the existing private Rust 1.90.0 build environment:
+
+- `cargo check -p otrios-dashboard --bin canvas-bundle --bin dashboard-server --features server,canvas,host-sync --locked --offline` passed.
+- `cargo test -p otrios-core --features canvas,merkle,signed-bundles --lib canvas::state --locked --offline`: 19 passed.
+- `cargo test -p otrios-dashboard --features server,canvas,host-sync --bin dashboard-server --locked --offline`: 9 passed.
+- Core library Clippy and focused dashboard-bin Clippy with `-D warnings` passed.
+- `cargo test -p otrios-core --features signed-bundles --lib --locked --offline -- library::tests bundle::tests`: 19 passed; the unsigned `--features canvas --lib library::tests` run passed 3 cases.
+- `cargo test -p otrios-core --features canvas --test oib_library_imports --locked --offline -- --nocapture`: 10 passed.
+- `cargo test -p otrios-core --features canvas --test oib_library_adoption --locked --offline -- --nocapture`: 10 passed.
+- `cargo test -p otrios-core --features canvas --test oib_edit_batches --locked --offline -- --nocapture`: 16 passed before the live-projection-only correction.
+- With the freshly built debug `dashboard-server` supplied in `OTRIOS_SPACES_SERVER`, `cargo test -p otrios-core --features canvas --test spaces_process d1::l1_ --locked --offline -- --nocapture`: 2 actual process cases passed.
+- `cargo test -p otrios-core --features canvas --lib compatible_library_activation_waits_for_held_slider --locked --offline -- --nocapture`: the actual Client gesture/receipt test passed.
+- `scripts/watch-dashboard.py --once --stage-only` built and signed the ARM/Web
+  host. `scripts/install-app.py` staged the initial exact library pin and the
+  established full deployment script activated the complete verified release.
+- `scripts/publish-oib-library.py` performed update, compatible rollback and
+  return to the current source through the existing deployment config. Each
+  library-only transfer was **153,600 bytes**. No host compilation command runs
+  in this publication path; native/browser asset hashes and the actual authority
+  executable hash stayed equal across those three publications.
+
+The source changed the accent to teal and untouched slider width from 440 to
+400. An explicit Audio occurrence width of 360 stayed unchanged; all four
+business values, collection, semantic epoch and original roots 20/30 survived
+update, rollback and return. Browser slider values stayed 40/70. During a
+synthetic DOM pointer gesture through the real browser handlers, generation 3's
+candidate arrived while generation 2's 440 px scene remained presented. Release
+and confirmation activated the new 400 px scene. Platform pointer capture was
+skipped only for the synthetic pointer ID; physical Frame touch separately
+opened Designer with the calibrated device unchanged.
+
+Native Frame and a current ARM client agreed on revision 5, the library pin,
+retained values and 360/400 widths after the corrected full host deployment
+restarted the authority. No reset was needed for that correction. Browser and
+native readiness passed, Monitoring resumed, and no pixels were exported. Native
+RSS was **60,664 KiB** at final acceptance; this is one whole-process observation,
+including fonts and GLES resources, not a library-only memory benchmark.
+Imported UIs retained zero entries in the optional client UI history cache.
+
+Live leases validate coalesced snapshots, including skipped library adoptions
+and ordinary writes in the same frame. Authority journals validate each exact
+adoption predecessor separately. Two repros initially failed before that
+validation split; ten adoption cases and both real-process cases then passed,
+including malformed/stale live witness rejection and strict combined-journal
+delta rejection. The corrected code was signed and deployed before final checks.
+
+A compatible code-only fallback is held privately. No app-data backup, migration,
+new identity, trust root or service was introduced. Full `scripts/check.sh` and
+the separate Linux shared-memory IPC qualification were not run for L1. Accepted
+builder maintenance awaits user review. Component behavior ABI L2, D3/D4,
+complete OIB data transfer, images and XR remain deferred.

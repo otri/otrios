@@ -1,0 +1,344 @@
+{
+  "date": "2026-11-09",
+  "status": "implemented-signed-deployed-focused-live-qualified-awaiting-user-review",
+  "implementation_commit": "e1b7882",
+  "state_protocol": "otrios-canvas-sync-v30",
+  "release_control_version": 1,
+  "initial_release": "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+  "initial_reset": {
+    "passed": true,
+    "resets": [
+      {
+        "app": "live-ui",
+        "fresh_collection": true,
+        "installed_schema_adopted": true,
+        "business_schema_unchanged": true,
+        "generation": 76
+      },
+      {
+        "app": "oib-designer",
+        "fresh_collection": true,
+        "installed_schema_adopted": true,
+        "business_schema_unchanged": true,
+        "generation": 77
+      }
+    ],
+    "unrelated_apps_reset": false,
+    "data_migrated": false
+  },
+  "initial_readiness": {
+    "passed": true,
+    "release": "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+    "state_protocol": "otrios-canvas-sync-v30",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:spaces-host/ui",
+      "release": "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+      "runtime_release": "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 24.258
+  },
+  "physical_touch": {
+    "passed": true,
+    "release": "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+    "native_ui": "app:oib-designer/ui",
+    "active_generation": 1,
+    "presented_generation": 1,
+    "live_instances": 2,
+    "input_idle": true,
+    "calibration_unchanged": true,
+    "pixels_exported": false
+  },
+  "initial_arm_override": {
+    "passed": true,
+    "architecture": "armv7 Linux",
+    "release": "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+    "generation": 2,
+    "library_pin": "6bdc0fa5acc240ff81c66ad0d4a92091dc66c4b7d375459a35786424fff0bd93",
+    "semantic_epoch": "b28ded13a7b3012d6853488e60f77c5e5483fb56506cfea60b7072921094c7cc",
+    "occurrence_width_override": 360,
+    "untouched_width": 440,
+    "all_four_business_values_unchanged": true,
+    "collection_record_retained_locally_for_comparison": true
+  },
+  "library_update": {
+    "passed": true,
+    "release": "cd05be501604e93b52990520615d14c05c049f3f1268ff77c3d2d9b01fe4e416",
+    "library_pin": "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba",
+    "generation": 3,
+    "collection_preserved": true,
+    "semantic_epoch_preserved": true,
+    "all_four_business_values_unchanged": true,
+    "original_instances_preserved": true,
+    "occurrence_width_override": 360,
+    "untouched_width": 400,
+    "default_accent": "#34D399",
+    "native_and_arm_client_agree": true,
+    "native_input_idle": true,
+    "native_rss_kib": null,
+    "pixels_exported": false
+  },
+  "compatible_library_rollback": {
+    "passed": true,
+    "release": "2ea78787dbc8bc3ca2afa610de45d1950ec3848ce6831c7d41c50633067b298a",
+    "library_pin": "6bdc0fa5acc240ff81c66ad0d4a92091dc66c4b7d375459a35786424fff0bd93",
+    "generation": 4,
+    "collection_preserved": true,
+    "semantic_epoch_preserved": true,
+    "all_four_business_values_unchanged": true,
+    "original_instances_preserved": true,
+    "occurrence_width_override": 360,
+    "untouched_width": 440,
+    "default_accent": "#5588FF",
+    "native_and_arm_client_agree": true,
+    "native_input_idle": true,
+    "native_rss_kib": 60168,
+    "pixels_exported": false
+  },
+  "return_to_current_library": {
+    "passed": true,
+    "release": "2487af05b9e0a1e5d9b395a9bc12bdfddcf3f7df0bd7b92232a9a9d4afd78452",
+    "library_pin": "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba",
+    "generation": 5,
+    "collection_preserved": true,
+    "semantic_epoch_preserved": true,
+    "all_four_business_values_unchanged": true,
+    "original_instances_preserved": true,
+    "occurrence_width_override": 360,
+    "untouched_width": 400,
+    "default_accent": "#34D399",
+    "native_and_arm_client_agree": true,
+    "native_input_idle": true,
+    "native_rss_kib": 60244,
+    "pixels_exported": false
+  },
+  "host_assets": {
+    "passed": true,
+    "library_update_releases": [
+      "982b9078850dd0b76093319f1e4623dd4df03c3c623c023f4fc1025db315f82d",
+      "cd05be501604e93b52990520615d14c05c049f3f1268ff77c3d2d9b01fe4e416",
+      "2ea78787dbc8bc3ca2afa610de45d1950ec3848ce6831c7d41c50633067b298a",
+      "2487af05b9e0a1e5d9b395a9bc12bdfddcf3f7df0bd7b92232a9a9d4afd78452"
+    ],
+    "all_host_assets_unchanged": true,
+    "authority_binary_matches_qualified_full_build": true,
+    "authority_sha256": "bc0b39231867235db7a3552fda852d3157f2cafd77ab0def78e441ba2343cdd2",
+    "native_sha256": "e2fe17cf4572fa0e83aa1febb7c06578cadc79491237449905ddf39fb1661972",
+    "web_wasm_sha256": "22ff55c18a236b69047b53d83f8d91dd2315b82fd01d52cf9891ff8de269e3e9"
+  },
+  "held_browser_gesture": {
+    "passed": true,
+    "input_method": "synthetic DOM pointer through real browser handlers; platform pointer capture skipped for that synthetic ID only",
+    "candidate_received_generation": 3,
+    "presented_generation_while_held": 2,
+    "held_width": 440,
+    "held_value": 70,
+    "after_confirmation_width": 400,
+    "occurrence_override_width": 360,
+    "browser_values_preserved": [
+      40,
+      70
+    ],
+    "epoch_preserved": true,
+    "optional_library_ui_cache_entries": 0
+  },
+  "validation": {
+    "signed_package_and_bundle_cases": 19,
+    "unsigned_library_cases": 3,
+    "import_resolution_cases": 10,
+    "adoption_cases_before_coalescing_correction": 7,
+    "existing_batch_cases": 16,
+    "ordinary_state_cases": 19,
+    "server_cases": 9,
+    "shared_session_node_cases": 19,
+    "explicit_authority_library_upgrade_restart_rollback_passed": true,
+    "process_fixture_uses_synthetic_verified_bodies": true,
+    "actual_signatures_qualified_by_cli_and_live_publication": true,
+    "linux_shared_memory_ipc_qualified": false,
+    "adoption_cases": 10,
+    "explicit_authority_library_process_cases": 2,
+    "core_clippy_warnings_denied": true,
+    "dashboard_bins_clippy_warnings_denied": true,
+    "full_check_script_run_for_L1": false,
+    "coalescing_regression": {
+      "failed_before_correction": 2,
+      "live_projection_accepts_skipped_adoptions_and_ordinary_writes": true,
+      "full_journal_keeps_exact_predecessor_and_preservation_checks": true,
+      "malformed_and_stale_live_witnesses_rejected": true,
+      "real_process_held_offer_then_latest_snapshot_passed": true
+    },
+    "commands": [
+      {
+        "command": "cargo test -p otrios-core --features signed-bundles --lib --locked --offline -- library::tests bundle::tests",
+        "passed": 19
+      },
+      {
+        "command": "cargo test -p otrios-core --features canvas --lib library::tests --locked --offline",
+        "passed": 3
+      },
+      {
+        "command": "cargo test -p otrios-core --features canvas --test oib_library_imports --locked --offline -- --nocapture",
+        "passed": 10
+      },
+      {
+        "command": "cargo test -p otrios-core --features canvas --test oib_library_adoption --locked --offline -- --nocapture",
+        "passed": 10
+      },
+      {
+        "command": "cargo test -p otrios-core --features canvas --test oib_edit_batches --locked --offline -- --nocapture",
+        "passed": 16,
+        "scope": "before live-projection-only correction"
+      },
+      {
+        "command": "OTRIOS_SPACES_SERVER=<fresh debug dashboard-server> cargo test -p otrios-core --features canvas --test spaces_process d1::l1_ --locked --offline -- --nocapture",
+        "passed": 2
+      }
+    ],
+    "final_client_held_slider_test_passed": true,
+    "final_dashboard_bins_clippy_passed": true
+  },
+  "data_backup_or_migration_performed": false,
+  "pixels_exported": false,
+  "new_trust_roots_or_identities_added": false,
+  "component_wasm_ABI_L2_implemented": false,
+  "XR_implemented": false,
+  "accepted_work_maintenance_run": false,
+  "pending": [],
+  "implementation_commits": [
+    "b51f60c",
+    "e1b7882"
+  ],
+  "final_release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+  "final_readiness": {
+    "passed": true,
+    "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+    "state_protocol": "otrios-canvas-sync-v30",
+    "health": "ok",
+    "ready": {
+      "ui_ref": "app:oib-designer/ui",
+      "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+      "runtime_release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+      "state_confirmed": true,
+      "stream_ready": true,
+      "input_busy": false,
+      "pending_commands": 0,
+      "renderer": "gles2-direct",
+      "rotation": 90,
+      "output": [
+        800,
+        1280
+      ],
+      "touch_devices": 1,
+      "touch_calibrated": true,
+      "scanout_format": "RGB565",
+      "color_bits": [
+        5,
+        6,
+        5,
+        0
+      ]
+    },
+    "services": {
+      "otrios-authority": "active",
+      "otrios-dashboard-direct": "active",
+      "otrios-tunnel": "active",
+      "otrios-monitoring.timer": "active"
+    },
+    "collector_resumed": true,
+    "collector_result": "success",
+    "pixels_exported": false,
+    "authority_restarted": false,
+    "data_restored": false,
+    "elapsed_seconds": 13.491
+  },
+  "final_arm_and_native": {
+    "passed": true,
+    "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+    "library_pin": "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba",
+    "generation": 5,
+    "collection_preserved": true,
+    "semantic_epoch_preserved": true,
+    "all_four_business_values_unchanged": true,
+    "original_instances_preserved": true,
+    "occurrence_width_override": 360,
+    "untouched_width": 400,
+    "default_accent": "#34D399",
+    "native_and_arm_client_agree": true,
+    "native_input_idle": true,
+    "native_rss_kib": 60664,
+    "pixels_exported": false
+  },
+  "final_browser": {
+    "generation": 5,
+    "issued_fields": 0,
+    "library_ui_cache_entries": 0,
+    "passed": true,
+    "pending_fields": 0,
+    "pin": "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba",
+    "presented": 5,
+    "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+    "semantic_epoch": "b28ded13a7b3012d6853488e60f77c5e5483fb56506cfea60b7072921094c7cc",
+    "sliders": [
+      {
+        "label": "Volume",
+        "value": 40,
+        "width": 360
+      },
+      {
+        "label": "Brightness",
+        "value": 70,
+        "width": 400
+      }
+    ]
+  },
+  "final_library_revision": "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba",
+  "authority_restart_recovered_exact_pin_values_epoch_and_override": true,
+  "data_reset_after_initial_cutover": false,
+  "initial_and_final_business_schemas_unchanged": true,
+  "browser_tab_closed": true,
+  "library_only_transfer_bytes_each": 153600,
+  "code_only_rollback_held_privately": true,
+  "temporary_ARM_helper_and_comparison_record_removed": true,
+  "initial_implementation_commit": "b51f60c",
+  "corrected_host": {
+    "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+    "source": "e1b7882",
+    "separate_full_host_release": true,
+    "actual_authority_binary_matches_build": true,
+    "authority_sha256": "3d4d98fff39be9154924a071aae93f229e9c13e6dd103afb9297cf234bbdc08e",
+    "native_sha256": "971f595b8ef7730251a7f0d89449b02d7b388da5f46bff8751d1495649d5ccd3",
+    "web_wasm_sha256": "5b0da680b1a2eac76c7d9dc193bb9974a0378c613b93a3c55b4db5289125ab2e",
+    "existing_library_pin_retained": true,
+    "authority_restart_recovered_existing_data": true
+  }
+}

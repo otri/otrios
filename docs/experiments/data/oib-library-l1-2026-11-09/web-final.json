@@ -1,0 +1,23 @@
+{
+  "generation": 5,
+  "issued_fields": 0,
+  "library_ui_cache_entries": 0,
+  "passed": true,
+  "pending_fields": 0,
+  "pin": "3ce95edfa948a4d0299e869c7b7f070e4419fb37fea3f7955669cae724113aba",
+  "presented": 5,
+  "release": "ca310b5ca4a75a43b7891a1492085bfae35a04bf29cddff54d4f8160ea39d8e1",
+  "semantic_epoch": "b28ded13a7b3012d6853488e60f77c5e5483fb56506cfea60b7072921094c7cc",
+  "sliders": [
+    {
+      "label": "Volume",
+      "value": 40,
+      "width": 360
+    },
+    {
+      "label": "Brightness",
+      "value": 70,
+      "width": 400
+    }
+  ]
+}

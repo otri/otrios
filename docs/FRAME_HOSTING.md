@@ -82,7 +82,8 @@ queued bytes leave the socket. [Public access](PUBLIC_ACCESS.md) details policy.
 
 Each app has a Merkle checkpoint and bounded append journal. Changed nodes and
 intent receipts are durable before roots are published or edits acknowledged.
-Checkpoints rotate at 4 MiB. Clients keep document state and pending edits in RAM;
+Ordinary checkpoints rotate at 4 MiB; OIB checkpoints rotate at 256 KiB to bound
+graph replay. Clients keep document state and pending edits in RAM;
 closing one may lose unconfirmed edits. Connected upgrades wait for confirmed
 intents and finished gestures; a disconnected client may discard unconfirmed RAM
 edits when upgrading. Executable/font/blob caches are bounded
@@ -206,7 +207,7 @@ Frame installation. It preserves every public runtime asset and native binary,
 generates Home from installed entries, and uses the expected-baseline activation
 lock. Registry changes use a safe browser/native handoff after confirmed edits and
 idle gestures. Code/state stay on the existing session. The current managed
-session uses state v29 and retains control v1. [Live OIB UI](OIB.md) adds
+session uses state v30 and retains control v1. [Live OIB UI](OIB.md) adds
 Space-scoped property editing through that session. See [Bundle Counter](../apps/bundle-counter/README.md) for an app
 outside the host source registry.
 

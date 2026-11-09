@@ -12,12 +12,13 @@ app-scoped Merkle adapter and viewport-scoped collection windows. See the
 [milestone history](HISTORY.md) for current behavior and dated evidence. These
 experiments do not satisfy the Linux IPC acceptance gates below.
 
-The [canonical OIB D2 milestone](OIB_D2_COMPLETION.md) is deployed on Frame/Web
-with state protocol v29 and release-control v1. It adds bounded graph authoring,
-presets and connections over the existing runtime. Independently upgradable
-component libraries are the selected next boundary in
-[RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md); their loader and
-component Wasm ABI remain unimplemented. Neither work changes the P1–P5 gates.
+The [canonical OIB D2 milestone](OIB_D2_COMPLETION.md) added bounded graph
+authoring, presets and connections. [Library L1](OIB_LIBRARY_L1.md) now deploys
+independently signed 2D component libraries on Frame/Web with state protocol
+v30 and release-control v1. Compatible updates preserve values and overrides
+while reusing host binaries. The component Wasm ABI and XR remain future work
+in [RFC 0036](rfcs/0036-upgradable-oib-component-libraries.md). These dashboard
+increments do not change the P1–P5 gates.
 
 ## Scope
 

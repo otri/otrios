@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # RFC 0036: Independently upgradable OIB component libraries
 
-Date: 2026-11-09. Status: **L1 implementation in progress; live qualification pending**.
+Date: 2026-11-09. Status: **L1 implemented and focused live-qualified; L2 and XR remain proposed**.
 
 The user selected independently upgradable OIB libraries on 2026-11-09. This RFC
 defines that boundary and a bounded first loader milestone. The
-[L1 work record](../OIB_LIBRARY_L1.md) tracks implementation and qualification.
+[L1 work record](../OIB_LIBRARY_L1.md) records implementation and qualification.
 D2 itself did not import libraries or execute library behavior.
-[D2 completion](../OIB_D2_COMPLETION.md) is delivered; L1 is the next loader milestone.
+[D2 completion](../OIB_D2_COMPLETION.md) and data-library L1 are delivered;
+component behavior ABI L2 remains the next executable-library stage.
 The practical boundary is summarized in [OIB library boundary](../OIB_LIBRARY_BOUNDARY.md).
 
 ## Goal and current execution
@@ -35,7 +36,7 @@ The existing app ABI's five command lanes are not that ABI either.
 | Stage | Scope | Host changes |
 | --- | --- | --- |
 | D2 | Canonical authored graph, semantic property identities, bounded structural edits | Deployed; no library imports |
-| L1 | Signed data-only library imports, exact pins, compatible baseline adoption | Implement loader/adoption once; later compatible library bodies reuse it |
+| L1 | Signed data-only library imports, exact pins, compatible baseline adoption | Loader/adoption deployed; compatible library bodies reuse it |
 | L2 | Portable component behavior with a generic typed event/command ABI | Implement and qualify the ABI once; widget behavior then ships in libraries |
 | Later XR | Spatial scene/input/backend support and XR libraries | Explicit runtime/backend milestone before XR library iteration |
 
@@ -162,10 +163,10 @@ and reveals the newly pinned default according to the existing causal contract.
 
 ## Compatible baseline adoption
 
-Current D2 `configure_oib` admits an identical signed graph or requires a fresh
-collection. Keep that rule until the dedicated adoption operation exists. A
-library loader must not obtain upgrades by weakening equality checks or resetting
-every collection whenever a layout changes.
+D2 `configure_oib` admits an identical signed graph or requires a fresh
+collection. L1 retains that rule and provides a separate compatible-library
+adoption operation. Routine library layout changes use this operation rather
+than resetting collections.
 
 Separate the stable semantic admission contract from the resolved body/pin:
 
@@ -175,7 +176,7 @@ Separate the stable semantic admission contract from the resolved body/pin:
 - **Active closure:** the resolved baseline plus the admitted authored/causal
   projection and compiled scene identity.
 
-Compatible library bodies will advance the baseline and structural generation
+Compatible library bodies advance the baseline and structural generation
 while retaining the semantic epoch, app data, identities, causal contexts and
 receipts. The D2 boundary cleanup separates a semantic-admission digest for state
 schema, class/property signatures and signed action grants from graph body bytes.
@@ -186,8 +187,8 @@ must not reinterpret an old epoch or substitute an epoch on a queued intent.
 Incompatible schema/grant/semantic changes still require explicit new admission
 or a fresh collection. Disposable PoC data permits that cutover, not identity reuse.
 
-Add a bounded authority operation equivalent to
-`adopt_library_baseline(expected_structural_generation, expected_lock, new_lock)`.
+The implemented authority operation `Document::adopt_oib_baseline` receives the
+candidate verified UI, expected structural generation and expected baseline hash.
 It is separate from user property edits and the structural edit batch. It must:
 
 1. Verify the complete signed candidate closure and expected current generation.
@@ -330,8 +331,9 @@ collection/semantic epoch and preserved values/overrides. Demonstrate restart
 with the accepted pin, coherent pinned snapshots, a held gesture during staging,
 compatible rollback, stale-generation rejection and bounded slow-reader resync.
 Bad signatures/hashes, missing exports, incompatible types and over-budget
-candidates must retain the prior active closure. These are future acceptance
-requirements, not results obtained by writing this RFC.
+candidates must retain the prior active closure. The [L1 work record](../OIB_LIBRARY_L1.md) records the signed live update,
+rollback, gesture and recovery evidence; the component ABI requirements below
+remain future work.
 
 L2 additionally needs cross-host canonical ABI vectors, unauthorized-command and
 memory/fuel/trap rejection, capture safety and a new widget whose behavior changes

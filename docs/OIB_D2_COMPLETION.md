@@ -4,6 +4,9 @@
 Date: 2026-11-09. Status: **implemented, deployed and focused live-qualified; awaiting user review**.
 Branch: `feat/oib-d2-completion`, from `39156f2`.
 
+This records the dated D2 v29 qualification. [Library L1](OIB_LIBRARY_L1.md)
+subsequently deployed state v30 and supersedes its active-release statements.
+
 The original repository remains on `main`. Work is isolated in the D2 worktree.
 The local authoring prototype was checkpointed in `6c954f0` before the format
 cleanup. Implementation commit `5aa2a39` is deployed as signed release
